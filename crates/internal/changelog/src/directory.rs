@@ -221,6 +221,63 @@ pub enum Part {
     Release(Version),
 }
 
+/// Where a fragment or highlight sits in a fragments directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    /// The top level, or a release's directory.
+    pub part: Part,
+
+    /// Whether it sits in a `highlights/` directory.
+    pub highlight: bool,
+
+    /// The file's name, such as `retry-idle-turns.md`.
+    pub name: String,
+}
+
+impl Place {
+    /// Read `path`, below the fragments directory with `/` between its parts,
+    /// such as `retry-idle-turns.md` or `0.3.0/highlights/fan-out.md`.
+    ///
+    /// `None` for a path at which the layout holds no fragment or highlight.
+    #[must_use]
+    pub fn parse(path: &str) -> Option<Self> {
+        let mut parts: Vec<&str> = path.split('/').collect();
+        let name = parts.pop().filter(|name| !name.is_empty())?;
+        let highlight = parts.last() == Some(&HIGHLIGHTS);
+        if highlight {
+            parts.pop();
+        }
+
+        let part = match parts.as_slice() {
+            [] => Part::Unreleased,
+            [version] => Part::Release(Version::parse(version).ok()?),
+            _ => return None,
+        };
+
+        Some(Self {
+            part,
+            highlight,
+            name: name.to_owned(),
+        })
+    }
+
+    /// The path below the fragments directory, with `/` between its parts.
+    #[must_use]
+    pub fn path(&self) -> String {
+        let mut path = match &self.part {
+            Part::Unreleased => String::new(),
+            Part::Release(version) => format!("{version}/"),
+        };
+        if self.highlight {
+            path.push_str(HIGHLIGHTS);
+            path.push('/');
+        }
+        path.push_str(&self.name);
+
+        path
+    }
+}
+
 /// The fragments and highlights one [`Part`] of a fragments directory holds,
 /// each read into its format, in the order of their paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

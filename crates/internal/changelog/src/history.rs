@@ -8,16 +8,151 @@
 //! branch through a merge is the merge commit's, whose message names the change
 //! request.
 //!
+//! [`History::read`] reads it once, to ask about any file: the commit that
+//! brought it to the top level, the change requests that wrote it, and for a
+//! commit, the files it added and where they are now.
 //! [`parse`] reads the log `git::log` writes, and [`credited`] follows each
 //! file back through it, renames included.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU64};
 
-use crate::directory::is_unreleased;
+use camino::Utf8Path;
+
+use crate::{directory::is_unreleased, forge::Forge, git, release::ReleaseError};
 
 /// What each commit's header in the log starts with, followed by its hash, a
 /// line break, and its message.
 pub(crate) const HEADER: &str = "commit ";
+
+/// The first-parent history of `HEAD` in the repository holding a fragments
+/// directory, limited to the commits that changed the directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct History {
+    /// Newest first, as git writes them.
+    commits: Vec<Commit>,
+}
+
+/// A fragment or highlight a commit added at the top level of the fragments
+/// directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Added {
+    /// Its path below the fragments directory when the commit added it, such as
+    /// `retry-idle-turns.md` or `highlights/fan-out.md`.
+    pub path: String,
+
+    /// Its path at `HEAD`, followed through every rename since, such as
+    /// `0.3.0/retry-idle-turns.md`; `None` once a later commit deleted it.
+    pub now: Option<String>,
+}
+
+impl History {
+    /// Read the history of the repository holding the fragments directory
+    /// `dir`.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a shallow clone, which lacks the history, and returns a git
+    /// command that failed or a log that doesn't read as one.
+    pub fn read(dir: &Utf8Path) -> Result<Self, ReleaseError> {
+        if git::is_shallow(dir)? {
+            return Err(ReleaseError::Shallow);
+        }
+        let commits = parse(&git::log(dir)?).map_err(ReleaseError::Log)?;
+
+        Ok(Self { commits })
+    }
+
+    pub(crate) fn commits(&self) -> &[Commit] {
+        &self.commits
+    }
+
+    /// For each of `paths`, below the fragments directory at `HEAD`, the hash
+    /// of the commit that brought it to the top level: the oldest commit that
+    /// wrote or changed it there.
+    ///
+    /// `None` for a file no commit wrote at the top level, such as one added
+    /// straight into a release's directory.
+    #[must_use]
+    pub fn origins(&self, paths: &[&str]) -> Vec<Option<String>> {
+        credited(&self.commits, paths)
+            .into_iter()
+            .map(|indices| {
+                let oldest = indices.first()?;
+                Some(self.commits.get(*oldest)?.hash.clone())
+            })
+            .collect()
+    }
+
+    /// The fragments and highlights the commit `hash` added at the top level,
+    /// each with where it is now.
+    ///
+    /// Empty when the commit added none, which includes a commit off the
+    /// first-parent line of `HEAD`: its changes are the merge commit's.
+    #[must_use]
+    pub fn added_by(&self, hash: &str) -> Vec<Added> {
+        let Some(index) = self.commits.iter().position(|commit| commit.hash == hash) else {
+            return vec![];
+        };
+
+        self.commits[index]
+            .changes
+            .iter()
+            .filter_map(|change| match change {
+                Change::Added(path) if is_unreleased(path) => Some(Added {
+                    path: path.clone(),
+                    now: self.follow(index, path),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The change requests `forge` reads from the commits that wrote or changed
+    /// `path`, below the fragments directory at `HEAD`, while it sat at the top
+    /// level, oldest first and each once.
+    #[must_use]
+    pub fn change_requests(&self, path: &str, forge: Forge) -> Vec<NonZeroU64> {
+        let indices = credited(&self.commits, &[path]).pop().unwrap_or_default();
+
+        let mut numbers = vec![];
+        for index in indices {
+            let number = self
+                .commits
+                .get(index)
+                .and_then(|commit| forge.change_request(&commit.message));
+            if let Some(number) = number
+                && !numbers.contains(&number)
+            {
+                numbers.push(number);
+            }
+        }
+
+        numbers
+    }
+
+    /// Where the file at `path` after the commit at `index` is at `HEAD`:
+    /// followed through every later rename, and `None` once a later commit
+    /// deleted it.
+    fn follow(&self, index: usize, path: &str) -> Option<String> {
+        let mut path = path.to_owned();
+
+        // The commits newer than the one at `index`, oldest of them first.
+        for commit in self.commits[..index].iter().rev() {
+            for change in &commit.changes {
+                match change {
+                    Change::Renamed { from, to } if *from == path => {
+                        path.clone_from(to);
+                        break;
+                    }
+                    Change::Deleted(deleted) if *deleted == path => return None,
+                    _ => {}
+                }
+            }
+        }
+
+        Some(path)
+    }
+}
 
 /// A commit on the first-parent line that changed the fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]

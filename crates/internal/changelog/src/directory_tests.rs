@@ -410,6 +410,53 @@ fn reading_a_release_without_a_directory_says_so() {
 }
 
 #[test]
+fn a_place_is_read_from_a_path_and_written_back() {
+    for (path, part, highlight, name) in [
+        ("retry.md", Part::Unreleased, false, "retry.md"),
+        (
+            "highlights/fan-out.md",
+            Part::Unreleased,
+            true,
+            "fan-out.md",
+        ),
+        (
+            "0.3.0/retry.md",
+            Part::Release(Version::new(0, 3, 0)),
+            false,
+            "retry.md",
+        ),
+        (
+            "0.3.0/highlights/fan-out.md",
+            Part::Release(Version::new(0, 3, 0)),
+            true,
+            "fan-out.md",
+        ),
+    ] {
+        let place = Place::parse(path).unwrap();
+
+        assert_eq!(place, Place {
+            part,
+            highlight,
+            name: name.to_owned(),
+        });
+        assert_eq!(place.path(), path);
+    }
+}
+
+#[test]
+fn a_path_the_layout_holds_nothing_at_is_no_place() {
+    for path in [
+        "",
+        "0.3.0/",
+        "drafts/retry.md",
+        "0.3.0/drafts/retry.md",
+        "a/b/c.md",
+    ] {
+        assert_eq!(Place::parse(path), None, "{path}");
+    }
+}
+
+#[test]
 fn the_reserved_slugs_say_what_they_are_reserved_for_in_any_letter_case() {
     assert_eq!(
         reserved_for("Overview"),

@@ -203,3 +203,98 @@ fn a_file_history_does_not_know_is_credited_to_nobody() {
 
     assert_eq!(credited(&commits, &["new.md"]), vec![Vec::<usize>::new()]);
 }
+
+/// The full hash `commit` gives the commit made of `id`.
+fn hash(id: char) -> String {
+    id.to_string().repeat(40)
+}
+
+fn history(commits: Vec<Commit>) -> History {
+    History { commits }
+}
+
+/// A commit whose message names a pull request, as a GitHub squash commit's
+/// does.
+fn squashed(id: char, number: u64, changes: Vec<Change>) -> Commit {
+    Commit {
+        message: format!("Commit {id} (#{number})\n"),
+        ..commit(id, changes)
+    }
+}
+
+#[test]
+fn the_origin_of_a_file_is_the_commit_that_brought_it_to_the_top_level() {
+    let history = history(vec![
+        commit('d', vec![added("0.3.1/copy.md")]),
+        commit('c', vec![renamed("a.md", "0.3.0/a.md")]),
+        commit('b', vec![renamed("retry.md", "a.md"), modified("b.md")]),
+        commit('a', vec![added("retry.md"), added("b.md")]),
+    ]);
+
+    assert_eq!(history.origins(&["0.3.0/a.md", "b.md", "0.3.1/copy.md"]), [
+        Some(hash('a')),
+        Some(hash('a')),
+        None,
+    ]);
+}
+
+#[test]
+fn the_files_a_commit_added_are_followed_to_where_they_are_now() {
+    let history = history(vec![
+        commit('d', vec![Change::Deleted("gone.md".to_owned())]),
+        commit('c', vec![renamed(
+            "highlights/fan-out.md",
+            "0.3.0/highlights/fan-out.md",
+        )]),
+        commit('b', vec![renamed("retry.md", "retry-idle-turns.md")]),
+        commit('a', vec![
+            added("retry.md"),
+            added("highlights/fan-out.md"),
+            added("gone.md"),
+            // Added straight into a release, as a copy is: not at the top level.
+            added("0.2.1/copy.md"),
+        ]),
+    ]);
+
+    assert_eq!(history.added_by(&hash('a')), [
+        Added {
+            path: "retry.md".to_owned(),
+            now: Some("retry-idle-turns.md".to_owned()),
+        },
+        Added {
+            path: "highlights/fan-out.md".to_owned(),
+            now: Some("0.3.0/highlights/fan-out.md".to_owned()),
+        },
+        Added {
+            path: "gone.md".to_owned(),
+            now: None,
+        },
+    ]);
+}
+
+/// History lists only the first-parent commits that changed the fragments
+/// directory: any other commit changed nothing there, or reached the default
+/// branch through a merge commit that history lists instead.
+#[test]
+fn a_commit_outside_the_history_added_nothing() {
+    let history = history(vec![commit('a', vec![added("a.md")])]);
+
+    assert_eq!(history.added_by(&hash('z')), []);
+}
+
+#[test]
+fn a_files_change_requests_are_read_from_the_commits_that_wrote_it() {
+    let history = history(vec![
+        // After the cut, which credits nobody.
+        squashed('e', 1260, vec![modified("0.3.0/a.md")]),
+        squashed('d', 1250, vec![renamed("a.md", "0.3.0/a.md")]),
+        squashed('c', 1182, vec![modified("a.md")]),
+        commit('b', vec![modified("a.md")]),
+        squashed('a', 1182, vec![added("a.md")]),
+    ]);
+
+    assert_eq!(history.change_requests("0.3.0/a.md", Forge::GitHub), [
+        NonZeroU64::new(1182).unwrap()
+    ]);
+    assert_eq!(history.change_requests("0.3.0/a.md", Forge::None), []);
+}

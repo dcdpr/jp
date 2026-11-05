@@ -42,10 +42,11 @@ mod links;
 pub mod markdown;
 pub mod release;
 
-pub use directory::{CheckError, Problem, ProblemKind, Report, check, reserved_for};
-pub use document::FrontmatterError;
+pub use directory::{CheckError, Place, Problem, ProblemKind, Report, check, reserved_for};
+pub use document::{FrontmatterError, with_change_requests};
 pub use forge::{Credit, CreditKind, Forge, UnknownForge};
 pub use fragment::{Fragment, FragmentError, Type, UnknownType, Upgrade};
 pub use git::GitError;
 pub use highlight::{Highlight, HighlightError};
+pub use history::{Added, History};
 pub use release::{Headings, Release, ReleaseError};

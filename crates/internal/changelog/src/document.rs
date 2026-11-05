@@ -6,7 +6,7 @@
 //! [`marker`] finds the lines both formats hold to the rules about upgrade
 //! sections, and [`markdown_options`] says how a body is read as Markdown.
 
-use std::fmt;
+use std::{fmt, num::NonZeroU64};
 
 use comrak::{Options, options::Extension};
 use serde::de::DeserializeOwned;
@@ -83,6 +83,50 @@ pub(crate) fn parse<T: DeserializeOwned>(source: &str) -> Result<Parsed<T>, Fron
     })
 }
 
+/// `source`, a fragment or highlight, with `numbers` written into its
+/// frontmatter as its `change_requests`, after every field it holds.
+///
+/// The rest of the file is kept as it is, line endings included.
+/// The frontmatter must not list `change_requests` already: a file that lists
+/// them twice follows neither format.
+///
+/// # Errors
+///
+/// Returns why `source` holds no frontmatter to write into.
+pub fn with_change_requests(
+    source: &str,
+    numbers: &[NonZeroU64],
+) -> Result<String, FrontmatterError> {
+    let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let bom = source.len() - body.len();
+
+    let mut lines = body.split_inclusive('\n');
+    let opening = lines
+        .next()
+        .filter(|line| is_delimiter(line))
+        .ok_or(FrontmatterError::Missing)?;
+    let newline = if opening.ends_with("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+
+    let mut offset = bom + opening.len();
+    for line in lines {
+        if is_delimiter(line) {
+            let numbers: Vec<String> = numbers.iter().map(ToString::to_string).collect();
+            let field = format!("change_requests: [{}]{newline}", numbers.join(", "));
+
+            let mut written = source.to_owned();
+            written.insert_str(offset, &field);
+            return Ok(written);
+        }
+        offset += line.len();
+    }
+
+    Err(FrontmatterError::Unclosed)
+}
+
 /// The token that opens an upgrade section `line` starts with, if it starts
 /// with one.
 pub(crate) fn marker(line: &str) -> Option<&'static str> {
@@ -133,3 +177,7 @@ fn is_delimiter(line: &str) -> bool {
 fn line_number(text: &str, offset: usize) -> usize {
     text[..offset].matches('\n').count() + 1
 }
+
+#[cfg(test)]
+#[path = "document_tests.rs"]
+mod tests;

@@ -56,7 +56,7 @@ use crate::{
     fragment::{Fragment, Type},
     git::{self, GitError},
     highlight::Highlight,
-    history::{self, Commit},
+    history::{self, Commit, History},
     links::Links,
 };
 
@@ -216,20 +216,19 @@ pub fn read(
         fragments,
         highlights,
     } = directory::read(dir, part)?;
-    if git::is_shallow(dir)? {
-        return Err(ReleaseError::Shallow);
-    }
 
     let address = git::origin(dir).as_deref().and_then(web_address);
     let forge = forge.unwrap_or_else(|| Forge::infer(address.as_deref()));
     let project = Project::new(forge, address.as_deref())?;
-    let commits = history::parse(&git::log(dir)?).map_err(ReleaseError::Log)?;
 
-    let mut entries = credit(&project, &commits, fragments);
+    let history = History::read(dir)?;
+    let commits = history.commits();
+
+    let mut entries = credit(&project, commits, fragments);
     entries.sort_by(|(order, entry), (other_order, other)| {
         (entry.file.type_, order, &entry.slug).cmp(&(other.file.type_, other_order, &other.slug))
     });
-    let mut highlights = credit(&project, &commits, highlights);
+    let mut highlights = credit(&project, commits, highlights);
     highlights.sort_by(|(order, highlight), (other_order, other)| {
         (order, &highlight.slug).cmp(&(other_order, &other.slug))
     });
