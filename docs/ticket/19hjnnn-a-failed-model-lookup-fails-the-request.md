@@ -13,9 +13,9 @@
 
 Before every turn, inquiry, and title, JP asks the provider about the model
 (`Provider::model_details`).
-A lookup that failed failed the request, though what it reports (context
-window, output limit, reasoning support) only fills in details the request can
-go ahead without.
+A lookup that failed failed the request, though what it reports (context window,
+output limit, reasoning support) only fills in details the request can go ahead
+without.
 
 That broke:
 
@@ -23,9 +23,8 @@ That broke:
   `/anthropic` endpoint, on every turn.
 - vLLM, llama.cpp, Ollama, Cerebras, Google, and OpenRouter whenever their
   listing failed, such as behind a router that serves no `/v1/models`.
-- The model picker for unknown OpenAI and Anthropic models: their lookup
-  failed before the stream, where the refusal is classified as an unknown
-  model.
+- The model picker for unknown OpenAI and Anthropic models: their lookup failed
+  before the stream, where the refusal is classified as an unknown model.
 
 A lookup on a slow connection also held up every request, with no timeout.
 
@@ -42,14 +41,14 @@ model the table does not know.
   exhausted chain still fails, since the request would be refused too.
   Every other failure falls back to the override table.
 - OpenAI: no request at all.
-  `GET /v1/models/{id}` reports only the id, so the capability table was
-  already the only source.
+  `GET /v1/models/{id}` reports only the id, so the capability table was already
+  the only source.
 
 Errors from outside the lookup request still fail: credential resolution,
 OpenAI's check that a ChatGPT subscription serves the model, and a missing
 Claude Code on the ACP route.
 
-An unknown model now reaches the stream, where the refusal is classified, so
-the error with the served models, and the picker, apply.
+An unknown model now reaches the stream, where the refusal is classified, so the
+error with the served models, and the picker, apply.
 
 Found while triaging review feedback on RFD 125.
