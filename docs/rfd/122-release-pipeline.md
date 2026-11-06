@@ -488,8 +488,9 @@ hash and linked to the forge's commit page (`/commit/<sha>` on GitHub,
 Because JP squash-merges pull requests using GitHub's default commit subject,
 its entries credit pull requests automatically.
 GitLab's default squash commit message contains only the merge request title, so
-GitLab projects that squash-merge receive commit credits unless they include
-`%{reference}` in their squash commit template.
+GitLab projects that squash-merge receive commit credits unless their squash
+commit template ends with `See merge request %{reference}`, as GitLab's default
+merge commit message does.
 
 Because credit resolution requires Git history, `render` rejects shallow clones
 rather than emitting incomplete credits.
