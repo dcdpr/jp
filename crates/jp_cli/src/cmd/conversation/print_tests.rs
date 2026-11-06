@@ -1705,6 +1705,45 @@ fn assistant_header_names_the_model_each_turn_ran_on() {
     );
 }
 
+/// The model picker records its pick as a config delta after the turn's
+/// request, so the answer that follows came from the picked model, not the
+/// refused one.
+#[test]
+fn assistant_header_names_the_model_picked_mid_turn() {
+    let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("hello"), ts(0, 0, 1)),
+    ]);
+
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.id = "openai/gpt-4o".into();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(h);
+    lock.as_mut().update_events(|e| {
+        e.add_config_delta(delta);
+        e.extend(vec![ConversationEvent::new(
+            ChatResponse::message("hi"),
+            ts(0, 0, 2),
+        )]);
+    });
+    drop(lock);
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(None, id).run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (openai/gpt-4o) "),
+        "the answer should name the picked model, got: {output:?}"
+    );
+    assert!(
+        !output.contains("── jp (anthropic/test) "),
+        "no header should name the refused model, got: {output:?}"
+    );
+}
+
 /// A `--style` preset overrides presentation only.
 /// It must not swap the per-turn config out for the current workspace config,
 /// which would label every turn with the model configured right now.
