@@ -25,8 +25,8 @@ Run `run.sh --help` to list all options.
 
 The run exits 0 when `next-target` has no targets left, or when it reaches its
 deadline or iteration limit after a turn that succeeded and passed the gate.
-It exits 1 when it stops on a failed turn or gate, or aborts early, and 130
-when interrupted.
+It exits 1 when it stops on a failed turn or gate, or aborts early, and 130 when
+interrupted.
 
 ## Missions
 
