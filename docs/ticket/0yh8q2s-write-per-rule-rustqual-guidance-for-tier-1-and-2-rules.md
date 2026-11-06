@@ -9,9 +9,15 @@
 Write `.config/rustqual/guidance/<RULE>.md` for each rule that gates, so a
 finding tells the reader how to fix it the JP way, not just what rustqual
 detected.
-The `qual` crate (T-0yh5frr) appends the matching file to every rendered finding
-in CI, `cargo_check` and the burn-down loop.
-Depends on T-0yh5frr for the file layout and rule IDs.
+The gate appends the matching file to every rendered finding in CI,
+`cargo_check` and the burn-down loop: the `qual` crate (T-0yh5frr) today, and
+rustqual once T-1dhk659's follow-up folds `qual` into it, with the guidance
+directory as a config setting.
+The files themselves don't change with that move.
+
+Rule IDs are the ones rustqual's SARIF output uses (`CX-004`, `DRY-002`,
+`BP-009`, `A20`); a `/` in an ID becomes `_` in the file name, so
+`iosp/violation` would be `iosp_violation.md`.
 
 ## Rules to cover
 
@@ -27,7 +33,8 @@ Tier 1 and tier 2, the rules the burn-down mission (T-0yh5sy9) works on:
 - error handling (`unwrap`, `expect`, `panic!`).
 
 Skip rules that T-0yh5m6r exempts, and write the guidance against the thresholds
-that ticket sets.
+that ticket sets: `.config/rustqual/config.toml` records them, including the
+150-line function limit for test code and `allow_expect = false`.
 
 ## Each file
 

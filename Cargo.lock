@@ -3676,6 +3676,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "qual"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "indoc",
+ "jp_process",
+ "pretty_assertions",
+ "proc-macro2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "syn 2.0.114",
+ "thiserror 2.0.20",
+ "toml",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
