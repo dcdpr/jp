@@ -71,12 +71,6 @@ async fn a_failed_model_lookup_falls_back_to_the_table() {
     ]);
 }
 
-/// The table's fallback says what `/v1/models` said when the listing fixture
-/// was recorded, so a failed lookup shapes a request to a listed model the way
-/// a successful one would.
-///
-/// `context-editing` is left out: it only describes the model, and nothing a
-/// request sends depends on it.
 #[test]
 fn the_table_fallback_matches_the_recorded_listing() {
     let path = jp_test::fixtures_dir().join("anthropic/test_models.yml");
@@ -90,6 +84,8 @@ fn the_table_fallback_matches_the_recorded_listing() {
 
     for model in listing.data {
         let mut reported = map_model(model).unwrap();
+        // `table_details` omits `context-editing` because request construction
+        // does not read that feature flag.
         reported
             .features
             .retain(|feature| *feature != "context-editing");
@@ -116,9 +112,6 @@ fn the_table_fallback_matches_the_recorded_listing() {
     }
 }
 
-/// A model with no configured or reported output limit, such as one served by a
-/// gateway without a model listing, is given room for its thinking and an
-/// answer.
 #[test]
 fn an_unknown_output_limit_falls_back_to_the_default() {
     let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;

@@ -77,12 +77,13 @@ static PROVIDER: ProviderId = ProviderId::Anthropic;
 /// <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
 const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
 
-/// The output limit a request asks for when none is configured or reported.
+/// Fallback `max_tokens` sent when neither configuration nor [`ModelDetails`]
+/// specifies an output limit.
 ///
-/// The Messages API requires one, and it bounds thinking and the answer
-/// together, so it is set high enough for both on current models.
-/// A model with a lower ceiling rejects the request, which `max_tokens` in its
-/// config fixes.
+/// The Messages API requires `max_tokens` on every request, and the limit
+/// covers both thinking and response tokens.
+/// Models with a lower ceiling reject the request unless
+/// `assistant.model.parameters.max_tokens` is configured.
 const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 32_000;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
@@ -2329,14 +2330,7 @@ fn create_request(
 
 /// Derive reasoning support from the API-reported model capabilities.
 ///
-/// Every model the API reports goes through it; the override table's own copy
-/// of the result is used only when the lookup reports nothing.
-/// A model newer than this binary therefore still receives an explicit thinking
-/// configuration rather than falling back to the provider default, which bills
-/// for thinking tokens the caller never sees.
-///
-/// Returns `None` when the capabilities report nothing about thinking, leaving
-/// support genuinely unknown.
+/// Returns `None` when `capabilities` does not specify thinking support.
 fn derive_reasoning(capabilities: &types::ModelCapabilities) -> Option<ReasoningDetails> {
     let thinking = &capabilities.thinking;
 
@@ -2425,13 +2419,12 @@ const BETWEEN_TOOLS_THINKING: &str = "between-tools-thinking";
 /// them with a 400, so they are only sent when this flag is present.
 const SAMPLING_PARAMETERS: &str = "sampling-parameters";
 
-/// Model facts the capabilities API does not report, and what it did report
-/// when this binary was built.
+/// Static model metadata not reported by `/v1/models`, plus a fallback snapshot
+/// of the fields `/v1/models` does report.
 ///
-/// Token limits, reasoning, and structured output come from the API whenever
-/// the lookup answers; [`reported`] is the fallback for when it does not.
-/// A newly released model needs an entry here only when one of the other facts
-/// differs from the defaults.
+/// Token limits, reasoning support, and structured output come from the live
+/// `/v1/models/{id}` lookup when it succeeds, and fall back to [`reported`]
+/// when the lookup fails or times out.
 ///
 /// [`reported`]: Self::reported
 #[derive(Debug, Clone)]
@@ -2466,27 +2459,25 @@ struct ModelOverrides {
     /// Only meaningful together with `always_on`.
     between_tools: bool,
 
-    /// What `/v1/models/{id}` reported when this binary was built.
-    ///
-    /// `None` for a model whose listing was never recorded.
+    /// Snapshot of capabilities from `/v1/models/{id}`, used when the live
+    /// model lookup fails or times out.
     reported: Option<Reported>,
 }
 
-/// What `/v1/models/{id}` reported for a model when this binary was built.
+/// Capabilities reported by `/v1/models/{id}`, stored as a static fallback for
+/// [`ModelOverrides`].
 #[derive(Debug, Clone)]
 struct Reported {
     context_window: u32,
     max_output_tokens: u32,
 
-    /// As the capabilities report it, before `always_on` is applied.
+    /// Reasoning support before [`ModelOverrides::always_on`] is applied.
     reasoning: ReasoningDetails,
 
     structured_output: bool,
 }
 
 impl ModelOverrides {
-    /// Overrides for `id` that change nothing: no known cutoff, active, every
-    /// flag off, and nothing reported.
     fn new(id: &'static str) -> Self {
         Self {
             id,
@@ -2507,20 +2498,15 @@ impl Cataloged for ModelOverrides {
     }
 }
 
-/// Look up what the table holds for `id`.
-///
-/// Returns `None` for a model absent from [`MODEL_OVERRIDES`], leaving its
-/// cutoff and deprecation status unknown rather than asserting defaults for a
-/// model this binary predates.
+/// Look up the [`MODEL_OVERRIDES`] entry for `id` (by canonical ID or alias).
 fn model_overrides(id: &str) -> Option<&'static ModelOverrides> {
     MODEL_OVERRIDES.get(id)
 }
 
-/// The facts the capabilities API cannot supply, and what it reported, per
-/// model.
+/// Static model catalog for Anthropic models.
 ///
-/// The reported values are copied from
-/// `tests/fixtures/anthropic/test_models.yml`, and a test holds them to it.
+/// `reported` entries mirror the recorded `/v1/models` response in
+/// `tests/fixtures/anthropic/test_models.yml`.
 // qual:allow(complexity, magic_numbers) reason: "model catalogue: cutoff dates
 // and limits are data maintained by hand against Anthropic's published
 // documentation and recorded API responses"
@@ -2718,7 +2704,7 @@ fn table_details(name: &Name) -> Result<ModelDetails> {
     let reported = overrides.reported.as_ref();
     let reasoning = reported.map(|reported| &reported.reasoning);
 
-    // The flags `derive_features` sets from the same capabilities.
+    // Mirror the feature flags that `derive_features` derives from live capabilities.
     let mut features = vec![];
     if reasoning.is_some_and(|reasoning| !reasoning.is_unsupported()) {
         features.push("interleaved-thinking");
