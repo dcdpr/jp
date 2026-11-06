@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6712896358310932,
-  "iosp_score": 0.8211672318400857,
+  "quality_score": 0.6716324477134604,
+  "iosp_score": 0.82135853093243,
   "violations": 1002,
-  "total": 7733,
+  "total": 7740,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -3358,17 +3358,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1112
+      "line": 1179
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1211
+      "line": 1278
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1326
+      "line": 1393
     },
     {
       "name": "QueryText::read",
@@ -4613,17 +4613,17 @@
     {
       "name": "StreamError::from_http",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 351
+      "line": 357
     },
     {
       "name": "extract_retry_from_text",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 792
+      "line": 838
     },
     {
       "name": "extract_retry_after",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 863
+      "line": 909
     },
     {
       "name": "EventChain::ingest_normal",

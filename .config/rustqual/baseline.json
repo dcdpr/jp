@@ -1,20 +1,20 @@
 {
   "version": 2,
-  "quality_score": 0.7279744445410776,
-  "iosp_score": 0.9204309656823624,
+  "quality_score": 0.7278897867191861,
+  "iosp_score": 0.9205704270235819,
   "violations": 997,
-  "total": 17151,
-  "complexity_warnings": 198,
-  "magic_number_warnings": 267,
+  "total": 17177,
+  "complexity_warnings": 200,
+  "magic_number_warnings": 268,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 493,
+  "function_length_warnings": 495,
   "unsafe_warnings": 74,
   "error_handling_warnings": 203,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 315,
+  "boilerplate_warnings": 318,
   "srp_struct_warnings": 50,
   "srp_module_warnings": 262,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3181,
+  "total_findings": 3189,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -3353,17 +3353,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1112
+      "line": 1179
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1211
+      "line": 1278
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1326
+      "line": 1393
     },
     {
       "name": "QueryText::read",
@@ -4588,17 +4588,17 @@
     {
       "name": "StreamError::from_http",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 351
+      "line": 357
     },
     {
       "name": "extract_retry_from_text",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 792
+      "line": 838
     },
     {
       "name": "extract_retry_after",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 863
+      "line": 909
     },
     {
       "name": "EventChain::ingest_normal",
