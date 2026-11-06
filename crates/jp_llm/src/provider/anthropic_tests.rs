@@ -37,16 +37,12 @@ async fn test_redacted_thinking() -> Result {
     run_test(PROVIDER, function_name!(), requests).await
 }
 
-/// A provider pointed at `server`, which serves no `/v1/models` route unless a
-/// test mocks one.
 fn provider_at(server: &MockServer) -> Anthropic {
     let mut config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
     config.base_url = server.base_url();
     Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()))
 }
 
-/// A server without the model route, such as an Anthropic-compatible gateway,
-/// still serves the request: the lookup's 404 falls back to the built-in table.
 #[test(tokio::test)]
 async fn a_failed_model_lookup_falls_back_to_the_table() {
     let server = MockServer::start_async().await;
@@ -75,12 +71,6 @@ async fn a_failed_model_lookup_falls_back_to_the_table() {
     ]);
 }
 
-/// The table's fallback says what `/v1/models` said when the listing fixture
-/// was recorded, so a failed lookup shapes a request to a listed model the way
-/// a successful one would.
-///
-/// `context-editing` is left out: it only describes the model, and nothing a
-/// request sends depends on it.
 #[test]
 fn the_table_fallback_matches_the_recorded_listing() {
     let path = jp_test::fixtures_dir().join("anthropic/test_models.yml");
@@ -94,6 +84,8 @@ fn the_table_fallback_matches_the_recorded_listing() {
 
     for model in listing.data {
         let mut reported = map_model(model).unwrap();
+        // `table_details` omits `context-editing` because request construction
+        // does not read that feature flag.
         reported
             .features
             .retain(|feature| *feature != "context-editing");
@@ -120,9 +112,6 @@ fn the_table_fallback_matches_the_recorded_listing() {
     }
 }
 
-/// A model with no configured or reported output limit, such as one served by a
-/// gateway without a model listing, is given room for its thinking and an
-/// answer.
 #[test]
 fn an_unknown_output_limit_falls_back_to_the_default() {
     let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
@@ -163,8 +152,6 @@ async fn a_failed_lookup_of_a_model_the_table_does_not_know_gives_empty_details(
     );
 }
 
-/// A refused credential is not a lookup failure: the request would be refused
-/// too, so it still fails, as the credential chain decides.
 #[test(tokio::test)]
 async fn a_refused_credential_still_fails_the_lookup() {
     let server = MockServer::start_async().await;

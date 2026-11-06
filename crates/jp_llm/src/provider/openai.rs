@@ -582,16 +582,16 @@ impl Provider for Openai {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let attempt = self.resolve(name.as_ref()).await?;
 
-        // The capability table is the only source on either route: the
-        // subscription host serves no model endpoint, and the API's
-        // `GET /v1/models/{id}` reports nothing but the id, so asking would cost
-        // a round trip and add nothing.
+        // Resolve details from the built-in catalog without calling the API:
+        // the subscription host has no models endpoint, and `GET /v1/models/{id}`
+        // only echoes the model ID without capability metadata.
         let details = map_model(ModelResponse::named(name.to_string()))?;
 
-        // Refused here rather than at the host, which answers a model it does
-        // not serve with the same 404 it gives a typo. A model the table has
-        // never heard of is let through: the catalog ships with the binary and
-        // the plan's model set does not.
+        // Reject models known not to work with a ChatGPT subscription before
+        // sending the request, because the subscription host returns a generic
+        // 404 that cannot be distinguished from a typo. Models absent from the
+        // catalog (`subscription: None`) are allowed through so newly added
+        // subscription models work without a binary update.
         if attempt.is_subscription() && details.subscription == Some(false) {
             return Err(Error::UnsupportedForCredential(format!(
                 "{name} is not served by a ChatGPT subscription; pick one of {}, or add `api_key` \
