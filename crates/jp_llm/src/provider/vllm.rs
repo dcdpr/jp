@@ -264,11 +264,18 @@ fn create_request(
 /// leaving thinking to the model's chat template and the server's
 /// `--default-chat-template-kwargs`.
 ///
-/// When reasoning is configured, named effort levels set `reasoning_effort`
-/// (which vLLM translates for the chat template via `--reasoning-effort-map`),
-/// token budgets set `thinking_token_budget`, and `Auto` leaves both unset.
-/// `chat_template_kwargs` is always set alongside the effort for servers that
-/// do not translate `reasoning_effort`.
+/// A named effort, `off` included, is sent as `reasoning_effort` alone. vLLM
+/// rewrites it through `--reasoning-effort-map` and derives the chat template's
+/// thinking switch from the result, but only when the request does not set that
+/// switch itself, so no kwarg accompanies it.
+/// This needs a vLLM that translates the effort (vllm-project/vllm#43401, May
+/// 2026); older releases reject `none`, `minimal`, `xhigh`, and `max`.
+///
+/// `auto` and a token count name no effort for the server to translate, so they
+/// turn thinking on through chat template kwargs.
+/// Templates disagree on the kwarg's name: Qwen3's reads `enable_thinking`, and
+/// the `DeepSeek` V3.1 family's reads `thinking`.
+/// Both are sent, and a template ignores the one it does not declare.
 fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &ParametersConfig) {
     let effort = match parameters.reasoning {
         Some(ReasoningConfig::Off) => ReasoningEffort::None,
@@ -279,38 +286,31 @@ fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &Paramete
     };
 
     let effort = match effort {
-        ReasoningEffort::None => {
-            body["reasoning_effort"] = json!("none");
-            body["chat_template_kwargs"] = thinking_kwargs(false);
+        ReasoningEffort::None => "none",
+        ReasoningEffort::Xlow => "minimal",
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::Max => "max",
+        ReasoningEffort::Auto => {
+            body["chat_template_kwargs"] = thinking_on();
             return;
         }
-        ReasoningEffort::Auto => None,
         ReasoningEffort::Absolute(tokens) => {
             body["thinking_token_budget"] = json!(tokens);
-            None
+            body["chat_template_kwargs"] = thinking_on();
+            return;
         }
-        // vLLM's effort vocabulary has no `xlow`; `minimal` is its lowest active level.
-        ReasoningEffort::Xlow => Some("minimal"),
-        ReasoningEffort::Low => Some("low"),
-        ReasoningEffort::Medium => Some("medium"),
-        ReasoningEffort::High => Some("high"),
-        ReasoningEffort::XHigh => Some("xhigh"),
-        ReasoningEffort::Max => Some("max"),
     };
 
-    if let Some(effort) = effort {
-        body["reasoning_effort"] = json!(effort);
-    }
-    body["chat_template_kwargs"] = thinking_kwargs(true);
+    body["reasoning_effort"] = json!(effort);
 }
 
-/// Build `chat_template_kwargs` to enable or disable thinking.
-///
-/// Qwen3 templates read `enable_thinking` and `DeepSeek` V3.1 templates read
-/// `thinking`.
-/// Templates ignore unknown keys, so both are sent.
-fn thinking_kwargs(enabled: bool) -> Value {
-    json!({ "enable_thinking": enabled, "thinking": enabled })
+/// The chat template kwargs that switch thinking on, under every name a served
+/// template is known to read.
+fn thinking_on() -> Value {
+    json!({ "enable_thinking": true, "thinking": true })
 }
 
 /// A `/v1/models` listing from vLLM.

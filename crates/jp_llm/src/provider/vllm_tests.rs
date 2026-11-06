@@ -162,10 +162,9 @@ fn create_request_off_disables_thinking() {
     let body = body_with_reasoning(PartialReasoningConfig::Off);
 
     assert_eq!(body["reasoning_effort"], json!("none"));
-    assert_eq!(
-        body["chat_template_kwargs"],
-        json!({ "enable_thinking": false, "thinking": false })
-    );
+    // The server derives the thinking switch from the effort, honoring
+    // `--reasoning-effort-map`; an explicit kwarg would override that map.
+    assert!(body.get("chat_template_kwargs").is_none());
 }
 
 #[test]
@@ -173,10 +172,7 @@ fn create_request_none_effort_disables_thinking() {
     let body = body_with_reasoning(effort(ReasoningEffort::None));
 
     assert_eq!(body["reasoning_effort"], json!("none"));
-    assert_eq!(
-        body["chat_template_kwargs"],
-        json!({ "enable_thinking": false, "thinking": false })
-    );
+    assert!(body.get("chat_template_kwargs").is_none());
 }
 
 #[test]
@@ -184,17 +180,18 @@ fn create_request_sends_the_effort_level() {
     let body = body_with_reasoning(effort(ReasoningEffort::High));
 
     assert_eq!(body["reasoning_effort"], json!("high"));
-    assert_eq!(
-        body["chat_template_kwargs"],
-        json!({ "enable_thinking": true, "thinking": true })
-    );
+    assert!(body.get("chat_template_kwargs").is_none());
 }
 
 #[test]
 fn create_request_maps_xlow_to_minimal() {
+    // vLLM's effort vocabulary has no `xlow`; `minimal` is its lowest level.
+    // An operator may map `minimal` to `none` with `--reasoning-effort-map`,
+    // which only takes effect when the request sends no thinking kwarg.
     let body = body_with_reasoning(effort(ReasoningEffort::Xlow));
 
     assert_eq!(body["reasoning_effort"], json!("minimal"));
+    assert!(body.get("chat_template_kwargs").is_none());
 }
 
 #[test]
