@@ -105,6 +105,29 @@ async fn a_failed_lookup_with_reasoning_unset_requests_summarized_thinking() {
     );
 }
 
+#[test]
+fn the_claude_code_route_sends_no_thinking_when_reasoning_is_unset() {
+    let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
+    let provider = Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()));
+    let details = acp::model_details(&"claude-haiku-4-5".parse().unwrap());
+    assert_eq!(details.reasoning, None);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+    let body = provider.request_value(&details, query).unwrap();
+
+    assert!(body.get("thinking").is_none(), "{body}");
+}
+
 #[test(tokio::test)]
 async fn a_refused_credential_still_fails_the_lookup() {
     let server = MockServer::start_async().await;
