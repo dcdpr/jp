@@ -36,16 +36,12 @@ async fn test_redacted_thinking() -> Result {
     run_test(PROVIDER, function_name!(), requests).await
 }
 
-/// A provider pointed at `server`, which serves no `/v1/models` route unless a
-/// test mocks one.
 fn provider_at(server: &MockServer) -> Anthropic {
     let mut config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
     config.base_url = server.base_url();
     Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()))
 }
 
-/// A server without the model route, such as an Anthropic-compatible gateway,
-/// still serves the request: the lookup's 404 falls back to the built-in table.
 #[test(tokio::test)]
 async fn a_failed_model_lookup_falls_back_to_the_table() {
     let server = MockServer::start_async().await;
@@ -79,8 +75,6 @@ async fn a_failed_lookup_of_a_model_the_table_does_not_know_gives_empty_details(
     );
 }
 
-/// A refused credential is not a lookup failure: the request would be refused
-/// too, so it still fails, as the credential chain decides.
 #[test(tokio::test)]
 async fn a_refused_credential_still_fails_the_lookup() {
     let server = MockServer::start_async().await;

@@ -11,44 +11,48 @@
 - **Label**: package=jp_llm
 - **Label**: type=bug
 
-Before every turn, inquiry, and title, JP asks the provider about the model
-(`Provider::model_details`).
-A lookup that failed failed the request, though what it reports (context window,
-output limit, reasoning support) only fills in details the request can go ahead
-without.
+Before every turn, inquiry, and title generation, JP queries the provider for
+model metadata via `Provider::model_details`.
+Previously, a failed lookup aborted the entire request, even though the metadata
+it returns (context window, output token limit, reasoning support) is optional.
 
-That broke:
+This broke:
 
-- Anthropic-compatible gateways without `/v1/models/{id}`, such as Synthetic's
-  `/anthropic` endpoint, on every turn.
+- Anthropic-compatible gateways that do not serve `/v1/models/{id}`, such as
+  Synthetic's `/anthropic` endpoint, on every turn.
 - vLLM, llama.cpp, Ollama, Cerebras, Google, and OpenRouter whenever their
-  listing failed, such as behind a router that serves no `/v1/models`.
-- The model picker for unknown OpenAI and Anthropic models: their lookup failed
-  before the stream, where the refusal is classified as an unknown model.
+  `/v1/models` listing failed (for example, behind a router that does not expose
+  that endpoint).
+- The model picker for unknown OpenAI and Anthropic models, because the lookup
+  failed before the chat stream could classify the provider refusal as an
+  unknown-model error.
 
-A lookup on a slow connection also held up every request, with no timeout.
+Model lookups also had no timeout, so a slow response stalled every request.
 
 ## Fix
 
-The lookup is advisory.
-A failed lookup, or one still running after three seconds, is logged at `warn`,
-and the provider falls back to its built-in table, or to empty details for a
-model the table does not know.
+Model metadata lookups are advisory.
+When a lookup fails or exceeds the 3-second timeout, JP logs a warning and falls
+back to the provider's built-in table, or to `ModelDetails::empty` for unknown
+models.
 
-- `crates/jp_llm/src/provider/lookup.rs`: the timeout, `advisory_lookup`, and
-  `find_listed` for providers that search their listing.
-- Anthropic: a spent or refused credential still moves the chain on, and an
-  exhausted chain still fails, since the request would be refused too.
-  Every other failure falls back to the override table.
-- OpenAI: no request at all.
-  `GET /v1/models/{id}` reports only the id, so the capability table was already
-  the only source.
+- `crates/jp_llm/src/provider/lookup.rs`: defines the timeout,
+  `advisory_lookup`, and `find_listed` for providers that search their model
+  listing.
+- Anthropic: a spent or rejected credential still advances the credential chain
+  (and fails if the chain is exhausted), because the chat request would fail
+  with the same credential error.
+  All other lookup failures fall back to `MODEL_OVERRIDES`.
+- OpenAI: skips the network lookup entirely.
+  `GET /v1/models/{id}` returns only the model ID, so `CAPABILITIES` was already
+  the sole source of metadata.
 
-Errors from outside the lookup request still fail: credential resolution,
-OpenAI's check that a ChatGPT subscription serves the model, and a missing
-Claude Code on the ACP route.
+Pre-request checks outside the metadata lookup still fail fast: credential
+resolution, OpenAI's check that a ChatGPT subscription supports the model, and a
+missing Claude Code binary on the ACP route.
 
-An unknown model now reaches the stream, where the refusal is classified, so the
-error with the served models, and the picker, apply.
+Unknown models now reach the chat stream, where the provider refusal is
+classified, listing available models in the error and offering the interactive
+model picker.
 
 Found while triaging review feedback on RFD 125.
