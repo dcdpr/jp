@@ -6,22 +6,18 @@
 - **Date**: 2026-03-08
 - **Extended by**: [RFD 046]
 - **Required by**: [RFD 051]
-- **Summary**: Add parent-child conversation relationships via metadata field,
-  enabling fork lineage and hierarchical organization without nested
-  directories.
+- **Summary**: Adds a `parent_id` metadata field to conversations for fork
+  lineage and tree-structured `ls` and `rm` operations.
 
 ## Summary
 
-This RFD introduces a tree-structured conversation hierarchy.
-Every conversation can have child conversations.
-The parent-child relationship is stored as a `parent_id` field in each
-conversation's `metadata.json`, while all conversations remain in a flat
-directory layout under `.jp/conversations/`.
-`conversation ls` gains `--tree` and `--root` flags.
-`conversation rm` supports `--cascade` and `--promote` strategies when a
-conversation has children.
-`conversation fork` creates a child instead of a top-level copy, and `--fork=0`
-([RFD 020]) becomes the mechanism for creating blank child conversations.
+This RFD organizes conversations into a parent-child hierarchy via a `parent_id`
+field in `metadata.json` while keeping flat directory storage under
+`.jp/conversations/`.
+`conversation fork` creates a child conversation by default (with `--fork=0`
+from [RFD 020] creating a blank child), `conversation ls` gains `--tree` and
+`--root` flags, and `conversation rm` adds `--cascade` and `--promote`
+strategies.
 
 ## Motivation
 

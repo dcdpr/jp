@@ -6,16 +6,15 @@
 - **Date**: 2026-02-23
 - **Required by**: [RFD 010], [RFD 037]
 - **Summary**: Unifies one-shot and long-running tool execution under a stateful
-  protocol enabling multi-step interactive workflows.
+  `Running`/`Stopped` protocol for multi-step interactive tools.
 
 ## Summary
 
 This RFD introduces a stateful tool execution protocol that unifies one-shot and
 long-running tools under a single execution model.
-Every tool call is internally modeled as a state machine (`Running → Stopped`),
-with one-shot tools wrapped transparently.
-Long-running tools expose this lifecycle to the assistant, enabling multi-step
-interactive workflows like `git add --patch` or persistent shell sessions.
+Every tool call is modeled as a state machine (`Running → Stopped`), with
+one-shot tools wrapped transparently and long-running tools exposing spawn,
+input, and stop actions for interactive workflows like `git add --patch`.
 
 ## Motivation
 

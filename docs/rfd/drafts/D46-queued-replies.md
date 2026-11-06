@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-31
 - **Extends**: [RFD 045]
+- **Summary**: Adds a `[q] Queue reply` interrupt action that composes the next
+  turn's message without stopping the current turn.
 
 ## Summary
 

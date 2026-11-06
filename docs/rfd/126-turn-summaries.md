@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-30
 - **Extends**: [RFD 097]
-- **Summary**: Store a single-line LLM-generated summary on each `TurnStart`
+- **Summary**: Stores a single-line LLM-generated summary on each `TurnStart`
   event, generated in the background during the next query.
 
 ## Summary

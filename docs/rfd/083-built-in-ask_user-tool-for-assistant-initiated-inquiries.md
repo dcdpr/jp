@@ -4,15 +4,15 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Summary**: Built-in tool for assistant to ask typed questions mid-turn with
-  human-only enforcement and optional answer persistence.
+- **Summary**: Adds a built-in `ask_user` tool for the assistant to ask typed
+  human-only questions mid-turn.
 
 ## Summary
 
-Add a built-in `ask_user` tool that lets the assistant ask the user a question
-mid-turn and receive a typed answer (boolean, select, or text).
-This keeps the agentic loop moving when the assistant needs human input, instead
-of requiring the user to end the turn and submit a new query.
+This RFD adds a built-in `ask_user` tool that lets the assistant ask the user a
+typed question (boolean, select, or text) mid-turn.
+Answering through a tool call keeps the agentic turn loop running instead of
+ending the turn and requiring a separate query.
 
 ## Motivation
 

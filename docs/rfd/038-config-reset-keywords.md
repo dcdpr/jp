@@ -4,39 +4,20 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
-- **Summary**: UPPERCASE keywords NONE and WORKSPACE reset config state;
-  loader.reset entry setting provides local resets; ConfigDelta becomes enum to
-  persist resets.
+- **Summary**: Adds `NONE` and `WORKSPACE` reset keywords to `--cfg`, an
+  entry-level `loader.reset` setting, and `ConfigDelta::Reset` events.
 
 ## Summary
 
-This RFD extends `--cfg` with two reserved UPPERCASE keyword values — `NONE`
-and `WORKSPACE` — that each define a **reset point**: a known state that
-`--cfg` returns to when the keyword is encountered.
-Both keywords share the same reset-then-layer mechanism: each persists a
-`ConfigDelta::Reset` event that clears accumulated state to
-`PartialAppConfig::default()`, and `WORKSPACE` appends a `ConfigDelta::Apply`
-carrying the workspace's resolved partial on top.
-Subsequent `--cfg` directives layer on top of the reset, processed using the
-existing left-to-right merge model from [RFD 008].
-`NONE` is additionally a pre-pipeline gate that skips all implicit config
-loading, providing an escape hatch when implicit config is broken or when a
-script wants full control.
-
-This RFD also defines `loader.reset = "none"` for self-contained config entries.
-When a `--cfg` entry declares this setting, JP performs the same positional
-reset as `--cfg=NONE` immediately before applying that entry.
-Unlike the `NONE` keyword, `loader.reset` does not skip implicit config loading;
-it only affects the accumulated state at the entry's position in the `--cfg`
-directive stream.
-
-To persist these reset semantics, `ConfigDelta` is promoted from a struct to an
-enum with `Apply` (existing shape) and `Reset` (new) variants.
-
-This RFD focuses on reset points in the `--cfg` directive stream: the two
-keyword reset points and the entry-local `loader.reset = "none"` setting.
-Conversation-ID values for `--cfg` (e.g. `--cfg=jp-c17528832001`) and
-fork-implicit config are out of scope here; see [Non-Goals](#non-goals).
+This RFD extends `--cfg` with two reserved uppercase reset keywords, `NONE` and
+`WORKSPACE`, plus an entry-local `loader.reset = "none"` setting that resets
+accumulated configuration before applying the entry in the left-to-right `--cfg`
+pipeline ([RFD 008]).
+`NONE` clears accumulated configuration to defaults and skips implicit startup
+loading, while `WORKSPACE` resets to defaults and reapplies the workspace's
+resolved configuration.
+To persist these resets in conversation history, `ConfigDelta` becomes an enum
+with `Apply` and `Reset` variants.
 
 ## Motivation
 

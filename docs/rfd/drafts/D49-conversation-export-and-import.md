@@ -4,18 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-12
+- **Summary**: Adds `jp conversation export` and `import` subcommands to
+  transfer self-contained conversation JSON envelopes across workspaces.
 
 ## Summary
 
 This RFD adds `jp conversation export`, which writes conversations to stdout as
 versioned, self-contained JSON envelopes, and `jp conversation import`, which
-reads envelopes from stdin and writes them into the target workspace.
-Combined with the global `--workspace` flag, the pair enables copying
-conversations between workspaces:
-
-```sh
-jp c export jp-c123 jp-c456 | jp -w <workspace-id> c import
-```
+validates and writes envelopes from stdin into a target workspace.
+Combined with the global `--workspace` flag, the pair lets users pipe
+conversations directly from one workspace into another.
 
 ## Motivation
 

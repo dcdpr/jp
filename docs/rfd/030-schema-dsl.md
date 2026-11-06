@@ -4,8 +4,8 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
-- **Summary**: JP's concise DSL syntax for defining JSON Schema objects via
-  command-line flags with types, descriptions, and nested structures.
+- **Summary**: Documents the concise `--schema` DSL syntax for defining typed
+  JSON Schema objects on the command line.
 
 ## Summary
 

@@ -15,14 +15,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-30
 - **Extends**: [RFD 012]
+- **Summary**: Extracts LLM provider SSE streaming and event normalization into
+  a standalone, feature-gated `elelem` crate.
 
 ## Summary
 
-`elelem` is a standalone, feature-gated crate that owns the LLM streaming
-pipeline: one SSE driver, one normalized event model, and a per-shape parser
-seam, with each provider behind a Cargo feature.
-It replaces the external provider SDKs JP currently wraps and in several cases
-forks.
+This RFD introduces `elelem`, a standalone, feature-gated crate that owns the
+LLM streaming pipeline through a shared SSE driver, a normalized event model,
+and a per-provider chunk parser trait.
+It replaces the external provider SDKs and forks that `jp_llm` wraps for
+streaming.
 
 ## Motivation
 

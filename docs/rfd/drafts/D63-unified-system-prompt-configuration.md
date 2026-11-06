@@ -4,14 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-07
+- **Summary**: Unifies `assistant.system_prompt` and
+  `assistant.system_prompt_sections` into a single `assistant.system_prompts`
+  list that accepts strings, tables, or entry arrays.
 
 ## Summary
 
-`assistant.system_prompt` and `assistant.system_prompt_sections` collapse into
-one key, `assistant.system_prompts`, holding an ordered list of prompt entries.
-The key accepts a bare string, a merge-metadata table, or a list of entries, so
-every shape in use today keeps working, and `system_prompt` survives as an
-alias.
+This RFD collapses `assistant.system_prompt` and
+`assistant.system_prompt_sections` into a single `assistant.system_prompts` key
+holding an ordered list of prompt entries.
+The key accepts a bare string, a merge-metadata table, or a list of entries, and
+retains `system_prompt` as an alias for backward compatibility.
 
 ## Motivation
 

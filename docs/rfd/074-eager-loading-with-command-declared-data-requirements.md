@@ -4,17 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-15
-- **Summary**: Commands declare data needs upfront; startup eagerly loads and
-  validates it, enabling infallible access during execution.
+- **Summary**: Loads and validates command-declared conversation data eagerly at
+  startup so command execution accesses loaded state infallibly.
 
 ## Summary
 
 This RFD replaces lazy conversation loading with an eager, command-driven model.
-Commands declare what data they need (index only, metadata, or full events) and
-which conversations they need it for.
-The startup pipeline loads and validates that data before the command runs.
-After startup, access to loaded data is infallible — no `Result` or `Option` at
-call sites for built-in commands.
+Each command declares upfront which conversations and data granularity (index,
+metadata, or events) it requires.
+The startup pipeline loads and validates that data before the command runs,
+making access to loaded state infallible during execution.
 
 ## Motivation
 

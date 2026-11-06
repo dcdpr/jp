@@ -7,23 +7,16 @@
 - **Requires**: [RFD 065]
 - **Required by**: [RFD 066], [RFD 067]
 - **Extended by**: [RFD 094]
-- **Summary**: Replace opaque tool output strings with typed content blocks
-  (text, resource, question) mirroring MCP's CallToolResult model.
+- **Summary**: Replaces opaque tool output strings with typed `text`,
+  `resource`, and `question` content blocks aligned with MCP's `CallToolResult`.
 
 ## Summary
 
-This RFD replaces `jp_tool::Outcome` with typed content blocks for tool
-responses.
-Tools return an array of structured content blocks — `text`, `resource`, and
-`question` — instead of opaque strings.
-This gives JP the metadata it needs to own resource formatting, reason about
-resource identity, and enable resource-level optimizations like deduplication.
-
-The content block schema follows MCP's `CallToolResult` model because MCP has
-already standardized the right primitives for `text` and `resource` blocks, and
-it is the format MCP tools already speak.
-JP extends the model with `question` blocks for the inquiry system, and with a
+This RFD replaces `jp_tool::Outcome` with typed content blocks (`text`,
+`resource`, and `question`) aligned with MCP's `CallToolResult` model, plus a
 stateful response envelope for long-running tools.
+Returning structured blocks instead of opaque strings gives JP the resource URIs
+and metadata needed for consistent formatting and cross-turn deduplication.
 
 ## Motivation
 

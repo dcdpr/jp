@@ -5,17 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-13
 - **Requires**: [RFD D19]
+- **Summary**: Adds `--args-schema` and `--args-json` flags derived from `clap`
+  argument structs for programmatic CLI invocation.
 
 ## Summary
 
-This RFD adds a machine-readable JSON interface to JP's CLI.
-A new `--args-schema` flag prints a JSON Schema describing the full CLI surface,
-and a new `--args-json` flag accepts a JSON object conforming to that schema to
-drive any JP command.
-The CLI's existing clap argument structs are the single source of truth — they
-gain `serde::Deserialize` and `schemars::JsonSchema` derives alongside their
-existing `clap` derives, so the schema and JSON input/output format fall
-directly out of the Rust types.
+This RFD adds a machine-readable JSON interface to JP's CLI via `--args-schema`
+(which prints a JSON Schema for the full CLI surface) and `--args-json` (which
+drives any command from a JSON payload).
+The existing `clap` argument structs also derive `serde::Deserialize` and
+`schemars::JsonSchema` so the CLI, schema, and JSON input share a single source
+of truth.
 
 ## Motivation
 

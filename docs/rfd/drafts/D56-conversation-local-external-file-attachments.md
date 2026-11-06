@@ -29,17 +29,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-04
 - **Extends**: [RFD 031]
+- **Summary**: Snapshots files attached from outside the workspace into
+  conversation-local storage under an `external:` URI scheme.
 
 ## Summary
 
-This RFD adds support for attaching files from outside the workspace root (e.g.
-`jp q --attach /tmp/data.json`) by snapshotting their content into the
-conversation's own storage at attach time and referencing it through a new
-`external:` URI scheme.
-It is a deliberately scoped interim design that stays within JP's existing
-reference-based attachment model — no blob store, no resource model migration
-— and documents a clean migration path to the blob-backed design once that
-infrastructure exists.
+This RFD adds support for attaching files from outside the workspace root (such
+as `jp q --attach /tmp/data.json`) by snapshotting their content into the
+conversation's storage directory under an `external:` URI scheme.
+It provides an interim implementation within JP's reference-based attachment
+model and defines the migration path to the blob-backed resource model.
 
 ## Motivation
 

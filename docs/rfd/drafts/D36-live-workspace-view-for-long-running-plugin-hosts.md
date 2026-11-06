@@ -4,19 +4,19 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-08
+- **Summary**: Introduces a `LiveWorkspace` view that revalidates the workspace
+  index and reloads conversations from disk on every plugin read.
 
 ## Summary
 
 Long-running plugin hosts such as `jp serve` return stale conversation data
-because `Workspace`'s read methods cache aggressively for `jp query`'s
-read-your-writes semantics, and the cache is never invalidated within the host's
-lifetime.
+because `Workspace`'s read methods cache state in memory for `jp query`'s
+read-your-writes semantics.
 This RFD introduces `LiveWorkspace<'a>`, a `&mut`-borrowed view over `Workspace`
-that provides method-level freshness: every read revalidates the index and
-force-reloads the relevant cell from disk before returning.
-The plugin runner is plumbed with `&mut LiveWorkspace<'_>` end-to-end, making
-the cached `Workspace::events()` etc. structurally unreachable from plugin
-handlers.
+whose read methods revalidate the conversation index and reload the target
+conversation from disk on every call.
+Plumbing `&mut LiveWorkspace<'_>` through the plugin runner makes cached
+`Workspace` read methods unreachable from plugin request handlers.
 
 ## Motivation
 

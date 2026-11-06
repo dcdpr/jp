@@ -5,18 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-28
 - **Extends**: [RFD 048]
+- **Summary**: Wraps JSON machine output in a versioned `{"format", "version",
+  "data"}` envelope and adds `--format-version` pinning.
 
 ## Summary
 
-Every JSON machine record JP emits is wrapped in a three-key envelope —
-`{"format", "version", "data"}` — that names the record and its version.
-The line-oriented ID formats have no in-band place for a version and are the
-stated exception: they keep their current bytes and are versioned out-of-band.
-All existing shapes start at version `0`, which explicitly promises nothing and
-exists so the envelope can ship before any shape is stabilized.
-A `--format-version` flag lets consumers pin what they parse, validated before
-the command runs, with reserved exit codes `20` and `21` for "too old" and "too
-new."
+This RFD wraps every JSON machine record JP emits in a `{"format", "version",
+"data"}` envelope that names the record type and its schema version, while
+keeping line-oriented ID outputs as raw lines.
+Existing JSON shapes start at version `0` until stabilized, and a
+`--format-version` flag lets callers pin the version they expect with dedicated
+exit codes (`20` and `21`) on version mismatch.
 
 ## Motivation
 

@@ -4,15 +4,15 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
-- **Summary**: Add --explain flag to jp query showing rendered system prompt,
-  tools, attachments, and final request without calling the LLM provider.
+- **Summary**: Adds an `--explain` flag to `jp query` that prints the assembled
+  LLM request and exits without calling the provider.
 
 ## Summary
 
-Add an `--explain` flag to `jp query` that prints the rendered system prompt,
-the resolved tools, the resolved attachments, and the new user query that would
-be sent to the LLM, then exits without calling the provider.
-Output is structured and JSON-first via `--format json`.
+This RFD adds an `--explain` flag to `jp query` that prints the rendered system
+prompt, resolved tools, resolved attachments, and outgoing user message, then
+exits without calling the LLM provider.
+Output supports both terminal rendering and structured JSON via `--format json`.
 
 ## Motivation
 

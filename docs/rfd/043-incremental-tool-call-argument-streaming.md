@@ -4,16 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-24
-- **Summary**: Extend EventBuilder to incrementally parse and emit tool call
-  arguments as typed fragments during streaming.
+- **Summary**: Extends `EventBuilder` to incrementally parse streaming tool call
+  JSON and emit typed argument fragments before completion.
 
 ## Summary
 
-This RFD proposes extending the `EventBuilder` to incrementally parse tool call
-argument JSON as it streams in, emitting a recursive stream of typed fragments
-so that downstream consumers (e.g. the terminal renderer) can act on argument
-data as it arrives — including partial string values, individual array items,
-and nested object entries — before the full tool call is complete.
+This RFD extends `EventBuilder` to parse tool call argument JSON incrementally
+as it streams from the provider.
+It emits a recursive stream of typed fragments (including partial strings, array
+items, and nested object entries) so downstream consumers like the terminal
+renderer can display arguments before the full tool call completes.
 
 ## Motivation
 

@@ -4,16 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Summary**: Adds conversation archiving to JP, moving inactive conversations
-  to a hidden partition while preserving them.
+- **Summary**: Adds `jp conversation archive` and `unarchive` to move inactive
+  conversations out of active listings while preserving them on disk.
 
 ## Summary
 
 This RFD adds conversation archiving to JP.
-Archived conversations are physically moved out of the active storage directory,
-excluded from the workspace index, and hidden from listings and pickers.
-Two new subcommands — `jp conversation archive` and `jp conversation unarchive`
-— manage the lifecycle.
+Archived conversations are moved out of the active storage directory, excluded
+from the workspace index, and hidden from default listings and pickers.
+Two subcommands (`jp conversation archive` and `jp conversation unarchive`)
+manage the lifecycle.
 
 ## Motivation
 

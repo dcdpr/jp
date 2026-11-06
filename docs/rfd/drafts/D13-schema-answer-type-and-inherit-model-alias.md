@@ -6,6 +6,8 @@
 - **Date**: 2026-04-02
 - **Extends**: [RFD 028][RFD 028], [RFD 034][RFD 034]
 - **Required by**: [RFD D14]
+- **Summary**: Adds `AnswerType::Schema` for structured JSON inquiry answers and
+  an `inherit` model alias that targets the main assistant model.
 
 ## Summary
 

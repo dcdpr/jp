@@ -16,6 +16,8 @@
 - **Date**: 2026-08-10
 - **Extends**: [RFD 097]
 - **Required by**: [RFD D52]
+- **Summary**: Extends `jp://` URLs with quote- and position-anchored fragments
+  that address stream entries, text spans, and ranges.
 
 ## Summary
 

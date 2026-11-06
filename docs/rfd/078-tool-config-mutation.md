@@ -6,22 +6,18 @@
 - **Date**: 2026-04-17
 - **Requires**: [RFD 076], [RFD 070]
 - **Extended by**: [RFD 108]
-- **Summary**: Scoped tool config access via `access.config` rules, with
-  re-invocation on delta rejection and per-cycle commit buffering.
+- **Summary**: Grants tools scoped read and write access to `AppConfig` paths
+  via `access.config` rules and per-cycle `ConfigDelta` commits.
 
 ## Summary
 
-This RFD introduces scoped config access for tools via `access.config` — a new
-resource type in [RFD 076]'s access model.
-Workspace owners grant tools read and/or write access to specific config paths.
-Tools receive granted config values in `context.config` on invocation and return
-updated values in `outcome.config`.
-Approved changes land in a per-cycle commit buffer and are emitted at cycle end
-as a single merged `ConfigDelta` event on the conversation's event stream.
-
-Grants apply to any `AppConfig` path — `assistant.model`,
-`conversation.attachments`, `conversation.tools.*`, and so on.
-This enables tools that adapt the assistant's behavior during a conversation.
+This RFD extends [RFD 076]'s access model with `access.config` rules that grant
+tools scoped read and write access to `AppConfig` paths such as
+`assistant.model`, `conversation.attachments`, and `conversation.tools.*`.
+Tools receive granted values in `context.config` and return proposed changes in
+`outcome.config`.
+Approved mutations accumulate in a per-cycle commit buffer and persist as a
+single merged `ConfigDelta` event on the conversation stream.
 
 ## Motivation
 

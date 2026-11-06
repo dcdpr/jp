@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
-- **Summary**: Detached query execution with process registry and queue policy
-  for background conversations; superseded by RFD 027.
+- **Summary**: Runs queries in the background via `jp query --detach`, tracks
+  active processes, and pauses on user inquiries.
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.

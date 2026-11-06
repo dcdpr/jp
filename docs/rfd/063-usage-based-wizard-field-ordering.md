@@ -5,16 +5,15 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-21
 - **Requires**: [RFD 061], [RFD 062], [RFD 060]
-- **Summary**: Extend config wizard with frecency-based field ordering using CLI
-  usage tracking data.
+- **Summary**: Orders fields in the interactive `--cfg` wizard by frecency using
+  per-workspace CLI usage data.
 
 ## Summary
 
-Extend the interactive config wizard ([RFD 061]) with a frecency-based tier in
-the field selector ordering, powered by the CLI usage tracking infrastructure
-from [RFD 062].
-Fields the user frequently sets via `--cfg` or dedicated CLI flags are promoted
-in the list, making the wizard increasingly personalized over time.
+This RFD adds a frecency-ranked tier to the interactive `--cfg` wizard ([RFD
+061]) using the local CLI usage data from [RFD 062].
+Fields that the user frequently or recently sets via `--cfg` or dedicated CLI
+flags appear directly below already-configured fields.
 
 ## Motivation
 

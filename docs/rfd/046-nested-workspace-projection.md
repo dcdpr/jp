@@ -5,25 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
 - **Extends**: [RFD 039]
-- **Summary**: Nested workspace directories project conversation trees visually;
-  user-local storage stays flat for durability.
+- **Summary**: Projects conversation trees as nested directories in
+  `.jp/conversations/` while keeping user-local storage flat for durability.
 
 ## Summary
 
-This RFD extends [RFD 039]'s conversation tree design by changing the workspace
-storage layout from flat to nested.
-User-local storage remains flat (as [RFD 031] describes).
-Workspace storage projects conversations as a nested directory tree derived from
-`parent_id`, giving filesystem visibility to the tree hierarchy.
-`ls .jp/conversations/` shows only root conversations.
-`rm -r` on a parent cleans up its children.
-Sub-agent conversations are naturally grouped under their parent's directory.
-
-All tree features from [RFD 039] — `parent_id`, tree index, fork-as-child,
-`conversation ls --tree`, `conversation rm --cascade/--promote`, workspace API
-— are unchanged.
-This RFD only addresses how conversations are laid out on disk in workspace
-storage, and the sync and projection behaviors that follow from that layout.
+This RFD extends [RFD 039]'s conversation tree design by projecting workspace
+conversations (`.jp/conversations/`) as a nested directory tree derived from
+`parent_id`, while keeping user-local storage flat for durability ([RFD 031]).
+Root conversations sit at the top level of `.jp/conversations/`, and child or
+sub-agent conversations nest under their parent's directory.
+All tree semantics and CLI flags from [RFD 039] remain unchanged.
 
 ## Motivation
 

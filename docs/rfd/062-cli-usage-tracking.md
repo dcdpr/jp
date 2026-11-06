@@ -10,14 +10,10 @@
 
 ## Summary
 
-Introduce a `usage.json` file that records how the CLI is used — which commands
-are invoked, which flags are passed, and how often.
-This data enables features that adapt to a user's workflow.
-The file is stored per-workspace and updated atomically on every command
-invocation.
-
-This data is **NOT shared with any external service**, it is purely local-only,
-used to enhance the local JP experience.
+This RFD introduces a per-workspace `usage.json` file that records command
+invocations and flag usage atomically on each CLI run.
+The recorded data stays strictly local and is never shared with external
+services, providing a frequency and recency signal for adaptive CLI features.
 
 ## Motivation
 

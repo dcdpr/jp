@@ -5,16 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-21
 - **Required by**: [RFD 061], [RFD 063]
-- **Summary**: Global `--explain` flag traces config resolution through 9
-  layers, showing where each field value originates.
+- **Summary**: Adds a global `--explain` flag that prints the layer-by-layer
+  origin of resolved configuration fields and exits.
 
 ## Summary
 
-Add a global `--explain` flag that prints the config resolution chain for all or
-a specific field, then exits without running the command.
-This gives users visibility into JP's layered configuration system — which
-files, environment variables, CLI flags, and conversation deltas contribute to
-the final resolved value.
+This RFD adds a global `--explain` flag that prints the configuration resolution
+chain for all fields or a selected field path, then exits without running the
+command.
+The output shows which config files, environment variables, conversation deltas,
+and CLI flags contributed to each resolved value.
 
 ## Motivation
 

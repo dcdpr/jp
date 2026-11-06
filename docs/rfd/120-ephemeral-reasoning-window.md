@@ -10,11 +10,11 @@
 
 ## Summary
 
-Add `style.reasoning.window`, which routes rendered reasoning into a
-fixed-height window at the bottom of the terminal while the assistant reasons,
+This RFD adds `style.reasoning.window`, which streams rendered reasoning into a
+fixed-height window at the bottom of the terminal while the assistant reasons
 and erases it when reasoning ends.
 The window is built on the printer-owned status region ([RFD 091]) and composes
-with the existing `style.reasoning.display` modes instead of replacing them.
+with the existing `style.reasoning.display` modes.
 
 ## Motivation
 

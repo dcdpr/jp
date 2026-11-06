@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-12
 - **Extends**: [RFD 064]
+- **Summary**: Adds a per-tool `compaction` setting to override how individual
+  tools' requests and responses are compacted.
 
 ## Summary
 

@@ -4,12 +4,14 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-16
+- **Summary**: Introduces a `--filter EXPR` predicate DSL in a `jp_query` crate
+  for querying conversations by metadata, config, and events.
 
 ## Summary
 
-Introduce a small predicate language for querying conversations, evaluated by a
-new `jp_query` crate and exposed through a `--filter EXPR` flag on `jp c ls`,
-`jp c grep`, `jp c rm`, `jp c archive`, and `jp c fork`.
+This RFD introduces a small predicate language for querying conversations,
+evaluated by a new `jp_query` crate and exposed through a `--filter EXPR` flag
+on `jp c ls`, `jp c grep`, `jp c rm`, `jp c archive`, and `jp c fork`.
 The language supports boolean predicates over conversation metadata, the
 configuration tree, and conversation events, with explicit `event(...)` and
 `turn(...)` scoping for binding predicates to a single record.

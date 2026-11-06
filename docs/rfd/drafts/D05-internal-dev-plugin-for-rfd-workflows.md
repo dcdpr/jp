@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
 - **Requires**: [RFD 050]
+- **Summary**: Orchestrates AI-assisted RFD exploration, drafting, review, and
+  phased implementation through an internal `jp-dev` command plugin.
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.

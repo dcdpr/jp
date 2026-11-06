@@ -5,16 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
 - **Extends**: [RFD 072]
+- **Summary**: Extends the command plugin protocol with live conversation event
+  subscriptions, interactive prompt handling, and query delegation.
 
 ## Summary
 
-This RFD extends the command plugin protocol ([RFD 072]) with event
+This RFD extends the command plugin protocol ([RFD 072]) with live event
 subscriptions and agent loop delegation.
-Plugins can subscribe to live conversation events, respond to interactive
-prompts (tool approval, inquiries), and trigger LLM queries that JP executes on
-their behalf.
-Together, these capabilities enable plugins to act as alternative frontends to
-JP's agent loop — the key building block for a web-based chat interface.
+Plugins can subscribe to streaming conversation events, answer interactive
+approval and inquiry prompts, and trigger LLM queries that JP executes on their
+behalf, allowing plugins to serve as full chat frontends.
 
 ## Motivation
 

@@ -6,15 +6,14 @@
 - **Date**: 2026-03-13
 - **Tracking Issue**: [\#437]
 - **Extended by**: [RFD 081]
-- **Summary**: Make CLI tool flags order-sensitive, processing `--tool` and
-  `--no-tools` left-to-right instead of in fixed order.
+- **Summary**: Processes `--tool` and `--no-tools` CLI flags left-to-right so
+  interleaved flags compose in the order given.
 
 ## Summary
 
-Make `--tool` and `--no-tools` CLI flags order-sensitive, so interleaved
-invocations like `--no-tools --tool=write --no-tools=fs_modify_file` are
-processed left-to-right.
-This replaces the current fixed-order processing that ignores flag position.
+This RFD makes `--tool` and `--no-tools` CLI flags order-sensitive, evaluating
+interleaved invocations like `--no-tools --tool=write --no-tools=fs_modify_file`
+from left to right rather than in a fixed precedence order.
 
 ## Motivation
 

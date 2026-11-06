@@ -5,17 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
 - **Requires**: [RFD 009]
-- **Summary**: Proposes jp_pty crate and interactive SDK for building stateful
-  tools that wrap interactive CLI programs.
+- **Summary**: Introduces the `jp_pty` crate and `jp_tool::interactive` SDK for
+  building stateful tools that drive interactive CLI programs.
 
 ## Summary
 
 This RFD introduces a `jp_pty` crate for managing pseudo-terminal sessions and a
 `jp_tool::interactive` SDK module for building stateful tools that drive
 interactive CLI programs.
-Together they provide the infrastructure that tool authors need to wrap programs
-like `git add --patch`, `vim`, or a persistent shell session — exposing them
-through the stateful tool protocol defined in [RFD 009].
+Together they let tool authors wrap programs like `git add --patch`, `vim`, or a
+persistent shell session and expose them through the stateful tool protocol from
+[RFD 009].
 
 ## Motivation
 

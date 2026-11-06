@@ -5,6 +5,8 @@
 - **Authors**: rgrant <rgrant@contract.design>
 - **Date**: 2026-08-02
 - **Extends**: [RFD 064]
+- **Summary**: Adds `jp conversation compact --interactive` to review and revise
+  proposed compactions in a forked conversation before applying.
 
 ## Summary
 

@@ -4,14 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
-- **Summary**: Make JP scriptable with concise schema DSL and inferred clean
-  JSON output when piping or with --schema flag.
+- **Summary**: Adds a concise `--schema` DSL and clean stdout JSON defaults so
+  `jp query` works directly in shell pipelines.
 
 ## Summary
 
-Make JP useful as a scriptable tool for structured LLM output.
-This RFD captures the goals, analyzes prior art, and defines an incremental plan
-to make `jp query --schema 'summary' "summarize this" | jq .` work cleanly.
+This RFD makes `jp query` scriptable for structured LLM output by adding a
+concise `--schema` DSL and emitting only the structured JSON result when
+`--schema` is set or stdout is piped.
+With these defaults, `jp query --schema 'summary' "summarize this" | jq .` works
+without extra flags to suppress interactive chrome or persistence.
 
 ## Motivation
 

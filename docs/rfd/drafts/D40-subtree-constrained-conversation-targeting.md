@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-10
 - **Requires**: [RFD 039]
+- **Summary**: Adds a `--root-id` flag to `jp query` that restricts target
+  conversations to strict descendants of a given ancestor.
 
 ## Summary
 

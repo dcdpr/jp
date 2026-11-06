@@ -4,20 +4,16 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-13
+- **Summary**: Defines JP's plugin-first architecture: a small agent-loop and
+  storage core extended by plugins over an internal event bus.
 
 ## Summary
 
-This guide describes JP's extensibility strategy.
-The core of JP is the agent loop and a stable storage API.
-Everything else — LLM providers, terminal rendering, attachment handlers, tools
-— is a plugin or is on a path to becoming one.
-An internal event bus provides the connective tissue: JP emits structured events
-at well-defined points in its execution pipeline, and plugins subscribe to
-observe, intercept, or extend behavior.
-
-This document explains the reasoning, maps the integration points where plugins
-participate, and provides a framework for deciding where new functionality
-belongs.
+This guide defines JP's extensibility strategy: keep the core limited to the
+agent loop, storage API, and configuration pipeline, and build LLM providers,
+renderers, attachment handlers, and tools as plugins.
+An internal event bus connects the core pipeline to plugins that subscribe to
+observe, intercept, or extend execution.
 
 ## Why Plugins
 

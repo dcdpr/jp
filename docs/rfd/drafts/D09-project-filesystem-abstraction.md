@@ -5,22 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Required by**: [RFD D11]
+- **Summary**: Replaces `Workspace::root` with a `ProjectFiles` trait to
+  abstract project file access across filesystem and in-memory backends.
 
 ## Summary
 
-This RFD introduces a `ProjectFiles` trait that abstracts read and write access
-to the user's project files — the content that tools operate on and attachments
-resolve against.
-`Workspace` holds a non-optional `Arc<dyn ProjectFiles>`, replacing the current
-`root: Utf8PathBuf` field and eliminating the assumption that project files live
-on a local filesystem.
-`FsProjectFiles` wraps the current root-directory behavior.
-`NullProjectFiles` provides an empty implementation for workspaces not tied to a
-project directory (tests, standalone conversations).
-The trait includes a `materialize()` method that produces a temporary filesystem
-directory from the backing store, enabling subprocess tools to work against any
-backend.
-For `FsProjectFiles`, materialization returns the real root path at zero cost.
+This RFD replaces `Workspace`'s `root: Utf8PathBuf` field with a non-optional
+`Arc<dyn ProjectFiles>` trait object that abstracts read and write access to
+project files for tools and attachments.
+`FsProjectFiles` wraps a local directory, while `NullProjectFiles` and in-memory
+implementations support tests and non-filesystem environments.
+A `materialize()` method exposes a temporary directory view for subprocess tools
+and returns the real root path at zero cost for `FsProjectFiles`.
 
 ## Motivation
 

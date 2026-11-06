@@ -5,17 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
 - **Requires**: [RFD 015], [RFD 016]
-- **Summary**: Wasm plugins export an attachment interface, wrapped in a native
-  Handler adapter for transparent integration.
+- **Summary**: Loads third-party attachment handlers from Wasm plugins and
+  adapts `jp:plugin/attachment` exports to the native `Handler` trait.
 
 ## Summary
 
 This RFD adds Wasm plugin support for attachment handlers.
-Third-party handlers are loaded as Wasm components at runtime, exposing the same
-`jp:plugin/attachment` interface.
-The host wraps them in a `WasmHandler` adapter that implements the native
-`Handler` trait from [RFD 015], making the plugin/native distinction transparent
-to the rest of the system.
+Third-party handlers are loaded as Wasm components at runtime through the
+`jp:plugin/attachment` WIT interface.
+The host wraps each component in a `WasmHandler` adapter that implements the
+native `Handler` trait from [RFD 015].
 
 ## Motivation
 

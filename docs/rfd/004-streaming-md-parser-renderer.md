@@ -5,16 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-19
 - **Extended by**: [RFD 084], [RFD 089]
-- **Summary**: Buffer segments streaming markdown blocks; TerminalRenderer
-  applies ANSI-aware terminal formatting; comrak chosen over pulldown-cmark.
+- **Summary**: Pairs `comrak` with a custom block-boundary `Buffer` and
+  ANSI-aware `TerminalRenderer` for progressive markdown rendering in `jp_md`.
 
 ## Summary
 
-`jp_md` contains two custom components alongside `comrak`: a block-boundary
-detector (`Buffer`) for streaming segmentation, and a terminal renderer for
-escape-sequence-aware styled output.
-This ADR records why we maintain both and why we chose comrak over
-pulldown-cmark.
+`jp_md` pairs `comrak` with two custom components: a block-boundary detector
+(`Buffer`) for streaming segmentation and a terminal renderer for ANSI-aware
+styled output.
+This RFD records why JP maintains both components and why it uses `comrak`
+rather than `pulldown-cmark`.
 
 ## Context
 

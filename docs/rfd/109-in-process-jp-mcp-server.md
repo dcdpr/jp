@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-12
 - **Extended by**: [RFD 115]
-- **Summary**: Tool execution moves into an in-process JP MCP Server that JP and
-  third-party MCP clients both call over loopback Streamable HTTP.
+- **Summary**: Moves tool execution into an in-process JP MCP Server called over
+  loopback Streamable HTTP by JP and external clients.
 
 ## Summary
 

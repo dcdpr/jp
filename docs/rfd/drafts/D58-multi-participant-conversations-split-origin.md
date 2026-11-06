@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-06
 - **Extends**: [RFD 076], [RFD 078]
+- **Summary**: Proposes multi-participant conversations with named assistant
+  configs, event authorship, and speaker-labeled provider projections.
 
 > [!WARNING]
 > This RFD is in the process of being split up into several smaller RFDs
@@ -20,14 +22,11 @@
 
 ## Summary
 
-This RFD generalizes JP conversations from one human and one assistant to many
-participants sharing one conversation.
-Humans are observed through event authorship; assistant participants are
-captured in the conversation config and activated through
-`conversation.participants`.
-The design preserves the current single-assistant behavior, keeps reusable
-assistant authoring as normal config files, and projects the shared conversation
-into each assistant's provider request with explicit speaker labels.
+This RFD generalizes JP conversations from one human and one assistant to
+multiple participants sharing one conversation stream.
+Human participants are recorded through event authorship, while assistant
+participants are configured and activated under `conversation.participants` and
+receive speaker-labeled provider projections.
 
 ## Motivation
 

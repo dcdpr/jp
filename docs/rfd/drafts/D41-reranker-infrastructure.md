@@ -4,14 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-22
+- **Summary**: Introduces a cross-encoder reranker `Provider` trait with Voyage
+  AI HTTP and local `fastembed`-backed `ember` implementations.
 
 ## Summary
 
-This RFD introduces a reranker primitive: a `Provider` trait that ranks
-candidates by relevance to a query, with two initial implementations — Voyage
-AI's HTTP reranking API and a local `ember` server backed by `fastembed`.
-The primitive is foundational for upcoming features that need on-the-fly
-relevance scoring without paying for full LLM inference.
+This RFD introduces a reranker primitive: a `Provider` trait that scores and
+ranks candidates by relevance to a query, with implementations for Voyage AI's
+HTTP reranking API and a local `ember` server backed by `fastembed`.
+The trait provides low-latency relevance scoring for downstream features without
+paying for full LLM inference.
 
 ## Motivation
 

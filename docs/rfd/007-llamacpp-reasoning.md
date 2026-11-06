@@ -4,15 +4,15 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-18
-- **Summary**: Llamacpp provider will drop the openai crate to properly extract
-  reasoning content from all three llama.cpp reasoning formats.
+- **Summary**: Replaces the `openai` crate in the Llamacpp provider to extract
+  reasoning content across all three `llama.cpp` formats.
 
 ## Summary
 
-The Llamacpp provider silently drops reasoning content when the llama.cpp server
-uses its default `--reasoning-format deepseek` setting.
-This RFD proposes fixing reasoning extraction to work across all three llama.cpp
-reasoning formats.
+The Llamacpp provider silently drops reasoning content when the `llama.cpp`
+server uses its default `--reasoning-format deepseek` setting.
+This RFD replaces the `openai` crate with a direct HTTP implementation that
+extracts reasoning content across all three `llama.cpp` reasoning formats.
 
 ## Motivation
 

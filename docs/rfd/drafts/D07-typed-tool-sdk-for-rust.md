@@ -5,14 +5,15 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-12
 - **Requires**: [RFD D06]
+- **Summary**: Extends `jp_tool` with `schemars`-based schema generation and
+  typed argument deserialization for Rust local tools.
 
 ## Summary
 
-This RFD evolves `jp_tool` from a thin protocol crate into a tool authoring SDK.
+This RFD extends `jp_tool` into a Rust tool authoring SDK backed by `schemars`.
 Tool authors define arguments as Rust structs with `#[derive(Deserialize,
-JsonSchema)]`, and the SDK handles schema generation and typed argument
-deserialization — eliminating manual string-keyed extraction and the disconnect
-between TOML schemas and implementation code.
+JsonSchema)]`, and the SDK generates the tool's parameter schema and
+deserializes typed arguments directly.
 
 ## Motivation
 

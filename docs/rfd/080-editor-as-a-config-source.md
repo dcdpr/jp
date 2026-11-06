@@ -5,18 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-04
 - **Requires**: [RFD 079]
-- **Summary**: Move editor invocation into startup pipeline to treat it as a
-  config source, fixing phantom deltas.
+- **Summary**: Moves query editor invocation into the startup config pipeline so
+  editor TOML changes apply to the current turn.
 
 ## Summary
 
-Move the query editor invocation out of `Query::run` and into the startup
-pipeline (`run_inner`).
-The editor's TOML preamble becomes another input to config resolution:
-`resolve_config` returns a `PartialAppConfig`; the editor is given that partial
-(with defaults applied); the editor's resulting delta is layered on top, and the
-final `AppConfig` is built.
-The `Ctx::config` immutability rule is preserved.
+This RFD moves query editor invocation out of `Query::run` and into the startup
+configuration pipeline (`run_inner`).
+`resolve_partial` produces the pre-editor `PartialAppConfig`, the editor runs
+against that partial, and the resulting delta is layered on top before building
+the final immutable `AppConfig` for the turn.
 
 ## Motivation
 

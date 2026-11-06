@@ -5,20 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-26
 - **Extends**: [RFD 020]
-- **Summary**: Guard-scoped persistence: ConversationMut auto-persists on drop
-  while holding cross-process file lock, with callback-based writes and explicit
-  flush for checkpoints.
+- **Summary**: Persists modified conversation state automatically when
+  `ConversationMut` drops while still holding the cross-process file lock.
 
 ## Summary
 
-Conversation data is automatically persisted to disk when a `ConversationMut`
-drops, while the cross-process file lock is still held.
-The workspace API produces `ConversationLock`s (cross-process exclusive access)
-from which `ConversationMut`s (mutable scopes with auto-persist) are derived.
-No manual persist calls are needed.
-The standard `?` operator works freely — early returns trigger the
-`ConversationMut`'s `Drop`, which persists and then releases or retains the lock
-depending on ownership.
+This RFD persists conversation data to disk automatically when a
+`ConversationMut` guard drops, while the cross-process `ConversationLock` is
+still held.
+Callers derive mutable scopes from `ConversationLock` and can use `?` or early
+returns without manual persist calls or lock-release race windows.
 
 ## Motivation
 

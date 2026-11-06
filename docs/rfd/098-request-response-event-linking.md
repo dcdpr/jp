@@ -5,21 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Extends**: [RFD 097]
-- **Summary**: Request-response linking via persistent event IDs detects answer
-  scope under structural edits.
+- **Summary**: Links answering events to their originating `ChatRequest` via a
+  persistent `request_id` field so answer scope survives manual edits.
 
 ## Summary
 
-The events that answer a chat request carry no explicit reference to the request
-they answer; the relationship is inferred from position within a turn.
-This RFD adds a **request link**: an optional `request_id` field on the
-stream-entry wrapper, holding the `event_id` (introduced in [RFD 097]) of the
-originating `ChatRequest`.
-The stream stamps the link at insertion, so it is persisted and survives
-reordering and deletion as a *detectable* reference rather than a positional
-guess.
-This RFD defines which event kinds are linked, where the link lives on disk, and
-what every reader does with a missing or dangling link.
+This RFD adds an optional `request_id` field to the stream-entry wrapper that
+links each answering event (`ChatResponse`, `ToolCallRequest`,
+`ToolCallResponse`, `InquiryRequest`, and `InquiryResponse`) to the `event_id`
+([RFD 097]) of its originating `ChatRequest`.
+Stamping `request_id` at insertion time makes request-response scope explicit on
+disk so structural edits to `events.json` produce detectable orphan or
+reordering states rather than silent positional aliasing.
 
 ## Terminology
 

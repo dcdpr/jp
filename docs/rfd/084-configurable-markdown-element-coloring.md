@@ -5,18 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
 - **Extends**: [RFD 004]
-- **Summary**: Introduce configurable per-markdown-element styling via
-  MarkdownStyleSheet, replacing hard-coded SGR escapes.
+- **Summary**: Introduces `MarkdownStyleSheet` in `jp_md` and
+  `style.markdown.elements.*` settings for per-element terminal markdown
+  styling.
 
 ## Summary
 
-Introduce a `MarkdownStyleSheet` in `jp_md` that maps the markdown elements the
-terminal renderer emits (headings per level and their markers, list markers,
-inline code, blockquote marker, links, emphasis, strikethrough, underline, …)
-to a structured `Style` value, and expose it as user config under
+This RFD introduces a `MarkdownStyleSheet` in `jp_md` that maps markdown
+elements (headings, list markers, inline code, blockquotes, links, emphasis, and
+strikethrough) to structured `Style` values configured under
 `style.markdown.elements.*`.
-This replaces today's hard-coded SGR escapes in the terminal renderer and the
-one-off `inline_code_bg` plumbing with a single coherent abstraction.
+It replaces fixed SGR escape constants and one-off style parameters in the
+terminal renderer with a stack-based style sheet.
 
 ## Motivation
 

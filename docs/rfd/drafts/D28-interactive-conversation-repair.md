@@ -5,17 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-15
 - **Requires**: [RFD 070]
+- **Summary**: Replaces automatic trashing during workspace sanitization with
+  per-file automatic reconstruction and interactive `$EDITOR` repair.
 
 ## Summary
 
-This RFD replaces the current all-or-nothing sanitize behavior (trash any
-conversation with a corrupt file) with an interactive repair session.
-Each file in a conversation directory has a different recoverability profile:
-`metadata.json` and `base_config.json` can be rebuilt automatically,
-`init_config.json` can be rebuilt from user-provided CLI flags, and corrupt
-`events.json` can be opened in `$EDITOR` for manual fixes.
-Only truly unrecoverable cases (missing `events.json`, unparseable directory
-names) are trashed.
+This RFD replaces all-or-nothing conversation trashing during workspace
+sanitization with a per-file recovery and interactive repair flow.
+`metadata.json` and `base_config.json` are reconstructed automatically,
+`init_config.json` can be rebuilt from user-supplied CLI flags, and corrupt
+`events.json` files can be opened in `$EDITOR` before falling back to `.trash/`.
 
 ## Motivation
 

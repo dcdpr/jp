@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-20
 - **Required by**: [RFD 080]
-- **Summary**: JP loads config from four implicit sources plus environment
-  variables, with extends directives and inherit flags controlling precedence.
+- **Summary**: Documents JP's configuration sources, file probing order,
+  `extends` resolution, `inherit` boundaries, and `config_load_paths` behavior.
 
 ## Summary
 

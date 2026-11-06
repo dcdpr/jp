@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-12
 - **Requires**: [RFD 029]
+- **Summary**: Adds `jp tool new` and `jp tool import` subcommands to scaffold
+  and generate local and MCP tool configurations.
 
 ## Summary
 

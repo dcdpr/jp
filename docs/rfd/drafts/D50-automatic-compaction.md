@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-15
 - **Extends**: [RFD 064]
+- **Summary**: Appends a rolling compaction overlay automatically between turns
+  when a conversation's projected size exceeds a configured context-window
+  ratio.
 
 ## Summary
 

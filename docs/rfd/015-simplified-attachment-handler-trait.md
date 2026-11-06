@@ -6,16 +6,16 @@
 - **Date**: 2026-02-27
 - **Supersedes**: [RFD 014]
 - **Required by**: [RFD 017]
-- **Summary**: Simplify attachment handlers from stateful (five methods) to
-  stateless (three methods), moving URL tracking to the host.
+- **Summary**: Simplifies attachment `Handler` implementations to three
+  stateless methods (`schemes`, `validate`, `resolve`) and moves URL tracking to
+  the host.
 
 ## Summary
 
-This RFD simplifies the attachment handler system.
-The `Handler` trait is reduced from five methods to three (`schemes`,
-`validate`, `resolve`), with URL tracking moved to the host.
-Handlers become stateless, eliminating redundant state management and
-serialization complexity.
+This RFD reduces the attachment `Handler` trait from five stateful methods to
+three stateless ones (`schemes`, `validate`, `resolve`) and moves URL tracking
+to the host.
+Handlers no longer store or serialize their own URL collections.
 
 ## Motivation
 

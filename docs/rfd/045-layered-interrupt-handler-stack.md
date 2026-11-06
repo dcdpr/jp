@@ -5,24 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
 - **Extended by**: [RFD 092]
-- **Summary**: Replace JP's ad-hoc interrupt handling with a layered LIFO
-  handler stack, routing OS signals through scoped notification channels.
+- **Summary**: Replaces ad-hoc interrupt handling with a global signal router
+  and a LIFO stack of RAII-scoped handlers.
 
 ## Summary
 
-This RFD replaces JP's ad-hoc interrupt handling with a layered handler stack.
-A global signal router consumes OS signals once and dispatches notifications
-through a LIFO stack of scoped handlers.
-Handlers are registered via RAII guards and execute in the caller's context (not
-the router's), preserving the current ability to show interactive terminal menus
-and return actions to the surrounding event loop.
+This RFD replaces ad-hoc SIGINT handling with a global signal router that
+dispatches notifications through a LIFO stack of RAII-scoped handlers executing
+in the caller's context.
 When no handler is registered, SIGINT triggers a graceful shutdown via a
 `CancellationToken`.
-Escalating Ctrl-C provides a reliable escape hatch: the first press invokes the
-handler, a second *unanswered* press triggers graceful shutdown, and a third
-terminates immediately.
-A handler that acts on a press reports it and clears the count, so ordinary use
-of an interrupt menu never escalates by accident.
+Unanswered Ctrl-C presses escalate from the active handler to graceful shutdown
+and then immediate termination, while handled menu actions reset the escalation
+counter.
 
 ## Motivation
 

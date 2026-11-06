@@ -4,20 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-24
+- **Summary**: Makes tool `run` and `result` policies conditional on tool call
+  arguments via ordered first-match-wins rules.
 
 ## Summary
 
-This RFD introduces argument-conditional tool policies.
-Today, `RunMode` and `ResultMode` (`ask`, `unattended`, `edit`, `skip`) are
-per-tool-name only — every invocation of a tool uses the same mode regardless
-of arguments.
-This RFD makes them conditional on tool call arguments: a user can allow
-unattended file modifications in `src/` while requiring approval for `.env`, or
-auto-deliver results for safe operations while reviewing results that touch
-sensitive paths.
-The `run` and `result` fields move into a new `policy` namespace and accept
-either a backward-compatible string alias or an ordered array of conditional
-rules evaluated with first-match-wins semantics.
+This RFD makes tool `run` and `result` policies (`ask`, `unattended`, `edit`,
+and `skip`) conditional on tool call arguments instead of applying a single mode
+to every invocation of a tool.
+The `run` and `result` settings move under a `policy` namespace and accept
+either a mode string or an ordered list of argument-matching rules evaluated
+with first-match-wins semantics.
 
 ## Motivation
 

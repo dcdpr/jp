@@ -5,20 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
 - **Required by**: [RFD 017]
-- **Summary**: Sandboxed Wasm plugin system with WIT interfaces, dynamic
-  capability discovery, and per-plugin sandbox configuration for extensibility.
+- **Summary**: Defines a sandboxed Wasm component plugin system with WIT
+  capability interfaces, dynamic export discovery, and per-plugin host
+  permissions.
 
 ## Summary
 
-This RFD defines JP's plugin system.
-Plugins are Wasm components that extend JP with new capabilities — attachment
-handlers, tools, LLM providers, and more.
-A plugin exports a required `plugin` interface for identification and any number
-of optional capability interfaces.
-The host discovers capabilities at load time using `wasmtime`'s dynamic export
-inspection.
-All host interaction is mediated through JP-controlled imports (`jp:host`),
-sandboxed per-plugin.
+This RFD defines a Wasm component plugin system for extending JP with attachment
+handlers, tools, and other capabilities.
+Each plugin exports a required `plugin` identity interface and optional
+capability interfaces that the host discovers dynamically at load time via
+`wasmtime`.
+All host interaction runs through `jp:host` imports under a per-plugin sandbox
+policy.
 
 ## Motivation
 

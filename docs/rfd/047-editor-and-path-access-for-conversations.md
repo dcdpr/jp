@@ -4,18 +4,15 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
-- **Summary**: Add `jp conversation edit` (opens directory in $EDITOR) and `jp
-  conversation path` (prints conversation filesystem path).
+- **Summary**: Opens conversation files in `$EDITOR` via bare `jp conversation
+  edit` and prints their paths via `jp conversation path`.
 
 ## Summary
 
-This RFD adds two capabilities: `jp conversation edit` without flags opens the
-conversation directory in `$EDITOR`, and `jp conversation path` prints the
-filesystem path to a conversation.
+This RFD makes bare `jp conversation edit` open a conversation's directory in
+`$EDITOR` and adds `jp conversation path` to print its filesystem path.
 Both commands accept `--events`, `--metadata`, and `--base-config` flags to
-target specific files.
-These provide direct filesystem access to conversation data — the missing
-complement to JP's existing JSON-based manual editing workflow.
+target individual files directly.
 
 ## Motivation
 

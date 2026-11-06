@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-02
 - **Requires**: [RFD D13]
+- **Summary**: Moves `fs_create_file` content from tool call arguments into a
+  schema-typed inquiry to keep file bodies out of context.
 
 ## Summary
 

@@ -5,17 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-26
 - **Requires**: [RFD 079]
+- **Summary**: Separates Project, Workspace, and Storage concepts, supports
+  external `.jp` marker files, and unifies `config_load_paths` across roots.
 
 ## Summary
 
-Today the term "workspace" is overloaded.
-It means the project directory, the `.jp/` storage directory, or a Rust struct
-that holds both — depending on which file you're reading.
-This RFD splits the overloaded term into three named concepts (Project,
-Workspace, Storage), formalises a `.jp` marker file that lets workspace storage
-live outside the project tree (gitfile-style), and makes config load paths
-symmetric across the three config roots.
-Schema is unchanged; the changes are conceptual and structural, not data-model.
+This RFD separates the overloaded term "workspace" into three distinct concepts:
+**Project** (the user's working tree), **Workspace** (the logical JP context),
+and **Storage** (the on-disk state directory).
+It also introduces a gitfile-style `.jp` marker file so storage can live outside
+the project tree, and makes `config_load_paths` resolution symmetric across
+user-global, workspace, and user-workspace roots.
 
 ## Motivation
 

@@ -6,18 +6,16 @@
 - **Date**: 2025-07-17
 - **Requires**: [RFD 065], [RFD 058]
 - **Required by**: [RFD 067]
-- **Summary**: Externalizes all content payloads to gzip-compressed
-  SHA-256-addressed blob store; events.json carries only metadata references.
+- **Summary**: Stores attachment and tool-response payloads in a gzip-compressed
+  SHA-256 blob store and keeps compact references in `events.json`.
 
 ## Summary
 
-This RFD introduces a content-addressable blob store that externalizes all
-content payloads from `events.json`.
-Resource content (attachments and tool responses) is stored as gzip-compressed
-blobs keyed by SHA-256 checksum.
-`events.json` carries compact blob references instead of inline content, keeping
-it a small structural skeleton of conversation metadata.
-A background task garbage-collects unreferenced blobs on every JP invocation.
+This RFD introduces a content-addressable blob store that moves attachment and
+tool-response payloads out of `events.json` into gzip-compressed files keyed by
+SHA-256 checksum.
+`events.json` retains only compact blob references and structural metadata, and
+a background task garbage-collects unreferenced blobs.
 
 ## Motivation
 

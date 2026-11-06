@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Requires**: [RFD 065], [RFD 066]
+- **Summary**: Introduces an `external:` URI scheme to attach and snapshot files
+  from outside the workspace without leaking host paths.
 
 ## Summary
 

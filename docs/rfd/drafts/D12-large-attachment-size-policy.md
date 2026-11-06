@@ -4,15 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-02
+- **Summary**: Adds a configurable attachment size threshold and policy for
+  prompting, truncating, allowing, or rejecting oversized attachments.
 
 ## Summary
 
-This RFD introduces a configurable size policy for attachments.
-When the total resolved attachment content exceeds a configurable threshold, JP
-applies a policy: prompt the user for confirmation (with options to attach
-as-is, truncate, or cancel), auto-truncate, allow unconditionally, or reject.
-The policy composes with non-interactive mode — when no TTY is available, the
-configured policy replaces the interactive prompt.
+This RFD introduces a configurable size policy for attachments when total
+resolved content exceeds a configured byte threshold.
+Depending on the policy, JP prompts the user (to attach as-is, truncate, or
+cancel), truncates automatically, allows unconditionally, or rejects the
+attachment, falling back to the configured policy in non-interactive runs.
 
 ## Motivation
 

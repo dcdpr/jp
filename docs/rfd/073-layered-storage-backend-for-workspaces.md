@@ -5,28 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Extended by**: [RFD 106]
-- **Summary**: Replace Workspace's optional Storage with four focused trait
-  objects (Persist, Load, Lock, Session) for cleaner polymorphism.
+- **Summary**: Replaces `Workspace`'s optional `Storage` with non-optional
+  `PersistBackend`, `LoadBackend`, `LockBackend`, and `SessionBackend` traits.
 
 ## Summary
 
-This RFD replaces `Workspace`'s `Option<Storage>` with a set of non-optional
-trait objects that decouple conversation persistence, loading, locking, and
-session management from the filesystem.
-Four focused traits — `PersistBackend` (widened from today's version),
-`LoadBackend`, `LockBackend`, and `SessionBackend` — replace the single
-`Storage` struct.
-`FsStorageBackend` implements all four, wrapping the current `Storage` behavior.
-`InMemoryStorageBackend` provides a filesystem-free implementation for tests and
-future non-filesystem environments.
-A `NullPersistBackend` provides a no-op `PersistBackend` for ephemeral mode
-(`--no-persist`).
-`Workspace` always holds all four backends; all `Option<Storage>` branching is
-eliminated.
-The `disable_persistence` method is retained but its implementation changes from
-flipping a boolean to swapping the `persist` backend for `NullPersistBackend`.
-`ConversationLock` and `ConversationMut` always have a writer and a lock
-backend, removing their internal optionality as well.
+This RFD replaces `Workspace`'s `Option<Storage>` with four non-optional trait
+objects (`PersistBackend`, `LoadBackend`, `LockBackend`, and `SessionBackend`)
+that decouple conversation persistence, loading, locking, and session management
+from the filesystem.
+`FsStorageBackend` implements all four for on-disk workspaces,
+`InMemoryStorageBackend` provides a filesystem-free backend for tests, and
+`NullPersistBackend` handles `--no-persist` without optionality in `Workspace`,
+`ConversationLock`, or `ConversationMut`.
 
 ## Motivation
 

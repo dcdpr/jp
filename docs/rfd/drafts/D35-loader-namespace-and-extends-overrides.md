@@ -6,6 +6,9 @@
 - **Date**: 2026-05-09
 - **Requires**: [RFD 079]
 - **Extends**: [RFD 038]
+- **Summary**: Adds entry-scoped `loader.overrides.extends` exclusions and
+  consolidates `extends`, `search_paths`, and `inherit` under a `loader` config
+  namespace.
 
 ## Summary
 

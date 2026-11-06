@@ -10,11 +10,11 @@
 
 ## Summary
 
-This RFD adds a typed access policy to tool configuration that declares what
-resources a tool can access.
-The policy flows to tools as part of their runtime context.
-Tools self-enforce the policy by checking grants before performing operations.
-OS-level enforcement is tackled separately in [RFD 075].
+This RFD adds a typed `access` policy to tool configuration that declares which
+filesystem, network, and environment resources a tool may access.
+The resolved policy flows to tools in their runtime context so tools can
+validate grants before performing operations, while OS-level enforcement is
+defined in [RFD 075].
 
 ## Motivation
 

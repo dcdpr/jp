@@ -5,19 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
 - **Supersedes**: [RFD 036]
-- **Summary**: Non-destructive conversation compaction through overlay events
-  that project reduced views without mutating stored data.
+- **Summary**: Compacts conversations non-destructively by appending overlay
+  events that project a reduced view to the LLM without mutating stored history.
 
 ## Summary
 
-This RFD introduces conversation compaction as a non-destructive, additive
-operation.
-Instead of mutating or deleting events in the stored conversation, compaction
-appends overlay events that instruct the projection layer to present a reduced
-view when building the LLM request.
-The original events are always preserved.
-Compaction policies are defined per content type (summary, reasoning, tool
-calls), composed across multiple compaction events, and configured at the
+This RFD introduces non-destructive conversation compaction by appending overlay
+events that project a reduced view when building LLM requests while leaving the
+stored history intact.
+Compaction policies are defined per content type (summary, reasoning, and tool
+calls), compose across multiple compaction events, and can be configured at the
 workspace and conversation level.
 
 ## Motivation

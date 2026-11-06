@@ -6,18 +6,17 @@
 - **Date**: 2026-07-03
 - **Tracking Issue**: [\#875]
 - **Extended by**: [RFD 110]
-- **Summary**: OAuth subscription auth for Anthropic with automatic fallback
-  chain, credential store, and scoped cooldown tracking across profiles.
+- **Summary**: Adds Anthropic OAuth subscription login, a multi-profile
+  credential store, and automatic cooldown fallback across subscription and
+  API-key credentials.
 
 ## Summary
 
-JP gains support for Anthropic's subscription plans (Claude Pro/Max) via the
-OAuth flow used by Claude Code, alongside the existing API key auth.
+This RFD adds OAuth authentication for Anthropic subscription plans (Claude Pro
+and Max) alongside API key authentication.
 Credentials are stored as named profiles in a user-global credential store, and
-each provider resolves an ordered credential chain: when a subscription account
-exhausts its quota, JP automatically falls back to the next credential in the
-chain — another subscription account, or the per-token API key — and continues
-the conversation without interruption.
+each provider resolves an ordered credential chain that automatically falls back
+to the next subscription profile or API key when a quota cooldown occurs.
 
 ## Motivation
 

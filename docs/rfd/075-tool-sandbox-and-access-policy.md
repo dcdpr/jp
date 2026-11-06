@@ -6,21 +6,18 @@
 - **Date**: 2026-04-01
 - **Extends**: [RFD 016]
 - **Requires**: [RFD 076]
-- **Summary**: Mandatory OS-level sandboxing for tool subprocesses using
-  platform-native mechanisms, extending access policy with subprocess and
-  environment controls.
+- **Summary**: Enforces OS-level sandboxes (`sandbox-exec`, Landlock, and
+  Windows job objects) and subprocess/environment rules on tool subprocesses.
 
 ## Summary
 
-This RFD introduces OS-level sandboxing for subprocess-based tools.
-Sandbox profiles are generated from the access policy defined in [RFD 076] and
-applied per tool invocation using platform-native mechanisms: `sandbox-exec` on
-macOS, Landlock on Linux, and restricted tokens with job objects on Windows.
-This RFD also extends [RFD 076]'s `AccessPolicy` with `CommandRule` for
-subprocess spawn restrictions, and defines the environment variable isolation
-model for tool subprocesses.
-Unconfigured tools receive a default sandbox (workspace read-write, no network,
-minimal environment).
+This RFD enforces OS-level sandboxing on subprocess-based tools using
+`sandbox-exec` on macOS, Landlock on Linux, and restricted tokens with job
+objects on Windows.
+Sandbox profiles are generated from [RFD 076]'s `AccessPolicy`, extended here
+with `CommandRule` subprocess restrictions and environment variable isolation,
+and unconfigured tools receive a default workspace-scoped sandbox with no
+network access.
 
 ## Motivation
 

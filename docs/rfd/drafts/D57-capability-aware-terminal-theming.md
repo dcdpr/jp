@@ -5,13 +5,15 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-02
 - **Extends**: [RFD 084], [RFD 048]
+- **Summary**: Splits styling into a frontend-agnostic `jp_style` crate and
+  capability-aware terminal color and theme adaptation in `jp_printer`.
 
 ## Summary
 
-Introduce a styling system split into two layers: a frontend-agnostic *semantic
-styling* layer (a `Style` model, a base16 `Palette`, named element *scopes*, and
-a theme) living in a neutral `jp_style` crate, and a terminal-specific
-*rendering* layer owned by `jp_printer`.
+This RFD introduces a styling system split into two layers: a frontend-agnostic
+*semantic styling* layer (a `Style` model, a base16 `Palette`, named element
+*scopes*, and a theme) living in a neutral `jp_style` crate, and a
+terminal-specific *rendering* layer owned by `jp_printer`.
 The terminal sink adapts resolved styling to the terminal it is writing to:
 downgrading 24-bit color to 256 or 16, selecting a light or dark default theme,
 and stripping color and unsafe control sequences for non-terminal channels and

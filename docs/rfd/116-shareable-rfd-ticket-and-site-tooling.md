@@ -6,20 +6,16 @@
 - **Date**: 2026-09-30
 - **Extends**: [RFD 001], [RFD 100]
 - **Extended by**: [RFD 127], [RFD 128]
-- **Summary**: Three `jp` command plugins, `ticket`, `rfd`, and `vite`, own the
-  ticket workflow, the RFD workflow, and the site that renders them, configured
-  through JP so any project can adopt the parts it uses.
+- **Summary**: Moves ticket, RFD, and documentation-site workflows into reusable
+  `jp-ticket`, `jp-rfd`, and `jp-vite` command plugins.
 
 ## Summary
 
-The RFD and ticket workflow moves into three `jp` command plugins that a project
-adopts independently.
-`jp ticket` manages tickets, `jp rfd` manages RFDs, and `jp vite` bootstraps and
-updates the VitePress pages that render both.
-Each reads its settings from JP's configuration, and the first two also serve
-tools to the assistant.
-A project that adopts them gets every later change by upgrading binaries rather
-than by porting files.
+This RFD moves the ticket, RFD, and documentation-site workflows into three
+independently adoptable command plugins: `jp ticket`, `jp rfd`, and `jp vite`.
+Each plugin reads its settings from JP's configuration, and `jp ticket` and `jp
+rfd` also expose their operations as assistant tools so adopting projects
+receive workflow updates by upgrading plugin binaries.
 
 ## Motivation
 

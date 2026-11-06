@@ -5,18 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-21
 - **Extends**: [RFD 101]
-- **Summary**: Multi-valued labels replacing single-valued ones; add/set/rm
-  verbs, set-membership filtering, config list-values, removes --label from
-  query/fork.
+- **Summary**: Allows conversation label keys to hold sets of values, splits
+  `set` from `add`, and filters by set membership.
 
 ## Summary
 
-A conversation label holds a set of values rather than one: `crate=jp_config`
-and `crate=jp_llm` coexist under the same key.
-`jp c label` splits `set` off from `add` as a distinct verb, `rm` accepts
-`key=value` as well as `key`, and filters match on set membership.
-Label mutation moves entirely to `jp c label`; `--label` and `--reset-labels`
-leave `jp query` and `jp conversation fork`.
+This RFD extends conversation labels so a single key can hold an ordered set of
+values (such as `crate=jp_config` and `crate=jp_llm`).
+`jp c label` splits `set` off from `add`, `rm` accepts `key=value` as well as a
+bare `key`, filters match on set membership, and `--label` / `--reset-labels`
+are removed from `jp query` and `jp conversation fork`.
 
 ## Motivation
 

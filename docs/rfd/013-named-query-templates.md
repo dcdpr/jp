@@ -4,19 +4,18 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-25
-- **Summary**: Add reusable, config-defined query templates with interactive
-  prompts for collecting variables before rendering.
+- **Summary**: Adds reusable, config-defined query templates with interactive
+  prompts that collect typed variables before rendering.
 
 ## Summary
 
-This RFD introduces named query templates: reusable, config-defined templates
-that combine a Jinja-style content string with interactive questions to collect
-template variables.
+This RFD introduces named query templates: reusable, config-defined Jinja
+templates paired with interactive, type-validated prompts that collect template
+variables.
 Users invoke a template by name (`jp q -% feature`) or pick one from a
 fuzzy-searchable list (`jp q -%`).
-The rendered template becomes the query sent to the assistant.
-Templates support configurable submit behavior and interactive question prompts
-with type validation.
+The rendered template is submitted directly or opened in the editor before
+sending.
 
 ## Motivation
 

@@ -6,15 +6,17 @@
 - **Date**: 2026-04-20
 - **Requires**: [RFD 070]
 - **Extends**: [RFD 038]
+- **Summary**: Accepts conversation IDs in `--cfg` and defaults `--fork` to
+  inherit the source conversation's resolved configuration.
 
 ## Summary
 
-This RFD extends `--cfg` to accept conversation IDs (`jp-c...`) as values.
-When a conversation ID is passed, the named conversation's fully-resolved config
-is loaded and layered into the directive pipeline like any other `--cfg` value.
-`--fork` uses the source conversation's ID as the implicit starting config.
-Together these enable forked conversations, explicit cross-conversation config
-sharing, and reproducible config sources tied to an auditable conversation.
+This RFD extends `--cfg` to accept conversation IDs (`jp-c...`), loading and
+layering the named conversation's resolved configuration into the `--cfg`
+pipeline.
+`--fork` uses the source conversation's ID as its implicit starting
+configuration, allowing forked and cross-referenced conversations to inherit
+accumulated config deltas.
 
 ## Motivation
 

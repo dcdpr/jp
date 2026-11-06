@@ -6,18 +6,17 @@
 - **Date**: 2026-03-07
 - **Supersedes**: [RFD 033]
 - **Extends**: [RFD 028]
-- **Summary**: Route inquiries to cheaper models with stable schemas for 5-25x
-  cost reduction via configurable assistant overrides.
+- **Summary**: Adds dedicated assistant configuration and cache policy overrides
+  for tool inquiries so questions can route to cheaper models.
 
 ## Summary
 
-This RFD extends the inquiry system ([RFD 028]) to support a dedicated assistant
-configuration — model, system prompt, request settings — for inquiry requests.
-A global default lives at `conversation.inquiry.assistant`, with per-question
-overrides via `QuestionTarget::Assistant(PartialAssistantConfig)`.
-Combined with stable schemas for cross-inquiry cache reuse and a new
-`CachePolicy` setting on `RequestConfig`, this reduces inquiry costs by 5-25x
-compared to the current approach.
+This RFD extends the inquiry system ([RFD 028]) with a dedicated assistant
+configuration (model, system prompt, and request settings) for inquiry requests.
+Global defaults live at `conversation.inquiry.assistant`, with per-question
+overrides via `QuestionTarget::Assistant(PartialAssistantConfig)`, allowing
+inquiries to route to smaller models with stable schemas and a configurable
+`CachePolicy`.
 
 ## Motivation
 

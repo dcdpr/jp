@@ -4,16 +4,14 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-07
-- **Summary**: Add FTS5 full-text search, typo tolerance, and local semantic
-  vector search to grizzly's note_search tool.
+- **Summary**: Adds FTS5 full-text search, typo tolerance, and local semantic
+  vector search to `grizzly`'s `note_search` tool.
 
 ## Summary
 
-Add semantic vector search, FTS5 full-text search, and typo tolerance to
-grizzly's `note_search` tool.
-The goal is to find notes by *meaning*, not just literal text.
-Searching "productivity systems" should surface notes about GTD and Pomodoro
-even when those exact words don't appear.
+This RFD adds FTS5 full-text search, typo tolerance, and local semantic vector
+search to `grizzly`'s `note_search` tool, merging results with Reciprocal Rank
+Fusion so queries match notes by meaning as well as literal text.
 
 ## Context
 

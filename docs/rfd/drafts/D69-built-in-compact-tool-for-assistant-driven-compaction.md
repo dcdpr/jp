@@ -5,16 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-04
 - **Extends**: [RFD 064]
+- **Summary**: Adds a built-in `compact` tool for the assistant to propose
+  user-approved compaction rules that apply on the next turn.
 
 ## Summary
 
-Add a built-in `compact` tool that lets the assistant propose compaction rules
-for the conversation it is having.
-Each proposed rule carries the assistant's own summary text and a one-sentence
-note, is approved by the user before it is recorded, and takes effect from the
-next turn rather than immediately.
-The tool composes existing machinery: [RFD 064]'s compaction events and
-projection, the tool run-mode approval flow, and the built-in tool registry.
+This RFD adds a built-in `compact` tool that lets the assistant propose
+compaction rules for the active conversation.
+Each proposed rule carries the assistant's summary text and a one-sentence
+rationale, requires user approval before it is recorded, and takes effect on the
+next turn using [RFD 064]'s compaction overlay and projection machinery.
 
 ## Motivation
 

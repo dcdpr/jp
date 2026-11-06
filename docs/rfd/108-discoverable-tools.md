@@ -5,9 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-08
 - **Extends**: [RFD 081], [RFD 078]
-- **Summary**: A third tool enablement state whose definition reaches the model
-  only after a `search_tools` builtin finds it, keeping large tool catalogues
-  out of context.
+- **Summary**: Adds a `discoverable` tool state whose schema reaches the model
+  only after a built-in `search_tools` query matches it.
 
 ## Summary
 

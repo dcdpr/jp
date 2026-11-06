@@ -5,15 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-12
 - **Required by**: [RFD D07]
+- **Summary**: Adds an `Action::Schema` protocol action so local tool binaries
+  can report their own description and parameter schema.
 
 ## Summary
 
-This RFD introduces a protocol extension that allows local tool binaries to
-describe their own capabilities — name, description, and parameter schema — so
-that JP can resolve tool definitions without requiring manual TOML parameter
-definitions.
-When a local tool is configured with `command` but no `parameters`, JP queries
-the binary for its schema at resolution time.
+This RFD adds an `Action::Schema` protocol extension that lets local tool
+binaries report their own name, description, and parameter schema.
+When a local tool is configured with `command` and no `parameters`, JP queries
+the binary for its schema at resolution time instead of requiring manual TOML
+parameter definitions.
 
 ## Motivation
 

@@ -5,14 +5,14 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
 - **Required by**: [RFD 049]
-- **Summary**: Codify prompt types as `Prompt` enum variants for unified
-  routing, config, and extensibility.
+- **Summary**: Unifies permission prompts, result delivery prompts, and tool
+  questions under a single `Prompt` enum for routing and configuration.
 
 ## Summary
 
-This RFD introduces a `Prompt` enum that codifies all prompt types in JP as
-typed variants, replacing the current implicit code-path-based distinction
-between permission prompts, result delivery prompts, and tool questions.
+This RFD introduces a `Prompt` enum that models permission prompts, result
+delivery prompts, and tool questions as variants of a single type for unified
+routing and configuration.
 
 ## Motivation
 

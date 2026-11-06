@@ -5,19 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-18
 - **Extends**: [RFD 042]
+- **Summary**: Adds an `enabled` flag on tool parameters to hide disabled
+  parameters from model schemas and reject model-supplied values.
 
 ## Summary
 
-This RFD adds `enabled` to a tool parameter's configuration.
-A parameter with `enabled = false` is absent from the JSON Schema sent to the
-model, absent from `describe_tools`, and rejected if the model supplies it
-anyway.
-Config layers can flip the flag, so a parameter can be hidden by default and
-exposed only in the context that needs it.
-
-Host-side default injection already exists and is unchanged, so a disabled
-parameter that declares a `default` still reaches the tool with that value —
-"hide this and always pass this" needs no new mechanism.
+This RFD adds an `enabled` flag to tool parameter configuration.
+A parameter with `enabled = false` is omitted from the JSON Schema sent to the
+model and from `describe_tools`, and is rejected if the model supplies it, while
+any configured `default` value is still injected by the host.
+Configuration layers can toggle `enabled` to keep context-specific parameters
+hidden by default and expose them only when needed.
 
 ## Motivation
 

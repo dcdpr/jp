@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-25
 - **Extends**: [RFD 048]
-- **Summary**: Extend reasoning-region background shading across tool calls to
-  visually represent continuous reasoning despite interleaved tool execution.
+- **Summary**: Extends reasoning background shading across interleaved tool call
+  headers, arguments, and results during a reasoning span.
 
 ## Summary
 

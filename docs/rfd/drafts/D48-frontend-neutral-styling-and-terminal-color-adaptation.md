@@ -5,11 +5,13 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-02
 - **Extends**: [RFD 048], [RFD 004]
+- **Summary**: Introduces a frontend-neutral semantic style model and adapts
+  terminal color output in `jp_printer` to the active terminal profile.
 
 ## Summary
 
-Introduce a frontend-neutral style model for JP and a terminal-specific color
-adapter for the CLI.
+This RFD introduces a frontend-neutral style model for JP and a
+terminal-specific color adapter for the CLI.
 Renderers resolve semantic styles into their own target's native representation,
 while `jp_printer` adapts terminal color bytes to the active terminal profile.
 

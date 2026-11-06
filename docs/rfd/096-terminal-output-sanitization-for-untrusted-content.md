@@ -4,24 +4,19 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-07
-- **Summary**: Sanitize untrusted terminal output: keep user and tool colors,
-  strip model escapes, and reset styling where styled content ends.
+- **Summary**: Sanitizes untrusted terminal output at render time, stripping
+  control sequences from model output while isolating user and tool SGR styling.
 
 ## Summary
 
-JP writes conversation content — echoed user messages, streamed LLM output,
-tool results — to the terminal without filtering control bytes, so content
-containing escape sequences is executed by the terminal instead of displayed.
-This RFD introduces render-time sanitization for untrusted content, with a
-policy per content class: user messages and tool output keep their styling
-(colors, bold), model output and tool prompt text are plain, and
-terminal-state-changing sequences are neutralized everywhere.
-Stored data remains byte-for-byte verbatim.
-Content that may carry styling is written in a content span that JP closes with
-a styling reset, so it cannot bleed into JP's own output.
-Beneath the per-class policy, the printer holds everything it writes to the
-sequences JP's own output is made of, so text a command prints without filtering
-it, such as a conversation title, cannot take over the terminal.
+This RFD introduces render-time terminal sanitization for conversation content
+while keeping stored event data verbatim.
+Each content class has its own policy: user messages and tool output retain
+bounded SGR styling (closed with a trailing reset so styles cannot bleed into JP
+chrome), while model output and tool prompt text are stripped of escape
+sequences.
+As a baseline defense, `jp_printer` also strips terminal-state-changing control
+sequences from all output channels.
 
 ## Motivation
 

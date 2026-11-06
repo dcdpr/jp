@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-18
-- **Summary**: Auto-refresh stale conversation titles periodically by re-running
-  LLM generation when accumulated turns exceed a configured threshold.
+- **Summary**: Periodically regenerates stale conversation titles in the
+  background once a conversation accumulates a configured number of new turns.
 
 ## Summary
 
