@@ -13,8 +13,7 @@ The `vllm` provider sends a token-count reasoning effort (for example
 SGLang does not read it, so on an SGLang server, or a router that forwards to
 one, the budget has no effect.
 
-SGLang documents two mechanisms
-(https://docs.sglang.io/docs/advanced_features/thinking_budget):
+SGLang documents [two mechanisms][sglang-budget]:
 
 - A hint, `chat_template_kwargs.thinking_budget`, which only works when the
   model's chat template declares that variable (Qwen3's does).
@@ -41,3 +40,5 @@ It says nothing about whether the documented forms work on that deployment.
    know).
 3. If both hold, send the budget under every name, as commit `b19f47ddd` does
    for the thinking switch.
+
+[sglang-budget]: https://docs.sglang.io/docs/advanced_features/thinking_budget

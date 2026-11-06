@@ -8,8 +8,8 @@
 ## Summary
 
 `providers.llm` becomes a map of providers the user declares and names.
-Each declaration points at a provider source, the code that talks to the server,
-and holds that source's settings.
+Each declaration points at a provider source, the implementation that talks to
+the server, and holds that source's settings.
 Model ids name a declared provider, so one source can back several providers,
 each with its own endpoint and credentials.
 New `openai-chat-completions` and `anthropic-messages` sources cover servers
@@ -42,18 +42,20 @@ JP already implements the Chat Completions protocol in
 `jp_llm::provider::openai_compat`, which `cerebras`, `llamacpp` and `vllm` build
 on, but no provider offers it without one of those servers' extensions.
 Servers with an Anthropic-compatible endpoint fare the same with `anthropic`,
-which applies Claude's rules to every model it does not know: adaptive thinking,
-no sampling parameters, and native reasoning replay only for signed blocks.
+which applies Claude's rules to every model not in its built-in table: adaptive
+thinking, no sampling parameters, and native reasoning replay only for signed
+blocks.
 
 **Model ids name code, not deployments.** A model id is stored in every
-conversation that uses it, so its prefix should name something the user chose.
+conversation that uses it, so its prefix should identify the user's configured
+deployment rather than the Rust module.
 `vllm/deepseek-v4.1-flash` names the implementation; behind a router that sends
 each model to a different engine, it is also wrong about the engine.
 `ProviderId` also lists `deepseek` and `xai`, which have no implementation:
 `get_provider` answers both with `todo!()`.
 
 Without a change, each new compatible server needs a new `ProviderId` variant, a
-config field, and an arm in every match on the enum, or it gets bent through
+config field, and an arm in every match on the enum, or must be routed through
 `openai`.
 
 ## Design
@@ -63,8 +65,8 @@ config field, and an arm in every match on the enum, or it gets bent through
 - **Provider**: a named entry under `providers.llm`, declared in config.
   It names a provider source and holds that source's settings.
   Model ids name it: `<provider>/<model>`.
-- **Provider source**: the code a provider runs on, named by a fixed identifier
-  such as `anthropic` or `vllm`.
+- **Provider source**: the client implementation a provider uses, named by a
+  fixed identifier such as `anthropic` or `vllm`.
   Every source is compiled into JP.
 
 The two vary independently: one source backs any number of providers, and a
@@ -105,7 +107,8 @@ A provider's settings are its source's settings: the fields of today's
   `aliases` is not a provider name; the alias map keeps that key.
 
 - `source` is required on every provider once layers are merged.
-  A layer that only changes a provider another layer declares may leave it out:
+  A config layer that overrides fields on a provider declared in an earlier
+  layer may omit `source`:
 
   ```toml
   # user-local config, patching the workspace's `gpu` provider
@@ -114,16 +117,16 @@ A provider's settings are its source's settings: the fields of today's
   ```
 
 - Providers merge by name, then field by field, as today's blocks do.
-  A layer that sets a different `source` than the layer below replaces the
-  provider whole, because one source's settings mean nothing to another.
+  A layer that sets a different `source` than a lower layer replaces the entire
+  provider entry, since settings are specific to a source.
 
 - No name is reserved for a source, and nothing is declared unless config
   declares it.
 
 - A conversation records each provider it has seen in full, as it records any
   setting.
-  A provider declared after the conversation started is a new name and reaches
-  it, the same way a new alias does.
+  A provider added to config after the conversation started has a new key and is
+  merged into the conversation's config, just like a new alias.
 
 ### Model ids
 
@@ -134,8 +137,8 @@ On disk the id keeps its shape, `{ "provider": "anthropic", "name":
 "claude-opus-5-5" }`; the `provider` field holds a provider name instead of a
 `ProviderId` value.
 
-An id naming a provider that nothing declares is a config error that names the
-provider and lists the declared ones.
+A model id that references an undeclared provider is a config error that names
+the unknown provider and lists the declared ones.
 
 A source decides whether a stored reasoning block is its own by comparing the
 provider in the model id recorded with the event (`is_anthropic` in
@@ -165,15 +168,15 @@ DeepSeek's API speaks Chat Completions, so a provider with `source =
 
 A source is named after the vendor or engine whose server it talks to
 (`anthropic`, `vllm`).
-A vendor's further endpoints add the vendor's own name for the endpoint
+Additional endpoints from a vendor append the endpoint's name
 (`openai-chat-completions`, `anthropic-messages`).
 `openai-completions` would name OpenAI's legacy Completions API at
 `/v1/completions`, a different protocol that vLLM and llama.cpp still serve.
 
 A source is a protocol module plus what is specific to its server: model
 listing, credentials, and quirks.
-`openai-chat-completions` is the Chat Completions module with nothing added, and
-`anthropic-messages` the Messages module.
+`openai-chat-completions` exposes the Chat Completions module without vendor
+extensions, and `anthropic-messages` does the same for the Messages module.
 A server with quirks worth handling gets its own source on the same module, as
 `vllm`, `cerebras` and `llamacpp` already have, rather than options on the
 generic one.
@@ -193,8 +196,8 @@ Its settings are `base_url` (required), `api_key_env` (optional), and [RFD
 - With `api_key_env` set, requests carry `Authorization: Bearer <key>`.
   Without it they carry no credential, which suits a local server.
 - Requests carry fields from OpenAI's Chat Completions reference, plus `top_k`
-  when it is configured: configuring it says the server takes it, and servers
-  commonly ignore a field they do not know.
+  when it is configured: setting `top_k` opts into sending it, and servers that
+  do not support `top_k` typically ignore unknown fields.
 - Reasoning:
   - unset: no reasoning fields, so the server's default applies;
   - `off`: `reasoning_effort: "none"`;
@@ -210,23 +213,24 @@ Its settings are `base_url` (required), `api_key_env` (optional), and [RFD
 - The model list comes from `GET /models`: each model's id, and its context
   window where the entry reports `context_length` (OpenRouter's and Synthetic's
   name) or `max_model_len` (vLLM's).
-  A listing that fails, or a server without one, reports nothing, and the
-  request goes ahead; [RFD 125] gives the order facts are taken from.
+  If the `/models` request fails or the server has no listing endpoint, JP
+  proceeds with empty reported details and resolves model details in the order
+  defined by [RFD 125].
 - A rejected model is classified as an unknown model, so the model picker
   applies.
 
 Testing Synthetic's endpoint, which runs vLLM, backs each choice above: it
 honours `reasoning_effort: "none"` and ignores a chat template kwarg meant to do
-the same, accepts `top_k` and ignores a field it does not know, follows
-`response_format`, and reports `context_length` in its listing.
+the same, accepts `top_k` and ignores unknown fields, follows `response_format`,
+and reports `context_length` in its listing.
 
 ### The `anthropic-messages` source
 
 Some servers offer an Anthropic-compatible endpoint, often so Claude Code can
 use them.
 `anthropic` is written for Anthropic's own API, and applies Claude's rules to
-any model its table does not know; `anthropic-messages` is the Messages protocol
-with neutral defaults.
+any model not in its built-in table; `anthropic-messages` is the Messages
+protocol with neutral defaults.
 Both run on one Messages module, extracted from today's `anthropic` provider.
 
 Its settings are `base_url` (required, without `/v1`, as `anthropic` takes it),
@@ -238,7 +242,7 @@ Its settings are `base_url` (required, without `/v1`, as `anthropic` takes it),
 | Reasoning configured, support unknown                  | adaptive thinking                                     | `thinking: enabled` with a budget                                                             |
 | Reasoning with a declared mode                         | per the table                                         | per the entry: `adaptive` with an effort, or `enabled` with a budget                          |
 | Reasoning `off`                                        | per the table: `disabled`, `between_tools`, omitted   | `thinking: disabled`                                                                          |
-| Sampling parameters                                    | only for models the table marks                       | whenever configured                                                                           |
+| Sampling parameters                                    | only for models marked in the built-in table          | whenever configured                                                                           |
 | Replayed reasoning                                     | thinking blocks when signed, otherwise `<think>` text | thinking blocks, signed or not                                                                |
 | Structured output                                      | `output_config.format`                                | `output_config.format` when declared `structured_output = true`, otherwise a forced tool call |
 | Beta headers, service tier, fast mode, context editing | yes                                                   | no                                                                                            |
@@ -248,8 +252,8 @@ Its settings are `base_url` (required, without `/v1`, as `anthropic` takes it),
 
 The neutral defaults come from testing Synthetic's endpoint, which serves other
 vendors' models.
-It has no model route, ignores `output_config.format` and answers in prose,
-returns unsigned thinking blocks and accepts them back, accepts sampling
+It has no `/v1/models` endpoint, ignores `output_config.format` and answers in
+prose, returns unsigned thinking blocks and accepts them back, accepts sampling
 parameters, and accepts a forced tool call with thinking on.
 Anthropic's own API rejects a thinking block without a valid signature, which is
 why `anthropic` replays unsigned reasoning as text.
@@ -299,9 +303,10 @@ Today's `to_partial` records all nine blocks, so every stored conversation ends
 up declaring every provider it could have used, and its model ids keep resolving
 without being rewritten.
 
-**Config files.** For one release, a block without `source` whose name is a
-source name is read as that source, and a model id naming an undeclared provider
-whose name is a source name resolves to that source with its defaults.
+**Config files.** For one release, a provider block without `source` whose key
+matches a known source name defaults `source` to that key, and a model id
+referencing an undeclared provider whose name matches a known source resolves to
+that source's default configuration.
 Both print a warning showing the declaration to add.
 The release after makes both errors, with the same declaration in the message.
 
@@ -334,14 +339,15 @@ blocks reads any config that declares providers under today's names.
 
 **Named endpoints in a sub-table** (`providers.llm.endpoints.<name>.kind =
 "vllm"`).
-Additive and cheaper to build, but backends would be configured in two places,
-today's blocks would stay special, and nothing moves toward sources that are not
-compiled in.
+This approach is additive and smaller to build, but it configures backends in
+two places, keeps today's provider blocks as special cases, and does not move
+toward pluggable provider sources.
 
 **Built-in providers with reserved names** (Codex's `model_providers`).
-Works with no configuration, but each source's name stays tied to one provider,
-so a second Anthropic endpoint needs a name the first does not, and replacing a
-built-in means working around it.
+Requires no initial configuration, but ties each source name to a single default
+provider instance; adding a second Anthropic endpoint requires a different
+configuration style than the first, and overriding a built-in provider requires
+special-case merging.
 
 **Model-centric configuration** (LiteLLM, Continue).
 Each model entry carries its endpoint and credential.
@@ -361,7 +367,7 @@ entry can be added later without a migration.
 accept.
 `anthropic` works against a server without a model route now that the lookup is
 advisory, but drops sampling parameters and replays reasoning as text for every
-model its table does not know, and sends Claude-only beta headers.
+model not in its built-in table, and sends Claude-only beta headers.
 Both allow only one such server.
 
 **`type` instead of `source`.** `source` matches
@@ -386,21 +392,23 @@ reads correctly once a source can come from a plugin.
 **Patching a provider without `source`.** Config types in `jp_config` are
 partials merged layer by layer.
 A provider is naturally an enum tagged by `source`, and `McpProviderConfig`
-shows the cost: its partial needs `type` in every layer that writes it.
-Letting a layer omit `source` means typing a provider's settings after merging,
-or a partial that holds every source's fields.
+shows the cost: its partial needs `type` in every layer that modifies it.
+Letting a layer omit `source` requires either deserializing a provider's
+settings into the source-specific struct after merging, or using a flat partial
+struct that holds every source's fields.
 Phase 3 prototypes this first.
-If neither works, the fallback is requiring `source` in every layer that writes
+If neither works, the fallback is requiring `source` in every layer that touches
 a provider.
 
-**Error locations.** Typing settings after merging can lose which file a bad
-value came from.
-The error has to name the file, or misspelled fields get worse errors than they
-do today.
+**Error locations.** Deserializing settings after merging can lose the source
+file location of an invalid value.
+Validation errors must preserve the file path so misspelled fields are still
+attributed to the file that set them.
 
-**`base_url` for the new source.** Taking the URL vendors document matches what
-users copy; leaving out `/v1` matches the rest of JP's config.
-This draft picks the first.
+**`base_url` for the new source.** Accepting the `/v1`-suffixed URL that vendors
+document matches what users copy from provider docs; omitting `/v1` matches JP's
+other provider blocks.
+This draft chooses the vendor-documented URL.
 
 ## Implementation Plan
 
@@ -429,22 +437,21 @@ This draft picks the first.
    Starts with the prototype from [Risks](#risks-and-open-questions).
    Depends on phase 2.
 
-4. **The `openai-chat-completions` source**, built on `openai_compat`, with
-   request-body tests for each reasoning setting, `top_k`, and both forms of
-   structured output, and a recorded server.
+4. **The `openai-chat-completions` source.** Implement the source on top of
+   `openai_compat`, with request-body tests for each reasoning setting, `top_k`,
+   and both forms of structured output, plus VCR cassette tests.
    Depends on phase 3.
 
-5. **The `anthropic-messages` source.** First the Messages module, extracted
-   from `anthropic.rs` with no change to `anthropic`'s requests, which its
-   recorded tests pin.
-   Then the new source on it, with request-body tests for each row of the table
-   above and a recorded server.
+5. **The `anthropic-messages` source.** Extract the shared Messages protocol
+   module from `anthropic.rs` without changing `anthropic`'s request output
+   (verified by existing VCR tests).
+   Then implement `anthropic-messages` on that module, with request-body tests
+   for each row of the comparison table above and VCR cassette tests.
    Depends on phase 3.
 
-6. **Documentation.** The provider section of the configuration guide, and
-   glossary entries for Provider and Provider Source.
-   The current Provider entry describes a vendor integration and lists
-   `deepseek`.
+6. **Documentation.** Update the provider section of the configuration guide,
+   and add glossary entries for Provider and Provider Source (the current
+   Provider entry describes a vendor integration and still lists `deepseek`).
    Depends on phase 3.
 
 7. **End of the transition.** Blocks without `source` and undeclared source
