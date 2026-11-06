@@ -81,5 +81,6 @@ it sends token usage without being asked, in a trailing chunk with `"choices":
 `parse_chunk` in `crates/jp_llm/src/provider/openai_compat.rs` returns early on
 a chunk with no choices, so these counts are dropped before any usage handling
 could see them.
-Whatever records usage for the Chat Completions providers has to read that
-chunk, and should not rely on `stream_options.include_usage` being required.
+Usage tracking for Chat Completions providers must read usage-only chunks with
+empty `choices`, and should not assume `stream_options.include_usage` is
+required to receive usage data.

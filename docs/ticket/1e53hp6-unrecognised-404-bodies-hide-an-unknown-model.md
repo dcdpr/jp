@@ -26,8 +26,9 @@ flat body:
 
 ## Fix
 
-Keep an unrecognised 404 as not found, and treat it as an unknown model when the
-provider's listing is reachable and does not contain the model.
+Preserve the 404 status on an unrecognised 404 response, and promote it to
+`UnknownModel` when the provider's model listing is reachable and does not
+contain the requested model.
 The CLI already fetches the listing for the error and the picker
 (`with_served_models` in `crates/jp_cli/src/cmd/query/turn_loop.rs`).
 A wrong `base_url` fails the listing too, so it keeps the generic error.
