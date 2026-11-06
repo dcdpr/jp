@@ -12,10 +12,13 @@ what changed, ending with a section of the upgrade guide when the change \
 requires them to act.
 
 Write the entry for someone using JP, not for someone reading its code: what \
-they can do now, what behaves differently, what was fixed. Add one fragment \
-per user-visible change. A follow-up to an earlier change adds a fragment of \
-its own rather than extending the earlier one, and an existing fragment is \
-edited only to correct its wording.
+they can do now, what behaves differently, what was fixed. Keep it to one or \
+two short sentences, since release notes list dozens of entries; a feature that \
+needs more gets a highlight. Format as code only what users type or read \
+literally, such as a command, a flag, or a config key, not every name in the \
+sentence. Add one fragment per user-visible change. A follow-up to an earlier \
+change adds a fragment of its own rather than extending the earlier one, and an \
+existing fragment is edited only to correct its wording.
 
 The type says what the change means for users, not what kind of code change \
 it is: an internal `feat` gets no fragment, and a `refactor` that changes what \
