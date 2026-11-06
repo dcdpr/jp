@@ -5,26 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-17
 - **Extends**: [RFD 048]
-- **Summary**: Convention for multi-value CLI arguments: `-` reads line-oriented
-  values from stdin, starting with conversation targeting.
+- **Summary**: Establishes the CLI convention that `-` on a multi-value argument
+  reads newline-delimited values from stdin.
 
 ## Summary
 
-This RFD establishes a project-wide CLI convention with two clauses:
-
-1. For a **multi-value argument that accepts stdin input**, the value `-` means
-   "read this argument's values from standard input."
-2. That stdin input is line-oriented: one value per line.
-
-The rule is a convention, not a command feature: any multi-value argument that
-chooses to read stdin does so via `-`, line-oriented — there is no second
-spelling, and the rule does not require every argument to read stdin.
-Its first and only opt-in so far is conversation targeting — `jp c archive -`,
-`jp c rm -`, and the other multi-ID commands — which lets the ID-list output of
-one command pipe straight into the next.
-
-Single-value arguments are out of scope: `-` is rejected on them for now (see
-[Non-Goals](#non-goals)).
+This RFD establishes a project-wide CLI convention: when a multi-value argument
+accepts standard input, passing `-` reads one value per line from stdin.
+Conversation targeting (`jp c archive -`, `jp c rm -`, and other multi-ID
+commands) is the first adopter, allowing ID lists from commands like `jp c grep
+--output ids` to pipe directly into management subcommands.
+Single-value arguments are out of scope and reject `-`.
 
 ## Motivation
 

@@ -4,21 +4,18 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-07
-- **Summary**: Plugin configuration integration with AppConfig enabling trust
-  policies, checksum pinning, execution policies, and per-plugin options.
+- **Summary**: Adds a `[plugins]` configuration section to `AppConfig` for trust
+  policies, binary checksum pinning, and per-plugin options.
 
 ## Summary
 
-This RFD defines the configuration surface for JP's plugin system.
-It introduces a `[plugins]` section in `AppConfig` that controls execution
-policy, binary checksum pinning, and per-plugin options.
-Config is the source of truth for plugin trust policy, and it participates in
-JP's existing config inheritance chain (global → workspace → local → CLI
-overrides).
-Under the `ask` policy, a user-local approval store remembers the user's
-answers, so a prompt answered once is not asked again for the same binary.
-Installing is not configured: official plugins install on first use, and
-third-party plugins only when the user runs `jp plugin install`.
+This RFD introduces a `[plugins]` section in `AppConfig` that configures plugin
+execution trust policies, binary checksum pinning, and per-plugin options across
+JP's layered configuration chain.
+Under the `ask` policy, a user-local approval store records approved binary
+checksums so each binary only prompts once.
+Official plugins install automatically on first use, while third-party plugins
+require an explicit `jp plugin install`.
 
 ## Motivation
 

@@ -5,23 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-28
 - **Extends**: [RFD 004]
-- **Summary**: Stream paragraphs incrementally while guaranteeing byte-identical
-  output to non-streaming, with four guards managing block-start ambiguity,
-  setext reinterpretation, inline spans, and wrap-in-progress stability.
+- **Summary**: Streams markdown paragraphs incrementally in `jp_md::Buffer`
+  while preserving byte-identical output with whole-paragraph rendering.
 
 ## Summary
 
-`jp_md::buffer::Buffer` flushes a paragraph only when it sees a block
-terminator, so a long single paragraph (common in assistant reasoning) stalls
-for up to a minute before anything renders.
-This RFD makes the buffer stream a paragraph incrementally as its content
-arrives, while guaranteeing the terminal output is **byte-for-byte identical**
-to today's whole-paragraph rendering.
-The behavior is an opt-out flag on `Buffer`.
-Byte-identity has two documented exceptions, neither produced by assistant
-output: a setext heading whose content grows past the streaming threshold (it
-streams as prose), and a GFM table whose header lacks a leading pipe (it is not
-detected and may stream with mis-padded columns).
+This RFD updates `jp_md::buffer::Buffer` to stream markdown paragraphs
+incrementally as tokens arrive instead of waiting for a block terminator.
+Four look-ahead guards (block-start classification, setext underline buffering,
+open inline spans, and word-wrap stability) keep the streamed terminal output
+byte-for-byte identical to whole-paragraph rendering, with documented exceptions
+only for oversized setext headings and pipeless GFM tables.
 
 ## Motivation
 

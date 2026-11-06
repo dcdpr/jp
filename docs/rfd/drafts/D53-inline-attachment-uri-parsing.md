@@ -15,15 +15,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Required by**: [RFD D54]
+- **Summary**: Parses registered URI schemes inline from `jp query` prompts into
+  attachments and replaces `@path` shorthands with `file:` URIs.
 
 ## Summary
 
-`jp query` treats its prompt as opaque text.
-This RFD parses the prompt for URIs — `file:`, `https:`, `jp:`, and other
-registered schemes — and routes each to the matching attachment handler, gated
-per scheme by `providers.resource.<scheme>.parse_query = true | false`.
-It also retires the overloaded `@path` forms (`--cfg @path` and the query-text
-`@path` shorthand) in favor of `file:` references.
+This RFD parses `jp query` prompts for inline URIs (`file:`, `https:`, `jp:`,
+and other registered schemes) and routes matches to their attachment handlers
+when `providers.resource.<scheme>.parse_query` is enabled.
+It also replaces the overloaded `@path` shorthands in `--cfg @path` and query
+text with explicit `file:` references.
 
 ## Motivation
 

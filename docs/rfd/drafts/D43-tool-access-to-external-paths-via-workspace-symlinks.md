@@ -15,21 +15,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-27
 - **Extends**: [RFD 076], [RFD 075]
+- **Summary**: Allows tools to access external paths through workspace symlinks
+  with `external` access rules and a `--mount` CLI flag.
 
 ## Summary
 
-This RFD lets the assistant read and modify files outside the workspace via
-user-created symlinks.
-It extends [RFD 076] in three places: tool call arguments must be
-workspace-relative before canonicalisation; `FsRule` gains an `external` scope
-field that acknowledges the rule's path is permitted to resolve outside the
-workspace; and rule-path canonicalisation preserves a lexical workspace-relative
-prefix plus an approved canonical target for these rules instead of rejecting
-them during policy compilation.
-The canonical target is approved host-side at policy compile time via
+This RFD lets the assistant read and modify files outside the workspace through
+user-created workspace symlinks.
+It extends [RFD 076] so tool arguments remain workspace-relative while `FsRule`
+gains an `external` scope that approves a symlink's canonical target via
 trust-on-first-use.
-A `--mount` flag on `jp q` creates a symlink and writes the access grant in one
-step.
+A `--mount` flag on `jp query` creates the workspace symlink and records its
+access grant in one step.
 
 ## Motivation
 

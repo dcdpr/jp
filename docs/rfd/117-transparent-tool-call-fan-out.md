@@ -5,24 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-18
 - **Extended by**: [RFD 129]
-- **Summary**: A per-tool `fan_out` setting lets one tool call carry several
-  independent operations, which JP's MCP server runs separately and folds into
-  one response.
+- **Summary**: Adds a per-tool `fan_out` setting so one tool call can batch
+  multiple independent operations through JP's MCP server.
 
 ## Summary
 
-This RFD adds **fan-out**: a per-tool configuration flag that lets a single tool
-call carry several independent operations, which JP executes as if the assistant
-had issued them separately.
-The tool's own implementation is unchanged.
-
-Fan-out lives entirely in JP's in-process MCP server ([RFD 109]), the one place
-every tool call passes through regardless of who submits it.
-The server advertises the tool with an envelope schema, expands a call's
-envelope into one child invocation per operation, runs them under the tool's
-concurrency and error policy, and folds their results into the one response the
-caller is waiting for.
-No LLM provider, and no MCP client, needs to know fan-out exists.
+This RFD adds **fan-out**: a per-tool configuration setting that lets a single
+tool call carry multiple independent operations without changing the tool's
+implementation.
+JP's in-process MCP server ([RFD 109]) advertises an `ops` envelope schema,
+expands each call into separate child invocations under the tool's error policy,
+and folds their results back into a single response.
 
 ## Motivation
 

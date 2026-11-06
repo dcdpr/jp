@@ -5,16 +5,15 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
 - **Requires**: [RFD 065], [RFD 066], [RFD 058]
-- **Summary**: Detects redundant resource deliveries to LLM via URI and checksum
-  matching, replacing duplicates with brief references.
+- **Summary**: Replaces duplicate attachment and tool-result resources in LLM
+  requests with compact references when URI and checksum match.
 
 ## Summary
 
-This RFD introduces resource deduplication in JP's tool execution pipeline.
-When a tool returns a resource that has already been delivered to the LLM —
-either as an attachment or a previous tool call — JP detects the overlap and
-replaces the redundant content with a reference to the earlier delivery.
-This avoids wasting tokens on content the LLM already has in its context window.
+This RFD deduplicates resources in the tool execution pipeline.
+When a tool returns a resource whose URI and content checksum match an earlier
+attachment or tool result in the conversation, JP replaces the duplicate payload
+with a short reference to the prior delivery.
 
 ## Motivation
 

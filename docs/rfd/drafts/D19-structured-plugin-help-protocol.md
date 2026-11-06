@@ -6,13 +6,16 @@
 - **Date**: 2026-04-07
 - **Extends**: [RFD 072]
 - **Required by**: [RFD D23]
+- **Summary**: Replaces raw plugin help text with a structured `Help` protocol
+  message rendered through `clap::Command` on the host.
 
 ## Summary
 
-This RFD proposes replacing the free-text `help` field in the plugin `Describe`
-response ([RFD 072]) with a structured `Help` protocol message.
-The host builds a `clap::Command` from the structured data and renders help
-text, ensuring consistent formatting between built-in and plugin commands.
+This RFD replaces the free-text `help` field in the plugin `Describe` response
+([RFD 072]) with a structured `Help` protocol message.
+The host constructs a `clap::Command` from the plugin's argument and subcommand
+definitions so `-h` and `--help` render with the same formatting as built-in
+commands.
 
 ## Motivation
 

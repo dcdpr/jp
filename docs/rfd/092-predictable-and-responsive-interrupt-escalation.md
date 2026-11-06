@@ -5,19 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 045], [RFD 088]
-- **Summary**: Hardened interrupt model with predictable three-rung escalation,
-  menus at every stage, and watchdog-bounded graceful shutdown.
+- **Summary**: Hardens Ctrl-C handling with immediate startup routing, interrupt
+  menus at every phase, and watchdog-bounded three-rung shutdown escalation.
 
 ## Summary
 
-This RFD hardens the interrupt model from [RFD 045] around two named properties
-— **Responsive** (a Ctrl-C acts immediately, anywhere in the program's
-lifecycle) and **Predictable** (in a terminal, the first press always opens a
-menu, the second always begins a graceful shutdown, the third always terminates)
-— and specifies the missing pieces: a messaged escalation ladder with a
-shutdown watchdog, an interrupt menu for every scope (a turn menu for the gaps
-between turn phases, a process-wide fallback), Ctrl-C handling inside active
-prompts, and an explicit non-TTY contract.
+This RFD hardens the interrupt model from [RFD 045] so Ctrl-C is both
+**Responsive** (acting immediately at any point in the process lifecycle) and
+**Predictable** (on a TTY, the first press always opens a menu, the second
+starts graceful shutdown, and the third exits immediately).
+It adds startup-time signal routing, fallback interrupt menus for inter-phase
+gaps and non-query commands, prompt-level Ctrl-C routing, a shutdown watchdog,
+and an explicit non-TTY contract.
 
 ## Motivation
 

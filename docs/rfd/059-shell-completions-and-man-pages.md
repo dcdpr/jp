@@ -4,17 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-21
-- **Summary**: Add `jp completions` and `jp manpage` subcommands using
-  clap_complete and clap_mangen for shell integration.
+- **Summary**: Adds `jp completions` and `jp manpage` subcommands backed by
+  `clap_complete` and `clap_mangen`.
 
 ## Summary
 
-Add a `jp completions <shell>` subcommand that prints shell completion scripts
-to stdout, and a `jp manpage` subcommand that prints man page content.
-Completions use `clap_complete`'s dynamic `CompleteEnv` system — the binary
-itself acts as the completer, enabling context-aware value completions in later
-phases.
-Man pages are generated at runtime using `clap_mangen`.
+This RFD adds a `jp completions <shell>` subcommand that prints shell completion
+scripts to stdout and a `jp manpage` subcommand that renders man pages at
+runtime with `clap_mangen`.
+Completions use `clap_complete`'s dynamic `CompleteEnv` mode, in which the `jp`
+binary itself serves context-aware completions.
 
 ## Motivation
 

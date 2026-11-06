@@ -5,18 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-04
 - **Extended by**: [RFD 034]
-- **Summary**: Replace tool re-invocation with async inquiries to avoid token
-  waste and latency when tools need LLM answers.
+- **Summary**: Answers assistant-targeted tool questions via async
+  structured-output inquiries instead of re-invoking the tool call.
 
 ## Summary
 
-This RFD replaces the `tool_answers` re-invocation pattern — where the LLM
-re-calls a tool with all original arguments plus answers — with a structured
+This RFD replaces the `tool_answers` re-invocation pattern, in which the LLM
+re-calls a tool with all original arguments plus answers, with a structured
 inquiry system.
-When a tool needs additional input targeted at the assistant, the
-`ToolCoordinator` spawns an async task that makes a structured output request to
-the LLM, extracts the answer, and re-executes the tool internally.
-The LLM never re-transmits the tool's arguments.
+When a tool requests input from the assistant, `ToolCoordinator` runs a
+structured-output inquiry against the LLM, extracts the answer, and re-executes
+the tool internally without the LLM re-transmitting the original arguments.
 
 ## Motivation
 

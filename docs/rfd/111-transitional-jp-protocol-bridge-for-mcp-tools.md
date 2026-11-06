@@ -4,9 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-15
-- **Summary**: A stopgap bridge that lets MCP tools return `jp_tool::Outcome`
-  and receive JP's tool execution context through `_meta`, until typed content
-  blocks land.
+- **Summary**: Bridges MCP tools to `jp_tool::Outcome` and passes JP's execution
+  context via `_meta` until typed content blocks land.
 
 ## Summary
 

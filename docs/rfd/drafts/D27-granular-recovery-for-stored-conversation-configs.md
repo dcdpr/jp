@@ -14,14 +14,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-15
+- **Summary**: Recovers stored conversation configs at per-field granularity on
+  schema mismatches and fills missing required fields from workspace defaults.
 
 ## Summary
 
-Make the stored-conversation config compat layer recover from schema
-incompatibilities at field granularity rather than wiping the entire config.
-A single invalid field no longer locks the user out of the conversation.
-Holes left by recovery are filled from the workspace's currently-resolved
-config, guaranteeing that finalize succeeds.
+This RFD makes the stored-conversation configuration compatibility layer recover
+from schema incompatibilities at per-field granularity rather than wiping the
+entire configuration.
+A single invalid field no longer locks the user out of the conversation, and
+holes left by recovery are filled from the workspace's resolved configuration so
+finalization always succeeds.
 
 ## Motivation
 

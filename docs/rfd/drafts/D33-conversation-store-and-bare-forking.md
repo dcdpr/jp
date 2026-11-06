@@ -5,21 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
 - **Requires**: [RFD 078]
+- **Summary**: Adds an untyped `conversation.store` map for tool-persisted
+  workflow state and `jp conversation fork --no-turns` for config-only forks.
 
 ## Summary
 
 This RFD adds `conversation.store`, an untyped `IndexMap<String, JsonValue>` on
-`ConversationConfig`, and `jp conversation fork --no-turns`, a fork variant that
-copies config without conversation events.
-Together these enable tools to persist arbitrary data that travels with a
-conversation and orchestrated workflows to chain conversations where each phase
-inherits accumulated state from its predecessor.
-
-Both features build on the config mutation mechanism from [RFD 078].
-The store is a config field — tools write to it via `access.config` grants and
-`outcome.config`.
-Turn-less forking copies the resolved config (including the store) into a fresh
-conversation.
+`ConversationConfig` that tools read and write through [RFD 078]'s
+`access.config` mechanism, along with `jp conversation fork --no-turns` to copy
+a conversation's resolved configuration without its event history.
+Together these let multi-phase workflows persist structured state in a
+conversation and carry it forward into fresh child conversations.
 
 ## Motivation
 

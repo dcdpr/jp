@@ -6,6 +6,8 @@
 - **Date**: 2026-07-14
 - **Extends**: [RFD 028], [RFD 034]
 - **Requires**: [RFD 049]
+- **Summary**: Requires reasoning on assistant-answered inquiries and escalates
+  rejected inquiries to the user instead of failing the tool call.
 
 ## Summary
 

@@ -4,17 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-26
-- **Summary**: Mid-conversation system and tool changes anchored in message
-  stream preserve Anthropic's prompt cache via positional directives.
+- **Summary**: Delivers mid-conversation system prompt and tool changes as
+  positional stream messages to preserve Anthropic's prompt cache.
 
 ## Summary
 
-JP delivers system prompt sections and tool availability changes as content
-anchored to a position in the conversation stream, rather than by rewriting the
-request prefix.
-On supported Anthropic models this keeps the prompt cache intact across
-mid-conversation configuration changes.
-Everywhere else the same content flattens into today's wire format, unchanged.
+JP delivers mid-conversation system prompt sections and tool availability
+changes as positional messages anchored in the conversation stream rather than
+rewriting the request prefix.
+On supported Anthropic models this preserves the prompt cache across
+configuration changes, while other providers flatten the directives into the
+standard top-level system prompt and tool list.
 
 ## Motivation
 

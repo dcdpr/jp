@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Requires**: [RFD 070], [RFD D51], [RFD 098], [RFD D53]
+- **Summary**: Generalizes conversations from a single human-assistant pair to
+  multiple named assistant and human participants sharing one event stream.
 
 ## Summary
 

@@ -5,20 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
 - **Required by**: [RFD 037]
-- **Summary**: System notification queue delivers asynchronous subsystem
-  notifications to the assistant by embedding them in existing conversation
-  messages.
+- **Summary**: Delivers asynchronous subsystem notifications to the assistant by
+  attaching queued messages to existing conversation events.
 
 ## Summary
 
-This RFD introduces a system notification queue that allows JP's internal
-subsystems to deliver asynchronous notifications to the assistant.
-Notifications are recorded in the conversation event stream and delivered at the
-next available communication opportunity — piggybacking on existing messages
-rather than fabricating new events.
-This solves the "stateful tool finished but nobody asked" problem from [RFD 009]
-and provides a general-purpose channel for any subsystem that needs to inform
-the assistant of out-of-band events.
+This RFD introduces a system notification queue for delivering asynchronous
+subsystem events to the assistant.
+Notifications are recorded in the conversation stream and piggyback on the next
+outgoing message rather than fabricating standalone events, giving background
+tools from [RFD 009] and other subsystems a general out-of-band delivery
+channel.
 
 ## Motivation
 

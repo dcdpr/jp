@@ -12,22 +12,15 @@
 
 ## Summary
 
-This RFD adds the release pipeline to the `jp release` plugin of [RFD 121].
-`jp release cut` branches `release/0.3` from `main` to hold the code 0.3.x
-ships, and opens a pull request that moves every unreleased fragment into the
-release's directory on `main`.
-Release notes are written and corrected on `main` alone; release branches carry
-code and no notes, and `jp release pick` adds code to them by cherry-picking
-from `main`.
-`jp release finalize` tags a release.
-Each release gets release notes and, when it breaks something, an upgrade guide,
-rendered from its directory whenever they are needed.
-Every step is a command a person runs, and every change to `main` is a pull
-request like any other; a project without a forge merges those branches however
-it merges.
-JP's CI adds a reminder, checks, and distribution, and writes to no branch.
-It retires `jilu`; building, signing, and distributing binaries are separate
-RFDs.
+This RFD extends the `jp release` plugin ([RFD 121]) with commands that cut,
+patch, and tag releases while keeping all release notes and upgrade guides on
+`main`.
+`jp release cut` branches `release/<series>` for code and opens a pull request
+moving unreleased fragments into the release's directory on `main`, `jp release
+pick` cherry-picks fixes onto the release branch, and `jp release finalize` tags
+the release.
+It replaces `jilu`, while binary building and distribution are covered in [RFD
+123].
 
 ## Motivation
 

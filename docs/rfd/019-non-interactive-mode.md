@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
-- **Summary**: Abandoned RFD split into RFD 048 and RFD 049; preserved for
-  historical context on non-interactive mode design.
+- **Summary**: Proposes a `--non-interactive` flag, configurable detached prompt
+  policies, and a four-channel output model for headless runs.
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.

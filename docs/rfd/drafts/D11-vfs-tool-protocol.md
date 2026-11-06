@@ -5,21 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Requires**: [RFD D09], [RFD D10], [RFD 075], [RFD 058], [RFD 009]
+- **Summary**: Runs `runtime = "vfs"` tool subprocesses inside an OS sandbox
+  that mediates all host I/O over stdio JSON-RPC.
 
 ## Summary
 
-This RFD specifies the IPC protocol and sandboxed execution model for `runtime =
-"vfs"` tools.
-A VFS tool is a subprocess that performs all host interaction — filesystem
-access, network requests, subprocess spawning — through a JSON-RPC protocol
-over stdin/stdout rather than direct system calls.
-The protocol exposes the same logical capabilities as the `jp:host/filesystem`,
-`jp:host/http`, and `jp:host/process` interfaces from [RFD 016], but over a
-stdio transport instead of WASM host imports.
-The host side resolves every request through the `ProjectFiles` trait from [RFD
-D09] and the access policy system from [RFD 075].
-Combined with OS-level sandboxing, the subprocess has no direct access to the
-filesystem or network, making the IPC protocol the only path to host resources.
+This RFD defines the `runtime = "vfs"` tool execution mode, in which an
+OS-sandboxed subprocess performs all filesystem, network, and process operations
+through a JSON-RPC protocol over stdin and stdout.
+The protocol mirrors the `jp:host/filesystem`, `jp:host/http`, and
+`jp:host/process` interfaces from [RFD 016] over stdio instead of Wasm imports.
+The host resolves every request through `ProjectFiles` ([RFD D09]) and
+`AccessPolicy` ([RFD 075]), leaving the IPC channel as the subprocess's only
+path to host resources.
 
 ## Motivation
 

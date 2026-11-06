@@ -5,24 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
 - **Extends**: [RFD 005][RFD 005-2]
-- **Summary**: Unify inquiry event recording across all routing paths; add
-  cancellation/redaction variants; track attempts per turn.
+- **Summary**: Records `InquiryRequest` and `InquiryResponse` events across all
+  question routing paths, including `Cancelled` and `Redacted` outcomes.
 
 ## Summary
 
-Record `InquiryRequest`/`InquiryResponse` events in the persisted conversation
-stream for **every** `Outcome::NeedsInput` round-trip, regardless of routing
-path.
-Today [RFD 005] records only inquiry-backend questions; prompter-answered
-questions, cached answers, and static answers leave no trace.
-This RFD closes the gap.
-It also adds an `InquiryResponse::Cancelled` variant so user cancellation and
-routing-backend errors appear in the stream, an `InquiryResponse::Redacted`
-variant so secret answers typed at the prompter never land on disk, and derives
-the persisted `InquirySource` from non-overridable tool metadata rather than
-from user-configurable fields.
-Downstream RFDs may extend the `Cancelled` enum with additional reasons for the
-routing paths they introduce.
+This RFD extends [RFD 005] so `InquiryRequest` and `InquiryResponse` events are
+recorded in the persisted conversation stream for every `Outcome::NeedsInput`
+round-trip, including user-prompted, cached, and static answers.
+It adds `InquiryResponse::Cancelled` for user cancellations and backend errors,
+adds `InquiryResponse::Redacted` so secret answers never land on disk, and
+derives `InquirySource` from non-overridable tool metadata.
 
 ## Motivation
 

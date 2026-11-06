@@ -4,17 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-08
+- **Summary**: Adds a PTY-backed end-to-end test harness that spawns the `jp`
+  binary against a scripted LLM provider.
 
 ## Summary
 
-This RFD adds a thin end-to-end testing tier that spawns the `jp` binary as a
-process, in a pty, against a scripted provider.
-It covers the four things the 5900 in-process tests cannot reach: `main`'s
-wiring, config loaded from disk, process lifecycle, and terminal rendering
-composed with real configuration.
-
-The tier is deliberately small — ten or so tests, not a mirror of the
-in-process suite.
+This RFD adds a small end-to-end test suite that spawns the `jp` binary in a
+pseudo-terminal against a scripted LLM provider.
+It exercises the four surfaces that in-process tests bypass: `main` startup
+wiring, on-disk configuration loading, process signal and exit lifecycle, and
+terminal rendering under real configuration.
 
 ## Motivation
 

@@ -5,21 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-03
 - **Required by**: [RFD 078]
-- **Summary**: Introduces `-C` flag to selectively revert previously applied
-  config sources using provenance tracking via claims maps.
+- **Summary**: Adds `-C` / `--no-cfg` to revert previously applied configuration
+  sources using per-field provenance claims recorded on `ConfigDelta`.
 
 ## Summary
 
 This RFD introduces `-C` / `--no-cfg` as the negative counterpart of `-c` /
-`--cfg`.
-A negative config argument accepts the same inputs as `-c` and reverts the
-matching config's influence on the conversation.
-To support precise per-source revert, each `ConfigDelta` gains a **claims map**
-that records which config source last set each field.
-All forms of `-C` (file, key-value, JSON object, and shortcut flag) use the same
-**claim-history-driven** revert: the scope of each `-C` is derived from the
-conversation's claims, not from the current contents of the named source.
-Sources are distinguished via a kv-style identity for non-file overrides.
+`--cfg` to revert a previously applied configuration source's influence on a
+conversation.
+Each `ConfigDelta` records a per-field claims map tracking which source last set
+each field.
+Reverting a file, `key=value` assignment, JSON object, or shortcut flag clears
+only the fields still claimed by that source and leaves later overrides intact.
 
 ## Motivation
 

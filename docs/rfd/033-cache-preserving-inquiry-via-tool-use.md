@@ -5,17 +5,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-07
-- **Summary**: Replace structured output with a tool-use-based inquiry system to
-  preserve prompt cache and reduce LLM costs.
+- **Summary**: Replaces structured-output inquiries with a forced
+  `answer_inquiry` tool call to avoid invalidating the provider's prompt cache.
 
 ## Summary
 
-This RFD replaces the structured output mechanism (`output_config.format`) used
-by the inquiry system ([RFD 028]) with a strict tool use approach.
-A built-in `answer_inquiry` tool is always present in the tool list and is
-invoked via `tool_choice: Function("answer_inquiry")` during inquiries.
-This eliminates two sources of prompt cache invalidation that currently cause
-complete cache misses on every inquiry request.
+This RFD replaces the structured output mechanism (`output_config.format`) in
+the inquiry system ([RFD 028]) with a forced tool call.
+A built-in `answer_inquiry` tool stays in the tool list and is invoked via
+`tool_choice: Function("answer_inquiry")` during inquiries to avoid invalidating
+the system prompt cache.
 
 ## Motivation
 

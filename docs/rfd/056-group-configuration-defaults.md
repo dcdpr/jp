@@ -6,16 +6,15 @@
 - **Date**: 2025-07-20
 - **Extends**: [RFD 055]
 - **Extended by**: [RFD 057]
-- **Summary**: Groups can declare default tool configuration, allowing tool
-  inheritance without per-tool repetition.
+- **Summary**: Adds a `defaults` section to tool groups so member tools inherit
+  shared settings without per-tool repetition.
 
 ## Summary
 
-This RFD adds a `defaults` section to tool group definitions, allowing groups to
-carry fallback configuration (`enable`, `run`, `result`, `style`, `questions`)
-for their member tools.
-The tool's `groups` array ordering determines which group's defaults take
-priority.
+This RFD adds a `defaults` section to tool group definitions so groups can
+supply fallback configuration (`enable`, `run`, `result`, `style`, and
+`questions`) to their member tools.
+A tool's `groups` array order determines which group's defaults take precedence.
 
 ## Motivation
 

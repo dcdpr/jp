@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
+- **Summary**: Serves a JavaScript-free, mobile-first read-only HTML interface
+  for browsing conversations via `jp serve --web`.
 
 ## Summary
 

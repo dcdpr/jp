@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-17
+- **Summary**: Defines a session as a cross-client durable cursor to an active
+  workspace and conversation, decoupling it from terminal PIDs.
 
 ## Summary
 

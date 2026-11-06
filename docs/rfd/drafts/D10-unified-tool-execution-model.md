@@ -5,21 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Required by**: [RFD D11]
+- **Summary**: Introduces a `ToolRuntime` trait and a `runtime` tool setting to
+  unify local, MCP, built-in, and Wasm execution.
 
 ## Summary
 
-This RFD introduces a `ToolRuntime` trait that abstracts how tools execute, and
-a `runtime` configuration field on `ToolConfig` that selects the execution
-environment for local tools.
-The trait replaces the current three-way dispatch in `ToolDefinition::execute()`
-with a single polymorphic call.
-Four initial implementations cover every existing tool source: `StdioRuntime`
-(subprocess), `McpRuntime` (MCP server RPC), `BuiltinRuntime` (in-process Rust),
-and — in future — a `WasmRuntime` as specified by [RFD 016].
-Tool resolution produces a `(ToolDefinition, Arc<dyn ToolRuntime>)` pair; the
-coordinator calls `runtime.execute()` without knowing the underlying mechanism.
-`ToolSource` is unchanged — it describes where a tool's definition comes from,
-not how it runs.
+This RFD introduces a `ToolRuntime` trait that abstracts tool execution and a
+`runtime` configuration field on `ToolConfig` that selects how a tool runs.
+Tool resolution pairs each `ToolDefinition` with an `Arc<dyn ToolRuntime>`
+(`StdioRuntime`, `McpRuntime`, `BuiltinRuntime`, or a future `WasmRuntime` from
+[RFD 016]) so the coordinator calls `runtime.execute()` polymorphically.
+`ToolSource` remains responsible only for where a tool's definition originates.
 
 ## Motivation
 

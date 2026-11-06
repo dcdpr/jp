@@ -5,20 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
 - **Extended by**: [RFD 098], [RFD 126]
-- **Summary**: Assign stable, stream-unique identifiers to every conversation
-  event for safe manual editing and future reference features.
+- **Summary**: Assigns a stable, stream-unique identifier to every
+  `ConversationStream` entry so references survive manual edits.
 
 ## Summary
 
-Every entry in a conversation's event stream carries a stable identifier, unique
-within its stream.
-The identifier lives on the stream-entry wrapper, so every kind of entry
-(conversation events, config deltas, compaction overlays, and any future kind)
-is addressable by a stable ID instead of by position.
-Future reference-bearing entries and overlays reference entries by ID rather
-than by position.
-Loaded entries without an ID get a fresh random ID assigned at load time and
-persisted on the next save.
+This RFD assigns a stable, stream-unique identifier to every entry in a
+conversation's event stream.
+The identifier lives on the stream-entry wrapper so conversation events, config
+deltas, and compaction overlays can be referenced by ID rather than by array
+index.
+Entries loaded from older files without an ID receive a fresh random ID at load
+time that is persisted on the next save.
 
 ## Motivation
 

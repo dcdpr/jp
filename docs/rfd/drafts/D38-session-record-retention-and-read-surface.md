@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-17
+- **Summary**: Marks dead session records with `dead_at`, retains them for a
+  configurable window, and adds a `jp session` read command.
 
 ## Summary
 

@@ -5,14 +5,14 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-15
 - **Extends**: [RFD 100]
-- **Summary**: Move ticket ids from sequential counters to collision-resistant
-  base-32 time-bucketed random ids.
+- **Summary**: Replaces sequential ticket counters with collision-resistant,
+  time-bucketed Crockford base-32 ticket IDs (`T-02wt0kx`).
 
 ## Summary
 
-Ticket ids move from a sequential counter to a time-ordered random identifier:
-`T-02wt0kx`.
-The `docs/ticket/.counter` file is deleted.
+This RFD replaces sequential ticket counters (`docs/ticket/.counter`) with
+collision-resistant, time-ordered Crockford base-32 identifiers (`T-02wt0kx`) so
+tickets created across parallel worktrees and clones never collide.
 
 ## Motivation
 

@@ -6,20 +6,17 @@
 - **Date**: 2026-05-08
 - **Extends**: [RFD 048]
 - **Extended by**: [RFD 092], [RFD 093]
-- **Summary**: Unify editor invocation through EditorBackend trait; add an
-  InlineReply widget, built on a patched reedline fork, for interrupt menu
-  replies.
+- **Summary**: Unifies external editor calls under `EditorBackend` and adds a
+  `reedline`-based `InlineReply` widget for interrupt-menu replies.
 
 ## Summary
 
-Consolidate JP's four independent editor-invocation paths onto a single
-`EditorBackend` trait — with `edit_text` (string in/out) and `edit_file`
-(path-based) methods — that fully respects `EditorConfig`, and replace the
-interrupt-menu reply prompt with a richer inline editing widget, built on a
-patched fork of [reedline], that accepts short replies inline, supports
-multi-line input, and escalates to the configured editor on demand.
-A per-context `compose_in_editor` setting (`false`/`true`/`"always"`/`"never"`)
-chooses where composition happens, from inline-only to editor-only.
+This RFD consolidates JP's four editor-invocation paths onto a single
+`EditorBackend` trait (`edit_text` and `edit_file`) that honors `EditorConfig`.
+It also replaces the interrupt-menu reply prompt with a [reedline]-based
+`InlineReply` widget that supports multi-line inline input and on-demand
+escalation to the external editor, controlled by a per-context
+`compose_in_editor` setting.
 
 ## Motivation
 

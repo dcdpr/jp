@@ -5,8 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
 - **Extended by**: [RFD 100]
-- **Summary**: Defer RFD numbering to Discussion, auto-create tracking issues,
-  add Extends/Extended by metadata.
+- **Summary**: Defers RFD numbering until Discussion, adds `Extends` and
+  `Extended by` metadata fields, and automates implementation tracking at
+  Acceptance.
 
 ## Summary
 

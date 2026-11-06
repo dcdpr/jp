@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
 - **Required by**: [RFD 051]
-- **Summary**: Shared option args, `conversation new` subcommand,
-  `--no-activate` flag for scripting; updated `conversation fork` behavior.
+- **Summary**: Adds `jp conversation new`, a `--no-activate` flag on `jp query`,
+  and shared creation flags across conversation commands for scripting.
 
 ## Summary
 

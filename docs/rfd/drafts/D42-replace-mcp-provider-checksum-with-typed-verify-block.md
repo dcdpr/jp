@@ -4,16 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-22
+- **Summary**: Replaces `[providers.mcp.*].checksum` with a tagged `verify`
+  block that distinguishes binary hash verification from launcher version
+  pinning.
 
 ## Summary
 
-Replace the `checksum` field on `[providers.mcp.*]` with a tagged-enum `verify`
-block that names what it verifies.
-The current field hashes `command`, which is the wrong artifact when `command`
-is a runtime that resolves the real tool at execution time (`uvx`, `npx`,
-`docker run`, …).
-Identity pinning is moved out of scope for `verify` and documented as belonging
-in `arguments`, using the launcher's own version syntax.
+This RFD replaces the `checksum` field on `[providers.mcp.*]` with a tagged-enum
+`verify` block that explicitly names the artifact being verified.
+Hashing `command` alone only protects static binaries, whereas launcher commands
+(`uvx`, `npx`, and `docker run`) resolve the actual tool at runtime and pin
+versions through `arguments`.
 
 ## Motivation
 

@@ -5,15 +5,15 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-25
 - **Extends**: [RFD 072]
+- **Summary**: Adds a `prompt` request to the command plugin protocol so plugins
+  can ask confirm, select, text, and secret questions.
 
 ## Summary
 
 This RFD adds a `prompt` request to the command plugin protocol ([RFD 072]).
-A plugin describes a question — confirm, select, text line, or secret — and
-the host renders it through its own prompt facilities, then replies with the
-answer.
-This mirrors how tool inquiries already work: the component that needs an answer
-describes the question; the component that owns the terminal asks it.
+A plugin sends a structured question (confirm, select, text line, or secret),
+and the host renders it through `PromptBackend` on the terminal and returns the
+user's answer.
 
 ## Motivation
 

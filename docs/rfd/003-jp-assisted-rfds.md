@@ -4,19 +4,15 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Summary**: Propose an `rfd` skill configuration enabling JP to assist RFD
-  writing through research, structure, and collaborative editing—not
-  authorship.
+- **Summary**: Adds an `rfd` skill configuration so JP can assist with RFD
+  research, structure, and editing as a collaborator.
 
 ## Summary
 
-This RFD describes how contributors can use JP itself to help write RFDs for the
-JP project.
-It proposes an `rfd` skill configuration that teaches JP the RFD process,
-attaches the process document as reference material, enables read-only tools for
-codebase exploration, and provides guarded write access for applying edits — so
-that JP can serve as a drafting partner without displacing the contributor's own
-thinking.
+This RFD proposes an `rfd` skill configuration for using JP to help write RFDs.
+The skill attaches the RFD process document as reference material, enables
+read-only tools for codebase exploration, and provides guarded write access so
+JP acts as a drafting partner while the contributor remains the author.
 
 ## Motivation
 

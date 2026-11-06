@@ -11,21 +11,14 @@
 
 ## Summary
 
-This RFD defines two user-facing input formats, written in the pull request that
-makes a change:
-
-- **Changelog fragments**: one short entry per user-visible change, grouped by
-  impact type.
-- **Highlight notes**: editorial, feature-level notes for the changes worth a
-  story.
-
-Both are Markdown files with YAML frontmatter in a fragments directory,
-`changelog.d/` by default.
-A `jp release` command plugin writes and validates them, at the terminal and as
-a tool the assistant calls.
-In JP's CI, a required check keeps a pull request red until it has a fragment or
-the GitHub label `no-changelog`.
-Assembling and publishing releases from these inputs is [RFD 122].
+This RFD defines two Markdown-with-frontmatter formats under `changelog.d/` for
+recording user-facing changes in pull requests: short per-change **changelog
+fragments** grouped by impact type, and editorial **highlight notes** for major
+features.
+A `jp release` command plugin writes and validates both from the CLI and as
+assistant tools, and a CI check requires every pull request to include a
+fragment or carry the `no-changelog` label.
+Assembling and publishing releases from these files is covered in [RFD 122].
 
 ## Motivation
 

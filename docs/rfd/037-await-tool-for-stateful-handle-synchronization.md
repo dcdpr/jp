@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Requires**: [RFD 009], [RFD 011]
-- **Summary**: Introduces `await` built-in tool to synchronize on parallel
-  stateful tool handles with `any`/`all` completion modes.
+- **Summary**: Introduces a built-in `await` tool that synchronizes on parallel
+  stateful tool handles with `any` and `all` completion modes.
 
 ## Summary
 

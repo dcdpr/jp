@@ -4,16 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-27
-- **Summary**: Automatically retry forced tool calls with reasoning disabled if
-  the model ignores soft-force directives.
+- **Summary**: Retries forced tool calls with reasoning disabled when an
+  Anthropic model ignores a soft-forced tool directive.
 
 ## Summary
 
 When the Anthropic API cannot combine forced tool use with extended thinking, JP
-falls back to a "soft force" via a system prompt directive.
-If the model ignores that directive and completes without calling the required
-tool, JP should automatically retry the request with reasoning disabled so it
-can use the real `tool_choice` API parameter.
+falls back to a soft-force system prompt directive.
+If the model ignores that directive and finishes without calling the required
+tool, JP retries the request with reasoning disabled (or escalating nudges on
+always-thinking models) so the tool call is enforced.
 
 ## Motivation
 

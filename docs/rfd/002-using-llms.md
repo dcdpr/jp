@@ -4,15 +4,15 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Summary**: LLMs are tools; you own your output and bear responsibility for
-  its quality regardless of how it was produced.
+- **Summary**: Contributors may use LLMs freely as tools, and remain responsible
+  for the quality of everything they submit.
 
 ## Summary
 
 LLM usage is encouraged in the JP project.
 Contributors are free to use LLMs for reading, research, editing, debugging,
 code review, and code generation.
-All work product — code, prose, reviews, comments — is the responsibility of
+All work product (code, prose, reviews, and comments) is the responsibility of
 the person who submits it, regardless of how it was produced.
 
 ## The Core Principle

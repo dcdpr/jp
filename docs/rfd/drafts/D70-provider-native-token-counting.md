@@ -4,13 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-09
+- **Summary**: Adds `Provider::count_input_tokens` backed by provider
+  token-counting endpoints to compute fitting turn ranges when summarization
+  overflows.
 
 ## Summary
 
-Add `count_input_tokens` to the `Provider` trait, backed by each provider's own
-counting endpoint where one exists.
-Use it to answer the question a user hits when summarizing a long range: not
-*does this fit* (the API already answers that), but *what range would*.
+This RFD adds `count_input_tokens` to the `Provider` trait, backed by each
+provider's native token-counting endpoint where available.
+When a summarization request exceeds the model's context window, JP uses token
+counts to report a turn range that fits instead of leaving the user to
+binary-search ranges by hand.
 
 ## Motivation
 

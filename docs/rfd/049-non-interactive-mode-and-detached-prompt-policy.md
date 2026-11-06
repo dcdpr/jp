@@ -6,17 +6,16 @@
 - **Date**: 2026-03-17
 - **Required by**: [RFD 027], [RFD 051]
 - **Requires**: [RFD 018], [RFD 104]
-- **Summary**: Introduces configurable detached prompt policy,
-  `--non-interactive` flag, and `exclusive` question property for
-  non-interactive environments.
+- **Summary**: Adds a `--non-interactive` flag, configurable detached prompt
+  policies, and an `exclusive` question property for unattended runs.
 
 ## Summary
 
-This RFD introduces a configurable detached prompt policy that controls what
-happens when an inquiry arrives and no interactive client is available, a
-`--non-interactive` CLI flag, and the `exclusive` question property.
-Together these give users explicit control over JP's behavior in non-interactive
-environments — scripts, CI, piped execution, and detached background queries.
+This RFD introduces a configurable detached prompt policy for inquiries when no
+interactive client is available, a `--non-interactive` CLI flag, and an
+`exclusive` question property for human-only prompts.
+Together these give users explicit control over JP's behavior in scripts, CI,
+piped commands, and detached background queries.
 
 ## Motivation
 

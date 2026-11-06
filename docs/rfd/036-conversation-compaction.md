@@ -5,18 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Superseded by**: [RFD 064]
-- **Summary**: Composable conversation compaction via mechanical strategies,
-  tool-aware deduplication, LLM summarization, and protocol extensions for
-  declarative compaction hints.
+- **Summary**: Introduces `jp conversation compact` with composable mechanical,
+  tool-aware, and LLM summarization strategies for reducing conversation size.
 
 ## Summary
 
 This RFD introduces `jp conversation compact`, a command that reduces
-conversation size through composable strategies — from mechanical
-transformations (strip reasoning, deduplicate tool calls) to LLM-assisted ones
-(summarize older turns).
-It also extends the tool protocol so that tools can declare their own compaction
-rules (e.g., "a `read_file(1,10)` call subsumes an earlier `read_file(2,5)`").
+conversation size through composable strategies ranging from mechanical
+transformations (stripping reasoning, deduplicating tool calls) to LLM-assisted
+turn summarization.
+It also extends the tool protocol so tools can declare their own compaction
+rules (for example, when a `read_file(1,10)` call subsumes an earlier
+`read_file(2,5)`).
 
 ## Motivation
 

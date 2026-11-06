@@ -6,17 +6,17 @@
 - **Date**: 2026-07-24
 - **Extends**: [RFD D25]
 - **Requires**: [RFD 043]
+- **Summary**: Evaluates argument-conditional tool policies incrementally as
+  parameters stream so permission prompts and cancellations happen before full
+  payload arrival.
 
 ## Summary
 
-This RFD extends [RFD D25]'s argument-conditional tool policies with streaming
-evaluation.
-Instead of waiting for the complete argument object before evaluating policy
-rules, JP evaluates rules incrementally as individual parameters finish
-streaming.
-This enables early permission prompts — seconds before large arguments like
-file content finish arriving — and early cancellation when the user declines a
-tool call mid-stream.
+This RFD extends [RFD D25]'s argument-conditional tool policies to evaluate
+rules incrementally as individual tool parameters finish streaming ([RFD 043]).
+Evaluating rules before the full argument payload arrives allows early
+permission prompts and immediate stream cancellation when a tool call is
+declined.
 
 ## Motivation
 

@@ -4,16 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-13
+- **Summary**: Adds `jp conversation edit --interactive` for git-rebase-style
+  editing, reordering, and pruning of conversation events in `$EDITOR`.
 
 ## Summary
 
 This RFD introduces `jp conversation edit --interactive`, an `$EDITOR`-based
-workflow for destructively editing the raw event stream of a conversation.
-The editor opens a temporary directory containing a plan file (the manifest of
-events) and individual event files (markdown or TOML).
-Users delete or reorder lines in the plan to restructure the conversation, and
-edit individual event files to modify content.
-On editor exit, JP validates the result and rebuilds the `ConversationStream`.
+workflow for destructively editing a conversation's event stream.
+The editor opens a temporary directory containing a manifest plan file alongside
+individual Markdown and TOML event files that the user can reorder, delete, or
+edit before JP validates and rebuilds the `ConversationStream`.
 
 ## Motivation
 

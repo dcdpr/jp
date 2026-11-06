@@ -5,20 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-31
 - **Required by**: [RFD D71]
+- **Summary**: Adds hosted-activity events, provider replay envelopes, and typed
+  citations to `ConversationStream` for provider-executed tool output.
 
 ## Summary
 
-LLM providers return response artifacts JP cannot represent: activity executed
-on the provider's own infrastructure, citations attached to assistant text, and
-usage counters for that activity.
-This RFD adds a normalized **hosted activity** event, a typed **provider
-payload** envelope for exact same-provider replay, and typed citations on
-assistant content.
-Hosted-activity usage counters are parsed and reported as diagnostics, not
-persisted.
-
-It adds no user-visible feature on its own.
-It is the response-model prerequisite for exposing any provider-hosted tool.
+This RFD extends JP's response and stream models to represent provider-executed
+activity, exact provider replay payloads, and typed citations on assistant
+messages.
+Usage counters for provider-hosted activity are parsed and surfaced as
+diagnostics without being persisted.
+These types form the response-model foundation required before exposing
+provider-hosted tools ([RFD D71]).
 
 ## Motivation
 

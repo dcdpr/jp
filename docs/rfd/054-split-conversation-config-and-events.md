@@ -5,16 +5,14 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-11
 - **Extended by**: [RFD 106]
-- **Summary**: Split conversation storage: extract immutable base config
-  snapshot into separate base_config.json file from events.json.
+- **Summary**: Extracts a conversation's initial configuration snapshot from
+  `events.json` into a separate `base_config.json` file.
 
 ## Summary
 
-This RFD splits the conversation `events.json` file into two files:
-`base_config.json` for the base configuration snapshot and `events.json` for the
-event stream.
-The base configuration is currently packed as a synthetic first element in the
-events array, making `events.json` difficult to inspect.
+This RFD extracts the initial conversation configuration snapshot out of
+`events.json` into a separate `base_config.json` file, leaving `events.json`
+with only the conversation event stream.
 
 ## Motivation
 

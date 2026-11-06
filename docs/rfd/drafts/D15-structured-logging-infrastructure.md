@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-05
 - **Extends**: [RFD 048]
+- **Summary**: Persists structured per-invocation log files under
+  `~/.local/share/jp/logs/` and defines `-v`, `-q`, `JP_DEBUG`, and `--log-file`
+  controls.
 
 ## Summary
 

@@ -4,6 +4,9 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-04
+- **Summary**: Shares provider-reported rate-limit budgets across concurrent
+  `jp` sessions in a credential-keyed local store so sessions wait before
+  overdrawing.
 
 ## Summary
 

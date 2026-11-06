@@ -5,15 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
 - **Extends**: [RFD 083]
+- **Summary**: Extends `ask_user` to collect multi-question forms with
+  predicate-gated branching and `Reply` / `End Turn` / `Back` cancellation
+  controls.
 
 ## Summary
 
-Extend the `ask_user` built-in tool from [RFD 083] to collect multi-question
-forms in a single tool call, with predicate-gated branching, a unified cancel UX
-(`Reply` / `End Turn` / `Back`), and support for `boolean`, `select`,
+This RFD extends the built-in `ask_user` tool ([RFD 083]) to collect
+multi-question forms in a single tool call, with predicate-gated branching,
+`Reply` / `End Turn` / `Back` navigation, and `boolean`, `select`,
 `multi_select`, `text`, and `schema` answer types.
-The LLM fills in a constrained meta-schema that defines the question flow; the
-coordinator walks it, prompting the user and collecting answers.
+The assistant supplies a question graph in the tool call arguments, and the
+coordinator walks it to prompt the user and return all collected answers at
+once.
 
 ## Motivation
 

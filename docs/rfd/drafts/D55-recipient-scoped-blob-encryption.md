@@ -5,18 +5,17 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-04
 - **Extends**: [RFD 066][RFD 066-2]
+- **Summary**: Adds optional per-blob, per-recipient `age` encryption to the
+  content-addressable blob store for private attachments in shared
+  conversations.
 
 ## Summary
 
-This RFD adds optional, per-blob encryption to the content-addressable blob
-store ([RFD 066]).
-A blob can be encrypted to a set of recipients, so its content is readable only
-by holders of a matching private identity.
-The primary use case is attaching a private file to an otherwise-shared
-conversation: the author and any chosen recipients can read it, every other
-teammate sees a placeholder.
-Encryption is delegated to [`age`]; JP owns the policy (what is encrypted, for
-whom), not the cryptography.
+This RFD adds optional per-blob encryption to the content-addressable blob store
+([RFD 066]) using [`age`] so individual attachments in a shared conversation can
+be encrypted to specific recipients.
+Holders of a matching private identity read the blob transparently, while other
+teammates see a placeholder.
 
 ## Motivation
 

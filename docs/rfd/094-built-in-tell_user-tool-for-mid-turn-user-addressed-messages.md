@@ -5,24 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-02
 - **Extends**: [RFD 058]
-- **Summary**: Mid-turn tool for assistant to deliver user-visible messages;
-  activates generic audience-filtering and markdown rendering mechanisms across
-  conversation events.
+- **Summary**: Adds a built-in `tell_user` tool for mid-turn user messages and
+  activates MCP `audience` filtering and markdown tool rendering.
 
 ## Summary
 
-Add a built-in `tell_user` tool that lets the assistant deliver a message the
-user must see, mid-turn, without ending the agentic loop.
-The message renders as regular chat content; the assistant receives a short
-acknowledgement and continues working.
-
-The tool itself is small.
-Most of this RFD activates generic mechanisms that [RFD 058] defines but does
-not yet act on: honoring MCP `audience` annotations at JP's two view boundaries,
-rendering `text/markdown` content through the markdown pipeline, and one new
-style knob (`style.header`).
-`tell_user` is the first consumer of these mechanisms, not a special case in
-jp-core.
+This RFD adds a built-in `tell_user` tool that lets the assistant display a
+markdown message to the user mid-turn and receive a brief acknowledgement
+without ending the turn loop.
+To support `tell_user` without special-casing, it activates MCP `audience`
+filtering at JP's terminal and LLM view boundaries, renders `text/markdown` tool
+blocks through the markdown pipeline, and adds a `style.header` tool
+configuration knob.
 
 ## Motivation
 

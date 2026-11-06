@@ -5,19 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-20
 - **Requires**: [RFD 079]
+- **Summary**: Allows configuration fields to load their values from external
+  files and JSON Pointers at config load time.
 
 ## Summary
 
-A config field can take its value from another file instead of spelling it out:
-
-```toml
-[conversation.tools.ticket_create.parameters.labels.items]
-enum = { file = "../../../docs/ticket/.labels.json", pointer = "/package/values" }
-```
-
-The reference resolves at load time, relative to the declaring file, before
-merging.
-Nothing is executed, and the result is the same on every invocation.
+This RFD allows any configuration field to source its value from another file
+(and an optional JSON Pointer within that file) using a `{ file, pointer }`
+table.
+File references resolve relative to the declaring configuration file at load
+time before merging, without executing external commands.
 
 ## Motivation
 

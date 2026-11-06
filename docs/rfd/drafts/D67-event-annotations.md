@@ -15,6 +15,8 @@
 - **Authors**: rgrant <rgrant@contract.design>
 - **Date**: 2026-08-10
 - **Requires**: [RFD D68]
+- **Summary**: Stores schema-tagged JSON annotations addressed to conversation
+  locations in `annotations.json` without sending them to the model.
 
 ## Summary
 

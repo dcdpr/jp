@@ -4,18 +4,15 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-18
+- **Summary**: Allows `extends` entries to specify a configuration root
+  (`workspace`, `user_global`, or `user_workspace`) for cross-root path
+  resolution.
 
 ## Summary
 
-This RFD lets an `extends` entry name the config root its path is resolved
-against:
-
-```toml
-extends = [{ root = "workspace", path = "crates/my-project/.jp/config.toml" }]
-```
-
-Today every `extends` path resolves relative to the directory of the declaring
-file, so a config file in one root cannot reliably reach a file in another.
+This RFD allows an `extends` entry to specify the configuration root
+(`workspace`, `user_global`, or `user_workspace`) against which its path is
+resolved, rather than resolving only relative to the declaring file's directory.
 
 ## Motivation
 

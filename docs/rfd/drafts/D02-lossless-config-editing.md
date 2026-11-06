@@ -4,12 +4,14 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-31
+- **Summary**: Replaces serde round-tripping in `config set` with
+  format-preserving document editors for TOML, JSON, JSON5, and YAML.
 
 ## Summary
 
-Replace the lossy deserialize-mutate-serialize round-trip in `config set` with
-format-preserving editors for every config format JP supports (TOML, JSON,
-JSON5, YAML).
+This RFD replaces the lossy deserialize-mutate-serialize round-trip in `config
+set` with format-preserving editors for every config format JP supports (TOML,
+JSON, JSON5, and YAML).
 This eliminates git diff noise when a user changes a single config value.
 
 ## Motivation

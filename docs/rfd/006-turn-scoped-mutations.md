@@ -4,15 +4,14 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-18
-- **Summary**: Restrict stream mutations to turn-scoped accessors, preventing
-  invalid event sequences through compile-time guarantees.
+- **Summary**: Restricts `ConversationStream` mutations to turn-scoped accessors
+  so invalid event sequences cannot be constructed through the public API.
 
 ## Summary
 
-This RFD proposes restricting `ConversationStream` mutations to go through
-turn-scoped accessors (`start_turn` and `current_turn_mut`), making it
-impossible to construct a stream without proper turn boundaries through the
-public API.
+This RFD restricts `ConversationStream` mutations to turn-scoped accessors
+(`start_turn` and `current_turn_mut`) so callers cannot construct a stream
+without valid turn boundaries through the public API.
 
 ## Motivation
 

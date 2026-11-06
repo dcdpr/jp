@@ -15,6 +15,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Required by**: [RFD D54]
+- **Summary**: Moves per-conversation tool configuration from
+  `conversation.tools.*` to `assistant.tools.*` while retaining
+  `conversation.tools.*` as a legacy alias.
 
 ## Summary
 

@@ -5,9 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-19
 - **Extended by**: [RFD 103]
-- **Summary**: Conversations gain configurable key-value labels—static,
-  command-backed, or CLI-set—managed through `jp c label` and used to filter by
-  context like VCS branches.
+- **Summary**: Adds static, command-backed, and CLI-managed `key=value` labels
+  to conversations for filtering and `jp c label` management.
 
 ## Summary
 

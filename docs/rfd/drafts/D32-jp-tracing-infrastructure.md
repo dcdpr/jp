@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
 - **Extends**: [RFD D15]
+- **Summary**: Introduces a `jp_trace` crate with typed tracing events,
+  execution spans, test capture, and content-addressed payload storage.
 
 ## Summary
 

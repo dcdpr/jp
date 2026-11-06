@@ -6,23 +6,18 @@
 - **Date**: 2026-03-05
 - **Tracking Issue**: [\#788]
 - **Extended by**: [RFD 106]
-- **Summary**: Make user-local storage the durable source; workspace copies
-  become optional projections for git visibility.
+- **Summary**: Makes user-local storage the source of truth for conversations
+  and treats `.jp/conversations/` as an optional workspace projection.
 
 ## Summary
 
-This RFD changes conversation storage so that user-local storage is the source
-of truth for all conversations.
-Workspace storage (`.jp/conversations/`) becomes a projection — a copy that
-exists for git visibility.
-Non-local conversations are written to both locations; local conversations are
-written only to user-local.
-The `local` property becomes a runtime-derived indicator (whether the workspace
-copy exists), not a stored flag.
-
-This makes conversations durable across workspace directory deletion - the
-primary pain point for git worktree users; without requiring JP to be aware of
-git.
+This RFD makes user-local storage the source of truth for all conversations and
+treats workspace storage (`.jp/conversations/`) as a projection for git
+visibility.
+Shared conversations are written to both locations, while user-local
+conversations are written only to the user data directory.
+This keeps conversations durable when a git worktree or workspace directory is
+deleted.
 
 ## Motivation
 

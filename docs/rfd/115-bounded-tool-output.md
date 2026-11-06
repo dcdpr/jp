@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-27
 - **Extends**: [RFD 109]
-- **Summary**: Bounds the text of each tool call response before it is recorded
-  or delivered, with a per-tool `size_threshold` and a fixed per-cycle ceiling.
+- **Summary**: Caps tool response text before persistence and delivery using a
+  configurable per-tool `size_threshold` and a per-cycle ceiling.
 
 ## Summary
 

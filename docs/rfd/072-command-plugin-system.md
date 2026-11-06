@@ -5,24 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
 - **Extended by**: [RFD 114]
-- **Summary**: Standalone command plugins communicate with JP via JSON-lines
-  protocol to extend subcommands across languages.
+- **Summary**: Extends JP with standalone `jp-<name>` command plugin binaries
+  that communicate with the host over a JSON-lines protocol.
 
 ## Summary
 
-This RFD introduces a command plugin system for JP.
-Command plugins are standalone binaries (`jp-<name>`) that communicate with JP
-over a structured JSON-lines protocol on stdin/stdout.
-JP handles workspace discovery, config loading, conversation locking, data
-access, output formatting, and signal management.
-Plugins request these services over the protocol, making it possible to write a
-plugin in any language — including shell scripts.
-
-This is one of several plugin mechanisms in JP.
-[RFD 016] defines the Wasm plugin system for sandboxed in-process capabilities
-(attachment handlers, tools, LLM providers).
-Command plugins operate at a different level: they are long-running processes
-that extend JP with new subcommands.
+This RFD introduces a command plugin system in which standalone binaries
+(`jp-<name>`) extend JP with new subcommands over a JSON-lines protocol on stdin
+and stdout.
+JP handles workspace discovery, configuration loading, conversation locking,
+output formatting, and signal management, so plugins can be written in any
+language.
+Unlike the in-process Wasm plugins in [RFD 016], command plugins run as separate
+processes that own subcommand execution.
 
 ## Motivation
 

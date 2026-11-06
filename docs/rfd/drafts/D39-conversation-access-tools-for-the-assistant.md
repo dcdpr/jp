@@ -4,13 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-21
+- **Summary**: Adds `conversation_list`, `conversation_grep`, and
+  `conversation_read` tools so the assistant can search and read past workspace
+  conversations.
 
 ## Summary
 
-Add three tools the assistant can call to access historical conversations in the
-current workspace: `conversation_list` (paginated metadata), `conversation_grep`
-(content search), and `conversation_read` (full content of a specific
-conversation).
+This RFD adds three tools the assistant can call to access historical
+conversations in the current workspace: `conversation_list` (paginated
+metadata), `conversation_grep` (content search), and `conversation_read` (full
+content of a specific conversation).
 The tools are Rust wrappers under `.config/jp/tools/src/conversation/` that
 shell out to `jp conversation` and present a stable JSON contract to the LLM.
 Scope is workspace-only and maintenance-tooling-only; if the pattern proves

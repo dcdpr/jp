@@ -5,20 +5,18 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Requires**: [RFD 039], [RFD 040], [RFD 049], [RFD 050]
-- **Summary**: Guide for building sub-agent workflows using local tools, config
-  overlays, and conversation trees to delegate scoped tasks cheaply.
+- **Summary**: Shows how to build sub-agent workflows using local tools, `--cfg`
+  overlays, hidden conversations, and conversation trees.
 
 ## Summary
 
-This guide walks through building sub-agent capabilities in JP using local tool
-definitions and JP's configuration system.
-A main agent delegates scoped tasks — research, planning, code review — to
-sub-agents running cheaper models in separate conversations.
-The entire workflow is built from existing features: local tools, `--cfg`
-overlays ([RFD 038]), `--non-interactive` mode ([RFD 049]), conversation trees
-([RFD 039]), and hidden conversations ([RFD 040]).
-
-No changes to JP's agent loop are required.
+This guide walks through building sub-agent workflows in JP using local tool
+definitions and configuration overlays.
+A main agent delegates scoped tasks such as research, planning, and code review
+to sub-agents running cheaper models in child conversations.
+The workflow composes existing features without changing the agent loop: local
+tools, `--cfg` overlays ([RFD 038]), `--non-interactive` mode ([RFD 049]),
+conversation trees ([RFD 039]), and hidden conversations ([RFD 040]).
 
 ## Why sub-agents?
 

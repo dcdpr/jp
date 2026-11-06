@@ -5,17 +5,20 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-31
 - **Requires**: [RFD D31]
+- **Summary**: Exposes provider-executed server tools such as Anthropic
+  `web_search` through per-provider configuration without adding a core tool
+  source.
 
 ## Summary
 
-Some LLM providers execute tools on their own infrastructure: Anthropic's
-`web_search` and `code_execution`, OpenAI's `web_search`, Google's Search
-grounding.
-This RFD exposes them as **provider-hosted tools**, configured inside each
-provider's own config block and translated entirely by that provider's adapter.
-Anthropic web search is the first vertical slice.
-
-JP core gains no vocabulary for hosted tools.
+This RFD exposes provider-executed server tools (such as Anthropic's
+`web_search` and `code_execution`, OpenAI's `web_search`, and Google Search
+grounding) as **provider-hosted tools** configured inside each provider's own
+settings block.
+Each provider adapter translates its hosted-tool settings into wire requests and
+maps the resulting activity onto [RFD D31]'s response artifacts without adding
+hosted-tool concepts to JP's core tool coordinator.
+Anthropic web search is the first implementation slice.
 
 ## Motivation
 

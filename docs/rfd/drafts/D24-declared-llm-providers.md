@@ -4,17 +4,19 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-03
+- **Summary**: Turns `providers.llm` into a user-named map of provider
+  declarations backed by reusable protocol implementations.
 
 ## Summary
 
-`providers.llm` becomes a map of providers the user declares and names.
-Each declaration points at a provider source, the implementation that talks to
-the server, and holds that source's settings.
-Model ids name a declared provider, so one source can back several providers,
-each with its own endpoint and credentials.
-New `openai-chat-completions` and `anthropic-messages` sources cover servers
-that speak OpenAI's Chat Completions API or Anthropic's Messages API without the
-vendor's own extensions.
+This RFD turns `providers.llm` into a map of user-declared, user-named provider
+instances, each pointing at a provider source (the implementation that talks to
+the server) and holding that source's settings.
+Model IDs reference the declared provider name so a single source can back
+multiple servers, each with its own endpoint and credentials.
+New `openai-chat-completions` and `anthropic-messages` sources support servers
+that speak OpenAI's Chat Completions API or Anthropic's Messages API without
+vendor-specific extensions.
 
 ## Motivation
 

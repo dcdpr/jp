@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
-- **Summary**: Detached conversation execution via background processes and
-  attachment—abandoned, split into RFD 023 and 027.
+- **Summary**: Proposes `jp query --detach`, a running-process registry, queued
+  inquiry pausing, and live terminal attachment for background conversations.
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.

@@ -6,21 +6,19 @@
 - **Date**: 2026-05-30
 - **Extends**: [RFD 075]
 - **Requires**: [RFD 076]
+- **Summary**: Extends OS-level subprocess sandboxing to stdio MCP servers with
+  `stateful` server-wide and stateless per-tool access policies.
 
 ## Summary
 
-This RFD extends [RFD 075]'s OS-level sandboxing to stdio MCP servers.
-JP spawns stdio MCP servers as child processes, so it can confine them with the
-same platform-native mechanisms [RFD 075] applies to local tools.
-A new `stateful` flag on each server's configuration determines both its process
-lifecycle and where its access policy is declared: a `stateful` server (the
-default) runs once for the whole agentic loop and is confined by a server-wide
-policy; a stateless server starts and stops per tool call and is confined by a
-per-tool policy.
-The relationship is enforced symmetrically — declaring access at the wrong
-level is a config error, not a silent lie.
-Unconfigured servers receive a default sandbox (workspace read-write, no
-network, allowlisted environment).
+This RFD extends [RFD 075]'s OS-level subprocess sandboxing to stdio MCP servers
+spawned by JP.
+A `stateful` flag on each server's configuration controls both its process
+lifecycle and where its access policy lives: stateful servers (the default) run
+across the turn loop under a server-wide policy, while stateless servers spawn
+per tool call under a per-tool policy.
+Unconfigured servers receive a default sandbox with workspace read-write access,
+no network access, and an allowlisted environment.
 
 ## Motivation
 

@@ -4,16 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-03
+- **Summary**: Allows local tools to produce a user-facing display view of a
+  tool result distinct from the assistant-facing payload.
 
 ## Summary
 
-This RFD lets a local tool author a separate **display view** of its result —
-the bytes shown to the user — distinct from the **assistant view** that is
-recorded into the conversation and replayed to the model.
-The display view is produced once at turn time by a new tool `Action`, stored in
-tool-call event metadata, and replayed from storage.
-It is opt-in per tool and defaults to being identical to the assistant view, so
-existing behavior is unchanged.
+This RFD lets a local tool produce a separate **display view** of its result
+(rendered to the user) distinct from the **assistant view** recorded in the
+conversation and sent to the model.
+The display view is generated once at turn time via a new tool `Action`, stored
+in tool-call event metadata, and defaults to matching the assistant view when
+not opted into.
 
 ## Motivation
 

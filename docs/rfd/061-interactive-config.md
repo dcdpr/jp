@@ -6,9 +6,8 @@
 - **Date**: 2026-07-21
 - **Requires**: [RFD 060]
 - **Required by**: [RFD 063]
-- **Summary**: Bare `--cfg` flag triggers interactive configuration browser for
-  searching, inspecting, and editing config fields with type-appropriate
-  prompts.
+- **Summary**: Opens an interactive configuration browser when `--cfg` is passed
+  without a value to search and edit settings inline.
 
 ## Summary
 

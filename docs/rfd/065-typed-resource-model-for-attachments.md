@@ -5,21 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-20
 - **Required by**: [RFD 058], [RFD 066], [RFD 067]
-- **Summary**: Replace opaque attachments with typed MCP-aligned resources on
-  ChatRequest at attachment turn, enabling deduplication and preventing cache
-  invalidation.
+- **Summary**: Replaces opaque attachments with typed MCP-aligned `Resource`
+  snapshots stored on the `ChatRequest` of the turn that attached them.
 
 ## Summary
 
 This RFD replaces the opaque `Attachment` type with a typed `Resource` model
-aligned with MCP's resource specification and [RFD 058]'s content block schema.
-Resources carry canonical URIs, MIME types, and MCP-standard annotations.
-Resource content moves from the system prompt into the `ChatRequest` at the turn
-where the resource is attached.
-Resources are snapshots — content is captured at attachment time, only updated
-when explicitly requested.
-A built-in `refresh_resource` tool lets the LLM request fresh content through
-the attachment handler when needed.
+carrying canonical URIs, MIME types, and MCP annotations aligned with [RFD 058].
+Resource snapshots are stored on the `ChatRequest` at the turn where they are
+attached instead of in the system prompt, and a built-in `refresh_resource` tool
+lets the assistant request updated content on demand.
 
 ## Motivation
 

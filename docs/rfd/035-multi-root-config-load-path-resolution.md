@@ -4,15 +4,16 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
-- **Summary**: Extend `--cfg` path resolution to search user-global, workspace,
-  and user-workspace config roots, merging matches.
+- **Summary**: Searches user-global, workspace, and user-workspace
+  `config_load_paths` roots when resolving `--cfg` fragments and merges all
+  matches in precedence order.
 
 ## Summary
 
-This RFD extends `--cfg` path resolution to search across all three config roots
-(user-global, workspace, user-workspace), merging matches in precedence order.
-Currently, `--cfg` paths are resolved exclusively against the workspace root,
-meaning user-global and user-workspace config files are unreachable.
+This RFD resolves relative `--cfg` paths across all three configuration roots
+(user-global, workspace, and user-workspace) instead of only the workspace root.
+When a fragment exists in multiple roots, all matching files are loaded and
+merged in precedence order.
 
 ## Motivation
 

@@ -12,9 +12,8 @@
 
 This document establishes the Request for Discussion (RFD) process for the JP
 project.
-RFDs are short design documents that describe a significant change — a new
-feature, an architectural shift, a process change — before implementation
-begins.
+RFDs are short design documents that describe a significant feature,
+architectural shift, or process change before implementation begins.
 The goal is to think clearly, communicate intent, and invite feedback early.
 
 ## Motivation

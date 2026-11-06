@@ -5,8 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Required by**: [RFD 051]
-- **Summary**: Hide conversations from default listings and expose
-  conversation_id to tools for sub-agent workflows.
+- **Summary**: Adds a `hidden` flag to exclude conversations from default
+  listings and exposes `conversation_id` in the tool execution context.
 
 ## Summary
 

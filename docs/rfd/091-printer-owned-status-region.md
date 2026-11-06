@@ -6,25 +6,18 @@
 - **Date**: 2026-07-03
 - **Extends**: [RFD 048]
 - **Extended by**: [RFD 120]
-- **Summary**: Consolidates nine ephemeral terminal indicators into a
-  printer-owned status region primitive, showing live child-process output with
-  multi-row windows and standardized chrome lifecycle.
+- **Summary**: Consolidates ephemeral terminal timers and live subprocess output
+  windows into a single status-region primitive owned by `jp_printer`.
 
 ## Summary
 
-This RFD makes ephemeral terminal chrome — `⏱ Waiting… 9.2s (receiving
-response data)` and the rows above it — a first-class concept owned by
-`jp_printer`.
-A **status region** is a block of terminal rows: a status row that ticks its own
-elapsed time, and an optional window showing the last N lines of output from one
-or more live sources.
-The printer's worker thread draws the region, ticks it, and erases it before any
-printer-managed write on any channel.
-
-Nine bespoke timer and temp-line mechanisms across `jp_cli` become clients of
-this one primitive, and two long-running child processes — MCP server startup
-and tool execution — gain a live view of their progress that leaves no trace in
-the final transcript.
+This RFD makes ephemeral terminal chrome a first-class **status region** owned
+by `jp_printer`: a self-ticking status line paired with an optional rolling
+window of live output lines.
+The printer's worker thread draws, ticks, and erases the region before any
+persistent write on any channel.
+Nine ad-hoc timer and temporary-line mechanisms across `jp_cli`, along with live
+output for MCP server startup and tool execution, share this single primitive.
 
 ## Motivation
 

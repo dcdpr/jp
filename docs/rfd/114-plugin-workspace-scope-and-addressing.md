@@ -6,20 +6,18 @@
 - **Date**: 2026-09-08
 - **Requires**: [RFD 113]
 - **Extends**: [RFD 072], [RFD 087]
-- **Summary**: Command plugins declare single- or multi-workspace scope;
-  multi-scope plugins address a checkout per request, and turns record their
-  checkout.
+- **Summary**: Lets command plugins declare multi-workspace scope to address
+  checkouts per request, and records each turn's checkout.
 
 ## Summary
 
-A command plugin declares in its manifest whether it operates on one workspace
-or on several.
-A single-scope plugin gets today's behavior: the host bootstraps a workspace and
-every request is about it.
-A multi-scope plugin gets no bootstrapped workspace, enumerates workspaces with
-`list_workspaces`, and names one checkout on every request.
-Every turn records the checkout it ran in, so a frontend can continue a
-conversation started in a terminal in the tree that holds its edits.
+A command plugin declares in its manifest whether it operates on a single
+workspace or across multiple workspaces.
+Single-scope plugins receive a bootstrapped workspace from the host, while
+multi-scope plugins enumerate workspaces via `list_workspaces` and name a target
+checkout on every request.
+Every turn also records the checkout it ran in so any frontend can resume a
+conversation in the worktree that holds its edits.
 
 ## Motivation
 

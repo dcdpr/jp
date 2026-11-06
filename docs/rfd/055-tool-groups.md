@@ -5,16 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
 - **Extended by**: [RFD 056]
-- **Summary**: Named tool groups enable CLI shortcuts and exhaustive validation
-  ensuring every tool is classified relative to a group.
+- **Summary**: Introduces named tool groups for bulk `--tool`/`--no-tools` CLI
+  toggling and optional exhaustive classification checks.
 
 ## Summary
 
 This RFD introduces tool groups: named sets of tools that can be enabled or
-disabled as a unit via `--tools GROUP` / `--no-tools GROUP`.
-Groups support exhaustive validation, ensuring every tool is classified relative
-to a group.
-Group membership is declared on the tool side via a `groups` field.
+disabled as a unit via `--tools GROUP` and `--no-tools GROUP`.
+Tools declare their group membership via a `groups` field, and groups marked
+`exhaustive = true` require every loaded tool to explicitly opt into or out of
+the group.
 
 ## Motivation
 

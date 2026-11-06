@@ -4,16 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
+- **Summary**: Organizes project knowledge into configured topics and subjects
+  retrieved on demand via a `learn` tool or `-k` flag.
 
 ## Summary
 
 This RFD proposes a knowledge base (KB) system that organizes reusable,
-project-specific knowledge into **topics** and **subjects**.
-Topics are configured directories of text files.
+project-specific knowledge into configured directories of **topics** and
+**subjects**.
 The assistant discovers available topics through the system prompt and retrieves
-subjects on demand via a built-in `learn` tool.
-Subjects can also be pre-loaded into the system prompt or injected per-query via
-the `-k` CLI flag.
+subjects on demand via a built-in `learn` tool, or users can pre-load subjects
+into the system prompt or per query with `-k`.
 
 ## Motivation
 

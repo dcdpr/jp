@@ -6,18 +6,17 @@
 - **Date**: 2026-05-11
 - **Extends**: [RFD 008]
 - **Extended by**: [RFD 108]
-- **Summary**: Split tool enable into state and allow_toggle to fix directive
-  bugs and eliminate variant proliferation.
+- **Summary**: Splits tool `enable` configuration into a boolean `state` and an
+  `allow_toggle` policy governing CLI directive overrides.
 
 ## Summary
 
-Replace the flat `Enable` enum on tool configuration with a struct that
-separates the tool's current `state` (`bool`) from `allow_toggle` (an enum
-describing which CLI directives may flip that state).
-This eliminates two latent bugs in the existing model, removes the need for a
-`Sticky` variant originally proposed in [RFD 083] (which now adopts this RFD's
-shape directly), and absorbs [RFD 055]'s `ExplicitOrGroup` variant without
-schema growth.
+This RFD replaces the flat `Enable` enum on tool configuration with a struct
+that separates the tool's active `state` (`bool`) from `allow_toggle` (the
+policy governing which CLI directives may flip that state).
+Separating state from toggle policy fixes directive-erasure bugs in the flat
+enum and covers the toggle rules required by [RFD 055] and [RFD 083] without
+adding combinatorial enum variants.
 
 ## Motivation
 
