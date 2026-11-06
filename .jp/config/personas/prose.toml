@@ -10,6 +10,7 @@ extends = [
     "../skill/writing.toml",
     "../skill/wiki.toml",
     "../skill/rfd.toml",
+    "../skill/changelog.toml",
 ]
 
 [conversation.tools]
