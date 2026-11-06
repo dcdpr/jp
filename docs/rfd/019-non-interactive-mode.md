@@ -523,7 +523,7 @@ Can be merged at any point.
 - `curl` / `git` — precedent for stdout/stderr output separation.
 
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md

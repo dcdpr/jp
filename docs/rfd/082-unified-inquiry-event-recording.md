@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
 - **Extends**: [RFD 005][RFD 005-2]
+- **Extended by**: [RFD 018]
 - **Summary**: Unify inquiry event recording across all routing paths; add
   cancellation/redaction variants; track attempts per turn.
 
@@ -930,14 +931,22 @@ counter bounded per-turn rather than universally.
 - **Rendering inquiry events in `jp conversation show`.** Display formatting for
   inquiry events in the CLI is deferred, consistent with [RFD 005]'s own
   Non-Goals.
+
 - **Inquiry events for permission and result-delivery prompts.** This RFD
   unifies recording only for the existing inquiry shape (tool questions).
   `RunTool` and `DeliverToolResult` prompts are not inquiry events today and
   remain outside the scope of this RFD.
+
+  > [!TIP]
+  > [RFD 018] makes permission and result-delivery prompts inquiry events, and
+  > has every prompt drawn from its `InquiryRequest` rather than recorded next
+  > to it.
+
 - **Stream replay and event-driven UI.** Several future features (sub-agent
   reasoning trails, replay tooling, conversation viewers) benefit from this
   RFD's completeness guarantee, but their implementations are their own
   concerns.
+
 - **Migration tooling for legacy streams.** The custom `Deserialize` heals
   legacy events one at a time as new responses are written; no separate
   migration step is provided.
@@ -1286,6 +1295,7 @@ Independent of the others, lands alongside Phase 3 in the same PR.
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 005-2]: ./005-first-class-inquiry-events.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 023]: 023-resumable-conversation-turns.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md

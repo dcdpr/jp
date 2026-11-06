@@ -551,7 +551,7 @@ the mechanical ones bisect apart.
 - `ssh -o BatchMode=yes` — prior art for failing rather than prompting.
 - `git`, `sudo`, `fzf` — prior art for `/dev/tty` as the prompt channel.
 
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 021]: 021-printer-live-redirection.md
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
