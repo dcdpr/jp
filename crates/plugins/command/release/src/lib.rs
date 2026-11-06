@@ -229,7 +229,8 @@ enum Command {
     /// saying why either way.
     ///
     /// The next release is due once `cadence` has passed since the newest minor
-    /// or major release was cut, and that release has been finalized.
+    /// or major release was cut, that release has been finalized, and `main`
+    /// has an unreleased fragment to release.
     /// With `jp --format json`, prints `{"due": <bool>, "reason": <text>}`.
     Due,
 

@@ -1139,6 +1139,9 @@ fn continue_without_a_stopped_pick_has_nothing_to_do() {
 #[test]
 fn due_says_whether_the_next_release_is_due_and_exits_1_when_it_is_not() {
     let fixture = Fixture::new();
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
 
     let messages = command(fixture.root(), &["due"], &[]);
 
@@ -1149,9 +1152,6 @@ fn due_says_whether_the_next_release_is_due_and_exits_1_when_it_is_not() {
     )]);
     assert_eq!(exit(&messages).code, 0);
 
-    fixture.fragment("retry", "fixed", "Retried.");
-    fixture.commit("fix: Retry (#1)");
-    fixture.push();
     let shell = fixture.shell();
     let options = Options::default();
     let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
@@ -1175,6 +1175,9 @@ fn due_says_whether_the_next_release_is_due_and_exits_1_when_it_is_not() {
 #[test]
 fn due_prints_json_when_jp_prints_json() {
     let fixture = Fixture::new();
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
     let mut message = init_message(fixture.root(), &["due"]);
     message.output_format = OutputFormat::Json;
 

@@ -198,6 +198,25 @@ fn unreleased(
     Ok(unreleased)
 }
 
+/// How many fragments at the top level of the fragments directory on `main` no
+/// release branch ships; none when `main` has no fragments directory.
+///
+/// Highlights aren't counted: a release needs a fragment to list.
+pub(crate) fn unreleased_count(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+) -> Result<usize, String> {
+    let repo = &pipeline.repo;
+    let notes = repo.worktree("due", &repo.main()?)?;
+    if !pipeline.fragments_in(&notes).is_dir() {
+        return Ok(0);
+    }
+
+    let unreleased = unreleased(pipeline, releases, &notes)?;
+
+    Ok(unreleased.iter().filter(|file| !file.highlight).count())
+}
+
 /// Move each of `unreleased` into the directory of release `version` in
 /// `notes`, run `bump`, and commit it all as `request` describes.
 ///

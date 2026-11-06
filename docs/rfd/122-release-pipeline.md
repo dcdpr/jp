@@ -498,7 +498,8 @@ rather than emitting incomplete credits.
 ### Release workflow
 
 `jp release due` exits zero when `cadence` has elapsed since the latest minor or
-major release was cut and that release has been finalized.
+major release was cut, that release has been finalized, and `main` has at least
+one unreleased fragment (without one, `cut` would have nothing to release).
 
 1. **Cut**: A maintainer runs `jp release cut` when `due` succeeds (or on
    demand).

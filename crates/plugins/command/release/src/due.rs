@@ -1,18 +1,20 @@
 //! `jp release due`: whether the next release should be cut.
 //!
 //! The next release is due once `cadence` has passed since the newest minor or
-//! major release was cut, and that release has been finalized.
+//! major release was cut, that release has been finalized, and `main` has an
+//! unreleased fragment to release.
 //! A release is cut when the commit that starts it on its release branch is
 //! made.
 //! A release tagged without such a commit, such as one made before the
 //! pipeline, counts from the date of its tag.
-//! Before any release, the first one is due.
+//! Before any release, the first one is due as soon as `main` has an unreleased
+//! fragment.
 
 use chrono::DateTime;
 use semver::Version;
 use serde::Serialize;
 
-use crate::{options::Cadence, pipeline::Pipeline};
+use crate::{cut, options::Cadence, pipeline::Pipeline};
 
 /// Whether the next release is due, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -33,27 +35,50 @@ pub(crate) fn due(pipeline: &Pipeline<'_>, now: i64) -> Result<Due, String> {
     repo.fetch()?;
     let releases = repo.releases()?;
 
-    let Some(newest) = releases.newest_cut() else {
-        return Ok(Due {
+    let by_cadence = match releases.newest_cut() {
+        None => Due {
             due: true,
             reason: "No release has been cut yet, so the first one is due.".to_owned(),
-        });
-    };
-    if !releases.tagged.contains(newest) {
-        return Ok(Due {
+        },
+        Some(newest) if !releases.tagged.contains(newest) => Due {
             due: false,
             reason: format!(
                 "{newest} is in preparation, so the next release is due once it is finalized."
             ),
-        });
+        },
+        Some(newest) => {
+            let cut_at = match releases.started_at(newest) {
+                Some(at) => at,
+                None => repo.tag_date(&format!("v{newest}"))?,
+            };
+            assess(newest, cut_at, now, &pipeline.options.cadence)
+        }
+    };
+    if !by_cadence.due {
+        return Ok(by_cadence);
     }
 
-    let cut = match releases.started_at(newest) {
-        Some(at) => at,
-        None => repo.tag_date(&format!("v{newest}"))?,
-    };
+    // `cut` refuses to start a release without an unreleased fragment, so a
+    // reminder then would ask for a release nobody can make.
+    if cut::unreleased_count(pipeline, &releases)? == 0 {
+        return Ok(nothing_to_release(releases.newest_cut().is_none()));
+    }
 
-    Ok(assess(newest, cut, now, &pipeline.options.cadence))
+    Ok(by_cadence)
+}
+
+/// The answer when a release would be due but `main` has no unreleased
+/// fragment; `first` when no release has been cut yet.
+fn nothing_to_release(first: bool) -> Due {
+    let which = if first { "first" } else { "next" };
+
+    Due {
+        due: false,
+        reason: format!(
+            "`main` has no unreleased fragments, so there is nothing to release yet; the {which} \
+             release is due once a fragment is merged."
+        ),
+    }
 }
 
 /// Whether the release after `release` is due at `now`: `release` was cut at
