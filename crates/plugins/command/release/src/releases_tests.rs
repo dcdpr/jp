@@ -123,7 +123,10 @@ fn a_commit_without_a_date_does_not_read_as_a_log() {
 fn the_start_message_carries_the_trailer_it_is_read_back_by() {
     let message = start_message(&version("0.3.0"));
 
-    assert_eq!(message, "Start release 0.3.0\n\nStarts-Release: 0.3.0\n");
+    assert_eq!(
+        message,
+        "chore(release): Start release 0.3.0\n\nStarts-Release: 0.3.0\n"
+    );
     assert_eq!(
         parse_line(&format!("0000\n{OCTOBER_1}\n{message}"))
             .unwrap()

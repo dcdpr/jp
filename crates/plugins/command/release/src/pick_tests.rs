@@ -205,7 +205,7 @@ fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
     );
     assert_eq!(
         fixture.message("release/0.1~1").trim_end(),
-        "Start release 0.1.1\n\nStarts-Release: 0.1.1"
+        "chore(release): Start release 0.1.1\n\nStarts-Release: 0.1.1"
     );
     assert!(
         fixture

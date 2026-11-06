@@ -67,7 +67,7 @@ fn a_cut_starts_the_release_branch_and_files_the_notes_on_a_branch_of_their_own(
     );
     assert_eq!(
         fixture.message("release/0.1").trim_end(),
-        "Start release 0.1.0\n\nStarts-Release: 0.1.0"
+        "chore(release): Start release 0.1.0\n\nStarts-Release: 0.1.0"
     );
     assert_eq!(fixture.show("release/0.1:changelog.d"), None);
     assert!(
@@ -107,11 +107,9 @@ fn a_cut_starts_the_release_branch_and_files_the_notes_on_a_branch_of_their_own(
             .unwrap()
             .contains("current = 0.1.0")
     );
-    assert!(
-        fixture
-            .message("release-cut/v0.1.0")
-            .starts_with("Cut release 0.1.0\n\n`jp release cut` started release 0.1.0 on")
-    );
+    assert!(fixture.message("release-cut/v0.1.0").starts_with(
+        "chore(release): Cut release 0.1.0\n\n`jp release cut` started release 0.1.0 on"
+    ));
 
     // The checkout it ran from is left alone, and its worktrees are gone.
     assert_eq!(fixture.git(&["status", "--porcelain"]), "");

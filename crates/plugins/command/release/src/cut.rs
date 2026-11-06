@@ -76,7 +76,7 @@ pub(crate) fn cut(pipeline: &Pipeline<'_>, requested: Option<&Version>) -> Resul
     let destination = format!("{}/{version}/", pipeline.fragments);
     let request = ChangeRequest {
         branch: cut_branch.clone(),
-        title: format!("Cut release {version}"),
+        title: format!("chore(release): Cut release {version}"),
         body: format!(
             "`jp release cut` started release {version} on `{branch}`, from `{MAIN}` at \
              {}.\n\nThis moves the {files} it ships into `{destination}`, where its notes are \

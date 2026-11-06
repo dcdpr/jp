@@ -162,7 +162,7 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
 
 /// The message of the commit that starts release `version` on its branch.
 pub(crate) fn start_message(version: &Version) -> String {
-    format!("Start release {version}\n\n{STARTS_RELEASE}: {version}\n")
+    format!("chore(release): Start release {version}\n\n{STARTS_RELEASE}: {version}\n")
 }
 
 /// When the tag object `text`, as `git cat-file tag` prints it, was made, in

@@ -501,8 +501,11 @@ fn change_request(
 ) -> ChangeRequest {
     let first = commits.first().map_or("", |commit| short(&commit.hash));
     let title = match commits.len() {
-        1 => format!("Pick {first} into release {version}"),
-        count => format!("Pick {first} and {} more into release {version}", count - 1),
+        1 => format!("chore(release): Pick {first} into release {version}"),
+        count => format!(
+            "chore(release): Pick {first} and {} more into release {version}",
+            count - 1
+        ),
     };
     let list: Vec<String> = commits
         .iter()
