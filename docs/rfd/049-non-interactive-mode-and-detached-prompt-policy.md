@@ -341,5 +341,5 @@ as `has_client`), and Phase 1.
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 048]: 048-four-channel-output-model.md
-[RFD 051]: 051-sub-agent-workflows.md
+[RFD 051]: 051-sub-agent-workflows-with-local-tools.md
 [RFD 104]: 104-terminal-capability-and-promptability-signals.md

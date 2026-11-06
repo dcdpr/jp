@@ -694,7 +694,7 @@ That is out of scope here.
   `ConversationEvent` JSON)
 
 [RFD 047]: 047-editor-and-path-access-for-conversations.md
-[RFD 051]: 051-sub-agent-workflows.md
+[RFD 051]: 051-sub-agent-workflows-with-local-tools.md
 [RFD 054]: 054-split-conversation-config-and-events.md
 [RFD 064]: 064-non-destructive-conversation-compaction.md
 [RFD 067]: 067-resource-deduplication-for-token-efficiency.md

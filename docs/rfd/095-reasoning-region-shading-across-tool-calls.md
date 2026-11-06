@@ -1,4 +1,4 @@
-# RFD 095: Reasoning-region shading across tool calls
+# RFD 095: Reasoning-Region Shading Across Tool Calls
 
 - **Status**: Implemented
 - **Category**: Design

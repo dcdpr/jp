@@ -1,4 +1,4 @@
-# RFD 068: Forced tool retry without reasoning
+# RFD 068: Forced Tool Retry Without Reasoning
 
 - **Status**: Implemented
 - **Category**: Design

@@ -1,4 +1,4 @@
-# RFD D30: Multi-question ask_user forms with branching and cancel UX
+# RFD D30: Multi-Question ask_user Forms with Branching and Cancel UX
 
 - **Status**: Draft
 - **Category**: Design

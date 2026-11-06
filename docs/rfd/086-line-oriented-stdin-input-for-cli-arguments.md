@@ -1,4 +1,4 @@
-# RFD 086: Line-oriented stdin input for CLI arguments
+# RFD 086: Line-Oriented Stdin Input for CLI Arguments
 
 - **Status**: Implemented
 - **Category**: Design

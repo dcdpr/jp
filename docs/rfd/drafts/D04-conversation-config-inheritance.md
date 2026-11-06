@@ -1,4 +1,4 @@
-# RFD D04: Conversation Config Inheritance for `--cfg`
+# RFD D04: Conversation Config Inheritance
 
 - **Status**: Draft
 - **Category**: Design

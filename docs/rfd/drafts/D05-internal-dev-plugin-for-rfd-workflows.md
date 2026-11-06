@@ -852,7 +852,7 @@ Depends on: Phase 6.
   protocol-based query delegation.
 
 [RFD 001]: ../001-jp-rfd-process.md
-[RFD 003]: ../003-jp-assisted-rfds.md
+[RFD 003]: ../003-jp-assisted-rfd-writing.md
 [RFD 050]: ../050-scripting-ergonomics-for-conversation-management.md
 [RFD 072]: ../072-command-plugin-system.md
 [RFD 116]: ../116-shareable-rfd-ticket-and-site-tooling.md

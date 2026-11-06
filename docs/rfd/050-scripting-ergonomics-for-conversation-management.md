@@ -446,4 +446,4 @@ Can be merged independently of Phase 1–2.
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 038]: 038-config-reset-keywords.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 051]: 051-sub-agent-workflows.md
+[RFD 051]: 051-sub-agent-workflows-with-local-tools.md

@@ -1,4 +1,4 @@
-# RFD 081: Decompose tool enable into state and allow_toggle
+# RFD 081: Decompose Tool Enable into state and allow_toggle
 
 - **Status**: Implemented
 - **Category**: Design

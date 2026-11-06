@@ -239,4 +239,4 @@ Can be merged independently.
   features to build sub-agent workflows with local tools.
 
 [RFD 039]: 039-conversation-trees.md
-[RFD 051]: 051-sub-agent-workflows.md
+[RFD 051]: 051-sub-agent-workflows-with-local-tools.md

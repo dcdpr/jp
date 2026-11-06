@@ -561,6 +561,6 @@ Wire sanitization into `cli/lib.rs`:
 
 [#404]: https://github.com/dcdpr/jp/issues/404
 [#450]: https://github.com/dcdpr/jp/pull/450
-[RFD 006]: 006-turn-scoped-mutations.md
+[RFD 006]: 006-turn-scoped-stream-mutations.md
 [RFD 020]: 020-parallel-conversations.md
 [RFD 023]: 023-resumable-conversation-turns.md

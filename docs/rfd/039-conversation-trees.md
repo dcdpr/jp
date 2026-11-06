@@ -650,6 +650,6 @@ Depends on Phase 1.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 038]: 038-config-reset-keywords.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
-[RFD 046]: 046-nested-workspace-projection.md
-[RFD 051]: 051-sub-agent-workflows.md
+[RFD 046]: 046-nested-workspace-projection-for-conversation-trees.md
+[RFD 051]: 051-sub-agent-workflows-with-local-tools.md
 [RFD 087]: 087-session-scoped-active-workspace.md

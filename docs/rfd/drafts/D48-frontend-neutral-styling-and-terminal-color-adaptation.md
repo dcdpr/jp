@@ -439,7 +439,7 @@ exercises the shared boundary.
 - [color256]: an informative writeup on generating 256-color palettes from
   base16 themes.
 
-[RFD 004]: ../004-streaming-md-parser-renderer.md
+[RFD 004]: ../004-streaming-markdown-parser-and-terminal-renderer-in-jp_md.md
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 075]: ../075-tool-sandbox-and-access-policy.md
 [RFD 084]: ../084-configurable-markdown-element-coloring.md
