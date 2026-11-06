@@ -461,8 +461,8 @@ impl Provider for Anthropic {
             let failure = match timeout(MODEL_LOOKUP_TIMEOUT, client.models().get(name)).await {
                 Ok(Ok(model)) => return map_model(model),
 
-                // A spent or refused credential would be refused by the request
-                // too, so the chain moves on here, and an exhausted chain fails.
+                // Credential errors will also fail the chat request, so advance
+                // the credential chain now or fail if it is exhausted.
                 Ok(Err(error)) if is_switchable(&error) => {
                     attempt = self.advance_or_fail(&attempt, error, name).await?;
                     continue;
@@ -2622,10 +2622,9 @@ fn derive_features(capabilities: &types::ModelCapabilities) -> Vec<&'static str>
     features
 }
 
-/// The details [`MODEL_OVERRIDES`] holds for `name`, for when the API reported
-/// nothing.
+/// Build [`ModelDetails`] for `name` from [`MODEL_OVERRIDES`] alone.
 ///
-/// A model absent from the table gets empty details.
+/// Returns [`ModelDetails::empty`] if `name` is not in the table.
 fn table_details(name: &Name) -> Result<ModelDetails> {
     let id = (PROVIDER, name.as_ref()).try_into()?;
     let Some(overrides) = model_overrides(name.as_ref()) else {

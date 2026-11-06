@@ -37,8 +37,6 @@ async fn a_lookup_still_running_at_the_timeout_reports_nothing() {
     assert_eq!(advisory_lookup(&id("m"), stalled).await, None);
 }
 
-/// The timeout bounds a slow connection, not an ordinary one: a lookup that
-/// answers inside it is used.
 #[tokio::test(start_paused = true)]
 async fn a_lookup_answering_before_the_timeout_is_used() {
     let slow = async {

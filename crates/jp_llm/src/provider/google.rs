@@ -546,16 +546,16 @@ fn map_model(model: types::Model) -> ModelDetails {
     details
 }
 
-/// The details [`MODEL_OVERRIDES`] holds for `id`, for when the API reported
-/// nothing.
+/// Build [`ModelDetails`] for `id` from [`MODEL_OVERRIDES`] alone.
 ///
-/// A model absent from the table gets empty details.
+/// Returns [`ModelDetails::empty`] if `id` is not in the table.
 fn table_details(id: ModelIdConfig) -> ModelDetails {
     let mut details = model_overrides(&id.name)
         .cloned()
         .unwrap_or_else(|| ModelDetails::empty(id.clone()));
 
-    // Reported under the id the caller named, which may be an alias.
+    // Preserve the requested ID when `id.name` matched an alias entry in
+    // `MODEL_OVERRIDES`.
     details.id = id;
     details
 }

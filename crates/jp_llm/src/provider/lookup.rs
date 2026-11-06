@@ -1,11 +1,11 @@
-//! Asking a provider about a model without letting the answer hold up a
-//! request.
+//! Non-blocking model metadata lookups.
 //!
-//! What a provider reports about a model (context window, output limit,
-//! reasoning support) fills in details a request can go ahead without.
-//! A lookup that fails, or takes longer than [`MODEL_LOOKUP_TIMEOUT`], is
-//! logged and treated as reporting nothing, and the provider falls back to its
-//! built-in table, or to empty details for a model the table does not know.
+//! `advisory_lookup` and `find_listed` bound provider model queries to
+//! [`MODEL_LOOKUP_TIMEOUT`].
+//! Because model metadata (context window, output token limit, reasoning
+//! support) is optional for sending a chat request, a lookup that fails or
+//! times out logs a warning and returns `None` so the caller can fall back to
+//! built-in model tables or [`ModelDetails::empty`].
 
 use std::{fmt::Display, time::Duration};
 
@@ -14,14 +14,14 @@ use tracing::warn;
 
 use crate::{error::Result, model::ModelDetails};
 
-/// How long a model lookup may take before the request goes ahead without it.
+/// Maximum duration to wait for a provider model metadata lookup.
 pub(crate) const MODEL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Why a lookup still running at [`MODEL_LOOKUP_TIMEOUT`] reported nothing.
+/// Warning reason logged when a model lookup exceeds [`MODEL_LOOKUP_TIMEOUT`].
 pub(crate) const TIMED_OUT: &str = "no answer within the lookup timeout";
 
-/// Run `lookup`, yielding `None` when it fails or is still running at
-/// [`MODEL_LOOKUP_TIMEOUT`].
+/// Run `lookup` with a [`MODEL_LOOKUP_TIMEOUT`] timeout, logging a warning and
+/// returning `None` if it fails or times out.
 pub(crate) async fn advisory_lookup<T, E: Display>(
     model: &ModelIdConfig,
     lookup: impl Future<Output = std::result::Result<T, E>>,
@@ -39,10 +39,10 @@ pub(crate) async fn advisory_lookup<T, E: Display>(
     }
 }
 
-/// Find `model` in a provider's `listing`.
+/// Find `model` in a provider's model listing.
 ///
-/// `None` when the listing fails, is still running at [`MODEL_LOOKUP_TIMEOUT`],
-/// or does not list the model.
+/// Returns `None` if `listing` fails, exceeds [`MODEL_LOOKUP_TIMEOUT`], or does
+/// not contain `model`.
 pub(crate) async fn find_listed(
     model: &ModelIdConfig,
     listing: impl Future<Output = Result<Vec<ModelDetails>>>,
@@ -53,7 +53,7 @@ pub(crate) async fn find_listed(
         .find(|listed| &listed.id == model)
 }
 
-/// Log a lookup that reported nothing about `model`, and why.
+/// Log a warning when a model lookup for `model` fails or times out.
 pub(crate) fn skipped(model: &ModelIdConfig, reason: &dyn Display) {
     warn!(
         %model,
