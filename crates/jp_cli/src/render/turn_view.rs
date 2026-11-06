@@ -349,9 +349,7 @@ impl TurnView {
         self.model_id = model_id;
     }
 
-    /// Name a different model on the assistant headers rendered from here on.
-    ///
-    /// A header already on screen keeps the model it named.
+    /// Set the model identifier shown on subsequent assistant role headers.
     pub fn set_model_id(&mut self, model_id: Option<String>) {
         self.model_id = model_id;
     }

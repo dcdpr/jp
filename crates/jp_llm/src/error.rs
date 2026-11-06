@@ -781,20 +781,17 @@ pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
         || lower.contains("too many tokens")
 }
 
-/// Whether a `404` response body says the server does not serve the requested
+/// Check whether a `404` response body indicates an unknown or unavailable
 /// model.
 ///
-/// A `404` alone is not enough: a `base_url` with the wrong path gets one too,
-/// from the web framework (`{"detail":"Not Found"}`), and that needs a
-/// different fix than picking another model.
-/// The body has to name the model:
+/// A `404` status alone is ambiguous because a misconfigured `base_url` path
+/// also returns `404` (e.g. `{"detail":"Not Found"}` from the HTTP server).
+/// Matches both nested (`{"error": {...}}`) and flat JSON error envelopes for:
 ///
 /// - OpenAI: `"code": "model_not_found"`
 /// - Cerebras: `"code": "model_archived"`
-/// - vLLM: `"param": "model"`, or on older servers `"type": "NotFoundError"`
-///   with a message saying the model does not exist
-///
-/// Both the nested (`{"error": {...}}`) and the flat envelope are read.
+/// - vLLM: `"param": "model"`, or `"type": "NotFoundError"` with a `"does not
+///   exist"` message on older servers
 pub(crate) fn looks_like_unknown_model(body: &str) -> bool {
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
         return false;

@@ -104,7 +104,6 @@ async fn a_flat_error_envelope_reaches_the_message() {
     );
 }
 
-/// vLLM names the rejected field in `param`.
 #[tokio::test]
 async fn a_vllm_404_naming_the_model_is_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(
@@ -155,10 +154,6 @@ async fn an_archived_cerebras_model_is_an_unknown_model() {
     assert_eq!(err.kind, StreamErrorKind::UnknownModel);
 }
 
-/// A `base_url` pointing at the wrong path also gets a 404, from the web
-/// framework rather than the model registry.
-/// Calling that an unknown model would send the user to pick a model when their
-/// URL is wrong.
 #[tokio::test]
 async fn a_404_for_an_unknown_route_is_not_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(404, r#"{"detail":"Not Found"}"#)).await;
@@ -166,8 +161,6 @@ async fn a_404_for_an_unknown_route_is_not_an_unknown_model() {
     assert_eq!(err.kind, StreamErrorKind::Other);
 }
 
-/// A model-related rejection that is not a 404 is about the request, not about
-/// whether the server serves the model.
 #[tokio::test]
 async fn a_400_naming_the_model_is_not_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(

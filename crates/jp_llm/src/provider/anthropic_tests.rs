@@ -530,7 +530,6 @@ fn test_a_not_found_model_is_an_unknown_model() {
     assert!(!error.is_retryable());
 }
 
-/// A wrong endpoint is also `not_found_error`, but it names no model.
 #[test]
 fn test_a_not_found_route_is_not_an_unknown_model() {
     let error = StreamError::from(AnthropicError::Api(api_error(
