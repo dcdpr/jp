@@ -41,7 +41,6 @@ fn query(events: ConversationStream, tools: Vec<ToolDefinition>) -> ChatQuery {
     }
 }
 
-/// The request body for a single "Hello" turn under `reasoning`.
 fn body_with_reasoning(reasoning: PartialReasoningConfig) -> Value {
     let mut events = ConversationStream::new_test().with_turn("Hello");
     let mut delta = jp_config::PartialAppConfig::empty();
@@ -70,8 +69,8 @@ fn map_model_keeps_full_id_and_reads_max_model_len() {
 
 #[test]
 fn create_request_plain_message() {
-    // The test config carries no reasoning setting, so nothing about thinking
-    // is sent and the chat template's own default applies.
+    // Reasoning is unset in the default test config, so no reasoning fields
+    // are sent.
     let events = ConversationStream::new_test().with_turn("Hello");
 
     let (body, is_structured, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
@@ -153,7 +152,7 @@ fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
         body["chat_template_kwargs"],
         json!({ "enable_thinking": true, "thinking": true })
     );
-    // `auto` leaves the effort to the template rather than picking one.
+    // `Auto` enables thinking without setting an effort level.
     assert!(body.get("reasoning_effort").is_none());
     assert!(body.get("reasoning_format").is_none());
 }
@@ -193,7 +192,6 @@ fn create_request_sends_the_effort_level() {
 
 #[test]
 fn create_request_maps_xlow_to_minimal() {
-    // vLLM's effort vocabulary has no `xlow`; `minimal` is its lowest level.
     let body = body_with_reasoning(effort(ReasoningEffort::Xlow));
 
     assert_eq!(body["reasoning_effort"], json!("minimal"));

@@ -260,18 +260,15 @@ fn create_request(
 
 /// Add the reasoning fields for `parameters` to the request `body`.
 ///
-/// With reasoning unconfigured nothing is sent, so the served model's chat
-/// template and the server's `--default-chat-template-kwargs` decide.
+/// When `parameters.reasoning` is `None`, no reasoning fields are added,
+/// leaving thinking to the model's chat template and the server's
+/// `--default-chat-template-kwargs`.
 ///
-/// A configured effort is sent as `reasoning_effort`, which vLLM translates for
-/// the chat template (through `--reasoning-effort-map` where the operator set
-/// one).
-/// The thinking switch is also sent as chat template kwargs, for servers that
-/// do not translate the effort.
-/// Templates disagree on its name: Qwen3's reads `enable_thinking`, and the
-/// `DeepSeek` V3.1 family's reads `thinking`.
-/// Both are sent with the same value, and a template ignores the one it does
-/// not declare.
+/// When reasoning is configured, named effort levels set `reasoning_effort`
+/// (which vLLM translates for the chat template via `--reasoning-effort-map`),
+/// token budgets set `thinking_token_budget`, and `Auto` leaves both unset.
+/// `chat_template_kwargs` is always set alongside the effort for servers that
+/// do not translate `reasoning_effort`.
 fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &ParametersConfig) {
     let effort = match parameters.reasoning {
         Some(ReasoningConfig::Off) => ReasoningEffort::None,
@@ -292,6 +289,7 @@ fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &Paramete
             body["thinking_token_budget"] = json!(tokens);
             None
         }
+        // vLLM's effort vocabulary has no `xlow`; `minimal` is its lowest active level.
         ReasoningEffort::Xlow => Some("minimal"),
         ReasoningEffort::Low => Some("low"),
         ReasoningEffort::Medium => Some("medium"),
@@ -306,8 +304,11 @@ fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &Paramete
     body["chat_template_kwargs"] = thinking_kwargs(true);
 }
 
-/// The chat template kwargs that switch thinking on or off, under every name a
-/// served template is known to read.
+/// Build `chat_template_kwargs` to enable or disable thinking.
+///
+/// Qwen3 templates read `enable_thinking` and `DeepSeek` V3.1 templates read
+/// `thinking`.
+/// Templates ignore unknown keys, so both are sent.
 fn thinking_kwargs(enabled: bool) -> Value {
     json!({ "enable_thinking": enabled, "thinking": enabled })
 }
