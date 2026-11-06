@@ -76,6 +76,36 @@ async fn a_failed_lookup_of_a_model_the_table_does_not_know_gives_empty_details(
 }
 
 #[test(tokio::test)]
+async fn a_failed_lookup_with_reasoning_unset_requests_summarized_thinking() {
+    let server = MockServer::start_async().await;
+    let provider = provider_at(&server);
+
+    let details = provider
+        .model_details(&"claude-opus-9-9".parse().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(details.reasoning, None);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+    let body = provider.request_value(&details, query).unwrap();
+
+    assert_eq!(
+        body["thinking"],
+        serde_json::json!({ "type": "adaptive", "display": "summarized" })
+    );
+}
+
+#[test(tokio::test)]
 async fn a_refused_credential_still_fails_the_lookup() {
     let server = MockServer::start_async().await;
     server

@@ -2198,6 +2198,22 @@ fn create_request(
                 );
             }
         }
+    } else if model.reasoning.is_none() && parameters.reasoning.is_none() {
+        // Support is unknown, as after a failed model lookup, and reasoning is
+        // unconfigured. Infer adaptive for the same reason as the configured
+        // case above: sending nothing takes the provider default, which on
+        // current models thinks with `display: "omitted"` and bills reasoning
+        // the transcript never receives. No effort is sent, so the API's
+        // default effort applies.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; requesting summarized adaptive thinking."
+        );
+
+        builder.thinking(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        });
     } else if model.features.contains(&BETWEEN_TOOLS_THINKING) {
         // Reasoning is off on a model that rejects `thinking: disabled`.
         // `between_tools` is the lowest setting it accepts; omitting the field
