@@ -521,7 +521,8 @@ locally without GitHub, and no workflow pushes commits to any branch:
 | Push to `main` or `release/*` | Test and lint suite (`just changelog-ci` runs only on `main`, since release branches lack fragments) | None                                                                       |
 | Daily schedule                | `just release-due`                                                                                   | Opens an issue labelled `release` if a release is due and none exists      |
 | Push to `main`                | Documentation site build ([On the site](#on-the-site))                                               | Deploys the site                                                           |
-| Push of a `v*` tag            | Binary distribution ([RFD 123])                                                                  | Publishes `jp` binaries and the GitHub Release; closes the `release` issue |
+| Push of a `v*` tag            | Binary distribution ([RFD 123])                                                                  | Publishes `jp` binaries and the GitHub Release                             |
+| Push of a `vX.Y.0` tag        | Release reminder cleanup (a minor or major release answers the reminder)                             | Closes the `release` issue                                                 |
 
 Because maintainers push branches and tags from their own machines, downstream
 workflows trigger normally.
@@ -743,7 +744,7 @@ Depends on Phase 1.
 
 Implement `jp release due`, add the `just release-due` recipe, and add the daily
 GitHub Actions workflow that opens a `release`-labelled reminder issue (closed
-automatically when the next `v*` tag is pushed).
+automatically when the tag of the next minor or major release is pushed).
 Depends on Phase 2.
 
 ### Repository settings

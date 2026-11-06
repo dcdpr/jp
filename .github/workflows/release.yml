@@ -4,9 +4,11 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
-  # The push of a release's tag, which `jp release finalize` makes.
+  # The push of a minor or major release's tag, which `jp release finalize`
+  # makes. A patch release is no answer to the reminder: `due` counts from the
+  # last minor or major release, so it would open again the next day.
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.0"]
 env:
   CARGO_TERM_COLOR: always
   JUST_TIMESTAMP: true
@@ -109,7 +111,7 @@ jobs:
             gh label create release --color 0E8A16 --description "A release is due"
           fi
 
-          body=$(printf '%s\n\n%s\n' "$REASON" 'Cut it with `jp release cut`, prepare its notes on `main`, and finalize it with `jp release finalize <version>`. The push of its tag closes this issue.')
+          body=$(printf '%s\n\n%s\n' "$REASON" 'Cut it with `jp release cut`, prepare its notes on `main`, and finalize it with `jp release finalize <version>`. The push of its tag closes this issue; a patch release does not.')
           gh issue create --title "Cut the next release" --label release --body "$body"
   close:
     name: Close the release reminder
