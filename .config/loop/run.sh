@@ -34,6 +34,7 @@ TURN_TIMEOUT=3600        # per-turn timeout in seconds; 0 disables
 ROTATE_COMMITS=10        # start a new conversation after this many commits
 ROTATE_EVENTS=40         # start a new conversation after this many events
 ROTATE_FAILURES=2        # start a new conversation after this many failed turns
+ROTATE_ON_TARGET=0       # 1 = start a new conversation whenever the target changes
 MAX_FAILURES=5           # stop after this many consecutive non-limit failures
 GATE=1                   # run the mission's gate between turns
 COMPACT=''               # `--compact` spec for every turn; empty passes none
@@ -445,6 +446,7 @@ discard_iteration() {
 CONV=""                   # current conversation id
 CONV_TITLE=""
 CONV_BASE=$BASELINE       # HEAD when the current conversation started
+CONV_TARGET=""            # the target the current conversation started on
 CONV_INDEX=0
 ITER=0
 FAILURES=0                # consecutive
@@ -547,7 +549,10 @@ while :; do
         commits_here=$(git rev-list --count "$CONV_BASE..HEAD")
         events_here=$(event_count_for_id "$CONV")
         events_here=${events_here:-0}
-        if [[ $commits_here -ge $ROTATE_COMMITS ]]; then
+        if [[ $ROTATE_ON_TARGET -eq 1 && $TARGET != "$CONV_TARGET" ]]; then
+            ROTATE_REASON="new target"
+            CONV=""
+        elif [[ $commits_here -ge $ROTATE_COMMITS ]]; then
             ROTATE_REASON="$commits_here commits"
             CONV=""
         elif [[ $events_here -ge $ROTATE_EVENTS ]]; then
@@ -592,8 +597,16 @@ while :; do
         CONV_INDEX=$((CONV_INDEX + 1))
         CONV_TITLE="$MISSION $RUN_ID #$CONV_INDEX"
         CONV_BASE=$(git rev-parse HEAD)
+        CONV_TARGET=$TARGET
         echo "$MISSION: [$seq] new conversation ($ROTATE_REASON): $CONV_TITLE" >&2
         jp_target=(--new --local --title "$CONV_TITLE")
+        # Arguments such as `--attach` become part of the conversation's config,
+        # so they are passed once, when the conversation starts.
+        if declare -F conversation_args >/dev/null; then
+            while IFS= read -r arg; do
+                jp_target+=("$arg")
+            done < <(conversation_args "$TARGET")
+        fi
     else
         jp_target=(--id "$CONV")
     fi
@@ -670,6 +683,7 @@ while :; do
     DISCARDED=0
     gate_text="skipped"
     if [[ $GATE -eq 1 && -n $GATE_BIN ]]; then
+        export LOOP_TURN_STATUS=$rc
         set +e
         gate_raw=$("$GATE_BIN" 2>&1)
         gate_rc=$?

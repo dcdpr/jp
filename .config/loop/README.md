@@ -58,6 +58,7 @@ A mission directory contains:
 | `ROTATE_COMMITS`          | `10`    | Start a new conversation after this many commits.                         |
 | `ROTATE_EVENTS`           | `40`    | Start a new conversation after this many conversation events.             |
 | `ROTATE_FAILURES`         | `2`     | Start a new conversation after this many consecutive failed turns.        |
+| `ROTATE_ON_TARGET`        | `0`     | Set to `1` to start a new conversation whenever `next-target` changes.    |
 | `SNAPSHOT_FILES`          | `()`    | Files under `state/` copied into the run's `snapshots/` before each turn. |
 | `GATE_LABEL`              | `gate`  | Label for the gate result in the post-turn summary.                       |
 | `DISCARD_ON_GATE_FAILURE` | `0`     | Set to `1` to reset the branch and working tree when the gate fails.      |
@@ -74,6 +75,9 @@ summary as `$1`; `repair_prompt` receives the gate output as `$1`.
 `target_prompt` is optional and receives the `next-target` output as `$1`.
 `init_state` is optional and runs once per run after the state directory is
 created, to initialize files such as `LEDGER.md`.
+`conversation_args` is optional, receives the current target as `$1`, and prints
+extra `jp query` arguments, one per line, for the first turn of each new
+conversation, such as `--attach=<path>`.
 
 The harness provides `fill`, which reads a template from stdin and replaces
 `@RUN_ID@`, `@BASELINE@`, and `@STATE@` with the current run's values.
@@ -84,6 +88,7 @@ The harness provides `fill`, which reads a template from stdin and replaces
 `LOOP_ROOT`, `LOOP_STATE`, `LOOP_RUN_ID`, `LOOP_RUN_DIR`, `LOOP_BASELINE`, and
 the per-iteration variables `LOOP_ITERATION` and `LOOP_ITERATION_BASE` (the
 `HEAD` commit at the start of the iteration).
+`gate` also receives `LOOP_TURN_STATUS`, the exit status of the turn it checks.
 
 ## Discarding an iteration
 
