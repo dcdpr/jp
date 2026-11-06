@@ -60,8 +60,28 @@ pub(crate) fn cut(pipeline: &Pipeline<'_>, requested: Option<&Version>) -> Resul
             "`{MAIN}` has no unreleased fragments, so there is nothing to release."
         ));
     }
-    let breaking = unreleased.iter().any(|file| file.breaking);
-    let version = releases.next_cut(breaking, requested)?;
+    let breaking: Vec<&str> = unreleased
+        .iter()
+        .filter(|file| file.breaking)
+        .map(|file| file.path.as_str())
+        .collect();
+    let version = releases.next_cut(!breaking.is_empty(), requested)?;
+    if let Some(first) = breaking.first()
+        && !releases::can_break(&version)
+    {
+        let which = match breaking.len() {
+            1 => format!("{}/{first} has an upgrade section", pipeline.fragments),
+            count => format!(
+                "{}/{first} and {} more have upgrade sections",
+                pipeline.fragments,
+                count - 1
+            ),
+        };
+        return Err(format!(
+            "{version} is a minor release from 1.0 on, which can't ship a change that requires \
+             users to act, and {which}. Leave out `--version` to cut the next major release."
+        ));
+    }
 
     let branch = releases::branch(&version);
     let cut_branch = format!("release-cut/v{version}");

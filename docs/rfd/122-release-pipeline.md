@@ -149,8 +149,10 @@ exists.
 Tags are annotated, and a release's date comes from its tag timestamp.
 
 Cutting from `main` starts a minor release, or a major release (from `1.0`
-onward) when an unreleased fragment has an upgrade section; `--version`
-overrides the computed version.
+onward) when an unreleased fragment has an upgrade section.
+`--version` overrides the computed version, except that from `1.0` onward it
+cannot name a minor release while an unreleased fragment has an upgrade section;
+`cut` refuses that, as `pick` does.
 The next version is computed from the highest tag or release in preparation, so
 running `cut` while a release is in preparation cuts the subsequent version.
 Patch releases are created only on release branches via `pick` ([Patch
@@ -693,7 +695,8 @@ docs-build step that ran `jilu` are removed.
   compiling it.
 - **Cherry-picking a breaking change into a non-breaking release**: `pick`
   rejects fragments with an upgrade section when targeting a patch release (or a
-  minor release from `1.0` onward).
+  minor release from `1.0` onward), and `cut --version` rejects such a minor
+  release.
   If a breaking fix must ship, maintainers must abandon the in-preparation
   release and cut a major release instead.
 - **Abandoning a release in preparation**: There is no dedicated `abandon`

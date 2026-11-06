@@ -199,6 +199,44 @@ fn from_1_0_on_a_breaking_change_cuts_a_major_release() {
     );
 }
 
+/// A requested version is held to the same rule a picked one is: from 1.0 on,
+/// only a major release ships a change that requires users to act.
+#[test]
+fn a_requested_minor_release_from_1_0_on_refuses_a_breaking_change() {
+    let fixture = Fixture::new();
+    fixture.git(&["tag", "v1.2.0"]);
+    fixture.git(&["push", "--quiet", "origin", "v1.2.0"]);
+    fixture.write(
+        "changelog.d/manifest.md",
+        "---\ntype: changed\n---\nPlugins are found by their manifest.\n\nBREAKING CHANGE: \
+         Plugins need a manifest\n\nRebuild them.\n",
+    );
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("feat!: Route plugins by manifest (#3)");
+    fixture.push();
+    let shell = fixture.shell();
+    let options = options();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
+
+    assert_eq!(
+        cut(&pipeline, Some(&version("1.3.0"))),
+        Err(
+            "1.3.0 is a minor release from 1.0 on, which can't ship a change that requires users \
+             to act, and changelog.d/manifest.md has an upgrade section. Leave out `--version` to \
+             cut the next major release."
+                .to_owned()
+        )
+    );
+    assert_eq!(branches(&fixture), ["main"]);
+
+    // A major release may.
+    let said = cut(&pipeline, Some(&version("2.0.0"))).unwrap();
+    assert!(
+        said.starts_with("Started release 2.0.0 on release/2.0,"),
+        "{said}"
+    );
+}
+
 #[test]
 fn a_main_without_unreleased_fragments_has_nothing_to_release() {
     let fixture = Fixture::new();
