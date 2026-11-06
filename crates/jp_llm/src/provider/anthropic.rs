@@ -2190,13 +2190,20 @@ fn create_request(
                 );
             }
         }
-    } else if model.reasoning.is_none() && parameters.reasoning.is_none() {
+    } else if model.reasoning.is_none()
+        && parameters.reasoning.is_none()
+        && !model.served_by_subscription()
+    {
         // Support is unknown, as after a failed model lookup, and reasoning is
         // unconfigured. Infer adaptive for the same reason as the configured
         // case above: sending nothing takes the provider default, which on
         // current models thinks with `display: "omitted"` and bills reasoning
         // the transcript never receives. No effort is sent, so the API's
         // default effort applies.
+        //
+        // Not on the Claude Code route, where support is never reported and
+        // Claude Code picks the thinking mode when none is sent. Inferring
+        // adaptive there would reach models that reject it, such as Haiku 4.5.
         debug!(
             id = %model.id,
             inferred = true,
