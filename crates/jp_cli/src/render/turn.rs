@@ -152,15 +152,27 @@ impl TurnRenderer {
     /// index; for a compacted view a summary turn carries the range it
     /// replaced.
     pub fn render_turn(&mut self, turn: &Turn<'_>, origin: TurnOrigin) {
-        if matches!(self.source, ConfigSource::PerTurn)
-            && let Some(partial) = turn.iter().next().map(|e| &e.config)
-        {
+        let per_turn = matches!(self.source, ConfigSource::PerTurn);
+        let mut model_id = None;
+        if per_turn && let Some(partial) = turn.iter().next().map(|e| &e.config) {
+            model_id = render_model_id(&partial.assistant.model.id);
             self.reconfigure(partial);
         }
 
         self.view.set_turn_detail(turn_detail(turn, origin));
 
         for event_with_cfg in turn {
+            // A model picked after the turn's request, such as from the
+            // unknown-model picker, is a config delta inside the turn. The
+            // events after it came from that model.
+            if per_turn {
+                let event_model_id = render_model_id(&event_with_cfg.config.assistant.model.id);
+                if event_model_id != model_id {
+                    self.view.set_model_id(event_model_id.clone());
+                    model_id = event_model_id;
+                }
+            }
+
             if self.user_only
                 && !matches!(
                     event_with_cfg.event.kind,
