@@ -280,8 +280,8 @@ async fn drive_turn(
     // the model is looked up has to reach the receiver this loop goes on to
     // read, not one that was dropped on the way.
 
-    // Owned, because a model the provider refuses can be swapped for one the
-    // user picks, for the rest of the turn.
+    // Owned copy so interactive model fallback can replace the active model
+    // mid-turn.
     let mut model = model.clone();
 
     let mut turn_state = TurnState::default();
@@ -684,9 +684,10 @@ async fn drive_turn(
                                         .await);
                                     }
 
-                                    // A refused model is the same on every
-                                    // attempt, so rather than end the turn,
-                                    // offer the ones the provider serves.
+                                    // `UnknownModel` is non-retryable; in
+                                    // interactive mode, let the user pick an
+                                    // available model from the provider and
+                                    // restart the request.
                                     if interactive
                                         && e.kind == StreamErrorKind::UnknownModel
                                         && let Some(picked) = pick_served_model(
@@ -1484,11 +1485,11 @@ fn flush_rendered_arguments(coordinator: &mut ToolCoordinator, conv: &mut Conver
     });
 }
 
-/// Ask the user which of the provider's models to use in place of `model`,
-/// which the provider refused.
+/// Prompt the user to select an available model from `provider` to replace
+/// `model`.
 ///
-/// Returns `None` when the provider lists nothing else to offer, or the user
-/// dismissed the prompt.
+/// Returns `None` if fetching the model list fails, no other models are
+/// available, or the user cancels the prompt.
 async fn pick_served_model(
     provider: &dyn Provider,
     model: &ModelDetails,
@@ -1528,7 +1529,8 @@ async fn pick_served_model(
     candidates.into_iter().nth(picked)
 }
 
-/// Record `model` as the conversation's model from here on, the way `-m` would.
+/// Append a config delta setting the conversation's `assistant.model.id` to
+/// `model`.
 fn record_model(conv: &mut ConversationMut, model: &ModelDetails) {
     let mut delta = PartialAppConfig::empty();
     delta.assistant.model.id = PartialModelIdOrAliasConfig::Id(model.id.to_partial());
@@ -1536,12 +1538,11 @@ fn record_model(conv: &mut ConversationMut, model: &ModelDetails) {
     conv.update_events(|stream| stream.add_config_delta(delta));
 }
 
-/// Name the models the provider does serve, when `error` is it refusing
-/// `model`.
+/// Convert an unknown-model [`LlmError`] into [`Error::UnknownModel`] with the
+/// provider's available models.
 ///
-/// Any other error is returned unchanged.
-/// The listing is a second request; when it fails, the rejection is still
-/// reported, without alternatives.
+/// Returns other errors unchanged.
+/// If fetching the model list fails, `available` is left empty.
 async fn with_served_models(error: Error, provider: &dyn Provider, model: &ModelDetails) -> Error {
     let unknown_model = match &error {
         Error::Llm(LlmError::UnknownModel(_)) => true,

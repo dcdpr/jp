@@ -1452,9 +1452,9 @@ impl From<GeminiError> for Error {
     }
 }
 
-/// The model a Gemini API error says is not served, if it says that.
+/// Extract the rejected model name from a Gemini `404` unknown-model error.
 ///
-/// Gemini answers an unknown model with a `404` whose message reads
+/// Gemini reports unknown models with a `404` status and a message matching
 /// `models/<name> is not found ... Call ListModels ...`.
 fn unknown_model_name(api: &Value) -> Option<&str> {
     if api.get("status").and_then(Value::as_u64) != Some(404) {

@@ -538,8 +538,7 @@ impl TurnCoordinator {
         self.view.enter_tool_call_region(chrome_visible)
     }
 
-    /// Name `model_id` on the assistant headers rendered from here on, when the
-    /// turn moves to another model.
+    /// Set the model identifier shown on subsequent assistant role headers.
     pub fn set_model_id(&mut self, model_id: String) {
         self.view.set_model_id(Some(model_id));
     }

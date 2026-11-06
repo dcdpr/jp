@@ -254,17 +254,14 @@ impl Provider for RunawayProvider {
     }
 }
 
-/// A provider that no longer serves `glm-5.3`.
+/// Test provider that rejects `glm-5.3` with [`StreamErrorKind::UnknownModel`]
+/// and succeeds for any other model.
 ///
-/// A request for `glm-5.3` fails the way vLLM's does: the request goes out and
-/// the server answers with an unknown-model rejection.
-/// A request for any other model is answered.
-/// `served` is what `models()` lists; `None` makes the listing itself fail.
+/// `served` controls the list returned by [`Provider::models`]; `None` causes
+/// `models()` to return an error.
 #[derive(Debug)]
 struct RejectingProvider {
     served: Option<Vec<&'static str>>,
-
-    /// The model each request named, in order.
     requested: Mutex<Vec<String>>,
 }
 
@@ -331,18 +328,12 @@ impl Provider for RejectingProvider {
     }
 }
 
-/// What a turn for `glm-5.3` left behind.
 struct RejectedTurn {
     result: Result<(), Error>,
-
-    /// The model the conversation's config names once the turn is over.
     recorded: String,
-
-    /// The chrome (stderr) the turn wrote, without ANSI styling.
     chrome: String,
 }
 
-/// Run a turn for `glm-5.3` against `provider`.
 async fn run_rejected_turn(
     provider: Arc<RejectingProvider>,
     interactive: bool,
@@ -356,12 +347,12 @@ async fn run_rejected_turn(
         provider: ProviderId::Test,
         name: "glm-5.3".parse().unwrap(),
     });
-    // Inquiries inherit the assistant's model during resolution, which this
-    // resolved config has already been through, so both are set.
+    // `AppConfig::new_test()` is already resolved, so set both the primary and
+    // inquiry model IDs explicitly.
     config.assistant.model.id = glm.clone();
     config.conversation.inquiry.assistant.model.id = glm;
-    // A retry budget is left in place so the request count can show the
-    // rejection was not retried.
+    // Enable retries so the request count verifies that `UnknownModel` is not
+    // retried.
     config.assistant.request.max_retries = 5;
     config.assistant.request.base_backoff_ms = 0;
 
@@ -428,18 +419,14 @@ async fn run_rejected_turn(
     }
 }
 
-/// A model the server does not serve ends the turn with the models it does
-/// serve, so the user can see what to switch to.
-///
-/// The turn is non-interactive, and the prompt backend holds an answer anyway:
-/// a picker shown here would take it and switch, rather than end the turn.
 #[tokio::test]
 async fn unknown_model_lists_the_served_models() {
     let provider = Arc::new(RejectingProvider::serving(Some(vec![
         "Qwen/Qwen3.8-27B-FP8",
         "deepseek-v4.1-flash",
     ])));
-    // `deepseek-v4.1-flash` is the second option offered.
+    // Seed a selection response to verify that non-interactive turns do not
+    // prompt.
     let prompts = MockPromptBackend::new().with_select_responses([1]);
 
     let RejectedTurn {
@@ -462,7 +449,6 @@ async fn unknown_model_lists_the_served_models() {
     assert_eq!(recorded, "glm-5.3");
 }
 
-/// A listing that fails still reports the rejection, without alternatives.
 #[tokio::test]
 async fn unknown_model_without_a_listing_names_no_alternatives() {
     let provider = Arc::new(RejectingProvider::serving(None));
@@ -478,15 +464,12 @@ async fn unknown_model_without_a_listing_names_no_alternatives() {
     assert!(available.is_empty());
 }
 
-/// In an interactive turn, picking one of the served models resends the request
-/// to it, and the conversation records the switch the way `-m` would.
 #[tokio::test]
 async fn unknown_model_picked_replacement_answers_the_turn() {
     let provider = Arc::new(RejectingProvider::serving(Some(vec![
         "Qwen/Qwen3.8-27B-FP8",
         "deepseek-v4.1-flash",
     ])));
-    // `deepseek-v4.1-flash` is the second option offered.
     let prompts = MockPromptBackend::new().with_select_responses([1]);
 
     let turn = run_rejected_turn(provider.clone(), true, prompts).await;
@@ -498,15 +481,12 @@ async fn unknown_model_picked_replacement_answers_the_turn() {
         "deepseek-v4.1-flash".to_owned(),
     ]);
     assert_eq!(turn.recorded, "deepseek-v4.1-flash");
-    // The answer is attributed to the model that gave it.
     assert_eq!(
         turn.chrome,
         "\n── jp (test/deepseek-v4.1-flash) ───────────────────────────────────────────────\n\n"
     );
 }
 
-/// Dismissing the picker ends the turn with the same error a non-interactive
-/// turn gets, and leaves the conversation's model alone.
 #[tokio::test]
 async fn unknown_model_dismissed_picker_ends_with_the_error() {
     let provider = Arc::new(RejectingProvider::serving(Some(vec![
@@ -514,7 +494,7 @@ async fn unknown_model_dismissed_picker_ends_with_the_error() {
         "deepseek-v4.1-flash",
     ])));
 
-    // No scripted answer: the mock reports the prompt as cancelled.
+    // An empty `MockPromptBackend` returns a cancelled-prompt error.
     let RejectedTurn {
         result, recorded, ..
     } = run_rejected_turn(provider.clone(), true, MockPromptBackend::new()).await;
