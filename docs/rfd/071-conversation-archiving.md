@@ -9,29 +9,23 @@
 
 ## Summary
 
-This RFD adds conversation archiving to JP.
-Archived conversations are moved out of the active storage directory, excluded
-from the workspace index, and hidden from default listings and pickers.
-Two subcommands (`jp conversation archive` and `jp conversation unarchive`)
-manage the lifecycle.
+This RFD adds `jp conversation archive` and `jp conversation unarchive`.
+Archiving moves a conversation out of the active storage directory, excluding it
+from the workspace index and hiding it from default listings and pickers;
+unarchiving restores it to the active directory.
 
 ## Motivation
 
-Long-running workspaces accumulate conversations.
-Most are no longer relevant but contain valuable history that shouldn't be
-deleted.
-Today, the only options are to keep every conversation in the active listing
-(noise) or delete them permanently (data loss).
+Long-running workspaces accumulate finished conversations whose history is still
+worth keeping.
+Without archiving, users must either leave every conversation in the active
+listing (cluttering pickers and listings as the workspace grows), delete them
+permanently (losing data), or move directories by hand.
 
-Archiving provides a middle ground: conversations are hidden from day-to-day
-operations but preserved on disk and recoverable at any time.
-The existing `expires_at` / `--tmp` mechanism handles truly ephemeral
-conversations that should be garbage-collected.
-Archiving is for conversations the user wants to keep but not see.
-
-Without this feature, users resort to manual filesystem operations (moving
-directories) or ignore the clutter, which degrades the picker and listing
-experience as the workspace grows.
+The `expires_at` / `--tmp` mechanism handles ephemeral conversations that should
+be garbage-collected.
+Archiving covers conversations the user wants to keep on disk and recover at any
+time while hiding them from day-to-day operations.
 
 ## Design
 
@@ -73,9 +67,9 @@ jp c archive --created-since 30d --inactive-since 7d
 jp c archive --inactive-since 6mo --yes
 ```
 
-When archiving a pinned or active session conversation, JP prompts for
-confirmation, showing the conversation's details above the question so a bulk
-selection can be checked one entry at a time:
+Archiving a pinned conversation or the session's active conversation prompts for
+confirmation first, printing the conversation's details so bulk selections can
+be reviewed one entry at a time:
 
 ```
 Archiving conversation jp-c123
@@ -92,12 +86,12 @@ Archiving conversation jp-c123
 Archive this conversation? [y,n,?]
 ```
 
-The prompt defaults to "no" and the conversation is skipped if declined.
+The prompt defaults to "no", and declining skips the conversation.
 `--yes` (`-y`) suppresses the prompt for batch use.
 
-The block is the same one `jp c rm` shows, and the same one `jp c show` renders
-without a heading; all three go through `DetailsFmt` in
-`jp_cli::format::conversation`, and the prompt itself through
+`jp c archive`, `jp c rm`, and `jp c show` (which omits the heading) render this
+detail block via `DetailsFmt` in `jp_cli::format::conversation`.
+Both `archive` and `rm` run the prompt through
 `jp_cli::shared::confirm::confirm_conversation_action`.
 
 #### Unarchiving
@@ -126,13 +120,12 @@ Non-archived IDs passed to `unarchive` are skipped with a warning.
 jp c ls --archived
 ```
 
-The `--archived` flag switches `ls` to scan the archive partition.
-All existing `ls` flags (`--sort`, `--limit`, `--full`, `--local`) work as
-expected.
+`--archived` switches `ls` to scan the archive partition and composes with the
+other `ls` flags (`--sort`, `--limit`, `--full`, `--local`).
 
 #### Targeting Keywords
 
-The conversation targeting system supports archive-related keywords:
+The conversation targeting system supports three archive keywords:
 
 | Keyword     | Alias | Description                                  |
 | ----------- | ----- | -------------------------------------------- |
@@ -140,10 +133,8 @@ The conversation targeting system supports archive-related keywords:
 | `+archived` | `+a`  | All archived conversations                   |
 | `?archived` | `?a`  | Interactive picker of archived conversations |
 
-The `archived` keyword resolves to the most recently archived conversation
-
-The `archived` and `?archived` keywords work with `jp c use` to
-unarchive-and-activate in one step:
+Passing `archived` or `?archived` to `jp c use` unarchives and activates the
+conversation in one step:
 
 ```sh
 # Pick an archived conversation, unarchive it, and activate it
@@ -155,8 +146,8 @@ jp c use archived
 
 ### Storage Layout
 
-Archived conversations are moved into a `.archive/` subdirectory within the
-`conversations/` directory:
+Archived conversations live in a `.archive/` subdirectory under
+`conversations/`:
 
 ```
 .jp/conversations/
@@ -167,24 +158,19 @@ Archived conversations are moved into a `.archive/` subdirectory within the
     └── 17729598000-another-old-one/
 ```
 
-The `.archive/` directory uses the existing dot-prefix convention that the
-storage layer already skips during index scans (same pattern as `.trash/`,
-`.old-*`, `.staging-*`).
-This means archived conversations are invisible to the active index with zero
-filtering overhead.
+Because the storage layer skips dot-prefixed entries during index scans
+(alongside `.trash/`, `.old-*`, and `.staging-*`), `.archive/` is invisible to
+the active index without extra filtering.
 
-Both workspace and user storage roots have independent `.archive/` directories.
-The archive operation preserves which root a conversation belongs to.
+Workspace and user storage roots each have their own `.archive/` directory, and
+archiving keeps a conversation in its original root.
 
 ### Backend Traits
 
-The storage backend traits are extended to support archiving:
-
 **`PersistBackend`** gains `archive(id)` and `unarchive(id)` methods.
 The filesystem backend moves directories between the active and archive
-partitions.
-The in-memory backend moves entries between two `HashMap`s.
-The null backend discards both operations.
+partitions, the in-memory backend moves entries between two `HashMap`s, and the
+null backend discards both operations.
 
 **`LoadBackend`** gains a `ConversationFilter` parameter on
 `load_conversation_ids`:
@@ -196,130 +182,124 @@ pub struct ConversationFilter {
 }
 ```
 
-The default filter returns active conversations.
-Setting `archived: true` scans the `.archive/` directories instead.
-This is a storage-level partition filter, not a metadata filter — the cost is
-the same as the existing directory scan (no per-conversation file I/O).
+The default filter returns active conversations; setting `archived: true` scans
+the `.archive/` directories instead.
+Because this filters by storage partition rather than reading metadata, it costs
+a single directory scan with no per-conversation file I/O.
 
-`load_conversation_metadata` searches both regular and archive partitions
+`load_conversation_metadata` searches both active and archive partitions
 transparently, so commands like `jp c show <archived-id>` work without special
 handling.
-
-The archived partition is not cached in the workspace's in-memory index.
-`archived_conversations()` scans the filesystem on each call.
-This is the right trade-off: archive operations are infrequent, the directory
-scan is cheap, and caching would consume memory for conversations the user
-explicitly wanted out of their working set.
-If repeated scans become a bottleneck, adding a cached archived index to `State`
-is straightforward.
 
 ### Workspace Layer
 
 `Workspace` exposes three methods:
 
-- `archive_conversation(conv: ConversationMut)` — moves the conversation to the
-  archive partition, removes it from the in-memory index.
-- `unarchive_conversation(id: &ConversationId) -> Result<ConversationHandle>` —
-  restores from the archive, inserts into the in-memory index.
-- `archived_conversations()` — returns an iterator over archived conversation
+- `archive_conversation(conv: ConversationMut)`: moves the conversation to the
+  archive partition and removes it from the in-memory index.
+- `unarchive_conversation(id: &ConversationId) -> Result<ConversationHandle>`:
+  restores the conversation from the archive partition and inserts it into the
+  in-memory index.
+- `archived_conversations()`: returns an iterator over archived conversation
   metadata, loaded on demand from the archive partition.
-  Not cached in the workspace index.
+
+`archived_conversations()` scans the filesystem on each call rather than caching
+the archive partition in the workspace's in-memory index.
+Archive operations are infrequent, the directory scan is cheap, and caching
+would keep conversations in memory after the user removed them from the working
+set.
+If repeated scans become a bottleneck, `State` can cache an archived index.
 
 ### CLI Integration
 
 `jp c archive` participates in the standard conversation resolution pipeline.
-Its `conversation_load_request` behaves in two modes:
+Its `conversation_load_request` operates in two modes:
 
 - **Filter mode** (any of
   `--created-since`/`--created-before`/`--inactive-since` set): returns
   `ConversationLoadRequest::none()`.
   The subcommand iterates the workspace and selects matching conversations
-  internally, mirroring `jp c unarchive`'s internal-resolution pattern.
-- **Direct mode** (no filter flags): returns `explicit_or_session(target)` —
-  explicit IDs when provided, otherwise the same fallback chain as `jp c show`
-  (session active → `conversation.default_id` → picker).
-  Resolution happens in the startup pipeline and the subcommand receives
-  pre-resolved handles.
+  internally.
+- **Direct mode** (no filter flags): returns `explicit_or_session(target)`,
+  which resolves explicit IDs when provided and otherwise follows the same
+  fallback chain as `jp c show` (session active → `conversation.default_id` →
+  picker).
+  The startup pipeline resolves the targets and passes pre-resolved handles to
+  the subcommand.
 
-The shared `--created-since`/`--created-before` range filter is implemented as a
-flattened `CreationRange` args struct in `crates/jp_cli/src/cmd/time.rs`, reused
-by `jp c rm` so the two commands' creation-range semantics stay in lockstep.
+`jp c unarchive` always returns `ConversationLoadRequest::none()` and resolves
+targets internally, because archived conversations live outside the active
+index.
+
+`jp c archive` and `jp c rm` share the `--created-since`/`--created-before`
+range filter via a flattened `CreationRange` args struct in
+`crates/jp_cli/src/cmd/time.rs`, keeping their creation-range semantics in
+lockstep.
 
 > [!NOTE]
-> The creation-range flags shipped as `--from`/`--until` and are now spelled
-> `--created-since`/`--created-before`.
-> They were renamed when `--from`/`--to` became the turn-range selector shared
-> by `jp c print`, `jp c compact`, and `jp c fork`: both families accept nearly
-> the same values (durations, absolute dates), so one flag name could no longer
-> mean both "which conversations" and "which turns".
-> Semantics are unchanged — the range is still half-open on conversation
-> creation time.
-> See [Indexing and Counting Conventions] for the turn-range side.
+> The creation-range flags shipped as `--from`/`--until` and were renamed to
+> `--created-since`/`--created-before` when `jp c print`, `jp c compact`, and
+> `jp c fork` introduced `--from`/`--to` as a turn-range selector.
+> Because both flag families accept durations and absolute dates, distinct names
+> separate conversation selection from turn selection.
+> The range remains half-open on conversation creation time.
+> See [Indexing and Counting Conventions] for turn ranges.
 
-`jp c unarchive` returns `ConversationLoadRequest::none()` because its targets
-are in the archive partition and cannot be resolved through the active index.
-It handles resolution internally.
-
-The conversation lock is acquired before the confirmation prompt renders and
-held until the answer arrives, so the details the user reads describe the state
-their answer acts on.
-Without that ordering, a prompt left unanswered while another terminal continued
-the conversation would archive work the user never saw.
-The cost is that a bulk archive waits on the lock for each conversation in turn,
-including ones the user goes on to skip.
-`jp c rm` orders the two the same way.
+`jp c archive` (like `jp c rm`) acquires the conversation lock before rendering
+the confirmation prompt and holds it until the user responds.
+This guarantees that the displayed details match the state being archived;
+otherwise, another terminal could append turns while the prompt is open, and
+confirming would archive work the user never saw.
+As a trade-off, bulk archiving acquires the lock for each conversation in turn,
+including ones the user declines.
 
 ## Drawbacks
 
-- **No toggle.** Archiving and unarchiving are separate subcommands.
-  There is no single command that flips the state.
-  This is a deliberate trade-off: the two operations have different user intents
-  ("clean up" vs "I need that back"), different discovery paths, and different
-  resolution needs (active index vs archive partition).
+- **No toggle.** Archiving and unarchiving are separate subcommands rather than
+  a single command that flips the state.
+  The two operations have different user intents ("clean up" vs "I need that
+  back"), discovery paths, and resolution targets (active index vs archive
+  partition).
 
-- **Directory rename under lock.** Archiving requires holding the conversation
-  lock and then renaming the directory.
-  If the process crashes between clearing dirty state and completing the rename,
-  the conversation could be in an inconsistent state.
-  The startup validation pass does not currently scan `.archive/` for recovery.
-  A crash during archiving could leave the conversation missing from both
-  partitions.
-  The risk is low (the rename is a single syscall) but should be addressed by
-  extending the validation pass to check `.archive/` in a follow-up.
+- **Directory rename under lock.** Archiving clears dirty state and renames the
+  conversation directory while holding the conversation lock.
+  Because the startup validation pass does not scan `.archive/` for recovery, a
+  crash before the rename completes could leave the conversation in an
+  inconsistent state or missing from both partitions.
+  The rename is a single syscall, so the window is small, and a follow-up can
+  extend the validation pass to check `.archive/`.
 
 ## Alternatives
 
 ### Metadata Flag
 
 Add an `archived: bool` field to `Conversation` metadata instead of moving
-directories.
-Filter at the `conversations()` iterator level.
+directories, and filter at the `conversations()` iterator level.
 
-Rejected because: every consumer of `workspace.conversations()` would need to
-filter, the index still pays the cost of tracking archived conversations in
-memory, and session mappings would need awareness of the archived state.
-The physical separation approach has zero cost for normal operations.
+Rejected because every consumer of `workspace.conversations()` would have to
+filter archived entries, the in-memory index would still track them, and session
+mappings would have to check the archived state.
+Separating partitions on disk adds zero overhead to active operations.
 
 ### `--archive` Flag on `jp c edit`
 
-Implement archive as a property flag on the `edit` subcommand, alongside
-`--pin`, `--local`, etc.
+Implement archiving as a property flag on the `edit` subcommand, alongside
+`--pin` and `--local`.
 
-Rejected because: archiving is not a property mutation — it changes whether a
-conversation exists in the working set, not how it appears.
-`--pin` and `--local` modify metadata fields; `--archive` moves the entire
-conversation to a different storage partition.
-Separate subcommands make this distinction clear to the user and give each
-operation its own help text, argument handling, and aliases.
+Rejected because `--pin` and `--local` modify metadata fields on a conversation
+in the working set, whereas `--archive` moves the conversation to a different
+storage partition and removes it from the working set.
+Separate subcommands make this distinction clear and give each operation its own
+help text, argument handling, and aliases.
 
 ### Dot-Prefixed Directory Names
 
-Prefix archived conversations with `.archived-` in the main `conversations/`
-directory instead of using a subdirectory.
+Prefix archived conversation directories with `.archived-` inside
+`conversations/` instead of moving them into a subdirectory.
 
-Rejected because: it clutters the `conversations/` directory with dot-prefixed
-entries, collides conceptually with `.old-*`/`.staging-*` which are transient
-states, and the `.trash/` precedent already uses a subdirectory.
+Rejected because this clutters `conversations/` with dot-prefixed entries,
+conflates persistent archives with transient `.old-*` and `.staging-*`
+directories, and departs from the `.trash/` subdirectory precedent.
 
 ## Non-Goals
 
@@ -327,48 +307,46 @@ states, and the `.trash/` precedent already uses a subdirectory.
   run without user intervention are out of scope.
 
 - **Archive-specific metadata.** Archived conversations retain their original
-  metadata.
-  There is no `archived_at` timestamp or archive-specific fields.
-  This means the `archived` keyword resolves by `last_activated_at` rather than
-  by when the conversation was archived.
+  metadata without an `archived_at` timestamp or other archive-specific fields.
+  Consequently, the `archived` keyword resolves by `last_activated_at` rather
+  than by when the conversation was archived.
 
 ## Implementation Plan
 
 ### Phase 1: Storage and Workspace
 
-Add `ConversationFilter`, `archive`/`unarchive` to the backend traits.
-Implement for `FsStorageBackend` (directory moves), `InMemoryStorageBackend`
+Add `ConversationFilter` and `archive`/`unarchive` to the backend traits,
+implemented for `FsStorageBackend` (directory moves), `InMemoryStorageBackend`
 (separate `HashMap`), and `NullPersistBackend` (no-op).
 Add `archive_conversation`, `unarchive_conversation`, and
-`archived_conversations` to `Workspace`.
-Add parity tests.
+`archived_conversations` to `Workspace`, along with parity tests.
 
 Can be merged independently.
 
 ### Phase 2: CLI Subcommands
 
-Add `jp c archive` and `jp c unarchive` subcommands.
-Add `--archived` flag to `jp c ls`.
-Add `archived`/`+archived`/`?archived` targeting keywords.
-Update `jp c use` to support unarchive-and-activate via the `archived` keyword.
+Add the `jp c archive` and `jp c unarchive` subcommands, the `--archived` flag
+on `jp c ls`, and the `archived`, `+archived`, and `?archived` targeting
+keywords.
+Update `jp c use` to unarchive and activate conversations via the `archived`
+keyword.
 
-Archive's selection flags ship as `--created-since`/`--created-before`
-(creation-date range) and `--inactive-since` (last-activity threshold); all
-three accept the `TimeThreshold` syntax (conversation ID, relative duration, or
-absolute date) and AND-compose.
-The range flags are extracted into a shared `CreationRange` args struct reused
-by `jp c rm`.
+`jp c archive`'s selection flags ship as `--created-since`/`--created-before`
+(creation-date range, extracted into a shared `CreationRange` args struct reused
+by `jp c rm`) and `--inactive-since` (last-activity threshold).
+All three accept the `TimeThreshold` syntax (conversation ID, relative duration,
+or absolute date) and AND-compose.
 
 Depends on Phase 1.
 
 ## References
 
-- [RFD 052: Workspace Data Store Sanitization][RFD 052] — `.trash/` pattern for
+- [RFD 052: Workspace Data Store Sanitization][RFD 052]: `.trash/` pattern for
   invalid conversations
-- [RFD 073: Layered Storage Backend for Workspaces][RFD 073] — backend trait
+- [RFD 073: Layered Storage Backend for Workspaces][RFD 073]: backend trait
   architecture
-- [Indexing and Counting Conventions] — the turn-range selector the range flags
-  were renamed to make room for
+- [Indexing and Counting Conventions]: turn-range selector conventions that
+  prompted renaming `--from`/`--until`
 
 [Indexing and Counting Conventions]: ../wiki/00dxyba-indexing-and-counting-conventions.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
