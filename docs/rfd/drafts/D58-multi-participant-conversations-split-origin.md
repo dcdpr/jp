@@ -991,7 +991,7 @@ jp c participant refresh dev
 
 [RFD 020]: ../020-parallel-conversations.md
 [RFD 031]: ../031-durable-conversation-storage-with-workspace-projection.md
-[RFD 051]: ../051-sub-agent-workflows.md
+[RFD 051]: ../051-sub-agent-workflows-with-local-tools.md
 [RFD 054]: ../054-split-conversation-config-and-events.md
 [RFD 070]: ../070-negative-config-deltas.md
 [RFD 072]: ../072-command-plugin-system.md

@@ -8,7 +8,7 @@
   advances to Discussion status.
 -->
 
-# RFD D45: Elelem: a standalone LLM provider streaming crate
+# RFD D45: Elelem: A Standalone LLM Provider Streaming Crate
 
 - **Status**: Draft
 - **Category**: Design

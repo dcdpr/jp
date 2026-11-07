@@ -1,4 +1,4 @@
-# RFD D48: Recipient-Scoped Blob Encryption
+# RFD D55: Recipient-Scoped Blob Encryption
 
 - **Status**: Draft
 - **Category**: Design

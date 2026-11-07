@@ -1,4 +1,4 @@
-# RFD D42: Replace MCP provider checksum with typed verify block
+# RFD D42: Replace MCP Provider Checksum with Typed Verify Block
 
 - **Status**: Draft
 - **Category**: Design

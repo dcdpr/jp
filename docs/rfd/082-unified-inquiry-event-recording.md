@@ -1,4 +1,4 @@
-# RFD 082: Unified inquiry event recording
+# RFD 082: Unified Inquiry Event Recording
 
 - **Status**: Implemented
 - **Category**: Design

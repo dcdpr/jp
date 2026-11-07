@@ -300,5 +300,5 @@ lists, `assistant.instructions` shared across workspaces, plugin registries.
 [RFD 100]: ../100-in-repo-ticket-tracking.md
 [RFD D02]: D02-lossless-config-editing.md
 [RFD D06]: D06-self-describing-local-tools.md
-[RFD D35]: D35-loader-namespace-and-extends-overrides.md
+[RFD D35]: D35-extends-overrides-and-loader-namespace.md
 [RFD D36]: D36-live-workspace-view-for-long-running-plugin-hosts.md

@@ -794,4 +794,4 @@ Depends on Phase 2.
   proposed writer stack builds on.
 - `termimad`'s `MadSkin` — referenced as schema inspiration; not adopted.
 
-[RFD 004]: 004-streaming-md-parser-renderer.md
+[RFD 004]: 004-streaming-markdown-parser-and-terminal-renderer-in-jp_md.md

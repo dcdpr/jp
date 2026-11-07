@@ -1,4 +1,4 @@
-# RFD D61: Session Record Retention and Read Surface
+# RFD D38: Session Record Retention and Read Surface
 
 - **Status**: Draft
 - **Category**: Design

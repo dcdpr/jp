@@ -603,5 +603,5 @@ below it rendering as today and headings above it rendering as paragraphs.
 - `crates/jp_md/tests/fuzz_buffer.rs` — chunked-vs-whole fuzz harness to run
   with streaming disabled.
 
-[RFD 004]: 004-streaming-md-parser-renderer.md
+[RFD 004]: 004-streaming-markdown-parser-and-terminal-renderer-in-jp_md.md
 [RFD 084]: 084-configurable-markdown-element-coloring.md

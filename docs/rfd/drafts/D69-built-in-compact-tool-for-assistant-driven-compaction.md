@@ -1,4 +1,4 @@
-# RFD D69: Built-in compact tool for assistant-driven compaction
+# RFD D69: Built-in compact Tool for Assistant-Driven Compaction
 
 - **Status**: Draft
 - **Category**: Design

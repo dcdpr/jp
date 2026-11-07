@@ -296,5 +296,5 @@ Can be merged independently.
   `rfd_open_tracking_issue` tool.
 
 [RFD 001]: 001-jp-rfd-process.md
-[RFD 003]: 003-jp-assisted-rfds.md
+[RFD 003]: 003-jp-assisted-rfd-writing.md
 [RFD 100]: 100-in-repo-ticket-tracking.md

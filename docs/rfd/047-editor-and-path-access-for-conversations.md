@@ -212,4 +212,4 @@ Depends on Phase 1 (shares path resolution logic).
   resolution.
 
 [RFD 039]: 039-conversation-trees.md
-[RFD 046]: 046-nested-workspace-projection.md
+[RFD 046]: 046-nested-workspace-projection-for-conversation-trees.md

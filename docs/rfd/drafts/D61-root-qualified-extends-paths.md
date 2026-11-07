@@ -274,5 +274,5 @@ invocation, and the work is a path join.
 [RFD 035]: ../035-multi-root-config-load-path-resolution.md
 [RFD 076]: ../076-tool-access-grants.md
 [RFD 079]: ../079-config-sources-and-load-order.md
-[RFD D35]: D35-loader-namespace-and-extends-overrides.md
+[RFD D35]: D35-extends-overrides-and-loader-namespace.md
 [RFD D43]: D43-tool-access-to-external-paths-via-workspace-symlinks.md

@@ -1,4 +1,4 @@
-# RFD 004: Streaming Markdown Parser and Terminal Renderer in `jp_md`
+# RFD 004: Streaming Markdown Parser and Terminal Renderer in jp_md
 
 - **Status**: Implemented
 - **Category**: Decision
