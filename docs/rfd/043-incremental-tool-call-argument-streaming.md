@@ -11,19 +11,21 @@
 
 This RFD extends `EventBuilder` to parse tool call argument JSON incrementally
 as it streams from the provider.
-It emits a recursive stream of typed fragments (including partial strings, array
-items, and nested object entries) so downstream consumers like the terminal
-renderer can display arguments before the full tool call completes.
+`EventBuilder` emits a recursive stream of typed fragments (including partial
+strings, array items, and nested object entries) so downstream consumers like
+the terminal renderer can display arguments before the full tool call completes.
 
 ## Motivation
 
 When the LLM calls a tool like `fs_create_file`, the terminal currently shows
-nothing until *all* arguments have been fully received and parsed.
-For tools with large arguments — file content, code, diffs — this means
-several seconds of silence between the "Calling tool X" header and the styled
-argument display.
+nothing until all arguments have been received and parsed.
+For tools with large arguments (file content, code, diffs), this causes several
+seconds of silence between the "Calling tool X" header and the styled argument
+display.
 
-Today's flow:
+In the current flow, JSON chunks accumulate in
+`IndexBuffer::ToolCall.arguments_json` and are parsed only when the content
+block finishes:
 
 ```txt
 content_block_start(tool_use{id, name})
@@ -38,48 +40,44 @@ content_block_stop
   → Event::Flush                                                  ← UI shows styled args
 ```
 
-If we could emit the `path` argument as soon as its value is complete, the UI
-could show "creating `src/main.rs`" within the first second.
-And if the `content` string were streamed as chunks, the file content could
-appear in the terminal in real-time rather than all at once.
+Emitting the `path` argument as soon as its value is complete lets the UI show
+"creating `src/main.rs`" within the first second.
+Streaming the `content` string in chunks lets the file content appear in the
+terminal in real time rather than all at once.
 
-For tools like `fs_modify_file`, whose `patterns` argument is an array of
-objects with potentially large `old` and `new` string fields, the same principle
-applies recursively: each array item's fields can stream as they arrive, giving
-the user immediate feedback on what's being changed.
+The same principle applies recursively to nested arguments.
+For example, `fs_modify_file` takes a `patterns` array of objects with large
+`old` and `new` string fields; streaming each item's fields as they arrive shows
+the user what is changing right away.
 
 ## Design
 
 ### User-facing behavior
 
-No changes to the CLI interface or configuration.
-The observable difference is that tool call arguments appear in the terminal
-incrementally:
+This RFD does not change the CLI interface or configuration.
+Tool call arguments appear in the terminal incrementally:
 
-1. Tool name appears immediately (already implemented).
+1. The tool name appears immediately (already implemented).
 2. Short arguments (paths, flags) appear as soon as their value is parsed.
-3. Long string arguments (file content, diffs) stream to the terminal in
-   real-time as chunks arrive.
-4. Compound arguments (arrays, nested objects) stream recursively — individual
-   items and entries appear as they arrive, with their own values streaming in
-   turn.
+3. Long string arguments (file content, diffs) stream to the terminal in real
+   time as chunks arrive.
+4. Compound arguments (arrays, nested objects) stream recursively: individual
+   items and entries appear as they arrive, and their values stream in turn.
 
-Callers that don't care about incremental updates continue to work unchanged —
-they ignore the intermediate events and only act on the final flushed
-`ToolCallRequest`.
+Callers that do not use incremental updates ignore the intermediate events and
+act only on the final flushed `ToolCallRequest`.
 
 ### Event model
 
-The `EventBuilder` currently emits `ToolCallRequest` events only on flush, with
-all arguments populated at once.
-This RFD introduces a streaming fragment protocol that the `EventBuilder` emits
-*during* accumulation, before the flush.
+`EventBuilder` currently emits `ToolCallRequest` events only on flush, with all
+arguments populated at once.
+This RFD introduces a streaming fragment protocol that `EventBuilder` emits
+during accumulation, before the flush.
 
-The protocol mirrors the existing `Event::Part` / `Event::Flush` pattern:
-fragments stream in, a `Done` signal marks completion.
-Every value — whether a scalar, a long string, or a deeply nested object —
-follows the same pipeline.
-There is no separate "complete" vs "streaming" code path.
+The protocol mirrors the `Event::Part` and `Event::Flush` pattern: fragments
+stream in and a `Done` signal marks completion.
+Every value (scalar, long string, or nested object) uses the same pipeline,
+without a separate code path for complete versus streaming values.
 
 #### Fragment types
 
@@ -125,7 +123,7 @@ pub enum StreamFragment {
 }
 ```
 
-The `EventBuilder` wraps each fragment with tool call identity:
+`EventBuilder` wraps each fragment with the tool call's ID and name:
 
 ```rust
 /// Ephemeral progress event emitted by EventBuilder during tool call
@@ -151,9 +149,9 @@ ObjectEntry { key: "content", value: Done }
 Done
 ```
 
-The renderer sees `path` complete in the first events (after getting `Done` in
-the second event) and can display "creating `/tmp/foo.rs`" immediately.
-The `content` string streams to the terminal in real-time.
+Once the second event delivers `Done` for `path`, the renderer knows `path` is
+complete and can display "creating `/tmp/foo.rs`" immediately, while `content`
+streams to the terminal in real time.
 
 For `fs_modify_file` with `{"path": "lib.rs", "patterns": [{"old": "long...",
 "new": "also long..."}]}`:
@@ -178,8 +176,8 @@ ObjectEntry { key: "patterns", value: Done }
 Done
 ```
 
-Each nesting level encodes the path from root to leaf.
-The renderer can stream each pattern's `old` and `new` fields as they arrive.
+Each nesting level encodes the path from root to leaf, so the renderer can
+stream each pattern's `old` and `new` fields as they arrive.
 
 For a scalar argument like `{"dry_run": true}`:
 
@@ -189,17 +187,16 @@ ObjectEntry { key: "dry_run", value: Done }
 Done
 ```
 
-Scalars are a single fragment followed by `Done`, same pipeline as everything
-else.
+A scalar emits a single `Scalar` fragment followed by `Done`.
 
-If the root value is not an object (e.g. a bare string), the parser streams it
-directly — `String("chunk")` fragments followed by `Done`.
-No special error case needed; the protocol handles any JSON shape.
+If the root value is not an object (for example, a bare string), the parser
+streams it directly as `String("chunk")` fragments followed by `Done`.
+The protocol handles any JSON shape without a special error case.
 
 #### Aggregator layer
 
-Consumers that don't care about streaming can use a `FragmentAggregator` that
-collects fragments and emits complete `serde_json::Value`s:
+`FragmentAggregator` collects streaming fragments and emits complete
+`serde_json::Value`s for consumers that need assembled values:
 
 ```rust
 struct FragmentAggregator { /* ... */ }
@@ -211,42 +208,24 @@ impl FragmentAggregator {
 }
 ```
 
-The `EventBuilder` uses this internally to build the final
-`ToolCallRequest.arguments` map, adding each argument as its `Done` arrives.
-This replaces the `arguments_json` string buffer on `IndexBuffer::ToolCall`.
+`EventBuilder` uses `FragmentAggregator` internally to populate
+`ToolCallRequest.arguments` as each argument's `Done` fragment arrives,
+replacing the `arguments_json: String` buffer on `IndexBuffer::ToolCall`.
 
-### Where the parsing lives
+### Incremental JSON parser
 
-The incremental JSON parsing happens inside `EventBuilder`, which is already
-where argument accumulation lives.
-Today `IndexBuffer::ToolCall` holds an `arguments_json: String` that every
-`ArgumentChunk` is appended to, and the whole buffer is parsed once on flush —
-which is why nothing can be shown until the last chunk arrives.
+`IncrementalArgParser` is a recursive-descent state machine that emits
+`StreamFragment` events as JSON chunks arrive.
+It maintains a stack of active nesting contexts:
 
-With this RFD that buffer is replaced by the `IncrementalArgParser` and
-`FragmentAggregator`, so parsing advances chunk by chunk.
-Providers already emit `ToolCall(ArgumentChunk(chunk))` events via the
-`EventPart` redesign from [RFD 012].
-The `EventBuilder` feeds these chunks to the `IncrementalArgParser`, which emits
-`StreamFragment`s.
-The `FragmentAggregator` collects these and populates
-`ToolCallRequest.arguments` progressively.
-By flush time, the arguments map is complete.
-
-### Incremental JSON parsing
-
-The parser is a recursive descent state machine that emits `StreamFragment`
-events as JSON chunks arrive.
-It maintains a stack tracking the current nesting context:
-
-- **Object context**: expecting a key or a value; tracks the current key.
-- **Array context**: expecting an item; tracks the current item index.
-- **String context**: accumulating string data; tracks escape sequence state.
-- **Scalar context**: accumulating a number, boolean, or null literal.
+- **Object context**: expects a key or a value and tracks the current key.
+- **Array context**: expects an item and tracks the current item index.
+- **String context**: accumulates string data and tracks escape-sequence state.
+- **Scalar context**: accumulates a number, boolean, or `null` literal.
 
 On each `push(chunk)` call, the parser appends to its internal buffer and
-advances the state machine, emitting fragments as structural boundaries are
-detected.
+advances the state machine, emitting fragments as it crosses structural
+boundaries.
 
 For example, given `{"path":"/tmp/foo.rs","content":"fn main()
 {}\n","dry_run":false}`, the parser emits:
@@ -262,27 +241,32 @@ ObjectEntry { key: "dry_run", value: Done }
 Done
 ```
 
-The parser handles:
+The parser handles each JSON construct as follows:
 
-1. **Strings**: Emitted as `String` chunks as data arrives.
-   Escape sequences (`\"`, `\\`, `\uXXXX`) are decoded correctly.
-   If a chunk boundary splits an escape sequence, the partial escape is buffered
-   until the next chunk resolves it.
-2. **Objects**: Each key-value pair is wrapped in `ObjectEntry`.
-   The key is parsed first (always a complete string), then the value is parsed
-   recursively.
-3. **Arrays**: Each item is wrapped in `ArrayItem` with its index.
-   Items are parsed recursively.
-4. **Scalars**: Numbers, booleans, and null are emitted as `Scalar` once the
-   literal is complete (detected by the next structural character or
-   whitespace).
-5. **Done signals**: Emitted at each level when the closing delimiter (`}`, `]`,
-   or end of string/scalar) is reached.
+1. **Strings**: Emits `String` chunks as data arrives and decodes escape
+   sequences (`\"`, `\\`, `\uXXXX`).
+   If a chunk boundary splits an escape sequence, the parser buffers the partial
+   escape until the next chunk completes it.
+2. **Objects**: Parses each key as a complete string, then recursively parses
+   the value and wraps each emitted fragment in `ObjectEntry`.
+3. **Arrays**: Recursively parses each item and wraps each emitted fragment in
+   `ArrayItem` with the item's index.
+4. **Scalars**: Buffers number, boolean, and `null` literals and emits `Scalar`
+   once the next structural character or whitespace marks the end of the
+   literal.
+5. **`Done` signals**: Emits `Done` at the current nesting level when its
+   closing delimiter (`}`, `]`, closing quote, or end of scalar) is reached.
 
-### EventBuilder changes
+### `EventBuilder` and `TurnCoordinator` integration
 
-The `IndexBuffer::ToolCall` variant gains an incremental parser and an optional
-fragment aggregator:
+Providers already emit `ToolCall(ArgumentChunk(chunk))` events via the
+`EventPart` types from [RFD 012], so no provider changes are required.
+Incremental parsing lives inside `EventBuilder`, where argument accumulation
+already happens.
+
+`IndexBuffer::ToolCall` replaces its `arguments_json: String` buffer (which
+buffered every `ArgumentChunk` and parsed once on flush) with an optional
+`IncrementalArgParser` and a `FragmentAggregator`:
 
 ```rust
 enum IndexBuffer {
@@ -299,33 +283,24 @@ enum IndexBuffer {
 }
 ```
 
-When the `EventBuilder` receives a `ToolCall(ArgumentChunk(chunk))`, it:
-
-1. Feeds the chunk to the `IncrementalArgParser`.
-2. The parser returns `Vec<StreamFragment>` — zero or more fragments.
-3. Each fragment is fed to the `FragmentAggregator`, which adds completed
-   arguments to `request.arguments` as their `Done` arrives.
-4. Each fragment is wrapped in `ToolCallArgumentProgress` (with tool call id and
-   name) and returned to the caller.
-
-The existing `handle_flush` behavior is unchanged — it returns the final
-`ToolCallRequest` with all arguments.
-The aggregator ensures arguments parsed incrementally are already present in the
-request by flush time.
-
-### Return type for handle_part
-
-`EventBuilder::handle_part` currently returns nothing — it just accumulates.
-With this RFD, it returns `Vec<ToolCallArgumentProgress>` (empty for
+`EventBuilder::handle_part` returns `Vec<ToolCallArgumentProgress>` (empty for
 non-tool-call parts).
-The `TurnCoordinator` forwards these to the `ToolRenderer`.
+When `EventBuilder::handle_part` receives `ToolCall(ArgumentChunk(chunk))`:
 
-### TurnCoordinator changes
+1. It feeds `chunk` to `IncrementalArgParser`, which returns zero or more
+   `StreamFragment`s.
+2. It feeds each fragment to `FragmentAggregator`, which inserts completed
+   arguments into `request.arguments` as their `Done` fragment arrives.
+3. It wraps each fragment in `ToolCallArgumentProgress` (with `tool_call_id` and
+   `tool_name`) and returns the progress events to the caller.
 
-The `TurnCoordinator` already matches on `EventPart::ToolCall` variants (per
-[RFD 012]).
-The change is that `handle_part` now returns `ToolCallArgumentProgress` events
-for `ArgumentChunk` parts:
+`EventBuilder::handle_flush` is unchanged: it returns the final
+`ToolCallRequest`, whose `arguments` map is already populated by
+`FragmentAggregator`.
+
+`TurnCoordinator` already matches on `EventPart::ToolCall` variants (per [RFD
+012]) and forwards the progress events returned for `ArgumentChunk` parts to
+`ToolRenderer`:
 
 ```rust
 EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
@@ -336,205 +311,188 @@ EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
 }
 ```
 
-### Provider changes
-
-None.
-Providers already emit `ToolCall(ArgumentChunk(chunk))` per [RFD 012]; the
-change is confined to how `EventBuilder` consumes those chunks.
-
 ### Backwards compatibility
 
-- The final `ToolCallRequest` event on flush is identical to today's.
-- `ToolCallArgumentProgress` events are ephemeral and not persisted.
-- The `ConversationStream` is not affected.
-- No new `Event` variants are added — this RFD builds on the `EventPart` types
+- The final `ToolCallRequest` event emitted on flush is unchanged.
+- `ToolCallArgumentProgress` events are ephemeral and are not persisted to
+  `ConversationStream`.
+- No new `Event` variants are added; this RFD builds on the `EventPart` types
   introduced by [RFD 012].
 
 ## Drawbacks
 
-- **Recursive parser complexity.** The incremental JSON parser is a recursive
-  descent state machine that must handle arbitrary nesting depths correctly.
-  Edge cases include escaped characters in strings at any depth, Unicode escapes
-  (`\uXXXX`), escape sequences split across chunk boundaries, and deeply nested
-  structures.
-  This is substantially more complex than a top-level-only parser.
+- **Recursive parser complexity.** Supporting arbitrary nesting depth in a
+  recursive-descent state machine is substantially more complex than parsing
+  only top-level keys.
+  The parser must handle escaped characters, Unicode escapes (`\uXXXX`), and
+  escape sequences split across chunk boundaries at every nesting level.
 
 - **Box allocations per fragment.** Each nesting level in a `StreamFragment`
-  requires a `Box` allocation.
-  For `patterns[0].old` string chunks, that's three Boxes per chunk.
-  In a CLI streaming terminal output where chunks are tens to hundreds of bytes,
-  this is negligible — but it is a per-chunk cost proportional to nesting
-  depth.
+  allocates a `Box`.
+  A string chunk inside `patterns[0].old` requires three `Box` allocations.
+  This per-chunk cost is proportional to nesting depth, though negligible for
+  terminal streaming where chunks are tens to hundreds of bytes.
 
-- **Argument order assumption.** The incremental parsing is most useful when
-  short arguments (like `path`) come before long ones (like `content`).
-  Most providers emit arguments in schema-definition order, but this is not
-  guaranteed by any spec.
-  If `content` comes first, the user still sees it streamed in real-time, but
-  the `path` won't appear until after the full content has been received.
+- **Argument order assumption.** Incremental parsing is most useful when short
+  identifying arguments (like `path`) precede long ones (like `content`).
+  Most providers emit arguments in schema-definition order, but no specification
+  guarantees this.
+  If `content` arrives first, it still streams in real time, but `path` does not
+  appear until `content` finishes.
 
 ## Alternatives
 
 ### Keep the `arguments_json` buffer alongside the incremental parser
 
-Keep the existing buffer-and-parse-on-flush path as the authoritative source for
-the final `ToolCallRequest`, and treat the incremental parser as a best-effort
-side channel for UI progress.
-This provides defense in depth — if the incremental parser has a bug, the
-flush-time parse still produces correct arguments.
+Keep the buffer-and-parse-on-flush path as the authoritative source for the
+final `ToolCallRequest`, and treat the incremental parser as a best-effort side
+channel for UI progress.
+If the incremental parser had a bug, the flush-time parse would still produce
+valid arguments.
 
 Rejected because:
 
-- It means buffering every JSON chunk twice (once in the string buffer, once in
-  the parser) for no functional benefit.
-- The incremental parser + `FragmentAggregator` already produce the complete
-  arguments by flush time.
-  A second independent parse path adds complexity without improving correctness
-  — if the parser is buggy, the fallback would silently mask the bug rather
-  than surfacing it.
-- One accumulation path keeps `IndexBuffer::ToolCall` holding one representation
-  of the arguments rather than two that can disagree.
+- Every JSON chunk would be buffered twice (once in the string buffer and once
+  in the parser) for no functional benefit.
+- `IncrementalArgParser` and `FragmentAggregator` already assemble the complete
+  arguments map by flush time.
+  A fallback parse path would silently mask bugs in the incremental parser
+  rather than surfacing them.
+- Maintaining a single accumulation path keeps `IndexBuffer::ToolCall` from
+  holding two representations of the arguments that can disagree.
 
 ### Use a streaming JSON parser crate
 
-Use something like `serde_json::StreamDeserializer` or a SAX-style JSON parser
-instead of a hand-written state machine.
-Worth investigating during implementation.
-A SAX-style parser would provide the event stream we need (start-object, key,
-start-string, string-data, end-string, etc.) and the `IncrementalArgParser`
-would translate SAX events into `StreamFragment`s.
-If a well-tested crate fits with minimal API surface, it should be preferred
-over a hand-rolled parser — especially given the recursive parsing requirement.
+Use an existing crate such as `serde_json::StreamDeserializer` or a SAX-style
+JSON parser instead of a hand-written state machine.
+A SAX-style parser could emit low-level events (start-object, key, start-string,
+string-data, end-string) that `IncrementalArgParser` translates into
+`StreamFragment`s.
 
-### Emit intermediate ToolCallRequest events with partial arguments
+This option is worth evaluating during implementation.
+If a well-tested crate supports arbitrary chunk boundaries with a minimal API
+surface, prefer it over a hand-rolled recursive parser.
 
-Instead of a separate `ToolCallArgumentProgress` type, emit `ToolCallRequest`
-events with partial `arguments` maps.
+### Emit intermediate `ToolCallRequest` events with partial arguments
+
+Emit `ToolCallRequest` events with partial `arguments` maps instead of
+introducing `ToolCallArgumentProgress`.
+
 Rejected because:
 
-- Consumers that match on `ToolCallRequest` would need to distinguish partial
-  from complete.
-- Partial events would need careful handling in persistence to avoid writing
+- Consumers matching on `ToolCallRequest` would have to distinguish partial
+  requests from completed ones.
+- Persistence code would have to filter out partial events to avoid writing
   incomplete tool calls.
-- A distinct type makes the contract explicit: these are progress signals, not
-  complete events.
+- A distinct type makes the contract explicit: `ToolCallArgumentProgress` values
+  are ephemeral progress signals, not complete requests.
 
-### Flat (non-recursive) fragment model
+### Flat fragment model
 
-Stream only top-level argument key-value pairs, emitting nested structures
+Stream only top-level argument key-value pairs and emit nested structures
 (arrays, objects) as complete `serde_json::Value`s.
-Simpler parser, but loses the ability to stream inside `fs_modify_file`'s
-`patterns` array or any other nested structure with large string values.
-The recursive model adds Box allocations per nesting level per fragment, but
-this cost is negligible for a CLI tool and the streaming benefit for nested
-arguments is real.
+This simplifies the parser, but cannot stream large strings inside nested
+structures such as `fs_modify_file`'s `patterns` array.
+The recursive model adds one `Box` allocation per nesting level per fragment,
+which is negligible for a CLI tool.
 
-### Carry complete value in terminal Done fragment
+### Carry the complete value in `Done`
 
-Instead of a data-free `Done`, have `Done(serde_json::Value)` carrying the final
-assembled value.
+Attach the assembled value to the terminal variant as `Done(serde_json::Value)`
+instead of using a unit `Done` variant.
+
 Rejected because:
 
-- The value is redundant — the consumer either aggregated from chunks already,
-  or uses the final `ToolCallRequest` from the flush path.
-- For large string values, this means allocating the full value a second time
-  just to attach it to a signal nobody reads.
-- The `FragmentAggregator` provides this convenience for consumers that need
-  complete values without duplicating data in the streaming protocol.
+- The value is redundant: consumers either aggregate chunks as they arrive or
+  use the final `ToolCallRequest` from the flush path.
+- For large string values, building `Done(Value)` allocates a full copy of the
+  string just to attach it to a completion signal nobody reads.
+- `FragmentAggregator` already provides assembled `serde_json::Value`s for
+  consumers that need them without duplicating data in the streaming protocol.
 
 ## Non-Goals
 
-- **Terminal renderer changes.** How the renderer uses
-  `ToolCallArgumentProgress` events to update the display is out of scope.
-  The renderer already has the infrastructure for incremental tool call display
-  (`ToolRenderer::register`, `complete`).
-  Wiring up the new events is straightforward follow-up work.
+- **Terminal renderer changes.** How `ToolRenderer` renders
+  `ToolCallArgumentProgress` events is out of scope.
+  `ToolRenderer` already supports incremental tool call display
+  (`ToolRenderer::register`, `complete`), and wiring up the new events is
+  follow-up work.
 
-- **Reordering arguments.** We do not attempt to reorder arguments to ensure
-  short ones arrive first.
-  The LLM controls the order.
+- **Reordering arguments.** `EventBuilder` emits arguments in the order the LLM
+  streams them and does not reorder short arguments ahead of long ones.
 
 ## Risks and Open Questions
 
-- **JSON edge cases.** The incremental parser must handle: escaped quotes
-  (`\"`), Unicode escapes (`\uXXXX`), nested objects and arrays, `null` / `true`
-  / `false` / numbers as values, empty objects and arrays.
-  The recursive parser must handle these at every nesting depth.
-  A thorough test suite with property-based testing is warranted.
+- **JSON grammar coverage at arbitrary depth.** The recursive parser must handle
+  escaped quotes (`\"`), Unicode escapes (`\uXXXX`), `null`, `true`, `false`,
+  numbers, and empty or nested objects and arrays at every nesting depth.
+  A unit and property-based test suite should verify parity with `serde_json`.
 
-- **Escape sequences at chunk boundaries.** A chunk can split mid-escape: `\` at
-  the end of one chunk, `"` at the start of the next.
-  Or `\u00` in one chunk, `41` in the next.
-  The parser needs a small state machine (4-5 states) to handle partial escapes
-  at every string nesting level.
-  This is the trickiest part of the parser implementation.
+- **Arbitrary chunk boundaries.** JSON chunks from providers can split at any
+  byte or token boundary, including mid-string, mid-number, or mid-escape
+  sequence (for example, `\` at the end of one chunk and `"` at the start of the
+  next, or `\u00` followed by `41`).
+  The parser must buffer incomplete tokens until a parse boundary is reached and
+  maintain a 4-to-5-state escape sub-machine at every string nesting level.
 
-- **Provider argument ordering.** We assume providers tend to emit arguments in
-  schema-definition order.
-  If a provider reorders arguments (e.g. longest first), the incremental parsing
-  adds overhead with no user-visible benefit.
-  This should be validated empirically with Anthropic, OpenRouter, and Llamacpp.
-
-- **Chunk boundaries.** JSON chunks from providers can split at arbitrary byte
-  positions — including mid-string, mid-escape-sequence, or mid-number.
-  The parser must handle partial data gracefully by buffering until a parse
-  boundary is reached.
+- **Provider argument ordering.** Incremental display assumes providers tend to
+  emit arguments in schema-definition order.
+  If a provider emits large arguments first, incremental parsing adds overhead
+  without improving time-to-first-argument.
+  This assumption should be validated empirically with Anthropic, OpenRouter,
+  and Llamacpp.
 
 ## Implementation Plan
 
-### Phase 1: StreamFragment types and FragmentAggregator
+Each phase can be merged independently.
 
-Define the `Scalar`, `StreamFragment`, and `ToolCallArgumentProgress` types in
-`jp_llm`, alongside the `EventPart` / `ToolCallPart` types they accompany.
-Implement `FragmentAggregator` with thorough unit tests.
+### Phase 1: `StreamFragment` types and `FragmentAggregator`
+
+Define `Scalar`, `StreamFragment`, and `ToolCallArgumentProgress` in `jp_llm`
+alongside `EventPart` and `ToolCallPart`, and implement `FragmentAggregator`.
 These are pure data types with no I/O dependencies.
 
-- Test aggregation: scalars, strings, arrays, nested objects.
-- Test that `Done` at each level produces the correct `serde_json::Value`.
-- Can be merged independently.
+- Unit-test aggregation of scalars, strings, arrays, and nested objects.
+- Verify that `Done` at each level produces the expected `serde_json::Value`.
 
 ### Phase 2: Incremental JSON parser
 
-Implement `IncrementalArgParser` as a standalone module in `jp_llm` with
-thorough unit tests.
-This is pure logic with no I/O dependencies.
+Implement `IncrementalArgParser` (`push(&mut self, chunk: &str) ->
+Vec<StreamFragment>`) as a standalone module in `jp_llm` with no I/O
+dependencies.
 
-- Input: `push(&mut self, chunk: &str)`
-- Output: `Vec<StreamFragment>`
-- Recursive parsing of objects, arrays, strings, and scalars.
-- Edge case tests: escaped strings at every depth, split escape sequences,
-  nested structures, empty containers.
-- Property-based tests: generate random JSON, chunk it at random boundaries,
-  verify the fragment stream reassembles to the original value via
-  `FragmentAggregator`.
-- Can be merged independently.
+- Parse objects, arrays, strings, and scalars recursively.
+- Unit-test escaped strings at every depth, split escape sequences, nested
+  structures, and empty containers.
+- Add property-based tests that split random JSON values at random chunk
+  boundaries and verify that `FragmentAggregator` reconstructs the original
+  value.
 
 ### Phase 3: Event plumbing
 
 1. Replace `IndexBuffer::ToolCall`'s `arguments_json` buffer with
-   `IncrementalArgParser` + `FragmentAggregator` for
+   `IncrementalArgParser` and `FragmentAggregator` for
    `ToolCall(ArgumentChunk(...))` handling.
 2. Update `EventBuilder::handle_part` to return `Vec<ToolCallArgumentProgress>`
    for tool call argument chunks.
-3. Update `TurnCoordinator` to forward progress events to the `ToolRenderer`.
-4. Can be merged independently (UI changes are a separate phase).
+3. Update `TurnCoordinator` to forward progress events to `ToolRenderer`.
 
 ### Phase 4: Terminal renderer integration
 
 Wire `ToolCallArgumentProgress` events into `ToolRenderer` to display arguments
 incrementally.
-This is follow-up work and can be scoped in a separate PR or RFD.
+This follow-up work can be scoped in a separate PR or RFD.
 
 ## References
 
-- [RFD 012 (Event Part Redesign)][RFD 012] — prerequisite; introduces
-  `EventPart` and `ToolCallPart`
+- [RFD 012 (Event Part Redesign)][RFD 012]: prerequisite that introduces
+  `EventPart` and `ToolCallPart`.
 - [Query Stream Pipeline Architecture]
-- `crates/jp_llm/src/event_builder.rs` — the `EventBuilder` this RFD changes,
-  and `IndexBuffer::ToolCall`, whose `arguments_json` field is the buffer-then-
-  parse-on-flush behavior being replaced
-- `crates/jp_cli/src/cmd/query/turn/coordinator.rs` — `TurnCoordinator`
-- `crates/jp_cli/src/render/tool.rs` — `ToolRenderer`
+- `crates/jp_llm/src/event_builder.rs`: `EventBuilder` and
+  `IndexBuffer::ToolCall`, whose `arguments_json` buffer-and-parse-on-flush path
+  this RFD replaces.
+- `crates/jp_cli/src/cmd/query/turn/coordinator.rs`: `TurnCoordinator`.
+- `crates/jp_cli/src/render/tool.rs`: `ToolRenderer`.
 
 [Query Stream Pipeline Architecture]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md
 [RFD 012]: 012-typed-llm-streaming-events.md
