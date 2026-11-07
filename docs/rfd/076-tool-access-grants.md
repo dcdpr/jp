@@ -12,52 +12,46 @@
 
 This RFD adds a typed `access` policy to tool configuration that declares which
 filesystem, network, and environment resources a tool may access.
-The resolved policy flows to tools in their runtime context so tools can
-validate grants before performing operations, while OS-level enforcement is
-defined in [RFD 075].
+The resolved policy is passed to tools in their runtime context so they can
+validate grants before performing operations.
+OS-level enforcement of the same policy is defined in [RFD 075].
 
 ## Motivation
 
-Individual tools implement ad-hoc safeguards today — `unix_utils` applies a
-`sandbox-exec` profile on macOS and runs with `clean_env: true`; the `fs_*`
+Individual tools implement ad-hoc safeguards today: `unix_utils` applies a
+`sandbox-exec` profile on macOS and runs with `clean_env: true`, and the `fs_*`
 tools join user-supplied paths against the workspace root.
-These protections are local to each tool and are not expressible in
-configuration.
-There is no typed, declarative access policy in the host/tool contract that a
-user's tool config can use to say "this tool may only write to
-`.config/jp/tools`."
+These protections are hardcoded per tool rather than expressed in configuration.
+The host-tool contract has no declarative access policy that lets a
+configuration restrict a tool to writing only under `.config/jp/tools`.
 The only configurable safeguard is `RunMode::Ask`, which controls *whether* a
-tool runs — not *what it can do* while running.
+tool runs, not *what it can do* while running.
 
 This creates two problems:
 
-1. **Tool config can't scope access.** A tool-writing config that enables
-   `fs_create_file` wants to grant write access to `.config/jp/tools` and read
-   access to the rest of the workspace.
-   Today there is no way to express this.
-   The tool gets full access to everything.
+1. **Tool configuration cannot scope access.** A configuration that enables
+   `fs_create_file` for authoring tools may want to grant write access to
+   `.config/jp/tools` and read-only access to the rest of the workspace.
+   Without scoped grants, the tool gets full access to the workspace.
 
-2. **Tools can't provide good error messages for out-of-scope operations.** When
-   a future OS-level sandbox denies a syscall, the tool gets a raw permission
-   error with no context.
-   If the tool knows its access policy, it can reject the operation early with a
-   helpful message that names the configured grants and suggests how to fix the
-   config.
+2. **Tools cannot explain out-of-scope errors.** When an OS-level sandbox denies
+   a syscall, the tool receives a raw permission error with no context.
+   A tool that knows its access policy can reject the operation early with an
+   error message that names the configured grants and suggests how to update the
+   configuration.
 
-This RFD solves the first problem and lays the groundwork for the second.
-It establishes the access policy types and configuration surface that [RFD 075]
-consumes for OS-level enforcement.
-Getting the policy semantics right here is a prerequisite for 075 — the two
-layers must agree on what each rule means.
+This RFD solves the first problem and provides the policy model for the second.
+It defines the configuration surface and runtime policy types that [RFD 075]
+consumes for OS-level enforcement, ensuring that cooperative tool checks and the
+OS sandbox agree on what each rule permits.
 
 ## Design
 
 ### Configuration
 
-A new `access` field on tool configuration declares resource grants.
-It is accepted in two scopes: on an individual tool, and on the
-`[conversation.tools.'*']` defaults block (see [Scope
-inheritance](#scope-inheritance)).
+A new `access` field on tool configuration declares resource grants in two
+scopes: on an individual tool, and on the `[conversation.tools.'*']` defaults
+block (see [Scope inheritance](#scope-inheritance)).
 Three resource types are supported: filesystem (`fs`), network (`net`), and
 environment variables (`env`).
 
@@ -88,46 +82,37 @@ write = true
 ```
 
 When no `access` field is present, the tool has unrestricted workspace access
-across all resource types (fs, net, env).
-This preserves backward compatibility — existing tools and configs work without
-changes.
+across all resource types (`fs`, `net`, `env`), preserving backward
+compatibility for existing tools and configurations.
 
 Default-deny applies **per resource type**.
-Declaring at least one rule in `access.fs` shifts filesystem access to
-default-deny; `access.net` and `access.env` remain unrestricted until they, too,
-have at least one rule.
-This avoids the footgun where adding a single network grant silently denies
-filesystem access.
-A resource type is considered "declared" when its list contains at least one
-rule after merging; absent or empty lists mean "unrestricted" for that type.
+A resource type is restricted only when its rule list contains at least one rule
+after merging; an absent or empty list leaves that resource type unrestricted.
+Declaring a rule in `access.fs` switches filesystem access to default-deny while
+leaving `access.net` and `access.env` unrestricted, so adding a network grant
+does not silently block filesystem access.
 
-Config validation rejects `access` on tools whose finalized (post-merge) source
-is `builtin` or `mcp`.
-`source` is a required field, so a ToolConfig with `access` and no source is
-already rejected at load — this check runs after all layers are merged so that
-a layer that only adds `access` (without restating source) is allowed, and the
-builtin/mcp rejection observes the effective source.
-`access` is designed for the local subprocess contract: the policy is serialized
-into the `Context` JSON that JP passes to tool binaries, and those binaries
-check it before acting.
-Builtin tools are in-process Rust code with their own configuration semantics,
-and MCP tools run on external servers JP does not control.
-Neither participates in the `access` surface of this RFD.
-Silently accepting `access` on those sources would create false confidence in a
-security-relevant field, so it is a hard error at config load.
-If host-side semantics for builtin or MCP tools are added later (e.g., JP-side
-enforcement for builtins, MCP argument proxying), a follow-up RFD will define
-them.
-This rejection covers `access` declared on a named tool; for grants that reach a
-tool through the `*` defaults, see [Declared versus inherited
-grants](#declared-versus-inherited-grants).
+`access` applies only to `local` subprocess tools: JP serializes the policy into
+the `Context` JSON passed to the tool binary, which validates grants before
+acting.
+Builtin tools run in-process with their own configuration semantics, and MCP
+tools run on external servers outside JP's control.
+Setting `access` on a named tool whose finalized (post-merge) `source` is
+`builtin` or `mcp` is a hard error at config load, avoiding false confidence in
+a security-relevant setting.
+Validation runs after all config layers merge so an override layer can add
+`access` without restating `source` (which `ToolConfig` already requires once
+finalized).
+Host-side enforcement for builtin or MCP tools is left to a follow-up RFD.
+For grants that reach a tool through the `*` defaults, see [Declared versus
+inherited grants](#declared-versus-inherited-grants).
 
 #### Cross-layer merging
 
-`access.fs`, `access.net`, and `access.env` are each a `MergeableVec` (from the
-`jp_config` types module).
-Default merge strategy is **append**: rules from later config layers are added
-to the pool defined by earlier layers, and longest-prefix-match resolves which
+`access.fs`, `access.net`, and `access.env` each use `MergeableVec` from
+`jp_config`.
+The default merge strategy is **append**: rules from later config layers are
+appended to those from earlier layers, and longest-prefix match resolves which
 rule applies to a given target.
 
 ```toml
@@ -143,7 +128,8 @@ read = true
 write = true
 ```
 
-Result: two `fs` rules, read on `.` and read+write on `.config/jp/tools`.
+The merged policy contains two `fs` rules: read on `.` and read+write on
+`.config/jp/tools`.
 
 To replace rather than append, a config layer uses the `Merged` form with an
 explicit strategy:
@@ -156,105 +142,91 @@ value = [
 ]
 ```
 
-This applies the standard jp_config merge primitives uniformly — users already
-familiar with `MergeableVec` semantics elsewhere (attachments, instructions,
-sections) don't learn new rules for `access`.
+This reuses the standard `jp_config` `MergeableVec` semantics already used by
+attachments, instructions, and sections.
 
 #### Scope inheritance
 
-`access` is declared in one of two scopes:
+`access` can be declared in two scopes:
 
-- **Per-tool** — `[conversation.tools.<name>.access]`.
-- **Defaults** — `[conversation.tools.'*'.access]`, which applies to every
-  local tool that declares no `access` of its own.
+- **Per-tool**: `[conversation.tools.<name>.access]`.
+- **Defaults**: `[conversation.tools.'*'.access]`, which applies to every local
+  tool that declares no `access` block of its own.
 
-Scope resolution is **replace**, not field-by-field fill: a tool that declares
-any `access` block ignores the `*` block entirely.
-Reading a tool's `access` block therefore tells the whole truth about what that
-tool may do.
+Scope resolution uses **replace** rather than field-by-field merge: a tool that
+declares any `access` rules ignores the `*` block entirely.
+A tool's `access` block is therefore a complete specification of its policy.
 
-The rejected alternative is appending the `*` rules to the tool's own.
-That leaves a grant in force which is not visible at the place the reader is
-looking, and it makes narrowing impossible: with append, the only way for a tool
-to take away something `*` granted is to add a longer-prefix rule with the
-capabilities set `false` and rely on specificity resolution to shadow the
-broader grant.
-That is denial-by-prefix-arithmetic, the same class of subtlety
-[Inheritance-based evaluation](#inheritance-based-evaluation) is rejected for.
-The cost of replace is repetition — a tool that wants the defaults plus one
-more rule restates the defaults — and that is the intended trade.
-A copied rule is auditable at the tool; an inherited one is not.
+Appending `*` rules to per-tool rules was rejected because it leaves inherited
+grants active without showing them in the tool's own configuration and makes
+narrowing awkward: revoking a capability granted in `*` would require adding a
+longer-prefix rule with capabilities set to `false` to shadow the broader grant
+(the same hazard described in [Inheritance-based
+evaluation](#inheritance-based-evaluation)).
+Replacing the whole block requires a tool that extends the defaults to restate
+them, keeping the full policy auditable in one place.
 
-The two axes are independent:
+Cross-layer merging and scope resolution operate on independent axes:
 
 | Axis                             | Rule                                                     |
 | -------------------------------- | -------------------------------------------------------- |
-| Between scopes (`*` vs per-tool) | Replace — the most specific non-empty scope wins whole   |
+| Between scopes (`*` vs per-tool) | Replace: the most specific non-empty scope wins in full  |
 | Between layers within one scope  | Append (see [Cross-layer merging](#cross-layer-merging)) |
 
-So `*` and each tool are separate rule pools, each accumulated across config
-layers, and the tool's policy is its own pool when non-empty, otherwise the `*`
-pool.
-`strategy = "replace"` still resets a pool from within a layer.
+`*` and each named tool accumulate rules in separate pools across config layers
+(where `strategy = "replace"` resets only that scope's pool).
+After layer merging completes, a tool uses its own pool if non-empty, or falls
+back to the `*` pool.
 
-The unit of replacement is the whole `access` block, not one resource type.
-A scope counts as non-empty when any of `fs`, `net`, or `env` holds a rule, and
-the block that wins carries all three lists.
-So a tool declaring only `access.fs` rules also drops the `*` block's
-`access.env` rules, and reverts to unrestricted environment access unless it
-restates them.
-This follows from the same reason replace beats append — a tool's block is read
-as the complete account of what that tool may do, and per-resource-type
-inheritance would make two of the three lists invisible at the tool.
-It is the sharpest edge of the design: check every resource type when you give a
-tool rules of its own, not just the one you came to change.
+Replacement applies to the entire `access` block, not per resource type.
+A scope is non-empty when any of `fs`, `net`, or `env` contains at least one
+rule, and the winning scope supplies all three lists.
+A tool that declares only `access.fs` rules therefore discards `access.env` and
+`access.net` rules from `*`, reverting to unrestricted environment and network
+access unless it restates them.
 
-One consequence is worth stating plainly: a single rule under
-`[conversation.tools.'*'.access]` switches every local tool without its own
-block to default-deny at once.
-That is what the scope is for, but the blast radius is wide — a `*` block
-granting read on `.` and nothing else revokes every such tool's write access.
+Conversely, adding a single rule under `[conversation.tools.'*'.access]`
+switches that resource type to default-deny for every local tool without its own
+`access` block.
+For example, a `*` block that grants only `read = true` on `"."` revokes write
+access for all such tools.
 
 #### Declared versus inherited grants
 
-The builtin/mcp rejection above applies to `access` **declared on a named
-tool**.
-Access reaching a tool through the `*` scope is *skipped* for builtin and MCP
-tools, not rejected.
+Config validation only rejects `access` when it is **declared on a named**
+`builtin` or `mcp` tool.
+Grants inherited from `[conversation.tools.'*'.access]` are *skipped* for
+`builtin` and `mcp` tools rather than rejected.
 
-The rejection exists because a user who writes
-`[conversation.tools.some_mcp_tool.access]` has named that tool, and would
-otherwise believe the grant applies to it.
-That reasoning does not transfer to `*`, which describes "the tools that consume
-access grants" — it makes no claim about any individual tool, so there is no
-false confidence to protect against.
-Without the distinction the `*` scope would be unusable: any workspace with a
-single MCP server configured would fail to load as soon as `*.access` was set.
+A user who writes `[conversation.tools.some_mcp_tool.access]` targets that tool
+explicitly and would otherwise expect the policy to apply.
+By contrast, `*` sets defaults for local tools without targeting individual
+builtin or MCP tools; rejecting `*` whenever a builtin or MCP tool is configured
+would make `[conversation.tools.'*'.access]` unusable in any workspace with
+builtins or an MCP server.
 
-The same rule extends to any future scope broader than one tool (tool groups,
-per RFDs 055–057): grants written at a scope the user did not name tool-by-tool
-apply to the local tools in that scope and pass over the rest.
+The same distinction applies to any future scope broader than a single tool
+(such as tool groups in RFDs 055-057): grants declared on a group apply to the
+local tools in that group and skip the rest.
 
 ### Rule evaluation
 
-Each resource type defines its own specificity metric (see per-type sections
-below).
-When multiple rules match a target, the most specific rule wins — its
-capabilities apply in full, without inheritance from less specific rules.
-When multiple rules share the same specificity, the **last rule in the vector
+Each resource type defines its own specificity metric.
+When multiple rules match a target, the most specific rule wins, and its
+capabilities apply in full without inheriting from less specific rules.
+When matching rules have equal specificity, the **last rule in the vector
 wins**.
-`MergeableVec`'s default append semantics mean later config layers append to
-earlier ones, so the most recently declared rule takes precedence on ties.
+Because `MergeableVec` appends rules from later config layers after earlier ones
+by default, later layers take precedence on ties.
 
 ### Filesystem rules
 
 Each filesystem rule grants capabilities at a path prefix relative to the
-workspace root.
-The path `"."` matches the entire workspace.
-Rule paths are literal: glob characters like `*` and `?` have no special meaning
-and are treated as literal path segments.
-Matching is component-aware, not byte-based — a rule `path = "src"` matches
-`src/lib.rs` but not `src_generated/foo.rs`.
+workspace root, where `"."` matches the entire workspace.
+Rule paths are literal: glob characters such as `*` and `?` have no special
+meaning.
+Matching compares path components rather than byte prefixes, so `path = "src"`
+matches `src/lib.rs` but not `src_generated/foo.rs`.
 
 ```toml
 [[access.fs]]
@@ -273,7 +245,7 @@ path = ".env"
 
 #### Capabilities
 
-Five atomic capabilities and one alias:
+A filesystem rule supports five atomic capabilities and one alias:
 
 | Field     | Description                                      |
 | --------- | ------------------------------------------------ |
@@ -303,10 +275,9 @@ create = true
 ```
 
 All capabilities default to `false`.
-The `write` field is settable in config and on the struct (via deserialization),
-but there is no `write()` accessor on `FsRule` — consumers read the atomic
-capabilities via `create()`, `update()`, and `delete()`, which apply the alias
-expansion.
+Although `write` can be set in configuration and deserialized onto `FsRule`,
+`FsRule` exposes no `write()` accessor; callers read the atomic `create()`,
+`update()`, and `delete()` methods, which expand the `write` alias.
 
 #### How tools map to capabilities
 
@@ -321,19 +292,15 @@ expansion.
 | `fs_move_file`   | `delete` on source; `create` (new) or `update` |
 |                  | (existing) on target                           |
 
-A directory target widens these checks to the whole subtree, and the parent
-directory that `fs_delete_file` and `fs_move_file` clean up is checked on its
-own.
-Both are covered by [Operations that reach a
-subtree](#operations-that-reach-a-subtree).
+When the target is a directory, mutating checks apply to the entire subtree, and
+when `fs_delete_file` or `fs_move_file` removes an empty parent directory, that
+parent is checked separately (see [Operations that reach a
+subtree](#operations-that-reach-a-subtree)).
 
 #### Evaluation: longest prefix match
 
-When multiple rules match a target path, the most specific rule wins.
-Specificity is determined by path component count — more components means more
-specific.
-The winning rule applies in full; capabilities are not inherited from less
-specific rules.
+When multiple rules match a target path, the rule with the most path components
+wins and applies in full without inheriting capabilities from shorter prefixes.
 
 ```toml
 # Rule A: workspace root (0 components after normalization)
@@ -356,26 +323,28 @@ write = true
 - `src/generated/schema.rs` → matches Rule C → read + write
 - `tests/main.rs` → matches Rule A → read + write
 
-If no rule matches a target path, all capabilities are denied (default-deny).
-See [Rule evaluation](#rule-evaluation) for tie-breaking.
+If no rule matches a target path, all capabilities are denied.
+Ties at equal component count resolve as described in [Rule
+evaluation](#rule-evaluation).
 
-Rules are self-contained — each rule is readable in isolation.
-The cost is some repetition (Rule B must re-state `read = true`), but this
-avoids subtle bugs from implicit inheritance where a less specific rule silently
-grants capabilities that a more specific rule intended to restrict.
+Because rules are self-contained, each rule can be read in isolation.
+Rule B must restate `read = true`, but a broader rule can never silently grant
+capabilities that a narrower rule intended to revoke.
 
 #### Operations that reach a subtree
 
-Longest-prefix match answers a question about one path.
-Some operations act on more than the path they name: renaming or removing a
-directory takes everything beneath it, so a grant on the directory alone would
-step straight past a deeper rule that closes part of the tree.
+Longest-prefix match evaluates a single path, but mutating a directory affects
+every entry beneath it.
+Checking only the directory path when renaming or deleting a directory would
+bypass more specific rules that deny access to paths inside that directory.
 
-For those, evaluation asks the same question of the subtree.
-The capability is permitted only when the winning rule at the target grants it
-**and** no rule below the target denies it.
-Each deeper rule is re-evaluated at its own path rather than read on its own, so
-a rule a later config layer has overridden does not deny.
+Mutating operations on a directory (`create`, `update`, and `delete`) therefore
+perform a subtree check.
+A subtree check permits the capability only when the winning rule for the target
+directory grants it **and** no rule under that directory denies it.
+Each descendant rule path is evaluated through full longest-prefix and
+tie-breaking resolution rather than inspected in isolation, so a deny rule
+overridden by a later config layer does not block the operation.
 
 ```toml
 [[access.fs]]
@@ -389,114 +358,94 @@ read = true
 write = false
 ```
 
-- `docs/notes.md` → `delete` granted: the root rule wins, and nothing below the
-  target denies.
+- `docs/notes.md` → `delete` granted: the root rule wins, and no descendant
+  rule denies `delete`.
 - `docs/ticket/T-02wt0kx-fix-the-header.md` → `delete` denied: the
   `docs/ticket` rule wins.
-- `docs`, as a directory → `delete` denied: the root rule grants it, but
-  `docs/ticket` denies below the target and removing `docs` would take that tree
-  with it.
+- `docs` (directory) → `delete` denied: the root rule grants `delete` on
+  `docs`, but the `docs/ticket` rule denies `delete` on a path inside `docs`.
 
-The subtree question applies to `create`, `update`, and `delete` on a directory
-target.
-`read` on a directory lists that directory and discloses nothing beneath it, and
-`execute` names one file, so both stay single-path questions.
-A target that does not exist yet is not a directory, and is asked about as the
-single entry it is.
+`read` on a directory only lists its immediate entries, and `execute` targets a
+single file, so both use a single-path check.
+A target path that does not exist yet is not a directory and also uses a
+single-path check, with two additional cases in tool operations:
 
-Two consequences for tools:
-
-- **A move's destination is shaped by its source.** Moving a directory onto a
-  path that does not exist yet lands every path under the source below the
-  destination.
-  The destination is therefore a subtree question whenever the source is a
-  directory, whatever sits at the destination.
-- **A path the call never named still needs a grant.** `fs_delete_file` and
-  `fs_move_file` remove the source's parent directory when the operation leaves
-  it empty.
-  That is a second deletion, of a directory the caller did not mention, and a
-  policy may grant `delete` on the files in a tree while refusing the tree
-  itself.
-  Without a grant the directory stays and the call still reports the deletion it
-  was asked for.
-
-The distinction is between what a rule *says* and what an operation *reaches*.
-Rules stay non-inheriting and readable in isolation; the reach of the operation
-decides how many of them are consulted.
+- **Moving a directory checks the destination subtree.** Moving a directory
+  places all of its contents under the destination path, even when the
+  destination does not exist yet.
+  `fs_move_file` therefore performs a subtree check on the destination whenever
+  the source is a directory.
+- **Cleaning up an empty parent directory requires its own `delete` grant.**
+  When `fs_delete_file` or `fs_move_file` leaves the source's parent directory
+  empty, it removes that parent directory only if `delete` is also permitted on
+  the parent.
+  If a policy grants `delete` on files inside a directory but denies `delete` on
+  the directory itself, the empty directory is left in place and the file
+  operation still succeeds.
 
 #### Rule path canonicalization
 
-Rule paths themselves are canonicalized at **policy compilation time** using the
-same algorithm as [Path evaluation](#path-evaluation) below.
-Before the merged `AccessConfig` is converted to a `jp_tool::AccessPolicy` (and
-before it crosses the wire to the tool), each rule's `path` is joined with
-`ctx.root`, normalized, resolved through symlinks on each existing ancestor, and
-stripped back to workspace-relative form.
-Rules rejected during canonicalization (workspace escape, absolute path outside
-`ctx.root`, symlink target outside workspace) fail config load with a clear
-error naming the offending rule.
+Rule paths are canonicalized when converting the merged `AccessConfig` into a
+`jp_tool::AccessPolicy`, using the same algorithm as [Path
+evaluation](#path-evaluation).
+Before the policy is serialized to the tool, each rule's `path` is joined with
+`ctx.root`, lexically normalized, resolved through symlinks on every existing
+ancestor, and stripped back to a workspace-relative path.
+Any rule path that escapes the workspace (via an absolute path outside
+`ctx.root`, `..` segments, or a symlink pointing outside `ctx.root`) fails
+config load with an error naming the offending rule.
 
-This ensures a rule `path = "src"` still matches target paths when `src/` is a
-symlink to another directory inside the workspace — both rule and target are
-reduced to the same canonical form before comparison.
-It also means the cooperative layer and the OS sandbox ([RFD 075]) agree on the
-resolved paths they enforce against.
+Canonicalizing rule paths ensures that `path = "src"` still matches targets when
+`src/` is a symlink to another directory inside the workspace, because both rule
+and target paths are reduced to the same canonical form before comparison.
+It also ensures that cooperative checks and the OS sandbox ([RFD 075]) enforce
+against the same resolved paths.
 
 #### Path evaluation
 
-Filesystem rule evaluation operates on a **canonical, workspace-relative form**
-of the target path.
-Raw user input is never evaluated directly.
+Filesystem rules are evaluated against a **canonical, workspace-relative**
+target path, never against raw user input.
 For any target path `input`, an implementation must:
 
 1. If `input` is relative, join it with `ctx.root`.
-   If it is absolute and not under `ctx.root`, reject as out-of-workspace.
-2. Normalize the joined path, removing redundant separators and resolving `..`
-   segments lexically.
-   If normalization escapes `ctx.root`, reject as workspace-escape.
-3. Resolve symlinks on the path and on each existing ancestor.
-   If the resolved path is outside `ctx.root`, reject as workspace-escape.
-   When the target does not yet exist (e.g., `create` on `new/dir/file.txt`
-   where `new/` is also missing), resolve the nearest existing ancestor, then
-   append the remaining relative suffix.
-   The missing components are not resolved — they cannot contain symlinks that
-   haven't been created yet.
-4. Strip the `ctx.root` prefix to produce the workspace-relative canonical form.
-5. Evaluate against `AccessPolicy` using longest-prefix match on that form,
-   extended to the subtree for an operation that reaches one (see [Operations
+   If it is absolute and not under `ctx.root`, reject it as outside the
+   workspace.
+2. Lexically normalize the joined path by removing redundant separators and
+   resolving `..` segments.
+   If normalization escapes `ctx.root`, reject it as a workspace escape.
+3. Resolve symlinks on the path and each existing ancestor.
+   If the resolved path leaves `ctx.root`, reject it as a workspace escape.
+   When the target does not yet exist (for example, `create` on
+   `new/dir/file.txt` where `new/` is also missing), resolve the nearest
+   existing ancestor and append the remaining relative suffix; non-existent
+   components cannot contain symlinks.
+4. Strip the `ctx.root` prefix to produce the workspace-relative canonical path.
+5. Evaluate the canonical path against `AccessPolicy` using longest-prefix
+   match, or a subtree check for mutating directory operations (see [Operations
    that reach a subtree](#operations-that-reach-a-subtree)).
 
-The `action` field on `Context` (`Run` vs `FormatArguments`) does not gate these
-checks at the host layer.
-Whether and when a tool calls `check_*` is the tool's choice —
-`FormatArguments` implementations typically return early before any I/O and
-therefore never reach a check.
-OS-level enforcement via [RFD 075] always applies regardless of action, so the
-tool is treated as a potentially hostile black box: cooperative checks improve
-error quality but are not the security boundary.
+The host passes the policy regardless of `Context::action` (`Run` or
+`FormatArguments`).
+Tools choose when to call `check_*`; `FormatArguments` implementations typically
+return before performing I/O and never run a check.
+OS-level enforcement in [RFD 075] applies to every invocation regardless of
+action, treating the tool as an untrusted black box while cooperative checks
+provide actionable error messages.
 
-This canonical form is the **authoritative shape** of a filesystem rule.
-[RFD 075] generates OS-level enforcement (sandbox-exec profiles, Landlock
-rulesets) against resolved absolute paths — the same paths step 3 produces
-before stripping the workspace prefix.
-The cooperative layer (this RFD) and the OS layer see the same rule mean the
-same thing, which includes the subtree reach: a sandbox that grants a directory
-whose subtree carries a deny would permit through the kernel exactly what the
-cooperative check refuses.
-
-JP's in-tree Rust tools link against the `jp_tool` crate, which provides
-`Context::check_read` and friends (see [Runtime types](#runtime-types)) as a
-reference implementation of the steps above.
-Tools written in other languages receive `Context` as a JSON object and must
-implement the same algorithm, or rely on [RFD 075]'s OS-level enforcement.
-Diverging from the canonical form means the tool's self-check disagrees with the
-OS sandbox — which is why the steps here are normative, not a convenience.
+This canonical form is normative.
+[RFD 075] generates `sandbox-exec` profiles and Landlock rulesets from the
+resolved absolute paths produced in step 3 (before stripping `ctx.root`), and
+accounts for subtree denials so the kernel sandbox never permits a directory
+mutation that a descendant rule denies.
+In-tree Rust tools use `Context::check_read` and related helpers in `jp_tool`
+(see [Runtime types](#runtime-types)); tools written in other languages must
+implement the same steps so their self-checks match the OS sandbox.
 
 ### Network rules
 
-Network rules match against parsed URIs, not raw strings.
-Each rule specifies a host (required), with optional scheme, port, and path
-prefix:
+Network rules match against parsed URIs rather than raw strings.
+Each rule requires a `host` and accepts an optional `scheme`, `port`, and
+`path_prefix`:
 
 ```toml
 [[access.net]]
@@ -509,49 +458,48 @@ path_prefix = "/admin"
 allow = false
 ```
 
-Both rule and target hosts are normalized identically before matching: parsed
-via `url::Host`, converted to ASCII (Punycode) form, then lowercased.
-This means `host = "münchen.de"` in config matches target URIs whether they
-arrive in Unicode or Punycode form.
-Rule `host` values that fail to parse as a host are rejected at config load.
+Rule and target hosts are normalized identically before comparison: parsed with
+`url::Host`, converted to ASCII (Punycode), and lowercased.
+A rule with `host = "münchen.de"` therefore matches target URIs in either
+Unicode or Punycode form.
+Rule `host` values that fail to parse are rejected at config load.
 
-Evaluation then matches:
+A rule matches a target URI when all four components match:
 
 - `scheme`: exact match if specified; any scheme if absent.
-- `host`: exact match, case-insensitive, after normalization.
-  No string prefix matching — `api.github.com` does not match
-  `api.github.com.evil.com`.
-- `port`: exact match if specified; default-port-for-scheme if absent.
-- `path_prefix`: segment-aware prefix match if specified; any path if absent.
-  `/admin` matches `/admin/users` but not `/administration`.
+- `host`: exact match after normalization, never a string prefix
+  (`api.github.com` does not match `api.github.com.evil.com`).
+- `port`: exact match if specified; the scheme's default port if absent.
+- `path_prefix`: segment-aware prefix match if specified (`/admin` matches
+  `/admin/users` but not `/administration`); any path if absent.
 
-Examples with the rules above:
+With the example rules above:
 
 - `https://api.github.com/repos` → matches first rule → allowed
 - `https://api.github.com/admin/users` → matches second rule → denied
 - `https://api.github.com.evil.com/` → no host match → denied
 - `https://example.com` → no match → denied
 
-Specificity for longest match is the sum of matched-component counts: presence
-of `scheme` + presence of `port` + path segment count.
-`host` is required and therefore constant across matching rules, so it does not
-contribute to tie-breaking.
-When two rules match a target, the more specific wins; ties resolve per [Rule
+Rule specificity is the sum of matched components: `1` if `scheme` is set, plus
+`1` if `port` is set, plus the number of path segments in `path_prefix`.
+Because `host` is required on every rule, it does not affect relative
+specificity.
+The most specific matching rule wins, with ties broken as described in [Rule
 evaluation](#rule-evaluation).
 
-Raw string prefix matching on URIs would accept `api.github.com.evil.com` as a
-match for `api.github.com` and fail similarly on userinfo smuggling and port
-variants.
-Structured matching is the only defensible primitive here, and it must be
-defined at the policy layer so [RFD 075]'s OS-level enforcement consumes the
-same model without re-interpreting string rules.
+Matching parsed URI components avoids the pitfalls of string-prefix matching on
+URLs, such as subdomain spoofing (`api.github.com.evil.com`), userinfo
+smuggling, and port ambiguity, and gives [RFD 075] a structured model for
+OS-level network enforcement.
 
 ### Environment variable rules
 
-Environment variable rules match variable names either exactly or as a prefix,
-distinguished by a trailing `*` in the `name` field.
-A `name` without `*` is an exact match; `name = "AWS_*"` is a prefix match where
-`*` is a sentinel (not part of the matched prefix).
+Environment variable rules match variable names either exactly or by prefix.
+A trailing `*` in `name` marks a prefix rule (`name = "AWS_*"` matches any
+variable starting with `AWS_`), while a `name` without `*` matches only that
+exact variable name.
+A `*` is allowed only as the final character of `name`, which is no practical
+restriction because POSIX environment variable names cannot contain `*`.
 
 ```toml
 [[access.env]]
@@ -573,58 +521,43 @@ read = false
 - `AWS_SECRET_ACCESS_KEY` → matches exact deny → denied
 - `HOME` → no match → denied
 
-Choosing explicit `*` over a trailing-underscore convention makes
-exact-vs-prefix a syntactic distinction rather than a convention.
-A rule `name = "AWS_TOKEN"` unambiguously matches only `AWS_TOKEN`, never
-`AWS_TOKEN_LOG`, regardless of the target variable's naming style.
+Requiring an explicit trailing `*` rather than inferring prefixes from a
+trailing underscore ensures that `name = "AWS_TOKEN"` matches only `AWS_TOKEN`,
+never `AWS_TOKEN_LOG`.
 
-Specificity is the byte length of the literal portion of `name` (excluding the
-trailing `*` if present).
-On ties at the same literal length, exact rules beat prefix rules — exact
-`AWS_TOKEN` (9 bytes, exact) beats `AWS_TOKEN*` (9 bytes, prefix) on variable
-`AWS_TOKEN`.
-Component count is not used; environment variable names have no universal
-separator.
+Because environment variable names have no universal delimiter, specificity is
+the byte length of the literal portion of `name` (excluding any trailing `*`).
+When an exact rule and a prefix rule have the same literal length, the exact
+rule wins: `AWS_TOKEN` (9 literal bytes, exact) beats `AWS_TOKEN*` (9 literal
+bytes, prefix) for `AWS_TOKEN`.
 
-A literal `*` cannot appear anywhere in a `name` value except as the trailing
-sentinel.
-This keeps the matching algorithm simple and is not a practical restriction:
-POSIX env var names cannot contain `*`.
-
-Matching is case-sensitive, unlike host matching for `net` rules.
-A rule set means the same thing wherever it is read, which matters because
-config is routinely shared across machines through a checked-in
-`.jp/config.toml`.
-
-This does not by itself preserve a deny on a platform whose OS resolves variable
-names case-insensitively.
-Given `*` granting reads and `GITHUB_TOKEN` denying them, a Windows request for
-`github_token` misses the exact deny, selects the wildcard grant, and then
-resolves to the same OS variable; on Unix the same request usually finds no
-variable at all.
-Canonicalizing the requested name alone does not close this — an exact rule
-written in another case still misses.
+Matching is case-sensitive so a checked-in `.jp/config.toml` evaluates
+identically across platforms.
+However, case-sensitive matching alone does not prevent bypasses on operating
+systems with case-insensitive environment variables.
+On Windows, if `*` grants read and `GITHUB_TOKEN` denies it, a lookup for
+`github_token` misses the exact deny, matches `*`, and resolves to
+`GITHUB_TOKEN` in the OS environment.
+Canonicalizing only the requested variable name is also insufficient if the deny
+rule itself was written in a different case.
 
 > [!NOTE]
-> **Open question.** The case-insensitive-platform rule needs a deny-preserving
-> definition before the first `env` consumer ships.
-> Candidates are canonicalizing requests *and* rule names to one form, or
-> matching denies case-insensitively while keeping grants exact.
-> Neither is settled, and the choice belongs with the consumer that first needs
-> it.
+> **Open question.** Case-insensitive platforms need a deny-preserving rule
+> before the first `env` consumer ships, either by canonicalizing both request
+> and rule names to a single case or by matching deny rules case-insensitively
+> while keeping grants case-sensitive.
+> The first `env` consumer will settle this choice.
 
 ### Runtime types
 
-The access policy types live in `jp_tool`, which defines the wire format between
-the host (JP) and tool binaries.
-`Context` is serialized to JSON and passed to each tool invocation.
-The types here are the **finalized** policy — merging across config layers
-happens host-side (see [Cross-layer merging](#cross-layer-merging)) before
-serialization, so the tool sees a resolved `Vec<FsRule>`, not a `MergeableVec`.
-`MergeableVec` lives in `jp_config` and is never exposed on the wire; this keeps
-`jp_tool` free of config-layer dependencies.
+The runtime access policy types live in `jp_tool`, which defines the JSON wire
+format between JP and tool binaries.
+Config-layer merging happens on the host before serialization (see [Cross-layer
+merging](#cross-layer-merging)), so tools receive a finalized `AccessPolicy`
+with plain `Vec` fields rather than `MergeableVec`, keeping `jp_tool`
+independent of `jp_config`.
 
-A new `access` field carries the policy:
+`Context` carries the policy in an optional `access` field:
 
 ```rust
 /// Contextual information available to a tool.
@@ -744,20 +677,19 @@ impl AccessPolicy {
 }
 ```
 
-`FsAccessError` is scoped to filesystem checks.
-When net and env cooperative consumers land, they define their own error types
-(`NetAccessError`, `EnvAccessError`) with shape-appropriate context — host/port
-for net, variable name for env.
-There is no unified `AccessError` union; each resource type carries the fields
-that make sense for it.
+`FsAccessError` is specific to filesystem checks.
+Future cooperative `net` and `env` consumers will define their own error types
+(`NetAccessError`, `EnvAccessError`) with resource-specific fields (host and
+port for `net`, variable name for `env`) rather than sharing a combined
+`AccessError` enum.
 
-For tools written in Rust that link `jp_tool` as a library, `Context` exposes a
-reference implementation of the [Path evaluation](#path-evaluation) steps.
-Each method canonicalizes `input`, then delegates to `AccessPolicy`.
-On success it returns the resolved absolute path so the caller can perform the
-operation without re-resolving.
-When `self.access` is `None` (unrestricted), canonicalization still runs and
-workspace-escape is still rejected — only the capability check is skipped.
+For Rust tools that link `jp_tool`, `Context` implements the [Path
+evaluation](#path-evaluation) steps directly.
+Each `check_*` method canonicalizes `input`, delegates to `AccessPolicy`, and
+returns the resolved absolute path so the caller can perform the operation
+without resolving the path a second time.
+When `self.access` is `None`, `check_*` still canonicalizes the path and rejects
+workspace escapes, skipping only the capability check:
 
 ```rust
 impl Context {
@@ -774,22 +706,16 @@ impl Context {
 }
 ```
 
-`FsAccessError::Denied` carries the configured grants so callers can produce
-helpful error messages that name what the tool is allowed to do, not just what
-it was denied.
-
-Tools written in other languages deserialize `Context` from JSON and must
-implement the same algorithm to participate in cooperative enforcement.
-They receive `access` as a JSON object matching the shape of `AccessPolicy`.
-The path-evaluation steps are language-neutral; only the Rust convenience
-methods are specific to `jp_tool`.
+`FsAccessError::Denied` includes the configured `grants` so callers can report
+which paths the policy permits alongside the denied target.
+Tools in other languages deserialize `access` from the `Context` JSON and
+implement the same language-neutral evaluation steps.
 
 ### Config-layer types
 
-`jp_config` defines partial/mergeable counterparts for each rule type.
-They share the on-wire shape of `jp_tool`'s types but derive `schematic::Config`
-for the partial/merge/delta machinery, and use `MergeableVec` to participate in
-the standard cross-layer merge model:
+`jp_config` defines mergeable config types that mirror the serialized shape of
+the `jp_tool` types, deriving `schematic::Config` and wrapping each rule list in
+`MergeableVec`:
 
 ```rust
 // crates/jp_config/src/conversation/tool/access.rs
@@ -837,72 +763,67 @@ pub struct FsRuleConfig {
 ```
 
 `ToolConfig` and `ToolsDefaultsConfig` each gain an `access:
-Option<AccessConfig>` field with standard `AssignKeyValue`,
-`PartialConfigDelta`, and `ToPartial` impls alongside the existing fields like
-`options`.
-Neither participates in `FillDefaults`: scope resolution is replace, so it
-happens in `ToolConfigWithDefaults::access()` (the shape of `run()` and
-`result()`) rather than through the field-by-field fill `style` uses.
-After merging, the finalized `AccessConfig` is converted to
-`jp_tool::AccessPolicy` at the boundary in `jp_llm::execute_local` — rule paths
-are canonicalized (see [Rule path
-canonicalization](#rule-path-canonicalization)) and hosts are normalized (see
-[Network rules](#network-rules)) during conversion.
-Only the finalized `AccessPolicy` is serialized into the `Context` JSON the tool
-receives; `MergeableVec` and the partial types never cross the wire.
+Option<AccessConfig>` field with `AssignKeyValue`, `PartialConfigDelta`, and
+`ToPartial` implementations.
+Neither type merges `access` in `FillDefaults`: because scope resolution
+replaces the whole block rather than filling individual fields like `style`,
+`ToolConfigWithDefaults::access()` resolves the winning scope directly (matching
+`run()` and `result()`).
+In `jp_llm::execute_local`, the finalized `AccessConfig` is converted into a
+`jp_tool::AccessPolicy`, canonicalizing rule paths (see [Rule path
+canonicalization](#rule-path-canonicalization)) and normalizing hosts (see
+[Network rules](#network-rules)) before serializing `Context`.
 
 ### Data flow
 
-1. Tool config declares `access` on a named tool or on the
-   `[conversation.tools.'*']` defaults.
-   After all config layers are merged, config load rejects `access` declared on
-   a tool whose finalized source is `builtin` or `mcp`.
-2. Config layers merge per-subfield within each scope: `access.fs`,
-   `access.net`, and `access.env` each merge independently as `MergeableVec`.
-   Default strategy is append; replace requires explicit `strategy = "replace"`
-   (see [Cross-layer merging](#cross-layer-merging)).
-   The merged result is an `AccessConfig` with plain `Vec<_>` fields per scope.
-   Scope resolution then picks one pool per tool: the tool's own when non-empty,
-   otherwise the `*` pool for a local tool and nothing for a builtin or MCP tool
-   (see [Scope inheritance](#scope-inheritance)).
-3. `jp_llm::execute_local()` converts the merged `AccessConfig` to a
-   `jp_tool::AccessPolicy`: rule paths are canonicalized against `ctx.root`,
-   hosts are normalized, and the resulting policy is serialized into the context
-   JSON passed to the tool binary.
+1. Tool configuration declares `access` on `[conversation.tools.<name>]` or on
+   the `[conversation.tools.'*']` defaults.
+   Across config layers, `access.fs`, `access.net`, and `access.env` merge
+   independently within each scope as `MergeableVec` (appending by default, or
+   replacing with `strategy = "replace"`; see [Cross-layer
+   merging](#cross-layer-merging)).
+2. After all layers merge into a finalized `AccessConfig` per scope, config
+   validation rejects `access` declared on any named tool whose finalized
+   `source` is `builtin` or `mcp`.
+   Scope resolution then selects each local tool's policy: the tool's own
+   `AccessConfig` if non-empty, or the `*` policy otherwise (see [Scope
+   inheritance](#scope-inheritance)).
+   Builtin and MCP tools ignore the `*` policy.
+3. `jp_llm::execute_local()` converts the resolved `AccessConfig` to a
+   `jp_tool::AccessPolicy`, canonicalizing rule paths against `ctx.root` and
+   normalizing hosts, and serializes it into the `Context` JSON passed to the
+   tool binary.
 4. The tool binary deserializes `Context` with `access: Option<AccessPolicy>`.
-5. Before performing an operation on a path, the tool runs it through the [Path
-   evaluation](#path-evaluation) steps and checks the result against the policy.
-   Rust tools using `jp_tool` call `ctx.check_read(path)` (or `check_create`,
-   etc.); tools in other languages implement the algorithm directly.
-   V1 cooperative enforcement is applied only to the `fs_*` tool family —
-   subprocess-style tools like `unix_utils` rely on [RFD 075]'s OS-level sandbox
-   for `access.fs` confinement.
+5. Before operating on a path, the tool runs [Path evaluation](#path-evaluation)
+   (`ctx.check_read(path)`, `check_create`, and so on in Rust tools).
+   In V1, cooperative enforcement applies to the `fs_*` tool family;
+   subprocess-spawning tools such as `unix_utils` rely on [RFD 075]'s OS-level
+   sandbox for `access.fs` confinement.
 6. On denial, the tool returns an error naming the denied capability and listing
-   configured grants so the user knows what to change.
+   the configured grants.
 
 ### Relationship to RFD 075
 
-[RFD 075] introduces OS-level sandboxing for subprocess tools and consumes this
-RFD's `AccessPolicy` types to generate platform-native sandbox profiles (macOS
-`sandbox-exec`, Linux Landlock). 075 extends `AccessPolicy` with subprocess
-`CommandRule` for spawn restrictions but does not modify the fs, net, or env
-rule semantics defined here.
+[RFD 075] introduces OS-level sandboxing for subprocess tools and consumes
+`AccessPolicy` to generate platform-native sandbox profiles (macOS
+`sandbox-exec` and Linux Landlock).
+RFD 075 extends `AccessPolicy` with subprocess `CommandRule` spawn restrictions
+without changing the `fs`, `net`, or `env` rule semantics defined here.
 
-Two consequences for this design:
+This division has two consequences for the design:
 
-1. **This RFD defines the authoritative policy model.** Every rule type must
-   have semantics precise enough that 075 can enforce them at the kernel level.
-   This is why fs rules specify a canonical evaluation form (see [Path
-   evaluation](#path-evaluation)) and why net rules use structured matching (see
-   [Network rules](#network-rules)) instead of raw string prefix.
-   Getting the semantics wrong here propagates into 075.
-2. **The two layers always agree.** This RFD provides cooperative self-checks
-   with helpful error messages; 075 provides mandatory OS enforcement of the
-   same rules.
-   A tool that self-checks and passes must also pass the OS sandbox, modulo
-   platform-specific capability mapping — for example, Landlock distinguishes
-   `create`/`update`/ `delete`, while `sandbox-exec` collapses them to
-   `file-write*`.
+1. **This RFD defines the authoritative policy model.** Every rule type needs
+   semantics precise enough for RFD 075 to enforce at the kernel level.
+   That is why `fs` rules specify canonical path evaluation (see [Path
+   evaluation](#path-evaluation)) and `net` rules match parsed URI components
+   (see [Network rules](#network-rules)) rather than raw string prefixes.
+2. **Both enforcement layers agree.** This RFD provides cooperative self-checks
+   with descriptive error messages, while RFD 075 enforces the same rules in the
+   OS kernel.
+   Any operation that passes a tool's self-check also passes the OS sandbox, up
+   to platform-specific capability granularity (for example, Landlock
+   distinguishes `create`, `update`, and `delete`, whereas `sandbox-exec`
+   collapses them into `file-write*`).
 
 | Concern       | This RFD (cooperative) | RFD 075 (OS-level)      |
 | ------------- | ---------------------- | ----------------------- |
@@ -913,96 +834,95 @@ Two consequences for this design:
 
 ## Drawbacks
 
-**Tools must opt into checking.** The policy is informational — a tool that
-doesn't call `ctx.check_update()` (or equivalent) silently ignores the policy.
-This is acceptable for JP's own tools (we'll add the checks) but means
-third-party tools get no protection until [RFD 075]'s OS-level enforcement is in
-place.
+**Tools must opt into checking.** Cooperative enforcement is advisory: a tool
+that does not call `ctx.check_update()` (or an equivalent check) ignores the
+policy.
+This is sufficient for JP's in-tree tools, which call these helpers, but
+third-party tools receive no enforcement until [RFD 075]'s OS-level sandbox is
+in place.
 
 **Self-contained rule evaluation requires repetition.** A more specific rule
-must re-state all capabilities, even those that a less specific rule already
-grants.
-This is a deliberate trade-off for clarity — every rule is readable in
-isolation — but adds verbosity for complex policies.
-A future `inherit` flag could reduce this if it becomes painful in practice.
+must restate every capability it grants, even those already granted by a broader
+rule.
+This keeps each rule readable in isolation at the cost of verbosity in complex
+policies.
+A future `inherit` flag could reduce this repetition if needed.
 
-**Merge strategy is configurable, not implicit.** `access.fs`, `access.net`, and
-`access.env` use `MergeableVec`, which defaults to append and lets users opt
-into replace, prepend, or dedup.
-This avoids the "last-wins only" trap but means users writing strict policies
-must understand the merge model — an append from an upstream layer cannot be
-overridden by adding rules; it requires an explicit `strategy = "replace"`.
+**Tightening a policy across layers requires an explicit strategy.** Because
+`access.fs`, `access.net`, and `access.env` use `MergeableVec` (which defaults
+to append and supports replace, prepend, and dedup), a later config layer cannot
+drop broad grants from an earlier layer simply by adding narrower rules; it must
+set `strategy = "replace"`.
 
 **Accessor types collapse unset and `false`.** `FsRule::read()` and the other
-capability accessors return `bool`, not `Option<bool>`.
-Combined with self-contained rule evaluation, there is no meaningful distinction
-between "unset" and "explicitly false" at evaluation time.
-The cost is that a future `inherit` flag, if added, would require an API change
-to expose tri-state values to consumers.
-See [Inheritance-based evaluation](#inheritance-based-evaluation) for the
-variant this design rules out.
+capability accessors return `bool` rather than `Option<bool>`, because
+self-contained evaluation does not distinguish an omitted capability from
+`false`.
+Supporting a future `inherit` flag would require changing those accessors to
+expose tri-state values (see [Inheritance-based
+evaluation](#inheritance-based-evaluation)).
 
 ## Alternatives
 
 ### Access policy via `options`
 
-Use the existing `options` mechanism (`IndexMap<String, JsonValue>`) to pass
-access policy.
-This avoids new config types but loses schema validation, forces tools to parse
-`Value` manually, and conflates behavioral configuration with security policy.
+Passing access grants through the existing untyped `options` map
+(`IndexMap<String, JsonValue>`) would avoid new config types, but it would lose
+schema validation, force every tool to parse raw JSON values manually, and mix
+behavioral tool options with security policy.
 
 ### Inheritance-based evaluation
 
-Instead of self-contained rule evaluation, more specific rules could inherit
-unset capabilities from less specific rules.
-This reduces repetition but requires `Option<bool>` to distinguish "not set"
-from "explicitly false" at every level, and creates subtle bugs where a parent
-rule silently grants capabilities the child intended to restrict.
-Self-contained evaluation is simpler and safer.
+More specific rules could inherit unset capabilities from less specific rules
+instead of being evaluated in isolation.
+That reduces repetition, but it requires `Option<bool>` at every evaluation
+layer to distinguish "unset" from `false` and makes it easy for a parent rule to
+silently grant capabilities that a child rule intended to restrict.
 
 ## Non-Goals
 
-- **OS-level enforcement.** This RFD does not sandbox tool subprocesses.
-  [RFD 075] defines OS-level enforcement that consumes the types this RFD
-  establishes.
-- **MCP tool access control.** MCP tools run on external servers.
-  The server's security is the server operator's responsibility.
-  Config load rejects `access` declared on an MCP or builtin tool, and the `*`
-  defaults pass over them (see Configuration).
-- **Group-level access defaults and overrides.** `access` is declared per-tool
-  or on the `*` defaults; there is no per-group scope.
-  The example in Motivation is intentionally repetitive.
-  If RFDs 055–057 (group defaults/overrides) land, a group becomes a third
-  scope between `*` and the tool, resolved by the same replace rule and the same
-  declared-versus-inherited rule; defining the group merge model itself is out
-  of scope here.
+- **OS-level enforcement.** This RFD does not sandbox tool subprocesses; [RFD
+  075] consumes `AccessPolicy` for OS-level enforcement.
+- **MCP and builtin tool access control.** MCP tools run on external servers
+  managed by the server operator, and builtin tools run in-process.
+  Config validation rejects `access` declared on a named MCP or builtin tool,
+  and `*` defaults skip them (see [Configuration](#configuration)).
+- **Group-level access defaults and overrides.** `access` is configured per tool
+  or on the `*` defaults; there is no per-group scope, so tools sharing the same
+  grants repeat them in configuration.
+  If RFDs 055-057 (tool group defaults and overrides) land, a group will form an
+  intermediate scope between `*` and the named tool using the same whole-block
+  replacement and declared-versus-inherited rules.
+  Defining the group merge model is out of scope here.
 
 ## Risks and Open Questions
 
-1. **Env prefix overlap between explicit prefixes.** The largest class of
-   over-grant surprises is eliminated by requiring explicit `*` for prefix
-   matching (see [Environment variable rules](#environment-variable-rules)) —
-   `AWS_TOKEN` never silently matches `AWS_TOKEN_LOG`.
-   Residual overlaps between two prefix rules remain possible: `AWS_SEC*` (7
-   bytes) and `AWS_SECRET_*` (11 bytes) both match `AWS_SECRET_KEY`; the longer
-   wins.
-   Documented in guidance; revisit if it proves painful in practice.
+1. **Overlapping `env` prefix rules.** Requiring an explicit trailing `*` for
+   prefix matching (see [Environment variable
+   rules](#environment-variable-rules)) prevents `AWS_TOKEN` from matching
+   `AWS_TOKEN_LOG`.
+   Two prefix rules can still overlap: both `AWS_SEC*` (7 literal bytes) and
+   `AWS_SECRET_*` (11 literal bytes) match `AWS_SECRET_KEY`, and the longer
+   prefix wins.
+   User documentation should call this out, and we can revisit if it causes
+   confusion in practice.
 
-2. **Symlink resolution cost.** Every fs check resolves symlinks via
+2. **Symlink resolution overhead.** Every filesystem check resolves symlinks via
    `canonicalize`, which performs filesystem lookups.
-   For tools that check many paths (e.g., `fs_grep_files`), this adds per-path
+   For tools that check many paths (such as `fs_grep_files`), this adds per-path
    syscalls.
-   The alternative — lexical-only checks — would diverge from [RFD 075]'s OS
-   enforcement and create a policy gap, which is worse.
-   If measurable overhead appears, a cache keyed on `(dev, inode)` can be added.
+   Lexical-only checks would diverge from [RFD 075]'s OS enforcement and open a
+   symlink bypass.
+   If symlink resolution becomes a bottleneck, we can add a cache keyed on
+   `(dev, inode)`.
 
 ## Implementation Plan
 
 V1 defines the shared `fs`, `net`, and `env` rule types in `jp_tool` and
 enforces `fs` cooperatively across the `fs_*` tool family.
-`net` and `env` consumers (e.g., `web_fetch` network checks, `unix_utils` env
-forwarding) are deliberately not part of V1 — enforcing them well requires the
-consuming tool in scope for design, not after.
+Cooperative `net` and `env` consumers (such as `web_fetch` network checks or
+`unix_utils` environment forwarding) are omitted from V1 so their enforcement
+can be designed alongside each consuming tool.
 [RFD 075] reuses the same policy model for OS-level enforcement across all three
 rule types.
 
@@ -1010,101 +930,97 @@ rule types.
 
 Add `AccessPolicy`, `FsRule`, `NetRule`, `EnvRule`, and `FsAccessError` to
 `jp_tool`.
-Implement the path-canonicalization helper (reused by tools for target paths and
-by the host for rule paths at `AccessConfig` → `AccessPolicy` conversion) and
+Implement the path-canonicalization helper (shared by tools for target paths and
+by the host when converting `AccessConfig` to `AccessPolicy`) and the
 `Context::check_*` methods.
-Implement structured net matching (scheme/host/port/path_prefix) with
-`url::Host` normalization for both rule and target hosts, and explicit-`*` env
-matching with literal-length specificity.
-Add `access: Option<AccessPolicy>` to `Context` with `#[serde(default)]`.
-Unit tests for evaluation logic covering workspace escape, symlink resolution,
-host normalization (including IDN/Punycode), port defaulting, and
-exact-vs-prefix env ties.
+Implement structured `net` matching (`scheme`, `host`, `port`, and
+`path_prefix`) with `url::Host` normalization for both rule and target hosts,
+and explicit-`*` `env` matching with literal-length specificity.
+Add `access: Option<AccessPolicy>` to `Context` with `#[serde(default)]`, and
+add unit tests covering workspace escapes, symlink resolution, host
+normalization (including IDN/Punycode), port defaults, and exact-vs-prefix `env`
+ties.
 
-No dependency.
-Can merge independently.
+This phase has no dependencies and can merge independently.
 
 ### Phase 2: Config types in `jp_config`
 
-Add `AccessConfig`, `FsRuleConfig`, `NetRuleConfig`, `EnvRuleConfig` in
-`jp_config` with `MergeableVec` wrappers and the standard partial/delta/
-`ToPartial` impls.
-Add `access: Option<AccessConfig>` field to `ToolConfig` and an accessor on
+Add `AccessConfig`, `FsRuleConfig`, `NetRuleConfig`, and `EnvRuleConfig` in
+`jp_config` with `MergeableVec` wrappers and `Partial`, `PartialConfigDelta`,
+and `ToPartial` implementations.
+Add `access: Option<AccessConfig>` to `ToolConfig` and an accessor on
 `ToolConfigWithDefaults`.
-Implement the `AccessConfig` → `jp_tool::AccessPolicy` conversion, which
-canonicalizes rule paths against `ctx.root` (rejecting workspace-escape at
-config load) and normalizes rule hosts.
-Post-merge config validation rejects `access` on tools whose finalized source is
-`builtin` or `mcp` with a clear error.
+Implement the `AccessConfig` to `jp_tool::AccessPolicy` conversion,
+canonicalizing rule paths against `ctx.root` (rejecting workspace escapes at
+config load) and normalizing rule hosts.
+Reject `access` in post-merge validation on tools whose finalized `source` is
+`builtin` or `mcp`.
 
 Depends on Phase 1.
 
 ### Phase 3: Plumbing in `jp_llm`
 
-Include access policy in the JSON context passed to tool commands in
-`execute_local()` and the `FormatArguments` path.
+Serialize the resolved `AccessPolicy` into the `Context` JSON passed to tool
+commands in `execute_local()` and on the `FormatArguments` path.
 
 Depends on Phase 2.
 
 ### Phase 4: `fs_*` enforcement
 
 Replace ad-hoc path joining in the `fs_*` tool family with `ctx.check_read()`,
-`check_create()`, `check_update()`, `check_delete()`, and `check_execute()`.
-Return clear error messages naming the denied capability and listing configured
+`check_create()`, `check_update()`, `check_delete()`, and `check_execute()`,
+returning error messages that name the denied capability and list the configured
 grants.
 
-`unix_utils` is deliberately **out of scope** for V1 `access.fs` grant
-enforcement.
-It invokes subprocesses that read files opaquely (e.g., `sort /etc/passwd`), and
-per-argument path analysis fights the subprocess model.
-V1 only updates `unix_utils`'s existing argument scanner to delegate to the
-canonicalization helper for workspace-escape detection — matching today's
-behavior, just with shared code.
-Full enforcement of `access.fs` on subprocess-spawned reads is [RFD 075]'s
-responsibility via OS-level sandboxing.
+`unix_utils` is **out of scope** for V1 `access.fs` grant enforcement because it
+spawns subprocesses that open files directly (such as `sort /etc/passwd`), which
+per-argument path checks cannot reliably intercept.
+V1 only updates `unix_utils`'s existing argument scanner to use the shared
+canonicalization helper for workspace-escape detection.
+Enforcing `access.fs` on subprocess file access is handled by [RFD 075]'s
+OS-level sandbox.
 
 Depends on Phase 3.
 
 ### Phase 5: `*`-scope grants
 
 Add `access: Option<AccessConfig>` to `ToolsDefaultsConfig` and resolve it in
-`ToolConfigWithDefaults::access()` under the replace rule, skipping builtin and
-MCP tools.
-The non-empty test spans every resource list, so a block holding only `env`
-rules is a policy like any other.
-Narrow the post-merge validation to `access` declared on a tool, so an inherited
-grant no longer trips the builtin/mcp rejection.
+`ToolConfigWithDefaults::access()` using whole-block replacement, skipping
+`builtin` and `mcp` tools.
+Treat a tool's `access` block as non-empty when any of `fs`, `net`, or `env`
+contains a rule, so a tool with only `env` rules still replaces the `*` block.
+Narrow post-merge validation to `access` declared on a named tool so grants
+inherited from `*` do not trigger the `builtin`/`mcp` rejection.
 
-`--mount` needs one adjustment.
-It writes rules into a tool's own scope, which under replace detaches that tool
-from `*`, and a rule in one resource list switches only that list to
-default-deny.
-The injected block therefore carries the tool's prior reach across both edges: a
-copy of the `*` block when the tool declared nothing of its own, plus a
-workspace-wide `fs` rule whenever the scope that applied granted no `fs` rules,
-since the mount rule would otherwise be the tool's entire filesystem policy.
-Without that, mounting into a tool covered by a restrictive `*` block would
-silently widen it back to full workspace access, and mounting into one covered
-by an `env`-only block would revoke the workspace access it had.
+Update `--mount`, which appends an `fs` rule to a tool's own `access` block.
+Because whole-block replacement detaches a tool with its own `access` block from
+`*`, and adding a single `fs` rule switches `access.fs` from unrestricted to
+default-deny, `--mount` must preserve the tool's existing effective policy
+before inserting the mount rule:
 
-Depends on Phase 2.
-Independent of Phases 3 and 4.
+- If the tool declared no `access` block of its own, copy the `*` block into the
+  tool's `access` block so mounting does not discard restrictive `*` rules and
+  widen access.
+- If the effective policy had no `access.fs` rules (for example, an unrestricted
+  tool or an `env`-only policy), seed `access.fs` with a workspace-wide rule
+  (`path = "."`) so the mounted path does not become the only permitted
+  filesystem path.
+
+Depends on Phase 2; independent of Phases 3 and 4.
 
 ## References
 
-- [RFD 075] — OS-level sandboxing for subprocess tools.
+- [RFD 075]: OS-level sandboxing for subprocess tools.
   Consumes this RFD's `AccessPolicy` types to generate platform-native sandbox
   profiles and extends them with subprocess `CommandRule` spawn restrictions.
-- [RFD 016] — WASM plugin architecture.
-  Shares the same general capability-based model (filesystem, network, commands)
-  but uses different field names and a simpler `allow`/`writable` filesystem
-  model.
-  A future RFD may migrate RFD 016's WASM plugin config to consume
-  `AccessPolicy` directly.
-- [RFD 042] — Tool options.
-  Established the `options` mechanism; this RFD explains why access policy is a
-  first-class field instead.
-- [Deno security model] — Inspiration for the grant-based, default-deny
+- [RFD 016]: WASM plugin architecture.
+  Uses a capability-based model for filesystem, network, and commands with
+  different field names and a simpler `allow`/`writable` filesystem model.
+  A future RFD may migrate WASM plugin configuration to `AccessPolicy`.
+- [RFD 042]: Tool options.
+  Established the `options` map; this RFD makes access policy a first-class
+  typed field instead.
+- [Deno security model]: Inspiration for the grant-based, default-deny
   permission model.
 
 [Deno security model]: https://docs.deno.com/runtime/fundamentals/security/
