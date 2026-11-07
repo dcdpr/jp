@@ -4,6 +4,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     io::{self, Write as _},
+    mem,
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
@@ -26,13 +27,15 @@ use super::{
     schema::{
         ClientCapabilities, InitializeRequest, InitializeResponse, LoadSessionRequest,
         LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-        ProtocolVersion, RequestPermissionRequest, SessionConfigKind, SessionNotification,
-        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, agent_method, client_method,
+        ProtocolVersion, RequestPermissionRequest, SessionConfigKind, SessionConfigSelectOption,
+        SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+        agent_method, client_method, offered_models,
     },
+    subscription_model,
     transcript::PreparedRequest,
 };
 use crate::{
-    error::StreamError,
+    error::{StreamError, StreamErrorKind},
     event::Event,
     model::ModelDetails,
     query::{ChatQuery, QueryContext},
@@ -411,7 +414,7 @@ pub(super) async fn drive(
             };
             let options = options::metadata(&prepared, &environment)
                 .map_err(RpcError::into_internal_error)?;
-            let session = if let Some(id) = artifact.session {
+            let (session, offers) = if let Some(id) = artifact.session {
                 if !init.agent_capabilities.load_session {
                     return Err(RpcError::into_internal_error(
                         Error::HistoryLoadingUnsupported,
@@ -421,16 +424,24 @@ pub(super) async fn drive(
                     json!({"sessionId":id,"cwd":context.root,"mcpServers":servers,"_meta":options}),
                 )
                 .map_err(RpcError::into_internal_error)?;
-                peer.request(request).await?;
-                id.to_string().into()
+                let response = peer.request(request).await?;
+                (
+                    id.to_string().into(),
+                    offered_models(&response.config_options),
+                )
             } else {
                 let request: NewSessionRequest = serde_json::from_value(
                     json!({"cwd":context.root,"mcpServers":servers,"_meta":options}),
                 )
                 .map_err(RpcError::into_internal_error)?;
-                peer.request(request).await?.session_id
+                let response = peer.request(request).await?;
+                (
+                    response.session_id,
+                    offered_models(&response.config_options),
+                )
             };
-            for (config_id, value) in [("model", prepared.model.as_ref()), ("mode", "default")] {
+            let model = subscription_model(&prepared.model, &offers);
+            for (config_id, value) in [("model", model.as_str()), ("mode", "default")] {
                 let request: SetSessionConfigOptionRequest = serde_json::from_value(
                     json!({"sessionId":session,"configId":config_id,"value":value}),
                 )
@@ -439,18 +450,23 @@ pub(super) async fn drive(
                     if config_id != "model" {
                         return source;
                     }
+                    let kind = if refuses_unknown_model(&source) {
+                        StreamErrorKind::UnknownModel
+                    } else {
+                        StreamErrorKind::Other
+                    };
                     let error = Error::ModelSelection {
                         model: prepared.model.clone(),
                         source,
                     };
                     record_failure(
                         &foreground_state,
-                        StreamError::other(error.to_string()).with_source(error),
+                        StreamError::new(kind, error.to_string()).with_source(error),
                     )
                 })?;
                 // Claude Code can normalize a model alias to a canonical identifier.
                 let applied = response.config_options.iter().any(|option| option.id.0 == config_id
-                && matches!(&option.kind, SessionConfigKind::Select { current_value } if
+                && matches!(&option.kind, SessionConfigKind::Select { current_value, .. } if
                     (config_id == "model" && !current_value.0.is_empty()) || current_value.0 == value));
                 if !applied {
                     return Err(RpcError::into_internal_error(Error::SettingNotApplied {
@@ -516,6 +532,101 @@ pub(super) async fn drive(
             }
         }
     }
+}
+
+/// Whether a failed `model` selection is Claude Code refusing a model it does
+/// not serve.
+///
+/// The refusal arrives as a generic internal error, so the only signal is its
+/// data: `{"details": "Model 'foobarbaz' not found"}`.
+pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
+    error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("details"))
+        .and_then(Value::as_str)
+        .is_some_and(|details| details.starts_with("Model '") && details.ends_with("' not found"))
+}
+
+/// The values the adapter's `model` setting accepts for `login_directory`.
+///
+/// Opens a session and sends no prompt, so it spends no subscription allowance.
+/// The session is stored under a project directory of its own, apart from any
+/// conversation's.
+pub(super) async fn list_models(
+    login_directory: Option<&Utf8Path>,
+) -> Result<Vec<SessionConfigSelectOption>, Error> {
+    let mut environment = BTreeMap::new();
+    configure_storage_environment(
+        &mut environment,
+        env::var("CLAUDE_CONFIG_DIR").ok().as_deref(),
+        "jp-models",
+        login_directory,
+    );
+    let mut command = process::command(login_directory);
+    command.envs(&environment);
+
+    let cwd = Utf8PathBuf::from_path_buf(env::temp_dir()).map_err(|_| Error::NativeDirectory)?;
+    models(
+        Box::new(Spawned {
+            command,
+            tap: cassette::tap("models"),
+        }),
+        &cwd,
+    )
+    .await
+}
+
+/// Open a session over `transport` and read the values its `model` setting
+/// accepts.
+///
+/// Everything the adapter initiates is acknowledged and otherwise ignored.
+pub(super) async fn models(
+    transport: Box<dyn Transport>,
+    cwd: &Utf8Path,
+) -> Result<Vec<SessionConfigSelectOption>, Error> {
+    let listed: Arc<Mutex<Vec<SessionConfigSelectOption>>> = Arc::default();
+    let handler: Handler = Box::new(|_| Box::pin(async { Ok(Value::Null) }));
+    let foreground: Foreground = {
+        let listed = listed.clone();
+        let cwd = cwd.to_owned();
+        Box::new(move |peer| {
+            Box::pin(async move {
+                let init = peer
+                    .request(InitializeRequest {
+                        protocol_version: ProtocolVersion::V1,
+                        client_capabilities: ClientCapabilities::default(),
+                    })
+                    .await?;
+                if init.protocol_version != ProtocolVersion::V1 {
+                    return Err(RpcError::into_internal_error(
+                        Error::InitializationCapabilities,
+                    ));
+                }
+
+                let session = peer
+                    .request(NewSessionRequest {
+                        cwd: cwd.into_string(),
+                        mcp_servers: vec![],
+                        meta: None,
+                    })
+                    .await?;
+
+                *listed.lock().unwrap_or_else(PoisonError::into_inner) =
+                    offered_models(&session.config_options);
+                Ok(())
+            })
+        })
+    };
+
+    transport
+        .connect(handler, foreground)
+        .await
+        .map_err(Error::Protocol)?;
+
+    Ok(mem::take(
+        &mut *listed.lock().unwrap_or_else(PoisonError::into_inner),
+    ))
 }
 
 fn configure_storage_environment(
