@@ -14,71 +14,63 @@
 This RFD enforces OS-level sandboxing on subprocess-based tools using
 `sandbox-exec` on macOS, Landlock on Linux, and restricted tokens with job
 objects on Windows.
-Sandbox profiles are generated from [RFD 076]'s `AccessPolicy`, extended here
-with `CommandRule` subprocess restrictions and environment variable isolation,
-and unconfigured tools receive a default workspace-scoped sandbox with no
-network access.
+JP generates sandbox profiles from [RFD 076]'s `AccessPolicy`, which this RFD
+extends with `CommandRule` subprocess restrictions and environment variable
+isolation.
+Unconfigured tools receive a default workspace-scoped sandbox with no network
+access.
 
 ## Motivation
 
 JP runs LLM-selected tools as subprocesses on the user's machine.
-Today, the only safeguard is `RunMode::Ask` — a permission prompt before
+Today, the only safeguard is `RunMode::Ask`, a permission prompt before
 execution.
-Once the user approves, the subprocess runs with the user's full OS privileges:
-it can read any file, access the network, spawn other processes, and modify
-anything the user can.
+Once approved, the subprocess runs with the user's full OS privileges: it can
+read or modify any file, access the network, and spawn other processes.
 
-This is a structural problem, not a configuration oversight:
+Relying solely on a pre-execution prompt leaves four gaps:
 
-1. **Tools can access files outside the workspace.** A `modify_file` tool
-   receiving an absolute path argument like `/etc/hosts` or `~/.ssh/id_rsa` will
-   happily read or write it.
-   The `RunMode::Ask` prompt shows the arguments, but a user skimming a long
-   argument list can miss a dangerous path.
+1. **Tools can access files outside the workspace.** A `modify_file` tool given
+   an absolute path like `/etc/hosts` or `~/.ssh/id_rsa` reads or writes it
+   directly.
+   `RunMode::Ask` displays the arguments, but a user skimming a long argument
+   list can miss a dangerous path.
 
-2. **Tools can access the network.** A shell-based tool could `curl` data to an
-   external server.
-   Nothing prevents exfiltration of workspace contents through a tool
-   subprocess.
+2. **Tools can access the network.** A shell-based tool can `curl` workspace
+   contents to an external server; nothing prevents a tool subprocess from
+   exfiltrating data.
 
-3. **`RunMode` is all-or-nothing.** The current permission model is "run this
-   tool: yes or no."
-   There is no way to say "run this tool, but only let it read files in `src/`"
-   or "run this tool, but block network access."
-   The granularity is per-invocation, not per-capability.
+3. **`RunMode` is all-or-nothing.** Permissions apply per invocation rather than
+   per capability: a user can approve or deny a tool call, but cannot restrict
+   it to reading `src/` or block its network access.
 
-4. **The init wizard warns about this explicitly.** The `jp init` command tells
-   users that "externally supplied tools cannot be restricted" and that tools
-   "can potentially run any command on your system."
-   This is honest, but the right answer is to fix the problem, not document it.
+4. **`jp init` has to warn users that tools are unrestricted.** The setup wizard
+   states that "externally supplied tools cannot be restricted" and "can
+   potentially run any command on your system" because JP lacks a mechanism to
+   constrain them.
 
-[RFD 076] defines a typed access policy (`AccessPolicy`) that declares what
-resources a tool can access — filesystem paths, network URIs, environment
-variables — and a cooperative enforcement model where tools self-check their
-grants.
-That model addresses the policy surface and provides good error messages, but it
-is cooperative: a buggy or malicious tool can ignore the policy.
+[RFD 076] defines a typed `AccessPolicy` covering filesystem paths, network
+URIs, and environment variables, along with a cooperative enforcement model
+where tools check their own grants.
+Cooperative checks produce clear error messages, but a buggy or malicious tool
+can ignore them.
 
-[RFD 016] defines a sandbox model for WASM plugins with per-capability
-configuration and inquiry-based permission prompts.
-The WASM sandbox is architecturally sound (WASM has no ambient capabilities),
-but it only applies to WASM plugins.
-Subprocess-based tools — which are the vast majority of tools today and will
-remain common — have no equivalent protection.
+[RFD 016] defines per-capability sandboxing and inquiry-based permission prompts
+for WASM plugins.
+Because WASM has no ambient capabilities, that boundary holds for plugins, but
+it does not cover subprocess-based tools, which make up the majority of tools.
 
-This RFD adds the mandatory enforcement layer: OS-level sandboxing that the tool
-subprocess cannot bypass.
-It consumes [RFD 076]'s `AccessPolicy` types to generate platform-specific
-sandbox profiles, extends the policy with subprocess spawn restrictions
-(`CommandRule`), and defines environment variable isolation for tool
-subprocesses.
+This RFD adds mandatory, OS-level enforcement that a tool subprocess cannot
+bypass.
+It generates platform-specific sandbox profiles from [RFD 076]'s `AccessPolicy`,
+extends `AccessPolicy` with subprocess spawn rules (`CommandRule`), and isolates
+the subprocess environment.
 
 ## Design
 
 ### Relationship to RFD 076 (Tool Access Grants)
 
-This RFD and [RFD 076] address the same access policy at different enforcement
-layers:
+This RFD and [RFD 076] enforce the same access policy at different layers:
 
 | Concern          | RFD 076                        | RFD 075                      |
 | ---------------- | ------------------------------ | ---------------------------- |
@@ -88,15 +80,10 @@ layers:
 | **Bypass**       | Tool can ignore                | OS enforces                  |
 | **Config key**   | `conversation.tools.*.access`  | Same                         |
 
-The access policy is configured once via `conversation.tools.*.access`.
-[RFD 076]'s cooperative layer checks it at the application level with clear
-error messages.
-This RFD's OS layer enforces it at the kernel level as a hard boundary.
-
-The two layers complement each other: RFD 076 provides a good user experience
-(clear errors naming denied capabilities and listing configured grants).
-This RFD provides a security boundary (the OS prevents access regardless of what
-the tool code does).
+Both layers read from `conversation.tools.*.access`.
+[RFD 076] checks the policy at the application level to report clear errors that
+name the denied capability and list configured grants, while this RFD enforces
+the same policy in the kernel so the tool process cannot bypass it.
 
 ### Extending `AccessPolicy` with `CommandRule`
 
@@ -131,14 +118,11 @@ pub struct CommandRule {
 }
 ```
 
-`CommandRule` cannot be self-enforced by tools (the tool IS the subprocess), so
-it exists for OS-level enforcement (this RFD) and WASM host enforcement ([RFD
-016]).
-It is included in `AccessPolicy` to keep the policy surface unified — one
-config block, multiple enforcement layers.
-
-Example configuration using [RFD 076]'s `access` key with the `commands`
-extension:
+`CommandRule` is enforced by the OS (this RFD) and the WASM host ([RFD 016])
+rather than cooperatively by the tool, because the tool is the subprocess being
+constrained.
+Placing `commands` on `AccessPolicy` keeps all capability rules under one
+`access` configuration block:
 
 ```toml
 [conversation.tools.cargo_check]
@@ -174,9 +158,8 @@ read = true
 
 ### Default policy
 
-The OS sandbox always applies to subprocess tools, even when no `access` config
-is present.
-Tools without explicit access configuration receive these defaults:
+The OS sandbox applies to every subprocess tool.
+Tools without an explicit `access` configuration receive a default policy:
 
 | Capability  | Default                                |
 | ----------- | -------------------------------------- |
@@ -186,37 +169,33 @@ Tools without explicit access configuration receive these defaults:
 | Environment | Minimal set only (`PATH`, `HOME`,      |
 |             | `USER`, `LANG`, locale)                |
 
-These defaults are deliberately permissive for filesystem access (read-write) to
-avoid breaking existing tools.
-The primary security value of the defaults is containing tools to the workspace
-and blocking network access.
-As the ecosystem matures and tools gain explicit `access` configuration, the
-defaults can be tightened.
+Read-write workspace access avoids breaking existing tools while still confining
+filesystem access to the workspace and blocking network access.
+The defaults can be tightened once most tools declare explicit `access`
+policies.
 
-When no explicit `access` config is present, JP materializes the default policy
-as an `AccessPolicy` and includes it in the tool's `Context`.
-The tool sees `access: Some(default_policy)` — never `None` — so it can
-self-check against the same restrictions the OS enforces.
-This ensures the cooperative layer ([RFD 076]) and the OS layer always operate
-on the same policy.
-`Context.access` is `None` only when OS-level sandboxing is unavailable
-(unsupported platform, fallback mode).
+When `access` is omitted, JP materializes the default policy as an
+`AccessPolicy` and passes `access: Some(default_policy)` in the tool's
+`Context`.
+Both the cooperative layer ([RFD 076]) and the OS sandbox enforce the same
+policy.
+`Context.access` is `None` only when OS-level sandboxing is unavailable (on an
+unsupported platform or in fallback mode).
 
-When explicit `access` config is present, it replaces the defaults entirely.
-The OS sandbox is generated from the configured `AccessPolicy`, and [RFD 076]'s
-merge semantics apply: `fs`, `net`, and `env` are each a `MergeableVec`, which
-defaults to append across config layers.
-Users opt into replace, prepend, or dedup per field via the explicit `Merged`
-form (see [RFD 076]'s Cross-layer merging section).
+An explicit `access` configuration replaces the default policy.
+JP generates the OS sandbox from the configured `AccessPolicy` using [RFD 076]'s
+merge semantics: `fs`, `net`, and `env` each use `MergeableVec`, which appends
+across config layers by default unless overridden with the `Merged` form
+(replace, prepend, or dedup).
 
 ### Platform enforcement
 
 #### macOS: `sandbox-exec`
 
-macOS provides `sandbox-exec`, which applies a Scheme-based sandbox profile to a
-process.
-JP generates a profile from the tool's `AccessPolicy` and launches the tool
-process under it.
+On macOS, `sandbox-exec` applies a Scheme-based Sandbox Profile Language (SBPL)
+profile to a process.
+JP generates an SBPL profile from the tool's `AccessPolicy` and launches the
+tool under it:
 
 ```txt
 JP generates profile → sandbox-exec -p <profile> <command> <args>
@@ -232,16 +211,13 @@ The mapping from `AccessPolicy` to SBPL:
 | `NetRule` without port/scheme | `(allow network-outbound (remote tcp))`            |
 | No network rules              | `(deny network*)`                                  |
 
-RFD 076's fine-grained `create`/`update`/`delete` distinctions map to a single
-`file-write*` on macOS — sandbox-exec does not distinguish write
-sub-operations.
-RFD 076's `host` and `path_prefix` fields have no direct SBPL equivalent:
-`sandbox-exec` operates at the TCP layer and cannot filter by hostname or HTTP
-path.
-Host and path filtering is enforced cooperatively ([RFD 076]); OS-level
-enforcement on macOS is port-based only.
-The `scheme` field is translated to its default port (`80` for `http`, `443` for
-`https`) when no explicit `port` is specified.
+Because `sandbox-exec` does not distinguish write sub-operations, [RFD 076]'s
+`create`, `update`, and `delete` flags all map to `file-write*`.
+`sandbox-exec` operates at the TCP layer and filters network access by port
+only; [RFD 076]'s `host` and `path_prefix` fields have no SBPL equivalent and
+are enforced cooperatively.
+When `port` is omitted, JP translates `scheme` to its default port (`80` for
+`http`, `443` for `https`).
 
 Example generated profile for a read-write workspace tool with no network:
 
@@ -258,34 +234,25 @@ Example generated profile for a read-write workspace tool with no network:
 
 Limitations:
 
-- **`sandbox-exec` is deprecated by Apple** but still functional as of macOS 15.
-  There is no replacement API with equivalent functionality for third-party
-  applications.
-  The profile language (SBPL) is undocumented — all available references are
-  from reverse engineering.
-  Apple has progressively restricted sandbox profile capabilities in recent
-  releases.
-  If Apple removes `sandbox-exec` in a future release, JP falls back to no
-  OS-level enforcement on macOS (the cooperative policy from [RFD 076] remains
-  active).
-  A future RFD should investigate alternative macOS sandboxing (App Sandbox
-  entitlements via XPC services, `posix_spawn` with manual restriction) before
-  this becomes urgent.
-- Profile generation must handle path escaping and symlink resolution.
-- `sandbox-exec` cannot restrict which programs the subprocess spawns in a
-  fine-grained way — it can deny `process-exec` entirely or allow it entirely.
-  `commands` restrictions are enforced at the application level, not the OS
-  level on macOS.
+- **`sandbox-exec` is deprecated.** It remains functional on macOS 15, and Apple
+  provides no equivalent public API for third-party applications.
+  SBPL is undocumented (all references come from reverse engineering), and Apple
+  has progressively restricted profile capabilities across releases.
+  If a future macOS release removes `sandbox-exec`, JP falls back to [RFD 076]'s
+  cooperative enforcement.
+  A future RFD should evaluate macOS alternatives such as App Sandbox
+  entitlements via XPC services or `posix_spawn` restrictions.
+- **Path escaping and symlinks.** Profile generation must escape paths and
+  resolve symlinks.
+- **Coarse `process-exec` control.** `sandbox-exec` can only allow or deny
+  `process-exec` globally, not per binary, so `commands` restrictions on macOS
+  are enforced at the application level rather than by the OS.
 
 #### Linux: Landlock
 
-Landlock is a Linux security module (available since kernel 5.13) that allows
-unprivileged processes to restrict their own filesystem access.
-Unlike seccomp (which filters syscalls), Landlock operates at the filesystem
-level — it restricts which paths a process can access, which maps directly to
-[RFD 076]'s `FsRule` model.
-
-The mapping from `AccessPolicy` to Landlock:
+Landlock is a Linux security module (kernel 5.13+) that lets unprivileged
+processes restrict their own path-level filesystem access and (since kernel 6.7)
+TCP port access, mapping directly to [RFD 076]'s `FsRule` and `NetRule` types:
 
 | AccessPolicy field        | Landlock flags                       |
 | ------------------------- | ------------------------------------ |
@@ -299,11 +266,11 @@ The mapping from `AccessPolicy` to Landlock:
 | `NetRule` (any allow)     | `AccessNet::ConnectTcp` + port rules |
 |                           | (kernel 6.7+)                        |
 
-Landlock preserves more of RFD 076's granularity than sandbox-exec for
-filesystem access — it can distinguish read-only from write access per path,
-and with kernel 6.7+, it can restrict TCP connections by port.
-As with `sandbox-exec`, Landlock has no hostname or HTTP-path awareness; RFD
-076's `host` and `path_prefix` fields are enforced cooperatively only.
+Landlock preserves more of [RFD 076]'s filesystem granularity than
+`sandbox-exec` (distinguishing read, create, update, and delete operations per
+path) and restricts TCP connections by port on kernel 6.7+.
+Like `sandbox-exec`, Landlock has no hostname or HTTP-path awareness, so `host`
+and `path_prefix` are enforced cooperatively.
 
 ```rust
 // Pseudocode for Landlock ruleset creation from AccessPolicy
@@ -324,54 +291,42 @@ for rule in &policy.fs {
 ruleset.restrict_self()?;
 ```
 
-JP uses Landlock by setting up the ruleset in the child process after `fork()`
-but before `exec()`.
-This restricts the tool process without affecting JP itself.
+JP applies the Landlock ruleset in the child process after `fork()` and before
+`exec()`, restricting the tool without affecting the JP process.
+On kernels without Landlock (pre-5.13) or without `AccessNet` support (pre-6.7),
+JP logs a warning and falls back to [RFD 076]'s cooperative enforcement.
 
-On older kernels without Landlock, or without `AccessNet` support (pre-6.7),
-enforcement falls back gracefully: a warning is logged and the cooperative
-policy ([RFD 076]) remains the only protection.
-
-Seccomp-bpf is an alternative that filters at the syscall level.
-It is more powerful but also more complex and fragile — blocking the wrong
-syscall can crash the process in unpredictable ways.
-Landlock is preferred because its filesystem-level model maps directly to
-`AccessPolicy`.
-Seccomp may be added as a supplementary layer in the future.
+Seccomp-bpf filters at the syscall level rather than the path level, where
+blocking an unexpected syscall can crash the process.
+Landlock is the primary Linux mechanism because its path model matches
+`AccessPolicy`; seccomp-bpf may be added later as a supplementary layer.
 
 #### Windows: best-effort enforcement
 
-Windows provides two mechanisms that partially address the sandbox requirements:
+Windows provides two mechanisms that partially cover the sandbox model:
 
-**Restricted tokens** strip privileges from a process token before spawning.
-**Job objects** restrict the subprocess's ability to spawn child processes,
-access the network, and consume resources.
+- **Restricted tokens** strip privileges from a process token before spawning.
+- **Job objects** restrict child process creation, network access, and resource
+  consumption.
 
-Windows filesystem permissions are ACL-based, not path-prefix-based.
-Expressing "allow only these paths" without configuring NTFS ACLs on a
-per-invocation basis is expensive and fragile.
-The initial Windows implementation provides coarser enforcement than
-macOS/Linux:
+Because Windows permissions use NTFS ACLs rather than path prefixes, enforcing
+per-invocation path allowlists is expensive and fragile.
+The initial Windows implementation enforces coarser boundaries than macOS and
+Linux:
 
-- **Network**: Job objects can restrict network access (coarse on/off).
-- **Child processes**: Job objects can restrict subprocess spawning.
-- **Filesystem**: No per-path restriction in the initial implementation.
-  The cooperative policy ([RFD 076]) is the primary filesystem control on
-  Windows.
+- **Network**: Coarse on/off restriction via job objects.
+- **Child processes**: Subprocess spawn restrictions via job objects.
+- **Filesystem**: No OS-level path restrictions; [RFD 076]'s cooperative policy
+  is the sole filesystem control.
 
-If a more capable Windows sandboxing approach becomes feasible (e.g., using
-Windows Sandbox or AppContainers), a future RFD will address it.
-The current design provides what value it can without overinvesting in a
-platform where the OS mechanisms don't map cleanly to the policy model.
+More capable Windows mechanisms such as AppContainers or Windows Sandbox are
+left to a future RFD.
 
 #### Unsupported platforms and fallback
 
-On platforms where none of the above mechanisms are available, JP logs a warning
-at startup and operates without OS-level enforcement.
-The cooperative policy from [RFD 076] and `RunMode` permission prompts remain
-active.
-
-The warning is shown once per session, not per tool invocation:
+On platforms where none of these mechanisms are available, JP logs a warning
+once per session at startup and runs without OS-level sandboxing, leaving [RFD
+076]'s cooperative policy and `RunMode` prompts in effect:
 
 ```text
 Warning: OS-level tool sandboxing is not available on this platform.
@@ -380,7 +335,7 @@ Tools run with your full user permissions. Use `run = "ask"` for untrusted tools
 
 ### Interaction with `RunMode`
 
-The sandbox system and `RunMode` serve different purposes and stack:
+`RunMode` and the sandbox operate at different stages and compose:
 
 | Concern         | `RunMode`                      | Sandbox                                |
 | --------------- | ------------------------------ | -------------------------------------- |
@@ -388,12 +343,10 @@ The sandbox system and `RunMode` serve different purposes and stack:
 | **Granularity** | Per-invocation                 | Per-capability                         |
 | **Timing**      | Before execution               | During execution                       |
 
-A tool with `run = "unattended"` and a restrictive access policy is safe: it
-runs without permission prompts but can only access what the policy allows.
-A tool with `run = "ask"` and no access policy is the current behavior: the user
-approves each invocation but the tool has the default sandbox restrictions.
-
-The recommended configuration for most tools:
+With `run = "ask"` and no explicit `access` block, the user approves each
+invocation and the tool runs under the default sandbox.
+Most workspace tools can instead pair `run = "unattended"` with an explicit
+policy so they run without prompts while the OS confines them to the workspace:
 
 ```toml
 [conversation.tools.my_tool]
@@ -405,63 +358,53 @@ read = true
 write = true
 ```
 
-This is "trust but verify" — the tool runs without interruption, but the OS
-prevents it from escaping the workspace.
-For external or untrusted tools, combine `run = "ask"` with a restrictive access
-policy for defense in depth.
+External or untrusted tools can combine `run = "ask"` with a restrictive access
+policy.
 
 ### Sensitive path protection
 
-Certain paths trigger a strong warning when a tool's access policy includes
-them, regardless of how the policy is configured.
-These paths represent high-value secrets that should rarely be exposed to tool
-subprocesses:
+Certain paths trigger a warning whenever a tool's access policy includes them,
+because they hold credentials or secrets that rarely belong in a tool
+subprocess:
 
-- `~/.ssh/` — SSH keys
-- `~/.gnupg/` or `~/.gpg/` — GPG keys
-- `~/.aws/credentials` — AWS credentials
-- `~/.config/gcloud/` — Google Cloud credentials
-- `~/.kube/config` — Kubernetes credentials
-- `~/.docker/config.json` — Docker credentials
-- Files matching `**/.env` and `**/.env.*` patterns
+- `~/.ssh/`: SSH keys
+- `~/.gnupg/` and `~/.gpg/`: GPG keys
+- `~/.aws/credentials`: AWS credentials
+- `~/.config/gcloud/`: Google Cloud credentials
+- `~/.kube/config`: Kubernetes credentials
+- `~/.docker/config.json`: Docker credentials
+- `**/.env` and `**/.env.*`: environment files
 
-JP ships this list as a built-in default, updated with each release.
-Users can extend the list with additional paths:
+JP ships this list as a built-in default that cannot be reduced via
+configuration.
+Users can append additional patterns with `sensitive_paths`:
 
 ```toml
 [conversation.tools.*.access]
 sensitive_paths = ["~/.myapp/secrets", "**/.secret.*"]
 ```
 
-User-specified paths are added to (not replace) the built-in list.
-The built-in list cannot be reduced via configuration.
+`sensitive_paths` is a **warning list**, not a deny list.
+When `access.fs` grants access to a sensitive path, the OS sandbox allows the
+path, but JP prompts the user on first use with a warning naming the sensitive
+path before running the tool.
+The user's approval or denial is remembered for the session.
+Even when a tool has both an explicit `access.fs` grant and `run =
+"unattended"`, JP still shows the sensitive-path warning once per session.
 
-Sensitive paths are a **warning list**, not a deny list.
-When a tool's `access.fs` rules grant access to a sensitive path, the OS sandbox
-honors the grant — the tool gets access.
-But JP surfaces an inquiry prompt with a clear warning explaining what the tool
-will be able to access before allowing it.
-The user can approve or deny.
-This applies on first use, not on every invocation — the user's response is
-remembered for the session.
-To permanently grant a tool access to a sensitive path without prompts, the user
-adds the `access.fs` entry and configures `run = "unattended"` for that tool —
-the warning is shown once per session regardless.
-
-Tools without explicit `access` config receive the default sandbox (workspace
-read-write), which excludes sensitive paths outside the workspace by definition.
-Sensitive paths inside the workspace (e.g., `.env` files) are included in the
-default sandbox but trigger the warning if the tool's stderr output indicates it
-accessed them.
+For unconfigured tools, the default workspace sandbox automatically excludes
+home-directory credentials outside the workspace.
+Sensitive files inside the workspace (such as `.env` files) remain accessible in
+the default sandbox, and trigger a warning if the tool's stderr output indicates
+they were accessed.
 
 ### Environment variable isolation
 
-By default, tool subprocesses receive a minimal environment: `PATH`, `HOME`,
-`USER`, `LANG`, and locale variables.
-All other environment variables are stripped.
+By default, JP strips the subprocess environment down to a minimal set (`PATH`,
+`HOME`, `USER`, `LANG`, and locale variables) so secrets in the shell
+environment do not leak to tools.
 
-Tools that need specific environment variables declare them via [RFD 076]'s
-`EnvRule`:
+Tools declare additional variables through [RFD 076]'s `EnvRule`:
 
 ```toml
 [[conversation.tools.my_tool.access.env]]
@@ -473,203 +416,152 @@ name = "AWS_*"
 read = true
 ```
 
-Only variables matching `EnvRule` entries with `read = true` are forwarded to
-the subprocess, in addition to the minimal set.
-This prevents accidental leakage of secrets through the subprocess environment.
-
-For tools with `CommandRule` entries, per-command `envs` further restrict which
-of the tool's allowed env vars are forwarded to specific child processes.
+JP forwards variables matching `EnvRule` entries with `read = true` alongside
+the minimal set.
+When a tool also defines `CommandRule` entries, each command's `envs` list
+further restricts which of the tool's allowed variables reach that child
+process.
 
 ### Profile generation and caching
 
-Sandbox profiles are generated from `AccessPolicy` at tool resolution time (once
-per `jp query` invocation, not per tool call).
-The generated profile is cached for the duration of the session.
+JP generates sandbox profiles from `AccessPolicy` once at tool resolution time
+(per `jp query` invocation rather than per tool call) and caches them for the
+session.
+Relative paths in `access.fs` are resolved against the workspace root at
+generation time, and symlinks are canonicalized to prevent symlink-traversal
+bypasses.
 
-On macOS, the profile is written to a temporary file and passed to `sandbox-exec
--f`.
-On Linux, the Landlock ruleset is constructed in memory.
-On Windows, the job object is created once and reused.
-
-Path resolution happens at profile generation time: relative paths in
-`access.fs` rules are resolved against the workspace root.
-Symlinks are resolved to avoid sandbox bypasses via symlink traversal.
+On macOS, JP writes the SBPL profile to a temporary file and passes it to
+`sandbox-exec -f`.
+On Linux, it builds the Landlock ruleset in memory; on Windows, it creates the
+job object once and reuses it across calls.
 
 ## Drawbacks
 
-- **Platform inconsistency.** The three enforcement mechanisms have different
-  strengths.
-  `sandbox-exec` is capable but deprecated and uses an undocumented profile
-  language.
-  Landlock is sound but requires kernel 5.13+.
-  Windows provides only coarse-grained enforcement in the initial
-  implementation.
-  Users on different platforms get different levels of protection.
+- **Platform inconsistency.** Enforcement depth varies by OS: `sandbox-exec` is
+  deprecated and undocumented, Landlock requires Linux 5.13+ (6.7+ for network
+  rules), and Windows initially lacks per-path filesystem rules.
 
-- **`sandbox-exec` deprecation risk.** Apple has deprecated `sandbox-exec` with
-  no public replacement.
-  All SBPL documentation comes from reverse engineering.
-  Apple could remove it in any macOS release, leaving macOS without OS-level
-  enforcement until an alternative is developed.
-  This is the most significant platform risk since macOS is a primary
-  development platform for many JP users.
+- **`sandbox-exec` deprecation risk.** Apple could remove `sandbox-exec` in a
+  future macOS release without a public replacement, leaving a primary JP
+  platform without OS-level sandboxing until an alternative lands.
 
-- **Performance overhead.** Sandbox setup adds latency to tool spawning.
-  On macOS, `sandbox-exec` adds a wrapper process.
-  On Linux, Landlock ruleset creation adds ~1ms.
-  These costs are per-tool-call but small relative to the tool's own execution
-  time and LLM latency.
+- **Spawn overhead.** Wrapping a process in `sandbox-exec` on macOS or
+  constructing a Landlock ruleset on Linux (~1ms) adds per-call startup cost,
+  though it is small next to tool execution and LLM latency.
 
-- **False denials.** The default sandbox may break tools that legitimately need
-  access beyond the workspace root (e.g., tools that read system headers, access
-  package caches, or interact with databases).
-  Users must diagnose the sandbox violation and add the appropriate `access`
-  entry.
-  OS-level denials produce raw permission errors that may be difficult to
-  diagnose without context.
+- **Opaque OS denials.** Default restrictions can break tools that read outside
+  the workspace (such as system headers, package caches, or local databases).
+  Because the kernel returns raw permission errors, users must infer that the
+  sandbox denied the access and add the missing `access` rule.
 
-- **Configuration burden.** Adding `access` config is additional work for tool
-  authors.
-  The defaults are designed to cover common cases, but tools with unusual
-  requirements (build tools that read toolchain directories, tools that need
-  network access) need explicit configuration.
+- **Configuration burden.** While the default policy covers workspace-local
+  tools, build tools that read toolchain directories or tools that require
+  network access need explicit `access` rules.
 
-- **Environment variable isolation is a behavioral change.** Today, tool
-  subprocesses inherit the full environment.
-  This RFD strips all variables except a minimal set.
-  Tools relying on `CARGO_HOME`, `RUSTUP_HOME`, proxy settings, or other
-  environment variables will need explicit `EnvRule` entries.
+- **Breaking change for environment inheritance.** Subprocesses previously
+  inherited the full parent environment.
+  Stripping all non-minimal variables requires explicit `EnvRule` entries for
+  tools that depend on `CARGO_HOME`, `RUSTUP_HOME`, proxy variables, or other
+  ambient settings.
 
 ## Alternatives
 
 ### No OS-level sandboxing (cooperative only)
 
-Rely entirely on [RFD 076]'s cooperative enforcement and a future VFS IPC
-protocol for access control.
-A future RFD is expected to introduce `runtime = "vfs"` tools that access host
-resources through mediated IPC; until that exists, every tool runs as `runtime =
-"stdio"` (the current default) and would get no mandatory restrictions beyond
-`RunMode`.
+Rely solely on [RFD 076]'s cooperative checks and a future `runtime = "vfs"`
+mode that mediates host access over IPC.
 
 Rejected because `runtime = "stdio"` is the default and will remain the most
 common mode.
-Leaving the majority of tools without mandatory protection defeats the purpose.
-Cooperative enforcement is valuable for error messages but does not prevent a
-buggy or malicious tool from ignoring the policy.
+Until `runtime = "vfs"` exists, and for all `stdio` tools afterward, cooperative
+checks alone cannot stop a buggy or malicious tool from ignoring the policy.
 
 ### Container-based sandboxing
 
-Run each tool in a lightweight container (e.g., a micro-VM or namespace
-sandbox).
-This provides strong isolation but adds significant complexity and startup
-latency, and is not available on all platforms (notably Windows and macOS have
-limited namespace support).
+Run each tool inside a container, namespace sandbox, or micro-VM.
 
-Rejected as disproportionate for the threat model.
-JP's tools are typically short-lived commands that the user has configured.
-The threat is accidental over-reach (a path argument the LLM chose badly), not
-adversarial exploitation.
-OS-level filesystem restrictions are sufficient for this threat model.
+Rejected as disproportionate to the threat model.
+Containers add startup latency and setup complexity, and namespace isolation is
+not natively available on macOS or Windows.
+JP tools are typically short-lived, user-configured commands where the primary
+risk is an unintended LLM argument rather than adversarial kernel exploitation.
 
 ### Seccomp-only on Linux
 
-Use seccomp-bpf instead of Landlock for all Linux enforcement.
-Seccomp is more powerful (it can filter any syscall) but also more fragile —
-blocking the wrong syscall crashes the process.
-The filesystem-level model of Landlock maps directly to `AccessPolicy` and is
-safer to use.
+Use seccomp-bpf instead of Landlock on Linux.
 
-Seccomp may be added as a supplementary layer in the future, but Landlock is the
-primary mechanism.
+Rejected as the primary mechanism because seccomp filters raw syscalls rather
+than paths, and blocking an unexpected libc syscall crashes the process.
+Landlock's path-based rules map directly to `AccessPolicy`.
+Seccomp may be added later as a supplementary filter.
 
 ## Non-Goals
 
-- **Sandboxing JP itself.** This RFD restricts tool subprocesses, not the JP
-  process.
-  JP needs full access to the filesystem, network, and process table to
-  function.
+- **Sandboxing JP itself.** Only tool subprocesses are sandboxed; the JP process
+  requires full filesystem, network, and process-table access.
 
-- **Sandboxing MCP tools.** MCP tools run on external servers.
-  The server's security is the server operator's responsibility.
-  JP trusts MCP tool results the same way it trusts any network response.
+- **Sandboxing MCP tools.** MCP tools execute on external servers managed by
+  their operators.
+  JP treats MCP responses like any other network response.
 
-- **Restricting LLM API calls.** The LLM provider connection is not subject to
-  the sandbox system.
-  It is configured separately via provider settings.
+- **Restricting LLM API calls.** Provider connections are configured through
+  provider settings and are not subject to tool sandboxes.
 
-- **Fine-grained syscall filtering.** This RFD targets filesystem, network, and
-  subprocess restrictions — the capabilities most relevant to tool execution.
-  Low-level syscall filtering (e.g., blocking `ptrace`, `mount`) is out of
-  scope.
+- **Fine-grained syscall filtering.** This RFD covers filesystem, network,
+  environment, and subprocess execution rules.
+  Blocking low-level syscalls such as `ptrace` or `mount` is out of scope.
 
-- **Replacing `RunMode`.** The sandbox complements `RunMode`, it does not
-  replace it.
-  `RunMode` controls whether a tool runs.
-  The sandbox controls what the tool can do while running.
+- **Replacing `RunMode`.** `RunMode` gates whether a tool runs; the sandbox
+  constrains what it can access while running.
 
-- **Post-hoc detection of OS sandbox violations.** When the OS sandbox denies an
+- **Post-hoc detection of OS sandbox violations.** When the kernel denies an
   operation, the tool receives a raw permission error.
-  JP cannot intercept OS-level denials or reliably detect them by scanning
-  stderr — the heuristic for distinguishing sandbox denials from other
-  permission errors is inherently imprecise.
-  This RFD does not attempt runtime detection of sandbox violations.
-  If a tool fails due to a sandbox restriction, the user diagnoses it from the
-  tool's error output and adds the appropriate `access` entry.
-  A future RFD may explore detection heuristics or structured error reporting
-  from tools.
+  JP cannot intercept kernel denials directly, and scraping stderr cannot
+  reliably distinguish sandbox violations from ordinary permission errors.
+  Users diagnose denials from the tool's output and update `access` accordingly;
+  structured violation reporting is left to a future RFD.
 
-- **Sanitizing terminal escape sequences in tool output.** Tool results and
-  custom formatters can emit arbitrary ANSI control sequences (OSC 52 clipboard
-  writes, window-title changes, cursor movement) that reach the user's terminal.
-  This is a real tool trust-boundary concern, but it is a *terminal output*
-  problem, not a filesystem/network/subprocess one, so it is out of scope for
-  this sandbox.
-  It is handled by the capability-aware terminal theming work, whose render sink
-  strips non-SGR escapes from tool-sourced output by default; a complete
-  trust-boundary policy for tool-emitted escapes should land here in a future
-  revision once that sink exists.
+- **Sanitizing terminal escape sequences in tool output.** Tool output and
+  custom formatters can emit ANSI control sequences (such as OSC 52 clipboard
+  writes, window-title changes, or cursor movement).
+  Output sanitization belongs in the terminal render sink, which strips non-SGR
+  escape sequences from tool output by default, rather than in the OS process
+  sandbox.
 
 ## Risks and Open Questions
 
-1. **`sandbox-exec` removal timeline.** Apple has deprecated `sandbox-exec` but
-   provided no timeline for removal and no public replacement API.
-   If removed, macOS falls back to no OS-level enforcement.
-   A future RFD should investigate alternative macOS sandboxing before this
-   becomes urgent.
+1. **`sandbox-exec` removal timeline.** Apple has deprecated `sandbox-exec`
+   without a removal timeline or a public replacement API.
+   If Apple removes it, macOS falls back to cooperative enforcement until an
+   alternative sandbox mechanism is designed.
 
-2. **Landlock kernel version adoption.** Landlock requires kernel 5.13+.
-   Network restrictions require 6.7+.
-   What is the minimum kernel version we should target?
-   Most modern distributions ship 5.15+ but CI environments and older servers
-   may not.
+2. **Landlock kernel version adoption.** Filesystem rules require Linux 5.13+
+   and network rules require 6.7+.
+   While current desktop distributions generally ship 5.15+, older server and CI
+   kernels may not; what minimum kernel version should JP target?
 
-3. **Symlink and mount-point handling.** Sandbox path restrictions use resolved
-   absolute paths.
-   Symlinks inside the workspace that point outside it create a potential
-   bypass.
-   JP resolves all symlinks at sandbox setup time.
-   Should it also deny symlink traversal to out-of-scope targets?
+3. **Symlink and mount-point handling.** JP resolves symlinks when building the
+   sandbox profile, but a symlink inside the workspace pointing outside it could
+   still expose external targets or be created during execution.
+   Should the sandbox also deny symlink traversal to out-of-scope paths?
 
-4. **Convergence with RFD 016.** This RFD proposes adding `CommandRule` to [RFD
-   076]'s `AccessPolicy`.
-   [RFD 016] independently defines `CommandRule` and `SandboxConfig` for WASM
-   plugins.
-   Once this RFD is accepted, [RFD 016]'s WASM plugin config should adopt the
-   shared `AccessPolicy` types.
-   Is this a clean migration, or does the WASM sandbox have requirements that
-   `AccessPolicy` doesn't cover?
+4. **Convergence with RFD 016.** This RFD adds `CommandRule` to [RFD 076]'s
+   `AccessPolicy`, whereas [RFD 016] defines its own `CommandRule` and
+   `SandboxConfig` for WASM plugins.
+   Once this RFD is accepted, [RFD 016] should adopt the shared `AccessPolicy`
+   types; does the WASM sandbox need anything `AccessPolicy` does not express?
 
 5. **Windows filesystem restrictions.** The initial Windows implementation
-   provides only coarse-grained enforcement (network on/off, child process
-   restriction).
-   Is this acceptable for a first release, or should Windows support be deferred
-   entirely until a more capable mechanism is identified?
+   enforces only coarse network and child-process limits.
+   Is that sufficient for an initial release, or should Windows sandboxing wait
+   for a path-capable mechanism?
 
-6. **Environment variable discovery.** Stripping all env vars by default will
-   break tools that depend on undocumented environment variables (toolchain
-   paths, proxy settings, editor preferences).
-   How do users discover which variables a tool needs?
-   Should JP log which variables were stripped when a tool fails?
+6. **Environment variable discovery.** Stripping non-minimal environment
+   variables by default breaks tools that rely on ambient settings such as
+   toolchain paths, proxy variables, or editor preferences.
+   Should JP log the stripped variable names when a tool exits with an error so
+   users know which `EnvRule` entries to add?
 
 ## Implementation Plan
 
@@ -678,16 +570,14 @@ primary mechanism.
 - Add `commands: Option<HashMap<String, CommandRule>>` to `AccessPolicy` in
   `jp_tool`, extending [RFD 076]'s types.
 - Add `commands` field support to the `access` config in `jp_config`.
-- Unit tests for command matching logic.
+- Add unit tests for command-argument prefix matching.
 - **Dependency:** [RFD 076] Phase 1 (types in `jp_tool`).
 
 ### Phase 2: Environment variable isolation
 
-- Modify tool subprocess spawning in `jp_llm` to call `env_clear()` and forward
-  only the minimal set (`PATH`, `HOME`, `USER`, `LANG`, locale).
-- When `access.env` rules are present, forward matching variables in addition to
-  the minimal set.
-- When no `access` config is present, apply the same minimal-set default.
+- Call `env_clear()` when spawning tool subprocesses in `jp_llm` and forward
+  only the minimal set (`PATH`, `HOME`, `USER`, `LANG`, locale) by default.
+- Forward any additional variables matching `access.env` rules.
 - Update JP's built-in tools and documentation for any newly required `EnvRule`
   entries.
 - **Dependency:** Phase 1.
@@ -695,9 +585,9 @@ primary mechanism.
 ### Phase 3: macOS `sandbox-exec` integration
 
 - Implement SBPL profile generation from `AccessPolicy`.
-- Modify tool subprocess spawning to wrap with `sandbox-exec` when available.
-- Handle path resolution and symlink traversal.
-- Implement sensitive path warnings.
+- Wrap tool subprocess spawning with `sandbox-exec` when available.
+- Resolve paths and symlinks during profile generation.
+- Implement sensitive-path warnings.
 - Add integration tests that verify sandbox denials (macOS CI only).
 - Feature-gate behind `#[cfg(target_os = "macos")]`.
 - **Dependency:** Phase 2.
@@ -705,32 +595,29 @@ primary mechanism.
 ### Phase 4: Linux Landlock integration
 
 - Implement Landlock ruleset generation from `AccessPolicy`.
-- Apply ruleset in child process after `fork()` before `exec()`.
-- Detect kernel support and fall back gracefully.
+- Apply the ruleset in the child process after `fork()` and before `exec()`.
+- Detect kernel support and fall back with a warning when unavailable.
 - Add integration tests (Linux CI only).
 - Feature-gate behind `#[cfg(target_os = "linux")]`.
 - **Dependency:** Phase 2.
 
 ### Phase 5: Windows best-effort enforcement
 
-- Implement job object creation for network and process restrictions.
-- Spawn tool process with job assignment.
-- No per-path filesystem restriction in this phase.
+- Create job objects for network and child-process restrictions (without
+  per-path filesystem rules).
+- Assign spawned tool processes to the job object.
 - Add integration tests (Windows CI only).
 - Feature-gate behind `#[cfg(target_os = "windows")]`.
 - **Dependency:** Phase 2.
 
 ## References
 
-- [RFD 076] — Tool access grants: defines `AccessPolicy` types, cooperative
-  enforcement, filesystem/network/environment access rules.
-  This RFD consumes those types for OS-level enforcement and extends them with
-  `CommandRule`.
-- [RFD 016] — WASM plugin architecture, sandbox configuration model, secret
-  scrubbing, inquiry-based permissions.
-  This RFD extends its sandboxing concept to subprocess tools.
-- [RFD 009] — Stateful tool protocol.
-  Sandboxing applies to both one-shot and stateful tool sessions.
+- [RFD 076]: Tool access grants (`AccessPolicy` types, cooperative enforcement,
+  and filesystem, network, and environment rules).
+- [RFD 016]: WASM plugin architecture, sandbox configuration, secret scrubbing,
+  and inquiry-based permissions.
+- [RFD 009]: Stateful tool protocol.
+  OS sandboxing applies to both one-shot and stateful tool sessions.
 - [Apple sandbox-exec man page]
 - [Apple Sandbox SBPL Reference]
 - [Landlock documentation]
