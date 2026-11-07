@@ -10,12 +10,11 @@
 
 ## Summary
 
-This document establishes the Request for Discussion (RFD) process for the JP
-project.
+This document establishes the Request for Discussion (RFD) process for JP.
 RFDs are short design documents that describe a significant change, such as a
 new feature, an architectural shift, or a process change, before implementation
 begins.
-The goal is to think clearly, communicate intent, and invite feedback early.
+The goal is to think clearly, communicate intent, and invite early feedback.
 
 ## Motivation
 
@@ -23,15 +22,15 @@ JP's `docs/architecture` directory contains detailed system design documents.
 Several of these (query stream pipeline, structured output, stateful tool
 inquiries, wasm tools) are effectively design proposals: they describe what we
 intend to build, why, and how.
-However, they lack a formal lifecycle: there is no way to distinguish a proposal
-under discussion from an accepted design, or to track when a document has been
+However, they have no formal lifecycle to distinguish a proposal under
+discussion from an accepted design, or to record when a document has been
 superseded.
 
 We want a lightweight process that:
 
 1. Gives design documents a clear lifecycle (draft → discussion → accepted →
    implemented, or abandoned / superseded).
-2. Lowers the barrier to proposing ideas, welcoming rough thoughts.
+2. Lowers the barrier to proposing rough ideas.
 3. Creates a searchable record of decisions and their rationale.
 4. Fits our existing Git and pull request workflow.
 
@@ -40,8 +39,8 @@ discourages people from writing things down.
 
 ## Principles
 
-The RFD process is guided by a few core beliefs, drawn from the IETF's original
-RFC spirit and refined for a small, fast-moving open-source project.
+The RFD process draws on the original IETF RFC spirit, adapted for a small,
+fast-moving open-source project.
 
 ### Timely over polished
 
@@ -62,31 +61,30 @@ Clarity of thought matters more than grammar and formatting.
 ### Opinionated with options
 
 Propose a specific solution rather than an open-ended menu of choices.
-The author's job is to navigate the problem space, evaluate alternatives, and
-land on a recommendation.
-Readers should understand *what* is proposed, *why* it was chosen, and *what
-else* was considered.
+Navigate the problem space, evaluate alternatives, and recommend a direction so
+readers see *what* is proposed, *why* it was chosen, and *what else* was
+considered.
 
 Ambiguity creates unproductive discussion.
-When uncertain about the solution, state what you know, what you don't, and what
-you recommend given current information.
+When uncertain, state what you know, what you don't, and what you recommend
+given current information.
 Spike with code if you need to build confidence.
 
 ### Small scope
 
 Keep each RFD focused on a single topic.
-If a change has multiple independent parts, split it across multiple RFDs.
-Focused documents are easier to review and discuss, and reach consensus faster.
+Split changes with multiple independent parts across separate RFDs; focused
+documents are easier to review and reach consensus faster.
 
-Use the "Non-Goals" or "Future Work" sections to note deferred concerns without
+Use the "Non-Goals" or "Future Work" sections to note deferred work without
 bloating the proposal.
 
 ### Permanent record
 
 Published RFDs are never deleted.
-Abandoned documents are marked with a brief explanation, and superseded designs
-link to their replacements.
-This preserves the reasoning behind past decisions for future contributors.
+Abandoned RFDs record why they were set aside, and superseded RFDs link to their
+replacements.
+Future contributors can always read the reasoning behind past decisions.
 
 ## When to Write an RFD
 
@@ -97,7 +95,7 @@ Write an RFD when:
 - Introducing a new dependency, protocol, or integration pattern
 - Changing the build, release, or contribution process
 - Removing a feature or deprecating an interface
-- Proposing a large refactoring effort
+- Proposing a large refactoring
 - Seeking structured feedback on a change before investing in code
 
 Do not write an RFD for:
@@ -105,11 +103,11 @@ Do not write an RFD for:
 - Bug fixes
 - Performance improvements with no architectural change
 - Code reorganization that doesn't change behavior
-- Small feature additions that fit within established patterns
+- Small features that fit established patterns
 - Documentation updates
 
 When in doubt, start writing.
-If it turns out to be unnecessary, you'll know quickly.
+You will know quickly if an RFD is unnecessary.
 The cost of an unnecessary RFD is low; the cost of a misaligned implementation
 is high.
 
@@ -122,52 +120,47 @@ Draft → Discussion → Accepted  → Implemented ┐
                    ↘ Abandoned ↘ Superseded ◄┘
 ```
 
-Most RFDs follow the happy path: Draft → Discussion → Accepted → Implemented.
-The remaining states handle the less common cases:
-
-- **Abandoned**: The idea was rejected or withdrawn during discussion.
-- **Superseded**: An accepted or implemented design was later replaced by a new
-  RFD.
+Most RFDs follow the happy path from Draft to Implemented.
+Proposals withdrawn or rejected during discussion become **Abandoned**, and
+accepted or implemented designs replaced by a newer RFD become **Superseded**.
 
 ### Draft
 
 A draft is a work in progress on a branch.
 It may be incomplete, have open questions, or change significantly before formal
-review, though early feedback from collaborators is welcome.
+review, though early feedback is welcome.
 
 Drafts live in `docs/rfd/drafts/DNN-slug.md`, where `D` stands for "Draft" and
 `NN` is a two-digit slot from `01` to `99`.
-Deferring permanent numbering until the RFD advances to Discussion prevents
-speculative cross-draft dependencies and avoids number gaps from abandoned
-drafts.
+Deferring permanent numbering until Discussion prevents speculative cross-draft
+dependencies and avoids number gaps from abandoned drafts.
 
-The `drafts/` directory is excluded from the documentation site build, so
-authors can commit and iterate in the repository without publishing a public
-page.
-Published RFDs must not link to drafts; any such link fails the docs build.
+The documentation site build excludes `drafts/`, so authors can commit and
+iterate without publishing a public page.
+Published RFDs must not link to drafts; the docs build rejects any such link.
 
-Drafts cannot be superseded, because `Supersedes` only applies once an RFD
-reaches Accepted and has an agreed design to preserve.
-A draft replaced before advancing to Discussion is **deleted**.
-An unpursued draft can either be deleted or, if the rationale for rejecting the
-idea is worth keeping, marked as abandoned with `jp rfd abandon`.
+Because `Supersedes` preserves an agreed design, it applies only once an RFD
+reaches Accepted.
+A draft replaced before Discussion is **deleted**.
+An unpursued draft can also be deleted, or marked as abandoned with `jp rfd
+abandon` if the rationale for rejecting it is worth keeping.
 
 ### Discussion
 
 The RFD is complete enough to review.
 When the author runs `just rfd-promote DNN` (using the draft ID), the tooling:
 
-1. Assigns the next available sequential permanent number.
+1. Assigns the next sequential permanent number.
 2. Moves the file from `docs/rfd/drafts/DNN-slug.md` to `docs/rfd/042-slug.md`
    (for example).
-3. Updates the heading in the file.
+3. Updates the document heading.
 
-The author then opens a pull request to merge the document into `main`, where
-reviewers discuss the proposal and the author iterates on feedback.
+The author then opens a pull request against `main`, where reviewers discuss the
+proposal and the author iterates on feedback.
 
 Discussion has no fixed timeline, though a few days suffice for most RFDs.
 If no one reviews the RFD within 48 hours, ask a reviewer directly; if
-discussion stalls, use a synchronous call or chat to resolve the deadlock.
+discussion stalls, resolve the deadlock in a synchronous call or chat.
 
 ### Accepted
 
@@ -180,9 +173,8 @@ significant design changes, write a new RFD that supersedes the original.
 
 ### Implemented
 
-The feature or change described in the RFD is complete.
-This bookkeeping state signals that the document describes the current system
-rather than a plan.
+The feature or change is complete.
+This state signals that the RFD describes the current system rather than a plan.
 
 ### Superseded
 
@@ -191,15 +183,14 @@ The original document remains in the repository as a historical record, with a
 **Superseded by** link in its metadata and a matching **Supersedes** link in the
 replacement RFD.
 
-Only Accepted or Implemented RFDs can be superseded.
-Unlike an Abandoned RFD, which was never accepted, a Superseded RFD was accepted
-and possibly implemented before a later design replaced it.
+Only Accepted or Implemented RFDs can be superseded: unlike an Abandoned RFD, a
+Superseded RFD was accepted before a later design replaced it.
 A draft replaced before promotion is deleted instead (see [Draft](#draft)).
 
 ### Abandoned
 
-The idea was considered and deliberately set aside, because the problem was
-solved differently, priorities changed, or the approach proved infeasible.
+The idea was set aside because the problem was solved differently, priorities
+changed, or the approach proved infeasible.
 The document remains in the repository with a brief note explaining why.
 
 An abandoned RFD opens with a standard notice block:
@@ -215,9 +206,8 @@ An abandoned RFD opens with a standard notice block:
 > The original text below is preserved for historical context.
 ```
 
-If the RFD was split into other RFDs or partially carried into a later RFD, name
-the active successors in the second paragraph; if nothing was carried forward,
-omit that paragraph.
+If the RFD was split or partially carried into later RFDs, name those successors
+in the second paragraph; otherwise, omit that paragraph.
 
 ## Document Format
 
@@ -260,16 +250,9 @@ template:
 
 All categories share the same numbering scheme, directory, lifecycle, and review
 process.
-The difference is structure: a Design includes a full design section and
+They differ only in structure: a Design includes a design section and
 implementation plan, a Decision records concise context and consequences, and a
 Guide or Process document is free-form.
-
-**The templates are starting points, not constraints.** Structure the document
-however it reads best.
-Only the metadata header (Status, Category, Authors, Date) is required by the
-lifecycle tooling.
-Delete template sections that do not apply, add sections that do, or write a
-free-form document.
 
 To create a new draft:
 
@@ -285,13 +268,14 @@ jp rfd draft process "Release Process"        # workflow / policy
 populates the title, author, date, and category, and sets the status to
 **Draft**.
 
-#### Document sections
+**Templates are starting points, not constraints.** Only the metadata header
+(Status, Category, Authors, Date) is required by the lifecycle tooling.
+Structure the body however it reads best: add sections, write a free-form
+document, or omit template sections that genuinely do not apply.
+Think twice before skipping a section entirely; a one-sentence Alternatives
+section is better than none.
 
-Omit template sections that genuinely do not apply, but think twice before
-skipping one.
-Sections can be brief: a one-sentence Alternatives section is better than none.
-
-#### Metadata header
+### Metadata Header
 
 All categories use the same metadata:
 
@@ -308,73 +292,6 @@ All categories use the same metadata:
 - **Superseded by**: RFD NNN (if applicable)
 - **Summary**: One sentence, written once the RFD has a permanent number
 ```
-
-`Summary` is always the last field in the header.
-
-Implementation progress is tracked in [tickets], not in the metadata header.
-When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers
-to create a tracking ticket labelled `tracking-rfd=NNN`, using the RFD's
-Implementation Plan section as the ticket description so you can review it
-before creation.
-
-Because accepting an RFD records an agreed direction rather than a commitment to
-start building immediately, creating the tracking ticket is optional at
-promotion time.
-You can decline the prompt and create the ticket later with `jp rfd track NNN`.
-An RFD is considered in development while its tracking ticket has status In
-Progress; move the ticket on the [ticket board] when work starts, or run `jp rfd
-start NNN` to create the ticket (if needed) and mark it In Progress.
-Additional tickets for the RFD use the `relevant-rfd=NNN` label, and the
-[priority board] links each RFD to all of its tickets.
-
-Some older RFDs carry a retired `Tracking Issue` field pointing to a GitHub
-issue.
-New RFDs do not use this field; `jp rfd` only reads it to remind you to close
-the GitHub issue when the RFD is superseded or abandoned.
-
-The `Extends` and `Extended by` fields record design lineage and are maintained
-by `jp rfd extend`.
-Unlike `Supersedes`, an extending RFD builds on its predecessor while leaving
-the original design in effect.
-
-The `Requires` and `Required by` fields record hard prerequisites and are
-maintained by `jp rfd require`: the dependent RFD cannot be Accepted or
-Implemented until its prerequisite reaches that state.
-
-`Requires` only gates promotion on unbuilt dependencies.
-Once a target RFD reaches `Implemented`, the dependency is permanently
-satisfied, so `jp rfd require` and the docs build reject `Requires` links to
-`Implemented` targets.
-When an RFD reaches `Implemented`, `just rfd-promote` strips its `Requires`
-entries and the corresponding `Required by` back-links from its targets.
-Use `Extends` instead when design lineage should remain recorded after
-implementation.
-
-**Both relationships share the same promotion gate.** Because extending a design
-also depends on it (`Extends ⊆ Requires`), `rfd-promote` and the docs build
-enforce both fields identically:
-
-- Promoting an RFD from **Discussion to Accepted** requires every entry in
-  `Requires` *or* `Extends` to be at status `Accepted`, `Implemented`, or
-  `Superseded`.
-- Promoting from **Accepted to Implemented** requires every entry to be at
-  status `Implemented` or `Superseded`.
-
-This lets contributors design RFDs in parallel (with multiple RFDs in `Accepted`
-at once) while preventing an RFD from being marked complete before its
-dependencies are built.
-`jp rfd` and the docs build reject cycles in the combined dependency graph.
-
-**Do not list the same target in both `Extends` and `Requires`.** Because
-`Extends` implies `Requires`, listing a target in both fields is redundant; `jp
-rfd` and the docs build reject duplicates.
-Use `Extends` for design lineage and `Requires` for a pure execution
-prerequisite.
-
-Drafts can declare `Requires` and `Extends` links, but published RFDs never list
-drafts under `Required by` or `Extended by`.
-Promoting a draft to Discussion with `rfd-promote` adds the missing back-links
-to its targets.
 
 #### Summary
 
@@ -393,6 +310,65 @@ Unlike the body's `## Summary` section, which introduces the proposal in two or
 three sentences, the metadata `Summary` is a single line for index listings.
 The docs build only verifies that the field is present, so reviewers should
 check that edits to an RFD keep its `Summary` field accurate.
+
+#### Relationships
+
+The `Extends` and `Extended by` fields record permanent design lineage and are
+maintained by `jp rfd extend`.
+Unlike `Supersedes`, an extending RFD builds on its predecessor while leaving
+the original design in effect.
+
+The `Requires` and `Required by` fields record execution prerequisites and are
+maintained by `jp rfd require`.
+`Requires` only gates promotion on unbuilt dependencies: once a target RFD
+reaches `Implemented`, the prerequisite is permanently satisfied, so `jp rfd
+require` and the docs build reject `Requires` links to `Implemented` targets.
+When an RFD reaches `Implemented`, `just rfd-promote` strips its `Requires`
+entries and the corresponding `Required by` back-links from its targets.
+Use `Extends` when the relationship should remain recorded after implementation.
+
+Because extending a design also depends on it (`Extends ⊆ Requires`),
+`rfd-promote` and the docs build enforce the same promotion gate for both
+fields:
+
+- Promoting from **Discussion to Accepted** requires every entry in `Requires`
+  or `Extends` to be at status `Accepted`, `Implemented`, or `Superseded`.
+- Promoting from **Accepted to Implemented** requires every entry to be at
+  status `Implemented` or `Superseded`.
+
+This lets contributors design dependent RFDs in parallel (with multiple RFDs in
+`Accepted` at once) without marking an RFD complete before its dependencies are
+built.
+Because `Extends` implies `Requires`, do not list the same target in both
+fields; `jp rfd` and the docs build reject duplicates as well as cycles in the
+combined dependency graph.
+
+Drafts can declare `Requires` and `Extends` links, but published RFDs never list
+drafts under `Required by` or `Extended by`.
+Promoting a draft to Discussion with `rfd-promote` adds the back-links to its
+targets.
+
+#### Implementation Tracking
+
+Implementation progress is tracked in [tickets], not in the metadata header.
+When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers
+to create a tracking ticket labelled `tracking-rfd=NNN`, using the RFD's
+Implementation Plan section as the ticket description so you can review it
+before creation.
+
+Because accepting an RFD records an agreed direction rather than a commitment to
+start building immediately, creating the tracking ticket at promotion time is
+optional; you can decline the prompt and run `jp rfd track NNN` later.
+An RFD is in development while its tracking ticket has status In Progress.
+When work starts, move the ticket on the [ticket board] or run `jp rfd start
+NNN` to create the ticket (if needed) and mark it In Progress.
+Additional tickets for the RFD use the `relevant-rfd=NNN` label, and the
+[priority board] links each RFD to all of its tickets.
+
+Some older RFDs carry a retired `Tracking Issue` field pointing to a GitHub
+issue.
+New RFDs do not use this field; `jp rfd` reads it only to remind you to close
+the GitHub issue when the RFD is superseded or abandoned.
 
 ### Writing Style
 
@@ -425,9 +401,9 @@ check that edits to an RFD keep its `Summary` field accurate.
    assigns a permanent number and renames the file.
 2. Add the `Summary` field to the metadata header.
    The docs build rejects a published RFD without one.
-3. Open a pull request to merge your branch into `main`.
-4. Tag reviewers with context on the problem area.
-5. Incorporate feedback and update the document as the discussion evolves.
+3. Open a pull request against `main` and tag reviewers with context on the
+   problem area.
+4. Incorporate feedback and update the document as the discussion evolves.
 
 ### Accepting an RFD
 
@@ -471,31 +447,31 @@ named after the draft ID.
 |                               | assigns a number; Discussion → Accepted  |
 |                               | offers the tracking ticket.              |
 | `jp rfd track NNN`            | File or refresh the RFD's tracking       |
-|                               | ticket, printing its ID.                 |
+|                               | ticket and print its ID.                 |
 | `jp rfd start NNN`            | Mark the RFD in development by moving    |
 |                               | its tracking ticket to In Progress.      |
 | `jp rfd stop NNN`             | Move the tracking ticket back to Todo.   |
-| `jp rfd extend NNN MMM`       | Record that RFD NNN extends RFD MMM,     |
-|                               | updating both. Accepts draft IDs (DNN)   |
+| `jp rfd extend NNN MMM`       | Record in both documents that RFD NNN    |
+|                               | extends RFD MMM. Accepts draft IDs (DNN) |
 |                               | on either side.                          |
-| `jp rfd require NNN MMM`      | Record that RFD NNN requires RFD MMM,    |
-|                               | updating both. Rejects cycles. Accepts   |
-|                               | draft IDs (DNN) on either side.          |
-| `jp rfd supersede NNN MMM`    | Mark RFD NNN as superseded by RFD MMM,   |
-|                               | updating both.                           |
+| `jp rfd require NNN MMM`      | Record in both documents that RFD NNN    |
+|                               | requires RFD MMM. Rejects cycles.        |
+|                               | Accepts draft IDs (DNN) on either side.  |
+| `jp rfd supersede NNN MMM`    | Mark RFD NNN as superseded by RFD MMM in |
+|                               | both documents.                          |
 | `jp rfd abandon NNN REASON`   | Mark RFD NNN as abandoned with the given |
 |                               | reason.                                  |
 | `jp rfd renumber NNN [MMM]`   | Renumber an RFD (draft or published) to  |
 |                               | `MMM`, or the next available ID, and     |
 |                               | rewrite all cross-references.            |
 | `rg TERM docs/rfd/`           | Search across all RFD documents.         |
-| `jp rfd list [CATEGORY]`      | List RFDs in priority order, including   |
-|                               | drafts, optionally filtered by category. |
+| `jp rfd list [CATEGORY]`      | List RFDs (including drafts) in priority |
+|                               | order, optionally filtered by category.  |
 
 ## Relationship to Architecture Documents
 
-The `docs/architecture/` directory contains detailed technical descriptions of
-implemented systems, which serve a different purpose than RFDs:
+The `docs/architecture/` directory describes implemented systems, whereas RFDs
+propose and record changes:
 
 |               | RFDs (`docs/rfd/`)                  | Architecture Docs (`docs/architecture/`) |
 | ------------- | ----------------------------------- | ---------------------------------------- |
@@ -505,11 +481,9 @@ implemented systems, which serve a different purpose than RFDs:
 | **Audience**  | Contributors deciding what to build | Contributors understanding what exists   |
 | **Scope**     | A specific change or feature        | A subsystem or cross-cutting concern     |
 
-Once an accepted RFD is implemented, contributors update the relevant
-architecture documents to reflect the new system state, while the RFD remains as
-the historical record of the decision.
-The two directories complement each other: RFDs may reference existing
-architecture documents, and accepted RFDs may introduce new ones.
+When an RFD is implemented, contributors update the relevant architecture
+documents (or add new ones) to reflect the current system, while the RFD remains
+as the historical record of the decision.
 
 ## FAQ
 
@@ -559,18 +533,16 @@ The goal is consensus, not formal sign-off.
 ### What if my document doesn't fit a template?
 
 Use whatever structure fits the content.
-Templates are starting points, not required formats, and policy documents,
-values statements, and process guidelines have their own natural shape.
-Only the metadata header (Status, Category, Authors, Date) is required for the
-lifecycle tooling.
+Policy documents, values statements, and process guidelines have their own
+natural shape, and the lifecycle tooling requires only the metadata header
+(Status, Category, Authors, Date).
 See [RFD 002] for an example of a free-form RFD.
 
 -----
 
 ## Implementation Plan
 
-This RFD is its own implementation.
-The steps are:
+This RFD is its own implementation:
 
 1. Create the `docs/rfd/` directory.
 2. Add `000-design-template.md`, `000-decision-template.md`,
