@@ -11,10 +11,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": true,
-        "thinking": true
-      },
+      "reasoning_effort": "low",
       "tools": [
         {
           "type": "function",
@@ -196,10 +193,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": false,
-        "thinking": false
-      }
+      "reasoning_effort": "none"
     }
 then:
   status: 200

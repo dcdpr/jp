@@ -11,10 +11,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": false,
-        "thinking": false
-      }
+      "reasoning_effort": "none"
     }
 then:
   status: 200
@@ -59,10 +56,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": true,
-        "thinking": true
-      }
+      "reasoning_effort": "low"
     }
 then:
   status: 200
@@ -154,10 +148,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": false,
-        "thinking": false
-      },
+      "reasoning_effort": "none",
       "tools": [
         {
           "type": "function",
@@ -273,10 +264,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": false,
-        "thinking": false
-      }
+      "reasoning_effort": "none"
     }
 then:
   status: 200
@@ -352,10 +340,7 @@ when:
         }
       ],
       "stream": true,
-      "chat_template_kwargs": {
-        "enable_thinking": true,
-        "thinking": true
-      }
+      "reasoning_effort": "low"
     }
 then:
   status: 200
