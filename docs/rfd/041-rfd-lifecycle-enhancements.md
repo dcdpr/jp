@@ -11,99 +11,86 @@
 
 ## Summary
 
-This RFD introduces three improvements to the RFD lifecycle: RFD numbers are
-assigned at Discussion (not at Draft creation), a GitHub tracking issue is
-created automatically when an RFD is accepted, and two new metadata fields
-(`Extends` / `Extended by`) make directional relationships between RFDs
-machine-readable.
+This RFD makes three changes to the RFD lifecycle: it defers RFD numbering until
+Discussion (instead of Draft creation), creates a GitHub tracking issue
+automatically when an RFD reaches Accepted, and adds `Extends` and `Extended by`
+metadata fields to make directional relationships between RFDs machine-readable.
 
-The tracking-issue half is superseded by [RFD 100], which tracks implementation
-work in tickets instead.
+[RFD 100] supersedes the tracking-issue mechanism, tracking implementation work
+in tickets instead.
 
 ## Motivation
 
-Three independent problems with the current process motivated these changes.
-
-**Numbers are assigned too early.** Today, `rfd-draft` assigns a permanent
-number on creation.
-That number becomes a stable reference before the RFD has been reviewed or even
-finished.
-This means:
+**Numbers are assigned too early.** `rfd-draft` assigns a permanent number on
+creation, creating a stable reference before the RFD is reviewed or finished:
 
 - Splitting a draft into two focused RFDs requires renumbering, which breaks any
   in-flight references.
-- Authors pre-assign numbers to related RFDs they intend to write, creating gaps
-  and ordering confusion if any of them are abandoned.
-- The RFD number signals identity and commitment, but it currently signals
-  nothing more than "someone started typing."
+- Authors pre-assign numbers to related RFDs they intend to write, leaving gaps
+  and ordering confusion if any of those drafts are abandoned.
+- An RFD number should signal identity and commitment, not just that someone
+  started typing.
 
 **Implementation tracking lives in the wrong place.** The Implementation Plan
-section of a design RFD lists phases and steps, but there is no mechanism to
-track which phases have been completed, link to the PRs that implemented them,
-or collect the implementation notes that accumulate during development.
-That information ends up scattered across commit messages, PR descriptions, and
-nowhere.
+section of a design RFD lists phases and steps, but nothing tracks completed
+phases, links to the PRs that implemented them, or collects notes during
+development.
+That context ends up scattered across commit messages and PR descriptions, or
+goes unrecorded.
 
-**RFD relationships are invisible to tooling.** When a later RFD extends an
-earlier design — adding a capability, improving a mechanism, or building on the
-foundation — that relationship is captured only in prose and TIP callouts.
-It is not in the metadata header, not in the index, and not queryable.
-The relationship has to be discovered by reading.
+**RFD relationships are invisible to tooling.** When an RFD extends an earlier
+design, only prose and TIP callouts record the relationship.
+Because the metadata header and index omit it, tooling cannot query it and
+readers must discover it by reading the documents.
 
 ## Design
 
 ### 1. Deferred Numbering
 
-Drafts are created as `NNN-title.md` — the literal placeholder `NNN`, not a
-number.
-The file header uses `NNN` in the title and carries no number in the metadata.
+Drafts are created as `NNN-title.md`, using the literal placeholder `NNN`
+instead of a number in the filename and `# RFD NNN: Title` heading, and carry no
+number in their metadata.
 
-When the author runs `just rfd-promote NNN-title` to advance to Discussion, the
-tooling:
+When the author runs `just rfd-promote NNN-title` to advance a draft to
+Discussion, the tooling:
 
 1. Assigns the next available sequential number.
-2. Renames the file from `NNN-title.md` to `041-title.md`.
+2. Renames the file (for example, `NNN-title.md` to `041-title.md`).
 3. Updates the `# RFD NNN: Title` heading in the file.
 4. Proceeds with the existing promotion flow (status → Discussion).
 
-From that point the RFD has a stable identity.
-Other RFDs may reference it by number.
-Before that point, no number exists to reference.
-
-**What this enforces:** An RFD in Draft status cannot be linked to by number
-from another RFD, because it does not have one.
-This eliminates speculative cross-draft dependencies and forces design
-relationships to be resolved before both RFDs reach Discussion.
+An RFD gains a stable, linkable number only at Discussion.
+Because drafts have no number, other RFDs cannot link to them by number, which
+eliminates speculative cross-draft dependencies and forces authors to resolve
+design relationships before both RFDs reach Discussion.
 
 ### 2. Tracking Issues
 
 > [!TIP]
-> This section is superseded by [RFD 100].
-> Implementation work is tracked in tickets: `jp rfd promote` offers to file a
-> tracking ticket, labelled `tracking-rfd=NNN`, holding the Implementation Plan,
-> and that one ticket serves as both the tracking item and the prioritised work
-> item.
-> No GitHub tracking issue is created, and the `Tracking Issue` metadata field
-> is retired.
+> [RFD 100] supersedes this section.
+> `jp rfd promote` offers to file a tracking ticket labeled `tracking-rfd=NNN`
+> with the Implementation Plan as its body, and that ticket is both the tracking
+> item and the prioritized work item.
+> Promotion no longer creates a GitHub tracking issue, and the `Tracking Issue`
+> metadata field is retired.
 >
 > The original text below is preserved for historical context.
-> Note that it describes issue creation at Discussion; as implemented, it
-> happened at Accepted.
+> Note that parts of this RFD describe issue creation at Discussion, while the
+> implementation created it at Accepted.
 
-When `just rfd-promote` advances an RFD to Accepted, a GitHub tracking issue is
-created automatically alongside the status change.
+When `just rfd-promote` advances an RFD to Accepted, it automatically creates a
+GitHub tracking issue alongside the status change.
 
 The issue:
 
 - Links to the RFD document.
-- Contains a task list generated from the RFD's Implementation Plan by the
-  `rfd_open_tracking_issue` tool (an LLM-assisted tool in the `rfd` skill that
-  reasons about the RFD and produces a structured task list; the task list is
-  not a static template).
-- Serves as the canonical place for implementation notes, PR links, and progress
-  tracking.
+- Contains a task list generated from the RFD's Implementation Plan by
+  `rfd_open_tracking_issue`, an LLM-assisted tool in the `rfd` skill that
+  derives a structured task list from the RFD rather than filling a static
+  template.
+- Holds implementation notes, PR links, and progress tracking.
 
-A `Tracking Issue: #XXX` line is added to the metadata header:
+Promotion adds a `Tracking Issue: #XXX` line to the metadata header:
 
 ```markdown
 - **Status**: Discussion
@@ -124,110 +111,98 @@ A `Tracking Issue: #XXX` line is added to the metadata header:
 | Process  | Only if the process change has        |
 |          | implementation steps                  |
 
-**Lifecycle:** When an RFD is abandoned, the tracking issue is closed with a
-comment stating why.
-When an RFD is superseded, the tracking issue is closed and linked to the
-successor's tracking issue.
+**Lifecycle:** Abandoning an RFD closes its tracking issue with a comment
+stating why.
+Superseding an RFD closes its tracking issue and links it to the successor's
+tracking issue.
 
 ### 3. `Extends` and `Extended by` Metadata
 
-Two new optional metadata fields capture directional extension relationships
-between RFDs:
+Two optional metadata fields capture directional extension relationships between
+RFDs:
 
 ```markdown
 - **Extends**: RFD 028
 - **Extended by**: RFD 034, RFD 037
 ```
 
-`Extends` is written in the newer RFD.
-`Extended by` is written in the older one.
-Both are updated by `just rfd-extend NNN MMM`, which writes `Extended by: MMM`
-into NNN and `Extends: NNN` into MMM atomically.
+`Extends` appears in the newer RFD and `Extended by` in the older one.
+Running `just rfd-extend NNN MMM` updates both files atomically, writing
+`Extended by: MMM` into NNN and `Extends: NNN` into MMM.
 
-The relationship is n-to-m: an RFD can extend multiple predecessors, and can be
-extended by multiple successors.
-Both fields accept comma-separated RFD numbers.
+The relationship is n-to-m: an RFD can extend multiple predecessors and be
+extended by multiple successors, so both fields accept comma-separated RFD
+numbers.
 
-**Distinction from `Supersedes`:** A superseding RFD replaces its predecessor —
-the old design is no longer the current approach.
-An extending RFD builds on its predecessor — the original remains largely valid
-and in effect.
-RFD 034 extends RFD 028 (adds cheaper model routing); it does not supersede it
-(the inquiry mechanism is still the approach, just improved).
+**Distinction from `Supersedes`:** A superseding RFD replaces its predecessor,
+retiring the old design.
+An extending RFD builds on its predecessor while leaving the original design in
+effect.
+For example, RFD 034 extends RFD 028 by adding cheaper model routing rather than
+superseding the inquiry mechanism itself.
 
 **Constraint:** These fields reference only RFDs in Accepted status or later.
-The deferred numbering policy makes this natural: a draft has no number, so it
-cannot appear in an `Extends` or `Extended by` field.
+Deferred numbering enforces part of this automatically: a draft has no number,
+so it cannot appear in an `Extends` or `Extended by` field.
 
 ### 4. Related RFDs (Automated)
 
-A `Related` metadata field is deliberately not introduced.
-At scale, maintaining bidirectional `Related` links manually becomes a burden
-that outweighs the benefit.
-
-Instead, the VitePress site loader is extended to scan each RFD document for
-links to other RFDs and surface the results automatically — both as a
-"Referenced by" list on the individual RFD page and as data available to the
-index.
-The `Date` column in the index is removed; the space is used for relationship
-indicators instead.
+Rather than introducing a manual `Related` metadata field whose bidirectional
+links are costly to maintain at scale, the VitePress site loader scans each RFD
+document for links to other RFDs and surfaces them automatically.
+Individual RFD pages display a "Referenced by" list, and the RFD index replaces
+its `Date` column with relationship indicators.
 
 ## Drawbacks
 
-- **Habit change.** Contributors are used to getting a number immediately.
-  Drafts that circulate informally as "the thing I'm working on" can no longer
-  be referred to by number.
-  This is a feature, not a bug — but it requires adjustment.
+- **Habit change.** Contributors are used to getting a number immediately, and
+  circulating drafts can no longer be referenced by number.
+  That constraint is intentional, but it requires adjustment.
 
-- **`rfd-promote` is now a bigger operation.** It previously changed one line in
-  one file.
-  It now renames a file, updates a heading, creates a GitHub issue, and updates
-  metadata.
-  It must be atomic: if the GitHub issue creation fails, the file rename should
-  not persist.
+- **`rfd-promote` is a larger operation.** Instead of changing one status line
+  in one file, promotion renames a file, updates a heading, creates a GitHub
+  issue, and updates metadata.
+  The operation must be atomic: if GitHub issue creation fails, the file rename
+  must not persist.
 
-- **Tracking issues add noise to the GitHub issue tracker.** Mitigated by using
-  a dedicated label (`rfd`) and ensuring the issue titles are clear (`RFD-041:
-  ...`).
+- **Tracking issues add noise to the GitHub issue tracker.** A dedicated `rfd`
+  label and clear issue titles (`RFD-041: ...`) mitigate this by making tracking
+  issues easy to filter.
 
 ## Alternatives
 
 ### Assign numbers at Accepted, not Discussion
 
-Numbers could be deferred further — only assigned when consensus is reached.
-Rejected because Discussion is the point where external references become
-necessary.
-Reviewers link to the RFD in comments; other authors need to reference it in
-their own RFDs; tracking issues need a stable title.
-Discussion is the right commitment point.
+Deferring numbering until Accepted would assign numbers only after consensus is
+reached.
+This was rejected because external references start at Discussion: reviewers
+link to the RFD in comments, other authors reference it in their own RFDs, and
+tracking issues need a stable title.
 
 ### `Related` as manual metadata
 
-A `Related: RFD NNN, RFD MMM` field, maintained by authors, was considered.
-Rejected because the maintenance cost grows with every new RFD written.
-A site-level automation that scans document links is lower cost and covers the
-same use cases without requiring authors to remember to update metadata in both
-directions.
+An author-maintained `Related: RFD NNN, RFD MMM` field was rejected because
+maintaining bidirectional links by hand grows more costly with every new RFD.
+Scanning document links in the site loader covers the same use cases
+automatically.
 
 ### Static tracking issue template
 
-A fixed template for all tracking issues (boilerplate + link to RFD) was
-considered.
-Rejected because the implementation phases differ significantly between RFDs.
-A Design RFD with five phases needs five checkboxes; a Decision RFD may need
-none.
-The LLM-assisted tool reads the Implementation Plan and generates the task list
-accordingly.
+Using a fixed template (boilerplate plus a link to the RFD) for all tracking
+issues was rejected because implementation phases vary across RFDs: a five-phase
+Design RFD needs five checkboxes, while a Decision RFD may need none.
+`rfd_open_tracking_issue` reads the Implementation Plan and generates the task
+list to match.
 
 ## Non-Goals
 
-- **Renumbering existing drafts.** Existing Draft-status RFDs at the time this
-  ships keep their numbers under the grandfather clause.
-- **Automated tracking issue updates.** The tracking issue is created once at
-  promotion.
-  Keeping it current (checking off tasks) is the author's and implementer's
-  responsibility.
-- **`Related` as manual metadata.** Covered by website automation.
+- **Renumbering existing drafts.** Existing Draft-status RFDs keep their numbers
+  under the grandfather clause.
+- **Automated tracking issue updates.** Promotion creates the tracking issue
+  once; keeping it current by checking off tasks is the author's and
+  implementer's responsibility.
+- **`Related` as manual metadata.** The VitePress site loader derives
+  related-RFD links automatically.
 - **Changes to the Discussion or Accepted lifecycle steps** beyond what is
   described above.
 
@@ -235,13 +210,12 @@ accordingly.
 
 ### Phase 1: Deferred numbering tooling
 
-Update `just rfd-draft` to create `NNN-title.md` with `NNN` as the literal
-placeholder throughout (filename, heading, metadata).
-Update `just rfd-promote` to detect when the current status is Draft (i.e., the
-file is named `NNN-*.md`), assign the next available number, rename the file,
-and update the heading before changing the status.
-
-Update `docs/rfd/001-jp-rfd-process.md` to document the new policy.
+Update `just rfd-draft` to create `NNN-title.md` with the literal placeholder
+`NNN` in the filename, heading, and metadata.
+Update `just rfd-promote` to detect Draft RFDs (`NNN-*.md`), assign the next
+available number, rename the file, and update the heading before changing the
+status.
+Document the policy in `docs/rfd/001-jp-rfd-process.md`.
 
 Depends on: nothing.
 Can be merged independently.
@@ -249,29 +223,25 @@ Can be merged independently.
 ### Phase 2: Tracking issue creation
 
 Add `rfd_open_tracking_issue` to the `rfd` skill in `.jp/config/skill/rfd.toml`.
-The tool accepts the RFD number, title, a URL to the document, and an array of
-task strings derived from the Implementation Plan; it creates a GitHub issue via
-`gh issue create` (or `curl` against the GitHub API) and returns the issue URL.
+The tool takes the RFD number, title, document URL, and an array of task strings
+derived from the Implementation Plan, creates a GitHub issue via `gh issue
+create` (or `curl` against the GitHub API), and returns the issue URL.
 
-Extend `just rfd-promote` to call this tool when advancing to Discussion, then
-inject the resulting issue number into the `Tracking Issue:` metadata field.
-If issue creation fails, the promotion aborts before renaming the file.
-
-Update `docs/rfd/001-jp-rfd-process.md` to document the tracking issue field and
-its lifecycle (close on abandon/supersede).
+Extend `just rfd-promote` to call this tool when advancing to Discussion and
+write the returned issue number into the `Tracking Issue:` metadata field.
+If issue creation fails, abort promotion before renaming the file.
+Document the `Tracking Issue` field and its abandon/supersede lifecycle in
+`docs/rfd/001-jp-rfd-process.md`.
 
 Depends on: Phase 1 (the promotion command is extended, not replaced).
 
 ### Phase 3: `Extends` / `Extended by` metadata and `rfd-extend` command
 
-Add `just rfd-extend NNN MMM` to the justfile.
-The command adds `Extended by: RFD MMM` to `NNN`'s metadata and `Extends: RFD
-NNN` to `MMM`'s metadata.
-Handle comma-separated lists: if the field already exists, append rather than
-replace.
-
-Update the metadata header documentation in `001-jp-rfd-process.md` and the
-tooling table.
+Add `just rfd-extend NNN MMM` to the justfile to write `Extended by: RFD MMM`
+into `NNN`'s metadata and `Extends: RFD NNN` into `MMM`'s metadata, appending to
+existing comma-separated lists rather than replacing them.
+Update the metadata header documentation and tooling table in
+`001-jp-rfd-process.md`.
 
 Depends on: nothing.
 Can be merged independently of Phases 1 and 2.
@@ -279,21 +249,20 @@ Can be merged independently of Phases 1 and 2.
 ### Phase 4: Website automation for related RFDs
 
 Extend the VitePress data loader (`docs/.vitepress/loaders/rfds.data.js`) to
-parse each RFD document for Markdown links matching the pattern `NNN-*.md` and
-record the set of referenced RFD numbers.
-Expose this as a `references` field on each RFD data object.
-Compute `referenced_by` as the inverse.
-Update the index page to use this data: remove the `Date` column, add a
-references indicator, and surface `referenced_by` on individual RFD pages.
+parse each RFD document for Markdown links matching `NNN-*.md`, expose the
+referenced RFD numbers as `references` on each RFD data object, and compute
+`referenced_by` as the inverse.
+Update the index page to replace the `Date` column with a references indicator,
+and surface `referenced_by` on individual RFD pages.
 
 Depends on: nothing.
 Can be merged independently.
 
 ## References
 
-- [RFD 001: The JP RFD Process][RFD 001] — the process this RFD extends.
-- [RFD 003: JP-Assisted RFD Writing][RFD 003] — the `rfd` skill that gains the
-  `rfd_open_tracking_issue` tool.
+- [RFD 001: The JP RFD Process][RFD 001]: the process this RFD extends.
+- [RFD 003: JP-Assisted RFD Writing][RFD 003]: defines the `rfd` skill that
+  gains the `rfd_open_tracking_issue` tool.
 
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 003]: 003-jp-assisted-rfd-writing.md
