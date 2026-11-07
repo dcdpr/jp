@@ -103,6 +103,7 @@ This RFD adds:
 | `jp release finalize VERSION`        | Tags a finalized release, with its release notes as the tag message                              |
 | `jp release render [VERSION]`        | Renders a release's notes or upgrade guide, or the unreleased fragments                          |
 | `jp release due`                     | Exits zero when the next release is due                                                          |
+| `jp release status`                  | Reports the state of each release and the next command to run                                    |
 
 `cut`, `pick`, and `finalize` read `main`, the release branches, and the notes
 branches from both `origin` and the local repository, and operate in temporary
@@ -564,6 +565,24 @@ one unreleased fragment (without one, `cut` would have nothing to release).
 For a patch release, a maintainer runs `jp release pick` targeting the next
 patch version, followed by `jp release finalize`.
 
+`jp release status` reports the next step, so maintainers do not have to
+remember the order.
+It reads the same state as the other commands without changing anything, and
+reports, in this order:
+
+- whether the checkout is missing commits from `origin/main`, which `cut` and
+  `finalize` refuse;
+- a `pick` stopped by a conflict, with the `--continue` command that finishes
+  it;
+- release branches, notes branches, and `v` tags that exist only in the local
+  repository, with the push that publishes them or the commands that delete a
+  rehearsal's leftovers (notes branches the checkout has already merged are
+  omitted);
+- each release in preparation and where its notes are: on its notes branch,
+  still to be merged, or on `main`, with the `finalize` command that tags it;
+- when no minor or major release is in preparation, the result of `due`, with
+  the `cut` command that starts the next release once one is due.
+
 ### JP's CI
 
 Every GitHub Actions workflow invokes a `just` recipe so the same steps can run
@@ -793,9 +812,10 @@ Depends on Phase 1.
 
 ### Phase 3: `due` and the reminder workflow
 
-Implement `jp release due`, add the `just release-due` recipe, and add the daily
-GitHub Actions workflow that opens a `release`-labelled reminder issue (closed
-automatically when the tag of the next minor or major release is pushed).
+Implement `jp release due` and `jp release status`, add the `just release-due`
+recipe, and add the daily GitHub Actions workflow that opens a
+`release`-labelled reminder issue (closed automatically when the tag of the next
+minor or major release is pushed).
 Depends on Phase 2.
 
 ### Repository settings

@@ -272,16 +272,16 @@ pub(crate) fn top_level(
     Ok(top_level)
 }
 
-/// How many fragments at the top level of the fragments directory on `origin`'s
-/// `main` no release branch ships; none when `main` has no fragments directory.
+/// How many fragments at the top level of the fragments directory in the commit
+/// `main` no release branch ships; none when it has no fragments directory.
 ///
 /// Highlights aren't counted: a release needs a fragment to list.
 pub(crate) fn unreleased_count(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
+    main: &str,
 ) -> Result<usize, String> {
-    let repo = &pipeline.repo;
-    let notes = repo.worktree("due", &repo.main()?)?;
+    let notes = pipeline.repo.worktree("due", main)?;
     if !pipeline.fragments_in(&notes).is_dir() {
         return Ok(0);
     }

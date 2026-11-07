@@ -860,6 +860,16 @@ fn apply(pipeline: &Pipeline<'_>, filing: &Filing<'_>, message: &str) -> Result<
     filing.notes.commit(message)
 }
 
+/// The pick a conflict stopped, as the release it goes into and the worktree
+/// holding it, when there is one to continue.
+pub(crate) fn stopped(pipeline: &Pipeline<'_>) -> Result<Option<(String, Utf8PathBuf)>, String> {
+    let state = pipeline.repo.common_dir()?.join(STOPPED);
+
+    Ok(load(&state)?
+        .filter(|stopped| stopped.worktree.join(".git").exists())
+        .map(|stopped| (stopped.version, stopped.worktree)))
+}
+
 /// The stopped pick `path` keeps, when there is one.
 fn load(path: &Utf8Path) -> Result<Option<Stopped>, String> {
     let text = match fs::read_to_string(path) {

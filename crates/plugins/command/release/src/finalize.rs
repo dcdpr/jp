@@ -21,12 +21,41 @@ use crate::{
     cut,
     pipeline::{Pipeline, counted, listed, problems, push, short},
     releases::{self, Line, Releases},
-    repository::{Checkout, MAIN, ORIGIN, Worktree},
+    repository::{MAIN, ORIGIN, Worktree},
 };
 
 /// The heading the upgrade guide follows the release notes under, in a tag's
 /// message.
 const UPGRADE_GUIDE: &str = "Upgrade guide";
+
+/// Where the notes of a release in preparation stand, in a commit that stands
+/// for `main`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Notes {
+    /// Its notes branch has files of the release's directory the commit lacks,
+    /// each relative to the workspace root.
+    Unmerged {
+        /// The notes branch as a sentence names it: `release-notes/v0.3.0`, or
+        /// `origin's release-notes/v0.3.0`.
+        branch: String,
+
+        /// The command that deletes that branch.
+        delete: String,
+
+        missing: Vec<String>,
+    },
+
+    /// Fragments or highlights at the top level of the fragments directory
+    /// whose change the release's branch ships, each relative to the workspace
+    /// root.
+    Unfiled(Vec<String>),
+
+    /// The commit has no notes of the release.
+    Missing,
+
+    /// The commit has the release's notes.
+    Filed,
+}
 
 /// Tag release `version` at the tip of its release branch, with its notes as
 /// the commit checked out has them, and say how to publish the tag.
@@ -67,7 +96,45 @@ pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<Str
     let line = releases.finalize_target(version)?;
     let checkout = repo.checkout()?;
     let main = repo.worktree("finalize", &checkout.head)?;
-    refuse_unfiled(pipeline, &releases, line, version, &checkout, &main)?;
+    let at = checkout.describe();
+    let merge = format!(
+        "Merge {} into {MAIN} first, then finalize from there.",
+        releases::notes_branch(version)
+    );
+    match notes(pipeline, &releases, line, version, &main)? {
+        Notes::Filed => {}
+        Notes::Unmerged {
+            branch,
+            delete,
+            missing,
+        } => {
+            return Err(format!(
+                "{at} lacks {} of the notes of {version} that {branch} has: {}. {merge} If {MAIN} \
+                 dropped {} on purpose, delete the branch with {delete}.",
+                counted(missing.len(), "file", "files"),
+                listed(&missing),
+                if missing.len() == 1 { "it" } else { "them" },
+            ));
+        }
+        Notes::Unfiled(pending) => {
+            return Err(format!(
+                "{at} still has {} at the top of {} whose changes {} ships: {}. Their notes \
+                 aren't filed yet. {merge}",
+                counted(pending.len(), "file", "files"),
+                pipeline.fragments,
+                line.branch,
+                listed(&pending),
+            ));
+        }
+        Notes::Missing => {
+            let directory = format!("{}/{version}/", pipeline.fragments);
+            return Err(format!(
+                "{at} has no notes of {version} in {directory}. Write at least one fragment \
+                 there, such as {directory}<slug>.fixed.md, and finalize from a commit that has \
+                 it."
+            ));
+        }
+    }
     let message = message(pipeline, version, &main)?;
     repo.tag(&tag, &line.tip, &message)?;
 
@@ -87,23 +154,24 @@ pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<Str
     Ok(said)
 }
 
-/// Refuse while the commit checked out lacks notes of `version`: files of the
-/// release's directory its notes branch has, here or on `origin`; fragments or
-/// highlights at the top level of the fragments directory whose change `line`
-/// ships; or any notes at all.
-fn refuse_unfiled(
+/// Where the notes of `version`, in preparation on `line`, stand in the commit
+/// `main` is a worktree of.
+///
+/// They are unmerged while its notes branch, here or on `origin`, has files of
+/// the release's directory the commit lacks, and unfiled while fragments or
+/// highlights whose change `line` ships sit at the top level of the fragments
+/// directory.
+pub(crate) fn notes(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
     line: &Line,
     version: &Version,
-    checkout: &Checkout,
     main: &Worktree<'_>,
-) -> Result<(), String> {
+) -> Result<Notes, String> {
     let repo = &pipeline.repo;
     let notes_branch = releases::notes_branch(version);
     let directory = format!("{}/{version}/", pipeline.fragments);
-    let filed = repo.files_at(&checkout.head, &directory)?;
-    let merge = format!("Merge {notes_branch} into {MAIN} first, then finalize from there.");
+    let filed = repo.files_at(&main.head()?, &directory)?;
 
     let branch = repo.branch(&notes_branch)?;
     for (hash, name, delete) in [
@@ -126,18 +194,13 @@ fn refuse_unfiled(
             .difference(&filed)
             .cloned()
             .collect();
-        if missing.is_empty() {
-            continue;
+        if !missing.is_empty() {
+            return Ok(Notes::Unmerged {
+                branch: name,
+                delete,
+                missing,
+            });
         }
-
-        return Err(format!(
-            "{} lacks {} of the notes of {version} that {name} has: {}. {merge} If {MAIN} dropped \
-             {} on purpose, delete the branch with {delete}.",
-            checkout.describe(),
-            counted(missing.len(), "file", "files"),
-            listed(&missing),
-            if missing.len() == 1 { "it" } else { "them" },
-        ));
     }
 
     if pipeline.fragments_in(main).is_dir() {
@@ -147,27 +210,15 @@ fn refuse_unfiled(
             .map(|file| format!("{}/{}", pipeline.fragments, file.path))
             .collect();
         if !pending.is_empty() {
-            return Err(format!(
-                "{} still has {} at the top of {} whose changes {} ships: {}. Their notes aren't \
-                 filed yet. {merge}",
-                checkout.describe(),
-                counted(pending.len(), "file", "files"),
-                pipeline.fragments,
-                line.branch,
-                listed(&pending),
-            ));
+            return Ok(Notes::Unfiled(pending));
         }
     }
 
-    if filed.is_empty() {
-        return Err(format!(
-            "{} has no notes of {version} in {directory}. Write at least one fragment there, such \
-             as {directory}<slug>.fixed.md, and finalize from a commit that has it.",
-            checkout.describe()
-        ));
-    }
-
-    Ok(())
+    Ok(if filed.is_empty() {
+        Notes::Missing
+    } else {
+        Notes::Filed
+    })
 }
 
 /// The message of the tag of `version`: the subject `Release <version>`, then

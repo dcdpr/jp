@@ -40,6 +40,7 @@ mod repository;
 #[cfg(test)]
 mod repository_testing;
 mod shell;
+mod status;
 mod tool;
 
 use std::{
@@ -202,6 +203,14 @@ enum Command {
     /// has an unreleased fragment to release.
     /// With `jp --format json`, prints `{"due": <bool>, "reason": <text>}`.
     Due,
+
+    /// Say where the releases stand, and what to run next.
+    ///
+    /// Reads the release branches, notes branches, and tags here and on
+    /// `origin`, and the commit checked out, which stands for `main`, as `cut`,
+    /// `pick`, and `finalize` do.
+    /// Changes nothing.
+    Status,
 
     /// Write the definition of the tool that offers `add` to the assistant.
     Tools {
@@ -453,6 +462,9 @@ fn handle_command(
             finalize::finalize(pipeline, &version)
         }),
         Command::Due => due_release(root, &options, ctx.format),
+        Command::Status => {
+            make_release(root, &options, |pipeline| status::status(pipeline, now()?))
+        }
         Command::Tools {
             command: ToolsCommand::Init { path, force },
         } => definitions::init(&resolve_dir(root, &path), force),
@@ -691,10 +703,7 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
 fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Result<Output, String> {
     let shell = Shell::new();
     let pipeline = Pipeline::new(&shell, root, options)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("The system clock is set before 1970: {error}."))?;
-    let due = due::due(&pipeline, i64::try_from(now.as_secs()).unwrap_or(i64::MAX))?;
+    let due = due::due(&pipeline, now()?)?;
 
     let text = if format.is_json() {
         serde_json::to_string(&due)
@@ -709,6 +718,15 @@ fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Resu
         json: format.is_json(),
         note: None,
     })
+}
+
+/// The time now, in seconds since the Unix epoch.
+fn now() -> Result<i64, String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("The system clock is set before 1970: {error}."))?;
+
+    Ok(i64::try_from(now.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// Run `command`, which makes a release in the workspace at `root`.

@@ -14,7 +14,7 @@ use chrono::DateTime;
 use semver::Version;
 use serde::Serialize;
 
-use crate::{cut, options::Cadence, pipeline::Pipeline};
+use crate::{cut, options::Cadence, pipeline::Pipeline, releases::Releases};
 
 /// Whether the next release is due, and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -26,7 +26,7 @@ pub(crate) struct Due {
 }
 
 /// Whether the next release is due at `now`, in seconds since the Unix epoch,
-/// from what `origin`'s tags and release branches say.
+/// from what `origin`'s tags, release branches, and `main` say.
 ///
 /// The error says why they can't be read.
 pub(crate) fn due(pipeline: &Pipeline<'_>, now: i64) -> Result<Due, String> {
@@ -35,6 +35,20 @@ pub(crate) fn due(pipeline: &Pipeline<'_>, now: i64) -> Result<Due, String> {
     repo.fetch()?;
     let releases = repo.releases()?;
 
+    next(pipeline, &releases, now, &repo.main()?)
+}
+
+/// Whether the next release is due at `now`, in seconds since the Unix epoch,
+/// after `releases`, with the commit `main` standing for `main`.
+///
+/// The error says why they can't be read.
+pub(crate) fn next(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+    now: i64,
+    main: &str,
+) -> Result<Due, String> {
+    let repo = &pipeline.repo;
     let by_cadence = match releases.newest_cut() {
         None => Due {
             due: true,
@@ -60,7 +74,7 @@ pub(crate) fn due(pipeline: &Pipeline<'_>, now: i64) -> Result<Due, String> {
 
     // `cut` refuses to start a release without an unreleased fragment, so a
     // reminder then would ask for a release nobody can make.
-    if cut::unreleased_count(pipeline, &releases)? == 0 {
+    if cut::unreleased_count(pipeline, releases, main)? == 0 {
         return Ok(nothing_to_release(releases.newest_cut().is_none()));
     }
 

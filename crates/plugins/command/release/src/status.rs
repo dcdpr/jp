@@ -1,0 +1,206 @@
+//! `jp release status`: where the releases stand, and what to run next.
+//!
+//! It reads what `cut`, `pick`, and `finalize` read: the release branches,
+//! notes branches, and `v` tags here and on `origin`, and the commit checked
+//! out, which stands for `main`.
+//! It says, in this order: that the checkout lacks commits of `origin`'s
+//! `main`; a pick a conflict stopped; what only this repository has, with the
+//! push that publishes it; each release in preparation, with where its notes
+//! are and the next step; and, while no minor or major release is in
+//! preparation, whether the next one is due.
+//! It changes nothing.
+
+use semver::Version;
+
+use crate::{
+    due,
+    finalize::{self, Notes},
+    pick,
+    pipeline::{Pipeline, counted, listed, push},
+    releases::{self, Line, NOTES_BRANCH, RELEASE_BRANCH, Releases, Standing},
+    repository::{Checkout, MAIN, ORIGIN, Worktree},
+};
+
+/// Where the releases of the workspace stand at `now`, in seconds since the
+/// Unix epoch, and what to run next.
+///
+/// The error says why the repository can't be read.
+pub(crate) fn status(pipeline: &Pipeline<'_>, now: i64) -> Result<String, String> {
+    let repo = &pipeline.repo;
+    repo.refuse_shallow()?;
+    repo.fetch()?;
+    let releases = repo.releases()?;
+    let checkout = repo.checked_out()?;
+
+    let mut paragraphs = vec![];
+    if repo.lacks_main(&checkout)? {
+        paragraphs.push(checkout.behind());
+    }
+    if let Some((version, worktree)) = pick::stopped(pipeline)? {
+        paragraphs.push(format!(
+            "A pick into {version} stopped at a conflict in {worktree}; resolve it there, then \
+             run:\n\n    jp release pick --continue"
+        ));
+    }
+    paragraphs.extend(unpublished(pipeline, &checkout)?);
+
+    let main = repo.worktree("status", &checkout.head)?;
+    for line in releases.lines.values() {
+        if let Some(version) = releases.in_preparation(line) {
+            paragraphs.push(preparing(
+                pipeline, &releases, line, version, &checkout, &main,
+            )?);
+        }
+    }
+
+    let cutting = releases
+        .newest_cut()
+        .is_some_and(|newest| !releases.tagged.contains(newest));
+    if !cutting {
+        let next = due::next(pipeline, &releases, now, &checkout.head)?;
+        paragraphs.push(if next.due {
+            format!("{}\n\nCut it with:\n\n    jp release cut", next.reason)
+        } else {
+            next.reason
+        });
+    }
+
+    Ok(paragraphs.join("\n\n") + "\n")
+}
+
+/// What only this repository has of the releases, with the push that publishes
+/// it: release branches and notes branches with commits `origin` lacks, leaving
+/// out notes branches the checkout has merged, and `v` tags.
+/// Then the notes branches here and on `origin` that diverged; diverged release
+/// branches stop reading the releases before this, saying how to bring them
+/// together.
+fn unpublished(pipeline: &Pipeline<'_>, checkout: &Checkout) -> Result<Vec<String>, String> {
+    let repo = &pipeline.repo;
+    let mut branches = vec![];
+    let mut diverged = vec![];
+
+    for branch in repo.branches(RELEASE_BRANCH)? {
+        if releases::line_of(&branch.name).is_none() {
+            continue;
+        }
+        if repo.standing(&branch)?.is_some_and(Standing::unpushed) {
+            branches.push(branch.name);
+        }
+    }
+    for branch in repo.branches(NOTES_BRANCH)? {
+        let Some(version) = notes_version(&branch.name) else {
+            continue;
+        };
+        match repo.standing(&branch)? {
+            Some(Standing::Local | Standing::Ahead) => {
+                // A notes branch whose files the checkout has is merged, so
+                // pushing it again would only bring it back.
+                let Some(local) = &branch.local else {
+                    continue;
+                };
+                let directory = format!("{}/{version}/", pipeline.fragments);
+                let merged = repo
+                    .files_at(local, &directory)?
+                    .is_subset(&repo.files_at(&checkout.head, &directory)?);
+                if !merged {
+                    branches.push(branch.name);
+                }
+            }
+            Some(Standing::Diverged) => diverged.push(branch.name),
+            _ => {}
+        }
+    }
+
+    let tags = repo.tags()?;
+    let tags: Vec<String> = tags
+        .local
+        .keys()
+        .filter(|name| !tags.origin.contains_key(*name))
+        .filter(|name| !releases::versions([*name]).is_empty())
+        .cloned()
+        .collect();
+
+    let mut paragraphs = vec![];
+    if !branches.is_empty() || !tags.is_empty() {
+        let mut delete = vec![];
+        if !branches.is_empty() {
+            delete.push(format!("`git branch -D {}`", branches.join(" ")));
+        }
+        if !tags.is_empty() {
+            delete.push(format!("`git tag -d {}`", tags.join(" ")));
+        }
+        let names: Vec<String> = branches.into_iter().chain(tags).collect();
+        let them = if names.len() == 1 { "it" } else { "them" };
+
+        paragraphs.push(format!(
+            "Only this repository has {}. Publish {them} with:\n\n{}\nor, if a rehearsal left \
+             {them}, delete {them} with {}.",
+            listed(&names),
+            push(&names),
+            delete.join(" and "),
+        ));
+    }
+    if !diverged.is_empty() {
+        let them = if diverged.len() == 1 { "it" } else { "them" };
+        paragraphs.push(format!(
+            "{} here and on {ORIGIN} each have commits the other lacks; bring {them} together \
+             before the next release command.",
+            listed(&diverged)
+        ));
+    }
+
+    Ok(paragraphs)
+}
+
+/// The version of the release the notes branch `name` files the notes of.
+fn notes_version(name: &str) -> Option<Version> {
+    let version = name.strip_prefix(NOTES_BRANCH)?.strip_prefix('v')?;
+
+    Version::parse(version).ok()
+}
+
+/// Where `version`, in preparation on `line`, stands, and the next step: the
+/// notes are read from `checkout`, which `main` is a worktree of.
+fn preparing(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+    line: &Line,
+    version: &Version,
+    checkout: &Checkout,
+    main: &Worktree<'_>,
+) -> Result<String, String> {
+    let notes_branch = releases::notes_branch(version);
+    let at = checkout.describe();
+    let next = match finalize::notes(pipeline, releases, line, version, main)? {
+        Notes::Unmerged { branch, .. } => format!(
+            "Its notes are on {branch}, and {at} lacks some of them: merge {notes_branch} into \
+             {MAIN} through a pull request once they are final, then finalize it."
+        ),
+        Notes::Unfiled(pending) => format!(
+            "{at} still has {} at the top of {} whose changes {} ships, so its notes aren't filed \
+             yet: merge {notes_branch} into {MAIN} from wherever it was made.",
+            counted(pending.len(), "file", "files"),
+            pipeline.fragments,
+            line.branch,
+        ),
+        Notes::Missing => format!(
+            "{at} has no notes of it: write at least one fragment into {}/{version}/ on {MAIN}, \
+             then finalize it.",
+            pipeline.fragments
+        ),
+        Notes::Filed => format!(
+            "Its notes are on {at}. Once {}'s checks pass, finalize it with:\n\n    jp release \
+             finalize {version}",
+            line.branch
+        ),
+    };
+
+    Ok(format!(
+        "{version} is in preparation on {}. {next}",
+        line.branch
+    ))
+}
+
+#[cfg(test)]
+#[path = "status_tests.rs"]
+mod tests;

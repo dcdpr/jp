@@ -753,6 +753,7 @@ fn making_a_release_needs_a_git_repository() {
         &["finalize", "0.1.0"],
         &["pick", "--continue"],
         &["due"],
+        &["status"],
     ] {
         let messages = command(root.path(), args, &[]);
 
@@ -781,6 +782,23 @@ fn pick_takes_a_version_and_commits_or_continue() {
 
         assert_eq!(exit(&messages).code, 1, "{args:?}");
     }
+}
+
+#[test]
+fn status_prints_where_the_releases_stand() {
+    let fixture = Fixture::new();
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
+
+    let messages = command(fixture.root(), &["status"], &[]);
+
+    assert_eq!(
+        printed(&messages),
+        "No release has been cut yet, so the first one is due.\n\nCut it with:\n\n    jp release \
+         cut\n"
+    );
+    assert_eq!(exit(&messages).code, 0);
 }
 
 #[test]

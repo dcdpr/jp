@@ -84,8 +84,21 @@ impl Checkout {
         }
     }
 
+    /// That the checkout lacks commits of `origin`'s `main`, and how to bring
+    /// them in.
+    pub(crate) fn behind(&self) -> String {
+        format!(
+            "{} lacks commits {ORIGIN}'s {MAIN} has, at {}; bring them in first, such as with \
+             `git pull`.",
+            self.describe(),
+            short(&self.main)
+        )
+    }
+
     /// That the checkout is ahead of `origin`'s `main`, as the start of a
     /// sentence, when it is.
+    ///
+    /// Holds only for a checkout with every commit of `origin`'s `main`.
     pub(crate) fn ahead(&self) -> Option<String> {
         (!self.at_main()).then(|| {
             format!(
@@ -199,6 +212,17 @@ impl<'a> Repository<'a> {
     /// Refuses a checkout without the commits of `origin`'s `main`, as last
     /// fetched: what is made from it would leave out work `main` has.
     pub(crate) fn checkout(&self) -> Result<Checkout, String> {
+        let checkout = self.checked_out()?;
+        if self.lacks_main(&checkout)? {
+            return Err(checkout.behind());
+        }
+
+        Ok(checkout)
+    }
+
+    /// The checkout's commit, whether or not it has the commits of `origin`'s
+    /// `main`.
+    pub(crate) fn checked_out(&self) -> Result<Checkout, String> {
         let head = self.commit("HEAD").map_err(|_| {
             "The checkout has no commit yet, so there is nothing to release.".to_owned()
         })?;
@@ -208,17 +232,12 @@ impl<'a> Repository<'a> {
         let branch = branch.success.then(|| branch.stdout.trim().to_owned());
         let main = self.main()?;
 
-        let checkout = Checkout { head, branch, main };
-        if !self.is_ancestor(&checkout.main, &checkout.head)? {
-            return Err(format!(
-                "{} lacks commits {ORIGIN}'s {MAIN} has, at {}; bring them in first, such as with \
-                 `git pull`.",
-                checkout.describe(),
-                short(&checkout.main)
-            ));
-        }
+        Ok(Checkout { head, branch, main })
+    }
 
-        Ok(checkout)
+    /// Whether `checkout` lacks commits of `origin`'s `main`, as last fetched.
+    pub(crate) fn lacks_main(&self, checkout: &Checkout) -> Result<bool, String> {
+        Ok(!self.is_ancestor(&checkout.main, &checkout.head)?)
     }
 
     /// Whether the commit `ancestor` is in the history of `descendant`, or is
