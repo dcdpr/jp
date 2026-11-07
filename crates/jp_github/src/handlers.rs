@@ -54,24 +54,6 @@ impl IssuesHandler {
         }
     }
 
-    /// Add `labels` to the issue or pull request `number`, keeping the ones it
-    /// has.
-    ///
-    /// Returns every label it carries afterwards.
-    pub async fn add_labels(&self, number: u64, labels: &[String]) -> Result<Vec<models::Label>> {
-        #[derive(Serialize)]
-        struct AddLabelsBody<'a> {
-            labels: &'a [String],
-        }
-
-        self.client
-            .post_json(
-                &format!("/repos/{}/{}/issues/{number}/labels", self.owner, self.repo),
-                &AddLabelsBody { labels },
-            )
-            .await
-    }
-
     #[must_use]
     pub fn list_labels_for_repo(&self) -> RepoLabelsListBuilder {
         RepoLabelsListBuilder {
@@ -286,26 +268,6 @@ pub struct PullsHandler {
 }
 
 impl PullsHandler {
-    /// Begin building a pull request that merges the branch `head` into the
-    /// branch `base`, titled `title`.
-    #[must_use]
-    pub fn create(
-        &self,
-        title: impl Into<String>,
-        head: impl Into<String>,
-        base: impl Into<String>,
-    ) -> PullCreateBuilder {
-        PullCreateBuilder {
-            client: self.client.clone(),
-            owner: self.owner.clone(),
-            repo: self.repo.clone(),
-            title: title.into(),
-            head: head.into(),
-            base: base.into(),
-            body: None,
-        }
-    }
-
     pub async fn get(&self, number: u64) -> Result<models::pulls::PullRequest> {
         self.client
             .get_json(
@@ -891,50 +853,6 @@ impl PullReviewCreateBuilder {
                     "/repos/{}/{}/pulls/{}/reviews",
                     self.owner, self.repo, self.number
                 ),
-                &payload,
-            )
-            .await
-    }
-}
-
-pub struct PullCreateBuilder {
-    pub(crate) client: Octocrab,
-    pub(crate) owner: String,
-    pub(crate) repo: String,
-    pub(crate) title: String,
-    pub(crate) head: String,
-    pub(crate) base: String,
-    pub(crate) body: Option<String>,
-}
-
-impl PullCreateBuilder {
-    /// The pull request's description, as Markdown.
-    #[must_use]
-    pub fn body(mut self, body: impl Into<String>) -> Self {
-        self.body = Some(body.into());
-        self
-    }
-
-    pub async fn send(self) -> Result<models::pulls::PullRequest> {
-        #[derive(Serialize)]
-        struct CreatePullBody {
-            title: String,
-            head: String,
-            base: String,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            body: Option<String>,
-        }
-
-        let payload = CreatePullBody {
-            title: self.title,
-            head: self.head,
-            base: self.base,
-            body: self.body,
-        };
-
-        self.client
-            .post_json(
-                &format!("/repos/{}/{}/pulls", self.owner, self.repo),
                 &payload,
             )
             .await
