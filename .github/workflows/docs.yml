@@ -37,7 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
         with:
-          fetch-depth: 0 # Not needed if Vitepress' lastUpdated is not enabled
+          # Full history: the release pages credit each fragment to the change
+          # requests that wrote it, which they read from git's history.
+          fetch-depth: 0
       # `build` is a required status check, so the job always runs and decides
       # for itself whether there is work to do. A `paths:` filter on the trigger
       # would leave the check unreported, and a pull request without site
@@ -123,11 +125,6 @@ jobs:
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: corepack enable
-      # The release pages are rendered by `changelog`, built from this
-      # checkout rather than taken from a cache another commit filled. The
-      # checkout's full history is what it credits the fragments from.
-      - if: ${{ steps.task.outputs.run == 'true' }}
-        run: JP_INSTALL=1 just _install-changelog
       # Fetch the plugin registry before the build so VitePress copies it from
       # the public directory into the deployed site (served at /plugins.json).
       - if: ${{ steps.task.outputs.run == 'true' && github.ref == 'refs/heads/main' }}

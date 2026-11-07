@@ -2650,15 +2650,11 @@ _install-release *args:
 # Build and install the `changelog` binary the site's release pages are
 # rendered with, from this checkout: no release publishes it.
 #
-# A rebuild is skipped when one is installed; CI sets `JP_INSTALL=1` so the
-# docs build renders with the `changelog` of the commit it builds.
+# Always rebuilt, unlike the other tools: the site renders this checkout's
+# fragments, which a `changelog` built from another revision may not read. A
+# `--path` install builds in the workspace's `target` directory, so a rebuild
+# that changes nothing takes seconds.
 _install-changelog *args:
-    #!/usr/bin/env sh
-    set -eu
-    if [ -z "${JP_INSTALL:-}" ] && command -v changelog >/dev/null 2>&1; then
-        echo "Skipping changelog rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
-        exit 0
-    fi
     cargo install {{quiet_flag}} --locked --path crates/internal/changelog --debug {{args}}
 
 # Install the four plugins the site needs, from this checkout.
