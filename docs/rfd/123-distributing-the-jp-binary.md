@@ -1,6 +1,6 @@
 # RFD 123: Distributing the jp Binary
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-14
