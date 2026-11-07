@@ -19,9 +19,9 @@ A tool's `groups` array order determines which group's defaults take precedence.
 ## Motivation
 
 [RFD 055] introduces tool groups for CLI shorthand and exhaustive validation,
-but groups carry no configuration — they are purely membership containers.
-Configuring shared behavior across a set of tools still requires per-tool
-repetition:
+but groups are membership containers with no configuration of their own.
+Configuring shared behavior across a set of tools still requires repeating the
+settings on every tool:
 
 ```toml
 [conversation.tools.git_commit]
@@ -37,12 +37,11 @@ run = "unattended"
 style.inline_results = "off"
 ```
 
-A `--cfg` file can bundle these together, but the duplication remains — each
-tool repeats the same fields.
-If the group's intended behavior changes, every tool must be updated.
+A `--cfg` file can bundle these definitions together, but each tool still
+repeats the same fields, and changing the shared behavior requires updating
+every tool.
 
-Group defaults solve this: declare the shared configuration once on the group,
-and member tools inherit it automatically.
+With group defaults, shared settings are declared once on the group:
 
 ```toml
 [conversation.tools.groups.git]
@@ -51,8 +50,8 @@ defaults.style.inline_results = "off"
 ```
 
 Tools in the `git` group inherit `run = "unattended"` and `style.inline_results
-= "off"` without repeating them.
-A tool can still override any field in its own config.
+= "off"`, and any member tool can still override individual fields in its own
+config.
 
 ## Design
 
@@ -89,8 +88,8 @@ The `defaults` section accepts the behavioral subset of tool config fields:
 | `style`     | `DisplayStyleConfig`               | Terminal display settings   |
 | `questions` | `IndexMap<String, QuestionConfig>` | Question routing defaults   |
 
-Fields excluded (per-tool identity, not behavioral): `source`, `command`,
-`summary`, `description`, `examples`, `parameters`, `options`.
+Per-tool identity fields (`source`, `command`, `summary`, `description`,
+`examples`, `parameters`, and `options`) are excluded.
 
 The struct reuses the same types as `ToolsDefaultsConfig` (with `questions`
 added), so existing serialization, assignment, and delta logic applies.
@@ -104,13 +103,12 @@ chain:
 * defaults > group[0].defaults > group[1].defaults > ... > tool config > CLI flags
 ```
 
-Where `group[0]`, `group[1]`, etc. are the **included** groups from the tool's
+`group[0]`, `group[1]`, and so on are the **included** groups from the tool's
 effective `groups` array, in declaration order.
 Excluded groups (`!write`) do not contribute defaults.
 
-This follows the same last-write-wins principle used throughout JP's config
-system: later layers override earlier layers, and tool config overrides all
-group defaults.
+Following the config system's last-write-wins rule, later layers override
+earlier layers, and tool config overrides all group defaults.
 
 **Example:**
 
@@ -139,7 +137,7 @@ groups = ["!write", "read"]
 
 ### Resolution in `ToolConfigWithDefaults`
 
-`ToolConfigWithDefaults` currently resolves fields via simple fallback:
+`ToolConfigWithDefaults` resolves fields by lazy fallback:
 
 ```rust
 pub fn run(&self) -> RunMode {
@@ -147,8 +145,8 @@ pub fn run(&self) -> RunMode {
 }
 ```
 
-Group defaults extend this pattern.
-The accessor walks `tool > groups > defaults`, returning the first value found:
+Group defaults add a layer between `tool` and `defaults`.
+Each accessor walks `tool > groups > defaults` and returns the first value set:
 
 ```rust
 pub fn run(&self) -> RunMode {
@@ -159,9 +157,7 @@ pub fn run(&self) -> RunMode {
 ```
 
 `ToolConfigWithDefaults` gains a `groups` field storing the included groups'
-defaults in declaration order.
-The constructor stores inputs without mutating them — `tool` always represents
-what the tool actually declared:
+defaults in declaration order:
 
 ```rust
 pub struct ToolConfigWithDefaults {
@@ -176,32 +172,28 @@ pub struct ToolConfigWithDefaults {
 }
 ```
 
-This keeps the lazy fallback pattern that already exists for `* defaults` and
-extends it with one additional layer.
-The `tool` field remains a clean representation of the tool's own config, which
-makes provenance tracing straightforward (compare `tool.run` vs `groups[n].run`
-vs `defaults.run`).
+The constructor stores its inputs without mutating `tool`, so `tool` still
+reflects only what the tool itself declared.
+This keeps provenance tracing straightforward: compare `tool.run`,
+`groups[n].run`, and `defaults.run`.
 
 ### Interaction with `*` Defaults
 
-Group defaults and `*` defaults are complementary, not competing:
+`*` defaults, group defaults, and tool config form three tiers:
 
-- `*` provides the universal baseline for all tools.
-- Group defaults provide a per-group baseline for member tools.
-- Tool config provides per-tool specifics.
+- `*` provides the baseline for all tools.
+- Group defaults provide a baseline for member tools.
+- Tool config provides per-tool settings.
 
-A tool in the `git` group resolves `run` as: `tool.run > git.defaults.run >
-*.run`.
-If the tool doesn't set `run` and neither does the `git` group, the `*` default
-applies.
+A tool in the `git` group resolves `run` as `tool.run > git.defaults.run >
+*.run`, falling back to `*.run` when neither the tool nor `git` sets `run`.
 
 ## Drawbacks
 
-**Deeper merge chain.** The chain grows from `* > tool` to `* > groups > tool`.
-For a tool in multiple groups, each group is a layer.
-In practice most tools will be in one or two groups, but debugging "where did
-this value come from?" becomes harder until `jp config show` gains merge-chain
-tracing.
+**Deeper merge chain.** The chain grows from `* > tool` to `* > groups > tool`,
+with each included group adding a layer.
+Most tools belong to one or two groups, but tracing where a resolved value came
+from is harder until `jp config show` supports merge-chain tracing.
 
 ## Alternatives
 
@@ -210,27 +202,25 @@ tracing.
 Instead of lazy resolution in accessors, the constructor could clone the tool
 config and fold group defaults into it, so accessors stay as
 `self.tool.run.unwrap_or(self.defaults.run)`.
-This was rejected because it mutates the `tool` field — making it impossible to
-distinguish "the tool set this" from "a group set this" without storing a
-separate unmerged copy.
+This was rejected because mutating `tool` erases whether a value came from the
+tool or from a group, unless the struct also stores an unmerged copy.
 
 ### Reuse `ToolsDefaultsConfig` directly
 
-The group defaults struct could be exactly `ToolsDefaultsConfig`.
-This was rejected because `ToolsDefaultsConfig` uses required fields (e.g.,
-`#[setting(required)] pub run: RunMode`) that make sense for global defaults
-(every config must provide a run mode) but not for group defaults (a group may
-only want to set `style`, leaving `run` unspecified).
-Group defaults need all fields optional.
+Using `ToolsDefaultsConfig` as the group defaults struct was rejected because
+its fields are required (for example, `#[setting(required)] pub run: RunMode`).
+Global defaults must provide a `run` mode, whereas a group may configure only
+`style` and leave `run` unset, so all fields on group defaults must be optional.
 
 ## Non-Goals
 
-- **Group overrides.** This RFD covers `defaults` only — configuration that
-  tool-level config can override.
-  A future RFD may add an `overrides` section where group config takes priority
-  over tool-level config, enabling persona-level policy enforcement.
-- **`jp config show` tracing.** Displaying which layer set which value is useful
-  for debugging group defaults but is orthogonal to this RFD.
+- **Group overrides.** This RFD covers `defaults` only, which tool-level config
+  can override.
+  A separate `overrides` section where group config takes precedence over
+  tool-level config (for persona-level policy enforcement) is left to a future
+  RFD.
+- **`jp config show` tracing.** Showing which layer set each resolved value aids
+  debugging but is out of scope here.
 
 ## Implementation Plan
 
@@ -256,9 +246,9 @@ Depends on [RFD 055] (tool groups with membership and exhaustive validation).
 
 ## References
 
-- [RFD 055] — tool groups (membership, exhaustive validation, CLI integration)
-- [Configuration architecture] — progressive complexity design principles
-- `crates/jp_config/src/conversation/tool.rs` — `ToolConfig`,
+- [RFD 055]: tool groups (membership, exhaustive validation, CLI integration)
+- [Configuration architecture]: progressive complexity design principles
+- `crates/jp_config/src/conversation/tool.rs`: `ToolConfig`,
   `ToolConfigWithDefaults`, `ToolsDefaultsConfig`
 
 [Configuration architecture]: ../configuration.md
