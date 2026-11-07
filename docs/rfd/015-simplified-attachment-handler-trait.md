@@ -22,32 +22,29 @@ Handlers no longer store or serialize their own URL collections.
 The current attachment system has two problems:
 
 1. **Handlers own state they don't need.** Each handler stores a collection of
-   URLs, implements `add`/`remove`/`list` to manage that collection, and
-   serializes it via `typetag`.
-   But every handler's state is fully derivable from its URL list.
-   The host already tracks attachment URLs in the conversation config —
-   duplicating this in the handler adds complexity for no benefit.
+   URLs, implements `add`, `remove`, and `list` to manage it, and serializes it
+   via `typetag`.
+   Because every handler's state is derivable from its URL list, and the host
+   already tracks attachment URLs in the conversation config, duplicating that
+   list in the handler adds complexity for no benefit.
 
    Handlers were originally stateful to support eager loading: the `file`
-   handler read and cached file contents when attachments were added, rather
-   than at query time.
-   This kept file content in the system prompt stable even if files changed on
-   disk, preventing LLM context cache invalidation.
-   However, this meant the LLM operated on stale content and was more prone to
-   making errors when editing files.
-   The caching benefit doesn't justify the correctness cost.
+   handler read and cached file contents when attachments were added rather than
+   at query time.
+   Keeping file content stable in the system prompt prevented LLM context cache
+   invalidation when files changed on disk, but left the LLM operating on stale
+   content and prone to editing errors.
+   The caching benefit does not justify the correctness cost.
+   Eager loading may return as an opt-in feature, but it does not belong in the
+   core handler model.
 
-   Eager loading may return as an opt-in feature, but it's not core to the
-   handler model.
-   Handlers can be stateless.
-
-2. **Handlers are hardcoded into the binary.** Adding a new handler means
+2. **Handlers are hardcoded into the binary.** Adding a new handler requires
    writing a Rust crate, wiring it into the workspace, and recompiling.
    Users cannot add custom attachment types without forking the project.
 
-This RFD addresses the first problem by simplifying the trait to stateless
-`validate` + `resolve`.
-The second problem (extensibility via plugins) is addressed in future work.
+This RFD addresses the first problem by reducing `Handler` to stateless
+`validate` and `resolve` methods.
+Plugin extensibility is left to future work.
 
 ## Design
 
@@ -65,12 +62,9 @@ trait Handler {
 }
 ```
 
-Handlers are stateful objects.
-`add` parses a URL into an internal representation and stores it.
-`list` converts the internal representation back to URLs.
-`get` resolves all stored references into attachments.
-Every handler's internal state is fully reconstructible from its URL list, none
-store anything beyond parsed URLs.
+`add` parses and stores a URL, `list` converts the stored state back into URLs,
+and `get` resolves the stored references into attachments.
+No handler stores anything beyond parsed URLs.
 
 The new trait moves URL tracking to the host and makes handlers stateless:
 
@@ -98,32 +92,30 @@ trait Handler {
 }
 ```
 
-**`schemes`** returns multiple schemes, replacing the single `scheme` method.
-This eliminates the `http`/`https` handler duplication - a single handler
-returns `["http", "https"]`.
+**`schemes`** replaces `scheme` and returns all schemes the handler owns, so a
+single handler can serve `["http", "https"]` without duplication.
 
 **`validate`** replaces `add`.
-The host calls it when a user adds an attachment.
-The handler checks that the URL is parseable and (optionally) that the resource
-exists.
-It receives `cwd` for handlers that need to check file existence or resolve
-relative paths.
-The host stores the URL on success; the handler stores nothing.
+When a user adds an attachment, the host calls `validate` to check that the URL
+is parseable and, optionally, that the target resource exists (using `cwd` to
+resolve relative paths).
+On success, the host stores the URL; the handler stores nothing.
 
-**`resolve`** replaces `get`.
-It receives all URLs for this handler at once, which is important for handlers
-like `file` where includes and excludes interact.
-The handler fetches content and returns `Vec<Attachment>`.
+**`resolve`** replaces `get`, fetching content for all of the handler's URLs at
+once and returning `Vec<Attachment>`.
+Batching all URLs in a single call lets handlers like `file` evaluate
+interacting include and exclude rules together.
 
-The host owns `add`/`remove`/`list` - these are now just URL collection
-operations on a `Vec<Url>`, with no handler involvement beyond validation.
+The host handles `add`, `remove`, and `list` directly as operations on a
+`Vec<Url>`, calling the handler only to validate new URLs.
 
 ### Handler registration
 
-With handlers now stateless and `typetag` removed, we no longer need
-serialization or linker-based discovery.
-Built-in handlers move into `jp_attachment::builtin` and are registered via an
-enum:
+Stateless handlers do not need `typetag` serialization or linker-based
+discovery.
+All built-in handlers move from separate crates (such as
+`jp_attachment_cmd_output`) into `jp_attachment::builtin` and dispatch through
+the `BuiltinHandler` enum:
 
 ```rust
 // jp_attachment/src/builtin/mod.rs
@@ -183,9 +175,7 @@ pub fn all_handlers() -> Vec<BuiltinHandler> {
 }
 ```
 
-All built-in handlers are consolidated into `jp_attachment::builtin`.
-Individual handler crates (e.g., `jp_attachment_cmd_output`) are removed.
-Handlers can be enabled or disabled via cargo feature flags:
+Cargo feature flags control which built-in handlers are compiled:
 
 ```toml
 [features]
@@ -196,8 +186,7 @@ attachment-cmd = []
 attachment-mcp = []
 ```
 
-The `all_handlers()` function conditionally includes handlers based on enabled
-features:
+`all_handlers()` registers only the enabled handlers:
 
 ```rust
 pub fn all_handlers() -> Vec<BuiltinHandler> {
@@ -214,49 +203,46 @@ pub fn all_handlers() -> Vec<BuiltinHandler> {
 }
 ```
 
-Third-party handlers are out of scope for this RFD.
-A future change can introduce extensibility for custom attachment types.
+Third-party handler extensibility is out of scope for this RFD.
 
 ### What stays the same
 
-- **URL-based dispatch.** Users still type `jp -a "scheme:..."`.
-  The scheme determines which handler runs.
+- **URL-based dispatch.** Users still pass `jp -a "scheme:..."`, and the scheme
+  selects the handler.
 - **The `Attachment` struct.** Handlers still produce `Vec<Attachment>` with
   `source`, `description`, and `content` fields.
 - **Both URL forms.** Handlers receive `Url` values that can be hierarchical
-  (`scheme://host/path?query`) or opaque (`scheme:content`).
-  See [RFD 014].
-- **Config-file attachment syntax.** Both URL strings and the `type`/`path`/
-  `params` object form continue to work.
+  (`scheme://host/path?query`) or opaque (`scheme:content`), as defined in [RFD
+  014].
+- **Config-file attachment syntax.** Both URL strings and the
+  `type`/`path`/`params` object form continue to work.
 
 ## Drawbacks
 
-- **Breaking change.** All existing handlers must be rewritten to the new trait.
-  This is acceptable since handlers are currently internal-only.
+- **Breaking change.** Every existing handler must be rewritten for the new
+  trait, which is acceptable because handlers are currently internal-only.
 
 ## Alternatives
 
 ### Keep handlers stateful (current design)
 
-The current `add`/`remove`/`list`/`get` trait with handler-owned state.
-This works for native Rust handlers but creates problems for Wasm plugins:
-opaque state blobs that need serialization, versioning, and persistence.
-Since every handler's state is derivable from its URL list, the complexity is
+Retaining the `add`/`remove`/`list`/`get` trait with handler-owned state works
+for native Rust handlers, but complicates Wasm plugins by requiring opaque state
+blobs to be serialized, versioned, and persisted.
+Because every handler's state is derivable from its URL list, that complexity is
 unnecessary.
 
-### Use a different state management approach
+### Shared state registry
 
-Instead of moving URL tracking to the host, use a shared state management
-pattern (e.g., a registry that handlers query).
-This still requires handlers to implement state management methods, which adds
-complexity without clear benefit given that all handler state is derivable from
-the URL list.
+Instead of moving URL tracking to the host, handlers could query a shared state
+registry.
+Handlers would still need to implement state management methods, adding
+complexity when all handler state is already derivable from the URL list.
 
 ## Non-Goals
 
-- **Third-party extensibility.** This RFD focuses on simplifying the handler
-  interface.
-  Plugin support for third-party handlers is future work.
+- **Third-party extensibility.** This RFD only simplifies the handler interface;
+  plugin support for third-party handlers is left to future work.
 
   > [!TIP]
   > [RFD 016] introduces the plugin system.
@@ -265,11 +251,11 @@ the URL list.
 
 ## Risks and Open Questions
 
-1. **Validate semantics.** Should `validate` be purely syntactic (can I parse
-   this URL?) or also check existence (does this file/command/endpoint exist)?
-   Current handlers are inconsistent — `file` checks existence, `cmd` doesn't.
-   The RFD proposes passing `cwd` to support existence checks, but doesn't
-   mandate them.
+1. **`validate` semantics.** Should `validate` check only URL syntax, or also
+   verify that the target file, command, or endpoint exists?
+   Current handlers are inconsistent: `file` checks existence, while `cmd` does
+   not.
+   Passing `cwd` to `validate` supports existence checks without mandating them.
 
 ## Implementation Plan
 
@@ -280,30 +266,29 @@ the URL list.
 - Merge `http` and `https` into a single handler returning `["http", "https"]`.
 - Remove `typetag::serde` from the `Handler` trait (the host serializes URLs
   directly; handlers have no state to serialize).
-- Create `jp_attachment::builtin` module with `BuiltinHandler` enum.
+- Create the `jp_attachment::builtin` module with the `BuiltinHandler` enum.
 - Consolidate handler crates into `jp_attachment::builtin::*` submodules.
 - Remove individual handler crates (`jp_attachment_cmd_output`,
   `jp_attachment_file_content`, `jp_attachment_http_content`,
   `jp_attachment_mcp_resource`).
-- Add cargo feature flags for each built-in handler.
+- Add Cargo feature flags for each built-in handler.
 - Replace `linkme` registration with `builtin::all_handlers()`.
 - Remove `use jp_attachment_* as _` imports from `jp_cli`.
 - Update [RFD 014] to reflect the new trait and registration approach.
 - Update tests.
-- **Dependency:** None.
-  Can merge independently.
+- **Dependency:** None; can merge independently.
 
 ## Future Work
 
-- **Plugin support.** Allow third-party attachment handlers via plugins.
-  This requires defining a plugin infrastructure with sandboxing,
-  capability-based security, and host-mediated I/O.
-- **Remove niche handlers.** The `bear` handler could be moved to an external
-  plugin once plugin support is available.
+- **Plugin support.** Support third-party attachment handlers via a plugin
+  system with sandboxing, capability-based security, and host-mediated I/O.
+- **Extract niche handlers.** Move the `bear` handler to an external plugin once
+  plugin support is available.
 
 ## References
 
-- [RFD 014: Attachment Handler Guide][RFD 014] — how handlers work today.
+- [RFD 014: Attachment Handler Guide][RFD 014]: how handlers work prior to this
+  RFD.
 
 [RFD 014]: 014-attachment-handler-guide.md
 [RFD 016]: 016-wasm-plugin-architecture.md
