@@ -43,9 +43,9 @@ models.
   (and fails if the chain is exhausted), because the chat request would fail
   with the same credential error.
   All other lookup failures fall back to `MODEL_OVERRIDES`.
-  With reasoning support unknown and reasoning unconfigured, an API request
-  asks for summarized adaptive thinking instead of taking Anthropic's default,
-  which bills reasoning it does not return.
+  With reasoning support unknown and reasoning unconfigured, an API request asks
+  for summarized adaptive thinking instead of taking Anthropic's default, which
+  bills reasoning it does not return.
   The Claude Code route still sends nothing and lets Claude Code choose.
 - OpenAI: skips the network lookup entirely.
   `GET /v1/models/{id}` returns only the model ID, so `CAPABILITIES` was already
