@@ -19,10 +19,10 @@ use futures::{
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, PartialAppConfig, PartialConfig, ToPartial as _,
+    AppConfig, PartialConfig, ToPartial as _,
     assistant::{request::MaxResponseBytes, tool_choice::ToolChoice},
     conversation::tool::QuestionTarget,
-    model::id::{PartialModelIdOrAliasConfig, ProviderId},
+    model::id::ProviderId,
     style::streaming::StreamingConfig,
 };
 use jp_conversation::{
@@ -684,12 +684,13 @@ async fn drive_turn(
                                         .await);
                                     }
 
-                                    // `UnknownModel` is non-retryable; in
-                                    // interactive mode, let the user pick an
-                                    // available model from the provider and
-                                    // restart the request.
+                                    // `UnknownModel` is non-retryable. In
+                                    // interactive mode, a turn the model has
+                                    // not answered yet restarts on a model the
+                                    // user picks from the provider's list.
                                     if interactive
                                         && e.kind == StreamErrorKind::UnknownModel
+                                        && turn_coordinator.can_restart_turn(&conv.events())
                                         && let Some(picked) = pick_served_model(
                                             provider.as_ref(),
                                             &model,
@@ -701,18 +702,12 @@ async fn drive_turn(
                                         info!(
                                             from = %model.id,
                                             to = %picked.id,
-                                            "Switching to a model the provider serves."
+                                            "Restarting the turn on a model the provider serves."
                                         );
 
-                                        commit_partial_response(
-                                            &mut turn_coordinator,
-                                            &conv,
-                                            &printer,
-                                            ResponseBoundary::Continuation,
-                                        );
-                                        turn_coordinator.prepare_retry_continuation();
-                                        turn_coordinator.set_model_id(picked.id.to_string());
-                                        record_model(&mut conv, &picked);
+                                        conv.update_events(|stream| {
+                                            turn_coordinator.restart_turn_on(stream, &picked.id);
+                                        });
 
                                         model = picked;
                                         inquiry_backend = build_inquiry_backend(
@@ -1527,15 +1522,6 @@ async fn pick_served_model(
         .ok()?;
 
     candidates.into_iter().nth(picked)
-}
-
-/// Append a config delta setting the conversation's `assistant.model.id` to
-/// `model`.
-fn record_model(conv: &mut ConversationMut, model: &ModelDetails) {
-    let mut delta = PartialAppConfig::empty();
-    delta.assistant.model.id = PartialModelIdOrAliasConfig::Id(model.id.to_partial());
-
-    conv.update_events(|stream| stream.add_config_delta(delta));
 }
 
 /// Convert an unknown-model [`LlmError`] into [`Error::UnknownModel`] with the
