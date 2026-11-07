@@ -11,55 +11,51 @@
 
 ## Summary
 
-`jp_cli::Ctx` holds invocation state (terminal, printer, signal router, runtime)
-and workspace state (workspace, config, storage backend, MCP client) in one
-struct that every command borrows mutably.
-This RFD splits it into `CliCtx` and `WorkspaceCtx`, routes every turn's
-configuration through the one config pipeline for the checkout it runs in, and
-produces the inventory of which capabilities belong to the application rather
-than to a frontend.
+`jp_cli::Ctx` combines invocation state (terminal, printer, signal router,
+runtime) and workspace state (workspace, config, storage backend, MCP client) in
+a single struct that every command borrows mutably.
+This RFD splits `Ctx` into `CliCtx` and `WorkspaceCtx`, resolves each turn's
+configuration through `ConfigPipeline` for its target checkout, and defines
+which capabilities belong to the application layer versus a frontend.
 
 ## Motivation
 
-`Ctx` was shaped when one `jp` run meant one workspace and one terminal.
-Neither still holds.
+`Ctx` assumes a single `jp` process serves one workspace and one terminal.
+Neither assumption still holds.
 
-The plugin host already broke "one terminal": a delegated turn renders to
-`Printer::sink()` and pins its interrupt actions to `Stop`, because nobody is
-watching the host's terminal.
-It is about to break "one workspace": a plugin serving a workspace switcher
-needs one bundle of workspace state per checkout it addresses, and exactly one
-printer, signal router, and runtime for the process.
-The unit is the checkout, not the workspace ID: two git worktrees of one
-repository share a workspace ID ([RFD 087]) but hold different files, config,
-and projected conversations, and a turn has to run in the right one.
-Holding several `Ctx` values would duplicate the second set; threading extra
-parameters through every handler would leave the two scopes entangled and the
-duplication implicit.
+The plugin host already breaks the single-terminal assumption: a delegated turn
+renders to `Printer::sink()` and pins its interrupt actions to `Stop` because
+nothing watches the host's terminal.
+A workspace-switching plugin also breaks the single-workspace assumption: the
+host needs separate workspace state for each checkout it addresses, while
+sharing a single printer, signal router, and runtime across the process.
+Workspace state is scoped to a checkout, not a workspace ID: two git worktrees
+of the same repository share a workspace ID ([RFD 087]) but have different
+files, configuration, and projected conversations, and each turn must run in its
+target checkout.
+Holding multiple `Ctx` instances would duplicate the process-wide printer,
+signal router, and runtime, while threading workspace parameters alongside `Ctx`
+through every handler would leave invocation and workspace state entangled.
 
-The second consumer is the application-layer extraction.
-Moving the non-frontend half of `jp_cli` into its own crate requires knowing
-which side of the boundary each concern sits on.
-Today that answer is not written down anywhere, and some of it is already
-diverging: query-draft handling exists twice.
-`jp_cli::cmd::query` resolves the draft path, fingerprints it, and removes it
-conditionally; `jp_cli::cmd::plugin::dispatch` resolves the same path again with
-its own `create` branch and applies a different conflict policy.
-Neither lives anywhere a non-terminal frontend can reach.
-
-If nothing changes, the workspace switcher is implementable only by threading
-parameters around a god object, and the crate extraction begins by guessing at
-its own surface.
+Separating the two scopes also prepares `jp_cli` for extracting an
+application-layer crate.
+Extracting the non-frontend logic requires a clear boundary between application
+and frontend responsibilities.
+Without that boundary, logic is already diverging across `jp_cli`:
+`jp_cli::cmd::query` resolves the query-draft path, fingerprints the file, and
+removes it conditionally, while `jp_cli::cmd::plugin::dispatch` resolves the
+same path again with its own `create` branch and a different conflict policy.
+Neither implementation is reachable outside `jp_cli` by a non-terminal frontend.
 
 ## Design
 
-This RFD is written against the tree with the in-flight plugin-host work landed:
-delegated turns, query drafts over the protocol, and `list_configs`.
+This design assumes the in-flight plugin-host changes have landed: delegated
+turns, query drafts over the plugin protocol, and `list_configs`.
 
 ### Two scopes
 
-`Ctx` becomes two types.
-Every field moves to one side, except where noted below.
+`Ctx` splits into `CliCtx` (invocation scope) and `WorkspaceCtx` (workspace
+scope):
 
 | Field             | Scope      | Note                                                                          |
 | ----------------- | ---------- | ----------------------------------------------------------------------------- |
@@ -73,130 +69,129 @@ Every field moves to one side, except where noted below.
 | `workspace`       | workspace  |                                                                               |
 | `fs_backend`      | workspace  |                                                                               |
 
-Commands take both.
+Commands that require a workspace take both contexts.
 A multi-workspace plugin host holds one `CliCtx` and a map of `WorkspaceCtx`
-keyed by checkout — a workspace ID and a root — because `exec` holds exactly
-one selected root.
+instances keyed by checkout (workspace ID and checkout root), because `exec`
+holds a single selected root.
 
-`config_reset` and `task_handler` do not move cleanly to one side; see [Fields
-that straddle](#fields-that-straddle).
+A caller that requires no workspace reads what it needs from `CliCtx` and
+constructs no `WorkspaceCtx`.
+This avoids a bootstrap stage that returns a workspace wrapper around an empty
+workspace, though `WorkspaceRequirement` ([RFD 087]) still conflates two
+questions because `None` means "no workspace *and* no config" by returning
+before the config pipeline runs.
+Separating those two cases belongs with the first caller that needs
+configuration without a workspace.
 
-### Configuration is resolved per operation
+`config_reset` and `task_handler` span both scopes; see [Fields that span both
+scopes](#fields-that-span-both-scopes).
 
-`config` stays on `CliCtx` as the whole `AppConfig` the bootstrap resolves, as
-`Ctx` holds it today: loaded through [RFD 087]'s execution context — from the
-launch directory when it is inside the selected checkout, and from the selected
-checkout's root otherwise — with the environment and `--cfg` applied, and from
-the user-global layers alone when no workspace is selected.
-`jp -w B` run from inside workspace A therefore takes B's plugin admission and
-`options`, as it does now.
-It governs the process — plugin admission and `options`, the Ctrl-C escalation
-cooldown, output format, editor settings — and for a CLI command it is also the
-configuration the command runs under, conversation layer included.
-It is resolved once at startup and does not change when a host opens another
-checkout.
-Signal handling follows from this: it is scoped to the launched `jp` process and
-configured by the workspace that launched it, so a plugin can send and receive
-signals but cannot configure them.
+### Per-operation configuration resolution
 
-A turn a host runs on a plugin's behalf does not run under it.
-It resolves its own configuration through `ConfigPipeline` for the checkout it
-runs in: that checkout's files and environment as the base, loaded from its
-`exec.config_cwd()` (the launch directory for the checkout `jp` was launched in,
-the checkout root for any other), the conversation's stored configuration as the
-per-conversation layer, then `build`.
-This is the path `jp query` takes at startup.
-A conversation pins its configuration, so an existing conversation resolves as
-it does today; the base only supplies fields the conversation never set.
-The `--cfg` arguments `jp` was launched with govern the invocation, not the
-turns a host delegates, which already do not read them.
+`config` stays on `CliCtx` as the full `AppConfig` resolved during bootstrap.
+When a workspace is selected, bootstrap loads configuration through the
+execution context ([RFD 087]) from the launch directory if it lies inside the
+selected checkout, or from the selected checkout's root otherwise, and then
+applies environment variables and `--cfg` overrides.
+Running `jp -w B` from inside workspace A therefore uses B's plugin admission
+and `options`.
+When no workspace is selected, bootstrap loads only the user-global layers.
 
-`WorkspaceCtx` therefore holds the pipeline's inputs — `workspace`,
-`fs_backend`, `exec` — and no resolved configuration.
-A host that stays up for hours reads a checkout's files when a turn needs them,
-not when the checkout was first opened.
-The resolved configuration is passed to what reads it (turn preparation, and the
-tool service that leases the turn's MCP servers), so `Ctx::swap_config`, which
-installs a turn's configuration into the shared context and swaps the previous
-one back, is deleted.
+This bootstrap `config` is resolved once at startup and does not change when a
+plugin host opens another checkout.
+It governs process-wide settings (plugin admission and `options`, the Ctrl-C
+escalation cooldown, output format, and editor settings) and, for a CLI command,
+is also the configuration the command runs under, including the conversation
+layer.
+Because signal handling is scoped to the `jp` process and configured by this
+startup `config`, a plugin can send and receive signals but cannot reconfigure
+them.
 
-Today the host assembles delegated-turn configuration itself: from
-`load_base_partial` and `build_partial_over` for a new conversation, and from
-the stored stream alone for an existing one, because the pipeline lives with the
-caller that owns startup.
-Putting its inputs on `WorkspaceCtx` gives the host the same pipeline the CLI
-uses, and one resolution path instead of two.
+A delegated turn run by the plugin host does not use `CliCtx.config`.
+Instead, it resolves its own configuration through `ConfigPipeline` for the
+checkout it runs in, following the same path `jp query` takes at startup: it
+loads the base configuration from the checkout's files and environment at
+`exec.config_cwd()` (the launch directory for the startup checkout, or the
+checkout root for any other checkout), layers the conversation's stored
+configuration on top, and finalizes with `build`.
+Because a conversation pins its configuration, the base layer only supplies
+fields the conversation never set.
+The `--cfg` arguments passed when launching `jp` govern the invocation, not
+delegated turns.
 
-### MCP servers are leased per turn
+`WorkspaceCtx` therefore holds only the pipeline's inputs (`workspace`,
+`fs_backend`, and `exec`) and no resolved configuration.
+A long-running host reads a checkout's configuration files when a turn starts,
+not when the checkout is first opened.
+Putting the pipeline inputs on `WorkspaceCtx` lets the plugin host share
+`ConfigPipeline` with the CLI instead of assembling delegated-turn configuration
+separately (`load_base_partial` and `build_partial_over` for a new conversation,
+and the stored stream alone for an existing one).
+The resolved configuration is passed directly to turn preparation and to the
+tool service that leases the turn's MCP servers, so `Ctx::swap_config` (which
+installed a turn's configuration into the shared context and swapped the
+previous one back) is deleted.
 
-`mcp_client` is one pool per process.
-It holds running server instances keyed by server name, the configuration the
-instance was started with, and the directory it was spawned in, so the pool
-decides what is shared, not the checkout a turn happens to run in.
+### Per-turn MCP server leases
 
-A turn's tool service acquires the servers its tools name, passing the
-configuration its turn resolved and its checkout's spawn directory:
+`mcp_client` is a single process-wide pool.
+It keys running server instances by server name, the configuration the instance
+was started with, and the directory it was spawned in, so the pool key
+determines what is shared rather than which checkout a turn runs in.
 
-- A running instance with the same key is leased to the turn.
-- With no match, the pool starts a new instance, alongside any running under a
-  different configuration or directory.
-  A stdio server is a child process of its own, as it already is when two `jp
-  query` runs in two terminals start the same server.
-- The service releases its leases when the turn ends.
-  An instance nobody leases is eligible to stop; how long a long-running host
-  keeps one idle is the host's policy.
+A turn's tool service acquires leases for the servers its tools reference,
+passing the turn's resolved configuration and its checkout's spawn directory:
+
+- If a running instance matches the key, the pool leases it to the turn.
+- If no instance matches, the pool starts a new instance alongside any instances
+  running under a different configuration or directory.
+  Each stdio server runs as its own child process, just as when two `jp query`
+  invocations in separate terminals start the same server.
+- When the turn ends, the tool service releases its leases.
+  An instance with no active leases is eligible to stop; how long a long-running
+  host keeps an idle instance running is host policy.
 
 Acquiring a lease is asynchronous and cancellable, so a later policy can make a
-turn wait for an instance without changing the interface.
+turn wait for a busy instance without changing the interface.
 
-Today a host shares one client across turns and starts servers by name: a
-running server is reused whatever configuration started it.
-A conversation pins its configuration, `providers.mcp` included, so two
-conversations whose personas configure the same server differently share
-whichever instance started first, and the second one's tool results come from a
-server its recorded configuration does not describe.
-Keying by configuration removes that.
-Counting leases also removes the host's guess at whether another turn is using a
-server (`McpServerScope`), which it makes today from its own list of running
+Starting servers by name alone reuses a running instance regardless of the
+configuration that started it.
+Because a conversation pins its configuration (including `providers.mcp`), two
+conversations whose personas configure the same server differently would share
+whichever instance started first, and the second conversation's tool results
+would come from a server that does not match its recorded configuration.
+Keying instances by configuration prevents this mismatch.
+Reference-counting leases in the pool also replaces `McpServerScope`, which
+inferred whether another turn was using a server from the host's list of running
 turns.
 
-A caller that names no workspace reads what it needs from `CliCtx` and
-constructs no `WorkspaceCtx`.
-That removes the need for a bootstrap level producing a workspace-shaped result
-with no workspace in it — though `WorkspaceRequirement` ([RFD 087]) does
-conflate two questions today, since `None` means "no workspace *and* no config"
-by returning before the config pipeline runs.
-Untangling them belongs with the first caller that needs config without a
-workspace.
-
-### Fields that straddle
+### Fields that span both scopes
 
 **`config_reset`** is an invocation-scoped input applied to a workspace's
 conversation stream.
-It exists for the CLI's `--cfg` reset keywords ([RFD 038]) and has no meaning
-for a caller that names no single workspace.
-It lives on `CliCtx` and is refused for a multi-workspace caller.
+It implements the CLI's `--cfg` reset keywords ([RFD 038]) and only applies when
+a single workspace is targeted.
+It stays on `CliCtx` and is rejected for multi-workspace callers.
 
 **`task_handler`** has an invocation-scoped lifecycle and a workspace-scoped
 destination.
-One `JoinSet` and one cancellation token per process is right — Ctrl-C stops
-all background work — but `TaskHandler::sync` takes a single `&mut Workspace`
-and hands it to every drained task, and `TitleGeneratorTask::sync` silently
-returns success when its conversation is not in the workspace it was given.
-Drained against the wrong workspace, a generated title is dropped with no
-diagnostic.
+A single `JoinSet` and cancellation token per process allow Ctrl-C to stop all
+background work, so `task_handler` stays on `CliCtx`.
+However, `TaskHandler::sync` takes a single `&mut Workspace` and passes it to
+every drained task, and `TitleGeneratorTask::sync` silently returns success when
+its conversation is not in that workspace, dropping the generated title without
+a diagnostic.
+This RFD changes that silent skip to a warning.
+Routing background task results across multiple workspaces (either with one
+handler per workspace or with tasks that carry their own destination) only
+matters once a host addresses multiple workspaces, and is left to the RFD that
+introduces the checkout registry.
+The single-workspace path is unaffected.
 
-It lives on `CliCtx`, and the silent skip becomes a warning, which is the
-difference between a wrong result and a visible one.
-The destination problem is real but only reachable once a host addresses several
-workspaces: whether to hold one handler per workspace, or one handler whose
-tasks carry their own destination, is for the RFD that introduces the registry.
-The single-workspace path is unaffected either way.
+### Application versus frontend capabilities
 
-### What belongs to the application, and what to a frontend
-
-The placement question for every capability is whether all three frontends —
-terminal, IPC, FFI — would need it.
+A capability belongs in the application layer if all three frontends (terminal,
+IPC, and FFI) need it:
 
 | Capability                              | Application | Frontend |
 | --------------------------------------- | ----------- | -------- |
@@ -211,152 +206,155 @@ terminal, IPC, FFI — would need it.
 | JSON-lines framing, correlation IDs     |             | IPC      |
 | `catch_unwind`, C strings, handle table |             | FFI      |
 
-The last application row is the correction the inventory forces.
+Typed partial-config assignment is the main boundary violation in the current
+codebase.
 `PluginToHost::Query` carries `cfg: Vec<String>` parsed by the CLI's
-`KeyValueOrPath`, so the IPC frontend consumes a terminal argument grammar,
-including the `NONE` and `WORKSPACE` keywords whose payload is CLI-only.
-A typed replacement is not a partial: one `--cfg` argument resolves to several
-entries across search roots applied in precedence order, an entry can declare
-`loader.reset = "none"` which becomes a reset point rather than a value, and
-[RFD 070] distinguishes a named source from an anonymous assignment so that a
-later `-C` can revert it.
-Rather than design that surface here, the field goes away (see [Phase
-3](#phase-3-the-inventory-and-the-placements-it-forces)) and returns when the
+`KeyValueOrPath`, coupling the IPC frontend to a terminal argument grammar that
+includes the CLI-only `NONE` and `WORKSPACE` keywords.
+A typed replacement cannot simply be a partial configuration: one `--cfg`
+argument can resolve to multiple entries across search roots in precedence
+order, an entry can declare `loader.reset = "none"` to insert a reset point
+rather than a value, and [RFD 070] distinguishes a named source from an
+anonymous assignment so a later `-C` can revert it.
+Rather than design that typed surface here, this RFD removes `cfg` from
+`PluginToHost::Query` (see [Phase 3](#phase-3-boundary-corrections)) until the
 typed form is designed.
 
-The inventory records where each capability belongs, so the later extraction is
-a move rather than a redesign.
-Where a capability is already on the wrong side, this RFD moves it — but only
-the two Phase 3 names, not as a general licence.
+Recording this inventory now makes the later crate extraction a mechanical move
+rather than a redesign.
+This RFD moves only the two capabilities listed in [Phase
+3](#phase-3-boundary-corrections) (query-draft storage and protocol config
+assignment), leaving the remaining moves to the extraction itself.
 
-### Migration mechanic
+### Incremental migration
 
-`Ctx` becomes a shell holding the two halves (`ctx.cli`, `ctx.workspace`) and
-consumers migrate incrementally, one call path at a time.
-The shell is deleted when the last consumer stops using it.
-This keeps each step small and reviewable at the cost of both shapes existing
-during the migration.
+`Ctx` temporarily becomes a shell holding `ctx.cli` and `ctx.workspace` so
+callers can migrate incrementally, one call path at a time.
+The shell is deleted once the last caller stops using it.
+This keeps each step small and reviewable, at the temporary cost of both context
+shapes coexisting during the migration.
 
 The plugin dispatch path migrates first, because a multi-workspace plugin host
-depends on `WorkspaceCtx` existing and not on the rest of the CLI having moved.
+depends on `WorkspaceCtx` existing on the plugin path and not on the remaining
+CLI commands having migrated.
 
 ## Drawbacks
 
-- **Churn proportional to how pervasive `Ctx` is.** Every command signature
-  changes.
-  The work is mechanical and compiler-checked, but the diff is large and touches
-  files this RFD has no other reason to open.
+- **Broad signature churn.** Every command signature changes to take `CliCtx`
+  and `WorkspaceCtx`.
+  The migration is mechanical and compiler-checked, but produces a large diff
+  across files this RFD has no other reason to touch.
 
-- **Two shapes in flight.** During the migration, some call paths take the shell
-  and some take the halves.
-  A reader encountering the codebase mid-flight sees an inconsistency with no
-  local explanation.
+- **Two context shapes during migration.** Until Phase 2 completes, some call
+  paths take the `Ctx` shell and others take `CliCtx` and `WorkspaceCtx`.
 
-- **`WorkspaceCtx` is not the library seam.** It holds the inputs to config
-  resolution for the turn path, which also needs the runtime and the MCP pool on
-  `CliCtx`, so it is not a type an FFI consumer can hold.
-  It is the frontend-agnostic *application* bundle, and the narrower reader
+- **`WorkspaceCtx` is not the FFI library seam.** It holds the inputs to turn
+  configuration resolution, which also requires the runtime and MCP pool on
+  `CliCtx`, so an FFI consumer cannot hold `WorkspaceCtx` on its own.
+  It is the frontend-agnostic *application* bundle, while the narrower reader
   surface stays in `jp_workspace`, `jp_conversation`, and `jp_storage`.
 
-- **The inventory is a claim, not a proof.** It is checked by the extraction
-  that follows, which is where a wrong row surfaces.
+- **The capability inventory is unverified until extraction.** A misplaced
+  capability will only surface when the application crate is extracted.
 
 ## Alternatives
 
-**Leave `Ctx` and thread parameters.** The plugin host takes the workspace
-bundle as separate arguments per handler.
-This works for one caller and leaves the two scopes entangled for everything
-else; the duplication a multi-workspace host must avoid stays implicit, enforced
-by review rather than by types.
+- **Keep `Ctx` and thread workspace parameters separately.** Passing the
+  workspace bundle as extra arguments to each plugin handler works for a single
+  caller, but leaves invocation and workspace state entangled everywhere else.
+  Preventing process-state duplication in a multi-workspace host would rely on
+  code review rather than types.
 
-**Hold several `Ctx` values.** Rejected: each carries a printer, a signal
-router, and a runtime, of which the process needs exactly one.
+- **Hold multiple `Ctx` instances.** Rejected because each `Ctx` owns a printer,
+  a signal router, and a runtime, of which the process needs exactly one.
 
-**Two resolved configurations.** An invocation bundle of already-resolved
-namespaces (`plugins`, `interrupt`, …) on `CliCtx`, and a resolved `AppConfig`
-per checkout on `WorkspaceCtx`.
-Rejected: no turn runs under a checkout's `AppConfig`, because a turn runs under
-its conversation's configuration; the bundle is a new concept that forces a
-namespace-by-namespace allocation; and the host's own resolution path would
-remain alongside it, with `swap_config` to bridge the two.
+- **Store two resolved configurations.** `CliCtx` could hold a bundle of
+  resolved invocation namespaces (`plugins`, `interrupt`, and so on) while
+  `WorkspaceCtx` holds a resolved `AppConfig` per checkout.
+  Rejected because no turn runs under a checkout's static `AppConfig` (a turn
+  runs under its conversation's configuration), the invocation bundle would
+  require a new namespace-by-namespace split, and the host's custom resolution
+  path would remain alongside it with `swap_config` to bridge the two.
 
-**Extract the application crate first, and split as a consequence.** The split
-is the mechanical part and the crate boundary is the irreversible one.
-Doing the reversible work first means the boundary is drawn from a written
-inventory rather than from whatever the compiler accepted.
+- **Extract the application crate first, and split `Ctx` as a consequence.**
+  Splitting `Ctx` is mechanical and reversible, whereas the crate boundary is
+  harder to change.
+  Splitting the context first ensures the crate boundary is drawn from an
+  explicit inventory rather than from whatever the compiler accepted.
 
 ## Non-Goals
 
-- **Crate extraction.** Both halves stay in `jp_cli`.
+- **Crate extraction.** Both `CliCtx` and `WorkspaceCtx` stay in `jp_cli`.
   The application crate comes later, informed by this RFD's inventory.
 
-- **The output and interaction inversion.** Making the turn loop emit events
-  that frontends render, rather than writing to a `Printer`, is the largest
-  piece of the eventual architecture and is its own RFD.
-  This one only records that rendering is a frontend concern.
+- **Output and interaction inversion.** Making the turn loop emit events that
+  frontends render, rather than writing directly to a `Printer`, is its own RFD.
+  This RFD only records that rendering is a frontend concern.
 
-- **Agent loop extraction.** [RFD 026]'s territory, and it follows the output
-  inversion rather than preceding it.
-  Note that 026 as written extracts the loop while retaining `Printer` and moves
-  `ToolRenderer` into `jp_agent`, which this RFD's inventory puts on the
-  frontend side; 026 needs revision if the inversion lands first.
-  Neither gates the other.
+- **Agent loop extraction ([RFD 026]).** Extracting the agent loop follows the
+  output inversion.
+  As written, [RFD 026] extracts the loop while retaining `Printer` and moves
+  `ToolRenderer` into `jp_agent`, which this RFD's inventory places on the
+  frontend side; [RFD 026] needs revision if the output inversion lands first.
+  Neither RFD gates the other.
 
-- **Multi-workspace addressing.** This RFD makes it implementable; the protocol
-  surface, the host's per-checkout registry, and where background tasks deliver
-  their results in it are separate work.
+- **Multi-workspace addressing.** This RFD provides the context split needed for
+  multi-workspace support, but the protocol surface, the host's per-checkout
+  registry, and multi-workspace background task routing are separate work.
 
 - **Authentication and authorization.** The plugin protocol grants a plugin
   whatever the host can reach, and the web frontend binds an unauthenticated
   port.
-  That is accepted for internal use and addressed when the frontend is solid
-  enough to warrant it.
+  This is accepted for internal use and will be addressed once the frontend is
+  mature enough to warrant it.
 
 ## Risks and Open Questions
 
-- **Derived state is where a silent behavior change hides.** `Ctx::new` computes
+- **Silent behavior changes in derived state.** `Ctx::new` computes
   `escalation_cooldown`, the MCP spawn directory, and the output width from its
   inputs.
-  A split that recomputes any of them from a different side changes behavior
-  with no test failing.
-  Each derivation needs an explicit home and a test asserting the value, not
-  just the wiring.
+  Recomputing any of them from the wrong scope during the split would change
+  behavior without failing existing tests.
+  Each derived value needs an explicit owner and a unit test asserting its
+  computed value, not just its wiring.
 
-- **Resolution cost per turn.** Each delegated turn reads its checkout's config
-  files and `extends` chain.
-  That is what a new conversation already costs the host, and what every `jp
-  query` costs at startup; a cache is a measured follow-up, and would have to
-  stay fresh against file edits.
+- **Per-turn configuration resolution cost.** Each delegated turn reads its
+  checkout's configuration files and `extends` chain.
+  This matches what a new conversation already costs the host and what every `jp
+  query` costs at startup.
+  Caching base configurations is a measured follow-up and would have to stay
+  fresh against file edits.
 
-- **Servers with exclusive state.** A server that keeps state only one instance
-  can hold — a database file, a browser profile, a fixed port — conflicts with
-  a second instance of itself.
-  Two terminals already produce that conflict; the pool makes it reachable
-  inside one host.
-  Declaring such a server exclusive, and making turns wait for it across
-  processes, is separate work on MCP server lifecycle.
+- **MCP servers with exclusive state.** A server that holds exclusive state
+  (such as a database file, a browser profile, or a fixed port) conflicts with a
+  second instance of itself.
+  Running `jp query` in two terminals already produces that conflict, and the
+  instance pool makes it reachable inside a single host process.
+  Declaring such a server exclusive and queuing turns across processes is
+  separate MCP lifecycle work.
 
-- **`session` may not be cleanly invocation-scoped.** The identity is, but every
-  read of a session's active conversation goes through a workspace's mapping
-  store.
-  If `CliCtx` holding the identity forces workspace-shaped lookups back through
-  it, the field belongs on both or the lookup belongs elsewhere.
+- **Scope of `session`.** The terminal session identity is invocation-scoped,
+  but every read of a session's active conversation goes through a workspace's
+  mapping store.
+  If keeping `session` on `CliCtx` forces workspace-scoped lookups back through
+  `CliCtx`, the field belongs on both contexts or the lookup belongs elsewhere.
 
-- **Whether the inventory is complete.** It is drawn from the capabilities that
-  exist today.
-  A capability added between this RFD and the extraction lands on whichever side
-  its author picked, unless the placement question is asked in review.
+- **Completeness of the capability inventory.** The inventory covers the
+  capabilities that exist today.
+  Any capability added before the crate extraction must be evaluated against the
+  same application-versus-frontend criterion in review.
 
-- **The `cfg` refusal has no natural end.** The protocol has no floor below
-  which the host refuses a plugin, so the refusal stays until one exists or the
-  protocol is renumbered with a clean break.
+- **Lifetime of the `cfg` rejection.** The plugin protocol has no minimum
+  version floor below which the host refuses a plugin, so the host must keep
+  rejecting `cfg` and `list_configs` until a version floor exists or the
+  protocol makes a breaking version bump.
 
 ## Implementation Plan
 
-### Phase 1: The two types, and the plugin dispatch path
+### Phase 1: Context split and plugin dispatch
 
 - Introduce `CliCtx` and `WorkspaceCtx` with the field allocation above.
-- `Ctx` becomes a shell holding both.
+- Turn `Ctx` into a shell holding both contexts.
 - Resolve a delegated turn's configuration through `ConfigPipeline` for its
   checkout, pass it to turn preparation explicitly, and delete
   `Ctx::swap_config`.
@@ -364,70 +362,69 @@ inventory rather than from whatever the compiler accepted.
   spawn directory; lease them to a turn's tool service and route tool lookups
   and calls through the lease; delete `Ctx::configure_active_mcp_servers`, the
   per-turn `set_servers`, and `McpServerScope`.
-- Warn instead of silently skipping when a background task's conversation is not
-  in the workspace it was drained against.
+- Log a warning instead of silently skipping when a background task's
+  conversation is not in the workspace it was drained against.
 - Migrate `run_external`, `run_plugin`, `message_loop`, and every plugin request
-  handler to take the two halves.
-- Assert each derived value (escalation cooldown, child cwd, output width) in a
-  test.
+  handler to take `CliCtx` and `WorkspaceCtx`.
+- Add unit tests asserting each derived value (escalation cooldown, child cwd,
+  and output width).
 
-Mergeable independently.
-Unblocks multi-workspace addressing.
+Phase 1 is independently mergeable and unblocks multi-workspace addressing.
 
-### Phase 2: The remaining commands
+### Phase 2: Remaining CLI commands
 
-- Migrate every other command off the shell, one group at a time.
-- Delete the shell.
+- Migrate every remaining command off the `Ctx` shell, one command group at a
+  time.
+- Delete the `Ctx` shell.
 
-Depends on Phase 1.
-Each command group is independently mergeable.
+Phase 2 depends on Phase 1; each command group is independently mergeable.
 
-### Phase 3: The inventory, and the placements it forces
+### Phase 3: Boundary corrections
 
-- Record the application/frontend split as a living document under `docs/wiki/`.
-- Consolidate query-draft handling into the storage layer: one path resolution
-  instead of the two in `cmd/query.rs` and `cmd/plugin/dispatch.rs`, reachable
-  by `jp query` and an FFI consumer alike.
-  The two conflict policies guard different operations — the CLI refuses to
-  *delete* a draft that changed since the request was composed, the plugin
-  refuses to *write* over one whose revision moved — and both are kept.
+- Record the application-versus-frontend split as a living document under
+  `docs/wiki/`.
+- Consolidate query-draft handling in `jp_storage` and `jp_workspace`: replace
+  the duplicate path resolutions in `cmd/query.rs` and `cmd/plugin/dispatch.rs`
+  with a single implementation reachable by `jp query` and FFI consumers alike,
+  designed to `jp_storage` and `jp_workspace` conventions rather than the plugin
+  protocol's.
+  Both conflict policies remain because they guard different operations: the CLI
+  refuses to *delete* a draft that changed after the request was composed, and
+  the plugin host refuses to *write* over a draft whose revision moved.
 - Remove `cfg` from `PluginToHost::Query` and `list_configs` from the protocol
-  surface, keeping both deserializable.
-  A query carrying a non-empty `cfg`, and any `list_configs` request, is
-  answered with a correlated error telling the user to update the plugin, and no
-  turn starts.
-  A delegated turn otherwise runs under the conversation's stored configuration.
-  The host's version check only refuses a plugin that needs a newer host, and
-  `QueryRequest` ignores unknown fields, so without the refusal an older
-  plugin's configuration selection would be dropped and its turn would succeed
-  under different settings.
-  A removed configuration selection must never become a successful query.
-  The typed replacement takes a new field name, so an older plugin's string list
-  is never read as the new form.
+  surface while keeping both deserializable.
+  Any query carrying a non-empty `cfg` and any `list_configs` request is
+  answered with a correlated error instructing the user to update the plugin,
+  and no turn starts; otherwise, a delegated turn runs under the conversation's
+  stored configuration.
+  The host's version check only refuses a plugin that requires a newer host, and
+  `QueryRequest` ignores unknown fields, so dropping `cfg` from the wire schema
+  would silently ignore an older plugin's configuration selection and run its
+  turn under different settings.
+  The future typed replacement will use a new field name so an older plugin's
+  string list is never deserialized as the new form.
+  Removing `cfg` temporarily disables persona and skill selection in the web
+  frontend until that typed config-assignment surface replaces it; the CLI is
+  unaffected.
 
-Depends on Phase 1.
-Each item is independently mergeable and is a behavior change worth its own
-review.
-
-Removing `cfg` costs the web frontend its persona and skill selection until a
-typed config-assignment surface replaces it; the CLI is unaffected.
-The draft consolidation lands in `jp_storage` and `jp_workspace` and is held to
-their standard, not the protocol's.
+Phase 3 depends on Phase 1.
+Each item is a standalone behavior change that can merge and be reviewed
+independently.
 
 ## References
 
-- [RFD 087] — Session-scoped active workspace; defines `WorkspaceRequirement`,
+- [RFD 087]: Session-scoped active workspace; defines `WorkspaceRequirement`,
   the execution context, and the roots registry.
-- [RFD 072] — Command plugin system; defines the protocol whose host this RFD's
-  first phase reshapes.
-- [RFD 099] — Native macOS app; the FFI consumer whose constraints define the
+- [RFD 072]: Command plugin system; defines the protocol whose host Phase 1
+  reshapes.
+- [RFD 099]: Native macOS app; the FFI consumer whose constraints define the
   narrow reader surface.
-- [RFD 026] — Agent loop extraction; the later boundary this RFD's inventory
-  informs.
-- [RFD 048] — Four-channel output model, and [RFD 012] — typed streaming
-  events; the existing groundwork for treating rendering as a frontend concern.
-- [RFD 038] — Config reset keywords; the origin of `config_reset`.
-- [RFD 070] — Negative config deltas, and [RFD 060] — config explain; both
+- [RFD 026]: Agent loop extraction; the later boundary informed by this RFD's
+  inventory.
+- [RFD 048] (four-channel output model) and [RFD 012] (typed streaming events):
+  the existing groundwork for treating rendering as a frontend concern.
+- [RFD 038]: Config reset keywords; introduces `config_reset`.
+- [RFD 070] (negative config deltas) and [RFD 060] (config explain): both
   consume the canonical form of a config assignment.
 
 [RFD 012]: 012-typed-llm-streaming-events.md
