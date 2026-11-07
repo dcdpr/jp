@@ -62,6 +62,7 @@ fn run_with(
 /// hash of a fix merged since through merge request `!5`.
 fn on_gitlab_with_a_fix() -> (Fixture, String) {
     let fixture = cut_0_1_0();
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0");
     run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
     fixture.publish(&["release/0.1", "release-notes/v0.1.0", "v0.1.0"]);
     fixture.write("src/fix.rs", "// A fix.\n");
@@ -253,6 +254,7 @@ fn the_next_cut_leaves_a_fragment_a_pick_ships() {
 #[test]
 fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
     let fixture = cut_0_1_0();
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#2)");
     run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
     let hash = change(&fixture, "src/fix.rs", "fix", "fix: A fix (#3)");
 
@@ -345,6 +347,7 @@ fn a_fragment_filed_into_a_later_release_is_copied_from_its_directory() {
 #[test]
 fn a_patch_release_refuses_a_fragment_with_an_upgrade_section() {
     let fixture = cut_0_1_0();
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#2)");
     run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
     let tip = fixture.hash("release/0.1");
     fixture.write("src/plugins.rs", "// Plugins need a manifest.\n");

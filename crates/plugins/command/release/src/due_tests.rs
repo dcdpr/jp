@@ -50,8 +50,10 @@ fn cut_on_october_1() -> Fixture {
     fixture
 }
 
-/// Finalize release 0.1.0 of the workspace of `fixture`, now.
+/// Merge the notes of release 0.1.0 of the workspace of `fixture` into `main`,
+/// and finalize it, now.
 fn finalize_0_1_0(fixture: &Fixture) {
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#3)");
     let shell = fixture.shell();
     let options = options(&json!({}));
     let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
@@ -123,8 +125,8 @@ fn nothing_is_due_without_an_unreleased_fragment() {
             .to_owned(),
     });
 
-    // Release 0.1.0 ships the change behind `main`'s only fragment, which stays
-    // at the top level until 0.1.0's notes are filed.
+    // Release 0.1.0 ships the change behind `main`'s only fragment, which its
+    // notes moved into its directory.
     let released = cut_on_october_1();
     finalize_0_1_0(&released);
     assert_eq!(due_at(&released, OCTOBER_1 + TWO_WEEKS, &json!({})), Due {

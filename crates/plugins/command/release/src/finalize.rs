@@ -2,20 +2,34 @@
 //!
 //! The tag, `v<version>`, is annotated and points at the tip of the release
 //! branch: this repository's, or `origin`'s when this repository's is behind.
-//! It is made in this repository, and pushing it makes the release.
+//! Its message is the release notes, followed by the upgrade guide when the
+//! release has one, as the commit checked out has them in the release's
+//! directory; that commit stands for `main`, so the notes branch has to be
+//! merged into it first.
+//! The tag is made in this repository, and pushing it makes the release.
 //! The person running it decides when: on GitHub, CI shows its checks on the
 //! branch's tip once the branch is pushed.
 
+use changelog::{
+    ReleaseError,
+    directory::{Part, ReadError},
+    markdown, release,
+};
 use semver::Version;
 
 use crate::{
-    pipeline::{Pipeline, push, short},
-    releases,
-    repository::ORIGIN,
+    cut,
+    pipeline::{Pipeline, counted, listed, problems, push, short},
+    releases::{self, Line, Releases},
+    repository::{Checkout, MAIN, ORIGIN, Worktree},
 };
 
-/// Tag release `version` at the tip of its release branch, and say how to
-/// publish the tag.
+/// The heading the upgrade guide follows the release notes under, in a tag's
+/// message.
+const UPGRADE_GUIDE: &str = "Upgrade guide";
+
+/// Tag release `version` at the tip of its release branch, with its notes as
+/// the commit checked out has them, and say how to publish the tag.
 ///
 /// The error says why `version` can't be finalized.
 pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<String, String> {
@@ -51,16 +65,147 @@ pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<Str
     }
 
     let line = releases.finalize_target(version)?;
-    repo.tag(&tag, &line.tip, &format!("Release {version}"))?;
+    let checkout = repo.checkout()?;
+    let main = repo.worktree("finalize", &checkout.head)?;
+    refuse_unfiled(pipeline, &releases, line, version, &checkout, &main)?;
+    let message = message(pipeline, version, &main)?;
+    repo.tag(&tag, &line.tip, &message)?;
 
     let mut said = format!(
-        "Tagged the tip of {}, {}, as {tag}.\n",
+        "Tagged the tip of {}, {}, as {tag}, with the notes of {version} on {}.\n",
         line.branch,
-        short(&line.tip)
+        short(&line.tip),
+        checkout.describe()
     );
+    if let Some(ahead) = checkout.ahead() {
+        said.push_str(&format!(
+            "{ahead}, so the tag's notes may not match {ORIGIN}'s {MAIN}.\n"
+        ));
+    }
     said.push_str(&publish(pipeline, &line.branch, &tag, true)?);
 
     Ok(said)
+}
+
+/// Refuse while the commit checked out lacks notes of `version`: files of the
+/// release's directory its notes branch has, here or on `origin`; fragments or
+/// highlights at the top level of the fragments directory whose change `line`
+/// ships; or any notes at all.
+fn refuse_unfiled(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+    line: &Line,
+    version: &Version,
+    checkout: &Checkout,
+    main: &Worktree<'_>,
+) -> Result<(), String> {
+    let repo = &pipeline.repo;
+    let notes_branch = releases::notes_branch(version);
+    let directory = format!("{}/{version}/", pipeline.fragments);
+    let filed = repo.files_at(&checkout.head, &directory)?;
+    let merge = format!("Merge {notes_branch} into {MAIN} first, then finalize from there.");
+
+    let branch = repo.branch(&notes_branch)?;
+    for (hash, name, delete) in [
+        (
+            branch.local,
+            notes_branch.clone(),
+            format!("`git branch -D {notes_branch}`"),
+        ),
+        (
+            branch.origin,
+            format!("{ORIGIN}'s {notes_branch}"),
+            format!("`git push {ORIGIN} --delete {notes_branch}`"),
+        ),
+    ] {
+        let Some(hash) = hash else {
+            continue;
+        };
+        let missing: Vec<String> = repo
+            .files_at(&hash, &directory)?
+            .difference(&filed)
+            .cloned()
+            .collect();
+        if missing.is_empty() {
+            continue;
+        }
+
+        return Err(format!(
+            "{} lacks {} of the notes of {version} that {name} has: {}. {merge} If {MAIN} dropped \
+             {} on purpose, delete the branch with {delete}.",
+            checkout.describe(),
+            counted(missing.len(), "file", "files"),
+            listed(&missing),
+            if missing.len() == 1 { "it" } else { "them" },
+        ));
+    }
+
+    if pipeline.fragments_in(main).is_dir() {
+        let pending: Vec<String> = cut::top_level(pipeline, releases, main)?
+            .into_iter()
+            .filter(|file| file.shipping.contains(&line.branch))
+            .map(|file| format!("{}/{}", pipeline.fragments, file.path))
+            .collect();
+        if !pending.is_empty() {
+            return Err(format!(
+                "{} still has {} at the top of {} whose changes {} ships: {}. Their notes aren't \
+                 filed yet. {merge}",
+                checkout.describe(),
+                counted(pending.len(), "file", "files"),
+                pipeline.fragments,
+                line.branch,
+                listed(&pending),
+            ));
+        }
+    }
+
+    if filed.is_empty() {
+        return Err(format!(
+            "{} has no notes of {version} in {directory}. Write at least one fragment there, such \
+             as {directory}<slug>.fixed.md, and finalize from a commit that has it.",
+            checkout.describe()
+        ));
+    }
+
+    Ok(())
+}
+
+/// The message of the tag of `version`: the subject `Release <version>`, then
+/// its release notes as `main` has them, then its upgrade guide under a heading
+/// of its own when it has one.
+fn message(
+    pipeline: &Pipeline<'_>,
+    version: &Version,
+    main: &Worktree<'_>,
+) -> Result<String, String> {
+    let options = pipeline.options;
+    let release = release::read(
+        &pipeline.fragments_in(main),
+        &Part::Release(version.clone()),
+        options.forge,
+        &options.headings,
+    )
+    .map_err(|error| match error {
+        ReleaseError::Read(ReadError::Problems(found)) => format!(
+            "The notes of {version} break their format; fix these first:\n{}",
+            problems(main, &found)
+        ),
+        error => error.to_string(),
+    })?;
+
+    // The upgrade guide follows in the same message, so a breaking entry links
+    // to its section by anchor alone.
+    let notes = markdown::notes(&release, &options.headings, "");
+    let guide = markdown::upgrade_guide(&release);
+
+    let body = if guide.is_empty() {
+        notes
+    } else {
+        format!("{notes}\n# {UPGRADE_GUIDE}\n\n{guide}")
+    };
+
+    // The first paragraph is the tag's subject, which `git tag -n` lists.
+    Ok(format!("Release {version}\n\n{body}"))
 }
 
 /// How to publish the tag `tag`, at the tip of `branch`, which this command

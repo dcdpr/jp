@@ -20,7 +20,7 @@ patch, and tag releases while keeping all release notes and upgrade guides on
 `release-notes/v<version>` for moving unreleased fragments into the release's
 directory, which reaches `main` through a pull request.
 `jp release pick` cherry-picks fixes onto the release branch, and `jp release
-finalize` tags the release.
+finalize` tags the release, with its release notes as the tag message.
 Each command works in the local repository and prints the `git push` that
 publishes its result, so a release can be rehearsed without publishing anything.
 The pipeline replaces `jilu`; [RFD 123] covers binary builds and distribution.
@@ -100,7 +100,7 @@ This RFD adds:
 | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | `jp release cut [--version VERSION]` | Starts the next minor or major release from `main`                                               |
 | `jp release pick VERSION COMMIT...`  | Cherry-picks commits from `main` onto a release in preparation, or starts the next patch release |
-| `jp release finalize VERSION`        | Tags a finalized release                                                                         |
+| `jp release finalize VERSION`        | Tags a finalized release, with its release notes as the tag message                              |
 | `jp release render [VERSION]`        | Renders a release's notes or upgrade guide, or the unreleased fragments                          |
 | `jp release due`                     | Exits zero when the next release is due                                                          |
 
@@ -309,6 +309,25 @@ lands on `main` first.
 `jp release finalize 0.3.0` creates an annotated `v0.3.0` tag at the tip of
 `release/0.3` in the local repository and prints the push that publishes it,
 including the release branch when `origin` is missing some of its commits.
+The tag message starts with the subject `Release 0.3.0` (shown by `git tag -n`),
+followed by the release notes and, when the release has one, the upgrade guide
+under an `Upgrade guide` heading, so `git show v0.3.0` shows the whole release
+without the documentation site.
+Breaking entries link to their upgrade sections by anchor only, since those
+sections are in the same message; git keeps the message verbatim, including `#`
+headings.
+
+`finalize` reads the notes from `changelog.d/0.3.0/` in the checked-out commit,
+which stands in for `main` as it does for `cut`, so the notes branch must merge
+first.
+It refuses to run while the notes branch (local or on `origin`) has a file in
+the release's directory that the checked-out commit lacks, while a fragment for
+a change the release ships is still at the root of `changelog.d/`, or while the
+release has no notes at all.
+A notes file deliberately deleted on `main` after the merge (such as one of two
+entries for the same change) does not block it: deleting the merged notes branch
+lets `finalize` proceed.
+
 Pushing the tag is the release.
 Maintainers run `finalize` once checks pass on the release branch (via GitHub CI
 on `release/*` pushes, or `just ci` locally).
@@ -317,7 +336,7 @@ Because a maintainer pushes the tag directly, the push triggers JP's binary
 distribution workflow ([RFD 123]).
 Release notes remain editable on `main` after tagging: updating files in
 `changelog.d/<version>/` re-renders the notes wherever they are published,
-including when a notes branch merges after the tag is pushed.
+except in the tag, which keeps the notes the release was tagged with.
 
 ### Patch releases
 
@@ -535,10 +554,12 @@ one unreleased fragment (without one, `cut` would have nothing to release).
    demand), pushes the two branches it created, and opens the notes branch's
    pull request.
 2. **Prepare**: Contributors edit the release notes in `changelog.d/<version>/`
-   on the notes branch and merge it, and cherry-pick any additional fixes onto
-   `release/<major>.<minor>` with `jp release pick`.
-3. **Finalize**: Once CI passes on the release branch, a maintainer runs `jp
-   release finalize` to tag the release and pushes the tag.
+   on the notes branch and cherry-pick any additional fixes onto
+   `release/<major>.<minor>` with `jp release pick`, then merge the notes
+   branch.
+3. **Finalize**: Once the notes branch has merged and CI passes on the release
+   branch, a maintainer runs `jp release finalize` from `main` to tag the
+   release, and pushes the tag.
 
 For a patch release, a maintainer runs `jp release pick` targeting the next
 patch version, followed by `jp release finalize`.
@@ -766,7 +787,7 @@ Implement version computation from tags and release branches, the `bump` hook,
 release branch and notes branch creation in the local repository from the
 checked-out commit (printing the `git push` that publishes them), `pick`
 (including fragment moves and copies onto the notes branch), patch releases,
-and `finalize`.
+and `finalize` (with the release notes as the tag message).
 Configure `bump` for JP, and enable CI checks on pushes to `release/*`.
 Depends on Phase 1.
 

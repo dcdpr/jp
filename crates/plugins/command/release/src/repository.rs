@@ -11,7 +11,7 @@
 //! The default branch is `main`.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env, fs, process,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -538,10 +538,40 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
-    /// Make the annotated tag `tag` at the commit `hash`, with `message`.
+    /// Make the annotated tag `tag` at the commit `hash`, with `message` kept
+    /// as it is: lines starting with `#` stay, where git would otherwise drop
+    /// them as comments.
     pub(crate) fn tag(&self, tag: &str, hash: &str, message: &str) -> Result<(), String> {
-        self.git(&["tag", "--annotate", "--message", message, tag, hash])
-            .map(drop)
+        // A file rather than an argument, since a release's notes can outgrow
+        // what a command line holds on Windows.
+        let file = temporary("tag-message")?;
+        fs::write(&file, message)
+            .map_err(|error| format!("failed to write the message of {tag} to {file}: {error}"))?;
+        let made = self.git(&[
+            "tag",
+            "--annotate",
+            "--cleanup=verbatim",
+            "--file",
+            file.as_str(),
+            tag,
+            hash,
+        ]);
+        drop(fs::remove_file(&file));
+
+        made.map(drop)
+    }
+
+    /// The files below `path`, a directory relative to the workspace root, at
+    /// the commit `hash`, each relative to the workspace root; none when the
+    /// commit has no `path`.
+    pub(crate) fn files_at(&self, hash: &str, path: &str) -> Result<BTreeSet<String>, String> {
+        let listing = self.git(&["ls-tree", "-r", "-z", "--name-only", hash, "--", path])?;
+
+        Ok(listing
+            .split('\0')
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned)
+            .collect())
     }
 
     /// The git directory the repository's worktrees share.

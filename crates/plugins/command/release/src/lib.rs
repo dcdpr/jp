@@ -181,8 +181,11 @@ enum Command {
     },
 
     /// Tag a release in preparation: the tip of its release branch, as
-    /// `v<version>`.
+    /// `v<version>`, with its release notes and upgrade guide as the tag's
+    /// message.
     ///
+    /// The notes are read from the commit checked out, so merge the release's
+    /// notes branch into `main` first.
     /// Pushes nothing: it prints the push that publishes the tag, which makes
     /// the release.
     Finalize {

@@ -19,7 +19,10 @@
 //! repository, such as one a rehearsal left behind: the cut would count it as a
 //! release made.
 
-use std::{collections::HashMap, fs};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    fs,
+};
 
 use changelog::{
     History, Place,
@@ -33,16 +36,20 @@ use crate::{
     repository::{MAIN, ORIGIN, Repository, Worktree},
 };
 
-/// A fragment or highlight a cut files into the release's directory.
+/// A fragment or highlight at the top level of the fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Unreleased {
+pub(crate) struct TopLevel {
     /// Its path below the fragments directory.
-    path: String,
+    pub path: String,
 
-    highlight: bool,
+    pub highlight: bool,
 
     /// Whether it has an upgrade section.
-    breaking: bool,
+    pub breaking: bool,
+
+    /// The release branches that ship the change that added it, by name; none
+    /// when it is unreleased.
+    pub shipping: Vec<String>,
 }
 
 /// Start the next release from `main`, or `requested`, and say what was made
@@ -188,63 +195,81 @@ fn unreleased(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
     notes: &Worktree<'_>,
-) -> Result<Vec<Unreleased>, String> {
-    let dir = pipeline.fragments_in(notes);
-    if !dir.is_dir() {
+) -> Result<Vec<TopLevel>, String> {
+    if !pipeline.fragments_in(notes).is_dir() {
         return Err(format!(
             "`{MAIN}` has no fragments directory at {}, so there is nothing to release.",
             pipeline.fragments
         ));
     }
 
+    let mut files = top_level(pipeline, releases, notes)?;
+    files.retain(|file| file.shipping.is_empty());
+
+    Ok(files)
+}
+
+/// The fragments and highlights at the top level of the fragments directory in
+/// `tree`, which has to have one, each with the release branches that ship the
+/// change that added it.
+pub(crate) fn top_level(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+    tree: &Worktree<'_>,
+) -> Result<Vec<TopLevel>, String> {
+    let dir = pipeline.fragments_in(tree);
     let Contents {
         fragments,
         highlights,
     } = directory::read(&dir, &Part::Unreleased).map_err(|error| match error {
         ReadError::Problems(found) => format!(
             "The fragments on `{MAIN}` break their format; fix these first:\n{}",
-            problems(notes, &found)
+            problems(tree, &found)
         ),
         error => error.to_string(),
     })?;
     let history = History::read(&dir).map_err(|error| error.to_string())?;
 
-    let files: Vec<Unreleased> = fragments
+    let files: Vec<TopLevel> = fragments
         .iter()
-        .map(|fragment| Unreleased {
+        .map(|fragment| TopLevel {
             path: fragment.path.clone(),
             highlight: false,
             breaking: fragment.file.upgrade.is_some(),
+            shipping: vec![],
         })
-        .chain(highlights.iter().map(|highlight| Unreleased {
+        .chain(highlights.iter().map(|highlight| TopLevel {
             path: highlight.path.clone(),
             highlight: true,
             breaking: false,
+            shipping: vec![],
         }))
         .collect();
     let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
     let origins = history.origins(&paths);
 
-    let mut shipped: HashMap<String, bool> = HashMap::new();
-    let mut unreleased = vec![];
-    for (file, origin) in files.into_iter().zip(origins) {
+    let mut shipping: HashMap<String, Vec<String>> = HashMap::new();
+    let mut top_level = vec![];
+    for (mut file, origin) in files.into_iter().zip(origins) {
         if let Some(hash) = origin {
-            let ships = if let Some(&ships) = shipped.get(&hash) {
-                ships
-            } else {
-                let containing = pipeline.repo.containing(&hash)?;
-                let ships = !releases.shipping(&hash, &containing).is_empty();
-                shipped.insert(hash, ships);
-                ships
+            let branches = match shipping.entry(hash) {
+                Entry::Occupied(known) => known.into_mut(),
+                Entry::Vacant(unknown) => {
+                    let containing = pipeline.repo.containing(unknown.key())?;
+                    let branches = releases
+                        .shipping(unknown.key(), &containing)
+                        .into_iter()
+                        .map(|line| line.branch.clone())
+                        .collect();
+                    unknown.insert(branches)
+                }
             };
-            if ships {
-                continue;
-            }
+            file.shipping.clone_from(branches);
         }
-        unreleased.push(file);
+        top_level.push(file);
     }
 
-    Ok(unreleased)
+    Ok(top_level)
 }
 
 /// How many fragments at the top level of the fragments directory on `origin`'s
@@ -273,7 +298,7 @@ pub(crate) fn unreleased_count(
 fn file_notes(
     pipeline: &Pipeline<'_>,
     notes: &Worktree<'_>,
-    unreleased: &[Unreleased],
+    unreleased: &[TopLevel],
     version: &Version,
     message: &str,
 ) -> Result<String, String> {
