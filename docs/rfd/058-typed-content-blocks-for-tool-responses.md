@@ -20,27 +20,22 @@ and metadata needed for consistent formatting and cross-turn deduplication.
 
 ## Motivation
 
-JP's tool output is opaque.
-The `Outcome::Success { content: String }` type gives JP no way to distinguish
-between "here is the content of `main.rs`" and "check succeeded, no warnings."
-Both are strings.
-JP cannot:
+`jp_tool::Outcome::Success { content: String }` represents all tool output as an
+opaque string, so JP cannot distinguish between the contents of `main.rs` and a
+status message like `"check succeeded, no warnings."` As a result, JP cannot:
 
-- **Control resource formatting.** Each tool invents its own presentation.
-  Some wrap content in markdown fences, others use XML, others return plain
-  text.
-  There is no consistency, and JP cannot adapt formatting per-model or
-  per-configuration.
+- **Control resource formatting.** Each tool invents its own presentation,
+  wrapping content in Markdown fences, XML, or plain text.
+  JP cannot enforce consistent formatting or adapt it per model or
+  configuration.
 
-- **Reason about resource identity.** Without URIs, JP has no way to know that
-  two tool calls returned the same file, or that a tool returned a file already
-  provided as an attachment.
-  This blocks resource-level optimizations like deduplication.
+- **Reason about resource identity.** Without URIs, JP cannot tell when two tool
+  calls return the same file, or when a tool returns a file already provided as
+  an attachment.
+  This blocks resource-level optimizations such as deduplication.
 
-MCP tools already return typed content blocks with URIs, mimeTypes, and
-annotations — exactly the metadata JP needs.
-But JP collapses these into flat strings at the MCP boundary, discarding the
-structure:
+MCP tools already return typed content blocks with URIs, `mimeType`s, and
+annotations, but JP collapses them into a flat string at the MCP boundary:
 
 ```rust
 // From jp_llm/src/tool.rs — execute_mcp()
@@ -60,45 +55,39 @@ let content = result
     .join("\n\n");
 ```
 
-The problem isn't that tools lack structure — MCP tools already have it.
-The problem is that JP's internal model is a flat string, so all structure is
-lost regardless of source.
-Typed content blocks fix this.
-Tools return structured output with optional identity metadata (URIs,
-mimeTypes), and JP processes all tool responses — local, MCP, and builtin —
-through a single typed pipeline.
+Because JP's internal model is a flat string, structure is lost regardless of
+the tool's source.
+Replacing `Outcome` with typed content blocks lets tools return structured
+output with optional identity metadata (URIs and `mimeType`s), and lets JP
+process local, MCP, and builtin tool responses through a single typed pipeline.
 
 ### Why MCP's content model?
 
-MCP's `CallToolResult` defines typed content blocks (`text`, `resource`) with
-resource identity via URIs and mimeTypes.
-These are the primitives JP needs.
-If we designed our own, we would arrive at something ~90% identical.
+MCP's `CallToolResult` already defines `text` and `resource` content blocks
+identified by URIs and `mimeType`s.
+Designing a custom schema would produce something nearly identical.
 Adopting MCP's schema:
 
-- Avoids reinventing well-designed types.
-- Means MCP tool responses pass through without lossy conversion.
-- Gives the content model a stable, externally-maintained specification to
-  reference.
+- Avoids duplicating existing types.
+- Lets MCP tool responses pass through without lossy conversion.
+- Grounds the content model in a stable, externally maintained specification.
 
-This is not an attempt to make local tools into MCP servers.
-Local tools remain one-shot processes writing JSON to stdout.
-The transport is different; the content schema is shared.
+Local tools do not become MCP servers.
+They remain one-shot processes that write JSON to stdout; only the content
+schema is shared with MCP, not the transport.
 
-JP also has first-class support for **unstructured text output**.
-A local tool can be a quick shell script or a direct call to `fd` without any
-output processing.
-Raw stdout that isn't valid JSON is delivered to the LLM as-is.
-The trade-off is that unstructured output cannot participate in resource-level
-features like deduplication or JP-controlled formatting, because JP has no
-metadata to work with.
+JP also supports **unstructured text output** as a first-class path.
+A local tool can be a shell script or a direct call to `fd`: any stdout that is
+not valid JSON is delivered to the LLM as-is.
+Because unstructured output carries no metadata, it cannot participate in
+resource-level features such as deduplication or JP-controlled formatting.
 
 ## Design
 
 > [!TIP]
-> The `Resource` type and the MCP-compatible superset design principle that
-> governs its shape are defined in [RFD 065].
-> The `ContentBlock::Resource` variant wraps that type directly.
+> [RFD 065] defines the `Resource` type and the MCP-compatible superset
+> principle that governs its shape.
+> `ContentBlock::Resource` wraps that type directly.
 
 ### Response format
 
@@ -115,18 +104,17 @@ A tool's stdout is a JSON object with a `content` array of typed content blocks:
 }
 ```
 
-If the tool's stdout is not valid JSON, or does not contain a `content` array,
-JP treats the entire stdout as a single `text` block.
-This is the raw text fallback, and it is a permanent, supported path — not a
-deprecated compatibility mode.
+If stdout is not valid JSON or lacks a `content` array, JP treats the entire
+output as a single `text` block.
+This raw-text fallback is a permanent, supported path, not a deprecated
+compatibility mode.
 
 ### Content block types
 
 #### `text`
 
-Informative text output.
-JP passes it through to the LLM as-is.
-The tool owns the formatting.
+A `text` block carries informative text that the tool formats itself and JP
+passes to the LLM as-is:
 
 ```json
 {
@@ -145,16 +133,14 @@ Text blocks may carry an optional `mimeType` describing the format of the text:
 }
 ```
 
-This is a JP extension — MCP's `TextContent` has no mimeType — following the
-MCP-compatible superset principle from [RFD 065].
-MCP tools never set it, and absence means plain text.
-LLM delivery is unchanged either way: the text passes through as-is.
-The field exists to inform JP-side presentation of the block; as with
-annotations, JP defines it for type-level use but does not act on it initially.
+`mimeType` on `text` is a JP extension following the MCP-compatible superset
+principle from [RFD 065] (MCP's `TextContent` has no `mimeType`).
+MCP tools never set it, and omitting it means plain text.
+The field is defined for future JP-side presentation; JP does not act on it
+initially, and LLM delivery always passes the text through unchanged.
 
-Text blocks also support MCP's standard annotations (`audience`, `priority`,
-`lastModified`), matching MCP's `TextContent` schema — MCP defines annotations
-on every content type, not only resources:
+Matching MCP's `TextContent` schema, `text` blocks also accept standard MCP
+annotations (`audience`, `priority`, `lastModified`):
 
 ```json
 {
@@ -168,13 +154,13 @@ on every content type, not only resources:
 }
 ```
 
-As with resource blocks, JP defines the annotation types for type-level
-compatibility but does not act on them initially.
+JP defines the annotation types for MCP compatibility but does not act on them
+initially.
 
 #### `resource`
 
-Identified content with a URI and mimeType.
-JP owns formatting and may apply resource-level optimizations.
+A `resource` block carries content identified by a URI and `mimeType`.
+JP owns its formatting and can apply resource-level optimizations:
 
 ```json
 {
@@ -208,35 +194,26 @@ The `uri` field identifies the resource using standard URI schemes:
 
 The `mimeType` field tells JP how to format the content.
 For `text/rust`, JP wraps the content in a ` ```rs ` fenced code block.
-If the mimeType is unknown or absent, JP falls back to a plain code fence with
-no language tag.
+If `mimeType` is unknown or absent, JP falls back to a plain code fence with no
+language tag.
 
-MCP servers may also return `resource_link` blocks (URI without inline content).
-JP handles these through the MCP client's `resources/read` capability.
-Local tools cannot return `resource_link` blocks since they exit after
-responding and cannot serve follow-up fetches.
-Stateful local tools could in principle support this pattern (the process is
-still alive), but the interaction mechanism is not defined in this RFD.
-Tools that have content to share should embed it inline as a `resource` block.
+MCP servers may also return `resource_link` blocks (a URI without inline
+content), which JP resolves through the MCP client's `resources/read`
+capability.
+Local tools must embed content inline as a `resource` block instead: one-shot
+tools exit after responding and cannot serve follow-up fetches, and this RFD
+does not define a fetch mechanism for stateful local tools.
 
-Resource blocks support MCP's standard annotations (`audience`, `priority`,
-`lastModified`).
-These are optional.
-JP defines the annotation types for type-level compatibility with MCP but does
-not act on them initially.
-
-Local tools may also provide optional JP extension fields (`name`, `title`,
-`description`) for richer display metadata.
-These fields are `Option<T>` on the internal `Resource` type and default to
-`None` when absent from the JSON output (e.g., from MCP tools).
-See [RFD 065] for the full type definition and the MCP-compatible superset
-principle.
+Resource blocks also accept MCP's optional annotations (`audience`, `priority`,
+`lastModified`) and the optional JP extension fields (`name`, `title`,
+`description`) defined in [RFD 065].
+Extension fields are `Option<T>` on the internal `Resource` type and default to
+`None` when omitted (such as in MCP tool responses).
 
 ##### Tool-provided formatting
 
-By default, JP formats resource blocks based on mimeType.
-Tools that need custom presentation can provide a `formatted` field alongside
-the raw content:
+When a tool needs custom presentation instead of JP's default `mimeType`-based
+formatting, it can provide a `formatted` field alongside the raw content:
 
 ````json
 {
@@ -250,19 +227,16 @@ the raw content:
 }
 ````
 
-When `formatted` is present, JP uses it for LLM delivery but uses the raw
-`resource.text` (or `resource.blob`) for checksums and identity matching.
-This separates presentation from identity — tools can provide rich formatting
-without opting out of resource-level features like deduplication.
-
-When `formatted` is absent, JP formats the resource from the raw content using
-the mimeType-to-language mapping.
+JP delivers `formatted` to the LLM verbatim while still using `resource.text` or
+`resource.blob` for checksums and identity matching.
+Separating presentation from identity lets tools supply custom formatting
+without opting out of deduplication.
 
 #### `question`
 
-A request for input.
-Questions are content blocks, not a separate response type.
-A tool can return questions alongside other content:
+A `question` block requests input from the user or assistant.
+Because questions are content blocks rather than a separate response type, a
+tool can return them alongside other content:
 
 ```json
 {
@@ -298,30 +272,22 @@ A tool can return questions alongside other content:
 }
 ```
 
-In this example, the two resource blocks provide context for the question — the
-user (or LLM) can see what the tool has produced so far while deciding how to
-answer.
-Content blocks preceding a question are displayed above the terminal prompt (for
-user-targeted inquiries) or included in the request to the assistant (for
-LLM-targeted inquiries).
-The question's `text` field is a short label shown alongside the input — it
-should be a one-liner, not a formatted document.
-Supporting material (diffs, file contents, explanations) belongs in `text` or
-`resource` content blocks, not in the question text.
+Here, the two `resource` blocks provide context while the user or LLM decides
+how to answer.
+Content blocks preceding a question appear above the terminal prompt for
+user-targeted inquiries, or in the assistant request for LLM-targeted inquiries.
+The question's `text` field is a one-line prompt label shown next to the input
+field; supporting material (diffs, file contents, explanations) belongs in
+accompanying `text` or `resource` blocks.
 
 JP presents the question, collects the answer, and re-executes the tool with the
-accumulated answer.
-On re-execution, the tool returns its complete output (e.g., all four resource
-blocks).
-JP uses the final invocation's content as the tool call result.
-
-Every tool response is the complete answer for that invocation.
-JP does not stitch content across invocations.
-One-shot tools produce their full output on each execution.
-Stateful tools produce the response appropriate to the current `fetch`/`apply`
-call.
-Content blocks alongside questions serve as context during the inquiry flow but
-do not persist independently.
+accumulated answers.
+JP does not stitch content across invocations: each response is the complete
+output for that invocation, and content blocks returned alongside a question
+serve only as context during the inquiry.
+On re-execution, a one-shot tool returns its full output (for example, all four
+`resource` blocks), which becomes the tool call result; a stateful tool returns
+the response for the current `fetch` or `apply` call.
 
 ##### Question schema
 
@@ -346,12 +312,10 @@ Questions use JSON Schema to define the expected answer:
 }
 ```
 
-A tool may return multiple questions in a single response.
-They are presented in array order.
-Content blocks between questions serve as context for the question that follows
-them.
-Content blocks after the final question are rendered normally — JP displays all
-blocks in array order regardless of position relative to question blocks.
+A response may contain multiple questions.
+JP displays all blocks in array order: content blocks before a question provide
+context for that question, and content blocks after the final question render
+normally.
 
 JP maps common schema patterns to terminal prompts:
 
@@ -361,10 +325,10 @@ JP maps common schema patterns to terminal prompts:
 | `{ "type": "string", "enum": [...] }` | Select prompt   |
 | `{ "type": "string" }`                | Text input      |
 
-For complex schemas (nested objects, arrays, etc.) that don't map to a simple
-prompt, JP opens the user's editor with a JSON template matching the schema.
-The LLM path always works regardless of schema complexity — JP sends the schema
-and gets a conforming response.
+For complex schemas (nested objects, arrays) that do not map to a simple prompt,
+JP opens the user's editor with a JSON template matching the schema.
+LLM-targeted inquiries work with any schema, since JP sends the schema directly
+to the model.
 
 `jp_tool` provides an `AnswerType` convenience enum (`Boolean`, `Select`,
 `Text`) that generates the corresponding JSON Schema.
@@ -373,22 +337,19 @@ Tool authors can use either `AnswerType` or raw JSON Schema.
 ##### Relationship with MCP elicitation
 
 MCP's elicitation system (`elicitation/create`) serves the same purpose: the
-server asks the client for input via a JSON Schema form.
-JP normalizes both MCP elicitation requests and local tool `question` blocks
-into a single internal input-request type.
-MCP elicitation requests pass through with minimal transformation.
-Local tool questions are converted from `AnswerType` or raw schema into the same
-internal type.
+server asks the client for input using a JSON Schema form.
+JP normalizes MCP elicitation requests and local tool `question` blocks (whether
+built from `AnswerType` or raw JSON Schema) into a single internal
+`InputRequest` type.
 
-JP extends MCP's user-only elicitation model with assistant-targeted inquiry —
-routing questions to the LLM instead of the user.
-This is a JP-side annotation from tool configuration, not a field the tool sets.
+While MCP elicitation targets only the user, JP also supports assistant-targeted
+inquiries that route questions to the LLM.
+Target selection comes from JP's tool configuration, not from the tool output.
 
 ### Error responses
 
-Errors use `isError: true`, following MCP's convention.
-The tool sets this flag in its JSON output.
-The content blocks carry the error message:
+Following MCP's convention, a tool reports an error by setting `isError: true`
+in its JSON output and placing the error message in `content`:
 
 ```json
 {
@@ -461,10 +422,9 @@ The `computer.jp/status` field uses the following states (see [RFD 009]):
 | `stopped` | Tool has finished (content is the final |
 |           | result)                                 |
 
-When `computer.jp/status` is absent, the response is implicitly `stopped` — the
-tool completed in a single invocation.
-This means one-shot tools never need to set `status`.
-The stateful envelope is purely opt-in for tools that declare stateful support.
+When `computer.jp/status` is omitted, the status defaults to `stopped`
+(completed in a single invocation), so one-shot tools never need to set it.
+The stateful envelope is opt-in for tools that declare stateful support.
 
 A `waiting` response combines content and questions naturally:
 
@@ -504,22 +464,18 @@ A `waiting` response combines content and questions naturally:
 ```
 
 Each stateful interaction produces its own `ToolCallResponse` for the LLM.
-The tool process manages its own state — JP relays responses, it does not
-stitch them together.
-When the tool returns `stopped`, the content blocks in that final response are
-the tool's result.
+The tool process manages its own state while JP relays responses without
+stitching them together.
+When the tool returns `stopped`, that response's content blocks are the final
+result (or the final error if `isError: true`).
 
-A `stopped` response with `isError: true` signals that the tool finished with an
-error.
-
-The stateful protocol's execution model (handle registry, spawn/fetch/apply/
-abort actions, one-shot wrapping) is out of scope for this RFD.
-This RFD defines the content format; the lifecycle mechanics are a separate
-concern defined in [RFD 009].
+This RFD defines only the response content format; [RFD 009] defines the
+stateful execution model (handle registry, `spawn`/`fetch`/`apply`/`abort`
+actions, and one-shot wrapping).
 
 ### Internal representation
 
-JP's internal type for tool results, defined in `jp_tool`:
+`jp_tool` defines the contract types shared between tool authors and JP:
 
 ```rust
 /// A typed content block from a tool response.
@@ -556,58 +512,49 @@ pub struct InputRequest {
 }
 ```
 
-`ContentBlock` lives in `jp_tool` because it is the contract type shared between
-tool authors and JP.
-The `Resource` type (defined in [RFD 065]) carries both MCP-standard fields
-(`uri`, `content`, `mime_type`, `annotations`) and optional JP extensions
-(`name`, `title`, `description`, `formatted`).
-MCP tool responses populate only the MCP fields; local tools may populate the
-extensions.
-`ResourceContent` is defined alongside `Resource` — see [RFD 065] for the full
-type definition.
+`Resource` and `ResourceContent` (defined in [RFD 065]) carry the MCP-standard
+fields (`uri`, `content`, `mime_type`, `annotations`) alongside optional JP
+extensions (`name`, `title`, `description`, `formatted`).
+MCP tool responses populate only the MCP fields; local tools may also populate
+the extensions.
 
 All three execution paths (`execute_local`, `execute_mcp`, `execute_builtin`)
-produce `Vec<ContentBlock>`.
-The formatting step that converts content blocks into the final string delivered
-to the LLM is shared across all paths.
+produce `Vec<ContentBlock>` and share the formatting step that renders blocks
+for the LLM.
 
 ### `ToolCallResponse` migration
 
-The current `ToolCallResponse` in `jp_conversation` carries `Result<String,
-String>`.
-This changes to carry `Vec<ContentBlock>` internally (along with an `is_error`
-flag).
+`ToolCallResponse` in `jp_conversation` changes from `Result<String, String>` to
+`Vec<ContentBlock>` plus an `is_error` flag.
 
-Backward compatibility with stored conversations is handled through
-`ToolCallResponse`'s existing custom `Deserialize` impl.
-The deserializer detects the old format (flat `content` + `is_error` fields) and
-converts it to a single `ContentBlock::Text` block.
-On serialization, the new format is written.
-Old conversations remain readable; re-saved conversations use the new format.
+`ToolCallResponse`'s custom `Deserialize` implementation preserves backward
+compatibility with stored conversations: it detects the legacy flat `content`
+and `is_error` fields and converts them into a single `ContentBlock::Text`
+block.
+Serialization always writes the block format, so existing conversations remain
+readable and upgrade when re-saved.
 
-The migration carries JP's own consumers of the serialized shape with it: the
-terminal result renderer and the serve-web plugin become block-aware, and
-`inline_results` applies uniformly to a response's blocks.
+Downstream consumers of `ToolCallResponse`, including the terminal result
+renderer and the `serve-web` plugin, become block-aware, and `inline_results`
+applies uniformly across a response's blocks.
 
 ### Response parsing
 
-`parse_command_output` in `jp_llm/src/tool.rs` is the single parsing point for
-local tool stdout.
-The new parsing order:
+`parse_command_output` in `jp_llm/src/tool.rs` is the single entry point for
+parsing local tool stdout:
 
-1. Try JSON with `content` array → parse typed content blocks (including any
-   `question` blocks and optional `_meta."computer.jp/status"` envelope).
-2. Fall back to raw stdout as a single `ContentBlock::Text`.
+1. If stdout is JSON with a `content` array, parse typed content blocks
+   (including `question` blocks and any `_meta."computer.jp/status"` field).
+2. Otherwise, wrap raw stdout in a single `ContentBlock::Text`.
 
-`Outcome` is not preserved as a parsing target.
-Since JP is the only consumer of the `jp_tool` API, all tools are migrated in
-one sweep when the new types land.
-There is no incremental migration period.
+`Outcome` is removed rather than kept as a legacy parsing target.
+Because JP is the sole consumer of `jp_tool`, all tools migrate in a single
+change.
 
 ### JP-controlled resource formatting
 
-When a tool returns `resource` blocks without a `formatted` field, JP formats
-them for the LLM.
+When a `resource` block omits `formatted`, JP renders it for the LLM using a
+conventional `mimeType`-to-language mapping.
 For a resource with `mimeType: "text/rust"`:
 
 ````txt
@@ -618,33 +565,22 @@ fn main() {
 ```
 ````
 
-JP may prepend metadata (filename, line range) or adapt the format based on
-model preferences or conversation configuration.
-The mimeType-to-language mapping follows established conventions.
-
-When a tool provides a `formatted` field, JP uses it verbatim for LLM delivery.
-The raw content in `resource.text`/`resource.blob` is still used for checksums
-and identity matching.
-
-For `text` blocks, JP passes the text through as-is.
-The tool owns the formatting of informative output.
+JP may also prepend metadata (filename, line range) or adapt the format to model
+preferences and conversation configuration.
 
 ## Drawbacks
 
-**mimeType-to-language mapping.** JP needs a mapping from MIME types to code
-fence language tags.
-This is a well-understood problem with existing libraries, but it is a new
-dependency and maintenance surface.
+**`mimeType`-to-language mapping.** Mapping MIME types to code-fence language
+tags is a solved problem with existing libraries, but it adds a dependency and
+maintenance surface.
 
-**`ToolCallResponse` format change.** Stored conversations written with the old
-format need to be readable.
-The custom deserializer handles this, but it is added complexity.
+**`ToolCallResponse` format change.** Supporting stored conversations written in
+the legacy flat format requires keeping a custom deserializer.
 
-**Questions as content blocks add processing complexity.** JP must scan the
-content array for `question` blocks to decide whether to trigger the inquiry
-flow.
-This is more complex than the current dedicated `NeedsInput` variant, but the
-composability gains (questions alongside content) justify it.
+**Scanning for `question` blocks.** JP must scan the `content` array for
+`question` blocks to trigger the inquiry flow, which is more complex than
+matching a dedicated `NeedsInput` variant.
+Returning context alongside questions justifies the cost.
 
 ## Alternatives
 
@@ -652,138 +588,116 @@ composability gains (questions alongside content) justify it.
 
 Add `Outcome::Resources { items: Vec<Resource> }` alongside `Success`.
 
-**Rejected because:** This creates a JP-specific resource model that duplicates
-what MCP has already standardized.
-It also doesn't address the MCP metadata loss — `execute_mcp` would still need
-separate handling.
+**Rejected because:** This duplicates MCP's resource model with a JP-specific
+one and leaves `execute_mcp` requiring separate handling.
 
 ### Add optional metadata fields to `Outcome::Success`
 
 Keep the existing format but let tools annotate output with resource identifiers
 and checksums.
 
-**Rejected because:** It bolts resource semantics onto an opaque string.
-JP still can't format resources, can't decompose multi-resource responses, and
-tools still own presentation.
+**Rejected because:** Attaching metadata to an opaque string still leaves
+formatting to individual tools and cannot decompose multi-resource responses.
 
 ### Make local tools full MCP servers
 
-Instead of adopting just the content model, make every local tool implement the
-full MCP protocol (JSON-RPC, initialize, tools/list, tools/call).
+Instead of adopting only the content model, require every local tool to
+implement the full MCP protocol (JSON-RPC, `initialize`, `tools/list`,
+`tools/call`).
 
-**Rejected because:** The authoring burden is disproportionate.
-Writing a local tool today is trivially simple — read CLI args, write JSON,
-exit.
-Full MCP server implementation requires a JSON-RPC stack, lifecycle management,
+**Rejected because:** A local tool is a simple process that reads CLI arguments,
+writes JSON, and exits.
+Implementing a full MCP server requires a JSON-RPC stack, lifecycle management,
 and an SDK.
-The content model is the valuable part; the transport protocol is not worth the
-cost for one-shot tools.
+The content model provides the value; the transport protocol is unnecessary
+overhead for one-shot tools.
 
 ### Inquiry as a separate response type
 
-Have `question` be a top-level response field rather than a content block type.
+Represent `question` as a top-level response field rather than a content block
+type.
 
-**Rejected because:** It prevents tools from returning content alongside
-questions.
-A tool that has produced partial results and needs input before continuing must
-be able to express both in one response.
-Making `question` a content block enables natural composition: "here are 3
-resource blocks I'm done with, plus a question about the 4th."
+**Rejected because:** A tool that has produced partial results and needs input
+before continuing must be able to return both in one response (for example,
+three completed `resource` blocks followed by a `question` about the fourth).
 
 ## Non-Goals
 
-- **Resource deduplication.** Using resource URIs and content to avoid redundant
-  delivery to the LLM.
-  This RFD establishes the content model that makes deduplication possible, but
-  the deduplication logic itself is a separate concern.
+- **Resource deduplication.** This RFD establishes the resource identity
+  metadata that deduplication requires, but deduplication logic itself is a
+  separate concern.
 
-- **Mandating resource blocks.** Tools are free to return `text` blocks for any
-  output, or to skip JSON entirely and write plain text to stdout.
-  The `resource` type is available for tools that return identified content; it
-  is not required.
+- **Mandating resource blocks.** Tools may return `text` blocks for any output
+  or skip JSON entirely and write plain text to stdout.
+  `resource` blocks are optional.
 
-- **Prescribing per-tool migration.** This RFD defines the protocol.
-  How specific tools adopt it — and whether they return `resource` or `text`
-  blocks is decided per-tool during implementation.
+- **Prescribing per-tool migration.** This RFD defines the protocol; whether an
+  individual tool returns `resource` or `text` blocks is decided per tool during
+  implementation.
 
-- **Stateful tool execution model.** The handle registry, spawn/fetch/apply/
-  abort actions, and one-shot wrapping are separate concerns.
-  This RFD defines the content format that stateful tools use in their
+- **Stateful tool execution model.** The handle registry,
+  `spawn`/`fetch`/`apply`/`abort` actions, and one-shot wrapping are separate
+  concerns.
+  This RFD defines only the content format that stateful tools use in their
   responses.
 
-- **Image and audio blocks.** MCP supports `image` and `audio` content block
-  types.
-  JP does not use these today.
-  They can be added later since the content block model is extensible.
+- **Image and audio blocks.** MCP defines `image` and `audio` content block
+  types, which JP does not use today.
+  The content block enum can be extended with them later.
 
 ## Risks and Open Questions
 
-### mimeType inference
+### `mimeType` inference
 
-For file-reading tools, the mimeType can be inferred from the file extension.
-For HTTP tools, it comes from the `Content-Type` header.
-For other tools, the mimeType may not be obvious.
-The fallback is no mimeType, which means JP uses a plain code fence.
+File-reading tools can infer `mimeType` from the file extension, and HTTP tools
+can read the `Content-Type` header.
+When a tool has no obvious `mimeType`, omitting the field falls back to a plain
+code fence.
 
 ### URI canonicalization
 
-File URIs need to be canonical for cross-tool and cross-attachment matching.
-`file:///project/./src/../src/main.rs` and `file:///project/src/main.rs` must
-resolve to the same identity.
-JP canonicalizes URIs after receiving them.
-The rules need to be documented: resolve `.` and `..`, normalize trailing
-slashes, ensure paths are relative to the project root.
+Cross-tool and cross-attachment matching requires canonical file URIs so that
+`file:///project/./src/../src/main.rs` and `file:///project/src/main.rs` resolve
+to the same identity.
+JP canonicalizes URIs on receipt by resolving `.` and `..`, normalizing trailing
+slashes, and resolving paths relative to the project root.
 
 ### Content block ordering
 
-When a tool returns multiple content blocks, JP preserves the order from the
-tool's response.
-For mixed text and resource blocks, the tool may intend a specific order (e.g.,
-a text explanation followed by a resource).
-JP should not reorder blocks.
+JP preserves the block order from the tool's response, since a tool returning
+mixed `text` and `resource` blocks may rely on a specific sequence (such as an
+explanation followed by a resource).
 
 ### Malformed content blocks
 
-If a local tool returns JSON with a `content` array but individual blocks are
-malformed (e.g., a `resource` block missing `uri`, or an unknown `type` value),
-JP should log a warning and skip the malformed block rather than falling through
-to raw-stdout parsing.
-A tool that produces a valid `content` array is clearly trying to use the new
-format — a silent fallback to raw text would be a confusing failure mode.
+If a local tool returns JSON with a `content` array containing malformed entries
+(such as a `resource` block missing `uri` or an unknown `type` value), JP logs a
+warning and skips the malformed block rather than falling back to raw-stdout
+parsing.
+A response with a valid `content` array is opting into the structured format, so
+falling back to raw text would obscure the error.
 
 ### Content alongside questions in one-shot tools
 
-When a one-shot tool returns content blocks alongside questions, the content
-serves as context for the inquiry — the user or LLM can see what the tool has
-produced while deciding how to answer.
-On re-execution with the answer, the tool produces its complete output
-(including any content that was previously shown alongside the question).
-JP uses the final invocation's response as the tool call result.
-
-This means one-shot tools must re-emit all content on each invocation.
-This is natural for stateless processes — they compute their full output each
-time.
-The content-alongside-questions pattern is still valuable because it shows the
-user/LLM relevant context during the inquiry, even though JP doesn't persist it
-across invocations.
+Because JP uses only the final invocation's response as the tool call result, a
+one-shot tool that returns context blocks alongside a `question` must re-emit
+its full output when re-executed with the answer.
+This fits stateless processes, which recompute their output on each run, while
+still giving the user or LLM context during the inquiry.
 
 ### Complex JSON Schema questions in the terminal
 
-The JSON Schema > terminal prompt mapping covers simple cases (`boolean`,
-`string`, `enum`).
-For complex schemas, JP falls back to opening the user's editor with a JSON
+Direct terminal prompts cover simple schemas (`boolean`, `string`, `enum`),
+while complex schemas fall back to opening the user's editor with a JSON
 template.
-This is functional but not a great UX for multi-field forms.
-We may want to invest in a richer terminal form renderer later, but the editor
-fallback is sufficient for now.
+The editor fallback is awkward for multi-field forms, and a richer terminal form
+renderer may be worth adding later.
 
 ### Interaction with conversation compaction
 
-[RFD 036] describes conversation compaction.
-When compaction drops old tool responses, it should retain the resource metadata
-(URIs, mimeTypes) even if the content is dropped, so that future resource-level
-reasoning remains possible.
-The specifics depend on the compaction design.
+When conversation compaction ([RFD 036]) drops old tool response content, it
+should retain resource metadata (URIs and `mimeType`s) so resource-level
+reasoning remains possible across compacted turns.
 
 ## Implementation Plan
 
@@ -796,79 +710,70 @@ backward-compatible deserialization.
 Update `ExecutionOutcome` in `jp_llm` to carry `Vec<ContentBlock>` instead of
 `Result<String, String>`.
 
-Can be merged independently.
-No tool-side changes yet.
+This phase requires no tool-side changes and can be merged independently.
 
 ### Phase 2: MCP tool passthrough
 
 Update `execute_mcp` to preserve typed content blocks from MCP tools instead of
-collapsing to strings.
-Convert `rmcp` types to `ContentBlock` at the MCP boundary.
+collapsing them to strings, converting `rmcp` types to `ContentBlock` at the MCP
+boundary.
 
-Can be merged independently.
-MCP tools immediately benefit from preserved metadata.
+This phase can be merged independently and immediately preserves metadata from
+MCP tools.
 
 ### Phase 3: Resource formatting
 
-Implement the mimeType-to-language mapping and the formatting layer that wraps
-resource content in code fences (or other presentation).
-Support the `formatted` field override.
-This replaces the per-tool formatting currently embedded in each tool's
-implementation.
+Implement the `mimeType`-to-language mapping and the formatting layer that wraps
+resource content in code fences, including the `formatted` field override.
+This replaces the per-tool formatting embedded in individual tools.
 
-Can be merged independently.
-Initially applies only to MCP tool responses.
+This phase can be merged independently and initially applies to MCP tool
+responses.
 
 ### Phase 4: Local tool parsing and migration
 
-Update `parse_command_output` to parse the content block format.
-Migrate all tools in `.config/jp/tools/` and builtin tools to return the new
-format.
-Remove `Outcome` from `jp_tool`.
+Update `parse_command_output` to parse the content block format, migrate all
+tools in `.config/jp/tools/` and builtin tools to return the new format, and
+remove `Outcome` from `jp_tool`.
 
-This is a single coordinated change — all tools migrate together since JP is
-the only consumer.
+Because JP is the only consumer of `jp_tool`, all tools migrate in a single
+coordinated change.
 
 ### Phase 5: Question blocks and inquiry migration
 
 Update the inquiry system to detect `question` content blocks and trigger the
 input flow.
-Implement the JSON Schema → terminal prompt mapping (boolean, select, text)
-with editor fallback for complex schemas.
-Migrate existing `NeedsInput` tools to use `question` blocks.
+Implement the JSON Schema-to-terminal prompt mapping (`boolean`, `select`,
+`text`) with the editor fallback for complex schemas, and migrate existing
+`NeedsInput` tools to `question` blocks.
 
-Depends on Phase 4.
+This phase depends on Phase 4.
 
 ### Phase 6 (deferred): Stateful response envelope
 
-Add `_meta."computer.jp/status"` field parsing.
-Integrate with the handle registry and lifecycle management for long-running
-tools.
-This phase bridges the content format (this RFD) with the stateful execution
-model.
+Parse `_meta."computer.jp/status"` and integrate it with the handle registry and
+lifecycle management for long-running tools, bridging this RFD's content format
+with the stateful execution model.
 
-Depends on Phase 5 and [RFD 009], so it lands whenever the stateful tool
-protocol does.
-It is the only phase here that touches [RFD 009]: the status field is optional
-and absent means `stopped`, so every one-shot tool — which is all of them today
-— works through Phases 1-5 without it.
+This phase depends on Phase 5 and [RFD 009].
+Because `_meta."computer.jp/status"` is optional and defaults to `stopped`, all
+one-shot tools work through Phases 1 to 5 without it.
 
 ## References
 
-- [MCP Tools Specification (2025-11-25)] — defines `CallToolResult` content
+- [MCP Tools Specification (2025-11-25)]: Defines `CallToolResult` content
   blocks.
-- [MCP Resources Specification (2025-11-25)] — defines resource URIs, content
+- [MCP Resources Specification (2025-11-25)]: Defines resource URIs, content
   types, and annotations.
-- [MCP Tasks Specification (2025-11-25)] — defines the task lifecycle model
+- [MCP Tasks Specification (2025-11-25)]: Defines the task lifecycle model
   relevant to stateful tool support.
-- [RFD 009: Stateful Tool Protocol][RFD 009] — defines the stateful tool
-  execution model.
-  This RFD defines the content format used in stateful responses.
-- [RFD 036: Conversation Compaction][RFD 036] — relevant for how resource
-  metadata interacts with compacted conversations.
-- [RFD 065: Typed Resource Model for Attachments][RFD 065] — defines the
-  `Resource` type that `ContentBlock::Resource` wraps, and the MCP-compatible
-  superset design principle governing resource type shapes.
+- [RFD 009: Stateful Tool Protocol][RFD 009]: Defines the stateful tool
+  execution model whose response content format is specified here.
+- [RFD 036: Conversation Compaction][RFD 036]: Defines conversation compaction,
+  which interacts with retained resource metadata.
+- [RFD 065: Typed Resource Model for Attachments][RFD 065]: Defines the
+  `Resource` type wrapped by `ContentBlock::Resource` and the MCP-compatible
+  superset principle.
 
 [MCP Resources Specification (2025-11-25)]: https://modelcontextprotocol.io/specification/2025-11-25/server/resources
 [MCP Tasks Specification (2025-11-25)]: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks
