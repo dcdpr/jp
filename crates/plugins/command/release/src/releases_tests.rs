@@ -28,10 +28,13 @@ fn line(branch: &str, started: &[&str]) -> Line {
     }
 }
 
-/// The releases `tagged` finalized, and `lines` holds.
+/// The releases `tagged` finalized, their tags on `origin`, and `lines` holds.
 fn releases(tagged: &[&str], lines: Vec<Line>) -> Releases {
+    let tagged: BTreeSet<Version> = tagged.iter().map(|text| version(text)).collect();
+
     Releases {
-        tagged: tagged.iter().map(|text| version(text)).collect(),
+        published: tagged.clone(),
+        tagged,
         lines: lines
             .into_iter()
             .map(|line| (line_of(&line.branch).unwrap(), line))
@@ -50,10 +53,34 @@ fn a_release_branch_is_named_after_its_major_and_minor_version() {
         "release/03.1",
         "release/0",
         "release/x.y",
+        "release-notes/v0.3.0",
         "main",
     ] {
         assert_eq!(line_of(name), None, "{name}");
     }
+}
+
+#[test]
+fn a_releases_notes_branch_and_tag_are_named_after_its_version() {
+    assert_eq!(notes_branch(&version("0.3.1")), "release-notes/v0.3.1");
+    assert_eq!(tag(&version("0.3.1")), "v0.3.1");
+}
+
+#[test]
+fn a_branch_is_unpushed_when_this_repository_has_commits_of_it_origin_lacks() {
+    let unpushed: Vec<Standing> = [
+        Standing::Local,
+        Standing::Remote,
+        Standing::Published,
+        Standing::Ahead,
+        Standing::Behind,
+        Standing::Diverged,
+    ]
+    .into_iter()
+    .filter(|standing| standing.unpushed())
+    .collect();
+
+    assert_eq!(unpushed, [Standing::Local, Standing::Ahead]);
 }
 
 #[test]
@@ -66,8 +93,12 @@ fn tags_name_a_v_and_a_version_that_is_no_pre_release() {
         "eeee\trefs/tags/0.3.0\n",
     );
 
+    let tags = parse_tags(listing);
+
+    assert_eq!(tags.len(), 5);
+    assert_eq!(tags["v0.1.0"], "aaaa");
     assert_eq!(
-        parse_tags(listing),
+        versions(tags.keys()),
         BTreeSet::from([version("0.1.0"), version("0.2.0")])
     );
 }
@@ -269,6 +300,7 @@ fn a_requested_version_the_cut_cannot_start_is_refused() {
 fn a_cut_onto_an_existing_release_branch_is_refused() {
     let releases = Releases {
         tagged: BTreeSet::new(),
+        published: BTreeSet::new(),
         lines: BTreeMap::from([((0, 4), line("release/0.4", &[]))]),
     };
 
@@ -348,6 +380,22 @@ fn finalize_tags_the_release_in_preparation() {
     assert_eq!(
         releases.finalize_target(&version("0.3.2")),
         Err("0.3.1, not 0.3.2, is in preparation on release/0.3.".to_owned())
+    );
+}
+
+/// A tag only this repository has finalizes the release once it is pushed.
+#[test]
+fn finalize_points_at_a_tag_made_here_to_publish() {
+    let mut releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0", "0.3.1"])]);
+    releases.tagged.insert(version("0.3.1"));
+
+    assert_eq!(
+        releases.finalize_target(&version("0.3.1")),
+        Err(
+            "0.3.1 is tagged in this repository already; publish the tag with `git push origin \
+             v0.3.1`."
+                .to_owned()
+        )
     );
 }
 

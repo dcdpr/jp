@@ -5,7 +5,6 @@
 //! fragments_dir = "changelog.d"
 //! forge = "github"
 //! bump = "cargo set-version --package jp_cli {version}"
-//! change_request_labels = ["no-changelog"]
 //! cadence = "2w"
 //!
 //! [plugins.command.release.options.headings]
@@ -19,7 +18,7 @@
 //!
 //! `forge` is where change requests are reviewed, `github`, `gitlab`, or
 //! `none`, which decides how release notes credit them and where the credits
-//! link.
+//! link; `jp release` itself never talks to it.
 //! Unset, it is read from git's `origin` remote: `github` for github.com,
 //! `gitlab` for gitlab.com, and `none` for any other host.
 //! `headings` renames a type's section of the release notes; a type it doesn't
@@ -29,8 +28,6 @@
 //! it, run in the workspace root with `{version}` replaced by the new version.
 //! It is split into words as a shell splits them, but runs without a shell.
 //! Unset, a version lives only in its tag.
-//! `change_request_labels` lists the labels the change requests `jp release
-//! cut` and `jp release pick` open carry, none by default.
 //!
 //! `cadence` is how long after a minor or major release is cut the next one is
 //! due, which `jp release due` reports: a duration such as `2w`, `10d`, or
@@ -54,6 +51,9 @@ const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
 /// What `bump` writes where the new version goes.
 const VERSION: &str = "{version}";
 
+/// The setting `bump` is read from, as errors name it.
+pub(crate) const BUMP_KEY: &str = "plugins.command.release.options.bump";
+
 /// The cadence, when `cadence` isn't set, as configuration writes it and in
 /// seconds.
 const DEFAULT_CADENCE: (&str, u64) = ("2w", 14 * 24 * 60 * 60);
@@ -75,9 +75,6 @@ pub(crate) struct Options {
     /// The command that writes a new version where the project keeps it.
     pub bump: Option<Bump>,
 
-    /// The labels the change requests `cut` and `pick` open carry.
-    pub change_request_labels: Vec<String>,
-
     /// How long after a minor or major release is cut the next one is due.
     pub cadence: Cadence,
 }
@@ -89,7 +86,6 @@ impl Default for Options {
             forge: None,
             headings: Headings::default(),
             bump: None,
-            change_request_labels: vec![],
             cadence: Cadence::default(),
         }
     }
@@ -157,16 +153,14 @@ impl Bump {
     ///
     /// The error says what is wrong with it.
     fn parse(command: &str) -> Result<Self, String> {
-        let words = shlex::split(command).ok_or(
-            "`plugins.command.release.options.bump` can't be split into words; check its quotes.",
-        )?;
+        let words = shlex::split(command)
+            .ok_or_else(|| format!("`{BUMP_KEY}` can't be split into words; check its quotes."))?;
         if words.is_empty() {
-            return Err("`plugins.command.release.options.bump` is empty.".to_owned());
+            return Err(format!("`{BUMP_KEY}` is empty."));
         }
         if !words.iter().any(|word| word.contains(VERSION)) {
             return Err(format!(
-                "`plugins.command.release.options.bump` names no `{VERSION}`, so it couldn't \
-                 write the new version."
+                "`{BUMP_KEY}` names no `{VERSION}`, so it couldn't write the new version."
             ));
         }
 
@@ -195,7 +189,6 @@ struct Settings {
     forge: Option<String>,
     headings: BTreeMap<String, String>,
     bump: Option<String>,
-    change_request_labels: Vec<String>,
     cadence: Option<String>,
 }
 
@@ -206,7 +199,6 @@ impl Default for Settings {
             forge: None,
             headings: BTreeMap::new(),
             bump: None,
-            change_request_labels: vec![],
             cadence: None,
         }
     }
@@ -247,20 +239,6 @@ impl Options {
 
         let bump = settings.bump.as_deref().map(Bump::parse).transpose()?;
 
-        let mut change_request_labels = vec![];
-        for label in &settings.change_request_labels {
-            let label = label.trim();
-            if label.is_empty() {
-                return Err(
-                    "`plugins.command.release.options.change_request_labels` lists an empty label."
-                        .to_owned(),
-                );
-            }
-            if !change_request_labels.iter().any(|known| known == label) {
-                change_request_labels.push(label.to_owned());
-            }
-        }
-
         let cadence = settings
             .cadence
             .as_deref()
@@ -273,7 +251,6 @@ impl Options {
             forge,
             headings,
             bump,
-            change_request_labels,
             cadence,
         })
     }

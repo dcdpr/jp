@@ -813,7 +813,7 @@ fn due_says_whether_the_next_release_is_due_and_exits_1_when_it_is_not() {
 
     let shell = fixture.shell();
     let options = Options::default();
-    let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
     cut::cut(&pipeline, None).unwrap();
 
     let messages = command(fixture.root(), &["due"], &[]);

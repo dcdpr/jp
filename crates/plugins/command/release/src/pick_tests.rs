@@ -1,5 +1,6 @@
 use std::slice;
 
+use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
@@ -25,8 +26,8 @@ fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// A workspace whose release 0.1.0 was cut from a fix, its notes' change
-/// request left open.
+/// A workspace whose release 0.1.0 was cut here from a fix, nothing of it
+/// published.
 fn cut_0_1_0() -> Fixture {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -52,19 +53,17 @@ fn run_with(
     command: impl FnOnce(&Pipeline<'_>) -> Result<String, String>,
 ) -> Result<String, String> {
     let shell = fixture.shell();
-    let pipeline = Pipeline::new(&shell, fixture.root(), options, None).unwrap();
+    let pipeline = Pipeline::new(&shell, fixture.root(), options).unwrap();
 
     command(&pipeline)
 }
 
-/// A workspace on GitLab whose release 0.1.0 is tagged, and the hash of a fix
-/// merged since through merge request `!5`.
-///
-/// `origin` takes push options, as GitLab does.
+/// A workspace on GitLab whose release 0.1.0 is tagged and published, and the
+/// hash of a fix merged since through merge request `!5`.
 fn on_gitlab_with_a_fix() -> (Fixture, String) {
     let fixture = cut_0_1_0();
-    fixture.origin_git(&["config", "receive.advertisePushOptions", "true"]);
     run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
+    fixture.publish(&["release/0.1", "release-notes/v0.1.0", "v0.1.0"]);
     fixture.write("src/fix.rs", "// A fix.\n");
     fixture.fragment("fix", "fixed", "A fix.");
     let hash =
@@ -85,15 +84,6 @@ fn change(fixture: &Fixture, path: &str, slug: &str, message: &str) -> String {
     hash
 }
 
-/// The branches `origin` has.
-fn branches(fixture: &Fixture) -> Vec<String> {
-    fixture
-        .origin_git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"])
-        .lines()
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
 /// The worktree a stopped pick kept.
 fn stopped(fixture: &Fixture) -> Utf8PathBuf {
     let state = fs::read_to_string(fixture.root().join(".git").join(STOPPED)).unwrap();
@@ -102,30 +92,31 @@ fn stopped(fixture: &Fixture) -> Utf8PathBuf {
     stopped.worktree
 }
 
+/// What a pick that picked one commit and filed one fragment into 0.1.0 says.
+const PICKED_AND_FILED: &str =
+    "Picked 1 commit onto release/0.1 for release 0.1.0.\nFiled 1 fragment into \
+     changelog.d/0.1.0/ on release-notes/v0.1.0.\n\nNothing is published yet. Publish them \
+     with:\n\n    git push origin release/0.1 release-notes/v0.1.0\n\nthen open a pull request \
+     from release-notes/v0.1.0 into main, unless one is open from it already.\n";
+
 #[test]
-fn a_pick_into_the_release_in_preparation_moves_its_fragment() {
+fn a_pick_files_its_fragment_on_the_notes_branch_with_main_merged_in() {
     let fixture = cut_0_1_0();
+    let notes = fixture.hash("release-notes/v0.1.0");
     let hash = change(
         &fixture,
         "src/model.rs",
         "model",
         "feat: Show the model (#2)",
     );
-    let short = &hash[..7];
 
     let said = run(&fixture, |pipeline| {
-        pick(pipeline, &version("0.1.0"), &[short.to_owned()])
+        pick(pipeline, &version("0.1.0"), &[hash[..7].to_owned()])
     })
     .unwrap();
 
-    assert_eq!(
-        said,
-        format!(
-            "Picked 1 commit onto release/0.1 for release 0.1.0, and pushed it.\nPushed \
-             release-pick/v0.1.0-{short}, which files 1 fragment into changelog.d/0.1.0/.\nMerge \
-             release-pick/v0.1.0-{short} into main to file them.\n"
-        )
-    );
+    assert_eq!(said, PICKED_AND_FILED);
+    assert_eq!(fixture.origin_branches(), ["main"]);
 
     // The code, picked without its fragment.
     assert!(
@@ -136,14 +127,11 @@ fn a_pick_into_the_release_in_preparation_moves_its_fragment() {
     assert!(fixture.show("release/0.1:src/model.rs").is_some());
     assert_eq!(fixture.show("release/0.1:changelog.d"), None);
 
-    // The fragment, moved on a branch from `main`.
-    let branch = format!("release-pick/v0.1.0-{short}");
-    assert_eq!(
-        fixture
-            .origin_git(&["rev-parse", &format!("{branch}^")])
-            .trim(),
-        hash
-    );
+    // The fragment, moved on the notes branch once `main` is merged into it,
+    // `main` first.
+    let branch = "release-notes/v0.1.0";
+    assert_eq!(fixture.hash(&format!("{branch}^^1")), hash);
+    assert_eq!(fixture.hash(&format!("{branch}^^2")), notes);
     assert_eq!(
         fixture.show(&format!("{branch}:changelog.d/0.1.0/model.fixed.md")),
         Some("feat: Show the model (#2)\n".to_owned())
@@ -152,14 +140,90 @@ fn a_pick_into_the_release_in_preparation_moves_its_fragment() {
         fixture.show(&format!("{branch}:changelog.d/model.fixed.md")),
         None
     );
+    assert!(
+        fixture
+            .show(&format!("{branch}:changelog.d/0.1.0/retry.fixed.md"))
+            .is_some()
+    );
+    assert!(fixture.message(branch).starts_with(&format!(
+        "chore(release): Pick {} into release 0.1.0\n",
+        &hash[..7]
+    )));
     assert_eq!(fixture.git(&["worktree", "list"]).lines().count(), 1);
 }
 
-/// The fragment of a picked commit waits for the pick's change request, so the
+/// Once the notes branch's pull request has merged, a later pick's notes start
+/// from what merged, so a new pull request from the branch shows only them.
+#[test]
+fn a_pick_after_the_notes_merged_files_only_its_own_fragment() {
+    let fixture = cut_0_1_0();
+    fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#3)");
+    let hash = change(
+        &fixture,
+        "src/model.rs",
+        "model",
+        "feat: Show the model (#4)",
+    );
+
+    let said = run(&fixture, |pipeline| {
+        pick(pipeline, &version("0.1.0"), slice::from_ref(&hash))
+    })
+    .unwrap();
+
+    assert_eq!(said, PICKED_AND_FILED);
+    assert_eq!(
+        fixture.git(&["diff", "--name-status", "main", "release-notes/v0.1.0"]),
+        "R100\tchangelog.d/model.fixed.md\tchangelog.d/0.1.0/model.fixed.md\n"
+    );
+}
+
+/// The notes branch can't take a pick's notes while it conflicts with `main`,
+/// and nothing changes until it doesn't.
+#[test]
+fn a_notes_branch_that_conflicts_with_main_stops_the_pick_before_anything_changes() {
+    let fixture = cut_0_1_0();
+    let tip = fixture.hash("release/0.1");
+    fixture.git(&["switch", "--quiet", "release-notes/v0.1.0"]);
+    fixture.write("changelog.d/0.1.0/retry.fixed.md", "Retried, reworded.\n");
+    fixture.commit("Reword the retry");
+    fixture.git(&["switch", "--quiet", "main"]);
+    fixture.fragment("retry", "fixed", "Retried, corrected.");
+    fixture.commit("docs: Correct the retry (#5)");
+    let hash = change(
+        &fixture,
+        "src/model.rs",
+        "model",
+        "feat: Show the model (#6)",
+    );
+
+    let error = run(&fixture, |pipeline| {
+        pick(pipeline, &version("0.1.0"), slice::from_ref(&hash))
+    })
+    .unwrap_err();
+
+    assert!(
+        error.starts_with("Merging main into release-notes/v0.1.0 conflicts in "),
+        "{error}"
+    );
+    assert!(
+        error.ends_with(
+            "If its pull request has merged, delete it with `git branch -D release-notes/v0.1.0` \
+             and `git push origin --delete release-notes/v0.1.0`, and pick again; otherwise merge \
+             main into it yourself, resolving the conflicts, and pick again."
+        ),
+        "{error}"
+    );
+    assert_eq!(fixture.hash("release/0.1"), tip);
+    assert_eq!(fixture.git(&["worktree", "list"]).lines().count(), 1);
+}
+
+/// The fragment of a picked commit waits for the release's notes branch, so the
 /// next cut doesn't list the change again.
 #[test]
 fn the_next_cut_leaves_a_fragment_a_pick_ships() {
     let fixture = cut_0_1_0();
+    fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
     let picked = change(
         &fixture,
         "src/model.rs",
@@ -176,12 +240,12 @@ fn the_next_cut_leaves_a_fragment_a_pick_ships() {
 
     assert!(
         fixture
-            .show("release-cut/v0.2.0:changelog.d/0.2.0/later.fixed.md")
+            .show("release-notes/v0.2.0:changelog.d/0.2.0/later.fixed.md")
             .is_some()
     );
     assert!(
         fixture
-            .show("release-cut/v0.2.0:changelog.d/model.fixed.md")
+            .show("release-notes/v0.2.0:changelog.d/model.fixed.md")
             .is_some()
     );
 }
@@ -199,7 +263,8 @@ fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
 
     assert!(
         said.starts_with(
-            "Started release 0.1.1 on release/0.1 with 1 commit picked onto it, and pushed it.\n"
+            "Started release 0.1.1 on release/0.1 with 1 commit picked onto it.\nFiled 1 fragment \
+             into changelog.d/0.1.1/ on release-notes/v0.1.1.\n"
         ),
         "{said}"
     );
@@ -213,12 +278,11 @@ fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
             .unwrap()
             .contains("current = 0.1.1")
     );
+    // A new notes branch, from `main`.
+    assert_eq!(fixture.hash("release-notes/v0.1.1^"), hash);
     assert!(
         fixture
-            .show(&format!(
-                "release-pick/v0.1.1-{}:changelog.d/0.1.1/fix.fixed.md",
-                &hash[..7]
-            ))
+            .show("release-notes/v0.1.1:changelog.d/0.1.1/fix.fixed.md")
             .is_some()
     );
 }
@@ -231,24 +295,17 @@ fn a_fragment_a_later_release_ships_too_is_copied_with_its_credits() {
     let gitlab = options_for("gitlab");
     run_with(&fixture, &gitlab, |pipeline| cut(pipeline, None)).unwrap();
 
-    let said = run_with(&fixture, &gitlab, |pipeline| {
+    run_with(&fixture, &gitlab, |pipeline| {
         pick(pipeline, &version("0.1.1"), slice::from_ref(&hash))
     })
     .unwrap();
 
-    assert!(
-        said.ends_with(&format!(
-            "Asked GitLab to open a merge request from release-pick/v0.1.1-{} into main.\n",
-            &hash[..7]
-        )),
-        "{said}"
-    );
-    let branch = format!("release-pick/v0.1.1-{}", &hash[..7]);
+    let branch = "release-notes/v0.1.1";
     assert_eq!(
         fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.fixed.md")),
         Some("- **Credits**: !5\n\nA fix.\n".to_owned())
     );
-    // Left where it was, for 0.2.0's change request to move.
+    // Left where it was, for 0.2.0's notes branch to move.
     assert!(
         fixture
             .show(&format!("{branch}:changelog.d/fix.fixed.md"))
@@ -263,21 +320,17 @@ fn a_fragment_filed_into_a_later_release_is_copied_from_its_directory() {
     let (fixture, hash) = on_gitlab_with_a_fix();
     let gitlab = options_for("gitlab");
     run_with(&fixture, &gitlab, |pipeline| cut(pipeline, None)).unwrap();
-    fixture.git(&[
-        "pull",
-        "--quiet",
-        "--ff-only",
-        "origin",
-        "release-cut/v0.2.0",
-    ]);
-    fixture.push();
+    fixture.merge_notes(
+        "0.2.0",
+        "chore(release): Cut release 0.2.0\n\nSee merge request group/project!7",
+    );
 
     run_with(&fixture, &gitlab, |pipeline| {
         pick(pipeline, &version("0.1.1"), slice::from_ref(&hash))
     })
     .unwrap();
 
-    let branch = format!("release-pick/v0.1.1-{}", &hash[..7]);
+    let branch = "release-notes/v0.1.1";
     assert_eq!(
         fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.fixed.md")),
         Some("- **Credits**: !5\n\nA fix.\n".to_owned())
@@ -293,7 +346,7 @@ fn a_fragment_filed_into_a_later_release_is_copied_from_its_directory() {
 fn a_patch_release_refuses_a_fragment_with_an_upgrade_section() {
     let fixture = cut_0_1_0();
     run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
-    let tip = fixture.origin_git(&["rev-parse", "release/0.1"]);
+    let tip = fixture.hash("release/0.1");
     fixture.write("src/plugins.rs", "// Plugins need a manifest.\n");
     fixture.write(
         "changelog.d/manifest.changed.md",
@@ -316,10 +369,10 @@ fn a_patch_release_refuses_a_fragment_with_an_upgrade_section() {
             &hash[..7]
         )
     );
-    assert_eq!(fixture.origin_git(&["rev-parse", "release/0.1"]), tip);
-    assert_eq!(branches(&fixture), [
+    assert_eq!(fixture.hash("release/0.1"), tip);
+    assert_eq!(fixture.branches(), [
         "main",
-        "release-cut/v0.1.0",
+        "release-notes/v0.1.0",
         "release/0.1"
     ]);
 }
@@ -340,6 +393,7 @@ fn a_commit_the_release_branch_has_is_refused() {
 #[test]
 fn a_commit_off_mains_first_parent_line_is_refused() {
     let fixture = cut_0_1_0();
+    let main = fixture.hash("main");
     fixture.git(&["checkout", "--quiet", "-b", "feature"]);
     fixture.write("src/feature.rs", "// A feature.\n");
     let feature = fixture.commit("A feature");
@@ -350,9 +404,13 @@ fn a_commit_off_mains_first_parent_line_is_refused() {
     })
     .unwrap_err();
 
-    assert!(
-        error.starts_with(&format!("`{feature}` isn't on `main`'s first-parent line")),
-        "{error}"
+    assert_eq!(
+        error,
+        format!(
+            "`{feature}` isn't on the first-parent line of main at {}; pick the commit that \
+             brought it to `main`, such as the merge of its branch.",
+            &main[..7]
+        )
     );
 }
 
@@ -378,6 +436,27 @@ fn a_commit_that_only_changes_notes_is_refused() {
     );
 }
 
+/// The release branch is updated where it is, so a worktree that has it checked
+/// out would no longer match it.
+#[test]
+fn a_release_branch_checked_out_is_refused() {
+    let fixture = cut_0_1_0();
+    let hash = change(&fixture, "src/model.rs", "model", "feat: Show the model");
+    let elsewhere = Utf8TempDir::new().unwrap();
+    let path = elsewhere.path().join("release");
+    fixture.git(&["worktree", "add", "--quiet", path.as_str(), "release/0.1"]);
+
+    let error = run(&fixture, |pipeline| {
+        pick(pipeline, &version("0.1.0"), slice::from_ref(&hash))
+    })
+    .unwrap_err();
+
+    assert!(
+        error.starts_with("release/0.1 is checked out at "),
+        "{error}"
+    );
+}
+
 /// A correction to a fragment conflicts on a release branch, which has no
 /// fragments; leaving the fragment out resolves it.
 #[test]
@@ -395,8 +474,9 @@ fn a_conflict_in_notes_alone_is_resolved_by_leaving_them_out() {
 
     assert_eq!(
         said,
-        "Picked 1 commit onto release/0.1 for release 0.1.0, and pushed it.\nThe commit added no \
-         fragment or highlight to file on main.\n"
+        "Picked 1 commit onto release/0.1 for release 0.1.0.\nThe commit added no fragment or \
+         highlight to file.\n\nNothing is published yet. Publish it with:\n\n    git push origin \
+         release/0.1\n"
     );
     assert!(fixture.show("release/0.1:src/retry.rs").is_some());
     assert_eq!(fixture.show("release/0.1:changelog.d"), None);
@@ -405,6 +485,7 @@ fn a_conflict_in_notes_alone_is_resolved_by_leaving_them_out() {
 #[test]
 fn a_conflict_stops_the_pick_until_it_is_resolved_and_continued() {
     let fixture = cut_0_1_0();
+    let tip = fixture.hash("release/0.1");
     fixture.write("src/lib.rs", "two\n");
     fixture.commit("Change the library");
     fixture.write("src/lib.rs", "three\n");
@@ -427,12 +508,8 @@ fn a_conflict_stops_the_pick_until_it_is_resolved_and_continued() {
              release pick --continue`."
         )
     );
-    // Nothing is pushed while it is stopped, and another pick waits for it.
-    assert_eq!(branches(&fixture), [
-        "main",
-        "release-cut/v0.1.0",
-        "release/0.1"
-    ]);
+    // Nothing changes while it is stopped, and another pick waits for it.
+    assert_eq!(fixture.hash("release/0.1"), tip);
     let waiting = run(&fixture, |pipeline| {
         pick(pipeline, &version("0.1.0"), slice::from_ref(&hash))
     })
@@ -449,14 +526,7 @@ fn a_conflict_stops_the_pick_until_it_is_resolved_and_continued() {
         .unwrap();
     let said = run(&fixture, resume).unwrap();
 
-    assert_eq!(
-        said,
-        format!(
-            "Picked 1 commit onto release/0.1 for release 0.1.0, and pushed it.\nPushed \
-             release-pick/v0.1.0-{short}, which files 1 fragment into changelog.d/0.1.0/.\nMerge \
-             release-pick/v0.1.0-{short} into main to file them.\n"
-        )
-    );
+    assert_eq!(said, PICKED_AND_FILED);
     assert_eq!(
         fixture.show("release/0.1:src/lib.rs"),
         Some("three\n".to_owned())
@@ -467,6 +537,11 @@ fn a_conflict_stops_the_pick_until_it_is_resolved_and_continued() {
             .contains(&format!("(cherry picked from commit {hash})"))
     );
     assert_eq!(fixture.show("release/0.1:changelog.d"), None);
+    assert!(
+        fixture
+            .show("release-notes/v0.1.0:changelog.d/0.1.0/three.fixed.md")
+            .is_some()
+    );
     assert!(!worktree.exists());
     assert!(!fixture.root().join(".git").join(STOPPED).exists());
 }
@@ -563,7 +638,7 @@ fn a_pick_stops_only_for_conflicts_in_the_code() {
     let said = run(&fixture, resume).unwrap();
 
     assert!(
-        said.starts_with("Picked 1 commit onto release/0.1 for release 0.1.0, and pushed it.\n"),
+        said.starts_with("Picked 1 commit onto release/0.1 for release 0.1.0.\n"),
         "{said}"
     );
     assert_eq!(

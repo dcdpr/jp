@@ -135,10 +135,10 @@ impl Fixture {
         self.git(&["rev-parse", revision]).trim().to_owned()
     }
 
-    /// What `origin` holds at `revision`, such as `release/0.3:changelog.d`, or
-    /// `None` when it holds nothing there.
+    /// What the workspace's repository holds at `revision`, such as
+    /// `release/0.3:changelog.d`, or `None` when it holds nothing there.
     pub(crate) fn show(&self, revision: &str) -> Option<String> {
-        let output = Self::command(self.origin(), &["show", revision], &self.env());
+        let output = Self::command(self.root(), &["show", revision], &self.env());
 
         output
             .status
@@ -146,9 +146,53 @@ impl Fixture {
             .then(|| String::from_utf8(output.stdout).unwrap())
     }
 
-    /// The message of the commit `origin` has at `revision`.
+    /// The message of the commit the workspace's repository has at `revision`.
     pub(crate) fn message(&self, revision: &str) -> String {
-        self.origin_git(&["log", "-1", "--format=%B", revision])
+        self.git(&["log", "-1", "--format=%B", revision])
+    }
+
+    /// The branches the workspace's repository has, by name.
+    pub(crate) fn branches(&self) -> Vec<String> {
+        Self::names(&self.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]))
+    }
+
+    /// The branches `origin` has, by name.
+    pub(crate) fn origin_branches(&self) -> Vec<String> {
+        Self::names(&self.origin_git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]))
+    }
+
+    /// The tags `origin` has, by name.
+    pub(crate) fn origin_tags(&self) -> Vec<String> {
+        Self::names(&self.origin_git(&["tag", "--list"]))
+    }
+
+    fn names(listing: &str) -> Vec<String> {
+        listing.lines().map(ToOwned::to_owned).collect()
+    }
+
+    /// Push `refs`, branches and tags of the workspace's repository, to
+    /// `origin`, as the person releasing does with the command a release
+    /// command prints.
+    pub(crate) fn publish(&self, refs: &[&str]) {
+        let mut args = vec!["push", "--quiet", "origin"];
+        args.extend(refs);
+        self.git(&args);
+    }
+
+    /// Squash-merge the notes branch of release `version` into `main` with
+    /// `message`, and push `main`, as a pull request from it lands; returns the
+    /// merge's hash.
+    pub(crate) fn merge_notes(&self, version: &str, message: &str) -> String {
+        self.git(&[
+            "merge",
+            "--quiet",
+            "--squash",
+            &format!("release-notes/v{version}"),
+        ]);
+        let hash = self.commit(message);
+        self.push();
+
+        hash
     }
 
     /// Run git with `args` in the workspace root, and return what it printed.

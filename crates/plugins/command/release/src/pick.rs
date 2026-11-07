@@ -1,16 +1,21 @@
 //! `jp release pick`: add commits from `main` to a release in preparation, or
 //! start the next patch release with them.
 //!
-//! The commits are cherry-picked onto the release branch with `git cherry-pick
-//! -x`, in the order `main` has them, leaving out what they change in the
-//! fragments directory, which a release branch doesn't have; the branch is then
-//! pushed.
+//! `main` is the commit the workspace's checkout is at, which has to hold every
+//! commit of `origin`'s `main`, and the commits are picked from its
+//! first-parent line.
+//! They are cherry-picked onto the release branch with `git cherry-pick -x`, in
+//! the order `main` has them, leaving out what they change in the fragments
+//! directory, which a release branch doesn't have.
 //! The fragments and highlights they added are filed into the release's
-//! directory on `main`, through a change request from
-//! `release-pick/v<version>-<short hash>`.
+//! directory on its notes branch, `release-notes/v<version>`: the one the cut
+//! or an earlier pick made, with `main` merged into it so that it holds them,
+//! or a new one from `main`.
 //! One that no other release ships moves, so the next release doesn't list the
 //! change again; one another release ships too is copied, with its credits
 //! written into the copy's `Credits` fields, so both releases list it.
+//! Both branches are updated in this repository, and the pick prints the push
+//! that publishes them.
 //!
 //! A conflict stops the pick in its worktree, which is kept for the user to
 //! resolve, and `jp release pick --continue` finishes it.
@@ -25,10 +30,9 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    change_request::{ChangeRequest, Opener},
-    pipeline::{Pipeline, counted, files, short},
+    pipeline::{Pipeline, counted, files, listed, push, short},
     releases::{self, Line, Releases},
-    repository::{MAIN, Worktree},
+    repository::{Branch, Checkout, MAIN, ORIGIN, Worktree},
 };
 
 /// The file, in the repository's git directory, that keeps a stopped pick.
@@ -74,9 +78,14 @@ struct Filed {
     copy: Option<String>,
 }
 
-/// What a pick files on `main`, planned in a worktree at its tip.
+/// What a pick files on the release's notes branch, planned in a worktree at
+/// `main` with the notes branch merged in.
 struct Filing<'r> {
     notes: Worktree<'r>,
+
+    /// The notes branch, as it was before the pick.
+    branch: Branch,
+
     files: Vec<Filed>,
 
     /// The files the commits added that `main` no longer has, as notes for the
@@ -84,19 +93,19 @@ struct Filing<'r> {
     gone: Vec<String>,
 }
 
-/// Everything a pick needs settled before it pushes.
+/// Everything a pick needs settled before it changes a branch.
 struct Prepared<'r> {
-    /// The release branch.
+    /// The release branch, at the commit the pick builds on.
     line: Line,
+
+    /// This repository's release branch, as it was before the pick; `None` when
+    /// only `origin` has it.
+    local: Option<String>,
 
     /// Whether the pick starts the release.
     start: bool,
 
     filing: Filing<'r>,
-
-    /// The change request filing the notes, and how it is opened; `None` when
-    /// there is nothing to file.
-    request: Option<(ChangeRequest, Opener)>,
 }
 
 /// What became of one cherry-pick.
@@ -107,10 +116,10 @@ enum Picked {
     Conflicts(Vec<String>),
 }
 
-/// Pick `commits` from `main` into release `version`, and say what was done.
+/// Pick `commits` from `main` into release `version`, and say what was done and
+/// how to publish it.
 ///
-/// The error says why nothing was picked, where a conflict stopped the pick, or
-/// what was done before a step failed.
+/// The error says why nothing was picked, or where a conflict stopped the pick.
 pub(crate) fn pick(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -132,12 +141,13 @@ pub(crate) fn pick(
 
     repo.refuse_shallow()?;
     repo.fetch()?;
+    let checkout = repo.checkout()?;
     let releases = repo.releases()?;
     let target = releases.pick_target(version)?;
-    let commits = order(pipeline, target.line, commits)?;
-    let prepared = prepare(pipeline, &releases, version, &commits)?;
+    let commits = order(pipeline, &checkout, target.line, commits)?;
+    let prepared = prepare(pipeline, &checkout, &releases, version, &commits)?;
 
-    let code = repo.worktree("pick", &target.line.tip)?;
+    let code = repo.worktree("pick", &prepared.line.tip)?;
     if prepared.start {
         if let Some(bump) = &pipeline.options.bump {
             code.bump(bump, version)?;
@@ -150,14 +160,18 @@ pub(crate) fn pick(
         }
     }
 
-    repo.push(&code.head()?, &prepared.line.branch, false, &[])?;
-    drop(code);
-
-    publish(pipeline, version, &prepared, &commits)
+    finish(
+        pipeline,
+        &checkout,
+        &prepared,
+        &code.head()?,
+        version,
+        &commits,
+    )
 }
 
 /// Finish the pick a conflict stopped, once the conflict is resolved, and say
-/// what was done.
+/// what was done and how to publish it.
 ///
 /// The error says why it can't be finished yet; the stopped pick is kept, to
 /// try again.
@@ -186,7 +200,7 @@ pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
     }
 
     if let Some(commit) = commits.get(stopped.stopped)
-        && let Err(error) = finish(pipeline, &code, &commit.hash)
+        && let Err(error) = resolve(pipeline, &code, &commit.hash)
     {
         code.keep();
         return Err(error);
@@ -211,44 +225,56 @@ pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
         }
     }
 
-    // Every pick is made, and the worktree is kept until the release branch is
-    // pushed.
-    let pushed = (|| {
+    // Every pick is made, and the worktree is kept until the branches are
+    // updated.
+    let finished = (|| {
         repo.refuse_shallow()?;
         repo.fetch()?;
+        let checkout = repo.checkout()?;
         let releases = repo.releases()?;
-        let prepared = prepare(pipeline, &releases, &version, &commits)?;
-        repo.push(&code.head()?, &prepared.line.branch, false, &[])?;
+        let prepared = prepare(pipeline, &checkout, &releases, &version, &commits)?;
 
-        Ok::<_, String>(prepared)
+        finish(
+            pipeline,
+            &checkout,
+            &prepared,
+            &code.head()?,
+            &version,
+            &commits,
+        )
     })();
-    let prepared = match pushed {
-        Ok(prepared) => prepared,
+    match finished {
+        Ok(said) => {
+            remove(&state)?;
+            drop(code);
+            Ok(said)
+        }
         Err(error) => {
             let top = code.keep();
             save(&state, &Stopped {
                 stopped: commits.len(),
                 ..stopped
             })?;
-            return Err(format!(
+            Err(format!(
                 "{error}\nThe picks are kept in {top}; run `jp release pick --continue` to try \
                  again, or drop them with `git worktree remove --force {top}`."
-            ));
+            ))
         }
-    };
-    remove(&state)?;
-    drop(code);
-
-    publish(pipeline, &version, &prepared, &commits)
+    }
 }
 
 /// The commits `commits` name, in the order `main` has them, each once.
 ///
-/// The error names a commit that isn't on `main`'s first-parent line, that
-/// `line` has already, or that changes nothing but notes.
-fn order(pipeline: &Pipeline<'_>, line: &Line, commits: &[String]) -> Result<Vec<Commit>, String> {
+/// The error names a commit that isn't on the first-parent line of `checkout`,
+/// that `line` has already, or that changes nothing but notes.
+fn order(
+    pipeline: &Pipeline<'_>,
+    checkout: &Checkout,
+    line: &Line,
+    commits: &[String],
+) -> Result<Vec<Commit>, String> {
     let repo = &pipeline.repo;
-    let main_line = repo.main_line()?;
+    let main_line = repo.first_parents(&checkout.head)?;
     let positions: HashMap<&str, usize> = main_line
         .iter()
         .enumerate()
@@ -264,8 +290,9 @@ fn order(pipeline: &Pipeline<'_>, line: &Line, commits: &[String]) -> Result<Vec
         }
         let Some(&position) = positions.get(hash.as_str()) else {
             return Err(format!(
-                "`{commit}` isn't on `{MAIN}`'s first-parent line; pick the commit that brought \
-                 it to `{MAIN}`, such as the merge of its branch."
+                "`{commit}` isn't on the first-parent line of {}; pick the commit that brought it \
+                 to `{MAIN}`, such as the merge of its branch.",
+                checkout.describe()
             ));
         };
         if line.picked.contains(&hash) || repo.containing(&hash)?.contains(&line.branch) {
@@ -307,56 +334,59 @@ fn order(pipeline: &Pipeline<'_>, line: &Line, commits: &[String]) -> Result<Vec
     Ok(ordered.into_iter().map(|(_, commit)| commit).collect())
 }
 
-/// Settle where the pick of `commits` into `version` goes, what it files on
-/// `main`, and how its change request is opened.
+/// Settle where the pick of `commits` into `version` goes, and what it files on
+/// the release's notes branch.
+///
+/// Refuses a release branch or notes branch checked out in a worktree, before
+/// anything is picked.
 fn prepare<'r>(
     pipeline: &'r Pipeline<'_>,
+    checkout: &Checkout,
     releases: &Releases,
     version: &Version,
     commits: &[Commit],
 ) -> Result<Prepared<'r>, String> {
+    let repo = &pipeline.repo;
     let target = releases.pick_target(version)?;
-    let filing = plan(pipeline, releases, target.line, version, commits)?;
-
-    let request = if filing.files.is_empty() {
-        None
-    } else {
-        let request = change_request(pipeline, version, &target.line.branch, commits, &filing);
-        if pipeline.repo.has_branch(&request.branch)? {
-            return Err(format!(
-                "{} exists on origin already; delete it if an earlier pick left it behind.",
-                request.branch
-            ));
-        }
-        Some((request, pipeline.opener()?))
-    };
+    repo.refuse_checked_out(&target.line.branch)?;
+    repo.refuse_checked_out(&releases::notes_branch(version))?;
+    let local = repo.branch(&target.line.branch)?.local;
+    let filing = plan(pipeline, checkout, releases, target.line, version, commits)?;
 
     Ok(Prepared {
         line: target.line.clone(),
+        local,
         start: target.start,
         filing,
-        request,
     })
 }
 
-/// Plan what the pick of `commits` onto `line` files on `main` for `version`:
-/// each fragment and highlight they added, moved or copied into the release's
-/// directory.
+/// Plan what the pick of `commits` onto `line` files for `version`: each
+/// fragment and highlight they added, moved or copied into the release's
+/// directory, on the release's notes branch with `checkout` merged in, or on a
+/// new one from `checkout`.
 ///
 /// The error says why one can't be filed, such as an upgrade section `version`
-/// can't ship.
+/// can't ship, or that the notes branch and `checkout` conflict.
 fn plan<'r>(
     pipeline: &'r Pipeline<'_>,
+    checkout: &Checkout,
     releases: &Releases,
     line: &Line,
     version: &Version,
     commits: &[Commit],
 ) -> Result<Filing<'r>, String> {
     let repo = &pipeline.repo;
-    let notes = repo.worktree("pick", &repo.main()?)?;
+    let branch = repo.branch(&releases::notes_branch(version))?;
+    let notes = repo.worktree("pick", &checkout.head)?;
+    if let Some(tip) = repo.tip(&branch)? {
+        merge_notes(&notes, &branch.name, &tip)?;
+    }
+
     let dir = pipeline.fragments_in(&notes);
     let mut filing = Filing {
         notes,
+        branch,
         files: vec![],
         gone: vec![],
     };
@@ -445,6 +475,34 @@ fn plan<'r>(
     Ok(filing)
 }
 
+/// Merge the notes branch `name`, at `tip`, into `notes`, a worktree at `main`,
+/// so it holds both what `main` added since the branch started and the notes
+/// the branch filed.
+///
+/// `main` is the merge's first parent, so the history of the fragments
+/// directory is read along `main`'s line.
+/// A merge that conflicts is undone, and the error says how to resolve it.
+fn merge_notes(notes: &Worktree<'_>, name: &str, tip: &str) -> Result<(), String> {
+    let message = format!("Merge {MAIN} into {name}");
+    let ran = notes.try_git(&["merge", "--no-edit", "--quiet", "--message", &message, tip])?;
+    if ran.success {
+        return Ok(());
+    }
+
+    let conflicts = unmerged(notes)?;
+    drop(notes.try_git(&["merge", "--abort"]));
+    if conflicts.is_empty() {
+        return Err(format!("Merging {MAIN} into {name} failed: {}", ran.said()));
+    }
+
+    Err(format!(
+        "Merging {MAIN} into {name} conflicts in {}. If its pull request has merged, delete it \
+         with `git branch -D {name}` and `git push {ORIGIN} --delete {name}`, and pick again; \
+         otherwise merge {MAIN} into it yourself, resolving the conflicts, and pick again.",
+        conflicts.join(", ")
+    ))
+}
+
 /// Whether the fragment or highlight `text`, at `path` below the fragments
 /// directory, lists the credits to give.
 ///
@@ -485,15 +543,15 @@ fn lists_credits(
     Ok(fragment.credits.is_some())
 }
 
-/// The change request that files the notes of `commits`, picked onto `branch`
-/// for `version`.
-fn change_request(
+/// The message of the commit that files the notes of `commits`, picked onto
+/// `branch` for `version`.
+fn notes_message(
     pipeline: &Pipeline<'_>,
     version: &Version,
     branch: &str,
     commits: &[Commit],
     filing: &Filing<'_>,
-) -> ChangeRequest {
+) -> String {
     let first = commits.first().map_or("", |commit| short(&commit.hash));
     let title = match commits.len() {
         1 => format!("chore(release): Pick {first} into release {version}"),
@@ -512,18 +570,14 @@ fn change_request(
         ""
     };
 
-    ChangeRequest {
-        branch: format!("release-pick/v{version}-{first}"),
-        title,
-        body: format!(
-            "`jp release pick` picked {} onto `{branch}` for release {version}:\n\n{}\n\nThis \
-             files the {} they added into `{}/{version}/`{copies}.\n",
-            counted(commits.len(), "commit", "commits"),
-            list.join("\n"),
-            filed(&filing.files),
-            pipeline.fragments,
-        ),
-    }
+    format!(
+        "{title}\n\n`jp release pick` picked {} onto `{branch}` for release \
+         {version}:\n\n{}\n\nThis files the {} they added into `{}/{version}/`{copies}.\n",
+        counted(commits.len(), "commit", "commits"),
+        list.join("\n"),
+        filed(&filing.files),
+        pipeline.fragments,
+    )
 }
 
 /// How many fragments and highlights `list` holds, as [`files`] says it.
@@ -572,7 +626,7 @@ fn pick_one(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<
 /// resolved.
 ///
 /// The error says what is left to do.
-fn finish(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<(), String> {
+fn resolve(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<(), String> {
     let picking = code
         .try_git(&["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"])?
         .success;
@@ -634,10 +688,10 @@ fn drop_notes(pipeline: &Pipeline<'_>, code: &Worktree<'_>) -> Result<(), String
     Ok(())
 }
 
-/// The paths with unresolved conflicts in `code`, below the top of the work
+/// The paths with unresolved conflicts in `worktree`, below the top of the work
 /// tree.
-fn unmerged(code: &Worktree<'_>) -> Result<Vec<String>, String> {
-    let listing = code.git(&["diff", "--name-only", "--diff-filter=U", "-z"])?;
+fn unmerged(worktree: &Worktree<'_>) -> Result<Vec<String>, String> {
+    let listing = worktree.git(&["diff", "--name-only", "--diff-filter=U", "-z"])?;
 
     Ok(listing
         .split('\0')
@@ -676,79 +730,112 @@ fn stop(
     ))
 }
 
-/// File the notes of a pick that pushed its release branch, and say what was
-/// done.
+/// Point the release branch at `picked`, the picks `prepared` planned made on
+/// top of it, file the notes on the notes branch, and say what was done and how
+/// to publish it.
 ///
-/// The error says what was done before a step failed.
-fn publish(
+/// A release branch already at `picked`, as a retry finds it, is left there.
+fn finish(
     pipeline: &Pipeline<'_>,
-    version: &Version,
+    checkout: &Checkout,
     prepared: &Prepared<'_>,
+    picked: &str,
+    version: &Version,
     commits: &[Commit],
 ) -> Result<String, String> {
-    let picked = counted(commits.len(), "commit", "commits");
+    let repo = &pipeline.repo;
     let branch = &prepared.line.branch;
+    if !repo.is_ancestor(&prepared.line.tip, picked)? {
+        return Err(format!(
+            "{branch} moved since the pick started, to {}; pick the commits again.",
+            short(&prepared.line.tip)
+        ));
+    }
+    if prepared.local.as_deref() != Some(picked) {
+        repo.set_branch(branch, picked, prepared.local.as_deref())?;
+    }
+
+    let notes_branch = releases::notes_branch(version);
+    let filed_notes = !prepared.filing.files.is_empty();
+    if filed_notes {
+        let message = notes_message(pipeline, version, branch, commits, &prepared.filing);
+        let hash = apply(pipeline, &prepared.filing, &message)?;
+        repo.set_branch(
+            &notes_branch,
+            &hash,
+            prepared.filing.branch.local.as_deref(),
+        )?;
+    }
+
+    let picked_count = counted(commits.len(), "commit", "commits");
     let mut said = if prepared.start {
-        format!(
-            "Started release {version} on {branch} with {picked} picked onto it, and pushed it.\n"
-        )
+        format!("Started release {version} on {branch} with {picked_count} picked onto it.\n")
     } else {
-        format!("Picked {picked} onto {branch} for release {version}, and pushed it.\n")
+        format!("Picked {picked_count} onto {branch} for release {version}.\n")
     };
     for gone in &prepared.filing.gone {
         said.push_str(gone);
         said.push('\n');
     }
 
-    let Some((request, opener)) = &prepared.request else {
+    let mut refs = vec![branch.clone()];
+    if filed_notes {
         said.push_str(&format!(
-            "{} added no fragment or highlight to file on {MAIN}.\n",
+            "Filed {} into {}/{version}/ on {notes_branch}.\n",
+            filed(&prepared.filing.files),
+            pipeline.fragments
+        ));
+        refs.push(notes_branch.clone());
+    } else {
+        said.push_str(&format!(
+            "{} added no fragment or highlight to file.\n",
             if commits.len() == 1 {
                 "The commit"
             } else {
                 "The commits"
             }
         ));
-        return Ok(said);
-    };
-
-    let filed_notes = apply(pipeline, &prepared.filing, request).and_then(|hash| {
-        pipeline
-            .repo
-            .push(&hash, &request.branch, true, &opener.push_options(request))
-    });
-    let pushed = match filed_notes {
-        Ok(pushed) => pushed,
-        Err(error) => return Err(format!("{said}But its notes weren't filed: {error}")),
-    };
-    let opened = match opener.open(request, &pushed) {
-        Ok(opened) => opened,
-        Err(error) => {
-            return Err(format!(
-                "{said}Pushed {}, but its change request wasn't opened: {error}",
-                request.branch
+    }
+    if let Some(ahead) = checkout.ahead() {
+        let mut holding = vec![];
+        for commit in commits {
+            if !repo.is_ancestor(&commit.hash, &checkout.main)? {
+                holding.push(branch.clone());
+                break;
+            }
+        }
+        if filed_notes {
+            holding.push(notes_branch.clone());
+        }
+        if !holding.is_empty() {
+            said.push_str(&format!(
+                "{ahead}: {} {} commits {MAIN} doesn't have yet.\n",
+                listed(&holding),
+                if holding.len() == 1 { "holds" } else { "hold" }
             ));
         }
-    };
+    }
 
     said.push_str(&format!(
-        "Pushed {}, which files {} into {}/{version}/.\n{opened}.\n",
-        request.branch,
-        filed(&prepared.filing.files),
-        pipeline.fragments
+        "\nNothing is published yet. Publish {} with:\n\n{}",
+        if refs.len() == 1 { "it" } else { "them" },
+        push(&refs)
     ));
+    if filed_notes {
+        said.push_str(&format!(
+            "\nthen open a pull request from {notes_branch} into {MAIN}, unless one is open from \
+             it already.\n"
+        ));
+    }
+
     Ok(said)
 }
 
 /// Move or copy each file of `filing` into the release's directory, and commit
-/// it as `request` describes.
+/// it with `message`.
 ///
 /// Returns the commit's hash.
-fn apply(
-    pipeline: &Pipeline<'_>,
-    filing: &Filing<'_>,
-    request: &ChangeRequest,
-) -> Result<String, String> {
+fn apply(pipeline: &Pipeline<'_>, filing: &Filing<'_>, message: &str) -> Result<String, String> {
     let workspace = filing.notes.workspace();
 
     for file in &filing.files {
@@ -770,9 +857,7 @@ fn apply(
         }
     }
 
-    filing
-        .notes
-        .commit(&format!("{}\n\n{}", request.title, request.body))
+    filing.notes.commit(message)
 }
 
 /// The stopped pick `path` keeps, when there is one.

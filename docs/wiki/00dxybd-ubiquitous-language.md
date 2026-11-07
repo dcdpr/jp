@@ -51,6 +51,7 @@ In disagreements between code and docs, the code is authoritative.
     - [JP MCP Server](#jp-mcp-server)
     - [Match](#match)
     - [MCP Host](#mcp-host)
+    - [Notes Branch](#notes-branch)
     - [Operation](#operation)
     - [Parent Ticket](#parent-ticket)
     - [Pinned Conversation](#pinned-conversation)
@@ -414,6 +415,17 @@ the protocol.
 The Host is one such caller, and a third-party client is another; only the Host
 answers the server's decisions.
 
+### Notes Branch
+
+The branch `release-notes/v<version>` that files a release's notes on `main`:
+`jp release cut` starts it with every unreleased [Changelog
+Fragment](#changelog-fragment) and [Highlight](#highlight) moved into the
+release's directory, `jp release pick` adds the ones its picks added, and a pull
+request from it merges them into `main`.
+It starts from the same commit as its [Release Branch](#release-branch), so the
+code a release ships and the fragments it lists are chosen together.
+See [RFD-122].
+
 ### Operation
 
 One element of a [Fan-Out](#fan-out) call's `ops` array: one complete set of the
@@ -468,10 +480,12 @@ The branch `release/<major>.<minor>` holding the code of every release that
 shares the major and minor version: `main` at the cut, then a commit that starts
 each release, with a `Starts-Release` trailer, and the commits picked from
 `main` with `git cherry-pick -x`.
-It has no fragments directory, since a release's notes live on `main`.
+It has no fragments directory, since a release's notes live on `main`, filed
+through its [Notes Branch](#notes-branch).
 A release is **in preparation** from the commit that starts it until its
 `v<version>` tag, which **finalizes** it.
-Written by `jp release cut`, `pick`, and `finalize`.
+Written by `jp release cut`, `pick`, and `finalize`, in the local repository,
+for the person releasing to push.
 See [RFD-122].
 
 ### Release Notes

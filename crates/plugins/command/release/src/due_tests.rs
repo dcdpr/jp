@@ -31,7 +31,7 @@ fn options(settings: &Value) -> Options {
 fn due_at(fixture: &Fixture, now: i64, settings: &Value) -> Due {
     let shell = fixture.shell();
     let options = options(settings);
-    let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
 
     due(&pipeline, now).unwrap()
 }
@@ -44,7 +44,7 @@ fn cut_on_october_1() -> Fixture {
     fixture.push();
     let shell = fixture.shell_at(OCTOBER_1);
     let options = options(&json!({}));
-    let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
     cut(&pipeline, None).unwrap();
 
     fixture
@@ -54,7 +54,7 @@ fn cut_on_october_1() -> Fixture {
 fn finalize_0_1_0(fixture: &Fixture) {
     let shell = fixture.shell();
     let options = options(&json!({}));
-    let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
 
     finalize(&pipeline, &version("0.1.0")).unwrap();
 }

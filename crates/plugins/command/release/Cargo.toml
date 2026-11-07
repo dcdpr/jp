@@ -20,7 +20,6 @@ version.workspace = true
 [dependencies]
 changelog = { workspace = true }
 doc = { workspace = true }
-jp_github = { workspace = true }
 jp_md = { workspace = true }
 jp_plugin = { workspace = true }
 jp_tool = { workspace = true }
@@ -35,11 +34,8 @@ semver = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 shlex = { workspace = true }
-tokio = { workspace = true }
 
 [dev-dependencies]
-jp_test = { workspace = true }
-
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
 strip-ansi-escapes = { workspace = true }

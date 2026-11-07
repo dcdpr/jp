@@ -138,23 +138,6 @@ fn a_bump_that_cannot_write_the_version_is_refused() {
 }
 
 #[test]
-fn change_request_labels_are_trimmed_and_listed_once() {
-    let options = read(json!({
-        "change_request_labels": ["no-changelog", " release ", "no-changelog"]
-    }))
-    .unwrap();
-
-    assert_eq!(options.change_request_labels, ["no-changelog", "release"]);
-    assert_eq!(
-        read(json!({ "change_request_labels": [""] })),
-        Err(
-            "`plugins.command.release.options.change_request_labels` lists an empty label."
-                .to_owned()
-        )
-    );
-}
-
-#[test]
 fn the_cadence_is_two_weeks_by_default() {
     let options = read(json!({})).unwrap();
 

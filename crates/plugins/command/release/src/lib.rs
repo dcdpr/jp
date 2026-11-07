@@ -17,16 +17,15 @@
 //! With `format_on_write` on, every file written in the fragments directory is
 //! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
 //!
-//! `cut`, `pick`, and `finalize` make releases on release branches, from what
-//! `origin` holds, and `due` says when the next one should be cut: `releases`
-//! decides what they may do, `repository` runs the git they need in worktrees
-//! of their own, and `change_request` opens the change requests that file a
-//! release's notes on `main`.
+//! `cut`, `pick`, and `finalize` make releases on release branches and their
+//! notes on notes branches, in this repository, and print the push that
+//! publishes them; `due` says when the next release should be cut.
+//! `releases` decides what they may do, and `repository` runs the git they need
+//! in worktrees of their own, reading what this repository and `origin` hold.
 //!
 //! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`
 
-mod change_request;
 mod cut;
 mod definitions;
 mod due;
@@ -140,10 +139,14 @@ enum Command {
 
     /// Start the next minor or major release from `main`.
     ///
-    /// Branches `release/<major>.<minor>` from origin's `main`, with a commit
-    /// that removes the fragments directory and runs `bump`, and pushes it.
-    /// A change request from `release-cut/v<version>` moves every unreleased
-    /// fragment and highlight into the release's directory on `main`.
+    /// `main` is the commit you have checked out, which needs every commit of
+    /// origin's `main`.
+    /// Branches `release/<major>.<minor>` from it, with a commit that removes
+    /// the fragments directory and runs `bump`, and `release-notes/v<version>`,
+    /// with one that moves every unreleased fragment and highlight into the
+    /// release's directory.
+    /// Pushes nothing: it prints the push that publishes both, and merging the
+    /// notes branch into `main` files the release's notes.
     Cut {
         /// The version to start, such as `0.4.0`, rather than the next minor
         /// release, or from 1.0 on the next major one when a fragment has an
@@ -155,11 +158,12 @@ enum Command {
     /// Pick commits from `main` into a release in preparation, or start the
     /// next patch release with them.
     ///
-    /// Cherry-picks the commits onto the release branch, leaving out the
-    /// fragments directory, and pushes it.
-    /// A change request from `release-pick/v<version>-<hash>` files the
-    /// fragments and highlights they added into the release's directory on
-    /// `main`.
+    /// Cherry-picks the commits, from the first-parent line of the commit you
+    /// have checked out, onto the release branch, leaving out the fragments
+    /// directory.
+    /// Files the fragments and highlights they added into the release's
+    /// directory on `release-notes/v<version>`, merging `main` into it first.
+    /// Pushes nothing: it prints the push that publishes both.
     /// A conflict stops the pick in a worktree it names; resolve it there and
     /// run `jp release pick --continue`.
     Pick {
@@ -177,7 +181,10 @@ enum Command {
     },
 
     /// Tag a release in preparation: the tip of its release branch, as
-    /// `v<version>`, pushed to origin.
+    /// `v<version>`.
+    ///
+    /// Pushes nothing: it prints the push that publishes the tag, which makes
+    /// the release.
     Finalize {
         /// The release, such as `0.3.0`.
         #[arg(value_parser = parse_version)]
@@ -680,7 +687,7 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
 /// when the host prints JSON, as JSON, and exit 1 when it isn't.
 fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Result<Output, String> {
     let shell = Shell::new();
-    let pipeline = Pipeline::new(&shell, root, options, None)?;
+    let pipeline = Pipeline::new(&shell, root, options)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("The system clock is set before 1970: {error}."))?;
@@ -708,17 +715,9 @@ fn make_release(
     command: impl FnOnce(&Pipeline<'_>) -> Result<String, String>,
 ) -> Result<Output, String> {
     let shell = Shell::new();
-    let pipeline = Pipeline::new(&shell, root, options, github_token())?;
+    let pipeline = Pipeline::new(&shell, root, options)?;
 
     command(&pipeline).map(Output::from)
-}
-
-/// The token GitHub's API takes: `JP_GITHUB_TOKEN`, or else `GITHUB_TOKEN`, as
-/// JP's other GitHub features read it.
-fn github_token() -> Option<String> {
-    let non_empty = |name: &str| env::var(name).ok().filter(|value| !value.is_empty());
-
-    non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
 }
 
 /// Refuse a fragments directory that isn't there, saying how to make one.

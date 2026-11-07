@@ -1,5 +1,6 @@
-//! What `origin`'s tags and release branches say about a project's releases,
-//! and what `cut`, `pick`, and `finalize` may do next.
+//! What the tags and release branches, in this repository and on `origin`, say
+//! about a project's releases, and what `cut`, `pick`, and `finalize` may do
+//! next.
 //!
 //! A tag `v0.3.0` finalizes release 0.3.0.
 //! A release branch, `release/0.3`, holds the code of every 0.3.x release:
@@ -9,6 +10,7 @@
 //! commit <hash>)`, as `git cherry-pick -x` writes it.
 //! A release is in preparation from the commit that starts it until its tag.
 //! A minor or major release is cut when the commit that starts it is made.
+//! Its notes are filed on `main` from a notes branch, `release-notes/v0.3.0`.
 //!
 //! Everything here reads what git printed and decides; the `repository` module
 //! runs git.
@@ -26,15 +28,22 @@ pub(crate) const STARTS_RELEASE: &str = "Starts-Release";
 const PICKED_FROM: &str = "(cherry picked from commit ";
 
 /// What every release branch's name starts with.
-const RELEASE_BRANCH: &str = "release/";
+pub(crate) const RELEASE_BRANCH: &str = "release/";
 
-/// What origin's tags and release branches say about the releases.
+/// What every notes branch's name starts with.
+pub(crate) const NOTES_BRANCH: &str = "release-notes/";
+
+/// What the tags and release branches here and on `origin` say about the
+/// releases.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Releases {
-    /// The versions a `v` tag finalized.
+    /// The versions a `v` tag finalized, here or on `origin`.
     ///
     /// Tags of pre-releases are left out.
     pub tagged: BTreeSet<Version>,
+
+    /// The versions `origin` has a `v` tag for.
+    pub published: BTreeSet<Version>,
 
     /// Every release branch, by the major and minor version its releases share.
     pub lines: BTreeMap<(u64, u64), Line>,
@@ -76,9 +85,49 @@ pub(crate) struct Target<'a> {
     pub start: bool,
 }
 
+/// Where a branch in this repository stands against `origin`'s branch of the
+/// same name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// Only this repository has it.
+    Local,
+
+    /// Only `origin` has it.
+    Remote,
+
+    /// Both have it, at the same commit.
+    Published,
+
+    /// This repository's has every commit of `origin`'s, and more.
+    Ahead,
+
+    /// `origin`'s has every commit of this repository's, and more.
+    Behind,
+
+    /// Each has commits the other lacks.
+    Diverged,
+}
+
+impl Standing {
+    /// Whether this repository has commits of the branch `origin` doesn't.
+    pub(crate) fn unpushed(self) -> bool {
+        matches!(self, Self::Local | Self::Ahead)
+    }
+}
+
 /// The name of the release branch holding the releases `major.minor.x`.
 pub(crate) fn branch(version: &Version) -> String {
     format!("{RELEASE_BRANCH}{}.{}", version.major, version.minor)
+}
+
+/// The name of the branch that files the notes of release `version` on `main`.
+pub(crate) fn notes_branch(version: &Version) -> String {
+    format!("{NOTES_BRANCH}v{version}")
+}
+
+/// The name of the tag that finalizes release `version`.
+pub(crate) fn tag(version: &Version) -> String {
+    format!("v{version}")
 }
 
 /// The major and minor version the release branch `name` holds, when it is
@@ -100,14 +149,28 @@ fn number(text: &str) -> Option<u64> {
     text.parse().ok()
 }
 
-/// The versions the tags `git ls-remote --tags --refs` lists finalized: each
-/// `v`, then a semantic version that is no pre-release.
-pub(crate) fn parse_tags(listing: &str) -> BTreeSet<Version> {
+/// The tags `git ls-remote --tags --refs` lists, each
+/// `<hash>\trefs/tags/<name>`, as their names and the hashes of the objects
+/// they name.
+pub(crate) fn parse_tags(listing: &str) -> BTreeMap<String, String> {
     listing
         .lines()
         .filter_map(|line| {
-            let (_, name) = line.split_once('\t')?;
-            let version = Version::parse(name.strip_prefix("refs/tags/v")?).ok()?;
+            let (hash, reference) = line.split_once('\t')?;
+            let name = reference.strip_prefix("refs/tags/")?;
+
+            Some((name.to_owned(), hash.to_owned()))
+        })
+        .collect()
+}
+
+/// The versions the tags `names` finalize: each `v`, then a semantic version
+/// that is no pre-release.
+pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTreeSet<Version> {
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let version = Version::parse(name.strip_prefix('v')?).ok()?;
 
             (version.pre.is_empty() && version.build.is_empty()).then_some(version)
         })
@@ -334,9 +397,15 @@ impl Releases {
     ///
     /// The error says why `version` can't be finalized.
     pub(crate) fn finalize_target(&self, version: &Version) -> Result<&Line, String> {
-        if self.tagged.contains(version) {
+        if self.published.contains(version) {
             return Err(format!(
                 "{version} is finalized already: origin has its tag v{version}."
+            ));
+        }
+        if self.tagged.contains(version) {
+            return Err(format!(
+                "{version} is tagged in this repository already; publish the tag with `git push \
+                 origin v{version}`."
             ));
         }
         let Some(line) = self.line(version) else {

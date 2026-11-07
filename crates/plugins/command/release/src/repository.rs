@@ -1,9 +1,13 @@
-//! The repository holding the workspace, as `cut`, `pick`, and `finalize` reach
-//! `origin` through it.
+//! The repository holding the workspace, as `cut`, `pick`, `finalize`, and
+//! `due` reach it.
 //!
-//! They read what `origin` holds after fetching `main` and the release branches
-//! into their remote-tracking branches, and write in worktrees of their own, so
-//! the checkout they run from is left alone.
+//! They read what `origin` holds after fetching its `main`, release branches,
+//! and notes branches into remote-tracking branches, together with the release
+//! branches, notes branches, and tags this repository has: where both have a
+//! branch, the one with the other's commits counts (see [`Standing`]).
+//! They write in worktrees of their own, so the checkout they run from is left
+//! alone, and keep what they make in this repository's branches and tags.
+//! Nothing is pushed.
 //! The default branch is `main`.
 
 use std::{
@@ -18,12 +22,13 @@ use doc::repository::web_address;
 use semver::Version;
 
 use crate::{
-    options::Bump,
-    releases::{self, Line, Releases},
+    options::{BUMP_KEY, Bump},
+    pipeline::short,
+    releases::{self, Line, NOTES_BRANCH, RELEASE_BRANCH, Releases, Standing},
     shell::{Ran, Shell},
 };
 
-/// The remote releases are read from and pushed to.
+/// The remote releases are read from, and published to.
 pub(crate) const ORIGIN: &str = "origin";
 
 /// The default branch, which every change reaches first.
@@ -32,8 +37,11 @@ pub(crate) const MAIN: &str = "main";
 /// Where `main` is fetched to.
 const MAIN_REF: &str = "refs/remotes/origin/main";
 
-/// Where the release branches are fetched to.
-const RELEASE_REFS: &str = "refs/remotes/origin/release/";
+/// Where `origin`'s branches are fetched to, each below its own name.
+const ORIGIN_REFS: &str = "refs/remotes/origin/";
+
+/// Where this repository's branches are.
+const LOCAL_REFS: &str = "refs/heads/";
 
 /// The repository holding a workspace.
 pub(crate) struct Repository<'a> {
@@ -46,6 +54,68 @@ pub(crate) struct Repository<'a> {
     /// The path from the top of the work tree to the workspace root: empty, or
     /// ending in `/`.
     prefix: String,
+}
+
+/// The commit the workspace's checkout is at, which `cut`, `pick`, and
+/// `finalize` read as `main`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Checkout {
+    /// The commit's hash.
+    pub head: String,
+
+    /// The branch checked out; `None` on a detached `HEAD`.
+    pub branch: Option<String>,
+
+    /// The hash of `origin`'s `main`, as last fetched.
+    pub main: String,
+}
+
+impl Checkout {
+    /// Whether the checkout is at `origin`'s `main`.
+    pub(crate) fn at_main(&self) -> bool {
+        self.head == self.main
+    }
+
+    /// Where the checkout is, as a sentence names it: `main at 4c5d6e7`.
+    pub(crate) fn describe(&self) -> String {
+        match &self.branch {
+            Some(branch) => format!("{branch} at {}", short(&self.head)),
+            None => format!("the checkout at {}", short(&self.head)),
+        }
+    }
+
+    /// That the checkout is ahead of `origin`'s `main`, as the start of a
+    /// sentence, when it is.
+    pub(crate) fn ahead(&self) -> Option<String> {
+        (!self.at_main()).then(|| {
+            format!(
+                "{} is ahead of {ORIGIN}'s {MAIN} at {}",
+                self.describe(),
+                short(&self.main)
+            )
+        })
+    }
+}
+
+/// The tags this repository and `origin` each have: each tag's name, such as
+/// `v0.3.0`, and the hash of the object it names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Tags {
+    pub local: BTreeMap<String, String>,
+    pub origin: BTreeMap<String, String>,
+}
+
+/// A branch as this repository and `origin` each hold it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Branch {
+    /// Its name, such as `release/0.3`.
+    pub name: String,
+
+    /// The hash of this repository's branch, when it has one.
+    pub local: Option<String>,
+
+    /// The hash of `origin`'s branch, as last fetched, when it has one.
+    pub origin: Option<String>,
 }
 
 impl<'a> Repository<'a> {
@@ -98,12 +168,13 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
-    /// Fetch `main` and the release branches from `origin` into their
-    /// remote-tracking branches, dropping the release branches `origin` no
+    /// Fetch `main`, the release branches, and the notes branches from `origin`
+    /// into their remote-tracking branches, dropping the branches `origin` no
     /// longer has.
     pub(crate) fn fetch(&self) -> Result<(), String> {
         let main = format!("+refs/heads/{MAIN}:{MAIN_REF}");
-        let releases = format!("+refs/heads/release/*:{RELEASE_REFS}*");
+        let releases = format!("+refs/heads/{RELEASE_BRANCH}*:{ORIGIN_REFS}{RELEASE_BRANCH}*");
+        let notes = format!("+refs/heads/{NOTES_BRANCH}*:{ORIGIN_REFS}{NOTES_BRANCH}*");
 
         self.git(&[
             "fetch",
@@ -113,68 +184,225 @@ impl<'a> Repository<'a> {
             ORIGIN,
             &main,
             &releases,
+            &notes,
         ])
         .map(drop)
     }
 
-    /// The hash of `main`, as last fetched.
+    /// The hash of `origin`'s `main`, as last fetched.
     pub(crate) fn main(&self) -> Result<String, String> {
         self.commit(MAIN_REF)
     }
 
-    /// What `origin`'s tags and release branches say, its release branches as
-    /// last fetched.
-    pub(crate) fn releases(&self) -> Result<Releases, String> {
-        let tagged = releases::parse_tags(&self.git(&["ls-remote", "--tags", "--refs", ORIGIN])?);
+    /// The checkout's commit, which stands for `main`.
+    ///
+    /// Refuses a checkout without the commits of `origin`'s `main`, as last
+    /// fetched: what is made from it would leave out work `main` has.
+    pub(crate) fn checkout(&self) -> Result<Checkout, String> {
+        let head = self.commit("HEAD").map_err(|_| {
+            "The checkout has no commit yet, so there is nothing to release.".to_owned()
+        })?;
+        let branch =
+            self.shell
+                .try_git(&self.root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+        let branch = branch.success.then(|| branch.stdout.trim().to_owned());
+        let main = self.main()?;
 
-        let listing = self.git(&[
-            "for-each-ref",
-            "--format=%(refname:lstrip=3)%00%(objectname)",
-            RELEASE_REFS,
+        let checkout = Checkout { head, branch, main };
+        if !self.is_ancestor(&checkout.main, &checkout.head)? {
+            return Err(format!(
+                "{} lacks commits {ORIGIN}'s {MAIN} has, at {}; bring them in first, such as with \
+                 `git pull`.",
+                checkout.describe(),
+                short(&checkout.main)
+            ));
+        }
+
+        Ok(checkout)
+    }
+
+    /// Whether the commit `ancestor` is in the history of `descendant`, or is
+    /// it.
+    pub(crate) fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool, String> {
+        let ran = self.shell.try_git(&self.root, &[
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
         ])?;
+        // It exits 1, saying nothing, for a commit that isn't an ancestor.
+        if ran.success || ran.stderr.trim().is_empty() {
+            return Ok(ran.success);
+        }
+
+        Err(format!("`git merge-base` failed: {}", ran.said()))
+    }
+
+    /// Every branch whose name starts with `prefix`, such as `release/`, as
+    /// this repository and `origin` each hold it, by name.
+    pub(crate) fn branches(&self, prefix: &str) -> Result<Vec<Branch>, String> {
+        let mut branches: BTreeMap<String, Branch> = BTreeMap::new();
+        let mut list = |namespace: &str, local: bool| {
+            let pattern = format!("{namespace}{prefix}");
+            let listing = self.git(&[
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)",
+                &pattern,
+            ])?;
+            for entry in listing.lines() {
+                let Some((reference, hash)) = entry.split_once('\0') else {
+                    continue;
+                };
+                let Some(name) = reference.strip_prefix(namespace) else {
+                    continue;
+                };
+                let branch = branches.entry(name.to_owned()).or_insert_with(|| Branch {
+                    name: name.to_owned(),
+                    local: None,
+                    origin: None,
+                });
+                if local {
+                    branch.local = Some(hash.to_owned());
+                } else {
+                    branch.origin = Some(hash.to_owned());
+                }
+            }
+
+            Ok::<_, String>(())
+        };
+        list(LOCAL_REFS, true)?;
+        list(ORIGIN_REFS, false)?;
+
+        Ok(branches.into_values().collect())
+    }
+
+    /// The branch `name`, as this repository and `origin` each hold it.
+    pub(crate) fn branch(&self, name: &str) -> Result<Branch, String> {
+        Ok(Branch {
+            name: name.to_owned(),
+            local: self.hash(&format!("{LOCAL_REFS}{name}"))?,
+            origin: self.hash(&format!("{ORIGIN_REFS}{name}"))?,
+        })
+    }
+
+    /// Where `branch` in this repository stands against `origin`'s; `None` when
+    /// neither has it.
+    pub(crate) fn standing(&self, branch: &Branch) -> Result<Option<Standing>, String> {
+        let standing = match (&branch.local, &branch.origin) {
+            (None, None) => return Ok(None),
+            (Some(_), None) => Standing::Local,
+            (None, Some(_)) => Standing::Remote,
+            (Some(local), Some(origin)) if local == origin => Standing::Published,
+            (Some(local), Some(origin)) if self.is_ancestor(origin, local)? => Standing::Ahead,
+            (Some(local), Some(origin)) if self.is_ancestor(local, origin)? => Standing::Behind,
+            (Some(_), Some(_)) => Standing::Diverged,
+        };
+
+        Ok(Some(standing))
+    }
+
+    /// The commit `branch` is at for the release commands: this repository's
+    /// when it has every commit of `origin`'s, else `origin`'s; `None` when
+    /// neither has it.
+    ///
+    /// Refuses a branch this repository and `origin` each have commits of the
+    /// other lacks.
+    pub(crate) fn tip(&self, branch: &Branch) -> Result<Option<String>, String> {
+        Ok(match self.standing(branch)? {
+            None => None,
+            Some(Standing::Local | Standing::Published | Standing::Ahead) => branch.local.clone(),
+            Some(Standing::Remote | Standing::Behind) => branch.origin.clone(),
+            Some(Standing::Diverged) => {
+                return Err(format!(
+                    "{name} and {ORIGIN}/{name} have diverged; bring them together, such as with \
+                     `git rebase {ORIGIN}/{name} {name}`, and run the command again.",
+                    name = branch.name
+                ));
+            }
+        })
+    }
+
+    /// The `v` tags in this repository, and those on `origin`.
+    pub(crate) fn tags(&self) -> Result<Tags, String> {
+        let local = self.git(&[
+            "for-each-ref",
+            "--format=%(objectname)%09%(refname)",
+            "refs/tags/v*",
+        ])?;
+        let origin = self.git(&["ls-remote", "--tags", "--refs", ORIGIN, "refs/tags/v*"])?;
+
+        Ok(Tags {
+            local: releases::parse_tags(&local),
+            origin: releases::parse_tags(&origin),
+        })
+    }
+
+    /// What the tags and release branches here and on `origin` say, each
+    /// release branch at its [`tip`].
+    ///
+    /// [`tip`]: Self::tip
+    pub(crate) fn releases(&self) -> Result<Releases, String> {
+        let tags = self.tags()?;
+        let published = releases::versions(tags.origin.keys());
+        let tagged = releases::versions(tags.local.keys())
+            .union(&published)
+            .cloned()
+            .collect();
+
+        let main = self.main()?;
         let mut lines = BTreeMap::new();
-        for entry in listing.lines() {
-            let Some((branch, tip)) = entry.split_once('\0') else {
+        for branch in self.branches(RELEASE_BRANCH)? {
+            let Some(key) = releases::line_of(&branch.name) else {
                 continue;
             };
-            let Some(key) = releases::line_of(branch) else {
+            let Some(tip) = self.tip(&branch)? else {
                 continue;
             };
 
-            let range = format!("{MAIN_REF}..{tip}");
+            let range = format!("{main}..{tip}");
             let log = self.git(&["log", "-z", "--format=%H%n%ct%n%B", &range])?;
             let (started, picked) = releases::parse_line(&log)?;
             lines.insert(key, Line {
-                branch: branch.to_owned(),
-                tip: tip.to_owned(),
+                branch: branch.name,
+                tip,
                 started,
                 picked,
             });
         }
 
-        Ok(Releases { tagged, lines })
+        Ok(Releases {
+            tagged,
+            published,
+            lines,
+        })
     }
 
-    /// When `origin`'s tag `tag` was made, in seconds since the Unix epoch: an
+    /// When the tag `tag` was made, in seconds since the Unix epoch: an
     /// annotated tag's own time, or a lightweight tag's commit's.
     ///
-    /// The error says the tag can't be fetched, or has no time.
+    /// Reads this repository's tag, or else `origin`'s, which is fetched into
+    /// `FETCH_HEAD` alone, so no tag is written here.
+    /// The error says the tag can't be read, or has no time.
     pub(crate) fn tag_date(&self, tag: &str) -> Result<i64, String> {
-        // Into `FETCH_HEAD` alone, so no tag is written to the repository.
         let reference = format!("refs/tags/{tag}");
-        self.git(&["fetch", "--quiet", "--no-tags", ORIGIN, &reference])?;
-
-        let kind = self.git(&["cat-file", "-t", "FETCH_HEAD"])?;
-        let date = if kind.trim() == "tag" {
-            releases::tagger_time(&self.git(&["cat-file", "tag", "FETCH_HEAD"])?)
+        let object = if self.hash(&reference)?.is_some() {
+            reference
         } else {
-            self.git(&["log", "-1", "--format=%ct", "FETCH_HEAD"])?
+            self.git(&["fetch", "--quiet", "--no-tags", ORIGIN, &reference])?;
+            "FETCH_HEAD".to_owned()
+        };
+
+        let kind = self.git(&["cat-file", "-t", &object])?;
+        let date = if kind.trim() == "tag" {
+            releases::tagger_time(&self.git(&["cat-file", "tag", &object])?)
+        } else {
+            self.git(&["log", "-1", "--format=%ct", &object])?
                 .trim()
                 .parse()
                 .ok()
         };
 
-        date.ok_or_else(|| format!("The tag {tag} on {ORIGIN} has no time git can read."))
+        date.ok_or_else(|| format!("The tag {tag} has no time git can read."))
     }
 
     /// The web address of `origin`, when it has one.
@@ -199,35 +427,121 @@ impl<'a> Repository<'a> {
         Ok(ran.stdout.trim().to_owned())
     }
 
-    /// The first-parent line of `main`, as last fetched, newest first.
-    pub(crate) fn main_line(&self) -> Result<Vec<String>, String> {
-        let listing = self.git(&["rev-list", "--first-parent", MAIN_REF])?;
+    /// The hash of the object the reference `reference` names, when it names
+    /// one.
+    fn hash(&self, reference: &str) -> Result<Option<String>, String> {
+        let ran =
+            self.shell
+                .try_git(&self.root, &["rev-parse", "--verify", "--quiet", reference])?;
+
+        Ok(ran.success.then(|| ran.stdout.trim().to_owned()))
+    }
+
+    /// The commit the tag `tag` in this repository points at, when it has one.
+    pub(crate) fn local_tag(&self, tag: &str) -> Result<Option<String>, String> {
+        let reference = format!("refs/tags/{tag}");
+        if self.hash(&reference)?.is_none() {
+            return Ok(None);
+        }
+
+        self.commit(&reference).map(Some)
+    }
+
+    /// The first-parent line of the commit `hash`, newest first.
+    pub(crate) fn first_parents(&self, hash: &str) -> Result<Vec<String>, String> {
+        let listing = self.git(&["rev-list", "--first-parent", hash])?;
 
         Ok(listing.lines().map(ToOwned::to_owned).collect())
     }
 
-    /// The release branches whose history holds the commit `hash`, by name.
+    /// The release branches, here or on `origin`, whose history holds the
+    /// commit `hash`, by name.
     pub(crate) fn containing(&self, hash: &str) -> Result<Vec<String>, String> {
+        let local = format!("{LOCAL_REFS}{RELEASE_BRANCH}");
+        let origin = format!("{ORIGIN_REFS}{RELEASE_BRANCH}");
         let listing = self.git(&[
             "for-each-ref",
-            "--format=%(refname:lstrip=3)",
+            "--format=%(refname)",
             "--contains",
             hash,
-            RELEASE_REFS,
+            &local,
+            &origin,
         ])?;
 
-        Ok(listing.lines().map(ToOwned::to_owned).collect())
+        let mut names: Vec<String> = listing
+            .lines()
+            .filter_map(|reference| {
+                reference
+                    .strip_prefix(LOCAL_REFS)
+                    .or_else(|| reference.strip_prefix(ORIGIN_REFS))
+            })
+            .map(ToOwned::to_owned)
+            .collect();
+        names.sort();
+        names.dedup();
+
+        Ok(names)
     }
 
-    /// Whether `origin` has a branch named `branch`.
-    pub(crate) fn has_branch(&self, branch: &str) -> Result<bool, String> {
-        let reference = format!("refs/heads/{branch}");
-        let listing = self.git(&["ls-remote", "--heads", ORIGIN, &reference])?;
+    /// Point this repository's branch `name` at the commit `new`.
+    ///
+    /// `local` is the commit the branch was at when it was read, or `None` for
+    /// a branch to create; a branch that moved since is left alone.
+    /// Refuses a branch checked out in a worktree, whose files would no longer
+    /// match it.
+    pub(crate) fn set_branch(
+        &self,
+        name: &str,
+        new: &str,
+        local: Option<&str>,
+    ) -> Result<(), String> {
+        self.refuse_checked_out(name)?;
 
-        Ok(listing.lines().any(|line| {
-            line.split_once('\t')
-                .is_some_and(|(_, name)| name == reference)
-        }))
+        let reference = format!("{LOCAL_REFS}{name}");
+        let expected = local.unwrap_or_default();
+        let ran = self.shell.try_git(&self.root, &[
+            "update-ref",
+            "-m",
+            "jp release",
+            &reference,
+            new,
+            expected,
+        ])?;
+        if !ran.success {
+            return Err(format!(
+                "{name} moved while the command ran, so it wasn't changed: {}",
+                ran.said()
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Refuse when the branch `name` is checked out in one of the repository's
+    /// worktrees, naming where.
+    pub(crate) fn refuse_checked_out(&self, name: &str) -> Result<(), String> {
+        let listing = self.git(&["worktree", "list", "--porcelain"])?;
+        let reference = format!("branch {LOCAL_REFS}{name}");
+
+        let mut worktree = "";
+        for line in listing.lines() {
+            if let Some(path) = line.strip_prefix("worktree ") {
+                worktree = path;
+            } else if line == reference {
+                return Err(format!(
+                    "{name} is checked out at {worktree}; switch that worktree to another branch \
+                     and run the command again."
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Make the annotated tag `tag` at the commit `hash`, with `message`.
+    pub(crate) fn tag(&self, tag: &str, hash: &str, message: &str) -> Result<(), String> {
+        self.git(&["tag", "--annotate", "--message", message, tag, hash])
+            .map(drop)
     }
 
     /// The git directory the repository's worktrees share.
@@ -267,55 +581,6 @@ impl<'a> Repository<'a> {
             top: top.to_owned(),
             kept: false,
         })
-    }
-
-    /// Push the commit `hash` to `origin` as the branch `branch`, with each of
-    /// `options` as a push option.
-    ///
-    /// With `create`, the push refuses to replace a branch `origin` has.
-    /// Returns what git printed, which holds what the remote said.
-    pub(crate) fn push(
-        &self,
-        hash: &str,
-        branch: &str,
-        create: bool,
-        options: &[String],
-    ) -> Result<String, String> {
-        let reference = format!("refs/heads/{branch}");
-        let lease = format!("--force-with-lease={reference}:");
-        let refspec = format!("{hash}:{reference}");
-
-        let mut args = vec!["push"];
-        if create {
-            args.push(&lease);
-        }
-        for option in options {
-            args.extend(["--push-option", option]);
-        }
-        args.extend([ORIGIN, &refspec]);
-
-        let ran = self.shell.try_git(&self.root, &args)?;
-        if !ran.success {
-            return Err(format!(
-                "Pushing {branch} to {ORIGIN} failed: {}",
-                ran.said()
-            ));
-        }
-
-        Ok(ran.stderr)
-    }
-
-    /// Push the tag `tag` to `origin`, which refuses to replace a tag it has.
-    pub(crate) fn push_tag(&self, tag: &str) -> Result<(), String> {
-        let refspec = format!("refs/tags/{tag}:refs/tags/{tag}");
-        let ran = self
-            .shell
-            .try_git(&self.root, &["push", ORIGIN, &refspec])?;
-        if !ran.success {
-            return Err(format!("Pushing {tag} to {ORIGIN} failed: {}", ran.said()));
-        }
-
-        Ok(())
     }
 }
 
@@ -369,12 +634,20 @@ impl Worktree<'_> {
 
     /// Run `bump` in the workspace root in this worktree, to write `version`.
     ///
-    /// The error quotes what it printed.
+    /// The error names the setting `bump` comes from, and quotes what it
+    /// printed.
     pub(crate) fn bump(&self, bump: &Bump, version: &Version) -> Result<(), String> {
         let (program, args) = bump.command(version);
-        let ran = self.repo.shell().run(&self.workspace(), &program, &args)?;
+        let ran = self
+            .repo
+            .shell()
+            .run(&self.workspace(), &program, &args)
+            .map_err(|error| format!("`{BUMP_KEY}` couldn't write {version}: {error}"))?;
         if !ran.success {
-            return Err(format!("`bump` failed writing {version}: {}", ran.said()));
+            return Err(format!(
+                "`{BUMP_KEY}` failed writing {version}: {}",
+                ran.said()
+            ));
         }
 
         Ok(())

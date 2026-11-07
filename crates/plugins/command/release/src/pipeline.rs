@@ -1,13 +1,12 @@
 //! What `cut`, `pick`, and `finalize` share: the repository they work in, the
-//! plugin's options, and how they reach the forge.
+//! plugin's options, and how they say what to publish.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{Forge, directory::Problem};
 
 use crate::{
-    change_request::Opener,
     options::Options,
-    repository::{Repository, Worktree},
+    repository::{ORIGIN, Repository, Worktree},
     shell::Shell,
 };
 
@@ -19,9 +18,6 @@ pub(crate) struct Pipeline<'a> {
     /// The fragments directory, below the workspace root, with `/` between its
     /// parts.
     pub fragments: String,
-
-    /// The token GitHub's API takes, when one is set.
-    token: Option<String>,
 }
 
 impl<'a> Pipeline<'a> {
@@ -32,7 +28,6 @@ impl<'a> Pipeline<'a> {
         shell: &'a Shell,
         root: &Utf8Path,
         options: &'a Options,
-        token: Option<String>,
     ) -> Result<Self, String> {
         let repo = Repository::open(shell, root)?;
         let fragments = below(root, &options.fragments_dir)?;
@@ -41,7 +36,6 @@ impl<'a> Pipeline<'a> {
             repo,
             options,
             fragments,
-            token,
         })
     }
 
@@ -57,18 +51,12 @@ impl<'a> Pipeline<'a> {
             .forge
             .unwrap_or_else(|| Forge::infer(self.repo.origin_address().as_deref()))
     }
+}
 
-    /// How the change requests `cut` and `pick` open are opened.
-    ///
-    /// The error says what opening one needs, before anything is pushed.
-    pub(crate) fn opener(&self) -> Result<Opener, String> {
-        Opener::new(
-            self.forge(),
-            self.repo.origin_address().as_deref(),
-            self.token.clone(),
-            self.options.change_request_labels.clone(),
-        )
-    }
+/// The command that publishes the branches and tags `refs` to `origin`,
+/// indented to stand on a line of its own.
+pub(crate) fn push(refs: &[String]) -> String {
+    format!("    git push {ORIGIN} {}\n", refs.join(" "))
 }
 
 /// `found` in the fragments directory of `worktree`, one problem per line, each
@@ -110,6 +98,16 @@ pub(crate) fn slashed(path: &Utf8Path) -> String {
         .map(|component| component.as_str())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// `items` as a sentence lists them: `a`, `a and b`, or `a, b, and c`.
+pub(crate) fn listed(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
 }
 
 /// `count` followed by the noun it counts.
