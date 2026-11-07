@@ -43,6 +43,10 @@ models.
   (and fails if the chain is exhausted), because the chat request would fail
   with the same credential error.
   All other lookup failures fall back to `MODEL_OVERRIDES`.
+  With reasoning support unknown and reasoning unconfigured, an API request
+  asks for summarized adaptive thinking instead of taking Anthropic's default,
+  which bills reasoning it does not return.
+  The Claude Code route still sends nothing and lets Claude Code choose.
 - OpenAI: skips the network lookup entirely.
   `GET /v1/models/{id}` returns only the model ID, so `CAPABILITIES` was already
   the sole source of metadata.
@@ -51,8 +55,9 @@ Pre-request checks outside the metadata lookup still fail fast: credential
 resolution, OpenAI's check that a ChatGPT subscription supports the model, and a
 missing Claude Code binary on the ACP route.
 
-Unknown models now reach the chat stream, where the provider refusal is
-classified, listing available models in the error and offering the interactive
-model picker.
+A lookup no longer stops the turn for a model the provider does not serve, so
+the provider refusal of the chat request comes through instead.
+Classifying that refusal as an unknown-model error, listing the available
+models, and offering the interactive model picker are #1298's.
 
 Found while triaging review feedback on RFD 125.
