@@ -10,35 +10,36 @@
 
 ## Summary
 
-This RFD persists conversation data to disk automatically when a
-`ConversationMut` guard drops, while the cross-process `ConversationLock` is
-still held.
+This RFD moves conversation persistence into `ConversationMut`'s `Drop`
+implementation so modified data is written to disk automatically while the
+cross-process `ConversationLock` is still held.
 Callers derive mutable scopes from `ConversationLock` and can use `?` or early
 returns without manual persist calls or lock-release race windows.
 
 ## Motivation
 
-Persistence of conversation data needs two guarantees: the data reaches disk
-while the cross-process lock is held (no race window), and every mutation path
-persists without requiring manual calls (no silent data loss).
-An explicit `persist_conversation()` API satisfies the first but not the second
-— missing a call is a silent bug.
-A `Workspace::Drop` safety net satisfies the second but not the first — by the
-time `Workspace` drops, the lock has been released.
+Persisting conversation data requires two guarantees: writes must complete while
+the cross-process lock is held (preventing race windows), and every mutation
+path must persist without manual calls (preventing silent data loss).
+An explicit `persist_conversation()` API satisfies the first guarantee but not
+the second: a missed call is a silent bug.
+A `Workspace::Drop` safety net satisfies the second but not the first: by the
+time `Workspace` drops, the lock has already been released.
 
-This RFD solves both by moving persistence into `ConversationMut`'s `Drop`.
-The `ConversationMut` has everything it needs: shared references to the
-conversation data via `Arc<RwLock<...>>`, a write handle to storage via
-`PersistBackend`, and shared ownership of the file lock via `Arc`.
-When the mutable scope ends, data is written to disk while the lock is held.
-Callers mutate freely and never think about persistence.
+Moving persistence into `ConversationMut`'s `Drop` implementation satisfies both
+guarantees.
+`ConversationMut` holds shared references to the conversation data via
+`Arc<RwLock<...>>`, a storage write handle via `PersistBackend`, and shared
+ownership of the file lock via `Arc`.
+When the mutable scope ends, `Drop` writes modified data to disk before the file
+lock is released.
 
 ## Design
 
 ### Per-Conversation Interior Mutability
 
-Conversation data in the workspace state is wrapped in `Arc<RwLock<...>>` at the
-individual conversation level:
+Workspace state wraps each conversation's metadata and event stream in
+`OnceLock<Arc<RwLock<...>>>`:
 
 ```rust
 pub(super) struct State {
@@ -47,26 +48,26 @@ pub(super) struct State {
 }
 ```
 
-`OnceLock` provides lazy initialization (loaded from disk on first access).
-`Arc` enables shared ownership between the workspace and any active locks or
-mutable scopes.
+`OnceLock` loads each conversation from disk on first access.
+`Arc` shares ownership between the workspace, active locks, and mutable scopes.
 `RwLock` (`parking_lot::RwLock`) allows concurrent reads and exclusive writes
 within the process.
 
-Wrapping individual conversations rather than the entire `State` means:
+Wrapping individual conversations rather than the entire `State` has three
+benefits:
 
-- Locking is per-conversation, not global.
-  Accessing conversation A does not block access to conversation B.
-- No `MappedMutexGuard` is needed — methods call `.read()` or `.write()`
-  directly on the conversation's `RwLock`.
-- `HashMap` handles lookup.
-  No change tracking (`TombMap`) is needed because `ConversationMut`'s `dirty`
-  flag and auto-persist-on-drop replace all modification tracking, and
-  `remove_conversation_with_lock` handles directory deletion immediately.
+- **Per-conversation locking**: Accessing conversation A does not block access
+  to conversation B.
+- **Direct guard access**: Methods call `.read()` or `.write()` directly on the
+  conversation's `RwLock` without projecting through a `MappedMutexGuard`.
+- **Plain `HashMap` lookup**: `ConversationMut` tracks modifications with its
+  `dirty` flag and persists on drop, and `remove_conversation_with_lock` deletes
+  the conversation directory immediately, so `State` does not need a
+  change-tracking map (`TombMap`).
 
-The `Arc<RwLock<...>>` is never exposed outside the `jp_workspace` crate.
-All public APIs return lock guards or use callbacks, preserving the invariant
-that mutation requires holding the cross-process `flock`.
+`jp_workspace` never exposes the `Arc<RwLock<...>>` directly.
+All public APIs return read guards or mutate through callbacks, preserving the
+invariant that mutation requires holding the cross-process `flock`.
 
 ### Type Hierarchy
 
@@ -93,9 +94,9 @@ ConversationMut
 
 ### `ConversationLock`
 
-Cross-process exclusive access to a conversation.
-Proves that the `flock` is held.
-Provides read access and produces `ConversationMut` scopes for writes.
+`ConversationLock` represents exclusive cross-process access to a conversation:
+it proves that the process holds the `flock`, provides read access to metadata
+and events, and produces `ConversationMut` scopes for writes.
 
 ```rust
 pub struct ConversationLock {
@@ -124,16 +125,16 @@ impl ConversationLock {
 
 ### `ConversationMut`
 
-A mutable scope over a conversation.
-Automatically persists modified data to disk when dropped.
-`ConversationMut` is `Send + Sync` — it holds `Arc`s and `AtomicBool`, no lock
-guards — so it can safely be held across `.await` points.
+`ConversationMut` is a mutable scope over a locked conversation that persists
+modified data to disk when dropped.
+Because it holds only `Arc` handles and an `AtomicBool` rather than lock guards,
+`ConversationMut` is `Send + Sync` and can be held across `.await` points.
 
 #### Callback-Based Mutation
 
-Write access uses callbacks instead of returning raw `RwLockWriteGuard`s.
-This makes it structurally impossible to hold a write lock across `.await`
-points — the guard's scope is bounded by the closure:
+Write methods take callbacks instead of returning raw `RwLockWriteGuard`s.
+Bounding the write guard to the closure makes it structurally impossible to hold
+a write lock across `.await` points:
 
 ```rust
 impl ConversationMut {
@@ -143,10 +144,8 @@ impl ConversationMut {
 }
 ```
 
-The write guard is acquired for the duration of the callback and released when
-`f` returns.
-The dirty flag is set unconditionally.
-The callback's return value is forwarded, so `?` composes naturally:
+Each method acquires the write guard for the duration of `f`, sets the dirty
+flag unconditionally, and forwards `f`'s return value so `?` composes naturally:
 
 ```rust
 conv.update_events(|events| {
@@ -188,42 +187,43 @@ impl Drop for ConversationMut {
 }
 ```
 
-`Drop` cannot propagate, so it records the failure on state shared with the
-originating lock rather than writing to the terminal.
+Because `Drop` cannot return an error, a failed drop-time write records its
+error in persistence state shared with the `Workspace` and the originating
+`ConversationLock` rather than writing to the terminal.
 `ConversationLock::take_persist_failure` (and its `ConversationMut` counterpart)
-drains it, so the shell reports once, through the printer, with a non-zero exit
-code.
-Only the first failure is kept, so one failing disk yields one diagnostic
-instead of one per mutation scope.
+drains the recorded error so the shell reports it once through the printer and
+exits with a non-zero code.
+Only the first failure is retained, so a failing disk produces one diagnostic
+rather than one per mutation scope.
 
-Every later scope still attempts its own write.
-A persist spans two roots that can be separate filesystems (the durable
-user-local copy and the workspace projection), so a failure against one says
-nothing about the other; skipping subsequent writes would strand new events that
-the healthy root would have accepted.
+Subsequent `ConversationMut` scopes still attempt to write on drop.
+Persistence writes to two roots that may live on separate filesystems (the
+durable user-local copy and the workspace projection), so a failure on one root
+does not imply the other is unhealthy; skipping later writes would leave the
+healthy root behind.
 
-`flush` records nothing of its own, since it propagates and the caller owns
-reporting.
-A caller that swallows that error leaves the scope dirty, so the drop retries
-and records the outcome — a swallowed flush failure still reaches a drain.
+`flush` returns I/O errors directly to the caller without recording them in the
+shared persistence state.
+However, `flush` clears the dirty flag only when the write succeeds: if a caller
+ignores an error from `flush`, the scope remains dirty, so `Drop` retries the
+write and records any failure for later draining.
 
-The record is owned by the `Workspace`, not by the lock.
-A cancelled command future (Ctrl-C, SIGTERM) is dropped mid-flight: the scope
-persists from its `Drop` and the lock goes with it, taking any drain inside the
-future along.
-`Workspace::take_persist_failure` runs after the command future has resolved or
-been dropped, and is the drain of last resort for that path.
+The `Workspace` owns the failure record, so it outlives both `ConversationMut`
+and `ConversationLock`.
+When a command future is cancelled mid-flight (Ctrl-C, SIGTERM), dropping the
+future persists any active `ConversationMut` scope in `Drop` and drops the lock
+with it, bypassing any drain call inside the future.
+`Workspace::take_persist_failure` runs after the command future resolves or
+drops, serving as the fallback drain for cancelled commands.
 
-`AtomicBool` is used for the dirty flag instead of `Cell<bool>`.
-`Cell<bool>` is `!Sync`, which would make `ConversationMut` `!Sync` and cause
-async futures holding `&ConversationMut` across `.await` points to become
-`!Send`.
-`AtomicBool` with `Ordering::Relaxed` provides the same interior mutability
-without the `!Sync` constraint.
+The dirty flag uses `AtomicBool` with `Ordering::Relaxed` instead of
+`Cell<bool>`.
+`Cell<bool>` is `!Sync`, which would make `ConversationMut` `!Sync` and make
+async futures holding `&ConversationMut` across `.await` points `!Send`.
 
 ### `PersistBackend` Trait
 
-Persistence is abstracted behind a trait so tests can assert persist behavior
+`PersistBackend` abstracts disk writes so tests can verify persistence behavior
 without disk I/O:
 
 ```rust
@@ -234,12 +234,11 @@ pub trait PersistBackend: Send + Sync + Debug {
 }
 ```
 
-The production implementation (`FsPersistBackend`) extracts the write paths from
-`Storage` at construction time so persistence can be invoked from
-`ConversationMut::Drop` without requiring a reference to `Storage`.
-
-Tests use a `MockPersistBackend` that records calls, or `None` to skip
-persistence entirely.
+The production implementation (`FsPersistBackend`) captures the write paths from
+`Storage` at construction time so `ConversationMut::Drop` can persist without
+borrowing `Storage`.
+Tests use `MockPersistBackend` to record calls, or `None` to skip persistence
+entirely.
 
 ### Workspace API
 
@@ -266,20 +265,18 @@ impl Workspace {
 ```
 
 Read methods on `Workspace` return `RwLockReadGuard` (handle-based) or
-`ArcRwLockReadGuard` (iterator).
-These auto-deref to `&T`.
-Callers cannot call `.write()` through them — mutation requires a
+`ArcRwLockReadGuard` (iterator), both of which auto-deref to `&T`.
+Neither exposes `.write()`; mutating a conversation requires acquiring a
 `ConversationLock`.
 
-`lock_conversation` takes `&self` because it only interacts with the `Storage`
-layer for flock acquisition and clones `Arc`s from the state.
-No data is moved out of the workspace.
+`lock_conversation` takes `&self` because it only acquires the `flock` through
+`Storage` and clones `Arc` pointers from `State`, without moving data out of the
+workspace.
 
-`remove_conversation_with_lock` consumes a `ConversationMut` by value.
-It clears the dirty flag to prevent `Drop` from persisting data that's about to
-be deleted, then deletes the conversation's directory immediately via the
-`PersistBackend`.
-The conversation is removed from the `HashMap` index.
+`remove_conversation_with_lock` consumes a `ConversationMut` by value, clears
+its dirty flag so `Drop` does not persist data that is about to be deleted,
+deletes the conversation directory immediately via `PersistBackend`, and removes
+the conversation from the `HashMap` index.
 
 ### Usage Patterns
 
@@ -314,9 +311,9 @@ drop(lock); // flock released
 
 The turn loop takes `&ConversationLock` and creates `ConversationMut` scopes as
 needed.
-`ConversationMut` is held across `.await` points safely (it's `Send + Sync`).
-Write guards from `update_events` are scoped to the callback and never cross
-yield points.
+Because `ConversationMut` is `Send + Sync`, it can be held across `.await`
+points while each `update_events` callback confines its write guard to a
+synchronous block:
 
 ```rust
 async fn run_turn_loop(..., lock: &ConversationLock, ...) {
@@ -338,8 +335,8 @@ async fn run_turn_loop(..., lock: &ConversationLock, ...) {
 
 #### Async functions needing mutable stream access
 
-Functions that need `&mut ConversationStream` across `.await` points take
-`&ConversationMut` and acquire the write lock per-access via callbacks:
+Functions that mutate `ConversationStream` across `.await` points take
+`&ConversationMut` and acquire the write lock per access via callbacks:
 
 ```rust
 async fn execute_with_prompting(&mut self, conv: &ConversationMut, ...) {
@@ -351,19 +348,18 @@ async fn execute_with_prompting(&mut self, conv: &ConversationMut, ...) {
 
 ### Data Visibility
 
-Because `Arc<RwLock<...>>` is shared between the workspace and the lock/mut,
-readers can access conversation data at any time.
-No data is "checked out" or hidden.
-The workspace always has the data.
+Because `Workspace`, `ConversationLock`, and `ConversationMut` share the same
+`Arc<RwLock<...>>`, readers can access conversation data at any time; no data is
+checked out or hidden from the workspace.
 Write locks are held only for individual callback invocations, so contention is
 negligible.
 
 ### Test Support
 
-`Workspace::test_lock` creates a lock backed by a no-op flock.
-If the workspace has storage configured, the test lock automatically attaches
-the real `FsPersistBackend` — tests that assert on-disk persistence work
-without extra setup.
+`Workspace::test_lock` creates a lock backed by a no-op `flock`.
+When the workspace has storage configured, the test lock automatically attaches
+`FsPersistBackend` so tests that assert on-disk persistence work without extra
+setup.
 In-memory-only workspaces produce locks with `writer: None`, skipping
 persistence entirely.
 
@@ -372,21 +368,20 @@ persistence entirely.
 **Read-path API change.** `workspace.metadata(&handle)` returns
 `RwLockReadGuard<Conversation>` instead of `&Conversation`.
 Auto-deref makes most call sites transparent, but explicit type annotations need
-adjustment, and guards must not be held across `.await` points (clone-and-drop
-instead).
+adjustment, and callers must clone data and drop the guard before `.await`
+points.
 
 **Callback ergonomics.** Write access uses `conv.update_events(|e| ...)` instead
 of `conv.events_mut().do_thing()`.
-This is slightly more verbose but structurally prevents
-`.await`-across-lock-guard bugs.
-`?` composes naturally since the callback's return type is forwarded.
+This is slightly more verbose, though forwarding the callback's return value
+allows `?` to compose naturally while structurally preventing callers from
+holding write guards across `.await` points.
 
 **Errors in `Drop` cannot be propagated.** A persist failure during
-`ConversationMut`'s drop is recorded on the workspace-owned persist state and
-surfaced by the next `flush()`, by a `take_persist_failure()` drain in the
-command, or by the CLI's teardown drain, rather than returned from `drop`.
-The record outliving both the scope and the lock is what makes the teardown
-drain reachable after a cancelled future.
+`ConversationMut`'s drop cannot be returned from `drop`; instead, it is recorded
+in the workspace-owned persistence state and surfaced by the next `flush()`, by
+a `take_persist_failure()` drain in the command, or by the CLI's teardown drain
+after a cancelled future.
 Long-running loops must call `flush()?` at checkpoints so that I/O failures halt
 immediately.
 
@@ -395,46 +390,45 @@ immediately.
 `ArcRwLockReadGuard` for `'static` lifetime guards.
 `parking_lot` is already a transitive dependency.
 
-**`Arc` overhead.** Each conversation wraps metadata and events in
-`Arc<RwLock<...>>`.
-The `Arc` adds a heap allocation and reference count per conversation —
-negligible for the typical workspace with tens to hundreds of conversations.
+**`Arc` overhead.** Wrapping each conversation's metadata and events in
+`Arc<RwLock<...>>` adds a heap allocation and atomic reference count per
+conversation, which is negligible for a typical workspace with tens to hundreds
+of conversations.
 
 ## Alternatives
 
 ### Raw write guard access (no callbacks)
 
-Expose `events_mut()` and `metadata_mut()` returning `RwLockWriteGuard`
-directly.
-More ergonomic for synchronous code, but `RwLockReadGuard` (which is `Send`) can
-be held across `.await` without compiler errors, deadlocking silently at
-runtime.
-The callback approach makes this structurally impossible.
+Exposing `events_mut()` and `metadata_mut()` methods that return
+`RwLockWriteGuard` directly is more ergonomic for synchronous code, but
+`RwLockReadGuard` (which is `Send`) can be held across `.await` points without
+compiler errors, deadlocking silently at runtime.
+Scoping write access to callbacks makes holding a write guard across `.await`
+structurally impossible.
 
 ### Guard owns data (checkout model)
 
-The guard takes ownership of conversation data.
-The workspace state is empty while the guard is alive.
-Achieves auto-persist without `Arc<RwLock>`, but hides the data from
-`workspace.conversations()` during the guard's lifetime.
+Moving conversation data into the guard for the duration of the lock achieves
+auto-persistence on drop without `Arc<RwLock>`, but leaves the workspace entry
+empty while the guard is alive, hiding the conversation from
+`workspace.conversations()`.
 
 ### Whole-state locking (`Arc<Mutex<State>>`)
 
-A single lock for the entire state.
-Requires `MappedMutexGuard` to navigate to a specific conversation and means any
-access to any conversation locks everything.
+Wrapping the entire `State` in a single `Arc<Mutex<State>>` requires
+`MappedMutexGuard` to project into a specific conversation and serializes all
+access across unrelated conversations.
 
 ### Mandatory-resolution guard (panic-in-Drop)
 
-Callers must explicitly call `persist_and_release(guard)`.
-Guard drops without resolution panic.
-Breaks `?` — every early return between guard creation and
-`persist_and_release` triggers the panic.
+Requiring callers to explicitly call `persist_and_release(guard)` and panicking
+in `Drop` if they do not breaks `?`: every early return between guard creation
+and `persist_and_release` triggers a panic.
 
 ### Explicit `persist_conversation` at every call site
 
-Manual persist calls at every mutation site.
-Every new mutation path must remember to add a call, and missing one is silent
+Requiring manual `persist_conversation` calls at every mutation site forces
+every new mutation path to remember to persist, and missing a call causes silent
 data loss.
 
 ## Non-Goals
@@ -449,18 +443,17 @@ data loss.
 
 ### Read guards across `.await`
 
-`ArcRwLockReadGuard` is `Send`, so the compiler does not catch holding it across
-`.await` — the code compiles but deadlocks at runtime.
-Mitigated by convention: all lock guards are acquired, used, and dropped within
-a single expression or block.
-Data needed after an `.await` is cloned first.
+Because `ArcRwLockReadGuard` is `Send`, holding a read guard across `.await`
+compiles without error but deadlocks at runtime.
+By convention, callers acquire, read, and drop lock guards within a single
+expression or block, cloning any data needed after an `.await`.
 
 ### Per-event persistence cost with `as_mut()`
 
-Each `lock.as_mut()` creates a `ConversationMut` with a fresh `dirty` flag.
-Calling `update_events` on it marks it dirty, and when it drops, it persists.
-If used per-event in a loop, this causes one disk write per event.
-The correct pattern batches mutations within a single `ConversationMut` scope:
+Each `lock.as_mut()` call creates a `ConversationMut` with a fresh `dirty` flag
+that persists on drop once `update_events` marks it dirty.
+Calling `lock.as_mut()` per event in a loop causes one disk write per event.
+Loops should instead batch mutations within a single `ConversationMut` scope:
 
 ```rust
 let mut conv = lock.as_mut();
@@ -472,9 +465,9 @@ conv.flush()?;
 
 ## References
 
-- [RFD 020]: Parallel Conversations — introduced conversation locking and
+- [RFD 020] (Parallel Conversations) introduced conversation locking and
   session-based conversation tracking.
-- [RFD 052]: Workspace Data Store Sanitization — discusses persistence safety.
+- [RFD 052] (Workspace Data Store Sanitization) discusses persistence safety.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
