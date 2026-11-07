@@ -11,25 +11,21 @@
 
 ## Summary
 
-This RFD makes `--tool` and `--no-tools` CLI flags order-sensitive, evaluating
-interleaved invocations like `--no-tools --tool=write --no-tools=fs_modify_file`
-from left to right rather than in a fixed precedence order.
+This RFD makes the `--tool` and `--no-tools` CLI flags order-sensitive,
+evaluating interleaved invocations like `--no-tools --tool=write
+--no-tools=fs_modify_file` from left to right rather than in a fixed precedence
+order.
 
 ## Motivation
 
-Today, `--tool` values are collected into one `Vec` and `--no-tools` values into
-another.
-`apply_enable_tools` then processes them in a hardcoded sequence: disable-all >
-enable-all > enable-named > disable-named.
-The position of flags on the command line has no effect.
+`Query` collects `--tool` values into one `Vec` and `--no-tools` values into
+another, and `apply_enable_tools` processes them in a hardcoded sequence:
+disable-all > enable-all > enable-named > disable-named.
+Flag position on the command line is ignored, so `jp q --tool=write --no-tools
+--tool=read` and `jp q --no-tools --tool=write --tool=read` produce the same
+result.
 
-This means `jp q --tool=write --no-tools --tool=read` and `jp q --no-tools
---tool=write --tool=read` produce the same result, even though a user would
-reasonably expect left-to-right evaluation.
-The current behavior is surprising and limits the expressiveness of tool
-selection.
-
-With ordered processing, users can compose tool sets precisely:
+Evaluating flags from left to right lets users compose tool sets in order:
 
 ```sh
 # Start from nothing, add only what you need
@@ -42,24 +38,22 @@ jp q --tool --no-tools=dangerous_tool
 ## Design
 
 > [!TIP]
-> Since RFD 081, a directive only mutates a tool's `state`; whether a given
-> directive may flip that state is gated by the tool's `allow_toggle` policy
-> (`any` / `never` / `if_named` / `if_named_or_group`).
-> Bare `-t` / `-T` are bulk-scope directives and only affect freely-toggleable
-> (`any`) tools, so they can no longer erase a tool's classification (the
-> behavior the original `test_interleaved_disable_all_then_enable_all`
-> documented).
-> Named directives a policy forbids are errors.
-> See RFD 081 for the scope/policy model.
+> [RFD 081] gates each directive on the tool's `allow_toggle` policy (`any`,
+> `never`, `if_named`, `if_named_or_group`): a directive mutates the tool's
+> `state` only when that policy permits it, and named directives forbidden by a
+> policy return an error.
+> Bare `-t` and `-T` are bulk-scope directives that only affect freely
+> toggleable (`any`) tools, so they do not erase a tool's classification as the
+> original `test_interleaved_disable_all_then_enable_all` test documented.
 
-Replace the two separate fields on `Query`:
+Replace the separate `tools` and `no_tools` fields on `Query`:
 
 ```rust
 tools: Vec<Option<String>>,
 no_tools: Vec<Option<String>>,
 ```
 
-with a single flattened struct:
+with an ordered `ToolDirectives` list:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,39 +68,37 @@ enum ToolDirective {
 struct ToolDirectives(Vec<ToolDirective>);
 ```
 
-`ToolDirectives` implements `clap::Args` (defining both `--tool` and
-`--no-tools` as before) and `clap::FromArgMatches` manually.
-The `FromArgMatches` implementation uses `ArgMatches::indices_of` to recover the
-position of each value across both args, then merges and sorts them by index
-into a single ordered list.
+`ToolDirectives` manually implements `clap::Args` and `clap::FromArgMatches`.
+`Args` defines `--tool` (`-t`) and `--no-tools` (`-T`) with the same value
+syntax as before, so the CLI surface is unchanged.
+`FromArgMatches` uses `ArgMatches::indices_of` to read the command-line index of
+each value across both flags, then merges and sorts the directives by index into
+a single ordered list.
 
-The `Query` struct uses `#[command(flatten)]`:
+`Query` flattens `ToolDirectives`:
 
 ```rust
 #[command(flatten)]
 tool_directives: ToolDirectives,
 ```
 
-The CLI surface is unchanged: same flags, same short forms (`-t`, `-T`), same
-value syntax.
-
-`apply_enable_tools` changes from four fixed steps to a sequential loop over
-directives.
-Upfront validation (unknown tool names, attempts to disable core tools) remains.
-
-The existing restriction against combining bare `--no-tools` with bare `--tool`
-is removed — ordered evaluation makes that sequence well-defined.
+`apply_enable_tools` replaces its four fixed steps with a sequential loop over
+`ToolDirectives`.
+Upfront validation for unknown tool names and attempts to disable core tools is
+unchanged, while the restriction against combining bare `--no-tools` with bare
+`--tool` is removed because left-to-right evaluation makes that sequence
+well-defined.
 
 ## Implementation Plan
 
-Single PR scoped to `crates/jp_cli/src/cmd/query.rs` and `query_tests.rs`:
+A single PR scoped to `crates/jp_cli/src/cmd/query.rs` and `query_tests.rs`:
 
-1. Add `ToolDirective` enum and `ToolDirectives` struct with manual `clap::Args`
-   - `FromArgMatches`.
-2. Replace `tools`/`no_tools` fields on `Query` with `#[command(flatten)]
-   tool_directives`.
-3. Rewrite `apply_enable_tools` to iterate directives sequentially.
-4. Update existing tests; add new tests for interleaved ordering.
+1. Add the `ToolDirective` enum and `ToolDirectives` struct with manual
+   `clap::Args` and `clap::FromArgMatches` implementations.
+2. Replace the `tools` and `no_tools` fields on `Query` with
+   `#[command(flatten)] tool_directives`.
+3. Rewrite `apply_enable_tools` to apply directives sequentially.
+4. Update existing tests and add tests for interleaved ordering.
 
 [RFD 081]: 081-decompose-tool-enable-into-state-and-allow_toggle.md
 [\#437]: https://github.com/dcdpr/jp/issues/437
