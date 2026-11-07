@@ -1,0 +1,32 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        }
+      ],
+      "stream": true,
+      "chat_template_kwargs": {
+        "enable_thinking": false,
+        "thinking": false
+      }
+    }
+then:
+  status: 404
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "error": {
+        "message": "The model `foobarbaz` does not exist.",
+        "type": "NotFoundError",
+        "param": "model",
+        "code": 404
+      }
+    }

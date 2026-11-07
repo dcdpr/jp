@@ -1,0 +1,9 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    Err(
+        "Anthropic error: api error: not_found_error: model: foobarbaz",
+    ),
+]

@@ -23,6 +23,7 @@ use jp_test::mock::{Snap, Vcr};
 use jp_tool::{ToolDefinition, ToolDocs};
 
 use crate::{
+    error::StreamErrorKind,
     event::{Event, FinishReason},
     event_builder::EventBuilder,
     model::ModelDetails,
@@ -153,6 +154,26 @@ pub enum TestEvent {
     Finished(FinishReason),
 }
 
+/// How a provider answered a chat request expected to be refused.
+///
+/// Error text has the mock server's address replaced with `[base_url]`, since
+/// the port differs on every run.
+#[derive(Debug, Clone)]
+#[expect(dead_code, reason = "fields read via Debug formatting in snapshots")]
+pub enum TestRefusal {
+    /// The request failed before a stream was returned.
+    Request(String),
+
+    /// The stream ended with this error.
+    Stream {
+        kind: StreamErrorKind,
+        message: String,
+    },
+
+    /// The provider answered the request.
+    Answered,
+}
+
 #[allow(clippy::large_enum_variant)]
 pub enum TestRequest {
     /// A chat completion request.
@@ -177,6 +198,25 @@ pub enum TestRequest {
         name: String,
         #[expect(clippy::type_complexity)]
         assert: Arc<dyn Fn(&[ModelDetails])>,
+    },
+
+    /// A chat completion request the provider is expected to refuse.
+    ///
+    /// Built from [`Self::Chat`] by [`Self::expect_refusal`].
+    /// Snapshotted as `refusal` instead of as events.
+    Refused {
+        model: ModelDetails,
+        query: ChatQuery,
+        assert: Arc<dyn Fn(&TestRefusal)>,
+    },
+
+    /// A model details request that may fail.
+    ///
+    /// Snapshotted as `model_lookup`, with the error text when it fails.
+    ModelLookup {
+        name: String,
+        #[expect(clippy::type_complexity)]
+        assert: Arc<dyn Fn(&Result<ModelDetails, String>)>,
     },
 
     /// A tool call response, given the same ID as the last tool call request in
@@ -392,6 +432,22 @@ impl TestRequest {
         self
     }
 
+    /// Expect the provider to refuse this chat request.
+    ///
+    /// `assert` receives how the provider answered.
+    /// Call last: the builder methods for chat requests leave a refused request
+    /// unchanged.
+    pub fn expect_refusal(self, assert: impl Fn(&TestRefusal) + 'static) -> Self {
+        match self {
+            Self::Chat { model, query, .. } => Self::Refused {
+                model,
+                query,
+                assert: Arc::new(assert),
+            },
+            other => other,
+        }
+    }
+
     /// Add an attachment to the thread.
     pub fn attachment(mut self, attachment: Attachment) -> Self {
         if let Self::Chat { query, .. } = &mut self {
@@ -402,14 +458,14 @@ impl TestRequest {
 
     pub fn as_thread(&self) -> Option<&Thread> {
         match self {
-            Self::Chat { query, .. } => Some(&query.thread),
+            Self::Chat { query, .. } | Self::Refused { query, .. } => Some(&query.thread),
             _ => None,
         }
     }
 
     pub fn as_thread_mut(&mut self) -> Option<&mut Thread> {
         match self {
-            Self::Chat { query, .. } => Some(&mut query.thread),
+            Self::Chat { query, .. } | Self::Refused { query, .. } => Some(&mut query.thread),
             _ => None,
         }
     }
@@ -430,8 +486,16 @@ impl std::fmt::Debug for TestRequest {
                 .field("model", model)
                 .field("query", query)
                 .finish(),
+            Self::Refused { model, query, .. } => f
+                .debug_struct("Refused")
+                .field("model", model)
+                .field("query", query)
+                .finish(),
             Self::Models { .. } => f.debug_struct("Models").finish(),
             Self::ModelDetails { .. } => f.debug_struct("ModelDetails").finish(),
+            Self::ModelLookup { name, .. } => {
+                f.debug_struct("ModelLookup").field("name", name).finish()
+            }
             Self::ToolCallResponse {
                 result,
                 panic_on_missing_request,
@@ -563,7 +627,7 @@ pub async fn run_chat_completion_mode(
             });
         },
         |recording, url| async move {
-            route.set_base_url(&mut config, url);
+            route.set_base_url(&mut config, url.clone());
 
             if !recording {
                 route.use_replay_credentials(&mut config);
@@ -591,6 +655,9 @@ pub async fn run_chat_completion_mode(
             let mut history = vec![];
             let mut model_details = vec![];
             let mut models = vec![];
+            let mut refusals = vec![];
+            let mut model_lookups = vec![];
+            let redact = |text: String| text.replace(&url, "[base_url]");
 
             for (index, mut request) in requests.into_iter().enumerate() {
                 all_events.push(vec![]);
@@ -655,12 +722,12 @@ pub async fn run_chat_completion_mode(
                 }
 
                 let config = match &request {
-                    TestRequest::Chat { query, .. } => {
+                    TestRequest::Chat { query, .. } | TestRequest::Refused { query, .. } => {
                         query.thread.events.config().unwrap().to_partial()
                     }
-                    TestRequest::Models { .. } | TestRequest::ModelDetails { .. } => {
-                        PartialAppConfig::empty()
-                    }
+                    TestRequest::Models { .. }
+                    | TestRequest::ModelDetails { .. }
+                    | TestRequest::ModelLookup { .. } => PartialAppConfig::empty(),
                     TestRequest::ToolCallResponse { .. } | TestRequest::Func(_) => {
                         unreachable!("resolved at start of loop")
                     }
@@ -798,6 +865,33 @@ pub async fn run_chat_completion_mode(
                         model_details.push(value);
                         assert(&model_details);
                     }
+                    TestRequest::Refused {
+                        model,
+                        query,
+                        assert,
+                    } => {
+                        let refusal = match provider.chat_completion_stream(&model, query).await {
+                            Err(error) => TestRefusal::Request(redact(error.to_string())),
+                            Ok(stream) => match stream.try_collect::<Vec<_>>().await {
+                                Err(error) => TestRefusal::Stream {
+                                    kind: error.kind,
+                                    message: redact(error.message().to_owned()),
+                                },
+                                Ok(_) => TestRefusal::Answered,
+                            },
+                        };
+                        assert(&refusal);
+                        refusals.push(refusal);
+                    }
+                    TestRequest::ModelLookup { name, assert } => {
+                        let name: Name = name.parse().unwrap();
+                        let result = provider
+                            .model_details(&name)
+                            .await
+                            .map_err(|error| redact(error.to_string()));
+                        assert(&result);
+                        model_lookups.push(result);
+                    }
                     TestRequest::ToolCallResponse { .. } | TestRequest::Func(_) => {
                         unreachable!("resolved at start of loop")
                     }
@@ -849,6 +943,14 @@ pub async fn run_chat_completion_mode(
 
             if has_models_request {
                 outputs.push(("models", Snap::debug(models)));
+            }
+
+            if !refusals.is_empty() {
+                outputs.push(("refusal", Snap::debug(refusals)));
+            }
+
+            if !model_lookups.is_empty() {
+                outputs.push(("model_lookup", Snap::debug(model_lookups)));
             }
 
             outputs

@@ -6,8 +6,12 @@ use jp_test::{Result, function_name};
 use serde_json::json;
 
 use super::*;
-use crate::test::{
-    ProviderTestMode, TestRequest, fixture_attachment, run_test_mode, test_model_details,
+use crate::{
+    error::StreamErrorKind,
+    test::{
+        ProviderTestMode, TestRefusal, TestRequest, fixture_attachment, run_test_mode,
+        test_model_details,
+    },
 };
 
 /// Generate every provider's recorded suite, once per billing route.
@@ -191,6 +195,92 @@ async fn models(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -
     run_test_mode(provider, test_name, Some(request), mode).await
 }
 
+/// A model name no provider serves.
+const UNKNOWN_MODEL: &str = "foobarbaz";
+
+/// Providers that answer a request naming any model.
+///
+/// A llama.cpp server serves the model it was started with and ignores the
+/// `model` field, so it has nothing to refuse.
+const SERVES_ANY_MODEL: &[ProviderId] = &[ProviderId::Llamacpp];
+
+/// A chat request naming a model the provider does not serve is refused with
+/// [`StreamErrorKind::UnknownModel`] from the stream.
+///
+/// That classification is what lets `jp query` offer the models the provider
+/// does serve instead of failing the turn with a generic error.
+/// The request is otherwise the route's recorded model, so the name is the only
+/// thing the provider can object to.
+async fn unknown_model(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -> Result {
+    // Anthropic's subscription route records with a direct subscription token,
+    // which is not an authorized use of the subscription, so no new recordings
+    // are made against it.
+    if provider == ProviderId::Anthropic && mode == ProviderTestMode::Subscription {
+        return Ok(());
+    }
+
+    let support = provider_test_support(provider);
+    let mut details = match mode {
+        ProviderTestMode::Subscription => support.subscription().map(ProviderTestRoute::model),
+        ProviderTestMode::Api => None,
+    }
+    .unwrap_or_else(|| support.api().model());
+    details.id.name = UNKNOWN_MODEL.parse()?;
+
+    let request = TestRequest::chat(provider)
+        .model(details.id.clone())
+        .model_details(details)
+        .chat_request("Test message")
+        .expect_refusal(move |refusal| {
+            if SERVES_ANY_MODEL.contains(&provider) {
+                assert!(
+                    matches!(refusal, TestRefusal::Answered),
+                    "expected {provider} to answer for any model, got: {refusal:?}"
+                );
+                return;
+            }
+
+            assert!(
+                matches!(refusal, TestRefusal::Stream {
+                    kind: StreamErrorKind::UnknownModel,
+                    ..
+                }),
+                "expected the stream to refuse `{UNKNOWN_MODEL}` as an unknown model, got: \
+                 {refusal:?}"
+            );
+        });
+
+    run_test_mode(provider, test_name, Some(request), mode).await
+}
+
+/// Looking up a model the provider does not serve.
+///
+/// Anthropic and OpenAI ask the API about the named model, and the lookup
+/// fails.
+/// The other providers search their model list and fall back to empty details,
+/// leaving the refusal to the chat request.
+/// `jp query` looks the model up before the turn starts, so for Anthropic and
+/// OpenAI an unknown model ends there.
+async fn unknown_model_details(
+    provider: ProviderId,
+    test_name: &str,
+    mode: ProviderTestMode,
+) -> Result {
+    let request = TestRequest::ModelLookup {
+        name: UNKNOWN_MODEL.to_owned(),
+        assert: Arc::new(move |result| {
+            let lookup_fails = matches!(provider, ProviderId::Anthropic | ProviderId::Openai);
+            assert_eq!(
+                result.is_err(),
+                lookup_fails,
+                "unexpected lookup result for `{UNKNOWN_MODEL}`: {result:?}"
+            );
+        }),
+    };
+
+    run_test_mode(provider, test_name, Some(request), mode).await
+}
+
 /// Providers that don't support image/vision input.
 const NO_IMAGE_SUPPORT: &[ProviderId] = &[ProviderId::Cerebras];
 
@@ -351,6 +441,7 @@ test_all_providers![
         tool_call_stream,
         multi_turn_conversation,
         structured_output,
+        unknown_model,
     ],
-    api_only: [model_details, models],
+    api_only: [model_details, models, unknown_model_details],
 ];
