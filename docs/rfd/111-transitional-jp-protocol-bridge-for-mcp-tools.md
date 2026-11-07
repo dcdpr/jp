@@ -9,53 +9,50 @@
 
 ## Summary
 
-Bridge MCP tools into JP's tool execution semantics by (a) speculatively
-unwrapping `jp_tool::Outcome` JSON when an MCP tool emits it as a single text
-content, and (b) attaching JP's tool execution context (arguments, answers,
-options, root) to MCP requests under `_meta."computer.jp/tool"` and
-`_meta."computer.jp/context"`.
-This is an explicit stopgap until [RFD 058] lands, intended to give MCP tools
-access to JP-specific features (tool-driven inquiries via `Outcome::NeedsInput`,
-transient-error retry semantics, per-tool options) months earlier than the typed
-content-block migration allows.
+This RFD bridges MCP tools into JP's tool execution semantics by speculatively
+unwrapping `jp_tool::Outcome` JSON when an MCP tool returns a single text
+content block, and by attaching JP's tool execution context (`arguments`,
+`answers`, `options`, and `root`) to MCP requests under
+`_meta."computer.jp/tool"` and `_meta."computer.jp/context"`.
+This bridge is an explicit stopgap until [RFD 058] lands, giving MCP tools
+access to tool-driven inquiries (`Outcome::NeedsInput`), transient-error
+retries, and per-tool options without waiting for the typed content-block
+migration.
 
 ## Motivation
 
-`jp_cli` runs MCP tools and local tools through fundamentally different code
-paths.
-The local-tool path parses stdout as `jp_tool::Outcome` and maps the variants
-onto JP's `ExecutionOutcome`, so local tools can return `Success`, `Error {
+`jp_cli` runs local tools and MCP tools through separate code paths.
+The local-tool path parses stdout as `jp_tool::Outcome` and maps its variants
+onto `ExecutionOutcome`, allowing local tools to return `Success`, `Error {
 transient, trace }`, or `NeedsInput { question }`.
-The MCP-tool path concatenates all `Content` items into a single string, uses
-MCP's `is_error` flag as the only success/failure signal, and produces only
-`Completed`.
-There is no path for an MCP tool to declare a transient error, return a
-structured question, or read accumulated answers on retry.
+The MCP-tool path concatenates all `Content` items into a single string, relies
+on MCP's `is_error` flag as the sole success or failure signal, and always
+produces `ExecutionOutcome::Completed`.
+As a result, an MCP tool cannot declare a transient error or pause execution
+with a structured question.
 
-JP also has no mechanism to pass execution context to an MCP tool.
-[RFD 042] explicitly excluded MCP tools from the per-tool `options` mechanism
-because "JP has no way to pass out-of-band options to an external server."
-That constraint was correct at the time but is removable: MCP's `_meta` field
-([SEP-1319]) exists for exactly this kind of protocol-level signaling, and `rmcp
-1.1` already exposes it via the `RequestParamsMeta` trait.
+JP also has no way to pass execution context, such as accumulated inquiry
+answers or per-tool `options`, to an MCP server.
+[RFD 042] excluded MCP tools from per-tool `options` because JP had "no way to
+pass out-of-band options to an external server."
+MCP's `_meta` field ([SEP-1319]) provides a standard channel for this
+protocol-level metadata, and `rmcp 1.1` exposes it through the
+`RequestParamsMeta` trait.
 
-The capability gap matters now because two in-tree MCP servers (`bookworm` for
-crate documentation, `grizzly` for Bear-note search) ship with a `--jp` flag
-that already emits `jp_tool::Outcome` JSON envelopes — but `jp_cli` treats them
-as opaque text.
-The advertised "JP tool protocol" only half-works.
-Closing the gap unblocks tool-driven inquiries (`Outcome::NeedsInput`),
-transient retries, and JP options for MCP tools today, instead of waiting for
-[RFD 058]'s broader content-block migration.
+This gap affects existing tools today.
+Two in-tree MCP servers, `bookworm` (crate documentation) and `grizzly` (Bear
+note search), already ship with a `--jp` flag that emits `jp_tool::Outcome` JSON
+envelopes, but `jp_cli` treats those envelopes as opaque text.
+Supporting `Outcome` decoding and `_meta` context on the MCP path makes `--jp`
+work end to end without waiting for [RFD 058].
 
 ## Design
 
-### Scope discipline
-
-This RFD covers two narrow protocol additions and nothing else.
-It does **not** introduce typed content blocks, resource URIs, mimeType
-formatting, or content-block-shaped questions.
-Those belong to [RFD 058].
+This design adds two narrow protocol bridges to the MCP tool path: speculative
+`Outcome` unwrapping on responses and unified tool context under `_meta` on
+requests.
+Typed content blocks, resource URIs, `mimeType` formatting, and
+content-block-shaped questions remain in [RFD 058].
 
 ### Response side: speculative `Outcome` unwrap
 
@@ -63,30 +60,30 @@ Those belong to [RFD 058].
 guarded by a content-shape check:
 
 1. After receiving `CallToolResult`, inspect the `content` vector.
-2. If `content.len() == 1` and the single item is `RawContent::Text` and
-   `serde_json::from_str::<Outcome>(&text)` succeeds, route through `Outcome`
-   semantics (the same `CommandResult` → `ExecutionOutcome` mapping used by
-   `execute_local`).
-3. Otherwise, fall back to the current MCP-native behavior (concatenate content,
-   map `is_error`).
+2. If `content.len() == 1`, the sole item is `RawContent::Text`, and
+   `serde_json::from_str::<Outcome>(&text)` succeeds, map the parsed `Outcome`
+   to `ExecutionOutcome` through the same `CommandResult` conversion used by
+   `execute_local`.
+3. Otherwise, fall back to standard MCP handling: concatenate the content items
+   and map `is_error`.
 
-The single-text-content guard rules out two failure modes:
+Requiring a single text block prevents two failure modes:
 
-- **Lost multi-resource semantics.** A tool returning `n` resource items keeps
-  working as a list of resources, even if one of them happens to contain JSON
-  that parses as `Outcome`.
-- **Mixed content collisions.** A tool returning a text block followed by an
-  image block can't accidentally trigger Outcome-unwrapping on the text alone.
+- **Lost multi-resource semantics.** A tool returning `n` resource items is
+  still handled as a list of resources, even if one item contains JSON that
+  matches the `Outcome` schema.
+- **Mixed-content collisions.** A tool returning a text block alongside an image
+  or resource block never triggers `Outcome` unwrapping on the text block alone.
 
-When `is_error: true` and the content parses as `Outcome::Success`, the MCP flag
-wins — the response is treated as an error and the parsed `Outcome` is
-discarded with a `warn!` log.
-This case shouldn't arise in practice (a tool emitting `Outcome` semantics
-shouldn't disagree with itself) but the tiebreak needs to be defined.
+If `is_error` is `true` while the text parses as `Outcome::Success`, the MCP
+`is_error` flag takes precedence: `execute_mcp` logs a `warn!` diagnostic,
+discards the parsed `Outcome`, and treats the response as an error.
 
 ### Request side: unified tool context via `_meta`
 
-The local-tool path builds a JSON context for each tool invocation:
+For each local tool invocation, `execute_local` builds a JSON context object and
+exposes its fields (`tool.arguments`, `tool.answers`, `tool.options`,
+`context.root`) to the command template:
 
 ```json
 {
@@ -103,11 +100,11 @@ The local-tool path builds a JSON context for each tool invocation:
 }
 ```
 
-This blob is rendered into the local tool's command template as
-`tool.arguments`, `tool.answers`, `tool.options`, `context.root`, etc.
-
-The same blob is serialized into the MCP request's `_meta` field, split across
-two reverse-DNS-prefixed keys:
+A new `tool_context(name, arguments, answers, config, root, action) -> Value`
+helper extracts this JSON construction so both `execute_local` and `execute_mcp`
+build the same structure from a single source.
+On the MCP path, `execute_mcp` serializes the two top-level objects into the
+request's `_meta` field under reverse-DNS keys:
 
 ```json
 {
@@ -126,36 +123,26 @@ two reverse-DNS-prefixed keys:
 }
 ```
 
-The two keys are independently readable.
-A tool that only cares about answers reads `_meta["computer.jp/tool"].answers`;
-a tool that only needs the workspace path reads
-`_meta["computer.jp/context"].root`.
-The split matches [RFD 058]'s established `computer.jp/error` and
-`computer.jp/status` pattern.
+Splitting the payload across two keys lets a server read only the half it needs
+(`_meta["computer.jp/tool"].answers` for inquiry answers or
+`_meta["computer.jp/context"].root` for the workspace path) and matches the
+`computer.jp/error` and `computer.jp/status` namespace convention in [RFD 058].
 
-**`tool.arguments` is duplicated** between the standard MCP `arguments` field
-and `_meta["computer.jp/tool"].arguments`.
-The local-tool path makes the same trade — arguments are both rendered into the
-command line and visible in the template context as `tool.arguments`.
-Same-shape symmetry between transports is worth the duplicated bytes.
+`tool.arguments` appears in both the top-level MCP `arguments` field and
+`_meta["computer.jp/tool"].arguments`.
+The local-tool path makes the same trade-off by passing arguments on the command
+line while also exposing `tool.arguments` in the template context; keeping the
+context shape identical across transports is worth the extra bytes on the wire.
 
-### Shared context builder
+### MCP client and coordinator flow
 
-A `tool_context(name, arguments, answers, config, root, action) -> Value` helper
-extracts the JSON construction currently inlined in `execute_local`.
-Both `execute_local` (template context) and `execute_mcp` (`_meta` payload) call
-it.
-This removes the only place the two flows could drift.
+`jp_mcp::Client::call_tool` gains a `meta: Option<JsonObject>` parameter.
+When `meta` is non-empty, `call_tool` attaches it to `CallToolRequestParams` via
+`RequestParamsMeta::set_meta` before dispatching the request; when `None` or
+empty, no `_meta` field is sent.
 
-### MCP client changes
-
-`jp_mcp::Client::call_tool` gains an optional `meta: Option<JsonObject>`
-parameter.
-When provided, the client calls `RequestParamsMeta::set_meta` on the
-`CallToolRequestParams` before dispatch.
-When `None` (or empty), no `_meta` is sent.
-
-The execution flow:
+The end-to-end inquiry flow across `ToolCoordinator`, `execute_mcp`, and the MCP
+server is:
 
 ```text
 ToolCoordinator                        execute_mcp                       MCP server
@@ -176,260 +163,244 @@ ToolCoordinator                        execute_mcp                       MCP ser
           config, root, ...)
 ```
 
-The `ToolCoordinator` retry loop is unchanged.
-The local-tool, MCP-tool, and builtin-tool paths all return the same
-`ExecutionOutcome` shape, so any caller that handles `NeedsInput` for one
-transport handles it for all three.
+The `ToolCoordinator` retry loop does not change.
+Because the local-tool, MCP-tool, and builtin-tool paths all return
+`ExecutionOutcome`, any caller that handles `NeedsInput` for one transport
+handles it for all three.
 
-### Transitional markers
+### Transitional notices
 
-Every user-visible surface that mentions the protocol carries an explicit
-transitional notice:
+Every user-facing surface that exposes this bridge marks it as transitional so
+tool authors do not mistake it for a permanent contract:
 
-- The `--jp` flag's `--help` output: *"Enable transitional JP tool protocol.
-  Will be replaced by typed content blocks per RFD 058."*
-- `crates/contrib/bookworm/README.md` and `crates/contrib/grizzly/README.md`:
-  same notice, with a link to this RFD.
-- A new `docs/architecture/jp-aware-mcp-tools.md` page documenting the
-  `_meta."computer.jp/*"` namespace and the `Outcome` envelope shape, prefixed
-  with a `> [!IMPORTANT]` block stating the protocol is transitional and naming
-  [RFD 058] as the successor.
-
-If we don't mark it loudly, adopters treat it as stable regardless of intent.
+- **CLI help text:** the `--jp` flag's `--help` output in `bookworm` and
+  `grizzly` states: *"Enable transitional JP tool protocol. Will be replaced by
+  typed content blocks per RFD 058."*
+- **Server READMEs:** `crates/contrib/bookworm/README.md` and
+  `crates/contrib/grizzly/README.md` carry the same notice with a link to this
+  RFD.
+- **Architecture documentation:** a new
+  `docs/architecture/jp-aware-mcp-tools.md` page documents the
+  `_meta."computer.jp/*"` namespace and the `Outcome` envelope shape, opening
+  with a `> [!IMPORTANT]` callout that marks the protocol as transitional and
+  names [RFD 058] as its replacement.
 
 ## Drawbacks
 
-**Two protocols to maintain for MCP tools.** Until [RFD 058] lands and external
-tools migrate, `execute_mcp` carries both the speculative-Outcome path and the
-MCP-native path.
-The branches are small (~50 LOC) but they're real maintenance surface.
-
-**Hyrum's Law on a transitional protocol.** Even with explicit transitional
-markers, external tool authors who adopt the `Outcome` envelope and the
-`_meta."computer.jp/*"` keys treat them as a contract.
-If [RFD 058] slips for 12+ months and several external tools adopt this
-protocol, migrating becomes a coordinated ecosystem move rather than a quiet
-internal one.
-Shipping this RFD commits the project to keeping [RFD 058] on the active
-roadmap; deprioritizing 058 in favor of this stopgap would make the stopgap
-permanent by inertia.
-
-**Reverses an explicit decision in [RFD 042].** [RFD 042] excluded MCP tools
-from the per-tool `options` mechanism with a specific rationale ("JP has no way
-to pass out-of-band options to an external server").
-This RFD makes the opposite call.
-The reversal is deliberate: the constraint that justified 042's decision (no
-`_meta` plumbing) is removable, and `rmcp` 1.1's first-class `_meta` support
-makes the option-passing path cheap and idiomatic.
-
-**Argument duplication on the wire.** `tool.arguments` appears both in MCP's
-top-level `arguments` field and inside `_meta."computer.jp/tool".arguments`.
-For tools with large argument payloads (e.g. embedded file contents) this is
-wasteful.
-Accepted because same-shape symmetry between local and MCP transports matters
-more than wire size for the cases we care about.
+- **Two response paths in `execute_mcp`.** Until [RFD 058] lands and tools
+  migrate, `execute_mcp` must maintain both speculative `Outcome` unwrapping and
+  standard MCP response handling (roughly 50 lines of branching).
+- **Hyrum's Law on a stopgap protocol.** Even with explicit notices, external
+  tool authors who adopt the `Outcome` envelope and `_meta."computer.jp/*"` keys
+  will depend on them.
+  Shipping this bridge commits JP to keeping [RFD 058] on the active roadmap so
+  the stopgap does not become permanent by inertia.
+- **Reversal of [RFD 042].** [RFD 042] excluded MCP tools from per-tool
+  `options` because JP lacked out-of-band request metadata plumbing.
+  Using `_meta` reverses that decision now that `rmcp 1.1` supports request
+  metadata directly.
+- **Argument duplication on the wire.** Sending `tool.arguments` in both MCP's
+  top-level `arguments` field and `_meta."computer.jp/tool".arguments`
+  duplicates large payloads such as embedded file contents.
+  Keeping context structure identical across local and MCP transports outweighs
+  the extra wire size.
 
 ## Alternatives
 
 ### Wait for [RFD 058]
 
-The clean alternative is to ship nothing transitional, accept that MCP tools
-have second-class access to JP semantics until typed content blocks land, and
-push [RFD 058] through faster.
+JP could skip a transitional bridge, leave MCP tools without access to `Outcome`
+semantics or execution context until typed content blocks land, and focus effort
+on finishing [RFD 058].
 
-Rejected because the bookworm/grizzly use case is real today and the [RFD 058]
-implementation surface (typed content blocks + inquiry rework + resource URIs +
-mimeType formatting + stateful tool status) is large enough that even with focus
-it's a multi-month effort.
-Boyd's Law applies: a transitional solution shipped this week is more valuable
-than the perfect solution in six months, provided the transition path is
-bounded.
+This approach leaves `bookworm` and `grizzly` incomplete for too long.
+[RFD 058] spans typed content blocks, inquiry rework, resource URIs, `mimeType`
+formatting, and stateful tool status, making it a multi-month effort even with
+dedicated focus.
+A bounded stopgap delivers inquiry and retry support immediately while [RFD 058]
+is in progress.
 
-### Speculative `Outcome` parse without the content-shape guard
+### Parse `Outcome` without the content-shape guard
 
-Drop the "exactly one `Content::Text`" guard from the response side.
-Try to parse `Outcome` from any MCP response, including concatenated
-multi-content responses.
+`execute_mcp` could drop the single-`RawContent::Text` guard and attempt to
+parse `Outcome` from any MCP response, including concatenated multi-content
+responses.
 
-Rejected because it conflicts with MCP-native multi-resource tool responses.
-A tool emitting `n` `Content::Resource` items legitimately wants those treated
-as separate resources, not collapsed and re-interpreted as a JSON envelope.
-The guard preserves MCP-native semantics for tools that use them.
+This breaks MCP-native multi-resource responses.
+A tool emitting `n` `Content::Resource` items expects JP to treat them as
+separate resources rather than collapsing and re-interpreting them as a JSON
+envelope.
+The single-text-block guard preserves standard MCP semantics for multi-block
+responses.
 
-### Per-tool opt-in via JP-side config
+### Opt in per tool via JP configuration
 
-User declares `outcome_protocol = true` for specific MCP tools in `.jp/config`.
-The speculative parse only fires for opted-in tools.
+Users could enable `Outcome` parsing per tool by setting `outcome_protocol =
+true` in `.jp/config`.
 
-Rejected because configuration burden falls on the user installing the tool
-rather than the tool author.
-Tool authors who want `NeedsInput` semantics can't unilaterally enable them;
-they need every user to flip a flag.
-The speculative-with-guard approach gives tool authors the affordance directly.
+This shifts configuration burden onto every user who installs a JP-aware MCP
+tool.
+Tool authors could not rely on `NeedsInput` semantics working out of the box
+unless each user enabled the flag.
+Speculative parsing guarded by content shape lets tool authors opt in directly
+from the server response.
 
-### Use `_meta` exclusively (skip `Outcome` envelope unwrap)
+### Use `_meta` without `Outcome` unwrapping
 
-Send request-side metadata via `_meta` but rely entirely on MCP-native response
-semantics.
-MCP tools that want `NeedsInput` would have to define a custom MCP extension for
-it.
+JP could send request metadata in `_meta` while relying exclusively on standard
+MCP response semantics, requiring tools that need `NeedsInput` to use a custom
+MCP response extension.
 
-Rejected because there's no MCP-native equivalent of `Outcome::NeedsInput`.
-MCP's elicitation mechanism is server-initiated and out-of-band; it doesn't fit
-JP's "tool returns a question alongside its response" model.
-Skipping the Outcome unwrap would leave the most valuable JP feature
-(tool-driven inquiries) inaccessible to MCP tools.
+MCP has no response-side equivalent of `Outcome::NeedsInput`.
+MCP elicitation is server-initiated and out-of-band, which does not fit JP's
+model where a tool call returns a structured question as its result and is
+re-invoked with the accumulated answers.
+Without `Outcome` unwrapping, MCP tools still could not trigger JP inquiries.
 
-### Reverse-DNS namespace: alternative shapes
+### Alternative `_meta` key layouts
 
-- `_meta.jp` (no reverse-DNS prefix): shorter but inconsistent with [RFD 058]
-  and not aligned with MCP community conventions for vendor metadata.
-- `_meta["computer.jp/tool-context"]` (single nested key): one key holds the
-  full context blob.
-  Slightly fewer bytes but mixes two semantically distinct concepts (tool
-  identity/inputs vs execution environment) under one key, making partial reads
-  awkward.
+Two other key layouts were considered:
 
-Rejected in favor of two keys (`computer.jp/tool` and `computer.jp/context`)
-that mirror the local-tool template context shape and match [RFD 058]'s existing
-pattern.
+- **`_meta.jp` (no reverse-DNS prefix):** shorter, but inconsistent with [RFD
+  058] and with MCP conventions for vendor-scoped metadata.
+- **`_meta["computer.jp/tool-context"]` (single nested key):** saves a few bytes
+  by placing the entire context object under one key, but combines tool inputs
+  and execution environment under a single namespace and makes partial reads
+  more awkward.
+
+Using two keys (`computer.jp/tool` and `computer.jp/context`) mirrors the
+top-level keys of the local-tool template context and matches [RFD 058]'s
+namespace pattern.
 
 ## Non-Goals
 
-- **Typed content blocks for tool responses.** Out of scope; that's [RFD 058].
-  This RFD intentionally keeps `Outcome` as the response envelope.
-- **Resource URIs, mimeType formatting, resource deduplication.** Out of scope;
-  see [RFD 058], [RFD 065], [RFD 066], [RFD 067].
-- **Stateful tool protocol status.** Out of scope; see [RFD 009] and the
-  `computer.jp/status` field defined in [RFD 058].
-- **Restructuring the three-way dispatch in `ToolDefinition::execute`.** Out of
-  scope.
-  This RFD modifies `execute_mcp` in place.
-- **Promoting the transitional protocol to a permanent JP feature.** This RFD is
-  explicitly transitional.
-  If [RFD 058] is later rejected and the project decides to keep `Outcome` as
-  the long-term protocol, that's a separate decision recorded in a separate RFD.
+- **Typed content blocks for tool responses.** Covered by [RFD 058]; this RFD
+  keeps `Outcome` as the response envelope.
+- **Resource URIs, `mimeType` formatting, and resource deduplication.** Covered
+  by [RFD 058], [RFD 065], [RFD 066], and [RFD 067].
+- **Stateful tool protocol status.** Covered by [RFD 009] and the
+  `computer.jp/status` field in [RFD 058].
+- **Restructuring the three-way dispatch in `ToolDefinition::execute`.** This
+  RFD modifies `execute_mcp` in place.
+- **Making the bridge a permanent protocol.** Keeping `Outcome` as a long-term
+  MCP protocol if [RFD 058] were ever rejected would require a separate RFD.
 
 ## Risks and Open Questions
 
-### `is_error` / `Outcome` disagreement
+### `is_error` and `Outcome` disagreement
 
-When an MCP response has `is_error: true` and its single text content parses as
-`Outcome::Success { content }`, the design above lets the MCP flag win.
-Alternative tiebreaks (Outcome wins, fail loudly with an error) are defensible.
-The current choice errs on the side of preserving MCP semantics, since
-`is_error` is the older, more widely-implemented signal.
+When an MCP response sets `is_error: true` while its single text block parses as
+`Outcome::Success { content }`, `execute_mcp` lets `is_error` take precedence.
+Other tiebreakers, such as trusting `Outcome` or failing the call with a
+protocol error, are also defensible, but honoring `is_error` preserves standard
+MCP semantics when a server or proxy sets the error flag outside the `Outcome`
+payload.
 
 ### Migration cost when [RFD 058] lands
 
-The response side will need to migrate: tools emitting `Outcome` envelopes
-rewrite their response builders to emit content blocks.
-The request side mostly survives — `_meta."computer.jp/*"` is already aligned
-with [RFD 058]'s namespace conventions.
-The hope is that the request-side plumbing in this RFD is a forward-compatible
-foundation, but [RFD 058] may yet decide on a different blob shape (e.g. nested
-differently, or split across more keys).
-This RFD does not bind [RFD 058]'s design.
+When [RFD 058] lands, tools that emit `Outcome` envelopes will need to update
+their response builders to emit typed content blocks.
+The request side should require little or no change because
+`_meta."computer.jp/*"` already follows [RFD 058]'s namespace convention, though
+[RFD 058] remains free to revise the exact payload layout.
 
 ### External tool adoption
 
-If only bookworm and grizzly (in-tree) adopt the transitional protocol,
-migration when [RFD 058] lands is internal and cheap.
-If external tool authors adopt it widely, migration becomes a coordinated
-ecosystem change.
-The transitional markers (loud `--jp` `--help`, README notices, architecture doc
-disclaimer) are the primary mitigation, but they're not enforceable.
-Whether this is a problem depends on how aggressively external authors adopt the
-protocol before [RFD 058] is ready.
+If only the in-tree `bookworm` and `grizzly` servers adopt this bridge,
+migrating to [RFD 058] is a self-contained internal change.
+If third-party MCP servers adopt it widely before [RFD 058] ships, retiring the
+`Outcome` unwrap will require coordinating with external authors.
+The transitional notices in `--jp` `--help`, the server READMEs, and
+`docs/architecture/jp-aware-mcp-tools.md` set expectations early, though they
+cannot prevent external adoption.
 
 ## Implementation Plan
 
 ### Phase 1: shared tool context builder
 
-Extract a `tool_context(name, arguments, answers, config, root, action) ->
-Value` function in `jp_llm::tool`.
-Replace the inline `json!({...})` in `execute_local` with a call to it.
-No behavior change.
+Extract `tool_context(name, arguments, answers, config, root, action) -> Value`
+in `jp_llm::tool` and replace the inline `json!({...})` construction in
+`execute_local` with a call to it, without changing behavior.
 
 **Depends on:** nothing.
 **Mergeable:** yes.
 
 ### Phase 2: `_meta` support in `jp_mcp::Client::call_tool`
 
-Add an optional `meta: Option<JsonObject>` parameter (or a builder method) to
-`call_tool`.
-When set, attach via `RequestParamsMeta::set_meta` before dispatch.
-Unit-test that the `_meta` keys round-trip correctly.
+Add an optional `meta: Option<JsonObject>` parameter (or builder method) to
+`call_tool` that attaches metadata via `RequestParamsMeta::set_meta` before
+dispatch.
+Add unit tests verifying that `_meta` keys round-trip cleanly.
 
 **Depends on:** nothing.
 **Mergeable:** yes.
 
 ### Phase 3: request-side metadata in `execute_mcp`
 
-`ToolDefinition::execute` already receives `answers`, `config`, and `root`;
-extend `execute_mcp`'s parameter list to receive the same.
-Serialize the tool context (Phase 1) into `_meta["computer.jp/tool"]` and
-`_meta["computer.jp/context"]` and pass it to `call_tool` (Phase 2).
-Skip the metadata entirely when `answers`, `options`, and config-derived fields
-are all empty/default — keep first-call payloads clean.
+Pass `answers`, `config`, and `root` from `ToolDefinition::execute` into
+`execute_mcp`.
+Serialize the output of `tool_context` (Phase 1) into
+`_meta["computer.jp/tool"]` and `_meta["computer.jp/context"]` and pass it to
+`call_tool` (Phase 2).
+Omit `_meta` when `answers`, `options`, and config-derived fields are all empty
+or at their defaults so initial call payloads stay minimal.
 
 **Depends on:** Phases 1 and 2.
 **Mergeable:** yes.
 
 ### Phase 4: response-side `Outcome` unwrap in `execute_mcp`
 
-Add the speculative-parse-with-guard logic.
-Route `Outcome::NeedsInput`, `Outcome::Error { transient }`, etc. through the
-existing `CommandResult` mapping.
-Add unit tests covering: single-text-content with valid Outcome,
-single-text-content with invalid JSON, multi-content response, `is_error`
+Add the single-text-block guard and speculative `Outcome` parser to
+`execute_mcp`, routing `Outcome::NeedsInput`, `Outcome::Error { transient }`,
+and `Outcome::Success` through the existing `CommandResult` mapping.
+Add unit tests covering a single text block with a valid `Outcome`, a single
+text block with non-`Outcome` text or invalid JSON, a multi-content response,
+and a collision between `is_error: true` and `Outcome::Success`.
 
-- Outcome::Success collision.
-
-**Depends on:** Phase 3 (request side must work for retries to function).
+**Depends on:** Phase 3 (request-side metadata is required for inquiry retries).
 **Mergeable:** yes.
 
 ### Phase 5: transitional documentation
 
-Update `--jp` `--help` text in `bookworm` and `grizzly`.
-Update both READMEs with the transitional notice.
+Update the `--jp` `--help` text and README notices in `bookworm` and `grizzly`.
 Add `docs/architecture/jp-aware-mcp-tools.md` specifying the `Outcome` envelope
-shape and `_meta."computer.jp/*"` namespace, with a prominent `> [!IMPORTANT]`
-block declaring the protocol transitional and naming [RFD 058] as the successor.
+shape and the `_meta."computer.jp/*"` namespace, headed by a `> [!IMPORTANT]`
+callout marking the protocol as transitional and naming [RFD 058] as its
+replacement.
 
-**Depends on:** Phases 3 and 4 (document the actual shipped behavior).
+**Depends on:** Phases 3 and 4.
 **Mergeable:** yes.
 
-### Phase 6: bookworm/grizzly dogfooding
+### Phase 6: `bookworm` and `grizzly` dogfooding
 
-Migrate at least one bookworm tool to emit `Outcome::NeedsInput` and verify the
-round-trip works end-to-end (tool returns NeedsInput → JP CLI prompts or runs
-structured-output inquiry → answer flows back via `_meta` → tool proceeds).
-This is the dogfooding check that proves the protocol is wired correctly.
+Migrate at least one `bookworm` tool to emit `Outcome::NeedsInput` and verify
+the full inquiry round-trip end to end: the tool returns `NeedsInput`, `jp_cli`
+prompts the user or runs a structured-output inquiry, the answer flows back via
+`_meta`, and the re-invoked tool completes.
 
-**Depends on:** Phases 3–5.
+**Depends on:** Phases 3 through 5.
 **Mergeable:** yes.
 
 ## References
 
-- [RFD 028]: Structured Inquiry System for Tool Questions (Implemented) —
-  established the `NeedsInput` + answers-accumulation loop that this RFD extends
-  to MCP tools.
-- [RFD 042]: Tool Options (Implemented) — explicitly excluded MCP tools from
-  per-tool options; this RFD reverses that decision.
-- [RFD 058]: Typed Content Blocks for Tool Responses (Discussion) — the
-  long-term replacement.
-  This RFD's scope is bounded by the intent to be superseded by [RFD 058].
-- [RFD 065]: Typed Resource Model for Attachments (Discussion) — depends on
-  [RFD 058]; out of scope here.
-- [RFD 066]: Content-Addressable Blob Store (Discussion) — depends on [RFD
-  058]; out of scope here.
-- [RFD 067]: Resource Deduplication for Token Efficiency (Discussion) — depends
-  on [RFD 058]; out of scope here.
-- [RFD 009]: Stateful Tool Protocol (Accepted) — the stateful tool lifecycle is
-  layered above the single-execution model this RFD touches.
-- [SEP-1319]: MCP request-params `_meta` field — the protocol surface this RFD
-  attaches metadata to.
+- [RFD 028]: Structured Inquiry System for Tool Questions (Implemented).
+  Establishes the `NeedsInput` and answer-accumulation loop that this RFD
+  extends to MCP tools.
+- [RFD 042]: Tool Options (Implemented).
+  Excluded MCP tools from per-tool `options`, a decision this RFD reverses.
+- [RFD 058]: Typed Content Blocks for Tool Responses (Discussion).
+  The long-term replacement designed to supersede this bridge.
+- [RFD 065]: Typed Resource Model for Attachments (Discussion).
+  Builds on [RFD 058]; out of scope here.
+- [RFD 066]: Content-Addressable Blob Store (Discussion).
+  Builds on [RFD 058]; out of scope here.
+- [RFD 067]: Resource Deduplication for Token Efficiency (Discussion).
+  Builds on [RFD 058]; out of scope here.
+- [RFD 009]: Stateful Tool Protocol (Accepted).
+  Layers the stateful tool lifecycle above the single-execution model modified
+  here.
+- [SEP-1319]: MCP request-params `_meta` field.
+  Defines the protocol surface used to carry JP request metadata.
 
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
