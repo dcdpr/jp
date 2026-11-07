@@ -3,8 +3,8 @@ use std::env;
 use camino_tempfile::Utf8TempDir;
 use indoc::indoc;
 use jp_plugin::message::{
-    ComposeResponse, CreatedResponse, ErrorResponse, PathsInfo, QueryCompleteResponse,
-    QueryRequest, WorkspaceInfo,
+    CreatedResponse, EditedResponse, ErrorResponse, PathsInfo, QueryCompleteResponse, QueryRequest,
+    WorkspaceInfo,
 };
 use serde_json::{Map, json};
 
@@ -77,16 +77,6 @@ fn command(root: &Utf8Path, args: &[&str], replies: &[HostToPlugin]) -> Vec<Plug
     )
 }
 
-/// The composer's answer: `text`, or none, as when there is no terminal to ask
-/// on.
-fn composed(text: Option<&str>) -> HostToPlugin {
-    HostToPlugin::Composed(ComposeResponse {
-        id: None,
-        text: text.map(str::to_owned),
-        values: vec![],
-    })
-}
-
 /// Everything the session printed.
 fn printed(messages: &[PluginToHost]) -> String {
     messages
@@ -104,17 +94,6 @@ fn exit(messages: &[PluginToHost]) -> &ExitMessage {
         Some(PluginToHost::Exit(exit)) => exit,
         other => panic!("expected an exit, got {other:?}"),
     }
-}
-
-/// What the session asked the composer for.
-fn requests(messages: &[PluginToHost]) -> Vec<&ComposeRequest> {
-    messages
-        .iter()
-        .filter_map(|message| match message {
-            PluginToHost::Compose(request) => Some(request),
-            _ => None,
-        })
-        .collect()
 }
 
 fn read(root: &Utf8TempDir, path: &str) -> String {
@@ -328,56 +307,183 @@ fn a_directory_init_set_up_passes_check() {
     assert_eq!(exit(&messages).code, 0);
 }
 
+/// The editor's answer: it closed, cleanly when `saved`.
+fn edited(saved: bool) -> HostToPlugin {
+    HostToPlugin::Edited(EditedResponse { id: None, saved })
+}
+
+/// The files the session asked the host to open in the editor.
+fn opened(messages: &[PluginToHost]) -> Vec<Utf8PathBuf> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::EditFiles(request) => Some(request.paths.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// The host's editor writes nothing in a test, so a new fragment comes back as
+/// empty as it opened; what an edit leaves is the `edit` module's to test.
 #[test]
-fn add_writes_a_fragment_from_its_flags() {
+fn a_type_opens_its_fragment_in_the_hosts_editor() {
     let root = workspace();
 
-    let messages = command(
-        root.path(),
-        &["add", "--type", "fixed", "--body", "Crashes are fixed."],
-        &[],
-    );
+    let messages = command(root.path(), &["fixed", "retry"], &[edited(true)]);
 
-    assert_eq!(
-        printed(&messages),
-        "Wrote changelog.d/crashes-are-fixed.md\n"
-    );
+    assert_eq!(opened(&messages), [root
+        .path()
+        .join("changelog.d/retry.fixed.md")]);
+    assert_eq!(printed(&messages), "Nothing written.\n");
     assert_eq!(exit(&messages).code, 0);
-    assert_eq!(read(&root, "changelog.d/crashes-are-fixed.md"), indoc! {"
-        ---
-        type: fixed
-        ---
-        Crashes are fixed.
-    "});
+    assert!(!root.path().join("changelog.d/retry.fixed.md").exists());
 }
 
 #[test]
-fn add_lays_the_fragment_out_in_the_workspaces_style() {
+fn each_type_has_a_command_of_its_own() {
     let root = workspace();
-    fs::write(root.path().join(".comfort.toml"), "max_width = 80\n").unwrap();
 
-    let messages = formatting(
-        root.path(),
-        &[
-            "add",
-            "--type",
-            "fixed",
-            "--slug",
-            "retry",
-            "--body",
-            "Retries wait. They give up after three attempts.",
-        ],
-        &json!(true),
+    for type_ in Type::ALL {
+        let messages = command(root.path(), &[type_.id(), "retry"], &[edited(true)]);
+
+        assert_eq!(
+            opened(&messages),
+            [root.path().join(format!("changelog.d/retry.{type_}.md"))],
+            "{type_}"
+        );
+    }
+}
+
+#[test]
+fn an_existing_fragment_opens_for_another_edit() {
+    let root = workspace();
+    fs::write(
+        root.path().join("changelog.d/retry.fixed.md"),
+        "Idle turns are retried.\n",
+    )
+    .unwrap();
+
+    let messages = command(root.path(), &["fixed", "retry"], &[edited(true)]);
+
+    assert_eq!(
+        printed(&messages),
+        "changelog.d/retry.fixed.md: unchanged\n"
+    );
+    assert_eq!(
+        read(&root, "changelog.d/retry.fixed.md"),
+        "Idle turns are retried.\n"
+    );
+}
+
+#[test]
+fn a_fragment_is_named_after_the_git_branch_by_default() {
+    let repository = Repository::new("https://github.com/dcdpr/jp");
+    repository.git(&["checkout", "--quiet", "-b", "jean/fix-idle-turns"]);
+
+    let messages = command(repository.path(), &["fixed"], &[edited(true)]);
+
+    assert_eq!(opened(&messages), [repository
+        .path()
+        .join("changelog.d/fix-idle-turns.fixed.md")]);
+}
+
+#[test]
+fn without_a_branch_to_name_it_after_a_fragment_needs_a_slug() {
+    let repository = Repository::new("https://github.com/dcdpr/jp");
+
+    let messages = command(repository.path(), &["added"], &[]);
+
+    assert!(opened(&messages).is_empty());
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some(
+            "`main` has no change of its own to name the fragment after; name it: `jp release \
+             added <slug>`."
+        )
     );
 
-    assert_eq!(printed(&messages), "Wrote changelog.d/retry.md\n");
-    assert_eq!(read(&root, "changelog.d/retry.md"), indoc! {"
-        ---
-        type: fixed
-        ---
-        Retries wait.
-        They give up after three attempts.
-    "});
+    // Outside git, there is no branch at all.
+    let root = workspace();
+    let messages = command(root.path(), &["fixed"], &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some(
+            "There is no git branch to name the fragment after; name it: `jp release fixed \
+             <slug>`."
+        )
+    );
+}
+
+#[test]
+fn a_host_without_an_editor_writes_nothing() {
+    let root = workspace();
+    let refused = HostToPlugin::Error(ErrorResponse {
+        id: None,
+        request: Some("edit_files".to_owned()),
+        message: "no editor is configured".to_owned(),
+    });
+
+    let messages = command(root.path(), &["fixed", "retry"], &[refused]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some("Nothing written: couldn't open an editor: no editor is configured")
+    );
+    assert!(!root.path().join("changelog.d/retry.fixed.md").exists());
+}
+
+#[test]
+fn an_editor_needs_a_host_that_can_open_one() {
+    let root = workspace();
+    let mut message = init_message(root.path(), &["highlight"]);
+    message.version = 12;
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    assert!(opened(&messages).is_empty());
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some(
+            "Opening an editor needs `jp` protocol 13, and this `jp` speaks 12; reinstall the two \
+             together."
+        )
+    );
+}
+
+/// A new highlight is drafted outside the workspace, and filed once its title
+/// names it; one left as it opened writes nothing.
+#[test]
+fn a_new_highlight_opens_as_a_draft() {
+    let root = workspace();
+
+    let messages = command(root.path(), &["highlight"], &[edited(true)]);
+
+    let opened = opened(&messages);
+    assert_eq!(opened.len(), 1);
+    assert!(!opened[0].starts_with(root.path()), "{}", opened[0]);
+    assert_eq!(opened[0].extension(), Some("md"));
+    assert_eq!(printed(&messages), "Nothing written.\n");
+    assert!(!root.path().join("changelog.d/highlights").exists());
+}
+
+#[test]
+fn a_named_highlight_opens_in_highlights() {
+    let root = workspace();
+
+    let messages = command(root.path(), &["highlight", "fan-out"], &[edited(true)]);
+
+    assert_eq!(opened(&messages), [root
+        .path()
+        .join("changelog.d/highlights/fan-out.md")]);
+    assert_eq!(printed(&messages), "Nothing written.\n");
+    assert!(
+        !root
+            .path()
+            .join("changelog.d/highlights/fan-out.md")
+            .exists()
+    );
 }
 
 /// A setting the plugin can't read fails every command, not only the ones that
@@ -397,236 +503,6 @@ fn a_format_on_write_that_is_not_true_or_false_fails_the_command() {
 }
 
 #[test]
-fn add_asks_for_the_type_and_the_entry() {
-    let root = workspace();
-
-    let messages = command(root.path(), &["add", "--slug", "crashes"], &[
-        composed(Some("fixed")),
-        composed(Some("Crashes are fixed.")),
-    ]);
-
-    let requests = requests(&messages);
-    let ComposeMode::Select { options, default } = &requests[0].mode else {
-        panic!("expected a picker, got {:?}", requests[0]);
-    };
-    let values: Vec<&str> = options.iter().map(|option| option.value.as_str()).collect();
-    assert_eq!(values, [
-        "added",
-        "changed",
-        "deprecated",
-        "removed",
-        "fixed",
-        "security",
-        "performance"
-    ]);
-    assert_eq!(
-        options[0].label,
-        "added        A new capability the user can now reach."
-    );
-    assert_eq!(*default, None);
-    assert_eq!(requests[1].message, "New `fixed` fragment");
-    assert_eq!(requests[1].mode, ComposeMode::Buffer { initial_text: None });
-
-    assert_eq!(printed(&messages), "Wrote changelog.d/crashes.md\n");
-    assert_eq!(read(&root, "changelog.d/crashes.md"), indoc! {"
-        ---
-        type: fixed
-        ---
-        Crashes are fixed.
-    "});
-}
-
-/// An entry the format refuses opens the composer again on what was written,
-/// saying why, rather than throwing it away.
-#[test]
-fn add_offers_an_entry_the_format_refuses_back_to_fix() {
-    let root = workspace();
-    let broken = "Entry.\n\n```text\nBREAKING CHANGE: in an example\n```";
-
-    let messages = command(root.path(), &["add", "--type", "changed"], &[
-        composed(Some(broken)),
-        composed(Some("Entry, now without the example.")),
-    ]);
-
-    let requests = requests(&messages);
-    assert_eq!(requests[1].mode, ComposeMode::Buffer {
-        initial_text: Some(broken.to_owned())
-    });
-    assert_eq!(
-        requests[1].help.as_deref(),
-        Some(
-            "Not written: line 7 starts with `BREAKING CHANGE:` inside a code block; to show the \
-             token, indent the line or put the token in inline code."
-        )
-    );
-    assert_eq!(
-        printed(&messages),
-        "Wrote changelog.d/entry-now-without-the-example.md\n"
-    );
-}
-
-#[test]
-fn add_without_a_terminal_says_what_to_pass() {
-    let root = workspace();
-
-    let messages = command(root.path(), &["add", "--type", "fixed"], &[composed(None)]);
-
-    let exit = exit(&messages);
-    assert_eq!(exit.code, 1);
-    assert_eq!(
-        exit.reason.as_deref(),
-        Some("Nothing composed; run it again with what it asked for given as flags.")
-    );
-}
-
-/// The directory and a named slug are checked before the user is asked for
-/// anything, so a mistake there doesn't cost what they typed.
-#[test]
-fn add_checks_the_directory_and_the_slug_before_asking() {
-    let root = Utf8TempDir::new().unwrap();
-
-    let messages = command(root.path(), &["add"], &[]);
-
-    assert!(requests(&messages).is_empty());
-    assert_eq!(
-        exit(&messages).reason.as_deref(),
-        Some("There is no fragments directory at changelog.d; create it with `jp release init`.")
-    );
-
-    let root = workspace();
-    let messages = command(root.path(), &["add", "--slug", "README"], &[]);
-
-    assert!(requests(&messages).is_empty());
-    assert_eq!(
-        exit(&messages).reason.as_deref(),
-        Some(
-            "`README` is reserved for the fragments directory's documentation, `README.md` at its \
-             top level, in any letter case; choose another slug."
-        )
-    );
-}
-
-#[test]
-fn add_writes_a_highlight_from_its_flags() {
-    let root = workspace();
-
-    let messages = command(
-        root.path(),
-        &[
-            "add",
-            "--highlight",
-            "--title",
-            "Tool calls fan out",
-            "--author",
-            "@JeanMertz",
-            "--body",
-            "The assistant calls one tool on many inputs at once.",
-        ],
-        &[],
-    );
-
-    assert_eq!(
-        printed(&messages),
-        "Wrote changelog.d/highlights/tool-calls-fan-out.md\n"
-    );
-    assert_eq!(
-        read(&root, "changelog.d/highlights/tool-calls-fan-out.md"),
-        indoc! {r#"
-            ---
-            title: "Tool calls fan out"
-            authors: ["@JeanMertz"]
-            ---
-            The assistant calls one tool on many inputs at once.
-        "#}
-    );
-}
-
-/// The credits default to the user's own name, which they can replace with
-/// handles, several separated by commas.
-#[test]
-fn add_asks_for_a_highlights_title_credits_and_prose() {
-    let root = workspace();
-
-    let messages = command(root.path(), &["add", "--highlight"], &[
-        composed(Some("Tool calls fan out")),
-        composed(Some("@JeanMertz, Jane Doe")),
-        composed(Some("The assistant calls one tool on many inputs at once.")),
-    ]);
-
-    let requests = requests(&messages);
-    assert_eq!(requests[0].mode, ComposeMode::Line { default: None });
-    assert_eq!(requests[1].mode, ComposeMode::Line {
-        default: Some("Jane Doe".to_owned())
-    });
-    assert_eq!(requests[2].message, "Highlight: Tool calls fan out");
-    assert_eq!(
-        read(&root, "changelog.d/highlights/tool-calls-fan-out.md"),
-        indoc! {r#"
-            ---
-            title: "Tool calls fan out"
-            authors: ["@JeanMertz", "Jane Doe"]
-            ---
-            The assistant calls one tool on many inputs at once.
-        "#}
-    );
-}
-
-#[test]
-fn a_highlight_needs_a_title_and_someone_to_credit() {
-    let root = workspace();
-
-    let messages = command(root.path(), &["add", "--highlight"], &[composed(Some(" "))]);
-
-    assert_eq!(
-        exit(&messages).reason.as_deref(),
-        Some("A highlight needs a title.")
-    );
-
-    let messages = command(
-        root.path(),
-        &["add", "--highlight", "--title", "Fan out", "--author", " "],
-        &[],
-    );
-
-    assert_eq!(
-        exit(&messages).reason.as_deref(),
-        Some("A highlight credits at least one author.")
-    );
-}
-
-/// A highlight has no type, and a fragment no title or authors.
-#[test]
-fn the_flags_of_one_format_are_refused_for_the_other() {
-    let root = workspace();
-
-    for args in [
-        &["add", "--highlight", "--type", "fixed"][..],
-        &["add", "--title", "Fan out"],
-        &["add", "--author", "@JeanMertz"],
-    ] {
-        let messages = command(root.path(), args, &[]);
-
-        assert_eq!(exit(&messages).code, 1, "{args:?}");
-    }
-}
-
-#[test]
-fn an_unknown_type_is_refused_with_the_seven() {
-    let root = workspace();
-
-    let messages = command(root.path(), &["add", "--type", "feat"], &[]);
-
-    let reason = exit(&messages).reason.clone().unwrap_or_default();
-    assert!(
-        reason.contains(
-            "`feat` is not a changelog type; use one of: added, changed, deprecated, removed, \
-             fixed, security, performance"
-        ),
-        "{reason}"
-    );
-}
-
-#[test]
 fn check_names_each_problem_from_the_workspace_root() {
     let root = workspace();
     fs::write(root.path().join("changelog.d/notes.txt"), "Notes.\n").unwrap();
@@ -634,7 +510,7 @@ fn check_names_each_problem_from_the_workspace_root() {
     let messages = command(root.path(), &["check"], &[]);
 
     assert_eq!(printed(&messages), indoc! {"
-        changelog.d/notes.txt: not a fragment, which is named `<slug>.md`; rename it, or move it out of the fragments directory
+        changelog.d/notes.txt: not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out of the fragments directory
 
         Checked 0 fragments and 0 highlights: 1 problem.
     "});
@@ -675,8 +551,8 @@ fn the_fragments_directory_can_be_configured() {
 fn render_prints_the_unreleased_fragments_as_release_notes() {
     let repository = Repository::new("https://github.com/dcdpr/jp");
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("fix(llm): Retry idle turns (#1207)");
 
@@ -701,8 +577,8 @@ fn render_prints_the_unreleased_fragments_as_release_notes() {
 fn render_credits_the_configured_forge_under_the_configured_headings() {
     let repository = Repository::new("git@git.example.com:group/project.git");
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("Retry idle turns\n\nSee merge request group/project!42");
     let mut message = init_message(repository.path(), &["render"]);
@@ -728,17 +604,18 @@ fn render_credits_the_configured_forge_under_the_configured_headings() {
 #[test]
 fn render_prints_a_releases_upgrade_guide() {
     let repository = Repository::new("https://github.com/dcdpr/jp");
-    repository.write("changelog.d/0.3.0/plugin-manifest-routing.md", indoc! {"
-            ---
-            type: changed
-            change_requests: [1216]
-            ---
+    repository.write(
+        "changelog.d/0.3.0/plugin-manifest-routing.changed.md",
+        indoc! {"
+            - **Credits**: #1216
+
             JP finds a command plugin by its manifest.
 
             BREAKING CHANGE: Command plugins are found by their manifest
 
             Rebuild the plugin.
-        "});
+        "},
+    );
     repository.commit("chore(release): Cut 0.3.0 (#1250)");
 
     let messages = command(
@@ -762,8 +639,8 @@ fn render_prints_a_releases_upgrade_guide() {
 fn render_says_when_there_is_no_upgrade_guide() {
     let repository = Repository::new("https://github.com/dcdpr/jp");
     repository.write(
-        "changelog.d/0.3.0/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/0.3.0/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("chore(release): Cut 0.3.0 (#1250)");
 
@@ -787,8 +664,8 @@ fn render_says_when_there_is_no_upgrade_guide() {
 fn render_prints_json_when_asked_or_when_jp_prints_json() {
     let repository = Repository::new("https://github.com/dcdpr/jp");
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("fix(llm): Retry idle turns (#1207)");
     let mut message = init_message(repository.path(), &["render"]);
@@ -840,7 +717,7 @@ fn render_names_what_breaks_the_format_from_the_workspace_root() {
         exit(&messages).reason.as_deref(),
         Some(
             "Fix these first, which `jp release check` reports too:\nchangelog.d/0.3.0/notes.txt: \
-             not a fragment, which is named `<slug>.md`; rename it, or move it out of the \
+             not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out of the \
              fragments directory"
         )
     );
@@ -901,8 +778,8 @@ fn queries(messages: &[PluginToHost]) -> Vec<&QueryRequest> {
 fn review_prints_what_the_assistant_found_in_the_unreleased_fragments() {
     let root = workspace();
     fs::write(
-        root.path().join("changelog.d/retry-idle-turns.md"),
-        "---\ntype: fixed\n---\nRefactor the retry loop.\n",
+        root.path().join("changelog.d/retry-idle-turns.fixed.md"),
+        "Refactor the retry loop.\n",
     )
     .unwrap();
 
@@ -910,7 +787,7 @@ fn review_prints_what_the_assistant_found_in_the_unreleased_fragments() {
         root.path(),
         &["review"],
         &reviewed(&json!([{
-            "file": "changelog.d/retry-idle-turns.md",
+            "file": "changelog.d/retry-idle-turns.fixed.md",
             "kind": "commit_message",
             "quote": "Refactor the retry loop.",
             "comment": "Say what users notice: a turn that stalls while idle is retried."
@@ -927,7 +804,7 @@ fn review_prints_what_the_assistant_found_in_the_unreleased_fragments() {
     assert!(
         query.content.ends_with(indoc! {r#"
             <release version="unreleased">
-            <entry file="changelog.d/retry-idle-turns.md" type="fixed">
+            <entry file="changelog.d/retry-idle-turns.fixed.md" type="fixed">
             Refactor the retry loop.
             </entry>
             </release>
@@ -936,7 +813,7 @@ fn review_prints_what_the_assistant_found_in_the_unreleased_fragments() {
         query.content
     );
     assert_eq!(printed(&messages), indoc! {r#"
-            changelog.d/retry-idle-turns.md
+            changelog.d/retry-idle-turns.fixed.md
             - Reads like a commit message: "Refactor the retry loop."
               Say what users notice: a turn that stalls while idle is retried.
         "#});
@@ -950,8 +827,9 @@ fn review_reads_a_release_with_its_overview() {
     let root = workspace();
     fs::create_dir(root.path().join("changelog.d/0.3.0")).unwrap();
     fs::write(
-        root.path().join("changelog.d/0.3.0/retry-idle-turns.md"),
-        "---\ntype: fixed\n---\nA turn that stalls while idle is retried.\n",
+        root.path()
+            .join("changelog.d/0.3.0/retry-idle-turns.fixed.md"),
+        "A turn that stalls while idle is retried.\n",
     )
     .unwrap();
     fs::write(
@@ -972,7 +850,7 @@ fn review_reads_a_release_with_its_overview() {
             <overview file="changelog.d/0.3.0/overview.md">
             JP 0.3.0 retries idle turns.
             </overview>
-            <entry file="changelog.d/0.3.0/retry-idle-turns.md" type="fixed">
+            <entry file="changelog.d/0.3.0/retry-idle-turns.fixed.md" type="fixed">
             A turn that stalls while idle is retried.
             </entry>
             </release>
@@ -1020,8 +898,8 @@ fn review_of_a_release_that_is_not_there_says_so() {
 fn a_review_without_findings_to_read_ends_the_command() {
     let root = workspace();
     fs::write(
-        root.path().join("changelog.d/retry-idle-turns.md"),
-        "---\ntype: fixed\n---\nA turn that stalls while idle is retried.\n",
+        root.path().join("changelog.d/retry-idle-turns.fixed.md"),
+        "A turn that stalls while idle is retried.\n",
     )
     .unwrap();
     let refused = HostToPlugin::Error(ErrorResponse {
@@ -1054,8 +932,8 @@ fn a_review_without_findings_to_read_ends_the_command() {
 fn review_prints_json_when_jp_prints_json() {
     let root = workspace();
     fs::write(
-        root.path().join("changelog.d/retry-idle-turns.md"),
-        "---\ntype: fixed\n---\nA turn that stalls while idle is retired.\n",
+        root.path().join("changelog.d/retry-idle-turns.fixed.md"),
+        "A turn that stalls while idle is retired.\n",
     )
     .unwrap();
     let mut message = init_message(root.path(), &["review"]);
@@ -1064,7 +942,7 @@ fn review_prints_json_when_jp_prints_json() {
     let messages = session(
         &HostToPlugin::Init(Box::new(message)),
         &reviewed(&json!([{
-            "file": "changelog.d/retry-idle-turns.md",
+            "file": "changelog.d/retry-idle-turns.fixed.md",
             "kind": "typo",
             "quote": "retired",
             "comment": "Write `retried`."
@@ -1077,7 +955,7 @@ fn review_prints_json_when_jp_prints_json() {
     assert_eq!(
         text,
         concat!(
-            r#"{"findings":[{"file":"changelog.d/retry-idle-turns.md","kind":"typo","#,
+            r#"{"findings":[{"file":"changelog.d/retry-idle-turns.fixed.md","kind":"typo","#,
             r#""quote":"retired","comment":"Write `retried`."}]}"#,
             "\n"
         )

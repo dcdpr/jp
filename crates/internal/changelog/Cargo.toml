@@ -20,7 +20,6 @@ clap = { workspace = true, features = ["derive", "error-context", "help", "std",
 comrak = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
-serde-saphyr = { workspace = true, features = ["deserialize"] }
 serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]

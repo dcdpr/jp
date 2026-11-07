@@ -9,16 +9,18 @@
 //! request.
 //!
 //! [`History::read`] reads it once, to ask about any file: the commit that
-//! brought it to the top level, the change requests that wrote it, and for a
-//! commit, the files it added and where they are now.
+//! brought it to the top level, who to credit for it, and for a commit, the
+//! files it added and where they are now.
 //! [`parse`] reads the log `git::log` writes, and [`credited`] follows each
 //! file back through it, renames included.
 
-use std::{collections::HashMap, num::NonZeroU64};
+use std::collections::HashMap;
 
 use camino::Utf8Path;
 
-use crate::{directory::is_unreleased, forge::Forge, git, release::ReleaseError};
+use crate::{
+    directory::is_unreleased, document::ListedCredit, forge::Forge, git, release::ReleaseError,
+};
 
 /// What each commit's header in the log starts with, followed by its hash, a
 /// line break, and its message.
@@ -37,11 +39,12 @@ pub struct History {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Added {
     /// Its path below the fragments directory when the commit added it, such as
-    /// `retry-idle-turns.md` or `highlights/fan-out.md`.
+    /// `retry-idle-turns.fixed.md` or `highlights/fan-out.md`.
     pub path: String,
 
     /// Its path at `HEAD`, followed through every rename since, such as
-    /// `0.3.0/retry-idle-turns.md`; `None` once a later commit deleted it.
+    /// `0.3.0/retry-idle-turns.fixed.md`; `None` once a later commit deleted
+    /// it.
     pub now: Option<String>,
 }
 
@@ -107,27 +110,29 @@ impl History {
             .collect()
     }
 
-    /// The change requests `forge` reads from the commits that wrote or changed
-    /// `path`, below the fragments directory at `HEAD`, while it sat at the top
-    /// level, oldest first and each once.
+    /// Who to credit for `path`, below the fragments directory at `HEAD`: each
+    /// commit that wrote or changed it while it sat at the top level, oldest
+    /// first, as the change request `forge` reads from its message, or as the
+    /// commit itself when the message names none; each credit once.
     #[must_use]
-    pub fn change_requests(&self, path: &str, forge: Forge) -> Vec<NonZeroU64> {
+    pub fn credits(&self, path: &str, forge: Forge) -> Vec<ListedCredit> {
         let indices = credited(&self.commits, &[path]).pop().unwrap_or_default();
 
-        let mut numbers = vec![];
+        let mut credits = vec![];
         for index in indices {
-            let number = self
-                .commits
-                .get(index)
-                .and_then(|commit| forge.change_request(&commit.message));
-            if let Some(number) = number
-                && !numbers.contains(&number)
-            {
-                numbers.push(number);
+            let Some(commit) = self.commits.get(index) else {
+                continue;
+            };
+            let credit = match forge.change_request(&commit.message) {
+                Some(number) => ListedCredit::ChangeRequest(number),
+                None => ListedCredit::Commit(commit.hash.clone()),
+            };
+            if !credits.contains(&credit) {
+                credits.push(credit);
             }
         }
 
-        numbers
+        credits
     }
 
     /// Where the file at `path` after the commit at `index` is at `HEAD`:

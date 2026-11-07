@@ -8,10 +8,11 @@
 //!
 //! The formats, the check that holds a fragments directory to them, and the
 //! release notes and upgrade guide rendered from them live in the `changelog`
-//! crate; this crate is the commands, their configuration, the composer, and
-//! the tool over it.
-//! `entry` writes a fragment or highlight, `options` reads the settings from
-//! `plugins.command.release.options`, and `definitions` writes the tool's
+//! crate; this crate is the commands, their configuration, and the tool over
+//! it.
+//! `edit` opens a fragment or highlight in the user's editor, `entry` names the
+//! files and writes the fragment the tool gives, `options` reads the settings
+//! from `plugins.command.release.options`, and `definitions` writes the tool's
 //! definition.
 //! With `format_on_write` on, every file written in the fragments directory is
 //! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
@@ -31,6 +32,7 @@ mod change_request;
 mod cut;
 mod definitions;
 mod due;
+mod edit;
 mod entry;
 mod finalize;
 mod options;
@@ -55,23 +57,25 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{
-    ReleaseError, Type, UnknownType,
+    ReleaseError, Type,
     cli::{Format, Render, View, version as parse_version},
     directory::{self, OVERVIEW, Part, ReadError},
     release,
 };
 use clap::{CommandFactory, Parser, Subcommand};
 use jp_plugin::message::{
-    ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+    ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin, InitMessage, OutputFormat,
+    PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use semver::Version;
 use serde_json::Value;
 
 use crate::{
-    entry::{Entry, Fragments, HIGHLIGHTS, Planned},
+    edit::Host,
+    entry::{Fragments, HIGHLIGHTS},
     options::Options,
     pipeline::Pipeline,
+    repository::MAIN,
     shell::Shell,
 };
 
@@ -84,15 +88,6 @@ const README: &str = include_str!("../templates/README.md");
 
 /// The name of the file [`README`] is written to.
 const README_FILE: &str = "README.md";
-
-/// What the composer says while a fragment's entry is written.
-const FRAGMENT_HELP: &str = "What changed, for the people using the software. A paragraph \
-                             starting with `BREAKING CHANGE:` begins its section of the upgrade \
-                             guide.";
-
-/// What the composer says while a highlight's prose is written.
-const HIGHLIGHT_HELP: &str =
-    "What the feature does for the people using the software, in a few paragraphs.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -114,39 +109,21 @@ enum Command {
     /// What is already there is left as it is.
     Init,
 
-    /// Write a fragment, or with `--highlight`, a highlight.
+    #[command(flatten)]
+    Record(Record),
+
+    /// Write or edit a highlight, a section of the release notes for a feature
+    /// worth a story, in your editor.
     ///
-    /// Asks for what the flags don't give.
-    /// The file is named after the entry's first words, or the highlight's
-    /// title, unless `--slug` names it, and is checked against the format
-    /// before it is written.
-    Add {
-        /// Write a highlight, a section of the release notes for a feature
-        /// worth a story, rather than a fragment.
-        #[arg(long)]
-        highlight: bool,
-
-        /// What the change means for users: `added`, `changed`, `deprecated`,
-        /// `removed`, `fixed`, `security`, or `performance`.
-        #[arg(long = "type", value_name = "TYPE", conflicts_with = "highlight")]
-        type_: Option<Type>,
-
-        /// The fragment's entry, or the highlight's prose, as Markdown.
-        #[arg(long)]
-        body: Option<String>,
-
-        /// The file's name, without `.md`.
-        #[arg(long)]
+    /// A new highlight opens with a `# Title` to write, which names its file,
+    /// and you credited as its author.
+    /// Saving it empty writes nothing.
+    Highlight {
+        /// The highlight's name: `highlights/<slug>.md` in the fragments
+        /// directory, which opens for another edit when it is there.
+        ///
+        /// Without it, a new highlight is named after its title.
         slug: Option<String>,
-
-        /// The highlight's title, which heads its section of the release notes.
-        #[arg(long, requires = "highlight")]
-        title: Option<String>,
-
-        /// Someone to credit the highlight's feature to, such as `@JeanMertz`.
-        /// Repeat for more than one.
-        #[arg(long = "author", value_name = "AUTHOR", requires = "highlight")]
-        authors: Vec<String>,
     },
 
     /// Check every file in the fragments directory, released ones included, and
@@ -241,6 +218,64 @@ enum Command {
     },
 }
 
+/// A fragment of each type, written or edited in the user's editor.
+#[derive(Debug, Subcommand)]
+enum Record {
+    /// Write or edit an `added` fragment, a new capability users can now reach,
+    /// in your editor.
+    Added(Name),
+
+    /// Write or edit a `changed` fragment, a change to existing behavior, in
+    /// your editor.
+    Changed(Name),
+
+    /// Write or edit a `deprecated` fragment, something still working but
+    /// slated for removal, in your editor.
+    Deprecated(Name),
+
+    /// Write or edit a `removed` fragment, something taken away, in your
+    /// editor.
+    Removed(Name),
+
+    /// Write or edit a `fixed` fragment, a bug fix users would notice, in your
+    /// editor.
+    Fixed(Name),
+
+    /// Write or edit a `security` fragment, a fix with security relevance, in
+    /// your editor.
+    Security(Name),
+
+    /// Write or edit a `performance` fragment, a performance improvement users
+    /// would notice, in your editor.
+    Performance(Name),
+}
+
+impl Record {
+    /// The type of the fragment, and the slug given for it.
+    fn split(self) -> (Type, Option<String>) {
+        match self {
+            Self::Added(name) => (Type::Added, name.slug),
+            Self::Changed(name) => (Type::Changed, name.slug),
+            Self::Deprecated(name) => (Type::Deprecated, name.slug),
+            Self::Removed(name) => (Type::Removed, name.slug),
+            Self::Fixed(name) => (Type::Fixed, name.slug),
+            Self::Security(name) => (Type::Security, name.slug),
+            Self::Performance(name) => (Type::Performance, name.slug),
+        }
+    }
+}
+
+/// The name of a fragment to write or edit.
+#[derive(Debug, clap::Args)]
+struct Name {
+    /// The fragment's name: `<slug>.<type>.md` in the fragments directory,
+    /// which opens for another edit when it is there.
+    ///
+    /// Defaults to the current git branch's name, the part after its last `/`.
+    /// Saving a fragment empty removes it.
+    slug: Option<String>,
+}
+
 #[derive(Debug, Subcommand)]
 enum ToolsCommand {
     /// Write the tool's starting definition.
@@ -258,17 +293,6 @@ enum ToolsCommand {
         #[arg(long)]
         force: bool,
     },
-}
-
-/// What `add` was given on the command line.
-#[derive(Debug)]
-struct Add {
-    highlight: bool,
-    type_: Option<Type>,
-    body: Option<String>,
-    slug: Option<String>,
-    title: Option<String>,
-    authors: Vec<String>,
 }
 
 /// What a subcommand produced.
@@ -413,26 +437,13 @@ fn handle_command(
 
     let result = match args.command {
         Command::Init => init_dir(&ctx),
-        Command::Add {
-            highlight,
-            type_,
-            body,
-            slug,
-            title,
-            authors,
-        } => add(
-            &ctx,
-            Add {
-                highlight,
-                type_,
-                body,
-                slug,
-                title,
-                authors,
-            },
-            stdin,
-            stdout,
-        ),
+        Command::Record(record) => {
+            let (type_, slug) = record.split();
+            edit_fragment(&ctx, type_, slug, init.version, stdin, stdout)
+        }
+        Command::Highlight { slug } => {
+            edit_highlight(&ctx, slug.as_deref(), init.version, stdin, stdout)
+        }
         Command::Check => check(&ctx),
         Command::Render { render } => render_release(&ctx, &render),
         Command::Review { version } => review_release(&ctx, version.as_ref(), stdin, stdout),
@@ -477,7 +488,7 @@ fn handle_command(
 /// The README is laid out as the workspace formats the fragments directory.
 ///
 /// `highlights/` starts empty, which git doesn't keep, so a checkout has none
-/// until a highlight is written; `add` creates it then.
+/// until a highlight is written; `jp release highlight` creates it then.
 fn init_dir(ctx: &Context<'_>) -> Result<Output, String> {
     let fragments = &ctx.fragments;
     let mut text = String::new();
@@ -512,206 +523,71 @@ fn init_dir(ctx: &Context<'_>) -> Result<Output, String> {
     Ok(text.into())
 }
 
-/// Write a fragment or highlight, asking for what `add` doesn't give.
-///
-/// The directory and a named slug are checked before anything is asked, so a
-/// mistake there doesn't cost the user what they typed.
-fn add(
+/// Write or edit the fragment of type `type_` named `slug`, or after the git
+/// branch, in the editor of the host speaking protocol `version`.
+fn edit_fragment(
     ctx: &Context<'_>,
-    add: Add,
+    type_: Type,
+    slug: Option<String>,
+    version: u32,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
 ) -> Result<Output, String> {
-    entry::ready(&ctx.fragments, add.highlight, add.slug.as_deref())?;
-
-    let planned = if add.highlight {
-        compose_highlight(ctx, add, stdin, stdout)?
-    } else {
-        compose_fragment(ctx, add, stdin, stdout)?
+    edit::check_host(version)?;
+    let slug = match slug {
+        Some(slug) => slug,
+        None => branch_slug(ctx.fragments.root, type_)?,
     };
-    planned.write()?;
 
-    Ok(format!("Wrote {}\n", planned.shown).into())
+    edit::fragment(&ctx.fragments, type_, &slug, &mut Host { stdin, stdout })
 }
 
-/// Plan a fragment, asking for its type and its entry when `add` gives none.
-fn compose_fragment(
+/// Write or edit the highlight named `slug`, or a new one, in the editor of the
+/// host speaking protocol `version`.
+fn edit_highlight(
     ctx: &Context<'_>,
-    add: Add,
+    slug: Option<&str>,
+    version: u32,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
-) -> Result<Planned, String> {
-    let type_ = match add.type_ {
-        Some(type_) => type_,
-        None => pick_type(stdin, stdout)?,
-    };
-    let slug = add.slug.as_deref();
-    let plan = |body: &str| {
-        entry::plan(
-            &ctx.fragments,
-            &Entry::Fragment {
-                type_,
-                body: body.to_owned(),
-            },
-            slug,
-        )
-    };
+) -> Result<Output, String> {
+    edit::check_host(version)?;
+    let author = identity(ctx.fragments.root, ctx.config);
 
-    match add.body {
-        Some(body) => plan(&body),
-        None => compose_valid(
-            stdin,
-            stdout,
-            &format!("New `{type_}` fragment"),
-            FRAGMENT_HELP,
-            plan,
-        ),
-    }
+    edit::highlight(&ctx.fragments, slug, author.as_deref(), &mut Host {
+        stdin,
+        stdout,
+    })
 }
 
-/// Plan a highlight, asking for its title, who it credits, and its prose when
-/// `add` gives none.
+/// The slug a fragment of `type_` is named by when none is given: the one the
+/// current git branch's name gives, read in the workspace at `root`.
 ///
-/// The title and the credits are held to the format before the prose is asked
-/// for, so what the composer reports is about the prose alone.
-fn compose_highlight(
-    ctx: &Context<'_>,
-    add: Add,
-    stdin: &mut impl BufRead,
-    stdout: &mut impl Write,
-) -> Result<Planned, String> {
-    let title = match add.title {
-        Some(title) => title,
-        None => compose(stdin, stdout, ComposeRequest {
-            id: None,
-            message: "Highlight title".to_owned(),
-            mode: ComposeMode::Line { default: None },
-            help: Some("Heads the highlight's section of the release notes.".to_owned()),
-        })?,
-    };
-    if title.trim().is_empty() {
-        return Err("A highlight needs a title.".to_owned());
-    }
-
-    let authors = if add.authors.is_empty() {
-        ask_authors(ctx, stdin, stdout)?
-    } else {
-        add.authors
-    };
-    let authors: Vec<String> = authors
-        .iter()
-        .map(|author| author.trim().to_owned())
-        .filter(|author| !author.is_empty())
-        .collect();
-    if authors.is_empty() {
-        return Err("A highlight credits at least one author.".to_owned());
-    }
-
-    let slug = add.slug.as_deref();
-    let plan = |body: &str| {
-        entry::plan(
-            &ctx.fragments,
-            &Entry::Highlight {
-                title: title.clone(),
-                authors: authors.clone(),
-                body: body.to_owned(),
-            },
-            slug,
-        )
+/// The error says to name the fragment, when there's no branch to name it
+/// after.
+fn branch_slug(root: &Utf8Path, type_: Type) -> Result<String, String> {
+    let name_it = format!("name it: `jp release {type_} <slug>`");
+    let branch = Process::new("git")
+        .current_dir(root)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|branch| branch.trim().to_owned());
+    let Some(branch) = branch else {
+        return Err(format!(
+            "There is no git branch to name the fragment after; {name_it}."
+        ));
     };
 
-    match add.body {
-        Some(body) => plan(&body),
-        None => compose_valid(
-            stdin,
-            stdout,
-            &format!("Highlight: {}", title.trim()),
-            HIGHLIGHT_HELP,
-            plan,
-        ),
-    }
-}
-
-/// Ask which of the seven types a fragment is, each shown with what it is used
-/// for.
-fn pick_type(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<Type, String> {
-    let width = Type::ALL
-        .iter()
-        .map(|type_| type_.id().len())
-        .max()
-        .unwrap_or_default();
-    let options = Type::ALL
-        .iter()
-        .map(|type_| ComposeOption {
-            value: type_.id().to_owned(),
-            label: format!("{:<width$}  {}", type_.id(), type_.description()),
-        })
-        .collect();
-
-    let chosen = compose(stdin, stdout, ComposeRequest {
-        id: None,
-        message: "What does the change mean for users?".to_owned(),
-        mode: ComposeMode::Select {
-            options,
-            default: None,
-        },
-        help: None,
-    })?;
-
-    chosen
-        .parse()
-        .map_err(|unknown: UnknownType| unknown.to_string())
-}
-
-/// Ask who to credit a highlight's feature to, offering the user's own name.
-fn ask_authors(
-    ctx: &Context<'_>,
-    stdin: &mut impl BufRead,
-    stdout: &mut impl Write,
-) -> Result<Vec<String>, String> {
-    let answer = compose(stdin, stdout, ComposeRequest {
-        id: None,
-        message: "Credit the feature to".to_owned(),
-        mode: ComposeMode::Line {
-            default: identity(ctx.fragments.root, ctx.config),
-        },
-        help: Some("Separate several with commas, such as `@JeanMertz, @jdoe`.".to_owned()),
-    })?;
-
-    Ok(answer.split(',').map(str::to_owned).collect())
-}
-
-/// Compose text until `plan` accepts it.
-///
-/// When `plan` refuses what was written, the composer opens again on it, with
-/// the reason as its help, so a slip doesn't cost the user their text;
-/// cancelling ends it.
-fn compose_valid(
-    stdin: &mut impl BufRead,
-    stdout: &mut impl Write,
-    message: &str,
-    help: &str,
-    plan: impl Fn(&str) -> Result<Planned, String>,
-) -> Result<Planned, String> {
-    let mut initial_text = None;
-    let mut help = help.to_owned();
-
-    loop {
-        let text = compose(stdin, stdout, ComposeRequest {
-            id: None,
-            message: message.to_owned(),
-            mode: ComposeMode::Buffer { initial_text },
-            help: Some(help),
-        })?;
-
-        match plan(&text) {
-            Ok(planned) => return Ok(planned),
-            Err(problem) => {
-                help = format!("Not written: {}.", problem.trim_end_matches('.'));
-                initial_text = Some(text);
-            }
+    entry::branch_slug(&branch).ok_or_else(|| {
+        if branch == MAIN {
+            format!("`{MAIN}` has no change of its own to name the fragment after; {name_it}.")
+        } else {
+            format!("The branch `{branch}` holds no word to name the fragment after; {name_it}.")
         }
-    }
+    })
 }
 
 /// Ask the host to collect text, and wait for it.

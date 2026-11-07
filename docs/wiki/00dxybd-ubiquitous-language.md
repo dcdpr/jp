@@ -106,13 +106,14 @@ See [RFD-122].
 ### Changelog Fragment
 
 One entry in a release's notes, recording one change users notice: a Markdown
-file in the fragments directory, `changelog.d/` by default, whose frontmatter
-names one of seven fixed types (`added`, `changed`, `deprecated`, `removed`,
-`fixed`, `security`, `performance`).
+file in the fragments directory, `changelog.d/` by default, named
+`<slug>.<type>.md` after one of seven fixed types (`added`, `changed`,
+`deprecated`, `removed`, `fixed`, `security`, `performance`).
 A fragment for a change that requires users to act also carries its **upgrade
 section**: a paragraph starting with `BREAKING CHANGE:`, and the paragraphs
 after it.
-Parsed by `changelog::fragment`, and written by `jp release add`.
+Parsed by `changelog::fragment`, and written by `jp release <type>`, such as `jp
+release fixed`.
 See [RFD-121].
 
 **Not the same as** a conventional-commit type, which classifies a code change
@@ -475,9 +476,9 @@ See [RFD-122].
 
 ### Release Notes
 
-The document a release is read in: its overview, its
-[Highlights](#highlight), and every [Changelog Fragment](#changelog-fragment)
-grouped under its type's heading.
+The document a release is read in: its overview, its [Highlights](#highlight),
+and every [Changelog Fragment](#changelog-fragment) grouped under its type's
+heading.
 A fragment with an upgrade section is marked as breaking and links to that
 section of the release's other document, its **upgrade guide**.
 Both are rendered from the release's directory by `changelog::markdown`, and

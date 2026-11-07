@@ -145,11 +145,11 @@ fn a_pick_into_the_release_in_preparation_moves_its_fragment() {
         hash
     );
     assert_eq!(
-        fixture.show(&format!("{branch}:changelog.d/0.1.0/model.md")),
-        Some("---\ntype: fixed\n---\nfeat: Show the model (#2)\n".to_owned())
+        fixture.show(&format!("{branch}:changelog.d/0.1.0/model.fixed.md")),
+        Some("feat: Show the model (#2)\n".to_owned())
     );
     assert_eq!(
-        fixture.show(&format!("{branch}:changelog.d/model.md")),
+        fixture.show(&format!("{branch}:changelog.d/model.fixed.md")),
         None
     );
     assert_eq!(fixture.git(&["worktree", "list"]).lines().count(), 1);
@@ -176,12 +176,12 @@ fn the_next_cut_leaves_a_fragment_a_pick_ships() {
 
     assert!(
         fixture
-            .show("release-cut/v0.2.0:changelog.d/0.2.0/later.md")
+            .show("release-cut/v0.2.0:changelog.d/0.2.0/later.fixed.md")
             .is_some()
     );
     assert!(
         fixture
-            .show("release-cut/v0.2.0:changelog.d/model.md")
+            .show("release-cut/v0.2.0:changelog.d/model.fixed.md")
             .is_some()
     );
 }
@@ -216,7 +216,7 @@ fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
     assert!(
         fixture
             .show(&format!(
-                "release-pick/v0.1.1-{}:changelog.d/0.1.1/fix.md",
+                "release-pick/v0.1.1-{}:changelog.d/0.1.1/fix.fixed.md",
                 &hash[..7]
             ))
             .is_some()
@@ -245,13 +245,13 @@ fn a_fragment_a_later_release_ships_too_is_copied_with_its_credits() {
     );
     let branch = format!("release-pick/v0.1.1-{}", &hash[..7]);
     assert_eq!(
-        fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.md")),
-        Some("---\ntype: fixed\nchange_requests: [5]\n---\nA fix.\n".to_owned())
+        fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.fixed.md")),
+        Some("- **Credits**: !5\n\nA fix.\n".to_owned())
     );
     // Left where it was, for 0.2.0's change request to move.
     assert!(
         fixture
-            .show(&format!("{branch}:changelog.d/fix.md"))
+            .show(&format!("{branch}:changelog.d/fix.fixed.md"))
             .is_some()
     );
 }
@@ -279,12 +279,12 @@ fn a_fragment_filed_into_a_later_release_is_copied_from_its_directory() {
 
     let branch = format!("release-pick/v0.1.1-{}", &hash[..7]);
     assert_eq!(
-        fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.md")),
-        Some("---\ntype: fixed\nchange_requests: [5]\n---\nA fix.\n".to_owned())
+        fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.fixed.md")),
+        Some("- **Credits**: !5\n\nA fix.\n".to_owned())
     );
     assert!(
         fixture
-            .show(&format!("{branch}:changelog.d/0.2.0/fix.md"))
+            .show(&format!("{branch}:changelog.d/0.2.0/fix.fixed.md"))
             .is_some()
     );
 }
@@ -296,9 +296,9 @@ fn a_patch_release_refuses_a_fragment_with_an_upgrade_section() {
     let tip = fixture.origin_git(&["rev-parse", "release/0.1"]);
     fixture.write("src/plugins.rs", "// Plugins need a manifest.\n");
     fixture.write(
-        "changelog.d/manifest.md",
-        "---\ntype: changed\n---\nPlugins are found by their manifest.\n\nBREAKING CHANGE: \
-         Plugins need a manifest\n\nRebuild them.\n",
+        "changelog.d/manifest.changed.md",
+        "Plugins are found by their manifest.\n\nBREAKING CHANGE: Plugins need a \
+         manifest\n\nRebuild them.\n",
     );
     let hash = fixture.commit("feat!: Route plugins by manifest (#4)");
     fixture.push();
@@ -312,7 +312,7 @@ fn a_patch_release_refuses_a_fragment_with_an_upgrade_section() {
         error,
         format!(
             "0.1.1 is a patch release, which can't ship a change that requires users to act, and \
-             {} added changelog.d/manifest.md, which has an upgrade section.",
+             {} added changelog.d/manifest.changed.md, which has an upgrade section.",
             &hash[..7]
         )
     );
@@ -538,8 +538,8 @@ fn a_pick_stops_only_for_conflicts_in_the_code() {
     fixture.write("src/lib.rs", "two\n");
     fixture.commit("Change the library");
     fixture.write("src/lib.rs", "three\n");
-    // `retry.md` is on `main`, and the release branch has no notes, so editing
-    // it conflicts too.
+    // `retry.fixed.md` is on `main`, and the release branch has no notes, so
+    // editing it conflicts too.
     fixture.fragment("retry", "fixed", "Retried, three times.");
     let hash = fixture.commit("fix: Retry three times (#14)");
     fixture.push();

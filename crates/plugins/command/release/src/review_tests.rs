@@ -21,7 +21,7 @@ fn fragment(path: &str, type_: Type, entry: &str) -> Filed<Fragment> {
         path: path.to_owned(),
         file: Fragment {
             type_,
-            change_requests: None,
+            credits: None,
             entry: entry.to_owned(),
             upgrade: None,
         },
@@ -54,7 +54,7 @@ fn release_0_3_0() -> Subject {
                 file: Highlight {
                     title: "Tool calls fan out".to_owned(),
                     authors: vec!["@JeanMertz".to_owned()],
-                    change_requests: None,
+                    credits: None,
                     body: "JP runs the calls side by side.\n".to_owned(),
                 },
             }],

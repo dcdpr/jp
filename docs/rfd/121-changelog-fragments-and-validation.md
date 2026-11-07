@@ -11,12 +11,12 @@
 
 ## Summary
 
-This RFD defines two Markdown-with-frontmatter formats under `changelog.d/` for
-recording user-facing changes in pull requests: short per-change **changelog
-fragments** grouped by impact type, and editorial **highlight notes** for major
-features.
-A `jp release` command plugin creates and validates both formats from the CLI
-and exposes fragment creation as an assistant tool.
+This RFD defines two plain Markdown formats under `changelog.d/` for recording
+user-facing changes in pull requests: short per-change **changelog fragments**
+grouped by impact type, whose filename holds the type, and editorial
+**highlight notes** for major features, which open with their title.
+A `jp release` command plugin creates and validates both formats in the user's
+editor and exposes fragment creation as an assistant tool.
 A CI check requires every pull request to either add a fragment or carry the
 `no-changelog` label.
 [RFD 122] covers assembling and publishing releases from these files.
@@ -57,8 +57,10 @@ also use.
 
 ### Two input formats
 
-Both formats are Markdown files with YAML frontmatter stored in the fragments
-directory (`changelog.d/`):
+Both formats are plain Markdown files stored in the fragments directory
+(`changelog.d/`).
+Anything besides their text is held in the filename or in a metadata block of
+`- **Key**: value` lines, the same block RFDs and tickets use:
 
 - A **changelog fragment** records one user-visible change per file.
   Fragments are terse, categorized by impact type, and exhaustive: every
@@ -76,22 +78,18 @@ validate them, and JP's CI checks, leaving release rendering to [RFD 122].
 ### Changelog fragment
 
 A changelog fragment is a file placed directly in the fragments directory and
-named with a unique descriptive slug (for example, `enable-decomposition.md`).
-The filename serves only to avoid collisions:
+named `<slug>.<type>.md` (for example, `enable-decomposition.added.md`).
+The file's text is the entry:
 
 ```markdown
----
-type: added
----
 `tools.<name>.enable` splits into `state` and `allow_toggle`, so you can pin a
 tool on or off while still letting the assistant request the other state.
 ```
 
-The `type` field classifies **user impact** using one of seven fixed
-identifiers: the six [Keep a Changelog][keepachangelog] categories plus
-`performance`.
+The type classifies **user impact** using one of seven fixed identifiers: the
+six [Keep a Changelog][keepachangelog] categories plus `performance`.
 
-| `type`        | Used for                                                 |
+| Type          | Used for                                                 |
 | ------------- | -------------------------------------------------------- |
 | `added`       | A new user-facing capability.                            |
 | `changed`     | A change to existing behavior.                           |
@@ -121,23 +119,23 @@ When a pull request title follows Conventional Commits, JP's CI uses the commit
 type as a hint for the `no-changelog` label and requires an upgrade section when
 the title includes `!` (see [CI validation](#ci-validation)).
 
-Two slugs are reserved in any letter case: `overview`, which names a release's
-introduction ([Released fragments](#released-fragments)), and `readme`, which
-names the directory's documentation.
-The check ignores case because case-insensitive filesystems treat `README.md`
-and `readme.md` as the same file.
-Fragments and highlight notes cannot use either slug.
+The slug is descriptive and serves only to avoid collisions; the same slug can
+name one fragment of each type.
+The type is the last `.`-separated part of the filename before `.md`.
+Keeping it in the filename rather than the file makes it visible in a directory
+listing, and means a hand-written fragment needs nothing but its entry.
+Because every fragment's filename ends in its type, no slug can collide with the
+directory's `README.md` or a release's `overview.md`, in any letter case.
+A metadata block at the top of the file may hold only `Credits` fields
+([Credits](#credits)); it cannot name a type, since the filename holds it.
 
 #### Breaking changes
 
 When a change requires users to take action on upgrade, its fragment includes an
 upgrade guide section starting with a `BREAKING CHANGE:` (or `BREAKING-CHANGE:`)
-marker:
+marker, as in `enable-explicit.removed.md`:
 
 ````markdown
----
-type: removed
----
 `tools.<name>.enable` no longer accepts the legacy string `"explicit"`.
 
 BREAKING CHANGE: `enable = "explicit"` is no longer accepted
@@ -157,7 +155,7 @@ enable = { state = false, allow_toggle = "if_named" }
 A breaking-change fragment has three required, non-empty parts:
 
 - **The entry**: all paragraphs before the marker.
-  The release notes list the entry under its `type` category, mark it as
+  The release notes list the entry under its type's category, mark it as
   breaking, and link it to its upgrade section.
 - **The title**: the text following `BREAKING CHANGE:` in the marker paragraph.
   This becomes the section heading in the upgrade guide ([RFD 122]) and should
@@ -175,7 +173,7 @@ fragment either has an upgrade section or fails validation.
 To show the marker in an example, start the line with something else, such as
 indentation or inline code.
 
-Placing the upgrade section in the Markdown body rather than in YAML frontmatter
+Placing the upgrade section in the file's text rather than in a metadata field
 lets authors write ordinary Markdown that renders, wraps, and formats alongside
 the rest of the file.
 The marker syntax is borrowed from Conventional Commits for familiarity, but
@@ -199,9 +197,17 @@ Edits made after a fragment moves into a release directory
 (`changelog.d/<version>/`) are treated as wording corrections and do not add
 credits.
 If git history names no change request, the entry credits the commit instead.
-For the rare case where derived credits are inaccurate, an optional
-`change_requests` list in the frontmatter overrides them with explicit change
-request numbers on the workspace's forge.
+For the rare case where derived credits are inaccurate, `Credits` fields at the
+top of the file override them, one per line.
+Each names a change request on the workspace's forge, written `#1207` (or
+`!1207`, as GitLab writes it), or a commit hash:
+
+```markdown
+- **Credits**: #1207
+- **Credits**: 4e1f0a2
+
+A turn that stalls while idle is retried instead of failing.
+```
 
 Every user-visible change adds a new fragment, including follow-up pull requests
 that extend an earlier change, whether or not the earlier change has been
@@ -220,35 +226,38 @@ highlight note, which credits all of them.
 
 ### Highlight note
 
-A highlight note is a file in `highlights/` under the fragments directory for a
-feature worth an editorial section in the release notes:
+A highlight note is a file in `highlights/` under the fragments directory, named
+`<slug>.md`, for a feature worth an editorial section in the release notes.
+It opens with its title, followed by a metadata block crediting its authors:
 
 ```markdown
----
-title: "Unified editor and inline reply widget"
-authors: ["@JeanMertz"]
----
+# Unified editor and inline reply widget
+
+- **Authors**: @JeanMertz
+
 Every prompt in JP now runs through a single editor service, and short replies
 can be written inline without leaving the conversation view. Longer edits still
 open your editor, so the two paths share one backend and one set of keybindings.
 ```
 
-- `title`: the section heading in the release notes.
-- `authors`: the contributors credited for the feature.
-- `change_requests` (optional): explicit change request numbers that replace the
-  git-derived credits.
+- The title, a `# Title` heading on the first line, is the section heading in
+  the release notes.
+- `Authors`: a contributor credited for the feature, one per field; at least one
+  is required.
+- `Credits` (optional, after the authors): explicit change requests or commits
+  that replace the git-derived credits.
   By default, a highlight note is credited the same way as a fragment, to every
   change request that added or modified it, so a note updated across several
   pull requests automatically credits each of them.
-  Use `change_requests` when contributing change requests did not touch the
-  highlight file.
+  Use `Credits` when contributing change requests did not touch the highlight
+  file.
 
 Highlight notes are selective and editorial.
 Most changes get only a changelog fragment; highlights are reserved for major
 features that warrant a narrative.
 A highlighted change still requires a changelog fragment so that it also appears
 in the exhaustive categorized list.
-Unlike fragments, highlight notes have no `type` field and no upgrade section.
+Unlike fragments, highlight notes have no type and no upgrade section.
 
 A highlight note must always reflect the current state of `main`.
 Because releases are cut from `main` on a schedule, any commit on `main` can end
@@ -270,11 +279,11 @@ version directory in the same way:
 ```
 changelog.d/
   README.md
-  enable-explicit.md          # unreleased
-  highlights/fan-out.md       # unreleased
+  enable-explicit.removed.md    # unreleased
+  highlights/fan-out.md         # unreleased
   0.3.0/
     overview.md
-    retry-idle-turns.md
+    retry-idle-turns.fixed.md
     highlights/plugin-tools.md
 ```
 
@@ -307,8 +316,8 @@ the ticket format crate from `jp ticket`:
   It is configured through `plugins.command.release.options` and installed in
   the same `cargo install` step as the [RFD 116] plugins so they share a
   revision.
-  It handles host integration: CLI commands, configuration loading, interactive
-  composer prompts, and assistant tools.
+  It handles host integration: CLI commands, configuration loading, opening
+  files in the user's editor, and assistant tools.
 
 Configuration in `.jp/config.toml`:
 
@@ -331,21 +340,31 @@ Setting `run = "allow"` permits the plugin to run without prompting for approval
 ([RFD 077]), which avoids repeated prompts when rebuilding the plugin from the
 local checkout.
 
-| Command                        | Description                                                                               |
-| ------------------------------ | ----------------------------------------------------------------------------------------- |
-| `jp release init`              | Creates the fragments directory, `highlights/`, and a `README.md` describing both formats |
-| `jp release add [--highlight]` | Writes a fragment or highlight note, prompting for missing fields in the host's composer  |
-| `jp release check`             | Validates every file in the fragments directory (see [CI validation](#ci-validation))     |
+| Command                       | Description                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| `jp release init`             | Creates the fragments directory, `highlights/`, and a `README.md` describing both formats |
+| `jp release <type> [SLUG]`    | Opens the fragment `<slug>.<type>.md` in the user's editor, creating it if needed         |
+| `jp release highlight [SLUG]` | Opens a new highlight note, or `highlights/<slug>.md`, in the user's editor               |
+| `jp release check`            | Validates every file in the fragments directory (see [CI validation](#ci-validation))     |
 
-`jp release add` presents the seven impact types in an interactive picker (using
-each type's description from the table above as a hint), reads the entry body
-from the composer, and derives the filename slug from the body unless `--slug`
-is specified.
-It refuses a reserved slug ([Changelog fragment](#changelog-fragment)), and
-validates the entry, as formatted, with the same check as `jp release check`
-before writing the file.
+Each type is its own command, such as `jp release fixed`, so contributors name
+the type the way they would describe the change: "I fixed this".
+The slug defaults to the git branch name (the part after its last `/`), so
+running the command again on the same branch reopens the same fragment.
+On `main`, whose name describes no change, the command asks for a slug.
+The editor is the host's `editor.cmd`, opened through the plugin protocol's
+`edit_files` request.
+When the editor closes, the file is validated with the same check as `jp
+release check`, both as written and as formatted.
+A file that fails validation reopens in the editor, and abandoning it undoes the
+change.
+A fragment saved empty is removed.
+A new highlight note opens with a `# Title` line to fill in and the user
+credited as its author, and is named after its title once saved; `jp release
+highlight <slug>` opens `highlights/<slug>.md` instead.
 
-`add` is also exposed as a plugin tool, configured in JP like `ticket_create`:
+Writing a fragment is also exposed as a plugin tool, `add`, configured in JP like
+`ticket_create`:
 
 ```toml
 [conversation.tools.changelog_add]
@@ -371,30 +390,26 @@ describes the change from the user's perspective.
 
 JP's CI enforces three rules:
 
-1. **Format**: every file must parse against the schema below, and unknown
-   frontmatter fields are rejected.
+1. **Format**: every file must follow its format, and unknown metadata fields
+   are rejected.
 
-   Fragment frontmatter:
-
-   ```yaml
-   type: added | changed | deprecated | removed | fixed | security | performance
-   change_requests: list of positive integers # optional, replaces the derived credits
-   ```
-
-   The fragment body must be non-empty after trimming surrounding whitespace,
+   A fragment's filename must end in one of the seven type identifiers,
+   `<slug>.<type>.md`.
+   An optional metadata block at the top may hold only `Credits` fields, each a
+   change request (`#1207`, `!1207`) or a commit hash of at least seven
+   characters.
+   The entry after it must be non-empty after trimming surrounding whitespace,
    and any upgrade section must follow the structure in [Breaking
    changes](#breaking-changes).
 
-   Highlight frontmatter:
+   A highlight opens with a `# Title` heading with a title, then a metadata
+   block holding at least one `Authors` field, each naming someone, and any
+   number of `Credits` fields, and then non-empty prose.
 
-   ```yaml
-   title: non-empty string
-   authors: non-empty list of non-empty strings
-   change_requests: list of positive integers # optional, replaces the derived credits
-   ```
-
-   Unknown frontmatter fields are rejected rather than ignored so that typos
-   like `change_request:` fail in CI instead of being silently dropped.
+   Unknown metadata fields are rejected rather than ignored so that typos like
+   `- **Credit**:` fail in CI instead of being silently dropped.
+   A `Type` field is rejected as well: the filename holds the type, and a second
+   place to write it could disagree with the first.
 
 2. **Presence**: a pull request targeting `main` passes only if it adds a new
    fragment at the top level of the fragments directory or carries the
@@ -424,18 +439,17 @@ The set of paths allowed in the fragments directory is closed:
 
 - `README.md` at the top level, which documents both formats and is ignored by
   the parser (`highlights/` has no `README.md`).
-- `<slug>.md` and `highlights/<slug>.md` at the top level.
-- `<version>/<slug>.md`, `<version>/highlights/<slug>.md`, and
+- `<slug>.<type>.md` and `highlights/<slug>.md` at the top level.
+- `<version>/<slug>.<type>.md`, `<version>/highlights/<slug>.md`, and
   `<version>/overview.md`, where `<version>` is a semantic version directory.
 
 Any other path is a CI error rather than a silently ignored file, failing early
 instead of vanishing during release assembly.
-This rejects other file extensions (`.txt`, `.markdown`), a misspelled
-`overview.md`, non-version subdirectories, deeper directory nesting, or stray
-files under `highlights/`.
-A fragment or highlight note with a reserved slug ([Changelog
-fragment](#changelog-fragment)) is also an error, so a top-level `overview.md`
-never reaches a release as its introduction.
+This rejects a fragment without a type in its filename, other file extensions
+(`.txt`, `.markdown`), a misspelled `overview.md`, non-version subdirectories,
+deeper directory nesting, or stray files under `highlights/`.
+A top-level `overview.md` has no type in its filename, so it is an error rather
+than a release's introduction.
 
 CI runs these rules as two separate checks because they have opposite triggering
 requirements.
@@ -482,7 +496,8 @@ Because GitHub's pull request check list shows only a job's name and status, the
 gate surfaces failures in two places: its job name (`Changelog fragment or
 no-changelog label`) states the requirement directly in the check list, and a
 failure emits an error annotation on the check page with the fix (for example,
-"Add a fragment with `jp release add`, or add the `no-changelog` label.").
+"Add a fragment, such as with `jp release fixed`, or add the `no-changelog`
+label.").
 
 The gate applies only to pull requests targeting `main`; pushes to `main` and
 local `jp release check` runs perform format validation only.
@@ -547,7 +562,7 @@ Workspaces without CI or on other forges can use `jp release` without them.
 - **Edit a single `CHANGELOG.md` in each pull request.** Rejected because it
   causes merge conflicts across concurrent branches.
   Per-change fragment files are the standard solution.
-- **Store the pull request number in frontmatter, backfilled by CI.** Rejected
+- **Store the pull request number in the fragment, backfilled by CI.** Rejected
   because it requires a bot identity and CI commits to contributor branches.
   Deriving credits from git history avoids both.
 - **Use `towncrier` (Python).** Rejected to avoid introducing a Python toolchain
@@ -578,11 +593,17 @@ Workspaces without CI or on other forges can use `jp release` without them.
   release page, which [RFD 122] makes configurable.
   This decision can be revisited if a workspace's changes do not fit the seven
   fixed types.
-- **Record breaking changes in frontmatter** (as a boolean flag or a YAML string
-  containing the upgrade text).
-  A boolean flag provides nowhere to explain how to upgrade, while a YAML string
-  loses Markdown preview, `markdown_format` support, and clean multi-line syntax
-  for the section of a release users read most carefully.
+- **Record breaking changes in a metadata field** (as a flag or as the upgrade
+  text).
+  A flag provides nowhere to explain how to upgrade, and a field's value is a
+  single line of plain text, while the section of a release users read most
+  carefully needs paragraphs and code blocks.
+- **Store metadata in YAML frontmatter**, including `type`, between `---` lines.
+  Every fragment would carry a YAML block for a single field, which contributors
+  writing by hand must get right, and author handles starting with `@` need
+  quoting.
+  The type in the filename is one word that shows in a directory listing, and
+  the metadata block RFDs and tickets already use holds the rare `Credits`.
 - **Edit existing fragments in follow-up pull requests** so a change and its
   follow-ups share one entry.
   Release notes would read slightly cleaner without manual consolidation, but if
@@ -654,11 +675,11 @@ Depends on Phase 1.
 
 ### Phase 3: The `jp release` plugin
 
-Create `crates/plugins/command/release` with `init`, `check`, and `add`, and
-allow it in `.jp/config.toml`.
+Create `crates/plugins/command/release` with `init`, `check`, a command per
+type, and `highlight`, and allow it in `.jp/config.toml`.
 `init` writes the `README.md` template from Phase 1 into other workspaces.
-Expose `add` as the `changelog_add` tool via `jp release tools init`, and enable
-it in the `dev` and `rfd-implementor` personas.
+Expose writing a fragment as the `changelog_add` tool via `jp release tools
+init`, and enable it in the `dev` and `rfd-implementor` personas.
 Depends on Phase 1.
 
 ### Phase 4: Label auto-apply (optional)

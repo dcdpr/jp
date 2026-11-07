@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use crate::{
-    entry::{self, Entry, Fragments},
+    entry::{self, Fragments},
     options::Options,
 };
 
@@ -80,11 +80,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     // preview that errors fails the call ahead of the approval prompt, which
     // tells the assistant to fix the arguments rather than asking the user
     // about a call that cannot land.
-    let planned = match entry::plan(
-        &fragments,
-        &Entry::Fragment { type_, body },
-        slug.as_deref(),
-    ) {
+    let planned = match entry::plan(&fragments, type_, &body, slug.as_deref()) {
         Ok(planned) => planned,
         Err(refusal) => return refuse(refusal),
     };
@@ -194,8 +190,8 @@ fn refuse(message: impl Into<String>) -> Answer {
 /// The file at `path` a call is about to write, holding `text`, styled for the
 /// terminal as the user sees it before approving the call.
 ///
-/// The file is shown whole in a code block, so its frontmatter reads as it is
-/// written rather than as Markdown.
+/// The file is shown whole in a code block, so a `Credits` field and an upgrade
+/// section read as they are written rather than rendered.
 /// Falls back to the unstyled source if the Markdown can't be formatted.
 fn preview(path: &str, text: &str) -> String {
     let fence = "`".repeat(longest_backtick_run(text).max(2) + 1);

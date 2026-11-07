@@ -5,7 +5,7 @@ use crate::{options::Options, repository_testing::Fixture};
 
 /// A highlight that follows the format.
 const HIGHLIGHT: &str =
-    "---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\"]\n---\nThe assistant asks once.\n";
+    "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant asks once.\n";
 
 /// A `bump` that writes the version into `VERSION`, wherever git runs.
 const BUMP: &str = "git config --file VERSION version.current {version}";
@@ -85,15 +85,15 @@ fn a_cut_starts_the_release_branch_and_files_the_notes_on_a_branch_of_their_own(
         main
     );
     assert_eq!(
-        fixture.show("release-cut/v0.1.0:changelog.d/0.1.0/retry-idle-turns.md"),
-        Some("---\ntype: fixed\n---\nIdle turns are retried.\n".to_owned())
+        fixture.show("release-cut/v0.1.0:changelog.d/0.1.0/retry-idle-turns.fixed.md"),
+        Some("Idle turns are retried.\n".to_owned())
     );
     assert_eq!(
         fixture.show("release-cut/v0.1.0:changelog.d/0.1.0/highlights/fan-out.md"),
         Some(HIGHLIGHT.to_owned())
     );
     assert_eq!(
-        fixture.show("release-cut/v0.1.0:changelog.d/retry-idle-turns.md"),
+        fixture.show("release-cut/v0.1.0:changelog.d/retry-idle-turns.fixed.md"),
         None
     );
     assert!(
@@ -165,12 +165,12 @@ fn a_fragment_another_release_ships_waits_for_its_change_request() {
     );
     assert!(
         fixture
-            .show("release-cut/v0.3.0:changelog.d/0.3.0/model.md")
+            .show("release-cut/v0.3.0:changelog.d/0.3.0/model.added.md")
             .is_some()
     );
     assert!(
         fixture
-            .show("release-cut/v0.3.0:changelog.d/retry.md")
+            .show("release-cut/v0.3.0:changelog.d/retry.fixed.md")
             .is_some()
     );
 }
@@ -181,9 +181,9 @@ fn from_1_0_on_a_breaking_change_cuts_a_major_release() {
     fixture.git(&["tag", "v1.2.0"]);
     fixture.git(&["push", "--quiet", "origin", "v1.2.0"]);
     fixture.write(
-        "changelog.d/manifest.md",
-        "---\ntype: changed\n---\nPlugins are found by their manifest.\n\nBREAKING CHANGE: \
-         Plugins need a manifest\n\nRebuild them.\n",
+        "changelog.d/manifest.changed.md",
+        "Plugins are found by their manifest.\n\nBREAKING CHANGE: Plugins need a \
+         manifest\n\nRebuild them.\n",
     );
     fixture.commit("feat!: Route plugins by manifest (#3)");
     fixture.push();
@@ -207,9 +207,9 @@ fn a_requested_minor_release_from_1_0_on_refuses_a_breaking_change() {
     fixture.git(&["tag", "v1.2.0"]);
     fixture.git(&["push", "--quiet", "origin", "v1.2.0"]);
     fixture.write(
-        "changelog.d/manifest.md",
-        "---\ntype: changed\n---\nPlugins are found by their manifest.\n\nBREAKING CHANGE: \
-         Plugins need a manifest\n\nRebuild them.\n",
+        "changelog.d/manifest.changed.md",
+        "Plugins are found by their manifest.\n\nBREAKING CHANGE: Plugins need a \
+         manifest\n\nRebuild them.\n",
     );
     fixture.fragment("retry", "fixed", "Retried.");
     fixture.commit("feat!: Route plugins by manifest (#3)");
@@ -222,8 +222,8 @@ fn a_requested_minor_release_from_1_0_on_refuses_a_breaking_change() {
         cut(&pipeline, Some(&version("1.3.0"))),
         Err(
             "1.3.0 is a minor release from 1.0 on, which can't ship a change that requires users \
-             to act, and changelog.d/manifest.md has an upgrade section. Leave out `--version` to \
-             cut the next major release."
+             to act, and changelog.d/manifest.changed.md has an upgrade section. Leave out \
+             `--version` to cut the next major release."
                 .to_owned()
         )
     );
@@ -268,8 +268,8 @@ fn a_fragment_that_breaks_its_format_stops_the_cut() {
     assert_eq!(
         cut(&pipeline, None),
         Err("The fragments on `main` break their format; fix these \
-             first:\nchangelog.d/notes.txt: not a fragment, which is named `<slug>.md`; rename \
-             it, or move it out of the fragments directory"
+             first:\nchangelog.d/notes.txt: not a fragment, which is named `<slug>.<type>.md`; \
+             rename it, or move it out of the fragments directory"
             .to_owned())
     );
     assert_eq!(branches(&fixture), ["main"]);
@@ -297,10 +297,7 @@ fn a_cut_that_cannot_open_its_change_request_pushes_nothing() {
 #[test]
 fn a_workspace_below_the_top_of_its_repository_is_released_from_there() {
     let fixture = Fixture::new();
-    fixture.write(
-        "app/changelog.d/retry.md",
-        "---\ntype: fixed\n---\nRetried.\n",
-    );
+    fixture.write("app/changelog.d/retry.fixed.md", "Retried.\n");
     fixture.commit("fix: Retry (#1)");
     fixture.push();
     let shell = fixture.shell();
@@ -311,7 +308,7 @@ fn a_workspace_below_the_top_of_its_repository_is_released_from_there() {
 
     assert!(
         fixture
-            .show("release-cut/v0.1.0:app/changelog.d/0.1.0/retry.md")
+            .show("release-cut/v0.1.0:app/changelog.d/0.1.0/retry.fixed.md")
             .is_some()
     );
     assert!(fixture.show("release-cut/v0.1.0:app/VERSION").is_some());

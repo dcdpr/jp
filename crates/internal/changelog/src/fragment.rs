@@ -1,13 +1,21 @@
 //! One changelog fragment: the entry recording a change for the people using
 //! the software.
 //!
-//! A fragment is a Markdown file whose YAML frontmatter names the change's
-//! [`Type`], and whose body is the entry the release notes list:
+//! A fragment is a Markdown file named `<slug>.<type>.md`, such as
+//! `retry-idle-turns.fixed.md`: the name holds the change's [`Type`]
+//! ([`name`]), and the text is the entry the release notes list:
 //!
 //! ```markdown
-//! ---
-//! type: fixed
-//! ---
+//! A turn that stalls while idle is retried instead of failing.
+//! ```
+//!
+//! A fragment can open with a metadata block whose `Credits` fields replace the
+//! credits history names, one per line, each a change request or a commit's
+//! hash:
+//!
+//! ```markdown
+//! - **Credits**: #1207
+//!
 //! A turn that stalls while idle is retried instead of failing.
 //! ```
 //!
@@ -27,26 +35,27 @@
 //!
 //! Paragraphs and code blocks are read as GitHub renders Markdown.
 
-use std::{fmt, num::NonZeroU64, ops::Range, str::FromStr};
+use std::{fmt, ops::Range, str::FromStr};
 
 use comrak::{
     Arena,
     nodes::{NodeValue, Sourcepos},
     parse_document,
 };
-use serde::Deserialize;
 
 use crate::{
-    document::{self, FrontmatterError, Parsed},
+    document::{self, CREDITS, Field, ListedCredit},
     links::{Links, line_starts},
 };
+
+/// The extension a fragment's file name ends in.
+const EXTENSION: &str = ".md";
 
 /// What a change means for the people using the software.
 ///
 /// The ids are fixed, so a fragment means the same in every project.
 /// Types order as release notes show them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
     /// A new capability the user can now reach.
     Added,
@@ -76,7 +85,7 @@ impl Type {
         Self::Performance,
     ];
 
-    /// The id a fragment's frontmatter names the type by, such as `added`.
+    /// The id a fragment's file name holds the type by, such as `added`.
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -114,7 +123,7 @@ impl fmt::Display for Type {
 impl FromStr for Type {
     type Err = UnknownType;
 
-    /// Read a type from its id, written as the frontmatter writes it.
+    /// Read a type from its id, written as a file name writes it.
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         Self::ALL
             .into_iter()
@@ -142,15 +151,96 @@ impl fmt::Display for UnknownType {
 
 impl std::error::Error for UnknownType {}
 
+/// What a file name is, when it isn't a fragment's: `<slug>.<type>.md`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NameError {
+    /// The name doesn't end in `.md`, or nothing comes before its type.
+    NotAFragment,
+
+    /// Nothing but a slug comes before `.md`.
+    MissingType { slug: String },
+
+    /// What comes between the slug and `.md` is none of the seven type ids.
+    UnknownType { type_: String },
+}
+
+impl fmt::Display for NameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAFragment => f.write_str(
+                "not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out of \
+                 the fragments directory",
+            ),
+            Self::MissingType { slug } => write!(
+                f,
+                "no type in the name: name it `{slug}.<type>.md`, such as `{slug}.fixed.md`, with \
+                 one of: {}",
+                ids()
+            ),
+            Self::UnknownType { type_ } => write!(
+                f,
+                "`{type_}` is not a changelog type: the part of the name before `.md` is one of: \
+                 {}",
+                ids()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NameError {}
+
+/// The slug and the type the file name `name` holds: `retry-idle-turns` and
+/// [`Type::Fixed`] for `retry-idle-turns.fixed.md`.
+///
+/// The slug is everything before the type, dots included.
+///
+/// # Errors
+///
+/// Returns why `name` isn't a fragment's file name.
+pub fn name(name: &str) -> Result<(&str, Type), NameError> {
+    let stem = name
+        .strip_suffix(EXTENSION)
+        .filter(|stem| !stem.is_empty())
+        .ok_or(NameError::NotAFragment)?;
+    let Some((slug, type_)) = stem.rsplit_once('.') else {
+        return Err(NameError::MissingType {
+            slug: stem.to_owned(),
+        });
+    };
+    if slug.is_empty() {
+        return Err(NameError::NotAFragment);
+    }
+
+    let type_ = type_
+        .parse()
+        .map_err(|UnknownType(type_)| NameError::UnknownType { type_ })?;
+
+    Ok((slug, type_))
+}
+
+/// The file name of the fragment of type `type_` named `slug`:
+/// `<slug>.<type>.md`.
+#[must_use]
+pub fn file_name(slug: &str, type_: Type) -> String {
+    format!("{slug}.{type_}{EXTENSION}")
+}
+
+/// Every type's id, as an error lists them.
+fn ids() -> String {
+    let ids: Vec<&str> = Type::ALL.iter().map(|type_| type_.id()).collect();
+
+    ids.join(", ")
+}
+
 /// A fragment, as [`parse`] reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fragment {
-    /// What the change means for users.
+    /// What the change means for users, which the file name holds.
     pub type_: Type,
 
-    /// The change requests to credit in place of the ones history names, when
-    /// the frontmatter lists them.
-    pub change_requests: Option<Vec<NonZeroU64>>,
+    /// The credits to give in place of the ones history names, when the file
+    /// lists them.
+    pub credits: Option<Vec<ListedCredit>>,
 
     /// The entry the release notes list, as Markdown: the body before its
     /// upgrade section, or all of it.
@@ -179,14 +269,19 @@ pub struct Upgrade {
 
 /// A document that doesn't hold a well-formed fragment.
 ///
-/// Lines count from 1 at the top of the file, frontmatter included.
+/// Lines count from 1 at the top of the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FragmentError {
-    /// The frontmatter is missing, unclosed, or doesn't hold a fragment's
-    /// fields and nothing else.
-    Frontmatter(FrontmatterError),
+    /// The metadata block lists a type, which the file name holds.
+    TypeField { line: usize },
 
-    /// Nothing but whitespace follows the frontmatter.
+    /// The metadata block lists a field other than `Credits`.
+    UnknownField { line: usize, key: String },
+
+    /// A `Credits` field names neither a change request nor a commit.
+    InvalidCredit { line: usize, value: String },
+
+    /// Nothing but whitespace, or the metadata block, is in the file.
     EmptyBody,
 
     /// A line inside a code block starts with an upgrade section's token.
@@ -212,10 +307,18 @@ pub enum FragmentError {
 impl fmt::Display for FragmentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Frontmatter(error) => write!(f, "{error}"),
-            Self::EmptyBody => {
-                f.write_str("no entry: say below the frontmatter what changed for users")
+            Self::TypeField { line } => write!(
+                f,
+                "line {line} names a type, which a fragment's file name holds: `<slug>.<type>.md`"
+            ),
+            Self::UnknownField { line, key } => write!(
+                f,
+                "line {line} lists `{key}`, and the only field a fragment takes is `{CREDITS}`"
+            ),
+            Self::InvalidCredit { line, value } => {
+                f.write_str(&document::invalid_credit(*line, value))
             }
+            Self::EmptyBody => f.write_str("no entry: say what changed for users"),
             Self::MarkerInCodeBlock { line, marker } => write!(
                 f,
                 "line {line} starts with `{marker}` inside a code block; to show the token, \
@@ -251,43 +354,60 @@ impl fmt::Display for FragmentError {
 
 impl std::error::Error for FragmentError {}
 
-impl From<FrontmatterError> for FragmentError {
-    fn from(error: FrontmatterError) -> Self {
-        Self::Frontmatter(error)
-    }
-}
-
-/// The fields a fragment's frontmatter holds; any other is an error rather than
-/// ignored, so a misspelled field doesn't vanish.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Frontmatter {
-    #[serde(rename = "type")]
-    type_: Type,
-    change_requests: Option<Vec<NonZeroU64>>,
-}
-
-/// Read `source` as a fragment, held to every rule of the format.
+/// Read `source` as a fragment of type `type_`, which its file name holds, held
+/// to every rule of the format.
 ///
 /// Lines may end in `\n` or `\r\n`, and a leading byte order mark is skipped.
 ///
 /// # Errors
 ///
 /// Returns the first rule `source` breaks, reading from the top.
-pub fn parse(source: &str) -> Result<Fragment, FragmentError> {
-    let Parsed {
-        frontmatter,
-        body: text,
-        body_line,
-    } = document::parse::<Frontmatter>(source)?;
-    let (entry, upgrade) = body(&text, body_line)?;
+pub fn parse(type_: Type, source: &str) -> Result<Fragment, FragmentError> {
+    let source = document::normalize(source);
+    let lines: Vec<&str> = source.lines().collect();
+    let first = lines
+        .iter()
+        .position(|line| !line.trim().is_empty())
+        .unwrap_or(lines.len());
+
+    let (fields, end) = document::fields(&lines, first);
+    let credits = credits(&fields)?;
+    let offset = line_starts(&source)
+        .get(end)
+        .copied()
+        .unwrap_or(source.len());
+    let (entry, upgrade) = body(&source[offset..], end + 1)?;
 
     Ok(Fragment {
-        type_: frontmatter.type_,
-        change_requests: frontmatter.change_requests,
+        type_,
+        credits,
         entry,
         upgrade,
     })
+}
+
+/// The credits a fragment's metadata block lists, which takes no field but
+/// `Credits`; `None` when it lists none.
+fn credits(fields: &[Field]) -> Result<Option<Vec<ListedCredit>>, FragmentError> {
+    let mut credits = vec![];
+    for field in fields {
+        if field.key.eq_ignore_ascii_case(CREDITS) {
+            let credit = document::credit(field).ok_or_else(|| FragmentError::InvalidCredit {
+                line: field.line,
+                value: field.value.clone(),
+            })?;
+            credits.push(credit);
+        } else if field.key.eq_ignore_ascii_case("type") {
+            return Err(FragmentError::TypeField { line: field.line });
+        } else {
+            return Err(FragmentError::UnknownField {
+                line: field.line,
+                key: field.key.clone(),
+            });
+        }
+    }
+
+    Ok((!credits.is_empty()).then_some(credits))
 }
 
 /// The paragraph that opens a fragment's upgrade section.

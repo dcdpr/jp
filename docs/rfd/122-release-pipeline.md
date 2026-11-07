@@ -193,9 +193,9 @@ Passing `--workspace` would overwrite those `crates/contrib/` versions as well.
 ```
 changelog.d/
   README.md
-  enable-explicit.md          # merged after the cut: unreleased
+  enable-explicit.removed.md    # merged after the cut: unreleased
   0.3.0/
-    retry-idle-turns.md
+    retry-idle-turns.fixed.md
     highlights/plugin-tools.md
 ```
 
@@ -250,7 +250,7 @@ Preparing release notes takes as long as needed without blocking `main`:
   `changelog.d/<version>/` are edited on `main` through normal change requests.
   To combine two fragments for a single logical change (such as a feature and a
   follow-up fix), edit one fragment, delete the other, and list both change
-  requests in the surviving fragment's `change_requests` frontmatter.
+  requests in the surviving fragment's `Credits` fields.
 - **Overview**: The overview introduces the release notes.
   When `changelog.d/<version>/overview.md` is absent, rendering generates a
   default summary stating the version, the count of entries per type, and the
@@ -266,9 +266,8 @@ Preparing release notes takes as long as needed without blocking `main`:
   If no later release ships the fragment, `pick` moves it so the next release
   does not list it again.
   If a later release was already cut after the commit merged to `main`, `pick`
-  copies the fragment and writes its resolved credits into the copy's
-  `change_requests` field ([RFD 121]), so both releases include the change and
-  list the entry.
+  copies the fragment and writes its resolved credits into the copy's `Credits`
+  fields ([RFD 121]), so both releases include the change and list the entry.
   If cherry-picking hits a merge conflict, `pick` stops and prints the temporary
   worktree path; after resolving the conflict there, run `jp release pick
   --continue`.
@@ -472,9 +471,9 @@ to the commit that moved it into `changelog.d/<version>/`.
 Edits made after the file is moved into a version directory do not add credits.
 Each commit's change request is extracted from its commit message, or from its
 merge commit message when merged via a merge commit.
-If a fragment defines an explicit `change_requests` list in its frontmatter,
-that list overrides history lookup; `pick` uses this mechanism when copying a
-fragment into a patch release so the copy retains the original credits.
+If a fragment lists `Credits` fields, those override history lookup; `pick` uses
+this mechanism when copying a fragment into a patch release so the copy retains
+the original credits, including commit credits.
 
 | `forge`  | Change request pattern                                                       | Label  | Target URL                                      |
 | -------- | ---------------------------------------------------------------------------- | ------ | ----------------------------------------------- |

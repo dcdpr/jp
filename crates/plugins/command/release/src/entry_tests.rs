@@ -41,45 +41,32 @@ fn formatted(root: &Utf8TempDir) -> Fragments<'_> {
     Fragments::new(root.path(), root.path().join("changelog.d"), &config).unwrap()
 }
 
-fn fixed(body: &str) -> Entry {
-    Entry::Fragment {
-        type_: Type::Fixed,
-        body: body.to_owned(),
-    }
-}
-
-fn highlight(title: &str, body: &str) -> Entry {
-    Entry::Highlight {
-        title: title.to_owned(),
-        authors: vec!["@JeanMertz".to_owned()],
-        body: body.to_owned(),
-    }
-}
-
 #[test]
-fn a_fragment_is_written_as_its_frontmatter_then_its_entry() {
-    let entry = fixed("  A turn that stalls while idle is retried instead of failing.\n\n");
+fn a_fragment_holds_its_entry_and_its_name_its_type() {
+    let root = workspace();
 
-    assert_eq!(entry.render(), indoc! {"
-        ---
-        type: fixed
-        ---
-        A turn that stalls while idle is retried instead of failing.
-    "});
+    let planned = plan(
+        &fragments(&root),
+        Type::Fixed,
+        "  A turn that stalls while idle is retried instead of failing.\n\n",
+        Some("retry"),
+    )
+    .unwrap();
+
+    assert_eq!(planned.shown, "changelog.d/retry.fixed.md");
+    assert_eq!(
+        planned.text,
+        "A turn that stalls while idle is retried instead of failing.\n"
+    );
 }
 
 #[test]
 fn an_entry_is_written_as_given_unless_the_workspace_formats_on_write() {
     let root = workspace();
 
-    let planned = plan(&fragments(&root), &fixed(TWO_SENTENCES), Some("retry")).unwrap();
+    let planned = plan(&fragments(&root), Type::Fixed, TWO_SENTENCES, Some("retry")).unwrap();
 
-    assert_eq!(
-        planned.text,
-        "---\ntype: fixed\n---\nA turn that stalls while idle is retried instead of failing. The \
-         retry waits for the provider's own backoff, and gives up after three attempts, saying \
-         why.\n"
-    );
+    assert_eq!(planned.text, format!("{TWO_SENTENCES}\n"));
 }
 
 /// Laid out in the style of the workspace's `.comfort.toml`, so the file passes
@@ -88,43 +75,13 @@ fn an_entry_is_written_as_given_unless_the_workspace_formats_on_write() {
 fn an_entry_is_laid_out_in_the_workspaces_style_when_it_formats_on_write() {
     let root = workspace();
 
-    let planned = plan(&formatted(&root), &fixed(TWO_SENTENCES), Some("retry")).unwrap();
+    let planned = plan(&formatted(&root), Type::Fixed, TWO_SENTENCES, Some("retry")).unwrap();
 
     assert_eq!(planned.text, indoc! {"
-        ---
-        type: fixed
-        ---
         A turn that stalls while idle is retried instead of failing.
         The retry waits for the provider's own backoff, and gives up after three
         attempts, saying why.
     "});
-}
-
-/// `highlights/` sits inside the fragments directory, so a highlight is laid
-/// out as a fragment is.
-#[test]
-fn a_highlight_is_laid_out_as_a_fragment_is() {
-    let root = workspace();
-    let entry = highlight(
-        "Tool calls fan out",
-        "The assistant calls one tool on many inputs at once. Each result shows up under its own \
-         call.",
-    );
-
-    let planned = plan(&formatted(&root), &entry, None).unwrap();
-
-    assert_eq!(
-        planned.shown,
-        "changelog.d/highlights/tool-calls-fan-out.md"
-    );
-    assert_eq!(planned.text, indoc! {r#"
-        ---
-        title: "Tool calls fan out"
-        authors: ["@JeanMertz"]
-        ---
-        The assistant calls one tool on many inputs at once.
-        Each result shows up under its own call.
-    "#});
 }
 
 /// Laying a paragraph out a sentence per line can start a line with the upgrade
@@ -133,19 +90,19 @@ fn a_highlight_is_laid_out_as_a_fragment_is() {
 #[test]
 fn an_entry_is_checked_as_it_is_laid_out() {
     let root = workspace();
-    let entry = fixed("Retries are fixed. BREAKING CHANGE: the old flag is gone.");
+    let entry = "Retries are fixed. BREAKING CHANGE: the old flag is gone.";
 
-    let error = plan(&formatted(&root), &entry, None).unwrap_err();
+    let error = plan(&formatted(&root), Type::Fixed, entry, None).unwrap_err();
 
     assert_eq!(
         error,
-        "line 5 starts with `BREAKING CHANGE:` without starting a paragraph; an upgrade section \
-         opens a paragraph of its own, after a blank line, and to show the token instead, indent \
-         the line or put the token in inline code"
+        "once laid out as the workspace formats it, line 2 starts with `BREAKING CHANGE:` without \
+         starting a paragraph; an upgrade section opens a paragraph of its own, after a blank \
+         line, and to show the token instead, indent the line or put the token in inline code"
     );
     // Written as given, the token sits partway through a line, where it is
     // text.
-    assert!(plan(&fragments(&root), &entry, None).is_ok());
+    assert!(plan(&fragments(&root), Type::Fixed, entry, None).is_ok());
 }
 
 #[test]
@@ -163,44 +120,26 @@ fn a_format_on_write_that_is_not_true_or_false_is_refused() {
     );
 }
 
-/// The title and the authors are written as quoted strings, so neither a colon
-/// nor a quote in them can change what the YAML says.
-#[test]
-fn a_highlight_quotes_its_title_and_authors() {
-    let entry = Entry::Highlight {
-        title: "Tool calls \"fan out\": many inputs, one request".to_owned(),
-        authors: vec!["@JeanMertz".to_owned(), " Jane Doe ".to_owned()],
-        body: "The assistant calls one tool on many inputs at once.".to_owned(),
-    };
-
-    assert_eq!(entry.render(), indoc! {r#"
-        ---
-        title: "Tool calls \"fan out\": many inputs, one request"
-        authors: ["@JeanMertz", "Jane Doe"]
-        ---
-        The assistant calls one tool on many inputs at once.
-    "#});
-}
-
 #[test]
 fn a_fragment_is_named_after_its_first_words() {
     let root = workspace();
 
     let planned = plan(
         &fragments(&root),
-        &fixed("A turn that stalls while idle is retried instead of failing."),
+        Type::Fixed,
+        "A turn that stalls while idle is retried instead of failing.",
         None,
     )
     .unwrap();
 
     assert_eq!(
         planned.shown,
-        "changelog.d/a-turn-that-stalls-while-idle-is-retried-instead.md"
+        "changelog.d/a-turn-that-stalls-while-idle-is-retried-instead.fixed.md"
     );
     assert_eq!(
         planned.path,
         root.path()
-            .join("changelog.d/a-turn-that-stalls-while-idle-is-retried-instead.md")
+            .join("changelog.d/a-turn-that-stalls-while-idle-is-retried-instead.fixed.md")
     );
 }
 
@@ -222,16 +161,14 @@ fn an_entry_with_links_is_named_after_its_words() {
 
     let planned = plan(
         &formatted(&root),
-        &fixed("See [the docs](https://example.com/docs) for setup."),
+        Type::Fixed,
+        "See [the docs](https://example.com/docs) for setup.",
         None,
     )
     .unwrap();
 
-    assert_eq!(planned.shown, "changelog.d/see-the-docs-for-setup.md");
+    assert_eq!(planned.shown, "changelog.d/see-the-docs-for-setup.fixed.md");
     assert_eq!(planned.text, indoc! {"
-        ---
-        type: fixed
-        ---
         See [the docs] for setup.
 
         [the docs]: https://example.com/docs
@@ -256,113 +193,80 @@ fn a_long_first_word_is_cut() {
     assert_eq!(derive_slug(&word), Some("a".repeat(MAX_DERIVED_SLUG)));
 }
 
+/// Only a fragment of the same type takes the name: a slug can name one
+/// fragment of each type.
 #[test]
-fn a_highlight_is_named_after_its_title_in_highlights() {
+fn a_derived_name_a_fragment_of_the_type_has_gets_a_number() {
     let root = workspace();
+    for taken in [
+        "crashes-are-fixed.fixed.md",
+        "crashes-are-fixed-2.fixed.md",
+        "crashes-are-fixed-3.added.md",
+    ] {
+        fs::write(root.path().join("changelog.d").join(taken), "").unwrap();
+    }
 
-    let planned = plan(
-        &fragments(&root),
-        &highlight(
-            "Tool calls fan out",
-            "The assistant calls one tool at once.",
-        ),
-        None,
-    )
-    .unwrap();
+    let planned = plan(&fragments(&root), Type::Fixed, "Crashes are fixed.", None).unwrap();
 
-    assert_eq!(
-        planned.shown,
-        "changelog.d/highlights/tool-calls-fan-out.md"
-    );
+    assert_eq!(planned.shown, "changelog.d/crashes-are-fixed-3.fixed.md");
 }
 
 #[test]
-fn a_derived_name_another_file_has_gets_a_number() {
+fn a_named_slug_a_fragment_of_the_type_has_is_refused() {
     let root = workspace();
-    fs::write(root.path().join("changelog.d/crashes-are-fixed.md"), "").unwrap();
-    fs::write(root.path().join("changelog.d/crashes-are-fixed-2.md"), "").unwrap();
-
-    let planned = plan(&fragments(&root), &fixed("Crashes are fixed."), None).unwrap();
-
-    assert_eq!(planned.shown, "changelog.d/crashes-are-fixed-3.md");
-}
-
-#[test]
-fn a_named_slug_another_file_has_is_refused() {
-    let root = workspace();
-    fs::write(root.path().join("changelog.d/retry.md"), "").unwrap();
+    fs::write(root.path().join("changelog.d/retry.fixed.md"), "").unwrap();
 
     let error = plan(
         &fragments(&root),
-        &fixed("Crashes are fixed."),
+        Type::Fixed,
+        "Crashes are fixed.",
         Some("retry"),
     )
     .unwrap_err();
 
     assert_eq!(
         error,
-        "changelog.d/retry.md already exists; choose another slug."
+        "changelog.d/retry.fixed.md already exists; choose another slug."
     );
 }
 
+/// The type in a fragment's name keeps every slug clear of `README.md` and a
+/// release's `overview.md`.
 #[test]
 fn a_named_slug_is_used_as_given() {
     let root = workspace();
 
-    let planned = plan(
-        &fragments(&root),
-        &fixed("Crashes are fixed."),
-        Some("Retry_Idle-2"),
-    )
-    .unwrap();
+    for (slug, shown) in [
+        ("Retry_Idle-2", "changelog.d/Retry_Idle-2.fixed.md"),
+        ("readme", "changelog.d/readme.fixed.md"),
+        ("overview", "changelog.d/overview.fixed.md"),
+    ] {
+        let planned = plan(
+            &fragments(&root),
+            Type::Fixed,
+            "Crashes are fixed.",
+            Some(slug),
+        )
+        .unwrap();
 
-    assert_eq!(planned.shown, "changelog.d/Retry_Idle-2.md");
-}
-
-#[test]
-fn a_reserved_slug_is_refused_in_any_letter_case() {
-    let root = workspace();
-
-    let error = plan(
-        &fragments(&root),
-        &fixed("Crashes are fixed."),
-        Some("Overview"),
-    )
-    .unwrap_err();
-
-    assert_eq!(
-        error,
-        "`Overview` is reserved for a release's introduction, `overview.md` in the release's \
-         directory, in any letter case; choose another slug."
-    );
-}
-
-#[test]
-fn an_entry_whose_name_would_be_reserved_is_refused() {
-    let root = workspace();
-
-    let error = plan(
-        &fragments(&root),
-        &highlight("Readme", "The README is clearer."),
-        None,
-    )
-    .unwrap_err();
-
-    assert_eq!(
-        error,
-        "The entry would be named `readme`, which is reserved for the fragments directory's \
-         documentation, `README.md` at its top level; give it another slug."
-    );
+        assert_eq!(planned.shown, shown);
+    }
 }
 
 /// A slug is a plain file name: one that reaches another directory, or one with
-/// an extension of its own, would break the layout.
+/// a `.` that would read as part of the type, would break the layout.
 #[test]
 fn a_slug_that_is_not_a_plain_name_is_refused() {
     let root = workspace();
 
-    for slug in ["../escape", "retry.md", "two words", ""] {
-        let error = plan(&fragments(&root), &fixed("Crashes are fixed."), Some(slug)).unwrap_err();
+    for slug in ["../escape", "retry.md", "retry.added", "two words", ""] {
+        let error = plan(
+            &fragments(&root),
+            Type::Fixed,
+            "Crashes are fixed.",
+            Some(slug),
+        )
+        .unwrap_err();
 
         assert_eq!(
             error,
@@ -371,24 +275,24 @@ fn a_slug_that_is_not_a_plain_name_is_refused() {
     }
 }
 
-/// What `add` writes passes `jp release check`, so an entry breaking the format
-/// is refused rather than written.
+/// What the tool writes passes `jp release check`, so an entry breaking the
+/// format is refused rather than written.
 #[test]
 fn an_entry_that_breaks_the_format_is_refused() {
     let root = workspace();
-    let entry = fixed(indoc! {"
+    let entry = indoc! {"
         An example of the token:
 
         ```text
         BREAKING CHANGE: in an example
         ```
-    "});
+    "};
 
-    let error = plan(&fragments(&root), &entry, None).unwrap_err();
+    let error = plan(&fragments(&root), Type::Fixed, entry, None).unwrap_err();
 
     assert_eq!(
         error,
-        "line 7 starts with `BREAKING CHANGE:` inside a code block; to show the token, indent the \
+        "line 4 starts with `BREAKING CHANGE:` inside a code block; to show the token, indent the \
          line or put the token in inline code"
     );
 }
@@ -397,19 +301,16 @@ fn an_entry_that_breaks_the_format_is_refused() {
 fn an_empty_entry_is_refused() {
     let root = workspace();
 
-    let error = plan(&fragments(&root), &fixed("  \n"), None).unwrap_err();
+    let error = plan(&fragments(&root), Type::Fixed, "  \n", None).unwrap_err();
 
-    assert_eq!(
-        error,
-        "no entry: say below the frontmatter what changed for users"
-    );
+    assert_eq!(error, "no entry: say what changed for users");
 }
 
 #[test]
 fn there_has_to_be_a_fragments_directory() {
     let root = Utf8TempDir::new().unwrap();
 
-    let error = plan(&fragments(&root), &fixed("Crashes are fixed."), None).unwrap_err();
+    let error = plan(&fragments(&root), Type::Fixed, "Crashes are fixed.", None).unwrap_err();
 
     assert_eq!(
         error,
@@ -417,43 +318,53 @@ fn there_has_to_be_a_fragments_directory() {
     );
 }
 
-/// `highlights/` holds no file until its first highlight, so a checkout has
-/// none to begin with, and the first highlight creates it.
 #[test]
-fn writing_a_highlight_creates_highlights() {
+fn a_planned_fragment_passes_the_check() {
     let root = workspace();
 
-    let planned = plan(
-        &fragments(&root),
-        &highlight(
-            "Tool calls fan out",
-            "The assistant calls one tool at once.",
-        ),
-        None,
-    )
-    .unwrap();
+    let planned = plan(&fragments(&root), Type::Added, "Exports work.", None).unwrap();
     planned.write().unwrap();
 
     assert_eq!(fs::read_to_string(&planned.path).unwrap(), planned.text);
     let report = changelog::check(&root.path().join("changelog.d")).unwrap();
-    assert_eq!(report.highlights, 1);
+    assert_eq!(report.fragments, 1);
     assert!(report.problems.is_empty(), "{report}");
 }
 
 #[test]
 fn writing_refuses_a_file_that_appeared_since_it_was_planned() {
     let root = workspace();
-    let planned = plan(&fragments(&root), &fixed("Crashes are fixed."), None).unwrap();
+    let planned = plan(&fragments(&root), Type::Fixed, "Crashes are fixed.", None).unwrap();
     fs::write(&planned.path, "Someone else's.\n").unwrap();
 
     let error = planned.write().unwrap_err();
 
     assert_eq!(
         error,
-        "changelog.d/crashes-are-fixed.md already exists; choose another slug."
+        "changelog.d/crashes-are-fixed.fixed.md already exists; choose another slug."
     );
     assert_eq!(
         fs::read_to_string(&planned.path).unwrap(),
         "Someone else's.\n"
     );
+}
+
+#[test]
+fn a_branch_names_a_file_by_its_last_part() {
+    assert_eq!(
+        branch_slug("jean/fix-idle-turns"),
+        Some("fix-idle-turns".to_owned())
+    );
+    assert_eq!(
+        branch_slug("Export_Conversations"),
+        Some("export_conversations".to_owned())
+    );
+    assert_eq!(branch_slug("feature/v1.2"), Some("v1-2".to_owned()));
+}
+
+/// The default branch holds every change, so no file is named after it.
+#[test]
+fn the_default_branch_names_no_file() {
+    assert_eq!(branch_slug("main"), None);
+    assert_eq!(branch_slug("jean/🔥"), None);
 }

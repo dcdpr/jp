@@ -1,23 +1,41 @@
+use std::num::NonZeroU64;
+
 use indoc::indoc;
 
 use super::*;
 
+fn number(number: u64) -> NonZeroU64 {
+    NonZeroU64::new(number).unwrap()
+}
+
 #[test]
 fn a_fragment_without_an_upgrade_section_is_all_entry() {
-    let fragment = parse(indoc! {"
-        ---
-        type: fixed
-        ---
-        A turn that stalls while idle is retried instead of failing.
-    "})
+    let fragment = parse(
+        Type::Fixed,
+        "A turn that stalls while idle is retried instead of failing.\n",
+    )
     .unwrap();
 
     assert_eq!(fragment, Fragment {
         type_: Type::Fixed,
-        change_requests: None,
+        credits: None,
         entry: "A turn that stalls while idle is retried instead of failing.".to_owned(),
         upgrade: None,
     });
+}
+
+#[test]
+fn a_name_holds_the_slug_and_the_type() {
+    assert_eq!(
+        name("retry-idle-turns.fixed.md"),
+        Ok(("retry-idle-turns", Type::Fixed))
+    );
+    // The type is the last part before `.md`, so a slug can hold dots.
+    assert_eq!(name("v1.2.added.md"), Ok(("v1.2", Type::Added)));
+    assert_eq!(
+        file_name("retry-idle-turns", Type::Fixed),
+        "retry-idle-turns.fixed.md"
+    );
 }
 
 #[test]
@@ -33,8 +51,11 @@ fn each_of_the_seven_ids_names_its_type() {
     ];
 
     for (id, type_) in ids {
-        let fragment = parse(&format!("---\ntype: {id}\n---\nEntry.\n")).unwrap();
-        assert_eq!(fragment.type_, type_, "{id}");
+        assert_eq!(
+            name(&format!("entry.{id}.md")),
+            Ok(("entry", type_)),
+            "{id}"
+        );
     }
 }
 
@@ -78,119 +99,177 @@ fn an_unknown_id_names_the_seven() {
         "`feat` is not a changelog type; use one of: added, changed, deprecated, removed, fixed, \
          security, performance"
     );
-    // Written as the ids are, as in the frontmatter.
+    // Written as the ids are, as in a file name.
     assert!("Added".parse::<Type>().is_err());
 }
 
 #[test]
-fn a_type_is_one_of_the_seven_ids_as_written() {
-    let error = parse("---\ntype: Added\n---\nEntry.\n").unwrap_err();
+fn a_name_without_a_type_says_how_to_name_it() {
+    let error = name("retry.md").unwrap_err();
 
-    // Lines count from the top of the file, the opening `---` included.
+    assert_eq!(error, NameError::MissingType {
+        slug: "retry".to_owned()
+    });
     assert_eq!(
         error.to_string(),
-        "invalid frontmatter: unknown variant `Added`, expected one of added, changed, \
-         deprecated, removed, fixed, security, performance at line 2, column 7"
+        "no type in the name: name it `retry.<type>.md`, such as `retry.fixed.md`, with one of: \
+         added, changed, deprecated, removed, fixed, security, performance"
     );
 }
 
 #[test]
-fn a_fragment_without_a_type_is_an_error() {
-    let error = parse("---\nchange_requests: [1207]\n---\nEntry.\n").unwrap_err();
+fn a_name_with_an_unknown_type_names_the_seven() {
+    let error = name("retry.Fixed.md").unwrap_err();
 
+    assert_eq!(error, NameError::UnknownType {
+        type_: "Fixed".to_owned()
+    });
     assert_eq!(
         error.to_string(),
-        "invalid frontmatter: missing field `type` at line 2, column 1"
-    );
-    assert_eq!(
-        parse("---\n---\nEntry.\n").unwrap_err().to_string(),
-        "invalid frontmatter: missing field `type`"
+        "`Fixed` is not a changelog type: the part of the name before `.md` is one of: added, \
+         changed, deprecated, removed, fixed, security, performance"
     );
 }
 
 #[test]
-fn change_requests_replace_the_credits_history_names() {
-    let fragment = parse(indoc! {"
-        ---
-        type: fixed
-        change_requests: [1207, 1211]
-        ---
+fn a_name_without_md_or_a_slug_is_not_a_fragment() {
+    for not_one in ["notes.txt", ".md", ".fixed.md", "retry.fixed"] {
+        assert_eq!(name(not_one), Err(NameError::NotAFragment), "{not_one}");
+    }
+    assert_eq!(
+        NameError::NotAFragment.to_string(),
+        "not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out of the \
+         fragments directory"
+    );
+}
+
+#[test]
+fn credits_replace_the_credits_history_names() {
+    let fragment = parse(Type::Fixed, indoc! {"
+        - **Credits**: #1207
+        - **Credits**: !1211
+        - **Credits**: 4E1F0A2
+
         Entry.
     "})
     .unwrap();
 
     assert_eq!(
-        fragment.change_requests,
+        fragment.credits,
         Some(vec![
-            NonZeroU64::new(1207).unwrap(),
-            NonZeroU64::new(1211).unwrap()
+            ListedCredit::ChangeRequest(number(1207)),
+            ListedCredit::ChangeRequest(number(1211)),
+            ListedCredit::Commit("4e1f0a2".to_owned()),
         ])
     );
+    assert_eq!(fragment.entry, "Entry.");
 }
 
 #[test]
-fn a_change_request_is_a_positive_number() {
-    let error = parse("---\ntype: fixed\nchange_requests: [0]\n---\nEntry.\n").unwrap_err();
+fn a_credit_names_a_change_request_or_a_commit() {
+    for value in ["#0", "1207", "4e1f0a", "@JeanMertz"] {
+        let error = parse(Type::Fixed, &format!("- **Credits**: {value}\n\nEntry.\n")).unwrap_err();
 
+        assert_eq!(
+            error,
+            FragmentError::InvalidCredit {
+                line: 1,
+                value: value.to_owned()
+            },
+            "{value}"
+        );
+    }
+    assert_eq!(
+        FragmentError::InvalidCredit {
+            line: 1,
+            value: "@JeanMertz".to_owned()
+        }
+        .to_string(),
+        "line 1 credits `@JeanMertz`, which is neither a change request, such as `#1207`, nor a \
+         commit's hash"
+    );
+}
+
+/// The file name holds the type, so the file can't disagree with it.
+#[test]
+fn a_type_field_is_refused() {
+    let error = parse(Type::Fixed, "- **Type**: fixed\n\nEntry.\n").unwrap_err();
+
+    assert_eq!(error, FragmentError::TypeField { line: 1 });
     assert_eq!(
         error.to_string(),
-        "invalid frontmatter: invalid value: integer `0`, expected a nonzero u64 at line 3, \
-         column 19"
+        "line 1 names a type, which a fragment's file name holds: `<slug>.<type>.md`"
     );
 }
 
 #[test]
-fn an_unknown_frontmatter_field_is_an_error_rather_than_ignored() {
-    // A typo for `change_requests`, which would otherwise drop the credits
-    // without a word.
-    let error = parse("---\ntype: fixed\nchange_request: [1207]\n---\nEntry.\n").unwrap_err();
+fn an_unknown_field_is_an_error_rather_than_ignored() {
+    // A typo for `Credits`, which would otherwise drop the credits without a
+    // word.
+    let error = parse(Type::Fixed, "- **Credit**: #1207\n\nEntry.\n").unwrap_err();
 
+    assert_eq!(error, FragmentError::UnknownField {
+        line: 1,
+        key: "Credit".to_owned()
+    });
     assert_eq!(
         error.to_string(),
-        "invalid frontmatter: unknown field `change_request`, expected one of type, \
-         change_requests at line 3, column 1"
+        "line 1 lists `Credit`, and the only field a fragment takes is `Credits`"
     );
 }
 
+/// Only a block that opens the file is read as fields: a list further down is
+/// the entry's.
 #[test]
-fn a_fragment_opens_with_its_frontmatter() {
-    assert_eq!(
-        parse("type: fixed\n---\nEntry.\n"),
-        Err(FragmentError::Frontmatter(FrontmatterError::Missing))
-    );
-    assert_eq!(
-        parse("\n---\ntype: fixed\n---\nEntry.\n"),
-        Err(FragmentError::Frontmatter(FrontmatterError::Missing))
-    );
-}
+fn a_list_in_the_entry_is_not_metadata() {
+    let fragment = parse(Type::Changed, indoc! {"
+        Two settings moved:
 
-#[test]
-fn a_frontmatter_needs_a_closing_line() {
-    assert_eq!(
-        parse("---\ntype: fixed\nEntry.\n"),
-        Err(FragmentError::Frontmatter(FrontmatterError::Unclosed))
-    );
+        - **Old**: `tools.enable`
+        - **New**: `tools.state`
+    "})
+    .unwrap();
+
+    assert_eq!(fragment.credits, None);
+    assert_eq!(fragment.entry, indoc! {"
+        Two settings moved:
+
+        - **Old**: `tools.enable`
+        - **New**: `tools.state`"});
 }
 
 #[test]
 fn a_fragment_needs_an_entry() {
+    for empty in [
+        "",
+        "\n  \n",
+        "- **Credits**: #1207\n",
+        "- **Credits**: #1207\n\n  \n",
+    ] {
+        assert_eq!(
+            parse(Type::Fixed, empty),
+            Err(FragmentError::EmptyBody),
+            "{empty:?}"
+        );
+    }
     assert_eq!(
-        parse("---\ntype: fixed\n---\n\n  \n"),
-        Err(FragmentError::EmptyBody)
-    );
-    assert_eq!(
-        parse("---\ntype: fixed\n---"),
-        Err(FragmentError::EmptyBody)
+        FragmentError::EmptyBody.to_string(),
+        "no entry: say what changed for users"
     );
 }
 
 #[test]
 fn windows_line_endings_read_as_unix_ones() {
     let fragment = parse(
-        "---\r\ntype: removed\r\n---\r\nEntry.\r\n\r\nBREAKING CHANGE: Title\r\n\r\nBody.\r\n",
+        Type::Removed,
+        "- **Credits**: #7\r\n\r\nEntry.\r\n\r\nBREAKING CHANGE: Title\r\n\r\nBody.\r\n",
     )
     .unwrap();
 
+    assert_eq!(
+        fragment.credits,
+        Some(vec![ListedCredit::ChangeRequest(number(7))])
+    );
     assert_eq!(fragment.entry, "Entry.");
     assert_eq!(
         fragment.upgrade,
@@ -203,17 +282,21 @@ fn windows_line_endings_read_as_unix_ones() {
 
 #[test]
 fn a_byte_order_mark_is_skipped() {
-    let fragment = parse("\u{feff}---\ntype: fixed\n---\nEntry.\n").unwrap();
-
-    assert_eq!(fragment.entry, "Entry.");
+    assert_eq!(
+        parse(Type::Fixed, "\u{feff}Entry.\n").unwrap().entry,
+        "Entry."
+    );
+    assert_eq!(
+        parse(Type::Fixed, "\u{feff}- **Credits**: #7\n\nEntry.\n")
+            .unwrap()
+            .credits,
+        Some(vec![ListedCredit::ChangeRequest(number(7))])
+    );
 }
 
 #[test]
 fn an_upgrade_section_splits_the_body_into_entry_title_and_body() {
-    let fragment = parse(indoc! {r#"
-        ---
-        type: removed
-        ---
+    let fragment = parse(Type::Removed, indoc! {r#"
         `tools.<name>.enable` no longer accepts the legacy string `"explicit"`.
 
         BREAKING CHANGE: `enable = "explicit"` is no longer accepted
@@ -257,10 +340,7 @@ fn an_upgrade_section_splits_the_body_into_entry_title_and_body() {
 
 #[test]
 fn breaking_hyphen_change_opens_an_upgrade_section_too() {
-    let fragment = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let fragment = parse(Type::Changed, indoc! {"
         Entry.
 
         BREAKING-CHANGE: Title
@@ -280,10 +360,7 @@ fn breaking_hyphen_change_opens_an_upgrade_section_too() {
 
 #[test]
 fn a_title_wrapped_over_lines_is_read_as_one_line() {
-    let fragment = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let fragment = parse(Type::Changed, indoc! {"
         Entry.
 
         BREAKING CHANGE: Command plugins are found by
@@ -301,10 +378,7 @@ fn a_title_wrapped_over_lines_is_read_as_one_line() {
 
 #[test]
 fn a_token_that_does_not_start_its_line_is_text() {
-    let fragment = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let fragment = parse(Type::Changed, indoc! {"
         A paragraph that starts with `BREAKING CHANGE:` opens an upgrade section.
 
         `BREAKING CHANGE:` in inline code, and
@@ -325,10 +399,7 @@ fn a_token_partway_through_a_paragraph_is_an_error() {
     // Without a blank line before it, the token continues the entry's
     // paragraph rather than opening one, so a reader would see no upgrade
     // section where a search for the token finds one.
-    let error = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let error = parse(Type::Changed, indoc! {"
         Entry.
         BREAKING CHANGE: Title
 
@@ -337,17 +408,14 @@ fn a_token_partway_through_a_paragraph_is_an_error() {
     .unwrap_err();
 
     assert_eq!(error, FragmentError::MarkerOutsideParagraph {
-        line: 5,
+        line: 2,
         marker: "BREAKING CHANGE:",
     });
 }
 
 #[test]
 fn a_token_continuing_a_list_item_is_an_error() {
-    let error = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let error = parse(Type::Changed, indoc! {"
         Entry:
 
         - one change
@@ -358,17 +426,14 @@ fn a_token_continuing_a_list_item_is_an_error() {
     .unwrap_err();
 
     assert_eq!(error, FragmentError::MarkerOutsideParagraph {
-        line: 7,
+        line: 4,
         marker: "BREAKING CHANGE:",
     });
 }
 
 #[test]
 fn a_token_inside_a_code_block_is_an_error() {
-    let error = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let error = parse(Type::Changed, indoc! {"
         Entry, with an example:
 
         ```text
@@ -378,17 +443,14 @@ fn a_token_inside_a_code_block_is_an_error() {
     .unwrap_err();
 
     assert_eq!(error, FragmentError::MarkerInCodeBlock {
-        line: 7,
+        line: 4,
         marker: "BREAKING-CHANGE:",
     });
 }
 
 #[test]
 fn a_fragment_has_at_most_one_upgrade_section() {
-    let error = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let error = parse(Type::Changed, indoc! {"
         Entry.
 
         BREAKING CHANGE: First
@@ -401,53 +463,60 @@ fn a_fragment_has_at_most_one_upgrade_section() {
     "})
     .unwrap_err();
 
-    assert_eq!(error, FragmentError::SecondUpgradeSection { line: 10 });
+    assert_eq!(error, FragmentError::SecondUpgradeSection { line: 7 });
 }
 
 #[test]
 fn an_upgrade_section_needs_an_entry_before_it() {
-    let error = parse(indoc! {"
-        ---
-        type: changed
-        ---
-        BREAKING CHANGE: Title
-
-        Body.
-    "})
-    .unwrap_err();
+    let error = parse(Type::Changed, "BREAKING CHANGE: Title\n\nBody.\n").unwrap_err();
 
     assert_eq!(error, FragmentError::EmptyEntry {
-        line: 4,
+        line: 1,
         marker: "BREAKING CHANGE:",
     });
 }
 
 #[test]
 fn an_upgrade_section_needs_a_title() {
-    let error =
-        parse("---\ntype: changed\n---\nEntry.\n\nBREAKING CHANGE:  \n\nBody.\n").unwrap_err();
+    let error = parse(Type::Changed, "Entry.\n\nBREAKING CHANGE:  \n\nBody.\n").unwrap_err();
 
     assert_eq!(error, FragmentError::EmptyUpgradeTitle {
-        line: 6,
+        line: 3,
         marker: "BREAKING CHANGE:",
     });
 }
 
 #[test]
 fn an_upgrade_section_needs_a_body() {
-    let error = parse("---\ntype: changed\n---\nEntry.\n\nBREAKING CHANGE: Title\n").unwrap_err();
+    let error = parse(Type::Changed, "Entry.\n\nBREAKING CHANGE: Title\n").unwrap_err();
 
-    assert_eq!(error, FragmentError::EmptyUpgradeBody { line: 6 });
+    assert_eq!(error, FragmentError::EmptyUpgradeBody { line: 3 });
+}
+
+/// Lines count from the top of the file, the metadata block included.
+#[test]
+fn a_line_an_error_names_is_the_files() {
+    let error = parse(Type::Changed, indoc! {"
+        - **Credits**: #1207
+
+        Entry.
+        BREAKING CHANGE: Title
+
+        Body.
+    "})
+    .unwrap_err();
+
+    assert_eq!(error, FragmentError::MarkerOutsideParagraph {
+        line: 4,
+        marker: "BREAKING CHANGE:",
+    });
 }
 
 /// A formatter that gathers definitions at the end of the file puts them below
 /// the upgrade section, and each part still reads its links' URLs from them.
 #[test]
 fn each_part_reads_its_links_urls_from_definitions_anywhere_in_the_file() {
-    let fragment = parse(indoc! {r#"
-        ---
-        type: removed
-        ---
+    let fragment = parse(Type::Removed, indoc! {r#"
         `jp query --legacy` is gone, as [the flag's docs] said it would be.
 
         BREAKING CHANGE: [`--legacy`] is no longer accepted
@@ -478,17 +547,14 @@ fn each_part_reads_its_links_urls_from_definitions_anywhere_in_the_file() {
 #[test]
 fn a_body_of_definitions_alone_has_no_entry() {
     assert_eq!(
-        parse("---\ntype: fixed\n---\n[docs]: https://example.com/docs\n"),
+        parse(Type::Fixed, "[docs]: https://example.com/docs\n"),
         Err(FragmentError::EmptyBody)
     );
 }
 
 #[test]
 fn an_upgrade_body_of_definitions_alone_is_empty() {
-    let error = parse(indoc! {"
-        ---
-        type: changed
-        ---
+    let error = parse(Type::Changed, indoc! {"
         See [the docs].
 
         BREAKING CHANGE: Title
@@ -497,7 +563,7 @@ fn an_upgrade_body_of_definitions_alone_is_empty() {
     "})
     .unwrap_err();
 
-    assert_eq!(error, FragmentError::EmptyUpgradeBody { line: 6 });
+    assert_eq!(error, FragmentError::EmptyUpgradeBody { line: 3 });
 }
 
 #[test]

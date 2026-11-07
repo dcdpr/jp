@@ -141,40 +141,36 @@ fn jp_after_cutting_0_3_0() -> Repository {
     let repository = Repository::new(Some("git@github.com:dcdpr/jp.git"));
 
     repository.write(
-        "changelog.d/fan-out.md",
-        "---\ntype: added\n---\nThe assistant can call one tool on many inputs in a single \
-         request.\n",
+        "changelog.d/fan-out.added.md",
+        "The assistant can call one tool on many inputs in a single request.\n",
     );
     repository.write(
         "changelog.d/highlights/fan-out.md",
-        "---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\"]\n---\nThe assistant asks once, \
-         and JP runs the calls side by side.\n",
+        "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant asks once, and JP \
+         runs the calls side by side.\n",
     );
     repository.commit("feat(tools): Fan tool calls out (#1182)");
 
     repository.write(
         "changelog.d/highlights/fan-out.md",
-        "---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\"]\n---\nThe assistant asks once, \
-         and JP runs the calls side by side, MCP tools included.\n",
+        "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant asks once, and JP \
+         runs the calls side by side, MCP tools included.\n",
     );
     repository.commit("feat(mcp): Fan MCP tool calls out (#1183)");
 
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nA turn that stalls while idle is retried instead of fialing.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "A turn that stalls while idle is retried instead of fialing.\n",
     );
     repository.commit("fix(llm): Retry idle turns (#1207)");
 
     repository.write(
-        "changelog.d/help-default.md",
-        "---\ntype: fixed\n---\nThe help for `jp query --tmp` names the right default.\n",
+        "changelog.d/help-default.fixed.md",
+        "The help for `jp query --tmp` names the right default.\n",
     );
     repository.commit("Name the right default in the help");
 
-    repository.write("changelog.d/plugin-manifest-routing.md", indoc! {"
-            ---
-            type: changed
-            ---
+    repository.write("changelog.d/plugin-manifest-routing.changed.md", indoc! {"
             JP finds a command plugin by the manifest its binary embeds.
 
             BREAKING CHANGE: Command plugins are found by their manifest
@@ -184,23 +180,23 @@ fn jp_after_cutting_0_3_0() -> Repository {
     repository.commit("feat(plugin)!: Route plugins by manifest (#1216)");
 
     repository.file_into("0.3.0", &[
-        "fan-out.md",
+        "fan-out.added.md",
         "highlights/fan-out.md",
-        "retry-idle-turns.md",
-        "help-default.md",
-        "plugin-manifest-routing.md",
+        "retry-idle-turns.fixed.md",
+        "help-default.fixed.md",
+        "plugin-manifest-routing.changed.md",
     ]);
     repository.commit("chore(release): Cut 0.3.0 (#1250)");
 
     repository.write(
-        "changelog.d/0.3.0/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nA turn that stalls while idle is retried instead of failing.\n",
+        "changelog.d/0.3.0/retry-idle-turns.fixed.md",
+        "A turn that stalls while idle is retried instead of failing.\n",
     );
     repository.commit("docs(changelog): Correct a typo (#1260)");
 
     repository.write(
-        "changelog.d/show-model.md",
-        "---\ntype: added\n---\n`jp conversation show` shows the conversation's model.\n",
+        "changelog.d/show-model.added.md",
+        "`jp conversation show` shows the conversation's model.\n",
     );
     repository.commit("feat(cli): Show the conversation's model (#1243)");
 
@@ -372,13 +368,19 @@ fn an_empty_overview_md_is_summarized_like_a_missing_one() {
     );
 }
 
+/// A copy a patch release took lists its credits, a commit among them, and each
+/// is credited once.
 #[test]
-fn listed_change_requests_replace_the_ones_history_names() {
+fn listed_credits_replace_the_ones_history_names() {
     let repository = Repository::new(Some("https://github.com/dcdpr/jp"));
-    repository.write(
-        "changelog.d/0.3.1/retry-idle-turns.md",
-        "---\ntype: fixed\nchange_requests: [1207, 1211, 1207]\n---\nIdle turns are retried.\n",
-    );
+    repository.write("changelog.d/0.3.1/retry-idle-turns.fixed.md", indoc! {"
+        - **Credits**: #1207
+        - **Credits**: #1211
+        - **Credits**: #1207
+        - **Credits**: 4e1f0a2
+
+        Idle turns are retried.
+    "});
     repository.commit("chore(release): Pick a fix into 0.3.1 (#1300)");
 
     let release = read(
@@ -400,6 +402,11 @@ fn listed_change_requests_replace_the_ones_history_names() {
             label: "#1211".to_owned(),
             url: Some("https://github.com/dcdpr/jp/pull/1211".to_owned()),
         },
+        Credit {
+            kind: CreditKind::Commit,
+            label: "4e1f0a2".to_owned(),
+            url: Some("https://github.com/dcdpr/jp/commit/4e1f0a2".to_owned()),
+        },
     ]);
 }
 
@@ -409,31 +416,28 @@ fn listed_change_requests_replace_the_ones_history_names() {
 fn entries_are_ordered_by_type_then_first_credit_then_slug() {
     let repository = Repository::new(Some("https://github.com/dcdpr/jp"));
     repository.write(
-        "changelog.d/direct.md",
-        "---\ntype: fixed\n---\nPushed without a pull request.\n",
+        "changelog.d/direct.fixed.md",
+        "Pushed without a pull request.\n",
     );
     repository.commit("Fix a thing directly");
     repository.write(
-        "changelog.d/zeta.md",
-        "---\ntype: fixed\n---\nThe later of two in one pull request.\n",
+        "changelog.d/zeta.fixed.md",
+        "The later of two in one pull request.\n",
     );
     repository.write(
-        "changelog.d/alpha.md",
-        "---\ntype: fixed\n---\nThe earlier of two in one pull request.\n",
+        "changelog.d/alpha.fixed.md",
+        "The earlier of two in one pull request.\n",
     );
     repository.commit("fix: Two fixes (#20)");
     repository.write(
-        "changelog.d/early.md",
-        "---\ntype: fixed\n---\nA lower number, merged later.\n",
+        "changelog.d/early.fixed.md",
+        "A lower number, merged later.\n",
     );
-    repository.write(
-        "changelog.d/feature.md",
-        "---\ntype: added\n---\nAdded things come first.\n",
-    );
+    repository.write("changelog.d/feature.added.md", "Added things come first.\n");
     repository.commit("fix: An older pull request (#9)");
     repository.write(
-        "changelog.d/uncommitted.md",
-        "---\ntype: fixed\n---\nNot committed yet, so nobody is credited.\n",
+        "changelog.d/uncommitted.fixed.md",
+        "Not committed yet, so nobody is credited.\n",
     );
 
     let release = read(
@@ -463,8 +467,8 @@ fn entries_are_ordered_by_type_then_first_credit_then_slug() {
 fn without_an_origin_every_credit_is_a_commit_linked_nowhere() {
     let repository = Repository::new(None);
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("fix(llm): Retry idle turns (#1207)");
 
@@ -507,8 +511,8 @@ fn gitlab_merge_requests_are_read_from_merge_commits() {
     repository.dated(&["commit", "--quiet", "--allow-empty", "--message", "Start"]);
     repository.git(&["checkout", "--quiet", "-b", "retry"]);
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("Retry idle turns");
     repository.git(&["checkout", "--quiet", "main"]);
@@ -595,13 +599,9 @@ fn a_release_serializes_to_the_json_other_tools_read() {
     let repository = Repository::new(Some("https://github.com/dcdpr/jp"));
     repository.write(
         "changelog.d/highlights/fan-out.md",
-        "---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\"]\n---\nThe assistant asks \
-         once.\n",
+        "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant asks once.\n",
     );
-    repository.write("changelog.d/plugin-manifest-routing.md", indoc! {"
-            ---
-            type: changed
-            ---
+    repository.write("changelog.d/plugin-manifest-routing.changed.md", indoc! {"
             JP finds a command plugin by its manifest.
 
             BREAKING CHANGE: Command plugins are found by their manifest
@@ -610,14 +610,14 @@ fn a_release_serializes_to_the_json_other_tools_read() {
         "});
     repository.commit("feat(plugin)!: Route plugins by manifest (#1216)");
     repository.write(
-        "changelog.d/retry-idle-turns.md",
-        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
     );
     repository.commit("fix(llm): Retry idle turns (#1207)");
     repository.file_into("0.3.0", &[
         "highlights/fan-out.md",
-        "plugin-manifest-routing.md",
-        "retry-idle-turns.md",
+        "plugin-manifest-routing.changed.md",
+        "retry-idle-turns.fixed.md",
     ]);
     repository.write("changelog.d/0.3.0/overview.md", "JP 0.3.0 fans out.\n");
     repository.commit("chore(release): Cut 0.3.0 (#1250)");

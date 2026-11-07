@@ -52,6 +52,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{
     directory::{self, CheckError, Contents, Filed, OVERVIEW, Part, ReadError},
+    document::ListedCredit,
     forge::{Credit, Forge, NoAddress, Project},
     fragment::{Fragment, Type},
     git::{self, GitError},
@@ -89,12 +90,13 @@ pub struct Release {
 /// A fragment or highlight in a release, and who it credits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credited<T> {
-    /// The file's name, without `.md`.
+    /// The file's slug, such as `retry-idle-turns` for
+    /// `retry-idle-turns.fixed.md`.
     pub slug: String,
 
     /// The change requests and commits that wrote or changed the file while it
-    /// sat at the top level, oldest first and each once, or the change requests
-    /// its frontmatter lists instead.
+    /// sat at the top level, oldest first and each once, or the ones its
+    /// `Credits` fields list instead.
     pub credits: Vec<Credit>,
 
     /// The file, read into its format.
@@ -258,21 +260,20 @@ pub fn read(
     })
 }
 
-/// A file whose frontmatter can list the change requests to credit in place of
-/// the ones history names.
+/// A file that can list who to credit in place of the ones history names.
 trait Listed {
-    fn change_requests(&self) -> Option<&[NonZeroU64]>;
+    fn credits(&self) -> Option<&[ListedCredit]>;
 }
 
 impl Listed for Fragment {
-    fn change_requests(&self) -> Option<&[NonZeroU64]> {
-        self.change_requests.as_deref()
+    fn credits(&self) -> Option<&[ListedCredit]> {
+        self.credits.as_deref()
     }
 }
 
 impl Listed for Highlight {
-    fn change_requests(&self) -> Option<&[NonZeroU64]> {
-        self.change_requests.as_deref()
+    fn credits(&self) -> Option<&[ListedCredit]> {
+        self.credits.as_deref()
     }
 }
 
@@ -303,8 +304,8 @@ fn credit<T: Listed>(
         .into_iter()
         .zip(credited)
         .map(|(filed, indices)| {
-            let (order, credits) = match filed.file.change_requests() {
-                Some(numbers) => listed_credits(project, numbers),
+            let (order, credits) = match filed.file.credits() {
+                Some(listed) => listed_credits(project, commits, listed),
                 None => history_credits(project, commits, &indices),
             };
 
@@ -317,15 +318,34 @@ fn credit<T: Listed>(
         .collect()
 }
 
-/// The credits for the change requests `numbers` a file lists.
-fn listed_credits(project: &Project, numbers: &[NonZeroU64]) -> (Order, Vec<Credit>) {
-    let order = numbers
-        .first()
-        .map_or(Order::Nobody, |&number| Order::ChangeRequest(number));
+/// The credits a file lists as `listed`, and where it sorts by the first of
+/// them.
+///
+/// A listed commit sorts by its place in the project's history `commits`, and
+/// after every commit there when the history doesn't hold it.
+fn listed_credits(
+    project: &Project,
+    commits: &[Commit],
+    listed: &[ListedCredit],
+) -> (Order, Vec<Credit>) {
+    let order = listed.first().map_or(Order::Nobody, |credit| match credit {
+        ListedCredit::ChangeRequest(number) => Order::ChangeRequest(*number),
+        ListedCredit::Commit(hash) => Order::Commit(
+            commits
+                .iter()
+                .position(|commit| commit.hash.starts_with(hash.as_str()))
+                // The log lists the newest first.
+                .map_or(usize::MAX, |index| commits.len() - index),
+        ),
+    });
 
     let mut credits = vec![];
-    for &number in numbers {
-        push_new(&mut credits, project.change_request(number));
+    for credit in listed {
+        let credit = match credit {
+            ListedCredit::ChangeRequest(number) => project.change_request(*number),
+            ListedCredit::Commit(hash) => project.commit(hash),
+        };
+        push_new(&mut credits, credit);
     }
 
     (order, credits)

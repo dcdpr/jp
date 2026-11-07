@@ -18,7 +18,7 @@ fn entry(slug: &str, type_: Type, entry: &str, credits: Vec<Credit>) -> Credited
         credits,
         file: Fragment {
             type_,
-            change_requests: None,
+            credits: None,
             entry: entry.to_owned(),
             upgrade: None,
         },
@@ -65,7 +65,7 @@ fn jp_0_3_0() -> Release {
             file: Highlight {
                 title: "Tool calls fan out".to_owned(),
                 authors: vec!["@JeanMertz".to_owned()],
-                change_requests: None,
+                credits: None,
                 body: "When the assistant needs the same tool on several inputs, it asks once."
                     .to_owned(),
             },
@@ -297,7 +297,7 @@ fn a_credit_without_a_page_is_its_label() {
         file: Highlight {
             title: "Turns recover".to_owned(),
             authors: vec!["@JeanMertz".to_owned(), "@jdoe".to_owned()],
-            change_requests: None,
+            credits: None,
             body: "A stalled turn is retried.".to_owned(),
         },
     });

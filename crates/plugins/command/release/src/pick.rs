@@ -10,7 +10,7 @@
 //! `release-pick/v<version>-<short hash>`.
 //! One that no other release ships moves, so the next release doesn't list the
 //! change again; one another release ships too is copied, with its credits
-//! written into the copy's `change_requests`, so both releases list it.
+//! written into the copy's `Credits` fields, so both releases list it.
 //!
 //! A conflict stops the pick in its worktree, which is kept for the user to
 //! resolve, and `jp release pick --continue` finishes it.
@@ -20,7 +20,7 @@
 use std::{collections::HashMap, fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use changelog::{History, Place, directory::Part, fragment, highlight, with_change_requests};
+use changelog::{History, Place, directory::Part, fragment, highlight, with_credits};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -429,15 +429,8 @@ fn plan<'r>(
             } else if listed {
                 Some(text)
             } else {
-                let numbers = history.change_requests(&now, forge);
-                if numbers.is_empty() {
-                    Some(text)
-                } else {
-                    Some(
-                        with_change_requests(&text, &numbers)
-                            .map_err(|error| format!("{}/{now}: {error}", pipeline.fragments))?,
-                    )
-                }
+                let credits = history.credits(&now, forge);
+                Some(with_credits(&text, place.highlight, &credits, forge))
             };
 
             filing.files.push(Filed {
@@ -453,7 +446,7 @@ fn plan<'r>(
 }
 
 /// Whether the fragment or highlight `text`, at `path` below the fragments
-/// directory, lists the change requests to credit.
+/// directory, lists the credits to give.
 ///
 /// The error refuses a fragment with an upgrade section, which `version` can't
 /// ship unless it is a major release, or a minor one before 1.0.
@@ -469,10 +462,12 @@ fn lists_credits(
 
     if highlight {
         let highlight = highlight::parse(text).map_err(|error| malformed(error.to_string()))?;
-        return Ok(highlight.change_requests.is_some());
+        return Ok(highlight.credits.is_some());
     }
 
-    let fragment = fragment::parse(text).map_err(|error| malformed(error.to_string()))?;
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let (_, type_) = fragment::name(name).map_err(|error| malformed(error.to_string()))?;
+    let fragment = fragment::parse(type_, text).map_err(|error| malformed(error.to_string()))?;
     if fragment.upgrade.is_some() && !releases::can_break(version) {
         let kind = if version.patch > 0 {
             "a patch release"
@@ -487,7 +482,7 @@ fn lists_credits(
         ));
     }
 
-    Ok(fragment.change_requests.is_some())
+    Ok(fragment.credits.is_some())
 }
 
 /// The change request that files the notes of `commits`, picked onto `branch`

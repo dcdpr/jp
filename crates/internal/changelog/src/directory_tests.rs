@@ -2,13 +2,15 @@ use camino_tempfile::Utf8TempDir;
 use indoc::indoc;
 
 use super::*;
+use crate::fragment::Type;
 
-/// A fragment that follows the format.
-const FRAGMENT: &str = "---\ntype: fixed\n---\nA turn that stalls while idle is retried.\n";
+/// A fragment's text that follows the format, for a file named
+/// `<slug>.fixed.md`.
+const FRAGMENT: &str = "A turn that stalls while idle is retried.\n";
 
 /// A highlight that follows the format.
-const HIGHLIGHT: &str = "---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\"]\n---\nThe \
-                         assistant calls one tool on many inputs at once.\n";
+const HIGHLIGHT: &str = "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant calls \
+                         one tool on many inputs at once.\n";
 
 /// A fragments directory holding `files`, each a path below it and the file's
 /// contents.
@@ -53,13 +55,13 @@ fn a_directory_holding_only_its_readme_has_nothing_to_check() {
 fn fragments_are_read_at_the_top_level_and_in_each_release() {
     let dir = fragments_dir(&[
         ("README.md", "# Changelog fragments\n"),
-        ("enable-explicit.md", FRAGMENT),
+        ("enable-explicit.removed.md", FRAGMENT),
         (
             "0.3.0/overview.md",
             "JP 0.3.0 lets the assistant call one tool on many inputs.\n",
         ),
-        ("0.3.0/retry-idle-turns.md", FRAGMENT),
-        ("1.0.0-rc.1/plugin-tools.md", FRAGMENT),
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
+        ("1.0.0-rc.1/plugin-tools.added.md", FRAGMENT),
     ]);
 
     let report = check(dir.path()).unwrap();
@@ -74,7 +76,7 @@ fn fragments_are_read_at_the_top_level_and_in_each_release() {
 fn highlights_are_read_at_the_top_level_and_in_each_release() {
     let dir = fragments_dir(&[
         ("highlights/fan-out.md", HIGHLIGHT),
-        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
         ("0.3.0/highlights/plugin-tools.md", HIGHLIGHT),
     ]);
 
@@ -90,34 +92,35 @@ fn each_file_is_held_to_the_format_of_the_directory_it_sits_in() {
     // Each written to the other's place.
     let dir = fragments_dir(&[
         ("fan-out.md", HIGHLIGHT),
-        ("highlights/retry-idle-turns.md", FRAGMENT),
+        ("highlights/retry-idle-turns.fixed.md", FRAGMENT),
     ]);
 
     let report = check(dir.path()).unwrap();
 
-    assert_eq!(report.fragments, 1);
+    assert_eq!(report.fragments, 0);
     assert_eq!(report.highlights, 1);
     assert_eq!(problems(&report, dir.path()), vec![
-        "fan-out.md: invalid frontmatter: unknown field `title`, expected one of type, \
-         change_requests at line 2, column 1",
-        "highlights/retry-idle-turns.md: invalid frontmatter: unknown field `type`, expected one \
-         of title, authors, change_requests at line 2, column 1",
+        "fan-out.md: no type in the name: name it `fan-out.<type>.md`, such as \
+         `fan-out.fixed.md`, with one of: added, changed, deprecated, removed, fixed, security, \
+         performance",
+        "highlights/retry-idle-turns.fixed.md: no title: a highlight opens with `# Title`, which \
+         heads its section of the release notes",
     ]);
 }
 
 #[test]
 fn a_malformed_fragment_is_reported_with_the_rule_it_breaks() {
     let dir = fragments_dir(&[
-        ("a.md", "type: fixed\n\nEntry.\n"),
-        ("0.3.0/b.md", "---\ntype: fixed\n---\n\n"),
+        ("a.fixed.md", "- **Type**: fixed\n\nEntry.\n"),
+        ("0.3.0/b.fixed.md", "\n\n"),
     ]);
 
     let report = check(dir.path()).unwrap();
 
     assert_eq!(report.fragments, 2);
     assert_eq!(problems(&report, dir.path()), vec![
-        "0.3.0/b.md: no entry: say below the frontmatter what changed for users",
-        "a.md: no frontmatter: the first line has to be `---`",
+        "0.3.0/b.fixed.md: no entry: say what changed for users",
+        "a.fixed.md: line 1 names a type, which a fragment's file name holds: `<slug>.<type>.md`",
     ]);
 }
 
@@ -126,15 +129,12 @@ fn a_malformed_highlight_is_reported_with_the_rule_it_breaks() {
     let dir = fragments_dir(&[
         (
             "highlights/fan-out.md",
-            "---\ntitle: \"\"\nauthors: [\"@JeanMertz\"]\n---\nProse.\n",
+            "#\n\n- **Authors**: @JeanMertz\n\nProse.\n",
         ),
-        (
-            "highlights/editor.md",
-            "---\ntitle: Unified editor\nauthors: []\n---\nProse.\n",
-        ),
+        ("highlights/editor.md", "# Unified editor\n\nProse.\n"),
         (
             "0.3.0/highlights/plugin-tools.md",
-            "---\ntitle: Plugin tools\nauthors: [\"@JeanMertz\"]\n---\n",
+            "# Plugin tools\n\n- **Authors**: @JeanMertz\n",
         ),
     ]);
 
@@ -142,66 +142,62 @@ fn a_malformed_highlight_is_reported_with_the_rule_it_breaks() {
 
     assert_eq!(report.highlights, 3);
     assert_eq!(problems(&report, dir.path()), vec![
-        "0.3.0/highlights/plugin-tools.md: no prose: write below the frontmatter what the feature \
-         does for users",
-        "highlights/editor.md: no authors: list the people to credit for the feature in `authors`",
-        "highlights/fan-out.md: no title: name the feature in `title`, which heads its section of \
-         the release notes",
+        "0.3.0/highlights/plugin-tools.md: no prose: write what the feature does for users below \
+         the title and its authors",
+        "highlights/editor.md: no authors: list each person to credit for the feature below the \
+         title, as `- **Authors**: @JeanMertz`",
+        "highlights/fan-out.md: no title: a highlight opens with `# Title`, which heads its \
+         section of the release notes",
     ]);
 }
 
+/// The type in a fragment's name, and the `highlights/` a highlight sits in,
+/// keep every slug clear of `README.md` and `overview.md`.
 #[test]
-fn reserved_slugs_are_refused_in_any_letter_case() {
+fn any_slug_can_name_a_fragment_or_a_highlight() {
     let dir = fragments_dir(&[
-        ("overview.md", FRAGMENT),
-        ("Readme.md", FRAGMENT),
-        ("0.3.0/Overview.md", FRAGMENT),
-        ("0.3.0/README.md", FRAGMENT),
+        ("README.md", "# Changelog fragments\n"),
+        ("readme.fixed.md", FRAGMENT),
+        ("0.3.0/overview.md", "JP 0.3.0 retries idle turns.\n"),
+        ("0.3.0/overview.fixed.md", FRAGMENT),
         ("highlights/README.md", HIGHLIGHT),
         ("0.3.0/highlights/overview.md", HIGHLIGHT),
     ]);
 
     let report = check(dir.path()).unwrap();
 
-    assert_eq!(report.fragments, 0);
-    assert_eq!(report.highlights, 0);
-    assert_eq!(problems(&report, dir.path()), vec![
-        "0.3.0/Overview.md: the slug `overview` is reserved, in any letter case, for a release's \
-         introduction, `overview.md` in the release's directory; rename it",
-        "0.3.0/README.md: the slug `readme` is reserved, in any letter case, for the fragments \
-         directory's documentation, `README.md` at its top level; rename it",
-        "0.3.0/highlights/overview.md: the slug `overview` is reserved, in any letter case, for a \
-         release's introduction, `overview.md` in the release's directory; rename it",
-        "Readme.md: the slug `readme` is reserved, in any letter case, for the fragments \
-         directory's documentation, `README.md` at its top level; rename it",
-        "highlights/README.md: the slug `readme` is reserved, in any letter case, for the \
-         fragments directory's documentation, `README.md` at its top level; rename it",
-        "overview.md: the slug `overview` is reserved, in any letter case, for a release's \
-         introduction, `overview.md` in the release's directory; rename it",
-    ]);
+    assert_eq!(report.fragments, 2);
+    assert_eq!(report.highlights, 2);
+    assert_eq!(problems(&report, dir.path()), Vec::<String>::new());
 }
 
 #[test]
-fn a_file_not_named_slug_md_is_not_a_fragment() {
+fn a_file_not_named_slug_type_md_is_not_a_fragment() {
     let dir = fragments_dir(&[
         (".md", FRAGMENT),
         ("enable-explicit.markdown", FRAGMENT),
         ("notes.txt", "Remember the overview.\n"),
         ("0.3.0/overview.md.bak", "An older introduction.\n"),
+        ("retry.md", FRAGMENT),
+        ("retry.feat.md", FRAGMENT),
     ]);
 
     let report = check(dir.path()).unwrap();
 
     assert_eq!(report.fragments, 0);
     assert_eq!(problems(&report, dir.path()), vec![
-        ".md: not a fragment, which is named `<slug>.md`; rename it, or move it out of the \
+        ".md: not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out of the \
          fragments directory",
-        "0.3.0/overview.md.bak: not a fragment, which is named `<slug>.md`; rename it, or move it \
-         out of the fragments directory",
-        "enable-explicit.markdown: not a fragment, which is named `<slug>.md`; rename it, or move \
-         it out of the fragments directory",
-        "notes.txt: not a fragment, which is named `<slug>.md`; rename it, or move it out of the \
-         fragments directory",
+        "0.3.0/overview.md.bak: not a fragment, which is named `<slug>.<type>.md`; rename it, or \
+         move it out of the fragments directory",
+        "enable-explicit.markdown: not a fragment, which is named `<slug>.<type>.md`; rename it, \
+         or move it out of the fragments directory",
+        "notes.txt: not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out \
+         of the fragments directory",
+        "retry.feat.md: `feat` is not a changelog type: the part of the name before `.md` is one \
+         of: added, changed, deprecated, removed, fixed, security, performance",
+        "retry.md: no type in the name: name it `retry.<type>.md`, such as `retry.fixed.md`, with \
+         one of: added, changed, deprecated, removed, fixed, security, performance",
     ]);
 }
 
@@ -227,7 +223,7 @@ fn a_file_in_highlights_not_named_slug_md_is_not_a_highlight() {
 fn a_directory_not_named_after_a_version_is_reported_without_reading_it() {
     let dir = fragments_dir(&[
         ("drafts/plugin-tools.md", "Not a fragment yet.\n"),
-        ("v0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("v0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
         // Matched as written: a highlight here would never reach a release.
         ("Highlights/fan-out.md", HIGHLIGHT),
     ]);
@@ -252,7 +248,7 @@ fn a_directory_not_named_after_a_version_is_reported_without_reading_it() {
 #[test]
 fn a_directory_inside_a_release_is_reported_without_reading_it() {
     let dir = fragments_dir(&[
-        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
         ("0.3.0/drafts/plugin-tools.md", "Not a fragment yet.\n"),
     ]);
 
@@ -288,8 +284,8 @@ fn a_directory_inside_highlights_is_reported_without_reading_it() {
 fn a_fragment_that_is_not_utf8_is_reported() {
     let dir = fragments_dir(&[]);
     fs::write(
-        dir.path().join("latin-1.md"),
-        b"---\ntype: fixed\n---\nCaf\xe9 menus render again.\n",
+        dir.path().join("latin-1.fixed.md"),
+        b"Caf\xe9 menus render again.\n",
     )
     .unwrap();
 
@@ -297,7 +293,7 @@ fn a_fragment_that_is_not_utf8_is_reported() {
 
     assert_eq!(report.fragments, 1);
     assert_eq!(problems(&report, dir.path()), vec![
-        "latin-1.md: not UTF-8 text"
+        "latin-1.fixed.md: not UTF-8 text"
     ]);
 }
 
@@ -316,9 +312,9 @@ fn a_missing_fragments_directory_is_an_error_rather_than_an_empty_one() {
 fn reading_the_unreleased_part_leaves_every_release_out() {
     let dir = fragments_dir(&[
         ("README.md", "# Changelog fragments\n"),
-        ("enable-explicit.md", FRAGMENT),
+        ("enable-explicit.fixed.md", FRAGMENT),
         ("highlights/fan-out.md", HIGHLIGHT),
-        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
         // Broken, and in a part this read doesn't touch.
         ("0.3.0/highlights/plugin-tools.md", "Not a highlight.\n"),
     ]);
@@ -330,7 +326,7 @@ fn reading_the_unreleased_part_leaves_every_release_out() {
         .iter()
         .map(|filed| (filed.slug.as_str(), filed.path.as_str()))
         .collect();
-    assert_eq!(fragments, [("enable-explicit", "enable-explicit.md")]);
+    assert_eq!(fragments, [("enable-explicit", "enable-explicit.fixed.md")]);
     let highlights: Vec<(&str, &str)> = contents
         .highlights
         .iter()
@@ -339,21 +335,21 @@ fn reading_the_unreleased_part_leaves_every_release_out() {
     assert_eq!(highlights, [("fan-out", "highlights/fan-out.md")]);
     assert_eq!(
         contents.fragments[0].file,
-        fragment::parse(FRAGMENT).unwrap()
+        fragment::parse(Type::Fixed, FRAGMENT).unwrap()
     );
 }
 
 #[test]
 fn reading_a_release_returns_its_files_without_its_overview() {
     let dir = fragments_dir(&[
-        ("enable-explicit.md", FRAGMENT),
+        ("enable-explicit.removed.md", FRAGMENT),
         (
             "0.3.0/overview.md",
             "JP 0.3.0 calls tools on many inputs.\n",
         ),
-        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
         ("0.3.0/highlights/plugin-tools.md", HIGHLIGHT),
-        ("0.4.0/later.md", FRAGMENT),
+        ("0.4.0/later.added.md", FRAGMENT),
     ]);
 
     let contents = read(dir.path(), &Part::Release(Version::parse("0.3.0").unwrap())).unwrap();
@@ -363,7 +359,8 @@ fn reading_a_release_returns_its_files_without_its_overview() {
         .iter()
         .map(|filed| filed.path.as_str())
         .collect();
-    assert_eq!(paths, ["0.3.0/retry-idle-turns.md"]);
+    assert_eq!(paths, ["0.3.0/retry-idle-turns.fixed.md"]);
+    assert_eq!(contents.fragments[0].file.type_, Type::Fixed);
     assert_eq!(contents.highlights[0].slug, "plugin-tools");
     assert_eq!(
         contents.highlights[0].path,
@@ -374,9 +371,9 @@ fn reading_a_release_returns_its_files_without_its_overview() {
 #[test]
 fn reading_a_part_reports_every_problem_in_it() {
     let dir = fragments_dir(&[
-        ("0.3.0/a.md", "type: fixed\n\nEntry.\n"),
+        ("0.3.0/a.fixed.md", "- **Type**: fixed\n\nEntry.\n"),
         ("0.3.0/notes.txt", "Remember the overview.\n"),
-        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
     ]);
 
     let Err(ReadError::Problems(found)) =
@@ -390,15 +387,16 @@ fn reading_a_part_reports_every_problem_in_it() {
         ..Report::default()
     };
     assert_eq!(problems(&report, dir.path()), vec![
-        "0.3.0/a.md: no frontmatter: the first line has to be `---`",
-        "0.3.0/notes.txt: not a fragment, which is named `<slug>.md`; rename it, or move it out \
-         of the fragments directory",
+        "0.3.0/a.fixed.md: line 1 names a type, which a fragment's file name holds: \
+         `<slug>.<type>.md`",
+        "0.3.0/notes.txt: not a fragment, which is named `<slug>.<type>.md`; rename it, or move \
+         it out of the fragments directory",
     ]);
 }
 
 #[test]
 fn reading_a_release_without_a_directory_says_so() {
-    let dir = fragments_dir(&[("0.3.0/retry-idle-turns.md", FRAGMENT)]);
+    let dir = fragments_dir(&[("0.3.0/retry-idle-turns.fixed.md", FRAGMENT)]);
 
     let error = read(dir.path(), &Part::Release(Version::parse("0.4.0").unwrap())).unwrap_err();
 
@@ -412,7 +410,7 @@ fn reading_a_release_without_a_directory_says_so() {
 #[test]
 fn a_place_is_read_from_a_path_and_written_back() {
     for (path, part, highlight, name) in [
-        ("retry.md", Part::Unreleased, false, "retry.md"),
+        ("retry.fixed.md", Part::Unreleased, false, "retry.fixed.md"),
         (
             "highlights/fan-out.md",
             Part::Unreleased,
@@ -420,10 +418,10 @@ fn a_place_is_read_from_a_path_and_written_back() {
             "fan-out.md",
         ),
         (
-            "0.3.0/retry.md",
+            "0.3.0/retry.fixed.md",
             Part::Release(Version::new(0, 3, 0)),
             false,
-            "retry.md",
+            "retry.fixed.md",
         ),
         (
             "0.3.0/highlights/fan-out.md",
@@ -448,25 +446,12 @@ fn a_path_the_layout_holds_nothing_at_is_no_place() {
     for path in [
         "",
         "0.3.0/",
-        "drafts/retry.md",
-        "0.3.0/drafts/retry.md",
+        "drafts/retry.fixed.md",
+        "0.3.0/drafts/retry.fixed.md",
         "a/b/c.md",
     ] {
         assert_eq!(Place::parse(path), None, "{path}");
     }
-}
-
-#[test]
-fn the_reserved_slugs_say_what_they_are_reserved_for_in_any_letter_case() {
-    assert_eq!(
-        reserved_for("Overview"),
-        Some("a release's introduction, `overview.md` in the release's directory")
-    );
-    assert_eq!(
-        reserved_for("readme"),
-        Some("the fragments directory's documentation, `README.md` at its top level")
-    );
-    assert_eq!(reserved_for("overview-of-tools"), None);
 }
 
 #[test]
@@ -501,19 +486,19 @@ fn a_report_lists_each_problem_then_counts_them() {
         highlights: 1,
         problems: vec![
             Problem {
-                path: Utf8PathBuf::from("changelog.d/a.md"),
+                path: Utf8PathBuf::from("changelog.d/a.fixed.md"),
                 kind: ProblemKind::NotUtf8,
             },
             Problem {
                 path: Utf8PathBuf::from("changelog.d/notes.txt"),
-                kind: ProblemKind::NotAFragment,
+                kind: ProblemKind::FragmentName(NameError::NotAFragment),
             },
         ],
     };
 
     assert_eq!(report.to_string(), indoc! {"
-        changelog.d/a.md: not UTF-8 text
-        changelog.d/notes.txt: not a fragment, which is named `<slug>.md`; rename it, or move it out of the fragments directory
+        changelog.d/a.fixed.md: not UTF-8 text
+        changelog.d/notes.txt: not a fragment, which is named `<slug>.<type>.md`; rename it, or move it out of the fragments directory
 
         Checked 2 fragments and 1 highlight: 2 problems."});
 }

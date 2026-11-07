@@ -1,18 +1,23 @@
 //! One highlight: an editorial section of the release notes, for a feature
 //! worth more than its entry.
 //!
-//! A highlight is a Markdown file in a `highlights/` directory, whose YAML
-//! frontmatter names the section's title and the people it credits, and whose
-//! body is the section's prose:
+//! A highlight is a Markdown file in a `highlights/` directory, named
+//! `<slug>.md`.
+//! It opens with the section's title, then lists the people it credits in a
+//! metadata block, one `Authors` field each, and the rest is the section's
+//! prose:
 //!
 //! ```markdown
-//! ---
-//! title: "Unified editor and inline reply widget"
-//! authors: ["@JeanMertz"]
-//! ---
+//! # Unified editor and inline reply widget
+//!
+//! - **Authors**: @JeanMertz
+//!
 //! Every prompt in JP now runs through a single editor service, and short
 //! replies can be written inline without leaving the conversation view.
 //! ```
+//!
+//! The block can list `Credits` too, which replace the credits history names,
+//! as a fragment's do.
 //!
 //! A highlight has no type and no upgrade section: the fragment for the change
 //! carries both.
@@ -20,14 +25,15 @@
 //! meant for the upgrade guide can't end up in the release notes' prose
 //! instead.
 
-use std::{fmt, num::NonZeroU64};
-
-use serde::Deserialize;
+use std::fmt;
 
 use crate::{
-    document::{self, FrontmatterError, Parsed},
-    links::Links,
+    document::{self, CREDITS, ListedCredit},
+    links::{Links, line_starts},
 };
+
+/// The field that names someone to credit for the feature.
+const AUTHORS: &str = "Authors";
 
 /// A highlight, as [`parse`] reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,9 +44,9 @@ pub struct Highlight {
     /// The people credited for the feature, as written, such as `@JeanMertz`.
     pub authors: Vec<String>,
 
-    /// The change requests to credit in place of the ones history names, when
-    /// the frontmatter lists them.
-    pub change_requests: Option<Vec<NonZeroU64>>,
+    /// The credits to give in place of the ones history names, when the file
+    /// lists them.
+    pub credits: Option<Vec<ListedCredit>>,
 
     /// The section's prose, as Markdown.
     ///
@@ -51,23 +57,25 @@ pub struct Highlight {
 
 /// A document that doesn't hold a well-formed highlight.
 ///
-/// Lines count from 1 at the top of the file, frontmatter included.
+/// Lines count from 1 at the top of the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HighlightError {
-    /// The frontmatter is missing, unclosed, or doesn't hold a highlight's
-    /// fields and nothing else.
-    Frontmatter(FrontmatterError),
+    /// The first line with text isn't a `# Title` heading with a title.
+    NoTitle,
 
-    /// `title` holds nothing but whitespace.
-    EmptyTitle,
-
-    /// `authors` lists nobody.
+    /// The metadata block lists no `Authors`.
     NoAuthors,
 
-    /// An entry of `authors` holds nothing but whitespace.
-    EmptyAuthor,
+    /// An `Authors` field names nobody.
+    EmptyAuthor { line: usize },
 
-    /// Nothing but whitespace follows the frontmatter.
+    /// The metadata block lists a field other than `Authors` and `Credits`.
+    UnknownField { line: usize, key: String },
+
+    /// A `Credits` field names neither a change request nor a commit.
+    InvalidCredit { line: usize, value: String },
+
+    /// Nothing but whitespace follows the title and the metadata block.
     EmptyBody,
 
     /// A line starts with an upgrade section's token.
@@ -77,20 +85,30 @@ pub enum HighlightError {
 impl fmt::Display for HighlightError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Frontmatter(error) => write!(f, "{error}"),
-            Self::EmptyTitle => f.write_str(
-                "no title: name the feature in `title`, which heads its section of the release \
-                 notes",
+            Self::NoTitle => f.write_str(
+                "no title: a highlight opens with `# Title`, which heads its section of the \
+                 release notes",
             ),
-            Self::NoAuthors => {
-                f.write_str("no authors: list the people to credit for the feature in `authors`")
+            Self::NoAuthors => write!(
+                f,
+                "no authors: list each person to credit for the feature below the title, as `- \
+                 **{AUTHORS}**: @JeanMertz`"
+            ),
+            Self::EmptyAuthor { line } => write!(
+                f,
+                "line {line} credits nobody: write who to credit after `- **{AUTHORS}**:`"
+            ),
+            Self::UnknownField { line, key } => write!(
+                f,
+                "line {line} lists `{key}`, and the fields a highlight takes are `{AUTHORS}` and \
+                 `{CREDITS}`"
+            ),
+            Self::InvalidCredit { line, value } => {
+                f.write_str(&document::invalid_credit(*line, value))
             }
-            Self::EmptyAuthor => {
-                f.write_str("an empty author: each entry of `authors` names someone to credit")
-            }
-            Self::EmptyBody => {
-                f.write_str("no prose: write below the frontmatter what the feature does for users")
-            }
+            Self::EmptyBody => f.write_str(
+                "no prose: write what the feature does for users below the title and its authors",
+            ),
             Self::Marker { line, marker } => write!(
                 f,
                 "line {line} starts with `{marker}`, and a highlight has no upgrade section; \
@@ -103,23 +121,6 @@ impl fmt::Display for HighlightError {
 
 impl std::error::Error for HighlightError {}
 
-impl From<FrontmatterError> for HighlightError {
-    fn from(error: FrontmatterError) -> Self {
-        Self::Frontmatter(error)
-    }
-}
-
-/// The fields a highlight's frontmatter holds; any other is an error rather
-/// than ignored, so a misspelled field doesn't vanish, and neither does a
-/// fragment's `type`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Frontmatter {
-    title: String,
-    authors: Vec<String>,
-    change_requests: Option<Vec<NonZeroU64>>,
-}
-
 /// Read `source` as a highlight, held to every rule of the format.
 ///
 /// Lines may end in `\n` or `\r\n`, and a leading byte order mark is skipped.
@@ -130,30 +131,51 @@ struct Frontmatter {
 ///
 /// Returns the first rule `source` breaks, reading from the top.
 pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
-    let Parsed {
-        frontmatter,
-        body,
-        body_line,
-    } = document::parse::<Frontmatter>(source)?;
+    let source = document::normalize(source);
+    let lines: Vec<&str> = source.lines().collect();
+    let has_text = |index: &usize| !lines[*index].trim().is_empty();
 
-    let title = frontmatter.title.trim();
-    if title.is_empty() {
-        return Err(HighlightError::EmptyTitle);
+    let heading = (0..lines.len())
+        .find(has_text)
+        .ok_or(HighlightError::NoTitle)?;
+    let title = title(lines[heading]).ok_or(HighlightError::NoTitle)?;
+
+    let start = (heading + 1..lines.len())
+        .find(has_text)
+        .unwrap_or(lines.len());
+    let (fields, end) = document::fields(&lines, start);
+
+    let mut authors = vec![];
+    let mut credits = vec![];
+    for field in fields {
+        if field.key.eq_ignore_ascii_case(AUTHORS) {
+            if field.value.is_empty() {
+                return Err(HighlightError::EmptyAuthor { line: field.line });
+            }
+            authors.push(field.value);
+        } else if field.key.eq_ignore_ascii_case(CREDITS) {
+            let credit = document::credit(&field).ok_or_else(|| HighlightError::InvalidCredit {
+                line: field.line,
+                value: field.value.clone(),
+            })?;
+            credits.push(credit);
+        } else {
+            return Err(HighlightError::UnknownField {
+                line: field.line,
+                key: field.key,
+            });
+        }
     }
-
-    if frontmatter.authors.is_empty() {
+    if authors.is_empty() {
         return Err(HighlightError::NoAuthors);
     }
-    let authors: Vec<String> = frontmatter
-        .authors
-        .iter()
-        .map(|author| author.trim().to_owned())
-        .collect();
-    if authors.iter().any(String::is_empty) {
-        return Err(HighlightError::EmptyAuthor);
-    }
 
-    let prose = Links::read(&body).standalone(&body, 0..body.len());
+    let offset = line_starts(&source)
+        .get(end)
+        .copied()
+        .unwrap_or(source.len());
+    let body = &source[offset..];
+    let prose = Links::read(body).standalone(body, 0..body.len());
     let prose = prose.trim();
     if prose.is_empty() {
         return Err(HighlightError::EmptyBody);
@@ -165,7 +187,7 @@ pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
         .find_map(|(index, line)| document::marker(line).map(|marker| (index, marker)));
     if let Some((index, marker)) = marked {
         return Err(HighlightError::Marker {
-            line: body_line + index,
+            line: end + index + 1,
             marker,
         });
     }
@@ -173,9 +195,20 @@ pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
     Ok(Highlight {
         title: title.to_owned(),
         authors,
-        change_requests: frontmatter.change_requests,
+        credits: (!credits.is_empty()).then_some(credits),
         body: prose.to_owned(),
     })
+}
+
+/// The title of the `# Title` heading `line` holds, without the space around
+/// it; `None` when `line` holds no such heading, or one with no title.
+fn title(line: &str) -> Option<&str> {
+    if !document::is_title(line) {
+        return None;
+    }
+
+    let title = line.trim_start().strip_prefix('#')?.trim();
+    (!title.is_empty()).then_some(title)
 }
 
 #[cfg(test)]

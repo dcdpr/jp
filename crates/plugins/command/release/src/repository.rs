@@ -406,9 +406,8 @@ impl Drop for Worktree<'_> {
     }
 }
 
-/// A path in the temporary directory no other worktree takes, named after
-/// `purpose`.
-fn temporary(purpose: &str) -> Result<Utf8PathBuf, String> {
+/// A path in the temporary directory nothing else takes, named after `purpose`.
+pub(crate) fn temporary(purpose: &str) -> Result<Utf8PathBuf, String> {
     static TAKEN: AtomicU64 = AtomicU64::new(0);
 
     let dir = Utf8PathBuf::from_path_buf(env::temp_dir()).map_err(|dir| {

@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use super::*;
 
 /// A commit changing `changes`, with a hash made of `id`.
@@ -160,7 +162,7 @@ fn moving_a_file_out_of_a_release_credits_nobody() {
 }
 
 /// A copy filed into a patch release starts its own history there, and is
-/// credited through its frontmatter instead.
+/// credited through its `Credits` fields instead.
 #[test]
 fn a_file_added_in_a_release_is_credited_to_nobody() {
     let commits = [commit('a', vec![added("0.3.1/a.md")])];
@@ -282,8 +284,10 @@ fn a_commit_outside_the_history_added_nothing() {
     assert_eq!(history.added_by(&hash('z')), []);
 }
 
+/// A commit whose message names no change request is credited as itself, so a
+/// credit written into a copy keeps everyone history names.
 #[test]
-fn a_files_change_requests_are_read_from_the_commits_that_wrote_it() {
+fn a_files_credits_are_read_from_the_commits_that_wrote_it() {
     let history = history(vec![
         // After the cut, which credits nobody.
         squashed('e', 1260, vec![modified("0.3.0/a.md")]),
@@ -293,8 +297,14 @@ fn a_files_change_requests_are_read_from_the_commits_that_wrote_it() {
         squashed('a', 1182, vec![added("a.md")]),
     ]);
 
-    assert_eq!(history.change_requests("0.3.0/a.md", Forge::GitHub), [
-        NonZeroU64::new(1182).unwrap()
+    assert_eq!(history.credits("0.3.0/a.md", Forge::GitHub), [
+        ListedCredit::ChangeRequest(NonZeroU64::new(1182).unwrap()),
+        ListedCredit::Commit(hash('b')),
     ]);
-    assert_eq!(history.change_requests("0.3.0/a.md", Forge::None), []);
+    // Without a forge, no message names a change request.
+    assert_eq!(history.credits("0.3.0/a.md", Forge::None), [
+        ListedCredit::Commit(hash('a')),
+        ListedCredit::Commit(hash('b')),
+        ListedCredit::Commit(hash('c')),
+    ]);
 }

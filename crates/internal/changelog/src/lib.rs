@@ -2,12 +2,13 @@
 //! for its users, to build its release notes from.
 //!
 //! A project keeps them in one directory, `changelog.d/` by default.
-//! A fragment is one entry per change users notice: a Markdown file whose
-//! frontmatter names the change's [`Type`], followed by the entry the release
-//! notes list and, for a change that requires users to act, its section of the
-//! release's upgrade guide.
+//! A fragment is one entry per change users notice: a Markdown file named
+//! `<slug>.<type>.md` after the change's [`Type`], holding the entry the
+//! release notes list and, for a change that requires users to act, its section
+//! of the release's upgrade guide.
 //! A highlight, in the directory's `highlights/`, is an editorial section of
-//! the release notes, for a feature worth more than its entry.
+//! the release notes, for a feature worth more than its entry: a `# Title`, the
+//! people it credits, and its prose.
 //!
 //! [`fragment::parse`] and [`highlight::parse`] read one file and hold it to
 //! its format.
@@ -42,10 +43,10 @@ mod links;
 pub mod markdown;
 pub mod release;
 
-pub use directory::{CheckError, Place, Problem, ProblemKind, Report, check, reserved_for};
-pub use document::{FrontmatterError, with_change_requests};
+pub use directory::{CheckError, Place, Problem, ProblemKind, Report, check};
+pub use document::{ListedCredit, with_credits};
 pub use forge::{Credit, CreditKind, Forge, UnknownForge};
-pub use fragment::{Fragment, FragmentError, Type, UnknownType, Upgrade};
+pub use fragment::{Fragment, FragmentError, NameError, Type, UnknownType, Upgrade};
 pub use git::GitError;
 pub use highlight::{Highlight, HighlightError};
 pub use history::{Added, History};

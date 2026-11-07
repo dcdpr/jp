@@ -1,23 +1,25 @@
+use std::num::NonZeroU64;
+
 use indoc::indoc;
 
 use super::*;
 
 #[test]
 fn a_highlight_holds_a_title_the_authors_to_credit_and_its_prose() {
-    let highlight = parse(indoc! {r#"
-        ---
-        title: "Unified editor and inline reply widget"
-        authors: ["@JeanMertz"]
-        ---
+    let highlight = parse(indoc! {"
+        # Unified editor and inline reply widget
+
+        - **Authors**: @JeanMertz
+
         Every prompt in JP now runs through a single editor service, and short
         replies can be written inline without leaving the conversation view.
-    "#})
+    "})
     .unwrap();
 
     assert_eq!(highlight, Highlight {
         title: "Unified editor and inline reply widget".to_owned(),
         authors: vec!["@JeanMertz".to_owned()],
-        change_requests: None,
+        credits: None,
         body: indoc! {"
             Every prompt in JP now runs through a single editor service, and short
             replies can be written inline without leaving the conversation view."}
@@ -26,38 +28,51 @@ fn a_highlight_holds_a_title_the_authors_to_credit_and_its_prose() {
 }
 
 #[test]
-fn change_requests_replace_the_credits_history_names() {
-    let highlight = parse(indoc! {r#"
-        ---
-        title: Tool calls fan out
-        authors: ["@JeanMertz"]
-        change_requests: [1182, 1183]
-        ---
+fn each_author_is_a_field_of_its_own() {
+    let highlight = parse(indoc! {"
+        # Tool calls fan out
+
+        - **Authors**: @JeanMertz
+        - **Authors**: @jdoe
+
         The assistant calls one tool on many inputs at once.
-    "#})
+    "})
+    .unwrap();
+
+    assert_eq!(highlight.authors, vec![
+        "@JeanMertz".to_owned(),
+        "@jdoe".to_owned()
+    ]);
+}
+
+#[test]
+fn credits_replace_the_credits_history_names() {
+    let highlight = parse(indoc! {"
+        # Tool calls fan out
+
+        - **Authors**: @JeanMertz
+        - **Credits**: #1182
+        - **Credits**: #1183
+
+        The assistant calls one tool on many inputs at once.
+    "})
     .unwrap();
 
     assert_eq!(
-        highlight.change_requests,
+        highlight.credits,
         Some(vec![
-            NonZeroU64::new(1182).unwrap(),
-            NonZeroU64::new(1183).unwrap()
+            ListedCredit::ChangeRequest(NonZeroU64::new(1182).unwrap()),
+            ListedCredit::ChangeRequest(NonZeroU64::new(1183).unwrap())
         ])
     );
 }
 
 #[test]
 fn the_title_authors_and_prose_are_read_without_the_space_around_them() {
-    // Quoted, so YAML keeps the spaces it would drop from a plain scalar.
-    let highlight = parse(indoc! {r#"
-        ---
-        title: "  Tool calls fan out  "
-        authors: [" @JeanMertz "]
-        ---
-
-        The assistant calls one tool on many inputs at once.
-
-    "#})
+    let highlight = parse(
+        "\n#   Tool calls fan out  \n- **Authors**:   @JeanMertz  \n\n\nThe assistant calls one \
+         tool on many inputs at once.\n\n",
+    )
     .unwrap();
 
     assert_eq!(highlight.title, "Tool calls fan out");
@@ -68,114 +83,138 @@ fn the_title_authors_and_prose_are_read_without_the_space_around_them() {
     );
 }
 
+/// A highlight opens with a level-one heading, written as Markdown writes one:
+/// `#`, a space, and the title.
 #[test]
-fn a_highlight_needs_a_title() {
-    let missing = parse("---\nauthors: [\"@JeanMertz\"]\n---\nProse.\n").unwrap_err();
+fn a_highlight_opens_with_its_title() {
+    for untitled in [
+        "- **Authors**: @JeanMertz\n\nProse.\n",
+        "#\n\n- **Authors**: @JeanMertz\n\nProse.\n",
+        "## Tool calls\n\n- **Authors**: @JeanMertz\n\nProse.\n",
+        "#Tool calls\n\n- **Authors**: @JeanMertz\n\nProse.\n",
+        "Prose first.\n\n# Tool calls\n\n- **Authors**: @JeanMertz\n",
+        "",
+    ] {
+        assert_eq!(
+            parse(untitled),
+            Err(HighlightError::NoTitle),
+            "{untitled:?}"
+        );
+    }
     assert_eq!(
-        missing.to_string(),
-        "invalid frontmatter: missing field `title` at line 2, column 1"
+        HighlightError::NoTitle.to_string(),
+        "no title: a highlight opens with `# Title`, which heads its section of the release notes"
     );
-
-    let blank = parse("---\ntitle: \"  \"\nauthors: [\"@JeanMertz\"]\n---\nProse.\n").unwrap_err();
-    assert_eq!(blank, HighlightError::EmptyTitle);
 }
 
 #[test]
 fn a_highlight_credits_at_least_one_author() {
-    let missing = parse("---\ntitle: Tool calls fan out\n---\nProse.\n").unwrap_err();
-    assert_eq!(
-        missing.to_string(),
-        "invalid frontmatter: missing field `authors` at line 2, column 1"
-    );
+    let error = parse("# Tool calls fan out\n\nProse.\n").unwrap_err();
 
-    let none = parse("---\ntitle: Tool calls fan out\nauthors: []\n---\nProse.\n").unwrap_err();
-    assert_eq!(none, HighlightError::NoAuthors);
+    assert_eq!(error, HighlightError::NoAuthors);
+    assert_eq!(
+        error.to_string(),
+        "no authors: list each person to credit for the feature below the title, as `- \
+         **Authors**: @JeanMertz`"
+    );
 }
 
 #[test]
 fn every_author_names_someone() {
-    let error =
-        parse("---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\", \" \"]\n---\nProse.\n")
-            .unwrap_err();
+    let error = parse(indoc! {"
+        # Tool calls fan out
 
-    assert_eq!(error, HighlightError::EmptyAuthor);
-}
+        - **Authors**: @JeanMertz
+        - **Authors**:
 
-/// One author is written as a list of one, `["@JeanMertz"]`: the format takes
-/// no plain string.
-#[test]
-fn a_single_author_is_still_a_list() {
-    let error = parse("---\ntitle: Tool calls fan out\nauthors: \"@JeanMertz\"\n---\nProse.\n")
-        .unwrap_err();
+        Prose.
+    "})
+    .unwrap_err();
 
-    assert_eq!(
-        error.to_string(),
-        "invalid frontmatter: expected sequence start at line 3, column 10"
-    );
+    assert_eq!(error, HighlightError::EmptyAuthor { line: 4 });
 }
 
 #[test]
 fn a_highlight_has_no_type() {
-    // A fragment's field in a highlight's frontmatter, which strict parsing
-    // reports rather than drops.
-    let error = parse(indoc! {r#"
-        ---
-        type: added
-        title: Tool calls fan out
-        authors: ["@JeanMertz"]
-        ---
+    let error = parse(indoc! {"
+        # Tool calls fan out
+
+        - **Type**: added
+        - **Authors**: @JeanMertz
+
         Prose.
-    "#})
+    "})
     .unwrap_err();
 
+    assert_eq!(error, HighlightError::UnknownField {
+        line: 3,
+        key: "Type".to_owned()
+    });
     assert_eq!(
         error.to_string(),
-        "invalid frontmatter: unknown field `type`, expected one of title, authors, \
-         change_requests at line 2, column 1"
+        "line 3 lists `Type`, and the fields a highlight takes are `Authors` and `Credits`"
     );
 }
 
 #[test]
 fn a_misspelled_field_is_an_error_rather_than_ignored() {
-    let error = parse("---\ntitle: Tool calls fan out\nauthor: [\"@JeanMertz\"]\n---\nProse.\n")
-        .unwrap_err();
+    let error = parse("# Tool calls fan out\n\n- **Author**: @JeanMertz\n\nProse.\n").unwrap_err();
 
-    assert_eq!(
-        error.to_string(),
-        "invalid frontmatter: unknown field `author`, expected one of title, authors, \
-         change_requests at line 3, column 1"
-    );
+    assert_eq!(error, HighlightError::UnknownField {
+        line: 3,
+        key: "Author".to_owned()
+    });
 }
 
 #[test]
-fn a_highlight_opens_with_its_frontmatter() {
-    assert_eq!(
-        parse("title: Tool calls fan out\n---\nProse.\n"),
-        Err(HighlightError::Frontmatter(FrontmatterError::Missing))
-    );
+fn a_credit_names_a_change_request_or_a_commit() {
+    let error = parse(indoc! {"
+        # Tool calls fan out
+
+        - **Authors**: @JeanMertz
+        - **Credits**: @jdoe
+
+        Prose.
+    "})
+    .unwrap_err();
+
+    assert_eq!(error, HighlightError::InvalidCredit {
+        line: 4,
+        value: "@jdoe".to_owned()
+    });
 }
 
 #[test]
 fn a_highlight_needs_prose() {
     assert_eq!(
-        parse("---\ntitle: Tool calls fan out\nauthors: [\"@JeanMertz\"]\n---\n\n  \n"),
+        parse("# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\n  \n"),
         Err(HighlightError::EmptyBody)
     );
 }
 
 #[test]
+fn windows_line_endings_and_a_byte_order_mark_are_read_as_usual() {
+    let highlight =
+        parse("\u{feff}# Fan out\r\n\r\n- **Authors**: @JeanMertz\r\n\r\nProse.\r\n").unwrap();
+
+    assert_eq!(highlight.title, "Fan out");
+    assert_eq!(highlight.authors, vec!["@JeanMertz".to_owned()]);
+    assert_eq!(highlight.body, "Prose.");
+}
+
+#[test]
 fn a_highlight_carries_no_upgrade_section() {
-    let error = parse(indoc! {r#"
-        ---
-        title: Plugins are found by their manifest
-        authors: ["@JeanMertz"]
-        ---
+    let error = parse(indoc! {"
+        # Plugins are found by their manifest
+
+        - **Authors**: @JeanMertz
+
         JP reads the manifest each plugin binary embeds.
 
         BREAKING CHANGE: Command plugins are found by their manifest
 
         Rebuild your plugins against this release.
-    "#})
+    "})
     .unwrap_err();
 
     assert_eq!(error, HighlightError::Marker {
@@ -188,17 +227,17 @@ fn a_highlight_carries_no_upgrade_section() {
 fn a_token_starting_any_line_of_a_highlight_is_an_error() {
     // The rule fragments follow, where a line starting with the token is never
     // text, with no line left where a highlight could open an upgrade section.
-    let error = parse(indoc! {r#"
-        ---
-        title: Breaking changes in commit messages
-        authors: ["@JeanMertz"]
-        ---
+    let error = parse(indoc! {"
+        # Breaking changes in commit messages
+
+        - **Authors**: @JeanMertz
+
         A commit can mark a breaking change:
 
         ```text
         BREAKING-CHANGE: the flag is gone
         ```
-    "#})
+    "})
     .unwrap_err();
 
     assert_eq!(error, HighlightError::Marker {
@@ -209,14 +248,14 @@ fn a_token_starting_any_line_of_a_highlight_is_an_error() {
 
 #[test]
 fn a_token_that_does_not_start_its_line_is_text() {
-    let highlight = parse(indoc! {r#"
-        ---
-        title: Upgrade sections
-        authors: ["@JeanMertz"]
-        ---
+    let highlight = parse(indoc! {"
+        # Upgrade sections
+
+        - **Authors**: @JeanMertz
+
         `BREAKING CHANGE:` in inline code, and
          BREAKING CHANGE: indented, are both text.
-    "#})
+    "})
     .unwrap();
 
     assert_eq!(highlight.body, indoc! {"
@@ -228,15 +267,15 @@ fn a_token_that_does_not_start_its_line_is_text() {
 /// label differently would collide, so the prose comes with its links inline.
 #[test]
 fn a_highlights_links_are_inline() {
-    let highlight = parse(indoc! {r#"
-        ---
-        title: Tool calls fan out
-        authors: ["@JeanMertz"]
-        ---
+    let highlight = parse(indoc! {"
+        # Tool calls fan out
+
+        - **Authors**: @JeanMertz
+
         The assistant calls [one tool] on many inputs at once.
 
         [one tool]: https://example.com/tools
-    "#})
+    "})
     .unwrap();
 
     assert_eq!(
@@ -248,7 +287,7 @@ fn a_highlights_links_are_inline() {
 #[test]
 fn a_highlight_of_definitions_alone_has_no_prose() {
     assert_eq!(
-        parse("---\ntitle: Fan out\nauthors: [\"@JeanMertz\"]\n---\n[docs]: https://example.com\n"),
+        parse("# Fan out\n\n- **Authors**: @JeanMertz\n\n[docs]: https://example.com\n"),
         Err(HighlightError::EmptyBody)
     );
 }

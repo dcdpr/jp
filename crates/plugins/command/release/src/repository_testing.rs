@@ -108,11 +108,12 @@ impl Fixture {
         fs::write(path, contents).unwrap();
     }
 
-    /// Write a fragment of type `type_` holding `entry`, named `slug`.
+    /// Write a fragment of type `type_` holding `entry`, named `slug`:
+    /// `changelog.d/<slug>.<type>.md`.
     pub(crate) fn fragment(&self, slug: &str, type_: &str, entry: &str) {
         self.write(
-            &format!("changelog.d/{slug}.md"),
-            &format!("---\ntype: {type_}\n---\n{entry}\n"),
+            &format!("changelog.d/{slug}.{type_}.md"),
+            &format!("{entry}\n"),
         );
     }
 

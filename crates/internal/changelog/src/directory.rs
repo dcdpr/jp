@@ -5,19 +5,19 @@
 //!
 //! ```text
 //! changelog.d/
-//!   README.md               the directory's documentation, never read
-//!   enable-explicit.md      a fragment no release has taken yet
+//!   README.md                     the directory's documentation, never read
+//!   enable-explicit.removed.md    a fragment no release has taken yet
 //!   highlights/
-//!     fan-out.md            a highlight no release has taken yet
-//!   0.3.0/                  a release's directory, named after its version
-//!     overview.md           the release's introduction, never read here
-//!     retry-idle-turns.md   a fragment the release took
+//!     fan-out.md                  a highlight no release has taken yet
+//!   0.3.0/                        a release's directory, named after its version
+//!     overview.md                 the release's introduction, never read here
+//!     retry-idle-turns.fixed.md   a fragment the release took
 //!     highlights/
-//!       plugin-tools.md     a highlight the release took
+//!       plugin-tools.md           a highlight the release took
 //! ```
 //!
-//! A fragment or highlight is `<slug>.md`, and no slug is `overview` or
-//! `readme`, in any letter case.
+//! A fragment is `<slug>.<type>.md` ([`fragment::name`]), and a highlight
+//! `<slug>.md`.
 //! Anything else is a [`Problem`] rather than a file left unread, so a stray
 //! file fails loudly instead of vanishing when a release is assembled.
 //!
@@ -32,7 +32,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use semver::Version;
 
 use crate::{
-    fragment::{self, Fragment, FragmentError},
+    fragment::{self, Fragment, FragmentError, NameError},
     highlight::{self, Highlight, HighlightError},
 };
 
@@ -46,22 +46,8 @@ pub const OVERVIEW: &str = "overview.md";
 /// highlights.
 const HIGHLIGHTS: &str = "highlights";
 
-/// The extension every fragment's and highlight's file name ends in.
+/// The extension a highlight's file name ends in.
 const EXTENSION: &str = ".md";
-
-/// Each slug no fragment or highlight can have, in any letter case, and what it
-/// is reserved for: a case-insensitive filesystem reads `readme.md` and
-/// `README.md` as one file.
-const RESERVED: [(&str, &str); 2] = [
-    (
-        "overview",
-        "a release's introduction, `overview.md` in the release's directory",
-    ),
-    (
-        "readme",
-        "the fragments directory's documentation, `README.md` at its top level",
-    ),
-];
 
 /// What [`check`] found in a fragments directory.
 #[derive(Debug, Default)]
@@ -136,17 +122,12 @@ pub enum ProblemKind {
     /// A fragment or highlight whose contents aren't UTF-8 text.
     NotUtf8,
 
-    /// A file outside a `highlights/` directory whose name isn't `<slug>.md`.
-    NotAFragment,
+    /// A file outside a `highlights/` directory whose name isn't
+    /// `<slug>.<type>.md`.
+    FragmentName(NameError),
 
     /// A file in a `highlights/` directory whose name isn't `<slug>.md`.
     NotAHighlight,
-
-    /// A fragment or highlight whose slug is reserved.
-    Reserved {
-        slug: &'static str,
-        reserved_for: &'static str,
-    },
 
     /// A directory at the top level that is neither `highlights/` nor named
     /// after a semantic version.
@@ -165,17 +146,10 @@ impl fmt::Display for ProblemKind {
             Self::MalformedFragment(error) => write!(f, "{error}"),
             Self::MalformedHighlight(error) => write!(f, "{error}"),
             Self::NotUtf8 => f.write_str("not UTF-8 text"),
-            Self::NotAFragment => f.write_str(
-                "not a fragment, which is named `<slug>.md`; rename it, or move it out of the \
-                 fragments directory",
-            ),
+            Self::FragmentName(error) => write!(f, "{error}"),
             Self::NotAHighlight => f.write_str(
                 "not a highlight, which is named `<slug>.md`; rename it, or move it out of the \
                  fragments directory",
-            ),
-            Self::Reserved { slug, reserved_for } => write!(
-                f,
-                "the slug `{slug}` is reserved, in any letter case, for {reserved_for}; rename it"
             ),
             Self::NotARelease => f.write_str(
                 "neither `highlights/` nor a release's directory, which is named after its \
@@ -230,13 +204,13 @@ pub struct Place {
     /// Whether it sits in a `highlights/` directory.
     pub highlight: bool,
 
-    /// The file's name, such as `retry-idle-turns.md`.
+    /// The file's name, such as `retry-idle-turns.fixed.md`.
     pub name: String,
 }
 
 impl Place {
     /// Read `path`, below the fragments directory with `/` between its parts,
-    /// such as `retry-idle-turns.md` or `0.3.0/highlights/fan-out.md`.
+    /// such as `retry-idle-turns.fixed.md` or `0.3.0/highlights/fan-out.md`.
     ///
     /// `None` for a path at which the layout holds no fragment or highlight.
     #[must_use]
@@ -289,7 +263,8 @@ pub struct Contents {
 /// A fragment or highlight, and where it is filed in the fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filed<T> {
-    /// The file's name, without `.md`.
+    /// The file's slug: its name without `.md`, and a fragment's without its
+    /// type, so `retry-idle-turns` for `retry-idle-turns.fixed.md`.
     pub slug: String,
 
     /// The file's path below the fragments directory, with `/` between its
@@ -493,10 +468,22 @@ fn read_file(
     report: &mut Report,
     contents: &mut Contents,
 ) -> Result<(), CheckError> {
-    if let Some(kind) = misnamed(name, format) {
-        report.problem(path, kind);
-        return Ok(());
-    }
+    let (slug, type_) = match format {
+        Format::Fragment => match fragment::name(name) {
+            Ok((slug, type_)) => (slug, Some(type_)),
+            Err(error) => {
+                report.problem(path, ProblemKind::FragmentName(error));
+                return Ok(());
+            }
+        },
+        Format::Highlight => {
+            let Some(slug) = name.strip_suffix(EXTENSION).filter(|slug| !slug.is_empty()) else {
+                report.problem(path, ProblemKind::NotAHighlight);
+                return Ok(());
+            };
+            (slug, None)
+        }
+    };
 
     match format {
         Format::Fragment => report.fragments += 1,
@@ -511,11 +498,10 @@ fn read_file(
         return Ok(());
     };
 
-    // `misnamed` refused a name without the extension.
-    let slug = name.strip_suffix(EXTENSION).unwrap_or(name).to_owned();
+    let slug = slug.to_owned();
     let filed = format!("{below}{name}");
-    match format {
-        Format::Fragment => match fragment::parse(&source) {
+    match type_ {
+        Some(type_) => match fragment::parse(type_, &source) {
             Ok(file) => contents.fragments.push(Filed {
                 slug,
                 path: filed,
@@ -523,7 +509,7 @@ fn read_file(
             }),
             Err(error) => report.problem(path, ProblemKind::MalformedFragment(error)),
         },
-        Format::Highlight => match highlight::parse(&source) {
+        None => match highlight::parse(&source) {
             Ok(file) => contents.highlights.push(Filed {
                 slug,
                 path: filed,
@@ -534,33 +520,6 @@ fn read_file(
     }
 
     Ok(())
-}
-
-/// Why `name` isn't the file name of a file in `format`, if it isn't.
-fn misnamed(name: &str, format: Format) -> Option<ProblemKind> {
-    let Some(slug) = name.strip_suffix(EXTENSION).filter(|slug| !slug.is_empty()) else {
-        return Some(match format {
-            Format::Fragment => ProblemKind::NotAFragment,
-            Format::Highlight => ProblemKind::NotAHighlight,
-        });
-    };
-
-    reservation(slug).map(|(slug, reserved_for)| ProblemKind::Reserved { slug, reserved_for })
-}
-
-/// What `slug` is reserved for, when it is one of the slugs no fragment or
-/// highlight can have, in any letter case.
-#[must_use]
-pub fn reserved_for(slug: &str) -> Option<&'static str> {
-    reservation(slug).map(|(_, reserved_for)| reserved_for)
-}
-
-/// The reserved slug `slug` spells, and what it is reserved for, if it spells
-/// one.
-fn reservation(slug: &str) -> Option<(&'static str, &'static str)> {
-    RESERVED
-        .into_iter()
-        .find(|(reserved, _)| slug.eq_ignore_ascii_case(reserved))
 }
 
 /// Whether `path`, below the fragments directory with `/` between its parts, is

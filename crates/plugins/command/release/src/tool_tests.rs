@@ -95,14 +95,17 @@ fn add_writes_a_fragment() {
         json!({ "type": "fixed", "body": "Crashes are fixed." }),
     );
 
-    assert_eq!(content(outcome), "Wrote changelog.d/crashes-are-fixed.md");
     assert_eq!(
-        fs::read_to_string(root.path().join("changelog.d/crashes-are-fixed.md")).unwrap(),
-        "---\ntype: fixed\n---\nCrashes are fixed.\n"
+        content(outcome),
+        "Wrote changelog.d/crashes-are-fixed.fixed.md"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("changelog.d/crashes-are-fixed.fixed.md")).unwrap(),
+        "Crashes are fixed.\n"
     );
 }
 
-/// The tool lays a fragment out as `jp release add` does: as the workspace's
+/// The tool lays a fragment out as `jp release fixed` does: as the workspace's
 /// `format_on_write` says.
 #[test]
 fn add_lays_the_fragment_out_as_the_workspace_formats_it() {
@@ -127,10 +130,10 @@ fn add_lays_the_fragment_out_as_the_workspace_formats_it() {
         &Options::default(),
     );
 
-    assert_eq!(content(outcome), "Wrote changelog.d/retry.md");
+    assert_eq!(content(outcome), "Wrote changelog.d/retry.fixed.md");
     assert_eq!(
-        fs::read_to_string(root.path().join("changelog.d/retry.md")).unwrap(),
-        "---\ntype: fixed\n---\nRetries wait.\nThey give up after three attempts.\n"
+        fs::read_to_string(root.path().join("changelog.d/retry.fixed.md")).unwrap(),
+        "Retries wait.\nThey give up after three attempts.\n"
     );
 }
 
@@ -167,7 +170,10 @@ fn add_names_the_file_by_the_slug_it_is_given() {
         json!({ "type": "fixed", "body": "Crashes are fixed.", "slug": "retry-idle-turns" }),
     );
 
-    assert_eq!(content(outcome), "Wrote changelog.d/retry-idle-turns.md");
+    assert_eq!(
+        content(outcome),
+        "Wrote changelog.d/retry-idle-turns.fixed.md"
+    );
 }
 
 /// The preview shows the file whole, where it goes, and writes nothing.
@@ -181,8 +187,7 @@ fn a_preview_shows_the_file_and_writes_nothing() {
     )));
 
     for expected in [
-        "changelog.d/crashes-are-fixed.md",
-        "type: fixed",
+        "changelog.d/crashes-are-fixed.fixed.md",
         "Crashes are fixed.",
     ] {
         assert!(preview.contains(expected), "{expected} in:\n{preview}");
@@ -190,7 +195,7 @@ fn a_preview_shows_the_file_and_writes_nothing() {
     assert!(
         !root
             .path()
-            .join("changelog.d/crashes-are-fixed.md")
+            .join("changelog.d/crashes-are-fixed.fixed.md")
             .exists()
     );
 }
@@ -210,7 +215,7 @@ fn a_preview_refuses_an_entry_the_format_refuses() {
 
     assert_eq!(
         message,
-        "the upgrade section on line 6 has no body: say what changed and how to upgrade in the \
+        "the upgrade section on line 3 has no body: say what changed and how to upgrade in the \
          paragraphs after its title"
     );
 }
@@ -278,7 +283,7 @@ fn a_write_the_access_policy_denies_is_refused() {
     assert!(
         !root
             .path()
-            .join("changelog.d/crashes-are-fixed.md")
+            .join("changelog.d/crashes-are-fixed.fixed.md")
             .exists()
     );
 }
