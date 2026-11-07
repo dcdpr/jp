@@ -393,7 +393,7 @@ impl StreamError {
                     return Self::new(StreamErrorKind::InsufficientQuota, display);
                 }
 
-                if code == 404 && looks_like_unknown_model(body) {
+                if looks_like_unknown_model(code, body) {
                     return Self::unknown_model(display);
                 }
 
@@ -781,18 +781,24 @@ pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
         || lower.contains("too many tokens")
 }
 
-/// Check whether a `404` response body indicates an unknown or unavailable
-/// model.
+/// Check whether an error response says the requested model is unknown or
+/// unavailable.
 ///
-/// A `404` status alone is ambiguous because a misconfigured `base_url` path
-/// also returns `404` (e.g. `{"detail":"Not Found"}` from the HTTP server).
+/// The status alone is ambiguous: a misconfigured `base_url` path also returns
+/// `404` (e.g. `{"detail":"Not Found"}` from the HTTP server), and a `400` can
+/// object to the model for other reasons, such as not supporting tools.
 /// Matches both nested (`{"error": {...}}`) and flat JSON error envelopes for:
 ///
-/// - OpenAI: `"code": "model_not_found"`
+/// - OpenAI: `"code": "model_not_found"`, as a `404` from the API and as a
+///   `400` from the subscription host
 /// - Cerebras: `"code": "model_archived"`
-/// - vLLM: `"param": "model"`, or `"type": "NotFoundError"` with a `"does not
-///   exist"` message on older servers
-pub(crate) fn looks_like_unknown_model(body: &str) -> bool {
+/// - vLLM (`404` only): `"param": "model"`, or `"type": "NotFoundError"` with a
+///   `"does not exist"` message on older servers
+pub(crate) fn looks_like_unknown_model(status: u16, body: &str) -> bool {
+    if !matches!(status, 400 | 404) {
+        return false;
+    }
+
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
         return false;
     };
@@ -803,10 +809,14 @@ pub(crate) fn looks_like_unknown_model(body: &str) -> bool {
         .unwrap_or(&parsed);
     let field = |key: &str| error.get(key).and_then(serde_json::Value::as_str);
 
-    matches!(field("code"), Some("model_not_found" | "model_archived"))
-        || field("param") == Some("model")
-        || (field("type") == Some("NotFoundError")
-            && field("message").is_some_and(|message| message.contains("does not exist")))
+    if matches!(field("code"), Some("model_not_found" | "model_archived")) {
+        return true;
+    }
+
+    status == 404
+        && (field("param") == Some("model")
+            || (field("type") == Some("NotFoundError")
+                && field("message").is_some_and(|message| message.contains("does not exist"))))
 }
 
 /// Heuristic check for transient network/proxy failures based on error text.

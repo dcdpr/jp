@@ -1577,12 +1577,19 @@ mod stream_error_classification {
         let error = StreamError::from(api_error(
             404,
             "models/gemini-future-99 is not found for API version v1beta, or is not supported for \
-             generateContent. Call ListModels to see the list of available models and their \
-             supported methods.",
+             generateContent. Call ModelService.ListModels to see the list of available models \
+             and their supported methods.",
         ));
 
         assert_eq!(error.kind, StreamErrorKind::UnknownModel);
         assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn a_404_without_a_model_resource_is_not_an_unknown_model() {
+        let error = StreamError::from(api_error(404, "Requested entity was not found."));
+
+        assert_eq!(error.kind, StreamErrorKind::Other);
     }
 
     #[test]

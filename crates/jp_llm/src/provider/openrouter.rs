@@ -1281,6 +1281,14 @@ impl From<jp_openrouter::Error> for StreamError {
                 ..
             }
             | E::Stream(_) => StreamError::transient(err.to_string()).with_source(err),
+            // The only signal is the message: the body carries no error code
+            // beyond the status, and a 400 also rejects malformed requests.
+            E::Api {
+                code: 400,
+                ref message,
+            } if message.contains("is not a valid model ID") => {
+                StreamError::unknown_model(err.to_string()).with_source(err)
+            }
             _ => StreamError::other(err.to_string()).with_source(err),
         }
     }
