@@ -77,6 +77,9 @@ pub struct KvAssignment {
     /// Whether the value should be merged with the existing value, or replaced
     /// entirely.
     strategy: Strategy,
+
+    /// Whether the key carries the operator, or was spelled out of an object.
+    source: KeySource,
 }
 
 impl FromStr for KvAssignment {
@@ -214,6 +217,18 @@ impl KvAssignment {
         matches!(self.strategy, Strategy::Merge)
     }
 
+    /// Whether the assignment states a whole map or strategy wrapper, dropping
+    /// what earlier layers put in it.
+    ///
+    /// Only `:=` written on the collection's own key does.
+    /// A collection reached through an object's keys combines with what is
+    /// there, as the dotted keys the object spells out would.
+    /// A plain list is not asked: it has no keys to spell out, so `:=` replaces
+    /// it however the list is reached.
+    const fn replaces_collection(&self) -> bool {
+        matches!(self.strategy, Strategy::Set) && matches!(self.source, KeySource::Written)
+    }
+
     /// Create an assignment that clears the field at `path`.
     ///
     /// The value is JSON `null`, which every leaf setter already reads as "no
@@ -235,6 +250,7 @@ impl KvAssignment {
             },
             value: KvValue::Json(Value::Null),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }
     }
 
@@ -245,6 +261,8 @@ impl KvAssignment {
     /// [`try_merge_object`].
     /// This allows `--cfg '{"assistant": {"name": "dev"}}'` to work like `--cfg
     /// assistant.name=dev`.
+    /// That holds for maps too: an entry the object names joins the entries
+    /// already there.
     ///
     /// [`try_merge_object`]: Self::try_merge_object
     #[must_use]
@@ -257,6 +275,7 @@ impl KvAssignment {
             },
             value: KvValue::Json(value),
             strategy: Strategy::Set,
+            source: KeySource::Spelled,
         }
     }
 
@@ -286,6 +305,8 @@ impl KvAssignment {
     /// With no segment left (`foo:={…}`), the object is distributed across
     /// entries, mirroring [`try_vec`]: `:=` (Set) replaces the whole map, `:+=`
     /// (Merge) merges the entries into it.
+    /// A map reached through the keys of an object written higher up merges
+    /// under either operator, since it was not named with `:=` itself.
     /// A scalar value with no key segment, or any non-object whole-collection
     /// value, is a type error.
     ///
@@ -322,17 +343,19 @@ impl KvAssignment {
         // Whole-collection form, e.g. `aliases:={ ... }`: no map key remains to
         // consume, so distribute the object's top-level keys across entries.
         if self.key.is_empty() {
+            let replaces = self.replaces_collection();
             let Self {
                 key,
                 value,
                 strategy,
+                ..
             } = self;
 
             let KvValue::Json(Value::Object(obj)) = value else {
                 return type_error(&key, &value, &["object"]).map_err(Into::into);
             };
 
-            if !matches!(strategy, Strategy::Merge) {
+            if replaces {
                 map.clear();
             }
 
@@ -351,6 +374,7 @@ impl KvAssignment {
                     },
                     value: KvValue::Json(v),
                     strategy,
+                    source: KeySource::Spelled,
                 };
                 map.entry(k).or_default().assign(entry)?;
             }
@@ -387,10 +411,11 @@ impl KvAssignment {
     /// states how the map merges, not two entries named after those keys.
     /// See [`Self::states_map_strategy`] for how the two are told apart.
     ///
-    /// A wrapper assigned with `:=` states the map outright.
-    /// One assigned with `:+=` combines with what is already there, under the
-    /// strategy the wrapper names — which is what keeps a merge assignment
-    /// from dropping the entries earlier layers contributed.
+    /// A wrapper assigned with `:=` written on the map's own key states the map
+    /// outright.
+    /// One assigned with `:+=`, or reached through the keys of an object
+    /// written higher up, combines with what is already there under the
+    /// strategy the wrapper names, as the same wrapper in a config file does.
     ///
     /// Anything else is an entry, and lands inside whatever wrapper the map
     /// already carries: naming one entry says nothing about how the map
@@ -413,7 +438,7 @@ impl KvAssignment {
         let value = self.value.clone().into_value();
         let next = serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
 
-        if !self.is_merge() {
+        if self.replaces_collection() {
             *map = next;
             return Ok(());
         }
@@ -499,6 +524,7 @@ impl KvAssignment {
             } else {
                 Strategy::Set
             },
+            source: KeySource::Written,
         })
     }
 
@@ -565,6 +591,7 @@ impl KvAssignment {
             } else {
                 Strategy::Set
             },
+            source: KeySource::Written,
         })
     }
 
@@ -655,6 +682,7 @@ impl KvAssignment {
             key,
             value,
             strategy,
+            ..
         } = self;
 
         let KvValue::Json(Value::Object(obj)) = value else {
@@ -676,6 +704,7 @@ impl KvAssignment {
                 },
                 value: KvValue::Json(v),
                 strategy,
+                source: KeySource::Spelled,
             })?;
         }
 
@@ -1163,8 +1192,10 @@ impl KvAssignment {
     /// is how the user declares a strategy for the field.
     /// The two are told apart by shape, the same way [`MergeableVec`]'s own
     /// deserializer does it: a sequence cannot be a table.
-    /// Merge-assigned objects use the field's `merge` function; appends and
-    /// indexed edits preserve the existing wrapper metadata.
+    /// An object combines with the existing list through the field's `merge`
+    /// function, unless `:=` is written on the field's own key, which states
+    /// the list outright.
+    /// Appends and indexed edits preserve the existing wrapper metadata.
     pub(crate) fn try_some_mergeable_vec<T>(
         self,
         vec: &mut Option<MergeableVec<T>>,
@@ -1189,7 +1220,7 @@ impl KvAssignment {
         {
             let next = serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
 
-            *vec = if self.is_merge()
+            *vec = if !self.replaces_collection()
                 && let Some(prev) = vec.as_ref()
             {
                 merge(prev.clone(), next, &()).or_else(|error| {
@@ -1254,6 +1285,7 @@ impl KvAssignment {
                         KvValue::Json(Value::Object(obj)) => {
                             for (k, v) in obj {
                                 let mut kv = self.clone();
+                                kv.source = KeySource::Spelled;
                                 kv.key.full_path = [self.key.full_path.as_str(), k.as_str()]
                                     .join(kv.key.delim.as_str());
                                 kv.key.path = k;
@@ -1293,6 +1325,7 @@ impl KvAssignment {
                     let mut item = T::default();
                     for (k, v) in obj {
                         let mut nested_kv = kv.clone();
+                        nested_kv.source = KeySource::Spelled;
                         nested_kv.key.full_path =
                             [kv.key.full_path.as_str(), k.as_str()].join(kv.key.delim.as_str());
                         nested_kv.key.path = k;
@@ -1423,6 +1456,24 @@ enum Strategy {
 
     /// The value should be set, overwriting any existing value.
     Set,
+}
+
+/// Where an assignment's key comes from.
+///
+/// The operator (`=`, `:=`, `+=`, `:+=`) belongs to the key it is written on.
+/// An object value spells out keys below that one, each assigned on its own.
+/// Those keys keep the operator for the values they reach, so a list still
+/// replaces under `:=` and appends under `:+=`, but a map they reach is not
+/// replaced: `{"plugins":{"command":{"ticket":…}}}` names one plugin, as
+/// `plugins.command.ticket.…` does, rather than stating every plugin there is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeySource {
+    /// The key was written with the operator on it: `plugins.command:={…}`.
+    Written,
+
+    /// The key is one of an object's keys, or the empty key of a root object,
+    /// which names no key at all.
+    Spelled,
 }
 
 /// A key in a configuration.

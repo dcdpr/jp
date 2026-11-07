@@ -360,6 +360,18 @@ the root of the configuration:
 $ jp query --cfg '{"assistant": {"model": {"parameters": {"temperature": 0.2}}}}' "..."
 ```
 
+Each key the object names is set as its dot-delimited form would set it, so an
+entry of a map joins the entries other configuration sources declared:
+
+```bash
+$ jp --cfg '{"plugins": {"command": {"ticket": {"options": {"assistant": "Ada"}}}}}'
+$ jp --cfg 'plugins.command.ticket.options.assistant=Ada'   # the same
+```
+
+A list in the object replaces the list, as `:=` does.
+To replace a whole map, write `:=` on the map's own key, as in
+`plugins.command:={...}`.
+
 #### Reset Keywords
 
 Two reserved uppercase keywords discard everything loaded so far, and layer
