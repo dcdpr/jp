@@ -20,26 +20,26 @@ conversation trees ([RFD 039]), and hidden conversations ([RFD 040]).
 
 ## Why sub-agents?
 
-Using a frontier model (e.g. Claude Opus) for an entire conversation is
+Running a frontier model (such as Claude Opus) for an entire conversation is
 expensive.
-A typical agent task — "refactor error handling in jp_llm" — benefits from a
+A typical agent task, such as "refactor error handling in jp_llm", fits a
 research-plan-implement workflow: research the codebase on a cheaper model,
-produce a plan, then execute.
-Manually orchestrating these phases means switching models or starting new
+produce a plan, and execute it.
+Orchestrating those phases by hand requires switching models or starting new
 conversations between steps.
 
-Sub-agents let the main agent orchestrate this itself.
+Sub-agents let the main agent orchestrate this workflow itself.
 The frontier model delegates research to a cheaper sub-agent, receives a
-condensed summary, delegates plan authoring to another sub-agent, then
-implements from the finished plan.
-The main agent's context contains only summaries and artifacts — never the
-thousands of tokens of raw file content the research phase consumed.
+condensed summary, delegates plan authoring to another sub-agent, and implements
+from the finished plan.
+The main agent's context holds only summaries and plans, not the thousands of
+tokens of raw file content read during research.
 
-Sub-agents also handle research needs that arise mid-implementation.
-Three cycles into executing the plan, the agent discovers that changing `Error`
-variants requires understanding how the retry module pattern-matches on them.
-It delegates that investigation to a sub-agent and receives a 500-token summary,
-rather than reading the files directly and polluting its own context.
+Sub-agents also handle questions that come up mid-implementation.
+If the agent discovers partway through executing a plan that changing `Error`
+variants requires checking how the retry module matches on them, it can delegate
+that investigation to a sub-agent and receive a 500-token summary instead of
+reading the files into its own context.
 
 ### Design goals
 
@@ -56,26 +56,24 @@ rather than reading the files directly and polluting its own context.
 | **Scoped**            | Tools can only access the current        |
 |                       | conversation's subtree                   |
 
-## What we're building
+## Local tools
 
-Four tools that expose JP's CLI as capabilities the LLM can use:
+Four local tools expose JP CLI commands to the LLM:
 
 | Tool                    | Maps to                 | Purpose                                |
 | ----------------------- | ----------------------- | -------------------------------------- |
 | `jp_query`              | `jp query`              | Delegate a task to a sub-agent         |
 | `jp_conversation_list`  | `jp conversation ls`    | Discover existing sub-conversations    |
-| `jp_conversation_print` | `jp conversation print` | Read back a sub-conversation's history |
+| `jp_conversation_print` | `jp conversation print` | Read a sub-conversation's history      |
 | `jp_conversation_grep`  | `jp conversation grep`  | Search across sub-conversation content |
 
-Each tool enforces a security boundary: it can only operate on conversations
-that are descendants of the current conversation.
-The LLM cannot read, search, or continue arbitrary user conversations.
+Each tool is restricted to descendants of the current conversation, so the LLM
+cannot read, search, or continue arbitrary user conversations.
 
 ## Demo
 
-Here's how a main agent uses these tools in practice.
-The main agent (running Opus) is asked to refactor error handling.
-It delegates research to a cheaper model:
+Suppose the main agent (running Opus) is asked to refactor error handling.
+It delegates the initial codebase research to a cheaper model:
 
 ```js
 user: "Refactor error handling in jp_llm to use thiserror"
@@ -103,12 +101,11 @@ jp_llm defines two error types:
 </response>
 ```
 
-The sub-agent ran Sonnet, read 5 files, ran 2 greps, and returned a 500-token
-summary.
-The main agent processed only that summary.
+The sub-agent ran on Sonnet, read five files, ran two greps, and returned a
+500-token summary, which is all the main agent adds to its context.
 
-Three cycles into implementing, the main agent hits an unexpected pattern in the
-retry module.
+Three cycles into implementation, the main agent hits an unexpected pattern in
+the retry module.
 Rather than reading the files itself, it continues the existing
 sub-conversation:
 
@@ -130,9 +127,9 @@ retry.rs matches on Error variants in `is_retryable()`:
 </response>
 ```
 
-The sub-agent had its full prior context.
-The main agent received only the new answer.
-Later, the main agent can discover what sub-conversations exist:
+Because the sub-conversation retained its prior context, the sub-agent answers
+directly and the main agent receives only the new reply.
+Later, the main agent can list its sub-conversations:
 
 ```js
 main_agent: jp_conversation_list()
@@ -163,26 +160,23 @@ main_agent: jp_conversation_grep(pattern: "is_retryable")
 jp-c19283746501: retry.rs matches on Error variants in `is_retryable()`:
 ```
 
-Across this entire interaction, the main agent's context accumulated roughly
-1,500 tokens of sub-agent summaries.
-The sub-agents collectively read over 20 files and ran multiple greps — work
-that would have cost the main agent 10,000+ tokens of raw file content in its
-context window.
-The main agent never saw a line of source code it didn't need for
-implementation.
+Across this interaction, the main agent's context accumulated roughly 1,500
+tokens of sub-agent summaries.
+The sub-agents read over 20 files and ran multiple greps, keeping more than
+10,000 tokens of raw file content out of the main agent's context window so it
+only saw code needed for implementation.
 
-Each sub-conversation is a real conversation on disk.
-The main agent can return to them hours later, continue a line of research, or
-search across all of them for a half-remembered detail.
-The sub-agents are disposable — the knowledge they produced is not.
+Because each sub-conversation is persisted on disk, the main agent can return to
+it hours later, continue a line of research, or search across prior findings for
+a specific detail.
 
 ## Building the tools
 
 ### `jp_query`
 
-The core delegation tool.
-Creates a new child conversation (or continues an existing one) running a
-sub-agent with a specific configuration profile.
+`jp_query` is the delegation tool.
+It creates a new child conversation or continues an existing one, running a
+sub-agent under a specified configuration profile.
 
 #### Tool definition
 
@@ -290,53 +284,46 @@ echo "</response>"
 
 Key design decisions in this script:
 
-- **`--cfg=NONE` on creation only.** This resets all config to defaults before
-  applying the agent profile, creating a hard security boundary.
-  The agent config file must be fully self-contained — it specifies its own
-  model, system prompt, and tool set.
-  Changes to the user's workspace `config.toml` never leak into sub-agent
-  behavior.
+- **`--cfg=NONE` on creation only.** Resets all configuration to defaults before
+  applying the agent profile, isolating the sub-agent from the workspace
+  `config.toml`.
+  The profile must define its own model, system prompt, and tool set.
 
-- **No `--cfg=NONE` on continuation.** Once a conversation is created, its
-  config is stored in the stream.
-  Re-applying `NONE` would wipe those settings.
-  Continuation operates within the config established at creation time.
+- **No `--cfg=NONE` on continuation.** Once created, a conversation stores its
+  configuration in its event stream.
+  Re-applying `NONE` would wipe those settings, so continuation runs with the
+  configuration established at creation time.
 
-- **`conversation fork --last=0` for creation.** The script uses `conversation
-  fork` ([RFD 050]) to create a blank child conversation and capture its ID.
+- **`conversation fork --last=0` for creation.** `conversation fork` ([RFD 050])
+  creates a child conversation and prints its ID to stdout.
   `--last=0` copies zero turns, producing an empty child.
 
-- **`--root-id` for descendant validation.** The "continue" path passes
+- **`--root-id` for descendant validation.** The continuation path passes
   `--root-id={{context.conversation_id}}`.
-  JP enforces that the target conversation is a descendant of the root — if the
-  LLM provides an ID that escapes the subtree, the command fails with a hard
-  error.
-  No shell-level validation needed.
+  JP verifies that the target conversation is a descendant of that root and
+  fails with an error if the ID escapes the subtree, without needing shell-level
+  validation.
 
-- **`--no-activate`.** Sub-agent conversations should not become the user's
-  active conversation.
-  The `--no-activate` flag ([RFD 050]) persists the conversation without
-  switching to it.
+- **`--no-activate`.** Persists the sub-conversation without switching the
+  user's active conversation to it ([RFD 050]).
 
 - **Override allowlist.** The `overrides` parameter accepts `key=value` pairs,
-  but the script rejects anything that isn't `assistant.model=*`.
-  This lets the main agent pick a different model for a sub-agent without
-  opening up arbitrary config changes.
-  The allowlist can be extended in the tool definition's shell script as needs
-  evolve.
+  and the script rejects anything other than `assistant.model=*`.
+  This lets the main agent choose a different model for a sub-agent without
+  permitting arbitrary configuration changes.
+  Extend the allowlist in the script if other overrides are needed.
 
-- **Response wrapping.** The script wraps the sub-agent's stdout with a
-  `<response>` tag containing the conversation ID, so the main agent can
-  reference it in follow-up calls.
+- **Response wrapping.** Wraps the sub-agent's stdout in a `<response>` tag
+  containing the conversation ID so the main agent can reference it in follow-up
+  calls.
 
-- **`2>/dev/null` on `jp query`.** Chrome (progress indicators, tool headers)
-  goes to stderr.
-  Discarding it keeps the captured output clean.
+- **`2>/dev/null` on `jp query`.** Chrome (progress indicators and tool headers)
+  is written to stderr; discarding it keeps the captured output clean.
 
 ### `jp_conversation_list`
 
-Lets the main agent discover existing sub-conversations so it can reuse prior
-research instead of repeating it.
+`jp_conversation_list` lets the main agent discover existing sub-conversations
+so it can reuse prior research instead of repeating it.
 
 ```toml
 # jp_conversation_list.toml
@@ -351,8 +338,8 @@ sub-agent tasks.
 """
 ```
 
-No parameters — the tool is always scoped to the current conversation's
-children.
+The tool takes no parameters; it is always scoped to the current conversation's
+subtree.
 
 #### Command template
 
@@ -363,22 +350,19 @@ jp conversation ls \
   --format=json
 ```
 
-The output is JSON, which the LLM can parse to find conversation IDs and titles.
-The `--root` flag (from [RFD 039]) restricts the listing to descendants of the
-current conversation.
-The `--hidden` flag (from [RFD 040]) includes sub-conversations that were
-created with `--hidden`.
+The command outputs JSON containing conversation IDs and titles.
+`--root` ([RFD 039]) restricts the listing to descendants of the current
+conversation, and `--hidden` ([RFD 040]) includes sub-conversations created with
+`--hidden`.
 
 ### `jp_conversation_print`
 
-Lets the main agent read back a sub-conversation's history.
-Use sparingly — this can inject many tokens into the main agent's context,
-which is exactly what sub-agents are meant to avoid.
-Prefer `jp_conversation_grep` for targeted lookups, or `jp_query` to ask the
-sub-agent a follow-up question.
-
-The primary use case is reviewing what a sub-agent did (debugging), or
-extracting a specific artifact from a multi-turn sub-conversation.
+`jp_conversation_print` reads back a sub-conversation's history.
+Because printing a full transcript can inject many tokens into the main agent's
+context, reserve this tool for debugging what a sub-agent did or extracting a
+specific artifact from a multi-turn exchange.
+Prefer `jp_conversation_grep` for targeted lookups and `jp_query` for follow-up
+questions.
 
 ```toml
 # jp_conversation_print.toml
@@ -421,9 +405,9 @@ jp conversation print "{{tool.arguments.id}}" \
 
 ### `jp_conversation_grep`
 
-Lets the main agent search across sub-conversation content without printing
-entire conversations.
-This is the preferred way to find specific information in prior research.
+`jp_conversation_grep` searches across sub-conversation transcripts without
+printing full histories, making it the preferred way to look up specific
+findings from prior research.
 
 ```toml
 # jp_conversation_grep.toml
@@ -475,14 +459,13 @@ jp conversation grep \
 
 ## Configuring sub-agents
 
-A sub-agent's behavior is controlled entirely through a config file.
-Because the tool uses `--cfg=NONE` before loading the profile, the config file
-must be **fully self-contained** — it cannot rely on inheriting settings from
-the workspace's `config.toml`.
+A sub-agent's behavior is defined by its configuration profile.
+Because `jp_query` passes `--cfg=NONE` before loading the profile, the file must
+be **self-contained**: it cannot inherit settings from the workspace's
+`config.toml`.
 
-This is the primary security property of the system: **the agent config file
-*is* the security policy.** Reviewing what a sub-agent can do means reading one
-file.
+This makes the profile file the sub-agent's complete security policy.
+Auditing what a sub-agent can do requires reading only that file.
 
 ### Researcher profile
 
@@ -524,14 +507,13 @@ reasoning.display = "hidden"
 tool_call.show = false
 ```
 
-This config does not enable `jp_query`, preventing the researcher from spawning
-its own sub-agents.
-It does not enable any write tools (`fs_create_file`, `fs_modify_file`,
+This profile omits `jp_query`, preventing the researcher from spawning its own
+sub-agents, and omits write tools (`fs_create_file`, `fs_modify_file`,
 `cargo_check`, `git_commit`, etc.).
 
 ### Planner profile
 
-An agent that can read code and produce plans, but still cannot modify anything:
+An agent that can read code and produce plans, but cannot modify files:
 
 ```toml
 # jp_agent_planner.toml
@@ -573,28 +555,26 @@ tool_call.show = false
 ### The `NONE` boundary
 
 The `--cfg=NONE` flag ([RFD 038]) resets all configuration to defaults before
-applying the agent profile.
-This creates a hard isolation boundary:
+applying the agent profile, creating an isolation boundary:
 
-- The agent config must explicitly set `assistant.model`.
-  If it doesn't, config validation fails — a loud, clear error.
-- The agent config must explicitly enable each tool it needs.
-  Tools enabled in the user's workspace config are not inherited.
+- The agent config must set `assistant.model` explicitly, or configuration
+  validation fails with an error.
+- The agent config must enable each tool it needs; tools enabled in the
+  workspace config are not inherited.
 - Changes to the workspace `config.toml` never affect sub-agent behavior.
-  The user can add new tools, change models, or tweak settings without
-  accidentally granting sub-agents new capabilities.
+  Adding tools, changing models, or adjusting workspace settings does not grant
+  sub-agents new capabilities.
 
 After `NONE`, `config_load_paths` is empty (`[]`), so the agent profile must be
-loaded by direct path (`.jp/config/agent/researcher.toml`), not by load-path
-name (`agent/researcher`).
-The command template handles this mapping — the LLM selects from the `config`
-enum, and the shell script translates to a file path.
+loaded by file path (`.jp/config/agent/researcher.toml`) rather than by
+load-path name (`agent/researcher`).
+The LLM selects a profile from the `config` enum, and the shell script maps it
+to the corresponding file path.
 
 ### Restricting capabilities
 
-All capability restrictions are enforced through the agent config file and the
-tool's shell script.
-No special support from JP core is needed.
+Capability restrictions are enforced through the agent config file and the
+tool's shell script, without special support in JP core.
 
 | Control              | Mechanism                                              |
 | -------------------- | ------------------------------------------------------ |
@@ -607,25 +587,21 @@ No special support from JP core is needed.
 
 ## Security: conversation scoping
 
-The tools enforce that the LLM can only interact with conversations in its own
-subtree.
-This is the answer to "what stops the LLM from reading my unrelated
-conversations?"
+The tools restrict the LLM to conversations in its own subtree, preventing it
+from reading, searching, or continuing unrelated user conversations.
 
-The enforcement works at two levels:
+Subtree scoping is enforced at two levels:
 
-**Command template level.** The shell script controls the actual `jp`
-invocation.
-The LLM provides parameter values (conversation IDs, queries), but the template
-structure is fixed.
-The LLM cannot inject flags or change the command.
+**Command template level.** The shell script controls the `jp` invocation.
+The LLM supplies parameter values (conversation IDs and queries), while the
+command structure is fixed so the LLM cannot inject flags or alter the command.
 
 **`--root-id` constraint.** Tools that accept a conversation ID from the LLM
-pass `--root-id={{context.conversation_id}}` to the underlying `jp` command.
-JP enforces that the target conversation is a descendant of the root — if it
-isn't, the command fails with a hard error.
-This validation happens inside JP, not in shell script, so it is atomic and
-cannot be bypassed by malformed input.
+pass `--root-id={{context.conversation_id}}` to `jp`.
+JP verifies that the target conversation is a descendant of that root and fails
+with an error otherwise.
+Because this check runs inside JP rather than in the shell script, it is atomic
+and cannot be bypassed by malformed input.
 
 | Tool                    | Scoping mechanism                       |
 | ----------------------- | --------------------------------------- |
@@ -639,41 +615,39 @@ cannot be bypassed by malformed input.
 | `jp_conversation_grep`  | `--root-id={{context.conversation_id}}` |
 |                         | or `--root=`                            |
 
-The `config` parameter's `enum` is the second security boundary — it restricts
-which agent profiles are available.
-A free-form config path would let the LLM attempt to load arbitrary config
-files.
-The enum prevents this.
+Two additional boundaries restrict configuration:
 
-The `overrides` parameter's shell-side validation is the third boundary.
-Only allowlisted keys (currently `assistant.model=*`) are accepted.
-The LLM cannot override tool settings, system prompts, or other sensitive config
-via overrides.
+- **Profile allowlist (`config` enum).** The `config` parameter's `enum` limits
+  which agent profiles the LLM can select, preventing it from loading arbitrary
+  config files via a free-form path.
+
+- **Override allowlist (`overrides` validation).** The shell script accepts only
+  allowlisted override keys (`assistant.model=*`), so the LLM cannot override
+  tool settings, system prompts, or other configuration.
 
 ## Workflows
 
 ### Research-plan-implement
 
-The sub-agent pattern supports a phased workflow where the main agent
-orchestrates each step:
+The sub-agent pattern supports a phased workflow orchestrated by the main agent:
 
 1. **Research.** Delegate codebase investigation to a researcher sub-agent.
    The sub-agent reads files, runs greps, and returns a structured summary.
 
-2. **Plan.** Feed the research summary to a planner sub-agent (or the main agent
-   itself) to produce a step-by-step implementation plan.
+2. **Plan.** Pass the research summary to a planner sub-agent (or plan in the
+   main agent) to produce a step-by-step implementation plan.
 
-3. **Implement.** The main agent executes the plan.
-   When it hits a knowledge gap, it delegates another research task rather than
-   reading files directly.
+3. **Implement.** Execute the plan in the main agent, delegating follow-up
+   research tasks whenever a knowledge gap comes up rather than reading files
+   directly.
 
-The main agent's context stays lean throughout: it sees summaries and plans,
-never raw file contents from the research phase.
+The main agent's context stays lean throughout: it sees summaries and plans, not
+raw file contents from the research phase.
 
 ### Mid-task research
 
-Research needs often arise during implementation.
-The main agent can delegate these to a sub-agent at any point:
+When questions arise during implementation, the main agent can delegate them to
+a sub-agent at any point:
 
 ```txt
 main_agent > [modifying error.rs, realizes it needs to understand retry logic]
@@ -682,8 +656,8 @@ main_agent > [modifying error.rs, realizes it needs to understand retry logic]
            > [continues implementation with the new knowledge]
 ```
 
-The main agent can also check whether a prior sub-conversation already covered
-the topic:
+The main agent can also check whether an earlier sub-conversation already
+covered the topic:
 
 ```txt
 main_agent > jp_conversation_grep(pattern: "retry")
@@ -694,8 +668,8 @@ main_agent > jp_conversation_grep(pattern: "retry")
 ### Parallel sub-agents
 
 JP's `ToolCoordinator` runs tool calls in the same batch concurrently.
-If the main agent calls `jp_query` multiple times in one response, each creates
-an independent sub-conversation running in parallel:
+When the main agent calls `jp_query` multiple times in a single turn, each call
+runs in parallel in its own sub-conversation:
 
 ```txt
 main_agent > jp_query(config: "agent/researcher", query: "Analyze error handling in jp_llm")
@@ -703,73 +677,67 @@ main_agent > jp_query(config: "agent/researcher", query: "Analyze error handling
            < (both results returned when both complete)
 ```
 
-The response wrapping includes the conversation ID, so the main agent can track
-and reference each result independently.
+Because each `<response>` tag includes its `conversation_id`, the main agent can
+track and continue each sub-conversation independently.
 
 #### Future: stateful sub-agents
 
 With [RFD 009] and [RFD 037], `jp_query` could adopt the stateful tool protocol
-for asynchronous execution.
-The main agent would spawn sub-agents, continue with other work, and await
-results when needed.
-This is a future enhancement; the synchronous model delivers the core value.
+for asynchronous execution, allowing the main agent to spawn sub-agents,
+continue working, and await their results later.
 
 ## Tradeoffs
 
-**Process overhead.** Each sub-agent spawns a new `jp` process: argument
-parsing, config resolution, and MCP server connection setup.
-For sub-agents doing multiple LLM turns, this is small relative to API latency.
-For trivial lookups, calling a tool directly is faster.
+**Process overhead.** Each sub-agent call spawns a new `jp` process, including
+argument parsing, config resolution, and MCP server connection setup.
+Across multiple LLM turns, this startup cost is small compared to API latency,
+but for single lookups calling a tool directly is faster.
 
-**Conversation storage growth.** Sub-conversations are real conversations on
-disk.
-An aggressive main agent can create many.
-Mitigations: set `--tmp` to auto-expire ephemeral sub-conversations, and use
-`--hidden` ([RFD 040]) to keep them out of `jp conversation ls`.
-The tree structure from [RFD 039] keeps them organized under the parent, and
+**Conversation storage growth.** Sub-conversations are stored on disk, and an
+aggressive main agent can create many of them.
+Passing `--tmp` auto-expires ephemeral sub-conversations, and `--hidden` ([RFD
+040]) keeps them out of default `jp conversation ls` output.
+Conversation trees ([RFD 039]) group them under the parent conversation, and
 removing the parent with `--cascade` cleans up the entire subtree.
 
 **Delegation quality.** The main agent must formulate clear, scoped tasks.
-Vague delegations ("look at the codebase") waste tokens.
-Overly narrow tasks ("read line 42 of error.rs") are cheaper as direct tool
-calls.
-The system prompt should guide when to delegate — the tool description already
-says "for tasks that require reading multiple files."
+Vague delegations ("look at the codebase") waste tokens, while narrow tasks
+("read line 42 of error.rs") are cheaper as direct tool calls.
+The `jp_query` description instructs the model to delegate tasks that require
+reading multiple files, and the main agent's system prompt should reinforce when
+to delegate.
+Whether frontier models follow this guidance consistently still needs
+validation.
 
-Whether current frontier models reliably follow this guidance needs validation.
-
-**`conversation print` token cost.** Printing a full sub-conversation injects
-potentially thousands of tokens into the main agent's context.
+**`conversation print` token cost.** Printing a full sub-conversation can inject
+thousands of tokens into the main agent's context.
 The tool description warns against this and recommends `jp_conversation_grep` or
-`jp_query` (follow-up) instead.
-`--last=1` limits the damage for cases where the main agent only needs the most
-recent response.
+follow-up `jp_query` calls instead; when only the latest response is needed,
+`--last=1` caps the output.
 
-**JSON output key stability.** The current `jp conversation ls --format=json`
-output uses display-oriented keys (`"ID"`, `"#"`, `"Activity"`).
-These are the table column headers serialized to JSON, not a stable API
-contract.
-The shell scripts in this guide use these keys; they may change to snake_case
-(`id`, `events_count`) when a proper structured output format is defined.
+**JSON output key stability.** `jp conversation ls --format=json` serializes
+display-oriented table column headers (`"ID"`, `"#"`, `"Activity"`) rather than
+a stable schema.
+The shell scripts in this guide use those keys, which may change to `snake_case`
+(`id`, `events_count`) once a structured output format is defined.
 
 ## Prerequisites
 
 This guide assumes the following RFDs are implemented:
 
-- [RFD 038] — `--cfg=NONE` for isolated config and config load paths.
-- [RFD 039] — conversation trees (`conversation fork` creates children) and
+- [RFD 038]: `--cfg=NONE` for isolated config and config load paths.
+- [RFD 039]: conversation trees (`conversation fork` creates children) and
   `--root` flag on `conversation ls`.
-- [RFD 040] — hidden conversations and `conversation_id` in tool context.
-- [RFD 048] — output channel separation (stdout for assistant output, stderr
-  for chrome) so sub-agent output can be cleanly captured.
-- [RFD 049] — `--non-interactive` mode for sub-agents running without a
-  terminal.
-- [RFD 050] — `jp conversation new`, `--no-activate`, and `--root-id` for
+- [RFD 040]: hidden conversations and `conversation_id` in tool context.
+- [RFD 048]: output channel separation (stdout for assistant output, stderr for
+  chrome) so sub-agent output can be cleanly captured.
+- [RFD 049]: `--non-interactive` mode for sub-agents running without a terminal.
+- [RFD 050]: `jp conversation new`, `--no-activate`, and `--root-id` for
   scripting ergonomics.
 
 Additionally:
 
-- `conversation grep` needs a `--root` flag (mirroring `conversation ls`) to
+- `conversation grep` needs a `--root` flag (matching `conversation ls`) to
   scope searches to a subtree.
 - `conversation print` and `conversation grep` need `--root-id` support for
   descendant validation.
@@ -778,21 +746,21 @@ Additionally:
 
 ## References
 
-- [RFD 038: Config Reset Keywords][RFD 038] — `--cfg=NONE` and config keywords.
-- [RFD 039: Conversation Trees][RFD 039] — tree-structured conversation
-  hierarchy and `--root` scoping.
-- [RFD 040: Hidden Conversations and Tool Context][RFD 040] — `hidden` flag and
+- [RFD 038: Config Reset Keywords][RFD 038]: `--cfg=NONE` and config keywords.
+- [RFD 039: Conversation Trees][RFD 039]: tree-structured conversation hierarchy
+  and `--root` scoping.
+- [RFD 040: Hidden Conversations and Tool Context][RFD 040]: `hidden` flag and
   `conversation_id` in tool execution context.
-- [RFD 048: Four-Channel Output Model][RFD 048] — stdout/stderr separation for
+- [RFD 048: Four-Channel Output Model][RFD 048]: stdout/stderr separation for
   clean sub-agent output capture.
-- [RFD 049: Non-Interactive Mode][RFD 049] — detached prompt policies for
+- [RFD 049: Non-Interactive Mode][RFD 049]: detached prompt policies for
   sub-agents running without a terminal.
-- [RFD 050: Scripting Ergonomics][RFD 050] — `conversation new`,
-  `--no-activate`, and `--root-id`.
-- [RFD 009: Stateful Tool Protocol][RFD 009] — future: handle registry for
-  async sub-agents.
-- [RFD 037: Await Tool][RFD 037] — future: synchronization for parallel
-  stateful sub-agents.
+- [RFD 050: Scripting Ergonomics][RFD 050]: `conversation new`, `--no-activate`,
+  and `--root-id`.
+- [RFD 009: Stateful Tool Protocol][RFD 009]: future handle registry for async
+  sub-agents.
+- [RFD 037: Await Tool][RFD 037]: future synchronization for parallel stateful
+  sub-agents.
 
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 037]: 037-await-tool-for-stateful-handle-synchronization.md
