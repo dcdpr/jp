@@ -12,35 +12,30 @@
 ## Summary
 
 This document establishes **tickets**: lightweight work items tracked as
-markdown files in the repository, alongside RFDs.
-Tickets carry comments, sit on a kanban board, and can be imported from GitHub
-issues.
-They take over the work that RFDs have been absorbing but were never meant to
-hold.
+markdown files in the repository alongside RFDs.
+Tickets support comments, sit on a kanban board, and can be imported from GitHub
+issues, giving routine tasks and bugs a home outside the RFD process.
 
 ## Motivation
 
-The RFD process works for what it was designed for.
-It has also become the only place to write anything down, and the corpus shows
-it: 98 published RFDs and 58 drafts, with one-pagers sitting next to real
-designs.
-RFD 068 is 585 words.
-RFD 065 is 4638.
-Two drafts share a title.
+The RFD process is meant for significant architectural changes, but because the
+repository has no lighter-weight format, RFDs have become the only place to
+write anything down.
+The corpus has grown to 98 published RFDs and 58 drafts, mixing brief task notes
+with full system designs: RFD 068 is 585 words while RFD 065 is 4,638, and two
+drafts share the same title.
+Without a lighter option, every task climbs to an RFD.
 
-When "significant architectural change" is the bar and there is no lower rung,
-everything climbs to the top rung.
-
-GitHub Issues are the obvious lower rung, and they stay — outside contributors
-should not have to clone a repository to file a bug.
-But assistants grep the repository constantly and rarely search GitHub, so
-issues sit outside the context that actually gets read.
-They are also absent from `git grep` and detached from the commits that resolve
-them.
+GitHub Issues fill that role for external contributors, who should not have to
+clone the repository to file a bug.
+Within the repository workflow, however, GitHub Issues sit outside the context
+that humans and AI assistants read day to day: assistants search the working
+tree constantly and rarely query GitHub, issues do not appear in `git grep`, and
+issue state is detached from the commits that resolve the work.
 
 ## What a Ticket Is
 
-A ticket is a unit of work: a bug, a feature, a chore.
+A ticket is a unit of work: a bug, a feature, or a chore.
 It records what needs doing and the discussion around it.
 
 |           | RFD                            | Ticket                         |
@@ -50,19 +45,22 @@ It records what needs doing and the discussion around it.
 | Lifetime  | Permanent record               | Closed when the work is done   |
 | Deletable | No                             | Yes                            |
 
-Write a ticket when the work is clear enough to start, an RFD when it needs a
-design first.
-The signal is whether there is a decision to argue about: "the tool call header
-misaligns below 80 columns" is a ticket even if the fix is subtle; "how should
-tool output be bounded?" is an RFD even if the implementation is trivial.
+Write a ticket when the work is clear enough to start, and an RFD when it needs
+a design first.
+The deciding factor is whether there is an approach to debate: "the tool call
+header misaligns below 80 columns" is a ticket even if the fix is subtle,
+whereas "how should tool output be bounded?" is an RFD even if the
+implementation is small.
 
-A ticket whose discussion turns into a disagreement about approach is promoted
-to an RFD draft — the pressure valve that keeps design work out of tickets
-without pushing task work back into RFDs.
+If a ticket's discussion turns into a disagreement about design, promote the
+ticket to an RFD draft.
+This keeps design debates out of tickets without forcing routine task work into
+RFDs.
 
-Unlike RFDs, tickets can be deleted — a ticket carrying false claims or
-imported spam is removed outright, so that nothing reads it as true.
-References to a deleted ticket render as dangling.
+Unlike RFDs, tickets can be deleted.
+A ticket carrying false claims or imported spam is removed outright so tools and
+assistants do not read it as valid context.
+References to a deleted ticket render as dangling links.
 
 > [!TIP]
 > [RFD 102] replaces the counter with a time-ordered random id, so that two
@@ -72,16 +70,15 @@ References to a deleted ticket render as dangling.
 ## Ticket Format
 
 A ticket is a single markdown file at `docs/ticket/<id>-slug.md`.
-The canonical reference form is `T-02wt0kx`; tooling accepts `T02wt0kx`, the
-bare body, and any case.
-The id's shape and allocation are specified in [RFD 102].
+The canonical reference form is `T-02wt0kx`; tooling also accepts `T02wt0kx`,
+the bare ID (`02wt0kx`), and any letter case.
+The ID's format and allocation are specified in [RFD 102].
 
-The filename carries the id and the document does not, so there is one place
-that names a ticket and nothing to keep in step.
-Renaming a ticket is a rename.
+The ticket ID appears only in the filename, not inside the document, so there is
+no duplicate field to keep in sync and renaming a ticket is a plain file rename.
 
-Description and full discussion live in that one file, so reading a ticket is
-one `fs_read_file`, one `cat`, or one page on the website.
+The description and full comment thread live in the same file, so reading a
+ticket takes a single `fs_read_file` call, `cat` command, or web page load.
 
 ````markdown
 # Tool call header misaligned
@@ -123,8 +120,8 @@ let available = width - indent;
 
 ### Metadata
 
-Tickets use the same `- **Key**: Value` idiom as RFDs, for the same reason: it
-parses with a three-line regex and renders as visible content.
+Tickets use the same `- **Key**: Value` metadata list as RFDs: it parses with a
+three-line regex and renders directly as Markdown content.
 
 | Field         | Required | Values                           |
 | ------------- | -------- | -------------------------------- |
@@ -135,21 +132,21 @@ parses with a three-line regex and renders as visible content.
 | `GitHub`      | no       | `#123`, set by import            |
 | `Label`       | no       | One `key=value` pair, repeatable |
 
-There is no close date.
-The `ticket_*` tooling reads it from git history, so the file never carries a
+Tickets do not store a close date in metadata.
+The `ticket_*` tooling derives it from git history so the file never carries a
 timestamp that can go stale.
 
 #### Labels
 
-A label is a `key=value` annotation classifying a ticket: what type of work it
-is, and what part of the system it lands in.
-JP's board says the first with `type` and the second with keys such as `client`
-and `package`; another board picks its own.
-A ticket carries any number of them, or none, unless the board bounds a key (see
-below), and a key may repeat: a ticket spanning two crates carries
-`package=jp_cli` and `package=jp_config`.
+A label is a `key=value` (or bare `key`) annotation classifying a ticket, such
+as the kind of work (`type`) or the affected area (`client`, `package`).
+Each board defines its own keys.
+Unless a key's cardinality is constrained (see below), a ticket can carry any
+number of labels, and a key may repeat: a ticket spanning two crates carries
+both `package=jp_cli` and `package=jp_config`.
 
-The field is written once per pair rather than joining them onto one line:
+Each label is written on its own `- **Label**:` line rather than joined onto a
+single line:
 
 ```markdown
 - **Label**: client=cli
@@ -157,24 +154,22 @@ The field is written once per pair rather than joining them onto one line:
 - **Label**: package=jp_config
 ```
 
-That is not cosmetic.
-Every markdown file in the repository is formatted by `comfort`, which wraps a
-list item at 80 columns; a single line listing several long values would be
-wrapped onto an indented continuation that the metadata parser reads as the
-start of the description.
-One pair per line means no line grows with the number of labels.
-The formatter also escapes what would otherwise be emphasis, so `package=jp_cli`
-is written `package=jp\_cli` and every reader undoes that.
+Writing one label per line keeps line length independent of the label count.
+Every markdown file in the repository is formatted by `comfort`, which wraps
+list items at 80 columns; a single line listing several labels would wrap onto
+an indented continuation line that the metadata parser would read as the start
+of the description.
+`comfort` also escapes underscores that would otherwise parse as emphasis
+(writing `package=jp\_cli` for `package=jp_cli`), and readers unescape them when
+parsing.
 
-The shape, the key grammar, and the on-disk invariants come from [`jp_label`],
-the same `Labels` conversation labels use ([RFD 101]); the vocabulary below is
-the ticket board's own, declared through that crate's `Vocabulary`.
-
-The vocabulary lives in the workspace configuration, under
-`plugins.command.ticket.options.labels` ([RFD 116]).
-That setting is the only source of truth for which labels exist; nothing here
-enumerates them.
-It declares one entry per key, with the values that key accepts:
+Label syntax, key grammar, and on-disk invariants come from [`jp_label`], the
+same `Labels` type used by conversation labels ([RFD 101]).
+The ticket board declares its allowed label set through that crate's
+`Vocabulary` type under `plugins.command.ticket.options.labels` in the workspace
+configuration ([RFD 116]).
+That setting is the sole source of truth for which labels exist, with one entry
+per key:
 
 ```toml
 [plugins.command.ticket.options.labels.<key>]
@@ -186,61 +181,61 @@ max = 1
 unique = "key-value"
 ```
 
-`min` and `max` bound how many of the key's values one ticket carries.
-Left out, a ticket carries any number of them, or none.
-`min = 1, max = 1` makes a key every ticket carries exactly once, which is how
-JP's board makes `type` say what kind of work every ticket is; `max = 1` alone
-makes one optional, but never repeated.
-Every label write is held to them, and the refusal names the values to choose
-from; `jp ticket check` and the docs build report a ticket that breaks them,
-such as one edited by hand.
-A key that leaves `values` out is bare: present or absent, so it takes neither.
+- **Allowed values (`values` and `retired`)**: Declaring a closed set prevents
+  free-text near-synonyms that break grouping.
+  `values = ["..."]` restricts the key to an explicit list.
+  `values = []` declares an open key that accepts any value as written (for
+  values that cannot be enumerated up front, such as an RFD number) while still
+  supporting `min`, `max`, and `unique`.
+  Omitting `values` declares a bare key (`<key>` with no `=value`); since a bare
+  key is only present or absent, it accepts neither `min` nor `max`.
+  If a board declares no vocabulary at all, any well-formed `key` or `key=value`
+  label is accepted.
 
-`unique` holds a key to one ticket across the board.
-`unique = "key"` lets one ticket carry the key at all, whatever its value;
-`unique = "key-value"` lets one ticket carry each of its values, so `rfd=116`
-and `rfd=117` sit on two tickets but `rfd=116` on only one.
-Every label write checks it against the other tickets, and the refusal names the
-ticket already carrying the label; `jp ticket check` and the docs build report
-two tickets carrying one, such as after a hand edit or a merge.
-`unique = "key"` on a key every ticket needs is refused, since no two tickets
-could meet it.
+  A `retired` value remains valid on tickets that already carry it and is
+  preserved when those tickets are edited, so relabelling an old ticket never
+  forces its history to be rewritten, but the value cannot be added to new
+  tickets.
+  Removing a value from the vocabulary without retiring it causes `jp ticket
+  check` and the docs build to fail on every ticket still carrying that value.
 
-A closed set is the point of declaring one.
-Free-text labels accumulate near-synonyms and grouping stops working.
-A write naming a key or value the vocabulary doesn't declare is refused, and the
-refusal names the ones that can be added.
-A key declared with `values = []` is open: it takes any value, for labels whose
-values can't be listed up front, such as an RFD number.
-Its values are spelled as given, and it can be bounded and made unique like any
-other key.
-A board that declares no vocabulary has no set to hold a label to, so it takes
-any well-formed `key` or `key=value` label as written.
+- **Cardinality (`min` and `max`)**: `min` and `max` bound how many values for a
+  key a single ticket may carry.
+  When omitted, a ticket may carry zero or more values.
+  Setting `min = 1, max = 1` requires every ticket to carry the key exactly once
+  (how JP's board requires `type` on every ticket); setting `max = 1` alone
+  makes the key optional and non-repeatable.
 
-**Retiring is not deleting.** A retired value stays valid on a ticket that
-already carries it and can be listed again on a write to that ticket, so
-relabelling an old ticket never forces its history to be rewritten.
-It cannot be added anywhere new.
-Deleting the entry outright is the other option, and it turns every ticket
-carrying that value into a docs-build failure until they are fixed.
+- **Board-wide uniqueness (`unique`)**: `unique` restricts a key across all
+  tickets on the board.
+  `unique = "key"` allows at most one ticket on the board to carry the key
+  regardless of value; `unique = "key-value"` allows at most one ticket per
+  distinct `key=value` pair, so `rfd=116` and `rfd=117` can sit on different
+  tickets while `rfd=116` can sit on only one.
+  Combining `unique = "key"` with `min >= 1` is rejected because no two tickets
+  could satisfy both.
 
-Reading is liberal throughout: a ticket lists the labels it carries as written,
-and one the vocabulary doesn't declare is reported by `jp ticket check` and the
-docs build rather than hidden.
+- **Validation (`jp ticket check` and writes)**: Every label write validates the
+  ticket against the vocabulary.
+  Refused writes name the allowed values to choose from or the existing ticket
+  that already holds a `unique` label.
+  Reading is permissive: a ticket always lists the labels written in its file,
+  and undeclared labels are reported by validation rather than hidden.
+  `jp ticket check` (and the docs build) checks every ticket against all write
+  rules: unparseable ticket files, undeclared keys or values, `min` and `max`
+  violations, duplicate `unique` labels across tickets (such as after a hand
+  edit or merge), duplicate ticket IDs across files, and legacy four-digit
+  filenames from before [RFD 102] that commands ignore.
+  `jp ticket check` exits with status 1 on any violation so it can run in CI.
 
-`jp ticket check` reads every ticket and reports each rule a write would refuse:
-a ticket that doesn't parse, a label the vocabulary doesn't declare, a key held
-outside its `min` and `max`, a `unique` label on more than one ticket, two files
-claiming one id, and a file named in the four-digit form ids had before RFD 102,
-which no command reads.
-It exits 1 when it finds one, so it can run in CI.
+List filtering accepts either a `key=value` pair or a bare `key`: `--label
+package=jp_cli` matches that exact value, while `--label package` matches any
+value under `package`.
+Repeating `--label` narrows results further, requiring every specified filter to
+match.
 
-Filtering takes a pair or a bare key: `--label package=jp_cli` matches that
-value, `--label package` matches any value under the key.
-Repeating the flag narrows further, so each term is an additional requirement.
-
-Labelling adds and removes rather than replacing, so a write never drops a label
-it doesn't name:
+Label subcommands add and remove individual labels rather than overwriting the
+full list, so a write never drops unrelated labels:
 
 ```sh
 jp ticket label add --id T-02wt0kx client=cli   # keeps what the ticket carries
@@ -248,97 +243,100 @@ jp ticket label set --id T-02wt0kx type=bug      # replaces what `type` holds
 jp ticket label rm --id T-02wt0kx package        # takes every `package` label
 ```
 
-`--id` names the tickets, on either side of the verb; repeat it, or separate ids
-with commas, to change several at once, all of them or none.
-Adding a label the ticket carries, or removing one it lacks, changes nothing and
-says so, so a retried call lands the same way twice.
-`jp ticket edit --label` is the one write that sets the whole list, and it names
-the labels it removed.
-Because the check is against the ticket as well as the vocabulary, a retired
-value the ticket already has stays through any of them.
+`--id` can appear before or after the subcommand and accepts repeated flags or
+comma-separated IDs to update multiple tickets atomically.
+Adding a label the ticket already carries, or removing one it lacks, changes
+nothing and reports that no change was made, making retries idempotent.
+`jp ticket edit --label` is the only write that replaces the entire label list,
+and it reports any labels it removed.
+Because validation checks the existing ticket as well as the vocabulary, a
+retired value already on the ticket remains valid across all of these commands.
 
-The `ticket_*` tools advertise the accepted tokens as a JSON Schema `enum`, so
-the assistant is offered the set rather than guessing at it.
-An `enum` can't hold every value of an open key, so a board with one gets no
-`enum`: its labels are described in words instead, and a wrong guess is refused
-with the labels it can use.
-`ticket_create` and `ticket_edit`'s `add_labels` are offered only what they may
-add; `ticket_list` also gets retired values, because finding what still carries
-one means filtering on it.
-`ticket_edit` takes labels off with `remove_labels`, where a bare key takes
-every label under it.
-The tool declarations cannot read the vocabulary themselves, so `jp ticket tools
-sync` mirrors the tokens into a file it generates next to them,
-`.jp/mcp/tools/ticket/synced.toml` in JP.
-The mirror is a hint rather than a contract: writes are validated against the
-vocabulary, so a stale mirror degrades to a corrective round trip and never to a
-wrong write, and editing the vocabulary never fails a test.
-It is a stopgap, and goes once a plugin can describe the tools it serves ([RFD
+The `ticket_*` assistant tools expose valid label tokens as a JSON Schema `enum`
+so the assistant selects from the allowed set instead of guessing.
+Because an `enum` cannot enumerate every value of an open key (`values = []`), a
+board with an open key omits `enum` from the schema and describes its keys in
+prose instead; invalid guesses are still rejected on write with the list of
+valid labels.
+`ticket_create` and `ticket_edit`'s `add_labels` include only active values,
+while `ticket_list` also includes retired values so the assistant can filter for
+tickets that still carry them.
+`ticket_edit`'s `remove_labels` removes specific `key=value` pairs, or every
+label under a key when given a bare `key`.
+
+Because tool declarations cannot read the workspace vocabulary directly, `jp
+ticket tools sync` mirrors the allowed tokens into a generated file alongside
+them (`.jp/mcp/tools/ticket/synced.toml` in JP).
+This mirror is a schema hint rather than an enforcement contract: writes always
+validate against the vocabulary, so a stale mirror degrades to a corrective
+round trip rather than an invalid write, and editing the vocabulary does not
+break tests.
+`synced.toml` is a stopgap until plugins can describe the tools they serve ([RFD
 116]).
 
-An import never sets labels.
-The repository owns the metadata block, so an imported issue is labelled here by
-whoever triages it.
+GitHub import never sets labels.
+The repository owns the metadata block, so imported issues are labelled during
+triage.
 
 ### Comments
 
-Comments are separated by a line of five or more dashes and open with their own
-metadata block.
-`From` is a short handle (`jean`, `jp`); imported GitHub comments use
-`gh:username`.
+Comments are separated by a line of five or more dashes (`-----`) and open with
+their own metadata block.
+`From` is a short handle (`jean`, `jp`), or `gh:username` for imported GitHub
+comments.
 
-The *structure* of the file is append-only: comment blocks are never removed or
-reordered, and a new comment is a pure append at EOF.
-Block *contents* are freely editable, as on GitHub — descriptions grow as
-information arrives, and authors fix their own comments.
-Deleting a comment replaces its body with a marker naming the reason (`deleted`,
-`off-topic`, `spam`) and keeps the block.
+The structure of the file is append-only: comment blocks are never removed or
+reordered, and adding a comment appends to the end of the file.
+Block contents remain editable, as on GitHub, so descriptions can grow as
+information arrives and authors can edit their own comments.
+Deleting a comment preserves the block and replaces its body with a marker
+naming the reason (`deleted`, `off-topic`, or `spam`).
 
-Replies are recorded as `- **Re**: #1`, referencing a comment by its 1-based
-position.
-A reply always targets a comment on the same ticket, so it names no id.
-Storage stays flat; the website and terminal render the thread.
-Positions are not identifiers: two branches appending concurrently can shift
-one, and a reply then points at the wrong comment.
-Accepted rather than solved; stable ids are the fix if it ever bites.
+Replies are recorded as `- **Re**: #1`, referencing a comment on the same ticket
+by its 1-based position.
+Storage stays flat while the website and terminal render the thread.
+Because positions are not stable identifiers, concurrent appends on two branches
+can shift comment indices and leave a reply pointing at the wrong comment.
+That tradeoff is accepted for now; stable comment IDs are the fix if concurrent
+replies become a problem.
 
 ### Checklists
 
-A description can hold a checklist: the steps or acceptance criteria of the
-work, as markdown task-list items.
+A description can include Markdown task-list items to track the steps or
+acceptance criteria of the work:
 
 ```markdown
 - [x] Keep tools declared after a result
 - [ ] Cover a second tool call
 ```
 
-An item is a line opening with optional indentation, a list marker, whitespace,
-the checkbox, whitespace, and text.
-Items inside fenced code blocks don't count, and neither do items in comments,
-which the tooling only ever appends.
+A checklist item is a line opening with optional indentation, a list marker,
+whitespace, a checkbox (`[ ]` or `[x]`), whitespace, and item text.
+Task-list lines inside fenced code blocks or comments (which tooling only
+appends) are ignored.
 
-A checklist's progress is counted from the description whenever it is read, and
-never written into the metadata, so a checkbox ticked by hand and the tooling
-can't disagree.
-The tooling ticks an item by its text, changing the one character inside its
-checkbox and nothing else.
-Closing a ticket with items unchecked is allowed and reported, not refused: the
-items are the ticket's own, and whoever closes it decides what is left of them.
+Checklist progress is counted from the description on read and is never written
+into metadata, so checkboxes ticked by hand and by tooling cannot disagree.
+Tooling ticks an item by matching its text and changing only the character
+inside its checkbox.
+Closing a ticket with unchecked items is allowed and reported rather than
+refused: the checklist belongs to the ticket, and whoever closes it decides
+whether unchecked items remain relevant.
 
-An item is a step inside one piece of work.
-Work that could be picked up, merged, or argued about on its own is a ticket of
-its own.
+A checklist item represents a step within one piece of work.
+Work that can be picked up, merged, or debated on its own belongs in a separate
+ticket.
 
 ### Parsing
 
 A comment boundary is a line of five or more dashes at column zero, followed by
-a blank line, followed by a metadata block containing both `From` and `Date`.
-Content inside fenced code blocks is skipped.
+a blank line and a metadata block containing both `From` and `Date`.
+Content inside fenced code blocks is skipped when scanning for boundaries.
 Everything before the first boundary is the description.
 
-The `## Comments` heading is decorative.
-Tooling inserts it before the first comment and never consults it when parsing,
-so a heading of that name anywhere in a description or comment body is harmless.
+The `## Comments` heading is decorative: tooling inserts it before the first
+comment and never consults it when parsing, so a heading of that name inside a
+description or comment body is harmless.
 
 ## The Board
 
@@ -348,185 +346,181 @@ Tickets sit on a kanban board with three columns:
 Todo  →  In Progress  →  Done
 ```
 
-Columns are stages of work; priority is the vertical order within a column.
-Todo is therefore the prioritized work queue, read top-down, and it holds
-triaged and untriaged work alike — an imported bug report that may not be a bug
-still belongs there.
+Columns represent stages of work, and vertical order within a column represents
+priority.
+`Todo` is the prioritized work queue, read top-down, and holds triaged and
+untriaged work alike, including newly imported bug reports awaiting triage.
+`Done` is ordered newest-first; the board view shows only the head of the
+column, while full history lives in the ticket index.
 
-Blocking is not part of the format, and the board has no column or badge for it:
-a project that marks blocked tickets does it with a label, which the board shows
-like any other.
+Blocking is not part of the ticket format, and the board has no dedicated column
+or badge for it.
+Projects that mark blocked tickets use a label, which the board renders like any
+other label.
 
-Done is ordered like any other column, newest first, and the board view shows
-only the head of it.
-Full history lives in the ticket index.
+Board state is split across two places, matching the RFD priority board:
 
-Two pieces of state, kept apart:
-
-- **Status** lives in the ticket file.
-  It is semantic and belongs to the ticket.
-- **Order within a column** lives in a single board file.
-  It is relational and belongs to no individual ticket.
-
-Encoding rank as a ticket field would mean every drag rewrites a dozen files.
-Same split the RFD priority board already uses.
+- **Status** lives in the ticket file, since workflow status is semantic and
+  belongs to the ticket.
+- **Order within a column** lives in a single board file, since rank is
+  relational across tickets.
+  Encoding rank as a field on each ticket would mean reordering a column
+  rewrites a dozen ticket files.
 
 ## Relationship to RFDs
 
 Tickets and RFDs are separate document kinds with separate numbering and
-separate lifecycles.
-They meet in three places.
+lifecycles.
+They connect in three places.
 
-### An accepted RFD gets a tracking ticket, optionally
+### RFD Tracking Tickets
 
-When an RFD is accepted, `jp rfd promote` offers to file its tracking ticket:
-one ticket labelled `tracking-rfd=045`, with the phases of the Implementation
-Plan as its description, one checklist item per phase.
-A prompt, not an automatic step — the same shape as the existing tracking-issue
-prompt — because acceptance records an agreed direction, not a commitment to
-start building.
-Whoever accepts the prompt reviews the ticket before it lands.
+When an RFD is accepted, `jp rfd promote` offers to file its **tracking ticket**
+(replacing the GitHub tracking issue from [RFD 041] §2): one ticket labelled
+`tracking-rfd=045`, with the phases of the Implementation Plan as its
+description and one checklist item per phase.
+Filing is an interactive prompt rather than an automatic step, matching the
+earlier tracking-issue prompt, because acceptance records an agreed design
+direction rather than a commitment to start building immediately.
+Whoever accepts the prompt reviews the ticket before it is created.
 
-`jp rfd track` files it later, and `jp rfd start` files it when the work starts
-if it has none.
-Both are idempotent: an existing tracking ticket is reused, never duplicated.
+If declined at acceptance, `jp rfd track` files the tracking ticket later, and
+`jp rfd start` files it when work starts if none exists.
+Both commands are idempotent and reuse an existing tracking ticket rather than
+duplicating it.
 
-A phase that needs its own card is filed separately, labelled
-`relevant-rfd=045`, as is any other ticket whose work belongs to the RFD.
-The fan-out is a decision made when the work is picked up, not at acceptance,
-where the phases are still a plan.
+A phase that needs its own card is filed separately with `relevant-rfd=045`, as
+is any other ticket whose work belongs to the RFD.
+Splitting phases into separate tickets happens when the work is picked up, not
+at acceptance when the phases are still a plan.
 
-The two keys are settings of `jp rfd`, `tracking.key` and `relevant.key` ([RFD
-116]), so the ticket format knows nothing about RFDs.
-A board that defines labels defines both keys, open to any value; `max = 1` and
-`unique = "key-value"` on the tracking key hold a ticket to tracking one RFD and
-an RFD to one tracking ticket.
+The two label keys are configured on `jp rfd` via `tracking.key` and
+`relevant.key` ([RFD 116]), so the ticket format itself has no built-in RFD
+concepts.
+A board that defines a label vocabulary declares both keys as open (`values =
+[]`), with `max = 1` and `unique = "key-value"` on the tracking key so each
+tracking ticket maps one-to-one with an RFD.
 
-This replaces the GitHub tracking issue from [RFD 041] §2.
+### Promoting Tickets to RFDs
 
-### Tickets promote to RFDs
+When a ticket's discussion turns into a design question, promoting the ticket
+seeds an RFD draft from it and closes the ticket as `Done` with `Promoted to`
+pointing at the draft.
 
-A ticket whose discussion turns into a design question is promoted: the tooling
-seeds an RFD draft from the ticket, and the ticket closes as `Done` with
-`Promoted to` pointing at the draft.
-The work item is finished; the work moved.
+### RFD Priority Board and `inDevelopment`
 
-### The RFD board keeps ordering; `inDevelopment` moves to the ticket
+The `inDevelopment` flag is removed from `docs/rfd/priority.json`.
+Whether someone is actively writing code is a property of a work item rather
+than a design document; the flag lived on the RFD board only because tickets did
+not exist.
 
-The `inDevelopment` flag leaves `docs/rfd/priority.json`.
-"Someone is currently writing code for this" is a property of a work item, not
-of a design document — it was on the RFD board only because tickets did not
-exist.
+Instead, `inDevelopment` is derived from the RFD's `tracking-rfd=NNN` ticket: an
+RFD is in development while its tracking ticket sits in the `In Progress`
+column.
+Phase tickets (`relevant-rfd=NNN`) do not set the flag.
 
-Each RFD gets at most one **tracking ticket**: the ticket labelled
-`tracking-rfd=NNN`, holding the implementation plan as its description.
-It plays the role a tracking issue plays elsewhere; a phase that needs its own
-card gets a separate ticket, labelled `relevant-rfd=NNN`.
+Work starts and stops on the ticket board by moving the tracking ticket.
+The RFD board displays the derived flag and links each RFD that has tickets to
+the ticket board, filtered to tickets carrying either `tracking-rfd=NNN` or
+`relevant-rfd=NNN`.
+No status history is written to the ticket file, since git history already
+timestamps every change.
 
-The flag becomes **derived** from that one ticket: an RFD is in development when
-its tracking ticket sits in the In Progress column.
-Phase tickets never light the flag.
-
-Work starts and stops on the ticket board, by moving the tracking ticket.
-The RFD board shows the flag and links each RFD with tickets to the ticket
-board, narrowed to the tickets labelled with either key for that RFD.
-No status history is written to the ticket — the file's git history already
-dates every change.
-
-RFD priority ordering stays.
-The two boards rank different things:
+RFD priority ordering stays in `docs/rfd/priority.json` because the two boards
+rank different queues:
 
 |          | RFD priority board          | Ticket board              |
 | -------- | --------------------------- | ------------------------- |
 | Question | What should we design next? | What are we building now? |
 | Holds    | Ranked design pipeline      | Work items that exist     |
 
-Most of the RFD backlog is not a work item — nobody has said "this needs doing"
-about it beyond "we should think about it" — so a ticket per RFD would flood
-the board.
+Most of the RFD backlog consists of design ideas rather than committed work
+items, so creating a ticket for every RFD would flood the ticket board.
 
 ## GitHub Issues
 
-GitHub Issues remain the front door for outside contributors.
-They are imported as tickets, one way only.
+GitHub Issues remain the front door for outside contributors and are imported as
+tickets one-way.
 
-Each import replaces the ticket's content — title, description, comments —
-wholesale, and never touches the metadata block.
-GitHub owns what was written on GitHub; the repository owns `Status` and the
-labels, so an imported ticket can be triaged and moved across the board without
-the next import undoing it.
+Each import replaces the ticket's title, description, and comments wholesale
+while leaving the metadata block untouched.
+GitHub owns the issue prose and comments, while the repository owns `Status` and
+`Label` metadata, so an imported ticket can be triaged and moved across the
+board without the next import overwriting its state.
 
-Imported tickets are read-only for discussion: replies go on GitHub and arrive
-on the next import, so there is no divergence to reconcile and nothing is ever
-written back.
+Imported tickets are read-only for discussion locally: replies go on GitHub and
+arrive on the next import, so there is no divergence to reconcile and nothing is
+written back to GitHub.
 
-Imported text is untrusted input.
-The site compiles markdown as Vue, so imported bodies are escaped before they
-reach the working tree and are rendered as data, never as page source.
+Imported text is treated as untrusted input.
+Because the documentation site compiles markdown as Vue, imported bodies are
+escaped before they reach the working tree and render as data, never as
+executable page source.
 
 ## Alternatives
 
-**Git objects instead of files.** [PR #872] proposes issues as per-writer,
-append-only operation logs under a dedicated ref namespace, folded
+**Git objects instead of files.** [PR #872] proposes storing issues as
+per-writer, append-only operation logs under a dedicated ref namespace, folded
 deterministically so concurrent edits never conflict.
-It is the stronger data model and the wrong fit here: refs are unreachable by
-`fs_read_file` and `git grep`, invisible to the site build, and absent from
-pull-request diffs — the three properties this design exists to provide.
-Its conflict-freedom solves offline editing across replicas that cannot see each
-other, which is not this project.
-The cost accepted instead is merge conflicts on the board file and on concurrent
-appends.
-
-It also keeps priority in the store, where a re-rank rewrites one object per
-issue rather than one board file, and tombstones rather than deletes.
+While that data model avoids merge conflicts across offline replicas, custom
+refs are unreachable by `fs_read_file` and `git grep`, invisible to the site
+build, and absent from pull-request diffs, which are the three properties this
+design exists to provide.
+Storing tickets as files accepts merge conflicts on the board file and on
+concurrent comment appends in exchange for standard repository visibility.
+[PR #872] also stores priority per issue (so re-ranking rewrites one object per
+issue rather than a single board file) and tombstones issues rather than
+deleting them.
 
 ## Non-Goals
 
-- **Assignees and milestones.** Add them when the absence hurts.
-  Labels landed later, once grouping by area started to matter; see
+- **Assignees and milestones.** Deferred until needed.
+  Labels were added once grouping by area started to matter; see
   [Labels](#labels).
-- **Label hierarchies, colours, or per-label board columns.** A label is a name
-  and a description.
-- **A search DSL.** `jp ticket list --query`, or `rg` over the markdown files.
-- **Write-back to GitHub.**
-- **Notifications.** The board is the notification.
-- **Stable comment ids.** Positions are good enough until they are not.
-- **Replacing RFDs.** This lowers the bar for entry; it does not remove the top
-  rung.
+- **Label hierarchies, colours, or per-label board columns.** A label is only a
+  key-value pair and a description.
+- **A search DSL.** Use `jp ticket list --query`, or `rg` over the markdown
+  files.
+- **Write-back to GitHub.** GitHub import is one-way.
+- **Notifications.** Contributors check the board directly.
+- **Stable comment ids.** 1-based positions suffice unless concurrent replies
+  become a problem in practice.
+- **Replacing RFDs.** Tickets lower the bar for tracking work items; they do not
+  replace RFDs for design decisions.
 
 ## Risks and Open Questions
 
 - **Two boards may be one too many.** If the RFD board goes stale once tickets
   exist, fold RFDs into the ticket board as cards and retire `priority.json`.
 
-- **Ticket sprawl replaces RFD sprawl.** Mitigated only by tickets being
-  deletable and closed tickets leaving the board — neither true of RFDs.
+- **Ticket sprawl replaces RFD sprawl.** Unlike RFDs, tickets can be deleted and
+  closed tickets leave the active board view, which bounds active clutter.
 
 - **Agent comment volume.** A ticket with forty comments is a large file to
   read.
-  The answer is closing tickets sooner, not splitting the file.
+  The mitigation is keeping tickets scoped and closing them sooner rather than
+  splitting a ticket across multiple files.
 
 ## Implementation Plan
 
-This document fixes the file format, the vocabulary, the board semantics, and
-the relationship to RFDs.
-How the tooling gets there is not fixed.
+This document specifies the file format, vocabulary, board semantics, and RFD
+integration.
+Implementation proceeds in six phases:
 
-1. **Format and lifecycle.** `docs/ticket/`, the comment parser, and recipes to
-   create, comment, close, and list.
-2. **Assistant tools.** `ticket_*` tools through `.jp/mcp/tools/`.
-   The point of the exercise.
-3. **Website and board.** A `/ticket/` index and the kanban board.
-   Retire the `inDevelopment` field and derive it from the tracking ticket,
-   which the RFD board's checkbox moves.
-4. **GitHub import.** One-way, issues and comments.
-5. **RFD seams.** The tracking-ticket prompt and ticket-to-RFD promotion, which
-   needs an idempotent retry story.
-   Amend [RFD 001] and [RFD 041], including 041's stale claim that tracking
-   issues are created at Discussion, and add a TIP to 041 once this RFD holds a
-   permanent number.
-6. **Shared substrate.** Extract the duplicated metadata parsing, id allocation,
-   and board state — if the duplication has proven itself.
+1. **Format and lifecycle.** Create `docs/ticket/`, implement the comment
+   parser, and add commands to create, comment on, close, and list tickets.
+2. **Assistant tools.** Expose `ticket_*` tools through `.jp/mcp/tools/`.
+3. **Website and board.** Build a `/ticket/` index and kanban board, retire the
+   `inDevelopment` field from `priority.json`, and derive it from the tracking
+   ticket (moved by the RFD board's checkbox).
+4. **GitHub import.** Implement one-way import for GitHub issues and comments.
+5. **RFD seams.** Add the tracking-ticket prompt and idempotent ticket-to-RFD
+   promotion.
+   Amend [RFD 001] and [RFD 041] (including fixing 041's stale claim that
+   tracking issues are created at Discussion), and add a TIP to [RFD 041] once
+   this RFD holds a permanent number.
+6. **Shared substrate.** Extract shared metadata parsing, ID allocation, and
+   board state once both implementations have settled.
 
 [PR #872]: https://github.com/dcdpr/jp/pull/872
 [RFD 001]: 001-jp-rfd-process.md
