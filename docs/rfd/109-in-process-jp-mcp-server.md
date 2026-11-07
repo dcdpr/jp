@@ -10,26 +10,27 @@
 
 ## Summary
 
-JP moves per-call tool execution into `jp_mcp::server`, running inside the JP
-CLI process.
-JP and third-party MCP clients use the same MCP invocation path over loopback
-Streamable HTTP; a private in-process channel connects the JP MCP Server to JP
-for interactions and lifecycle control.
-The coordinator, inquiry routing, and conversation storage remain outside the JP
-MCP Server.
+JP moves per-call tool execution into `jp_mcp::server`, an in-process MCP server
+running inside the JP CLI process.
+Both JP and third-party MCP clients invoke tools over loopback Streamable HTTP
+through the same execution path, while a private in-process channel connects the
+JP MCP Server back to JP for user interaction, event recording, and lifecycle
+control.
+The tool coordinator, inquiry routing, and conversation storage remain in the
+CLI outside the JP MCP Server.
 
 ## Motivation
 
-Tool execution is split between `jp_llm::tool` and `jp_cli::cmd::query::tool`.
-Exposing it to Claude Code must not create another implementation of approvals,
-questions, argument editing, or result delivery.
-A wrapper that delegates the execution pipeline back into the CLI leaves that
-ownership problem in place.
+Tool execution is currently split between `jp_llm::tool` and
+`jp_cli::cmd::query::tool`.
+Exposing JP's tools to external MCP clients such as Claude Code must not
+duplicate approvals, questions, argument editing, or result delivery, and
+wrapping the CLI in an adapter that delegates execution back into `jp_cli` would
+leave that split ownership in place.
 
-This RFD extracts the execution service, not the entire coordinator or agent
-loop from [RFD 026].
-It provides the MCP dependency needed by future RFDs without waiting for the
-full typed-content and attachment migrations in [RFD 058] and [RFD 065].
+This RFD extracts per-call tool execution into a dedicated service without
+waiting for the full coordinator and agent-loop extraction in [RFD 026], or the
+typed-content and attachment migrations in [RFD 058] and [RFD 065].
 
 ## Design
 
@@ -44,21 +45,21 @@ remain available through ordinary queries:
 jp query --new "Run the configured checks."
 ```
 
-JP starts its execution service and HTTP endpoint automatically.
+JP starts the execution service and its HTTP endpoint automatically for each
+query.
 Users do not start a daemon, select a port, copy tool definitions, or configure
-another MCP server to run a normal query.
-The service adds no external runtime dependency; Claude Code installation and
+another MCP server to run a query.
+The service adds no external runtime dependencies; Claude Code installation and
 subscription setup belong to a separate RFD.
 
-The initial deployment is exclusively in-process.
-A future `jp mcp serve` command for long-running service deployment is outside
-this RFD.
-Third-party MCP servers retain their existing stdio configuration and
-child-process lifecycle; no HTTP variant is added to `providers.mcp`.
+The server runs exclusively in-process; a standalone `jp mcp serve` command for
+long-running deployment is out of scope.
+Third-party MCP servers under `providers.mcp` keep their existing stdio
+configuration and child-process lifecycle, with no HTTP variant added.
 
 ### Roles and terminology
 
-| Term                        | Meaning in this design                                                                                                                    |
+| Term                        | Role                                                                                                                                      |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | **MCP Host**                | JP's CLI process. It boots the JP MCP Server, supplies trusted configuration and context, and handles interaction and recording requests. |
 | **JP MCP Server**           | `jp_mcp::server`, the in-process service responsible for per-call tool execution.                                                         |
@@ -66,9 +67,10 @@ child-process lifecycle; no HTTP variant is added to `providers.mcp`.
 | **Third-party MCP Servers** | The MCP servers configured under `providers.mcp`, started and managed by the JP MCP Server through the JP MCP Client.                     |
 | **Third-party MCP Client**  | An external caller, initially Claude Code, requesting tools from the JP MCP Server.                                                       |
 
-The MCP Host also makes ordinary MCP requests when JP drives the model/tool loop
-itself.
-That Host-side connection is distinct from the upstream JP MCP Client.
+When JP drives the model and tool loop itself, the MCP Host also calls the JP
+MCP Server as an MCP client.
+This Host-side connection is distinct from the upstream JP MCP Client that
+connects to third-party MCP servers.
 
 ### One invocation path
 
@@ -86,73 +88,79 @@ MCP Host -- HTTP --> JP MCP Server <-- HTTP -- Third-party MCP Client
 MCP Host <-------- private typed channels --------> JP MCP Server
 ```
 
-Both HTTP callers use the same MCP handlers, catalog, validation, preparation,
+Both HTTP callers (the MCP Host and any third-party MCP client) go through the
+same MCP handlers for tool discovery, argument validation, call preparation,
 execution, and result processing.
-There is no Host-only invocation shortcut into an executor.
-An in-memory transport can be added later if justified, but it must carry the
-same MCP messages through those handlers, not introduce a second execution API.
+The MCP Host has no direct shortcut into an executor.
+If an in-memory transport is added later, it must route the same MCP messages
+through these handlers rather than introducing a second execution API.
 
-The private channel serves a different purpose: it supplies Host services while
-an MCP call is being processed.
-Third-party MCP clients cannot send Host commands over HTTP.
-They can perform ordinary MCP initialization, discovery, calls, and cancellation
-of their own requests.
+The private typed channel is separate from the MCP transport: the JP MCP Server
+uses it to request Host services while processing a call, and the MCP Host uses
+it for lifecycle control.
+Third-party MCP clients cannot send Host commands over HTTP; they can only
+initialize sessions, discover and call tools, and cancel their own requests.
 
 ### Ownership and crate boundaries
 
 The JP MCP Server owns tool resolution, per-call requirements and state,
-argument/answer validation, process invocation, accumulated answers, and the
-final MCP response.
-It executes configured custom argument formatters through the same controlled
-command-launching path when presentation requests them; pure terminal formatting
-stays with the MCP Host.
+argument and answer validation, process invocation, accumulated inquiry answers,
+and the final MCP response.
+When presentation requires a configured custom argument formatter, the server
+runs that formatter command through the same controlled process-execution path;
+pure terminal formatting stays with the MCP Host.
 
-The MCP Host owns query phases, the execution plan, terminal/editor interaction,
-turn-scoped remembered decisions, inquiry routing, and conversation writes.
-`ToolCoordinator` remains in `jp_cli` and delegates per-call execution.
-Moving that coordinator belongs to [RFD 026], not this extraction.
+The MCP Host owns query phases, the execution plan, terminal and editor
+interaction, turn-scoped remembered decisions, inquiry routing, and conversation
+writes.
+`ToolCoordinator` stays in `jp_cli` and delegates per-call execution to the
+server; moving the coordinator is deferred to [RFD 026].
 
-Extract the execution portions of `ToolDefinition::execute`, local command
-handling, upstream dispatch, and the existing `BuiltinTool`/`BuiltinExecutors`
-registry.
-Tool descriptions and the minimum shared result/input contracts live in
-`jp_tool`; configuration-dependent construction and execution do not move into
-that lightweight SDK.
+`jp_mcp::server` takes over the execution logic from `ToolDefinition::execute`,
+including local command handling, upstream MCP dispatch, and the
+`BuiltinTool`/`BuiltinExecutors` registry.
+Tool descriptions and the minimum shared result and input-request contracts live
+in `jp_tool`, which remains a lightweight SDK without configuration-dependent
+construction or execution logic.
 Provider-specific schema adaptation stays in `jp_llm`.
 
-The JP MCP Server does not depend on `jp_llm`, `jp_workspace`, or
-`jp_conversation`.
-Its inputs are resolved configuration and owned context data, not a Workspace, a
-provider, or a ConversationStream.
-Conversation event wrapping and inquiry provenance conversion belong at the MCP
-Host boundary; genuinely shared payload information belongs below both
-consumers.
+`jp_mcp` does not depend on `jp_llm`, `jp_workspace`, or `jp_conversation`.
+The server accepts resolved configuration and owned context data rather than a
+`Workspace`, model provider, or `ConversationStream`.
+Shared payload types live below both `jp_mcp` and `jp_cli`, while conversation
+event wrapping and inquiry provenance conversion stay at the MCP Host boundary.
 
-Introduce `client` and `server` features on `jp_mcp`.
-The `server` feature enables the client machinery needed for upstream stdio
-connections.
-The MCP Host's HTTP connection uses the MCP transport library without
-generalizing the upstream configuration surface.
-Feature selection limits client-only dependencies; it is not a way to conceal
-dependency cycles.
+`jp_mcp` splits into `client` and `server` Cargo features.
+The `server` feature enables the upstream client machinery needed for stdio
+connections to third-party MCP servers, while the MCP Host uses the MCP
+transport library directly for its loopback HTTP connection without expanding
+the upstream `providers.mcp` configuration surface.
+These features limit client-only dependencies rather than concealing dependency
+cycles.
 
-Remove the MCP-client parameter from the base attachment-handler interface and
-its callers when retiring `jp_attachment_mcp_resources` resolution.
-Plugin-based MCP attachments can be designed separately.
-Existing stored handler data must remain loadable, with a clear
+Retiring `jp_attachment_mcp_resources` resolution removes the MCP-client
+parameter from the base attachment-handler interface and its callers, dropping
+`jp_attachment`'s MCP dependency without redesigning attachments or removing MCP
+tools and their resource results.
+Existing stored handler data remains loadable and returns a clear
 unsupported-resolution error when used.
-This small cleanup removes `jp_attachment`'s MCP dependency without implementing
-an attachment redesign; it does not remove MCP tools or their resource results.
+Plugin-based MCP attachments can be designed separately.
 
 ### Host-only interaction
 
-The MCP Host supplies `conversation.tools`, `providers.mcp`, the working root,
-invocation identity, and existing access-approval data for the active context.
-The JP MCP Server does not discover or choose another workspace.
-Bind each server instance to its supplied context; concurrent queries must not
-share mutable configuration, answers, or pending interactions by accident.
+When the MCP Host starts a JP MCP Server instance, it binds the server to the
+active context: `conversation.tools`, `providers.mcp`, the working root,
+invocation identity, and existing access-approval data.
+The server never discovers or selects a workspace on its own, and concurrent
+queries do not share mutable configuration, accumulated answers, or pending
+interactions.
 
-The private channel carries correlated requests and replies for:
+The MCP Host creates the private channel when spawning the server.
+Client names, MCP session IDs, and HTTP request metadata do not grant access to
+this channel, nor can a tool call override configuration, access grants, or
+accumulated answers by supplying its own context metadata.
+Over the private channel, the server and Host exchange correlated requests and
+replies for:
 
 - Admission, approval, and argument editing.
 - Tool input requests, including supporting content and sensitivity constraints.
@@ -161,57 +169,51 @@ The private channel carries correlated requests and replies for:
 - Execution release, cancellation, and shutdown.
 
 The JP MCP Server determines which per-call interaction is required and
-validates its reply.
-The MCP Host decides how to obtain that reply.
-In particular, the JP MCP Server makes no distinction between user-targeted and
-assistant-targeted inquiries.
-The MCP Host applies configured answers, remembered answers, question targets,
-and assistant overrides, presents prompts or calls an assistant, and records the
-exchange.
-Secret answers retain their existing routing and redaction rules and do not
-enter ordinary progress events or logs.
+validates the reply, while the MCP Host decides how to obtain that reply.
+In particular, the server does not distinguish between user-targeted and
+assistant-targeted inquiries: the Host applies configured answers, remembered
+answers, question targets, and assistant overrides, prompts the user or queries
+an assistant, and records the exchange.
+Secret answers retain their existing routing and redaction rules and are never
+written to ordinary progress events or logs.
 
-Remembering a decision for a Turn remains a Host responsibility.
-The JP MCP Server can request an interaction for each invocation and receive an
-automatic Host reply; it does not interpret the lifetime of an MCP connection as
-a JP Turn.
-
-The JP MCP Server having no terminal does not authorize unattended execution.
-The MCP Host applies existing non-interactive policy; changing that policy is
-outside this RFD.
-
-The private interface is created by the MCP Host when it starts the JP MCP
-Server.
-Client names, MCP session IDs, and request metadata do not grant access to it.
-Nor can a tool request override configuration, access grants, or accumulated
-answers by supplying its own context metadata.
+Turn-scoped decisions and non-interactive policy also stay with the MCP Host.
+The server does not interpret an MCP connection lifetime as a JP Turn; it
+requests an interaction for each invocation and receives an automatic reply when
+the Host has remembered a decision for the active Turn.
+Similarly, running inside a server with no terminal does not authorize
+unattended execution: the Host enforces JP's existing non-interactive policy,
+and changing that policy is outside this RFD.
 
 ### Preparation and release
 
-A call being prepared is not yet authorized to execute.
-The common call path resolves the tool, validates its arguments, obtains
-required Host decisions, and waits for release.
-Edited arguments are validated again; configured formatter ordering and
-visibility remain part of the interaction contract.
+Preparing a call does not authorize it to execute.
+During preparation, the common call path resolves the tool, validates its
+arguments, obtains required Host decisions, and waits at a release gate.
+If the Host returns edited arguments, the server validates them again while
+preserving the configured formatter ordering and visibility rules.
 
-For JP-driven model loops, the MCP Host can start preparation as a tool call
-request finishes streaming while retaining the existing execution-phase barrier.
-It releases calls according to the execution plan derived from the conversation,
-not an independent list of queued HTTP requests.
-For an external agent, the MCP Host can release an admitted call as soon as the
-required preparation finishes.
-The JP MCP Server uses the same path in both cases; the MCP Host controls
-release timing.
+The JP MCP Server uses this same two-phase path for all callers, while the MCP
+Host controls release timing:
 
-The MCP Host must keep servicing its private channel and model stream while MCP
-requests are outstanding.
-Awaiting a final HTTP result in the only task capable of releasing the call or
+- For JP-driven model loops, the Host can start preparing a call as soon as its
+  request finishes streaming from the model, while keeping the existing
+  execution-phase barrier.
+  It releases calls according to the execution plan derived from the
+  conversation rather than HTTP arrival order.
+- For an external agent, the Host can release an admitted call as soon as
+  preparation completes.
+
+Because an in-flight `tools/call` HTTP request waits on execution release and
+any subsequent inquiries, the MCP Host must keep servicing the private channel
+and model stream while MCP requests are outstanding.
+Awaiting a final HTTP response on the only task capable of releasing the call or
 answering its inquiry would deadlock.
 
 ### Inquiries re-run tools
 
-`Outcome::NeedsInput` ends an execution attempt.
-It does not suspend a tool process for later resumption:
+Returning `Outcome::NeedsInput` ends that execution attempt rather than
+suspending a tool process for later resumption:
 
 ```text
 MCP tools/call
@@ -225,33 +227,29 @@ MCP tools/call
   -> final MCP response
 ```
 
-Further questions repeat that sequence.
-The enclosing MCP call can remain outstanding throughout; each tool execution
-attempt has finished before its answer is obtained.
-A persistent third-party MCP server can stay alive between attempts, but its
-JP-aware tool is invoked again with the answers.
-Built-ins are called again as well.
-
-The tool author remains responsible for making this re-execution safe, as under
-the existing protocol.
-This RFD does not add suspended tool invocations, stateful task handles, or a
-new upstream MCP elicitation implementation.
+Further questions repeat this loop while the enclosing MCP `tools/call` request
+remains open.
+Each execution attempt exits before the Host collects its answer, and the server
+invokes the tool again with the accumulated answers, whether it is a local
+command, a built-in tool, or a JP-aware tool on a persistent third-party MCP
+server.
+As under the existing protocol, the tool author is responsible for making
+re-execution safe.
+This RFD does not add suspended tool invocations, stateful task handles, or
+upstream MCP elicitation.
 
 ### Narrow content-model integration
 
-Use [RFD 058]'s ordered content and input-request representation for the service
-boundary.
-Introduce the minimum shared `ContentBlock` and `InputRequest` data and
-conversions needed for text, resource data, questions, and structured error
-information.
-Retain other native MCP content variants and metadata for forwarding without
-requiring the MCP Host to render them or persist them as typed blocks.
-Carry the MCP-standard resource fields as data; do not require [RFD 065]'s
-attachment placement, refresh, or canonicalization work to use them.
-
-This RFD does **not** require completion of RFD 058 or RFD 065.
-The implemented shared definitions are the ones those migrations consume, not a
-competing service-specific content model.
+The service boundary uses the ordered content and input-request representation
+from [RFD 058] without requiring completion of [RFD 058] or [RFD 065].
+`jp_tool` introduces the minimum shared `ContentBlock` and `InputRequest` types
+and conversions that those migrations will consume, covering text, MCP-standard
+resource fields, questions (with their existing secrecy constraints), and
+structured error information.
+Other native MCP content variants and metadata pass through the JP MCP Server
+for forwarding without requiring the MCP Host to render them or persist them as
+typed blocks, and without requiring [RFD 065]'s attachment placement, refresh,
+or canonicalization work.
 
 | Included here                                                              | Deferred                                                                              |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -260,166 +258,164 @@ competing service-specific content model.
 | Retention of native MCP content and metadata at the JP MCP Server boundary | New binary tool-result rendering in JP's existing provider flows                      |
 | Existing text/error projection for the MCP Host                            | Resource deduplication, blob storage, attachment refresh, and stateful tool lifecycle |
 
-Existing local and built-in tools keep working without changes.
-New shared input requests retain the secrecy constraints of existing questions.
-Malformed recognized envelopes are failures, not permission to silently discard
-content.
-The JP MCP Server must not lose mixed native MCP content while looking for a JP
-result inside it.
+Unlike [RFD 058], which removes the `Outcome` input decoder in a coordinated
+migration, this RFD keeps `Outcome` decoding alongside typed content blocks so
+existing local and built-in tools keep working without changes; removing
+`Outcome` later requires its own compatibility decision.
+Malformed recognized envelopes fail the call rather than silently discarding
+content, and the JP MCP Server never drops sibling native MCP content blocks
+when looking for a JP result inside a mixed response.
 
-The MCP Host adapts results to the existing `ToolCallResponse` representation
-and rendering where needed.
-Ordinary text/error results retain their existing serialized shape.
-This compatibility projection is explicit and shared across invocation paths;
-full typed persistence remains RFD 058 work.
-A result edited by the MCP Host replaces the delivered content, rather than
-allowing the JP MCP Server to return an earlier unedited value.
-
-JP question blocks are not standard MCP result blocks.
-Resolve them through the private Host interface before returning the final
-standard MCP result.
-Do not assume Claude Code interprets a raw `NeedsInput` envelope or a JP
-question block as a request to the JP user.
-
-Retaining `Outcome` as an input decoder is a deliberate difference from RFD
-058's coordinated removal of that decoder.
-It avoids making tool migration a prerequisite for this service; a later removal
-requires its own compatibility decision.
+On the Host side, an explicit compatibility projection adapts results to the
+existing `ToolCallResponse` representation and rendering across invocation
+paths, preserving the serialized shape of ordinary text and error results until
+[RFD 058] migrates conversation storage.
+If the MCP Host edits a result, the edited content replaces the delivered
+response rather than allowing the server to return the earlier unedited value.
+Likewise, because external clients such as Claude Code do not interpret a raw
+`NeedsInput` envelope or a JP question block as a user prompt, the server always
+resolves JP question blocks through the private Host interface before returning
+a standard MCP result.
 
 ### JP-aware upstream MCP tools
 
-Adopt the narrowly scoped interoperability from [RFD 111], within the new
-execution path rather than as another implementation in `jp_llm`.
-
-For a result containing exactly one MCP text block, attempt to parse the entire
-text as `jp_tool::Outcome`.
-A successful parse uses Outcome semantics and is converted to the shared
-representation.
-No opt-in or protocol advertisement is required.
-Do not concatenate mixed content to make it parseable or recursively unwrap
-strings within a successful result.
-An MCP error flag conflicting with `Outcome::Success` wins, as specified by 111.
-
-A literal JSON document can therefore be interpreted as an Outcome when its
-shape matches.
-This collision risk is explicitly accepted.
-`Outcome` remains a tool-result envelope; it does not authorize execution or
-change Host policy.
-Otherwise, preserve the native MCP result.
-Local stdout retains the existing Outcome and raw-text paths, with typed content
-decoding added at the boundary.
-A transient-error hint does not authorize blind replay after a lost connection.
-
-A shared context builder supplies local command templates and, for upstream MCP
-calls, `_meta["computer.jp/tool"]` and `_meta["computer.jp/context"]`.
-It includes the appropriate invoked name, validated execution arguments,
-accumulated answers, options, and trusted invocation context.
-Any duplicated arguments derive from the same post-edit value.
-Build this metadata from Host configuration and replies; never trust incoming
-metadata as those values.
-
-This reuses 111's request plumbing and Outcome compatibility without requiring
-its separate implementation or broadening the first delivery into new MCP
+Upstream stdio calls adopt the narrowly scoped interoperability from [RFD 111]
+directly inside `jp_mcp::server`, reusing its request plumbing and `Outcome`
+compatibility without a separate implementation in `jp_llm` or new MCP protocol
 features.
+
+When an upstream MCP result contains a single text block, the server attempts to
+parse the entire text as `jp_tool::Outcome` without requiring opt-in or protocol
+advertisement.
+If parsing succeeds, the server applies `Outcome` semantics and converts the
+result to the shared representation; otherwise, it preserves the native MCP
+result.
+The server never concatenates multiple content blocks to make them parseable or
+recursively unwraps strings inside a successful result, and an MCP error flag
+conflicting with `Outcome::Success` takes precedence as specified in [RFD 111].
+
+Because detection is structural, a literal JSON document whose shape matches
+`Outcome` will be interpreted as one.
+This collision risk is explicitly accepted: `Outcome` is only a tool-result
+envelope and cannot authorize execution or alter Host policy, and a
+transient-error hint never authorizes blind replay after a lost connection.
+Local command stdout retains its existing `Outcome` and raw-text paths, with
+typed content decoding added at the boundary.
+
+For outbound calls, a shared context builder populates local command templates
+and, on upstream MCP calls, `_meta["computer.jp/tool"]` and
+`_meta["computer.jp/context"]`.
+It supplies the invoked tool name, validated execution arguments, accumulated
+answers, options, and trusted invocation context, deriving any duplicated
+argument fields from the same post-edit value.
+The server builds this metadata exclusively from Host configuration and replies
+and never trusts incoming caller metadata for those values.
 
 ### Recording, correlation, and lifetime
 
-The JP MCP Server assigns invocation identity independently of transport request
-IDs and carries caller correlation metadata to the MCP Host.
-The MCP Host associates it with the appropriate tool call and ensures each event
-is recorded once.
-Host communication distinguishes requested arguments from edited execution
-arguments and raw results from approved or edited delivery content.
-Neither matching arguments nor arrival order identifies a call: simultaneous
-identical invocations are valid.
+The JP MCP Server assigns each call an invocation identity independent of
+transport request IDs and forwards caller correlation metadata to the MCP Host.
+Because simultaneous identical invocations are valid, the Host correlates calls
+by invocation identity rather than matching arguments or arrival order, ensuring
+each event is recorded once.
+Host messages distinguish requested arguments from edited execution arguments,
+and raw results from approved or edited delivery content.
 Interpreting Claude Code's `claudecode/toolUseId` metadata belongs to a future
-RFD integration, not the execution policy.
-Host-supplied tool-description metadata can likewise carry its result-size hints
-without introducing an Anthropic dependency into the JP MCP Server.
+RFD integration rather than the execution policy, and Host-supplied
+tool-description metadata can carry result-size hints without introducing an
+Anthropic dependency into the JP MCP Server.
 
-Execution release and final delivery respect Host recording acknowledgements.
-The MCP Host applies its configured persistence policy; a non-persisting
+The server owns no conversation lock and waits for Host recording
+acknowledgements before releasing execution or delivering a final response.
+The MCP Host applies its configured persistence policy, so a non-persisting
 invocation is not forced to write a conversation to disk.
-The JP MCP Server owns no conversation lock.
-Historical event replay does not submit new calls, and observed ACP tool events
-must not enqueue a second execution of an MCP call.
+Replaying historical events does not submit new calls, and observing ACP tool
+events must not enqueue a second execution of an MCP call.
 
-Use the existing cancellation pattern: the MCP Host sends a scoped stop command
-or cancellation token and waits for cleanup.
 Stopping current calls and shutting down the JP MCP Server are distinct
-operations.
-Shutdown stops admission and cancels pending interactions and calls.
-Upstream MCP connections belong to the MCP Host, which can share them across
-concurrent Turns, so shutting down one JP MCP Server leaves them running.
-The JP MCP Server's HTTP listener dies with the JP process; child-process
-cleanup still follows JP's existing execution mechanisms.
+operations, both using JP's existing scoped stop commands or cancellation
+tokens:
 
-The JP MCP Server continues handling control messages while individual calls
-wait on answers.
-Bound progress buffering separately from required interactions so a slow display
-does not block draining a tool's stderr.
-A transient HTTP disconnection is not itself cancellation or authority to
-execute again.
-A crash after a side effect but before recording leaves an uncertain outcome,
-not an exactly-once guarantee.
+- Stopping cancels the targeted in-flight calls and waits for cleanup.
+- Shutting down stops admitting new calls and cancels all pending interactions
+  and running calls.
+
+Upstream MCP connections belong to the MCP Host so they can be shared across
+concurrent Turns; shutting down one JP MCP Server leaves those upstream
+connections running.
+The server's HTTP listener exits with the JP process, and local child-process
+cleanup follows JP's existing execution mechanisms.
+
+While individual calls wait on inquiry answers, the JP MCP Server continues
+handling control messages.
+Progress buffering is bounded separately from required interactions so a slow
+terminal display cannot block draining a tool's stderr.
+A transient HTTP disconnect neither cancels a call nor authorizes executing it
+again, and a crash after a tool side effect but before recording leaves an
+uncertain outcome rather than an exactly-once guarantee.
 
 ### HTTP and initial security scope
 
-Use MCP [Streamable HTTP], not the legacy HTTP+SSE transport.
-Bind to loopback on an OS-assigned port and supply the endpoint to callers
+The server uses MCP [Streamable HTTP] rather than the legacy HTTP+SSE transport,
+binding to loopback on an OS-assigned port and supplying the endpoint to callers
 programmatically.
-JP's stdin/stdout retain their CLI purpose.
-The separate ACP connection used by a future RFD is outside the MCP transport.
+JP's stdin/stdout retain their CLI purpose, and the ACP connection used by a
+future RFD runs outside the MCP transport.
 
 The initial endpoint has no authentication token or login flow.
 This is an explicit local-access trade-off: loopback does not establish caller
-identity, and another local process can submit requests under the bound tool
+identity, so another local process can submit requests under the bound tool
 policies.
-Validate Host and supplied Origin headers using the controls provided by
-`rmcp`'s `StreamableHttpServerConfig`, with tests for rejected requests.
+To reject cross-origin requests, the server validates `Host` and supplied
+`Origin` headers using `rmcp`'s `StreamableHttpServerConfig`, with tests for
+rejected requests.
 
-Sandboxing stays at the current level.
-Preserve access-policy compilation and cooperative enforcement; moving code into
-a server does not create an OS sandbox.
-Future confinement work can use these execution boundaries, but is not part of
-this delivery.
+Moving tool execution into a server does not create an OS sandbox.
+The server preserves JP's existing access-policy compilation and cooperative
+enforcement; future OS confinement work can build on these execution boundaries.
 
 ## Drawbacks
 
-Using HTTP for JP's own calls adds serialization and lifecycle work.
-It buys one invocation path and avoids a second private execution API.
-There is no latency benchmark gate; investigate an in-memory MCP transport only
-if it solves a measured problem.
+Routing JP's own tool calls over HTTP adds serialization and connection
+lifecycle work in exchange for a single invocation path without a second private
+execution API.
+This RFD sets no latency benchmark gate; an in-memory MCP transport should be
+investigated only if measurements show HTTP overhead is a problem.
 
-The local endpoint accepts unauthenticated callers, and speculative Outcome
-recognition can reinterpret text.
-Both are explicit initial trade-offs, not claims of stronger isolation.
-The compatibility result projection also does not deliver RFD 058's complete
-typed-persistence benefits.
+The loopback endpoint accepts unauthenticated local callers, and structural
+`Outcome` detection can reinterpret literal JSON text whose shape matches
+`Outcome`.
+Both are explicit initial trade-offs rather than claims of stronger isolation.
+In addition, projecting results to `ToolCallResponse` defers the full
+typed-persistence benefits of [RFD 058].
 
 ## Alternatives
 
-**execution-host wrapper.** Exposes tools while leaving more execution ownership
-in the existing CLI arrangement.
-This RFD replaces that execution machinery and makes the MCP Host a caller of
-the same service as external clients.
+**An `execution-host` wrapper around the CLI.** A wrapper could expose tools
+over MCP while leaving execution ownership split across the existing CLI
+modules.
+This RFD instead moves execution into `jp_mcp::server` and makes the MCP Host a
+caller of the same service as external clients.
 
-**A separate runtime crate.** Unnecessary for the narrowed execution service.
-`jp_mcp::server` and feature separation are sufficient without importing the
-coordinator, LLM inference, or workspace storage.
+**A separate runtime crate.** A dedicated crate is unnecessary for per-call
+execution.
+`jp_mcp::server` and Cargo feature separation isolate dependencies without
+importing the coordinator, LLM inference, or workspace storage.
 
-**A direct Host execution API plus MCP for external clients.** Creates another
-invocation path.
-Rejected; transport may vary later, execution semantics may not.
+**A direct Host execution API plus MCP for external clients.** Giving the Host a
+direct execution API while serving external clients over MCP would create two
+invocation paths.
+Transport may vary later, but execution semantics must stay unified.
 
-**Require all of RFD 058 first.** Expands the prerequisite into storage,
-provider, renderer, and attachment migrations.
-The shared types and legacy conversion supply the required interface without
-delaying a future RFD for that work.
+**Requiring all of RFD 058 first.** Making the full [RFD 058] migration a
+prerequisite would expand this work into storage, provider, renderer, and
+attachment migrations.
+Introducing the shared boundary types and legacy `ToolCallResponse` conversion
+provides the required interface without delaying downstream RFDs.
 
 ## Non-Goals
 
-- Extracting `ToolCoordinator` or implementing RFD 026.
+- Extracting `ToolCoordinator` or implementing [RFD 026].
 - Implementing a future RFD's ACP provider flow, native transcript conversion,
   or subscription authentication.
 - Separate-process deployment, controller IPC, a long-running daemon, or `jp mcp
@@ -427,48 +423,48 @@ delaying a future RFD for that work.
 - HTTP transport for configured third-party MCP servers.
 - OS sandboxing, a new built-in plugin framework, suspended tool execution, MCP
   tasks, sampling, or new upstream elicitation support.
-- Completing RFD 058/065 or changing existing tool and conversation formats as a
-  prerequisite.
+- Completing [RFD 058] or [RFD 065], or changing existing tool and conversation
+  formats as a prerequisite.
 
 ## Implementation Plan
 
 1. **Shared contracts and dependency cleanup.** Introduce the minimum shared
-   result/input types and compatibility conversions.
-   Move tool descriptions and tool-domain errors out of their accidental LLM
-   ownership.
-   Remove the attachment-handler MCP coupling without a plugin redesign.
-   Keep existing execution working during these mechanical changes.
+   result and input-request types and compatibility conversions in `jp_tool`,
+   and move tool descriptions and tool-domain errors out of `jp_llm`.
+   Remove the attachment-handler MCP coupling without redesigning plugins, while
+   keeping existing tool execution working.
 2. **Execution service and Host interaction.** Implement `jp_mcp::server` behind
-   feature flags.
-   Reuse command execution and the built-in registry; add the private Host
-   channel, preparation/release, Outcome re-execution, and scoped cancellation.
-   Tests use real executor creation and controlled tool fixtures.
-3. **One HTTP path and CLI adoption.** Add the Streamable HTTP endpoint and make
-   JP's ordinary query path its MCP caller.
-   Keep the coordinator and event ownership in JP.
-   Add 111 metadata/Outcome handling to upstream stdio calls; do not maintain a
-   parallel production execution pipeline.
-4. **future RFD readiness.** Exercise a third-party MCP client against the same
-   service while the MCP Host handles interactions.
+   Cargo feature flags, reusing local command execution and the built-in tool
+   registry.
+   Add the private Host channel, call preparation and release gating, `Outcome`
+   re-execution, and scoped cancellation, tested with real executors and
+   controlled tool fixtures.
+3. **Single HTTP path and CLI adoption.** Add the loopback Streamable HTTP
+   endpoint and switch JP's ordinary query path to call it over MCP while
+   keeping `ToolCoordinator` and event ownership in `jp_cli`.
+   Add [RFD 111] metadata and `Outcome` handling to upstream stdio calls without
+   maintaining a parallel execution pipeline.
+4. **External MCP client readiness.** Exercise a third-party MCP client against
+   the same service while the MCP Host handles interactions.
    Verify correlation metadata, result-size metadata, edited results, and
-   recording before final response.
-   No Anthropic credential or transcript implementation is needed to test this
-   contract; future RFD consumes the completed service afterward.
+   conversation recording before the final response returns.
+   Testing this contract requires no Anthropic credentials or transcript
+   implementation, leaving the completed service ready for downstream RFDs
+   without waiting for the broader [RFD 026], [RFD 058], or [RFD 065]
+   migrations.
 
-Acceptance tests cover both MCP callers through the same handlers.
-Force denied calls, malformed arguments, stale/duplicate interaction replies,
-and cancelled prompts, and prove forbidden execution did not occur.
-An inquiry fixture must prove separate executions with the accumulated answer,
-one logical final result, and no claim of process resumption.
-Pin exact CLI output, request/result pairing, and stored text/error results.
-Exercise simultaneous identical calls, Host loss, shutdown, failed recording,
-and HTTP disconnect without duplicate side effects.
-Test client-only and server feature builds.
+Acceptance tests cover both MCP callers through the same server handlers across
+`client`-only and `server` feature builds:
 
-This RFD can be implemented and used by future RFD without completing the
-broader RFD 058, RFD 065, or RFD 026 migrations.
-Their documents remain separate references; this delivery establishes only the
-shared contracts and execution behavior specified here.
+- Force denied calls, malformed arguments, stale or duplicate interaction
+  replies, and cancelled prompts, and verify that forbidden execution never
+  occurs.
+- Use an inquiry fixture to verify separate tool executions with accumulated
+  answers, a single final result, and no process suspension.
+- Pin exact CLI output, request/result pairing, and stored text and error
+  results.
+- Exercise simultaneous identical calls, Host loss, shutdown, failed recording,
+  and HTTP disconnect without duplicate side effects.
 
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 058]: 058-typed-content-blocks-for-tool-responses.md
