@@ -1,6 +1,6 @@
 # RFD 122: Release Pipeline
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
