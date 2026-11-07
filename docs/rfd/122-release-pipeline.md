@@ -92,7 +92,6 @@ This RFD adds:
 | `jp release finalize VERSION`        | Tags a finalized release                                                                         |
 | `jp release render [VERSION]`        | Renders a release's notes or upgrade guide, or the unreleased fragments                          |
 | `jp release due`                     | Exits zero when the next release is due                                                          |
-| `jp release review [VERSION]`        | Asks the assistant to review a release's notes and upgrade guide                                 |
 
 `cut`, `pick`, and `finalize` operate in a temporary worktree based on
 `origin`'s branches, leaving the caller's working tree untouched.
@@ -564,16 +563,6 @@ JP's docs workflow therefore stops deploying on tag pushes.
 If JP later adds versioned documentation per release, each tag can build into a
 versioned subpath and link to the `/releases/` pages deployed from `main`.
 
-### `review`
-
-`jp release review` sends a structured `query` request (protocol 11) to the host
-`jp` process, using the same mechanism as `jp rfd track` ([RFD 116]).
-It asks the assistant to flag entries that read like raw commit messages,
-entries that fail to explain the user-facing impact, upgrade sections that omit
-migration steps, and typos.
-`review` prints findings to the terminal without modifying files; it is an
-advisory check, not a CI gate.
-
 ### Other artifacts
 
 Command plugins are published continuously via the rolling `plugins` release, so
@@ -627,9 +616,8 @@ docs-build step that ran `jilu` are removed.
 ## Alternatives
 
 - **A standalone binary invoked via `just` instead of a command plugin**: Avoids
-  the plugin protocol, but cannot request host LLM queries for `jp release
-  review` and separates release commands from the [RFD 116] plugin suite used by
-  other workspaces.
+  the plugin protocol, but separates release commands from the [RFD 116] plugin
+  suite used by other workspaces.
 - **Opening release pull requests against the release branch and syncing notes
   back to `main`**: Causes release notes to exist on two branches at once,
   creating ambiguity about where to edit historical notes.
@@ -768,11 +756,6 @@ with "Releases" in the site navigation.
 Update the docs workflow to build `changelog` instead of `jilu`, stop deploying
 the site on tag pushes, and remove `jilu` and `docs/change-log.md`.
 Depends on Phase 1 and the site phase of [RFD 116].
-
-### Phase 5: `review`
-
-Implement `jp release review` using host LLM queries.
-Depends on Phase 1.
 
 ## References
 

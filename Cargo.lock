@@ -2187,7 +2187,6 @@ dependencies = [
  "doc",
  "humantime",
  "indoc",
- "jp_config",
  "jp_github",
  "jp_md",
  "jp_plugin",

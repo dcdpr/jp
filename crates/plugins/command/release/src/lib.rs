@@ -22,8 +22,6 @@
 //! decides what they may do, `repository` runs the git they need in worktrees
 //! of their own, and `change_request` opens the change requests that file a
 //! release's notes on `main`.
-//! `review` asks the assistant, through the host, for its opinion of a
-//! release's notes and upgrade guide.
 //!
 //! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`
@@ -42,7 +40,6 @@ mod releases;
 mod repository;
 #[cfg(test)]
 mod repository_testing;
-mod review;
 mod shell;
 mod tool;
 
@@ -59,7 +56,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{
     ReleaseError, Type,
     cli::{Format, Render, View, version as parse_version},
-    directory::{self, OVERVIEW, Part, ReadError},
+    directory::ReadError,
     release,
 };
 use clap::{CommandFactory, Parser, Subcommand};
@@ -139,21 +136,6 @@ enum Command {
     Render {
         #[command(flatten)]
         render: Render,
-    },
-
-    /// Ask the assistant to review a release's notes and upgrade guide, or the
-    /// fragments no release has taken yet.
-    ///
-    /// Reports entries that read like commit messages or don't say what changed
-    /// for users, upgrade sections that don't say what to do, and typos, each
-    /// with the file it is in.
-    /// Edits nothing, and exits 0 whatever it finds: the review is an opinion,
-    /// not a check.
-    /// With `jp --format json`, prints `{"findings": [...]}`.
-    Review {
-        /// The release, such as `0.3.0`; without it, the unreleased fragments.
-        #[arg(value_parser = parse_version)]
-        version: Option<Version>,
     },
 
     /// Start the next minor or major release from `main`.
@@ -446,7 +428,6 @@ fn handle_command(
         }
         Command::Check => check(&ctx),
         Command::Render { render } => render_release(&ctx, &render),
-        Command::Review { version } => review_release(&ctx, version.as_ref(), stdin, stdout),
         Command::Cut { version } => make_release(root, &options, |pipeline| {
             cut::cut(pipeline, version.as_ref())
         }),
@@ -692,97 +673,6 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
         text,
         note,
         code: 0,
-    })
-}
-
-/// Have the host review a release's notes and upgrade guide, or the fragments
-/// no release has taken yet, through a model, and print what it found.
-///
-/// A review the host can't run, or whose response can't be read, ends the
-/// command; one that ran exits 0 whatever it found.
-fn review_release(
-    ctx: &Context<'_>,
-    version: Option<&Version>,
-    stdin: &mut impl BufRead,
-    stdout: &mut impl Write,
-) -> Result<Output, String> {
-    let fragments = &ctx.fragments;
-    existing(fragments)?;
-
-    let subject = review_subject(fragments, version)?;
-    if subject.is_empty() {
-        return Err(match version {
-            Some(version) => format!(
-                "Release {version} has nothing to review: it holds no fragment, highlight, or \
-                 overview."
-            ),
-            None => {
-                "There is nothing to review: no fragment or highlight is unreleased.".to_owned()
-            }
-        });
-    }
-
-    send(stdout, &PluginToHost::Query(review::query(&subject)))?;
-    let data = loop {
-        match read_message(stdin)? {
-            // The conversation the review runs in exists; the turn follows.
-            HostToPlugin::Created(_) => {}
-            HostToPlugin::QueryComplete(done) => break done.data,
-            HostToPlugin::Error(error) => {
-                return Err(format!("The review couldn't run: {}", error.message));
-            }
-            HostToPlugin::Shutdown => return Err("Interrupted.".to_owned()),
-            other => return Err(format!("expected the review's result, got: {other:?}")),
-        }
-    };
-    let findings = review::findings(data)
-        .map_err(|reason| format!("The review couldn't be read: {reason}."))?;
-
-    let text = if ctx.format.is_json() {
-        review::report_json(&findings) + "\n"
-    } else {
-        review::report(&findings, &subject.name())
-    };
-
-    Ok(Output {
-        text,
-        json: ctx.format.is_json(),
-        ..Output::default()
-    })
-}
-
-/// What `review` reads of a release, or of the fragments no release has taken
-/// yet: the fragments and highlights, and a release's `overview.md`, each file
-/// shown from the workspace root.
-///
-/// Files that break their format are refused, as `render` refuses them.
-fn review_subject(
-    fragments: &Fragments<'_>,
-    version: Option<&Version>,
-) -> Result<review::Subject, String> {
-    let part = version.map_or(Part::Unreleased, |version| Part::Release(version.clone()));
-    let mut contents = directory::read(&fragments.dir, &part)
-        .map_err(|error| unreadable(fragments, ReleaseError::Read(error)))?;
-
-    let shown = |path: &str| fragments.show(&fragments.dir.join(path));
-    for filed in &mut contents.fragments {
-        filed.path = shown(&filed.path);
-    }
-    for filed in &mut contents.highlights {
-        filed.path = shown(&filed.path);
-    }
-
-    let overview = match version {
-        Some(version) => release::overview(&fragments.dir.join(version.to_string()))
-            .map_err(|error| unreadable(fragments, error))?
-            .map(|text| (shown(&format!("{version}/{OVERVIEW}")), text)),
-        None => None,
-    };
-
-    Ok(review::Subject {
-        version: version.cloned(),
-        overview,
-        contents,
     })
 }
 

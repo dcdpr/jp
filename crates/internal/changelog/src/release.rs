@@ -387,11 +387,7 @@ fn push_new(credits: &mut Vec<Credit>, credit: Credit) {
 /// What `overview.md` in the release's directory `dir` holds, with its links
 /// inline, or `None` when there is no such file or it holds nothing but
 /// whitespace.
-///
-/// # Errors
-///
-/// Returns [`ReleaseError::Overview`] when the file exists but can't be read.
-pub fn overview(dir: &Utf8Path) -> Result<Option<String>, ReleaseError> {
+fn overview(dir: &Utf8Path) -> Result<Option<String>, ReleaseError> {
     let path = dir.join(OVERVIEW);
     let source = match fs::read_to_string(&path) {
         Ok(source) => source,
