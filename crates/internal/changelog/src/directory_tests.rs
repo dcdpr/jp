@@ -407,6 +407,28 @@ fn reading_a_release_without_a_directory_says_so() {
     );
 }
 
+/// Versions sort as versions, so 0.10.0 comes after 0.9.0; directories that
+/// name no version, and files, are no releases.
+#[test]
+fn the_releases_are_listed_oldest_first() {
+    let dir = fragments_dir(&[
+        ("0.10.0/retry-idle-turns.fixed.md", FRAGMENT),
+        ("0.9.0/retry-idle-turns.fixed.md", FRAGMENT),
+        ("1.0.0-rc.1/retry-idle-turns.fixed.md", FRAGMENT),
+        ("drafts/retry-idle-turns.fixed.md", FRAGMENT),
+        ("highlights/fan-out.md", HIGHLIGHT),
+        ("retry-idle-turns.fixed.md", FRAGMENT),
+    ]);
+
+    let versions: Vec<String> = releases(dir.path())
+        .unwrap()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(versions, ["0.9.0", "0.10.0", "1.0.0-rc.1"]);
+}
+
 #[test]
 fn a_place_is_read_from_a_path_and_written_back() {
     for (path, part, highlight, name) in [

@@ -6,8 +6,8 @@
 //! its format, and exits 1 when anything breaks a rule.
 //!
 //! `changelog render [VERSION]` prints a release's notes or upgrade guide, or
-//! the fragments no release has taken yet, as Markdown or as the JSON other
-//! tools render from ([`Render`]).
+//! what no tag ships yet, as Markdown or as the JSON other tools render from
+//! ([`Render`]).
 //! The forge and the headings arrive as flags rather than from configuration.
 //!
 //! Neither reads configuration, so CI can run them without `jp`.
@@ -91,8 +91,8 @@ enum Command {
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 #[group(skip)]
 pub struct Render {
-    /// The release, such as `0.3.0`; without one, the fragments no release has
-    /// taken yet.
+    /// The release, such as `0.3.0`; without one, what no tag ships yet: the
+    /// fragments at the top level, and those of every release not yet tagged.
     #[arg(value_parser = version)]
     pub version: Option<Version>,
 

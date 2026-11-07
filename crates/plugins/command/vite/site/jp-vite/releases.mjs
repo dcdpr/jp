@@ -12,7 +12,12 @@ import { SETTINGS_FILE, SRC_DIR, readSettings } from './settings.mjs'
 // `changelog render --format json` gives a release's version and date, which
 // the index lists, and `--format markdown` its release notes and its upgrade
 // guide, which this module places under the route the settings name, adding a
-// title and the date. A release in preparation has no date yet.
+// title and the date.
+//
+// A release is released once it is tagged, which gives it its date. Until
+// then it has no pages, and its notes are on the Unreleased page, which
+// `changelog` renders without a version: what no tag ships yet, the fragments
+// at the top level and those of every release not yet tagged.
 //
 // The site therefore builds without `jp`, but `changelog` has to be on `PATH`
 // wherever the site is built or served, in a clone that isn't shallow. When it
@@ -25,7 +30,7 @@ import { SETTINGS_FILE, SRC_DIR, readSettings } from './settings.mjs'
 // as `format`.
 const FORMAT = 1
 
-// The page of the changes no release lists yet, in place of a version.
+// The page of the changes no release ships yet, in place of a version.
 export const UNRELEASED = 'unreleased'
 
 // A release's directory: a semantic version, with no `v` in front.
@@ -66,10 +71,10 @@ export function workspaceRoot(settings, srcDir = SRC_DIR) {
     return resolve(srcDir, ...settings.site.split('/').map(() => '..'))
 }
 
-// The arguments `changelog` takes to render the release `version`, or the
-// fragments no release lists yet when it is `null`, from the fragments
-// directory `dir`, with the forge and the headings `release`, the settings'
-// `release`, names, as `view`, such as `['--format', 'json']`.
+// The arguments `changelog` takes to render the release `version`, or what no
+// tag ships yet when it is `null`, from the fragments directory `dir`, with
+// the forge and the headings `release`, the settings' `release`, names, as
+// `view`, such as `['--format', 'json']`.
 export function renderArgs(release, dir, version, view) {
     const args = ['render']
     if (version) args.push(version)
@@ -94,22 +99,24 @@ export function upgradePath(route, name) {
     return `/${route}/${name}/upgrade`
 }
 
+// The releases among `releases`, each a version and the model `changelog`
+// wrote of it, that a tag has made: the ones with a date.
+export function released(releases) {
+    return releases.filter(({ release }) => release.date)
+}
+
 // The release notes page of `release`, the model `changelog` wrote, around
-// its `notes`: a title, and when it was released, or that it isn't yet.
+// its `notes`: a title, and when it was released.
 export function notesContent(release, notes) {
     if (!release.version) {
-        return `# Unreleased\n\nThe changes no release lists yet.\n\n${notes}`
+        return `# Unreleased\n\nThe changes no release ships yet.\n\n${notes}`
     }
 
-    const when = release.date
-        ? `Released on ${release.date}.`
-        : 'In preparation: these notes can still change before the release is finalized.'
-
-    return `# Release ${release.version}\n\n${when}\n\n${notes}`
+    return `# Release ${release.version}\n\nReleased on ${release.date}.\n\n${notes}`
 }
 
 // The upgrade guide page of the release `version`, or of the changes no
-// release lists yet when it is `null`, around its `guide`, linking back to its
+// release ships yet when it is `null`, around its `guide`, linking back to its
 // notes below the releases' `route`.
 export function upgradeContent(version, guide, route) {
     if (!version) {
@@ -147,6 +154,19 @@ function versions(ctx) {
     return releaseVersions(names)
 }
 
+// Each release a tag has made, newest first, with the model `changelog` wrote
+// of it.
+function releases(ctx) {
+    return released(versions(ctx).map(version => ({ version, release: model(ctx, version) })))
+}
+
+// The pages to build: the changes no release ships yet, as `version` `null`,
+// then each release a tag has made, each with the model `changelog` wrote of
+// it.
+function pages(ctx) {
+    return [{ version: null, release: model(ctx, null) }, ...releases(ctx)]
+}
+
 // What `changelog` printed, run with `args` in the workspace root.
 //
 // Throws when it can't be run or fails, saying why.
@@ -171,8 +191,8 @@ function changelog(ctx, args) {
     }
 }
 
-// The release `version`, or the fragments no release lists yet when it is
-// `null`, as the model `changelog` writes.
+// The release `version`, or what no tag ships yet when it is `null`, as the
+// model `changelog` writes.
 function model(ctx, version) {
     const json = changelog(ctx, renderArgs(ctx.release, ctx.dir, version, ['--format', 'json']))
     const release = JSON.parse(json)
@@ -186,9 +206,9 @@ function model(ctx, version) {
     return release
 }
 
-// What the release index lists: each release, newest first, with its date,
-// `null` while it is in preparation, and its upgrade guide's path when it has
-// one; and how many entries no release lists yet.
+// What the release index lists: each release a tag has made, newest first,
+// with its date and its upgrade guide's path when it has one; and how many
+// entries no release ships yet.
 export function releaseIndex() {
     const ctx = context()
     if (!ctx) return { unreleased: null, releases: [] }
@@ -198,31 +218,26 @@ export function releaseIndex() {
 
     return {
         unreleased: { entries: unreleased.entries.length, path: notesPath(route, UNRELEASED) },
-        releases: versions(ctx).map((version) => {
-            const release = model(ctx, version)
-
-            return {
-                version,
-                date: release.date,
-                path: notesPath(route, version),
-                upgrade: release.entries.some(entry => entry.upgrade)
-                    ? upgradePath(route, version)
-                    : null,
-            }
-        }),
+        releases: releases(ctx).map(({ version, release }) => ({
+            version,
+            date: release.date,
+            path: notesPath(route, version),
+            upgrade: release.entries.some(entry => entry.upgrade)
+                ? upgradePath(route, version)
+                : null,
+        })),
     }
 }
 
-// The release notes pages: one for each release, and one for the changes no
-// release lists yet.
+// The release notes pages: one for each release a tag has made, and one for
+// the changes no release ships yet.
 export function notesPages() {
     const ctx = context()
     if (!ctx) return []
 
     const route = ctx.release.route
-    return [null, ...versions(ctx)].map((version) => {
+    return pages(ctx).map(({ version, release }) => {
         const name = version ?? UNRELEASED
-        const release = model(ctx, version)
         const view = ['--format', 'markdown', '--page', 'notes', '--upgrade-url', upgradePath(route, name)]
         const notes = changelog(ctx, renderArgs(ctx.release, ctx.dir, version, view))
 
@@ -230,17 +245,18 @@ export function notesPages() {
     })
 }
 
-// The upgrade guide pages: one for each release with upgrade sections, and one
-// for the changes no release lists yet when they have any.
+// The upgrade guide pages: one for each release a tag has made with upgrade
+// sections, and one for the changes no release ships yet when they have any.
 export function upgradePages() {
     const ctx = context()
     if (!ctx) return []
 
     const route = ctx.release.route
-    return [null, ...versions(ctx)].flatMap((version) => {
+    return pages(ctx).flatMap(({ version, release }) => {
+        if (!release.entries.some(entry => entry.upgrade)) return []
+
         const view = ['--format', 'markdown', '--page', 'upgrade']
         const guide = changelog(ctx, renderArgs(ctx.release, ctx.dir, version, view))
-        if (!guide.trim()) return []
 
         return [{ params: { version: version ?? UNRELEASED }, content: upgradeContent(version, guide, route) }]
     })

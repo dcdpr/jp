@@ -5,7 +5,8 @@ on:
   pull_request:
   # Not on tags: the release pages render from `main`'s `changelog.d/`, which a
   # release tag's tree doesn't have, so a site built from a tag must not
-  # replace `main`'s.
+  # replace `main`'s. The push of a release's tag runs this workflow on `main`
+  # instead, from the `release` workflow, so the release gets its pages.
   push:
     branches: [main]
 env:

@@ -1,8 +1,9 @@
 //! A release, as its notes are built: its version and date, its overview, and
 //! every highlight and fragment it ships, each with who it credits.
 //!
-//! [`read`] builds one from a release's directory, or from the unreleased top
-//! level of a fragments directory.
+//! [`read`] builds one from a release's directory, or from what no tag ships
+//! yet: the top level of a fragments directory, and the directory of every
+//! release without a tag.
 //! It credits each file to the commits that wrote or changed it while it sat at
 //! the top level, read from the default branch's history, and the `forge`
 //! module says what such a credit reads like and where it links.
@@ -68,7 +69,7 @@ pub const FORMAT: u32 = 1;
 /// A release's notes, before they are rendered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
-    /// The release's version; `None` for the fragments no release has taken.
+    /// The release's version; `None` for what no tag ships yet.
     pub version: Option<Version>,
 
     /// The day the release's tag was made, as `YYYY-MM-DD`; `None` while the
@@ -194,7 +195,11 @@ impl From<NoAddress> for ReleaseError {
 }
 
 /// Build the release that `part` of the fragments directory `dir` holds: a
-/// release's directory, or the unreleased top level.
+/// release's directory, or what no tag ships yet.
+///
+/// [`Part::Unreleased`] holds the top level and the directory of every release
+/// without a tag, `v<version>`, so a release counts as released once it is
+/// tagged, whenever its notes were filed.
 ///
 /// Credits link to the project on `forge`, at the web address of git's `origin`
 /// remote; without a `forge`, to the one that address is on (see
@@ -217,7 +222,10 @@ pub fn read(
     let Contents {
         fragments,
         highlights,
-    } = directory::read(dir, part)?;
+    } = match part {
+        Part::Unreleased => unreleased(dir)?,
+        Part::Release(_) => directory::read(dir, part)?,
+    };
 
     let address = git::origin(dir).as_deref().and_then(web_address);
     let forge = forge.unwrap_or_else(|| Forge::infer(address.as_deref()));
@@ -375,6 +383,24 @@ fn history_credits(
     }
 
     (order, credits)
+}
+
+/// The fragments and highlights no tag ships: the ones at the top level of the
+/// fragments directory `dir`, and the ones in the directory of every release
+/// without a tag.
+fn unreleased(dir: &Utf8Path) -> Result<Contents, ReleaseError> {
+    let mut contents = directory::read(dir, &Part::Unreleased)?;
+    for version in directory::releases(dir).map_err(ReadError::from)? {
+        if git::tag_date(dir, &format!("v{version}"))?.is_some() {
+            continue;
+        }
+
+        let release = directory::read(dir, &Part::Release(version))?;
+        contents.fragments.extend(release.fragments);
+        contents.highlights.extend(release.highlights);
+    }
+
+    Ok(contents)
 }
 
 /// Add `credit` to `credits` unless they hold it already.

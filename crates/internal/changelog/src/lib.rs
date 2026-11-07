@@ -16,8 +16,8 @@
 //! included, and every file in it to its format.
 //!
 //! [`release::read`] builds a [`Release`] from a release's directory, or from
-//! the files no release has taken yet, crediting each file to the change
-//! requests that wrote it, which it reads from git's history.
+//! the files no tag ships yet, crediting each file to the change requests that
+//! wrote it, which it reads from git's history.
 //! A release serializes to JSON, and [`markdown`] renders its release notes and
 //! upgrade guide.
 //!

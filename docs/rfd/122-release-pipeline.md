@@ -439,8 +439,10 @@ adds both when publishing the document.
 ### The release model
 
 The `changelog` crate builds and serializes a release model from a
-`changelog.d/<version>/` directory or from the unreleased fragments at the root
-of `changelog.d/`.
+`changelog.d/<version>/` directory or from everything no finalized release ships.
+That unreleased model holds the fragments at the root of `changelog.d/` and the
+directory of every release without a tag, so a release's entries count as
+unreleased until it is tagged, however early its notes branch merged.
 Markdown is one rendering of that model; consumers that need custom formatting
 read the JSON output:
 
@@ -595,6 +597,7 @@ locally without GitHub, and no workflow pushes commits to any branch:
 | Daily schedule                | `just release-due`                                                                                   | Opens an issue labelled `release` if a release is due and none exists      |
 | Push to `main`                | Documentation site build ([On the site](#on-the-site))                                               | Deploys the site                                                           |
 | Push of a `v*` tag            | Binary distribution ([RFD 123])                                                                  | Publishes `jp` binaries and the GitHub Release                             |
+| Push of a `v*` tag            | Documentation site build on `main`, started by the release workflow ([On the site](#on-the-site))    | Deploys the site                                                           |
 | Push of a `vX.Y.0` tag        | Release reminder cleanup (a minor or major release answers the reminder)                             | Closes the `release` issue                                                 |
 
 Because maintainers push branches and tags themselves, downstream workflows
@@ -603,6 +606,8 @@ In GitHub Actions, pushes and pull requests created with `GITHUB_TOKEN` do not
 trigger other workflows and require manual approval to run checks ([Triggering a
 workflow from a workflow]); because CI never pushes branches or opens pull
 requests, the pipeline needs no bot account or token workarounds.
+The only run a workflow starts is the site build for a release's tag, through
+`workflow_dispatch`, which a workflow's own token is allowed to trigger.
 
 ### On the site
 
@@ -611,13 +616,13 @@ and RFDs, allowing the documentation site to build without compiling `jp`.
 `jp vite sync` writes `fragments_dir`, `forge`, and `headings` into the site's
 settings snapshot alongside the other plugins' settings.
 During the site build, the releases loader runs `changelog render --format json`
-for each `changelog.d/<version>/` directory and for the root of `changelog.d/`,
+for each `changelog.d/<version>/` directory and for the unreleased model,
 passing the snapshotted settings as CLI flags.
 From that JSON model, `jp vite` generates release notes and upgrade guide pages
-for each release plus an "Unreleased" page.
-A release in preparation appears on the site (marked as in preparation) as soon
-as its notes branch merges to `main`, serving as a live preview while notes are
-edited.
+for each finalized release plus an "Unreleased" page.
+A release gets its own pages when it is tagged; until then, its entries appear
+on the Unreleased page, grouped by type with the fragments no release ships yet.
+`jp release render 0.3.0` previews a release's notes while they are prepared.
 The generated pages are not committed to Git.
 `jp vite` serves them under `/releases/` with a release index showing dates, and
 replaces the "Change Log" navigation link with "Releases".
@@ -632,7 +637,9 @@ Because release tags do not contain `changelog.d/` and `jp vite` only enables a
 workflow when its directory exists ([RFD 116]), building the site from a release
 tag would omit all release pages and must not overwrite the deployment from
 `main`.
-JP's docs workflow therefore stops deploying on tag pushes.
+JP's site workflow therefore builds only from `main`; pushing a release's tag
+starts it there through the release workflow, which is when the release's pages
+appear.
 If JP later adds versioned documentation per release, each tag can build into a
 versioned subpath and link to the `/releases/` pages deployed from `main`.
 
@@ -835,8 +842,9 @@ Add the releases workflow to `jp vite`: snapshot `fragments_dir`, `forge`, and
 `headings` in `jp vite sync`, add the releases loader, generate the release
 notes, upgrade guide, index, and "Unreleased" pages, and replace "Change Log"
 with "Releases" in the site navigation.
-Update the docs workflow to build `changelog` instead of `jilu`, stop deploying
-the site on tag pushes, and remove `jilu` and `docs/change-log.md`.
+Update the docs workflow to build `changelog` instead of `jilu`, build the site
+only from `main` (and again when a release's tag is pushed), and remove `jilu`
+and `docs/change-log.md`.
 Depends on Phase 1 and the site phase of [RFD 116].
 
 ## References

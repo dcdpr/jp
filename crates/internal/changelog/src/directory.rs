@@ -366,6 +366,23 @@ pub fn read(dir: &Utf8Path, part: &Part) -> Result<Contents, ReadError> {
     Ok(contents)
 }
 
+/// The versions of the releases whose directories the fragments directory `dir`
+/// holds, oldest first.
+///
+/// # Errors
+///
+/// Returns why `dir` can't be read.
+pub fn releases(dir: &Utf8Path) -> Result<Vec<Version>, CheckError> {
+    let mut versions: Vec<Version> = entries(dir)?
+        .into_iter()
+        .filter(|entry| entry.is_dir)
+        .filter_map(|entry| Version::parse(&entry.name).ok())
+        .collect();
+    versions.sort();
+
+    Ok(versions)
+}
+
 /// Read the top level of the fragments directory `dir`, and each release's
 /// directory in it when `releases` is set.
 fn read_top_level(

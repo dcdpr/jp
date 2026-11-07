@@ -38,7 +38,7 @@ import './style.css'
 // - `<WikiIndex />`: every wiki page.
 // - `<WikiChildren />`: the wiki pages under the page it is on, or with no page
 //   around it, the top pages.
-// - `<ReleaseIndex />`: the releases, and the changes no release lists yet.
+// - `<ReleaseIndex />`: the releases, and the changes no release ships yet.
 // - `<DocLabels />`: a document's labels, which every RFD, ticket, and wiki
 //   page's header shows.
 //

@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
     notesContent,
     notesPath,
+    released,
     releaseVersions,
     renderArgs,
     upgradeContent,
@@ -42,8 +43,8 @@ test('changelog renders with the forge and headings the settings name', () => {
     ])
 })
 
-// Without a version, `changelog` renders the fragments no release lists yet;
-// without a forge, it reads the one git's `origin` is on.
+// Without a version, `changelog` renders what no tag ships yet; without a
+// forge, it reads the one git's `origin` is on.
 test('the unreleased changes render without a version, and a forge left unset is left out', () => {
     const release = { ...RELEASE, forge: null, headings: {} }
 
@@ -77,10 +78,15 @@ test('the notes of a release open with its title and the day it was released', (
     )
 })
 
-test('the notes of a release in preparation say they can still change', () => {
-    const release = { version: '0.3.0', date: null }
+// A release without a date has no tag yet: its notes are on the Unreleased
+// page until it is tagged.
+test('only a release a tag has made gets pages of its own', () => {
+    const releases = [
+        { version: '0.4.0', release: { version: '0.4.0', date: null } },
+        { version: '0.3.0', release: { version: '0.3.0', date: '2026-10-28' } },
+    ]
 
-    assert.match(notesContent(release, 'Notes.\n'), /^# Release 0\.3\.0\n\nIn preparation: /)
+    assert.deepEqual(released(releases).map(({ version }) => version), ['0.3.0'])
 })
 
 test('the unreleased changes have a page of their own', () => {
@@ -88,7 +94,7 @@ test('the unreleased changes have a page of their own', () => {
 
     assert.equal(
         notesContent(release, '1 entry is unreleased: Fixed (1).\n'),
-        '# Unreleased\n\nThe changes no release lists yet.\n\n1 entry is unreleased: Fixed (1).\n',
+        '# Unreleased\n\nThe changes no release ships yet.\n\n1 entry is unreleased: Fixed (1).\n',
     )
 })
 

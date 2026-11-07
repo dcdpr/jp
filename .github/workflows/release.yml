@@ -4,11 +4,11 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
-  # The push of a minor or major release's tag, which `jp release finalize`
-  # makes. A patch release is no answer to the reminder: `due` counts from the
-  # last minor or major release, so it would open again the next day.
+  # The push of a release's tag, which `jp release finalize` makes: it puts the
+  # release's pages on the site, and a minor or major release's closes the
+  # reminder.
   push:
-    tags: ["v[0-9]+.[0-9]+.0"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 env:
   CARGO_TERM_COLOR: always
   JUST_TIMESTAMP: true
@@ -115,7 +115,9 @@ jobs:
           gh issue create --title "Cut the next release" --label release --body "$body"
   close:
     name: Close the release reminder
-    if: github.event_name == 'push' && github.repository == 'dcdpr/jp'
+    # A patch release is no answer to the reminder: `due` counts from the last
+    # minor or major release, so it would open again the next day.
+    if: github.event_name == 'push' && github.repository == 'dcdpr/jp' && endsWith(github.ref_name, '.0')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -138,3 +140,22 @@ jobs:
           while read -r number; do
             gh issue close "$number" --comment "Released as $TAG."
           done < "$RUNNER_TEMP/open"
+  site:
+    name: Publish the release on the site
+    # The site gives a release its pages once its tag exists, and is built only
+    # from `main`, since a tag's tree has no `changelog.d/`. So this job starts
+    # the site workflow on `main` through `workflow_dispatch`: unlike a push, a
+    # dispatch made with the workflow's own token starts a run.
+    if: github.event_name == 'push' && github.repository == 'dcdpr/jp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Rebuild the site from main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run docs.yml --ref main

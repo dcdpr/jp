@@ -288,6 +288,38 @@ fn a_release_is_dated_by_its_tag() {
     assert_eq!(tagged.date.as_deref(), Some("2026-10-10"));
 }
 
+/// A release counts as released once it is tagged, so the notes of one cut and
+/// filed but not yet tagged are still unreleased, grouped by type with the
+/// fragments merged since.
+#[test]
+fn an_untagged_release_is_still_unreleased() {
+    let repository = jp_after_cutting_0_3_0();
+    let fragments = repository.fragments();
+
+    let unreleased = read(&fragments, &Part::Unreleased, None, &Headings::default()).unwrap();
+
+    let help = repository.hash("HEAD~4");
+    assert_eq!(entry_credits(&unreleased), [
+        ("fan-out", vec!["#1182"]),
+        ("show-model", vec!["#1243"]),
+        ("plugin-manifest-routing", vec!["#1216"]),
+        ("retry-idle-turns", vec!["#1207"]),
+        ("help-default", vec![&help[..7]]),
+    ]);
+    assert_eq!(unreleased.highlights[0].slug, "fan-out");
+    assert_eq!(
+        unreleased.overview,
+        "5 entries are unreleased: Added (2), Changed (1), and Fixed (2).\n\nHighlights:\n\n- \
+         Tool calls fan out"
+    );
+
+    repository.tag("v0.3.0");
+    let unreleased = read(&fragments, &Part::Unreleased, None, &Headings::default()).unwrap();
+
+    assert_eq!(entry_credits(&unreleased), [("show-model", vec!["#1243"])]);
+    assert!(unreleased.highlights.is_empty());
+}
+
 #[test]
 fn the_unreleased_fragments_have_no_version_or_date() {
     let repository = jp_after_cutting_0_3_0();
