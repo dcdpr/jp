@@ -137,6 +137,12 @@ impl StreamError {
         Self::new(StreamErrorKind::ContextWindowExceeded, message)
     }
 
+    /// Create an unknown-model error.
+    #[must_use]
+    pub fn unknown_model(message: impl Into<String>) -> Self {
+        Self::new(StreamErrorKind::UnknownModel, message)
+    }
+
     /// Create an output-limit error.
     #[must_use]
     pub fn output_limit(message: impl Into<String>) -> Self {
@@ -387,6 +393,10 @@ impl StreamError {
                     return Self::new(StreamErrorKind::InsufficientQuota, display);
                 }
 
+                if looks_like_unknown_model(code, body) {
+                    return Self::unknown_model(display);
+                }
+
                 // An oversized prompt is the same size on the next attempt, so
                 // it is classified before the retry heuristics below. A 429 is
                 // exempt: it is an authoritative rate-limit signal, and
@@ -499,6 +509,10 @@ pub enum StreamErrorKind {
     /// Distinct from the Host's output-byte ceiling.
     MaxOutputTokens,
 
+    /// The provider does not serve the requested model.
+    /// This is not retryable: the request has to name a different model.
+    UnknownModel,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -520,6 +534,7 @@ impl StreamErrorKind {
             Self::ContextWindowExceeded => "Context window exceeded",
             Self::OutputLimit => "Output limit exceeded",
             Self::MaxOutputTokens => "Output token limit exceeded",
+            Self::UnknownModel => "Unknown model",
             Self::Other => "Stream Error",
         }
     }
@@ -764,6 +779,44 @@ pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
         || lower.contains("prompt is too long")
         || lower.contains("exceeds the maximum number of tokens")
         || lower.contains("too many tokens")
+}
+
+/// Check whether an error response says the requested model is unknown or
+/// unavailable.
+///
+/// The status alone is ambiguous: a misconfigured `base_url` path also returns
+/// `404` (e.g. `{"detail":"Not Found"}` from the HTTP server), and a `400` can
+/// object to the model for other reasons, such as not supporting tools.
+/// Matches both nested (`{"error": {...}}`) and flat JSON error envelopes for:
+///
+/// - OpenAI: `"code": "model_not_found"`, as a `404` from the API and as a
+///   `400` from the subscription host
+/// - Cerebras: `"code": "model_archived"`
+/// - vLLM (`404` only): `"param": "model"`, or `"type": "NotFoundError"` with a
+///   `"does not exist"` message on older servers
+pub(crate) fn looks_like_unknown_model(status: u16, body: &str) -> bool {
+    if !matches!(status, 400 | 404) {
+        return false;
+    }
+
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+
+    let error = parsed
+        .get("error")
+        .filter(|error| error.is_object())
+        .unwrap_or(&parsed);
+    let field = |key: &str| error.get(key).and_then(serde_json::Value::as_str);
+
+    if matches!(field("code"), Some("model_not_found" | "model_archived")) {
+        return true;
+    }
+
+    status == 404
+        && (field("param") == Some("model")
+            || (field("type") == Some("NotFoundError")
+                && field("message").is_some_and(|message| message.contains("does not exist"))))
 }
 
 /// Heuristic check for transient network/proxy failures based on error text.

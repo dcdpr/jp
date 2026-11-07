@@ -1,0 +1,27 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 404
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "message": "Model does not exist or you do not have access to it.",
+      "type": "not_found_error",
+      "param": "model",
+      "code": "model_not_found"
+    }

@@ -1,0 +1,10 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    Stream {
+        kind: UnknownModel,
+        message: "The 'foobarbaz' model is not supported when using Codex with a ChatGPT account. (HTTP 400 Bad Request)",
+    },
+]

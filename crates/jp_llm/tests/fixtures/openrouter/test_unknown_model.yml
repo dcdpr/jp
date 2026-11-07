@@ -1,0 +1,36 @@
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        }
+      ],
+      "reasoning": {
+        "exclude": true,
+        "effort": "minimal"
+      },
+      "stream": true
+    }
+then:
+  status: 400
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "error": {
+        "message": "foobarbaz is not a valid model ID",
+        "code": 400
+      },
+      "user_id": "[redacted]"
+    }

@@ -404,6 +404,7 @@ fn unavailable_model_is_classified_with_the_requested_name() {
         error.message(),
         "Claude Code cannot use model `claude-opus-5`: Not available on this account."
     );
+    assert_eq!(error.kind, StreamErrorKind::UnknownModel);
     assert!(!error.is_retryable());
 }
 
