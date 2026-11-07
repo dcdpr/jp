@@ -179,6 +179,9 @@ which updates `[workspace.package] version`, every crate that inherits it, and
 `Cargo.lock` (checked in CI with `--locked`), while leaving the independently
 versioned crates under `crates/contrib/` untouched.
 Passing `--workspace` would overwrite those `crates/contrib/` versions as well.
+JP's maintainers run these commands through `just release`, which installs a
+pinned `cargo-edit`, builds `jp` and `jp-release` from the checkout, and runs `jp
+release` with the given arguments.
 
 ### Cutting a release
 

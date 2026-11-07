@@ -5,6 +5,7 @@ bacon_version        := "3.25.0"
 binstall_version     := "1.22.0"
 cbindgen_version     := "0.29.4"
 deny_version         := "0.20.2"
+edit_version         := "0.13.14"
 expand_version       := "1.0.126"
 insta_version        := "1.48.0"
 llvm_cov_version     := "0.8.7"
@@ -1932,6 +1933,25 @@ ticket-import NNN *ARGS: _install-ticket
 
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
+
+# Run `jp release` with `ARGS`, the way JP's own releases are made:
+#
+#   just release status
+#   just release cut
+#   just release pick 0.3.1 4e1f0a2
+#   just release finalize 0.3.0
+#
+# Builds `jp` and `jp-release` from this checkout and runs them from the target
+# directory, as `release-due` does, and installs `cargo set-version` from
+# cargo-edit, which `cut` and `pick` run to write the new version.
+[group('release')]
+[positional-arguments]
+release *ARGS: (_install "cargo-edit@" + edit_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo build {{quiet_flag}} --locked --package jp_cli --package jp-release
+    PATH="${CARGO_TARGET_DIR:-$PWD/target}/debug:$PATH" exec jp release "$@"
 
 # Ask whether the next release should be cut, as JP's daily workflow does.
 #
