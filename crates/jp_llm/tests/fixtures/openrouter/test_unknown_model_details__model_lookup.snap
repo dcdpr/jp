@@ -1,0 +1,26 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    Ok(
+        ModelDetails {
+            id: ModelIdConfig {
+                provider: Openrouter,
+                name: Name(
+                    "foobarbaz",
+                ),
+            },
+            display_name: None,
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+            deprecated: None,
+            structured_output: None,
+            prefill: None,
+            subscription: None,
+            features: [],
+        },
+    ),
+]
