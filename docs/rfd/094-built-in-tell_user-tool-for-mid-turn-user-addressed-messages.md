@@ -13,31 +13,31 @@
 This RFD adds a built-in `tell_user` tool that lets the assistant display a
 markdown message to the user mid-turn and receive a brief acknowledgement
 without ending the turn loop.
-To support `tell_user` without special-casing, it activates MCP `audience`
-filtering at JP's terminal and LLM view boundaries, renders `text/markdown` tool
-blocks through the markdown pipeline, and adds a `style.header` tool
-configuration knob.
+To support `tell_user` without special-casing, JP filters tool content by MCP
+`audience` at the user and provider view boundaries, renders `text/markdown`
+content blocks through the markdown pipeline, and adds a `style.header` tool
+display setting.
 
 ## Motivation
 
-A response containing only chat text is terminal: the turn ends.
-A response containing tool calls keeps the agentic loop going — JP executes the
-tools and sends the responses back.
-This couples "say something to the user" with "have unrelated tool work in the
-same response": the assistant cannot deliver a progress update, a partial
-deliverable, or a direct answer to a mid-loop question and then continue
-working, unless it happens to also call another tool.
+A response containing only chat text ends the turn.
+A response containing tool calls continues the turn loop: JP executes the tools
+and sends their results back to the model.
+Because of this, the assistant cannot send the user a progress update, a partial
+deliverable, or a direct answer to a mid-turn question and then keep working,
+unless it also happens to call another tool in the same response.
 
-`tell_user` removes that coupling.
-The message rides in a tool call, so the response is non-terminal; the
-acknowledgement keeps the loop alive.
-This matches the `send_to_user` pattern Anthropic documents for long-running
-agents ([Prompting Claude Fable]), including its observation that tool inputs
-are delivered verbatim while free text may be treated as summarizable narration.
+`tell_user` decouples speaking to the user from ending the turn.
+The assistant sends the message as a tool call and receives an acknowledgement
+as the tool result, which continues the turn loop.
+This follows the `send_to_user` pattern Anthropic documents for long-running
+agents ([Prompting Claude Fable]), which notes that models treat tool inputs as
+verbatim deliverables while treating free-form chat text as summarizable
+narration.
 
-Secondary benefit: the message carries an explicit "addressed to the user"
-marker, so every consumer of the conversation — terminal, web viewer, future
-frontends — can identify user-facing deliverables without heuristics.
+Routing mid-turn deliverables through `tell_user` also marks them explicitly as
+user-addressed, so the terminal, web viewer, and other frontends can identify
+user-facing content without heuristics.
 
 ## Design
 
@@ -54,12 +54,11 @@ The assistant calls `tell_user` like any other tool:
 }
 ```
 
-The user sees the message rendered as markdown chat content — no "Calling tool"
-header, no arguments block, no result chrome.
+The terminal renders the message as markdown chat content, without a "Calling
+tool" header, arguments block, or result chrome.
 The assistant receives `"Message shown to user."` as the tool result and the
-loop continues.
-Turn-end semantics are unchanged: a text-only response remains terminal, and
-`tell_user` keeps the loop alive exactly like any other tool call.
+turn continues.
+Turn-end semantics do not change: a text-only response still ends the turn.
 
 ### Tool response shape
 
@@ -83,100 +82,98 @@ Turn-end semantics are unchanged: a text-only response remains terminal, and
 }
 ```
 
-Two notes on this shape:
+`audience` is the standard MCP per-block annotation (`user` or `assistant`).
+[RFD 058] defines the annotation types for MCP compatibility without acting on
+them; this RFD implements audience filtering.
 
-- `audience` is MCP's standard annotation (`user` / `assistant`, per block).
-  [RFD 058] carries the annotation types for MCP compatibility but does not act
-  on them; this RFD adds the first behavior.
-- `mimeType` on `text` blocks is the optional field [RFD 058] defines as a JP
-  extension (MCP's `TextContent` has no mimeType), following [RFD 065]'s
-  MCP-compatible superset principle: MCP tools never set it, and absence means
-  plain text.
-  [Alternatives](#carry-the-message-in-a-resource-block) covers why the message
-  does not ride in a `resource` block, which has `mimeType` natively.
+`mimeType` on `text` blocks is an optional JP extension defined in [RFD 058]
+(MCP's `TextContent` has no `mimeType` field), following [RFD 065]'s
+MCP-compatible superset principle: MCP tools omit it, and omitted `mimeType`
+defaults to plain text.
+See [Alternatives](#carry-the-message-in-a-resource-block) for why the message
+uses a `text` block rather than a `resource` block, which has `mimeType`
+natively.
 
-### Audience honoring
+### Audience filtering
 
-The two view boundaries apply a symmetric filter:
+JP filters content blocks by `audience` at two boundaries:
 
-- **Provider view** ([RFD 058]'s shared block-to-string conversion): includes
-  blocks whose `audience` is absent or contains `assistant`.
-  The `ToolCallResponse` sent back to the provider carries only the
-  acknowledgement — the message is not duplicated in the tool result.
-  The assistant-authored `ToolCallRequest` retains the `message` argument in the
-  replayed transcript, as with every tool call.
-- **User view** (chat-style terminal rendering, the plugin host's `user` events
-  view): includes blocks whose `audience` is absent or contains `user`.
-  The acknowledgement is not part of the user view.
+- **Provider view** ([RFD 058]'s shared block-to-string conversion): keeps
+  blocks whose `audience` is absent or includes `assistant`.
+  For `tell_user`, the `ToolCallResponse` sent to the provider carries only the
+  acknowledgement, avoiding duplicating the message in the tool result.
+  The `ToolCallRequest` retains the assistant's `message` argument in the
+  replayed transcript, like any other tool call.
+- **User view** (chat-style terminal rendering and the plugin host's `user`
+  events view): keeps blocks whose `audience` is absent or includes `user`.
+  The acknowledgement is excluded from the user view.
 
 If the provider filter removes every block from a successful result, JP
-substitutes a neutral placeholder — `"Tool executed successfully."` — so the
-request/response pairing stays wire-valid.
-The placeholder does not hint at withheld content; telling the model that hidden
-content exists invites retries and speculation.
-A failed result keeps `isError` and gets `"Tool failed."` in the same case.
+substitutes `"Tool executed successfully."` so the request/response pair remains
+valid on the wire.
+The placeholder is neutral and does not mention withheld content, which would
+invite the model to retry or speculate about hidden output.
+When all blocks are filtered from a failed result, JP preserves `isError` and
+substitutes `"Tool failed."`.
 
-This also fixes a latent spec-compliance gap: MCP servers can send `audience`
-annotations today, and JP silently ships user-only blocks to the LLM.
-After this RFD, JP honors the annotation for every tool, not just `tell_user`.
+Audience filtering applies to every tool, not just `tell_user`.
+This closes an MCP compliance gap where user-only blocks from MCP servers were
+forwarded to the LLM.
 
-### The user view as a canonical API
+### The user view
 
-"Which content is addressed to the user" must have exactly one definition, or
-every consumer improvises it (and a chat-only view silently drops `tell_user`
-messages).
-`jp_conversation` exposes a single accessor — the **user view** — that yields
-user-addressed content regardless of the carrying event: `ChatResponse` content
-and user-audience blocks from tool call responses.
-Chat-style consumers use it directly — the plugin host's `ReadEvents` handler
-when a plugin requests the `user` view, and any chat-only rendering.
-The terminal's tool-call rendering reads the same audience data through
-`inline_results`' per-audience settings.
+To keep chat-only consumers from each improvising their own filter (or silently
+dropping `tell_user` messages), `jp_conversation` exposes a single **user view**
+accessor.
+The user view yields all user-addressed content regardless of the carrying
+event: `ChatResponse` content and user-audience blocks from tool call responses.
+Chat-style consumers, including any chat-only renderer and the plugin host's
+`ReadEvents` handler when a plugin requests the `user` view, call this accessor
+directly.
+Terminal tool-call rendering reads the same audience annotations through the
+per-audience `inline_results` settings.
 
-The layering is strict: the user view is computed from event data alone —
-audience annotations — and knows nothing of configuration.
+The user view is computed from event data alone (event variants and `audience`
+annotations) and is independent of configuration.
 Display policy (`style.hidden`, `style.header`, `inline_results`) belongs to the
-renderers.
-Terminal style does not propagate to plugins.
+renderers, and terminal style settings do not affect plugins.
 
-`ReadEvents` gains a `view` selector: `raw` (the default) returns the full
-serialized event stream unchanged; `user` returns the user view.
-Both shapes have real consumers — chat-style frontends want the projection,
-audit and tooling paths want every block — so the choice is explicit in the
-request rather than implied by the consumer. serve-web requests the `user` view
-for its chat rendering.
+The plugin protocol's `ReadEvents` request gains a `view` selector: `raw` (the
+default) returns the full serialized event stream unchanged, while `user`
+returns the user view.
+Because chat frontends want the filtered projection while audit and tooling
+paths need every block, the request selects the view explicitly.
+`serve-web` requests the `user` view for its chat rendering.
 
-The `user` view is the raw shape, filtered: the same event kinds, IDs, and
-response envelope, no synthetic types (consistent with the rejection of event
-synthesis in [Alternatives](#event-synthesis-user-projection)).
-The filtering rules are defined per event family; this RFD defines the chat,
-turn, and tool-call families:
+The `user` view filters the raw stream in place: it uses the same event kinds,
+IDs, and `EventsResponse` envelope without introducing synthetic event types
+(see [Alternatives](#event-synthesis-user-projection)).
+Filtering is defined per event family:
 
-- `turn_start` and `chat_request` events pass through unchanged — a chat-style
-  consumer needs the user's own messages and turn boundaries, not only
-  assistant-side content.
-- `chat_response` events pass filtered by variant: `Message` and `Structured`
-  pass (both are the assistant's answer, addressed to the user); `Reasoning` is
-  dropped — thinking content is not user-addressed, and its terminal display is
-  already an opt-in style choice.
-  Consumers that want reasoning use the `raw` view.
-- `tool_call_response` events pass with their content reduced to user-audience
-  blocks; responses left empty by the reduction are dropped, along with their
-  paired `tool_call_request`.
-- `tool_call_request` events are dropped (arguments are not user-addressed
-  content).
-- Inquiry events are deferred: not every persisted inquiry pair is user-facing
-  — inquiries resolved by the inquiry backend record exchanges the user never
-  saw — and the source attribution that distinguishes them belongs to [RFD
-  082].
-  Inquiry-family rules land with that work.
-- All remaining event kinds are dropped.
+- `turn_start` and `chat_request` events pass through unchanged, since a
+  chat-style consumer needs turn boundaries and the user's own messages
+  alongside assistant content.
+- `chat_response` events are filtered by variant: `Message` and `Structured`
+  pass (both are user-addressed assistant replies), while `Reasoning` is
+  dropped.
+  Thinking content is not addressed to the user, and its terminal display is an
+  opt-in style setting; consumers that need reasoning use the `raw` view.
+- `tool_call_response` events retain only their user-audience blocks.
+  Responses with no user-audience blocks are dropped.
+- `tool_call_request` events are dropped, because tool arguments are not
+  user-addressed content.
+- Inquiry events are deferred to [RFD 082].
+  Inquiries resolved by the inquiry backend record exchanges the user never saw,
+  and distinguishing them from user-facing inquiries requires [RFD 082]'s source
+  attribution.
+- All other event kinds are dropped.
 
-`raw` is the only view that preserves conversation-stream invariants: in the
-`user` view a `tool_call_response` may have no paired request, so the result is
-a projection in event shape, not a valid conversation stream.
-Consumers must not feed it back into anything that consumes streams — provider
-conversion, storage repair, compaction, or event validators.
+Only the `raw` view preserves conversation-stream invariants.
+In the `user` view, a `tool_call_response` has no paired `tool_call_request`, so
+the output is a filtered projection in event shape rather than a valid
+conversation stream.
+Consumers must not pass it to stream consumers such as provider conversion,
+storage repair, compaction, or event validators.
 
 ```jsonc
 // request
@@ -198,41 +195,36 @@ The ubiquitous language gains two entries: *Audience* and *User View*.
 
 ### Markdown rendering for content blocks
 
-Blocks carrying `mimeType: text/markdown` render through the `jp_md` pipeline —
-the same rendering chat content receives — instead of a fenced code block.
-This is generic: any tool returning a report, summary, or explanation as
-markdown benefits.
-It makes the block renderer a second consumer of `jp_md`'s public rendering API;
-the existing streaming-identity and comrak cross-validation suites become shared
-contract tests for both consumers.
+Content blocks with `mimeType: text/markdown` render through the `jp_md`
+pipeline, matching chat content instead of rendering inside a fenced code block.
+Any tool that returns markdown reports, summaries, or explanations benefits from
+this behavior.
+The block renderer becomes a second consumer of `jp_md`'s public rendering API,
+sharing the existing streaming-identity and comrak cross-validation test suites.
 
 ### `style.header`
 
-A new knob on the per-tool display style: whether to render the "Calling tool
-`<name>`" header line.
-Accepts a boolean or `"on"` / `"off"`, following the bool-or-string pattern
-`inline_results` and `results_file_link` already use (their string vocabularies
-differ; `header` introduces `"on"`).
-Defaults to `true`.
-Setting it off also suppresses the streaming temp line shown while the tool's
-arguments are being received.
-The `style.error` overlay cannot override `header`: the header renders before
-the result exists, so an error-conditional header is structurally meaningless.
-With `parameters = "<command>"`, setting `header = "off"` prints the formatter's
-output with no header line above it.
+`style.header` is a per-tool display setting that controls whether JP renders
+the "Calling tool `<name>`" header line.
+It defaults to `true` and accepts a boolean or `"on"` / `"off"`, following the
+boolean-or-string pattern used by `inline_results` and `results_file_link`
+(whose string vocabularies differ; `header` introduces `"on"`).
+Disabling `header` also suppresses the temporary streaming line shown while JP
+receives the tool's arguments.
+With `parameters = "<command>"`, setting `header = "off"` prints the custom
+formatter's output without a header line above it.
+The `style.error` overlay cannot override `header`, because the header renders
+before the tool result exists.
 
-`style.hidden` is unchanged and remains the absolute kill switch: `hidden =
-true` renders nothing for the tool in the terminal, including user-audience
-blocks.
-A user who hides a tool has opted out of its terminal output entirely; the raw
-stream and plugin views are unaffected.
+`style.hidden` is unchanged and overrides all other terminal style settings:
+`hidden = true` suppresses all terminal output for the tool, including
+user-audience blocks, while leaving the raw stream and plugin views unaffected.
 
 ### Result display and audience
 
-No new style knob is needed: `inline_results` remains the single control for
-what a tool call's results display inline.
-When [RFD 058]'s block model lands, the value gains a per-audience map form; the
-existing scalars stay and apply to both audiences:
+`inline_results` remains the single setting for inline tool result display.
+Alongside its scalar values, which apply to both audiences, `inline_results`
+accepts a per-audience map:
 
 ```toml
 [conversation.tools.my_tool.style.inline_results]
@@ -240,26 +232,27 @@ user = "full" # blocks addressed to the user: show fully
 assistant = "off" # blocks addressed to the assistant: show nothing
 ```
 
-Each audience key takes the values the scalar form takes today — `off`, `full`,
-or a line count — plus one map-only value: `chat`.
-`chat` renders the selected blocks as assistant speech through the chat
-pipeline, untruncated.
-It is valid only on the `user` key; `assistant = "chat"` is rejected.
-An omitted key keeps the default (`10`).
-A scalar value (`off`, `full`, `<N>`) is shorthand for setting both audiences to
-that value — `off` is off for everything, exactly as `hidden` suppresses
-everything.
-The pre-existing serialized forms all remain valid — booleans, `off` / `full`
-strings, numbers, and the `{ truncate = { lines = N } }` object — and are
-distinguished from the audience map by their keys.
+Each audience key accepts the scalar values (`off`, `full`, or a line count)
+plus one map-only value, `chat`.
+`chat` renders the selected blocks untruncated as assistant speech through the
+chat pipeline; it is valid only on `user` (`assistant = "chat"` is rejected).
+An omitted audience key defaults to `10` lines.
+A scalar value (`off`, `full`, `<N>`) sets both `user` and `assistant` to that
+value.
+All existing serialized forms remain valid (booleans, `off` and `full` strings,
+numbers, and `{ truncate = { lines = N } }`), distinguished from the audience
+map by their keys.
+Because tools without `audience` annotations use the scalar default (`10`),
+existing tool display behavior and `style.error` overlay composition are
+unchanged.
 
-A block with no `audience` annotation is addressed to both audiences and renders
-under the more permissive of the two settings.
-Permissiveness is a total order: `off` < a line count < `full`, the larger of
-two line counts wins, and `0` is accepted as a line count equivalent to `off`.
-`chat` counts as `full` in this comparison, but the speech classification
-applies only to blocks explicitly annotated `user`: an unannotated block
-admitted by a `chat` setting renders as ordinary result display, in full.
+A block without an `audience` annotation is addressed to both audiences and
+renders under the more permissive of the two settings.
+Permissiveness follows the total order `off` < line count < `full`, where `0` is
+equivalent to `off` and the larger of two line counts wins.
+`chat` ranks as `full` in this comparison, but only blocks explicitly annotated
+with `user` render as assistant speech; an unannotated block admitted by `user =
+"chat"` renders in full as ordinary tool result output.
 
 | `user`  | `assistant` | unannotated block renders |
 | ------- | ----------- | ------------------------- |
@@ -270,35 +263,32 @@ admitted by a `chat` setting renders as ordinary result display, in full.
 | `chat`  | `off`       | full, as result display   |
 | omitted | `off`       | first 10 lines (default)  |
 
-Presentation is mimeType-driven wherever a block renders — a `text/markdown`
-block is pretty-printed through the markdown pipeline inside result display just
-as it is inside chat speech.
-Channels follow [RFD 048]: the terminal renders `chat`-classified blocks on
-stdout, like any other assistant speech; all other tool-call rendering —
-headers, arguments, and result display, including user-addressed non-`chat`
-blocks — stays on stderr.
-Display styles govern terminal text rendering only; structured output modes
-(`--format json`) serialize events and are unchanged by this RFD. serve-web
-renders `chat`-classified blocks through its existing chat path.
-
-Today's behavior is preserved everywhere: no existing tool emits audience
-annotations, and the scalar default (`10`) applies to all blocks exactly as now.
-The `style.error` overlay composes unchanged.
+Block formatting is driven by `mimeType` regardless of where the block appears:
+a `text/markdown` block renders through the markdown pipeline both in tool
+result output and in chat speech.
+Output channels follow [RFD 048]: the terminal writes `chat`-classified blocks
+to stdout like any other assistant speech, while headers, arguments, and all
+non-`chat` result blocks (including user-addressed ones) stay on stderr.
+Display styles govern terminal text rendering only; structured output modes such
+as `--format json` serialize events unchanged.
+`serve-web` renders `chat`-classified blocks through its existing chat path.
 
 ### Tool configuration
 
-Registered in `jp_cli::cmd::query::tool::builtins::all()`, using the existing
-`describe_tools` registration path, with the `if_named` enable policy [RFD 083]
-proposes for `ask_user` (083 is expected to merge before this RFD):
+`tell_user` is registered in `jp_cli::cmd::query::tool::builtins::all()` through
+the existing `describe_tools` registration path, using the `if_named` enable
+policy [RFD 083] proposes for `ask_user` (083 is expected to merge before this
+RFD):
 
 - `source`: builtin.
 
-- `enable`: `{ state = true, allow_toggle = "if_named" }` (per [RFD 081]) —
-  enabled by default, immune to bare `-T`, disableable by name.
-  The reasoning matches `ask_user`: this is a core conversational capability,
-  the only in-band way for the assistant to surface a deliverable mid-turn.
+- `enable`: `{ state = true, allow_toggle = "if_named" }` (per [RFD 081]), so
+  the tool is enabled by default, unaffected by bare `-T`, and disableable by
+  name.
+  As with `ask_user`, this is a core conversational capability and the only
+  in-band way for the assistant to surface a deliverable mid-turn.
 
-- `run: Unattended`, `result: Unattended` — displaying a message needs no
+- `run: Unattended`, `result: Unattended`: displaying a message requires no
   permission or delivery prompt.
 
 - Style:
@@ -311,286 +301,281 @@ proposes for `ask_user` (083 is expected to merge before this RFD):
   results_file_link = "off"
   ```
 
-  The message (user-addressed) renders as assistant speech; the acknowledgement
-  (assistant-addressed) is hidden.
-  Failures stay visible without an error overlay: error text is unannotated —
-  addressed to both audiences — so the more-permissive rule renders it in full,
-  as result display rather than speech.
+  The user-addressed message renders as assistant speech, and the
+  assistant-addressed acknowledgement is hidden.
+  Failures remain visible without an error overlay: error text is unannotated
+  (addressed to both audiences), so the more-permissive rule renders it in full
+  as tool result output rather than speech.
 
 - `parameters` schema: a single required `message` string.
 
-- `description` (model-visible; guards against overuse).
-  The positive cases follow Anthropic's published `send_to_user` guidance
-  ([Prompting Claude Fable]); the final-answer guard is JP-specific, because in
-  JP a text-only response is the proper terminal channel:
+- `description` (model-visible, guarding against overuse).
+  The positive cases follow Anthropic's `send_to_user` guidance ([Prompting
+  Claude Fable]), while the final-answer guard is specific to JP, where a
+  text-only response is the terminal channel:
 
   > Display a message directly to the user.
   > Use this for progress updates with specific numbers, partial deliverables,
-  > or a direct reply to a question the user asked mid-task — content the user
+  > or a direct reply to a question the user asked mid-task: content the user
   > must see exactly as written before the task finishes.
   > The message is rendered verbatim as chat content; you receive an
   > acknowledgement and your turn continues.
   > Do not route narration or internal reasoning through this tool, and do not
-  > use it for your final response — end your turn with a normal message for
+  > use it for your final response; end your turn with a normal message for
   > that.
 
-Defining the tool is not sufficient on its own: Anthropic documents that Claude
-Fable 5 rarely calls `send_to_user` without an instruction in the system prompt
-([Prompting Claude Fable]).
-JP does not ship default elicitation text — that is persona and workspace
-configuration — but the recommended snippet, adapted from Anthropic's guidance,
-is:
+Registering the tool is not enough on its own: Anthropic notes that Claude Fable
+5 rarely calls `send_to_user` without a system-prompt instruction ([Prompting
+Claude Fable]).
+JP leaves elicitation text to persona and workspace configuration rather than
+shipping a default prompt, though the tool description carries the usage
+contract either way.
+The recommended prompt snippet, adapted from Anthropic's guidance, is:
 
 > Between tool calls, when you have content the user must read verbatim (a
 > partial deliverable, a direct answer to their question), call the `tell_user`
 > tool with that content.
 > Use `tell_user` only for user-facing content, not for narration or reasoning.
 
-The tool description carries the usage contract either way.
-
 ### Local-tool equivalence
 
-Nothing in this design requires jp-core treatment.
-The same tool is expressible as a local tool — a script emitting the content
-JSON above — plus the TOML style block.
-The builtin is packaging, chosen for out-of-the-box availability, no external
-binary dependency, and no per-message process spawn.
-The builtin's module comment states this; when a tool registry lands (the
-direction sketched in [RFD 072]'s plugin registry), distribution of
-non-privileged bundled tools can move there.
+Nothing in `tell_user` requires privileged access to JP internals.
+The same tool can be written as a local tool (a script that emits the content
+JSON above) paired with the TOML style configuration.
+Shipping it as a builtin is a packaging choice that provides out-of-the-box
+availability without an external binary dependency or a process spawn per
+message.
+The builtin's module comment records this so that non-privileged bundled tools
+can move to a tool registry once one exists (following the plugin registry
+direction in [RFD 072]).
 
-This surfaces a distinction JP does not draw today: built-ins that are merely
-*bundled* (`tell_user` — generic mechanisms, shipped for convenience) versus
-built-ins that are *privileged* (`describe_tools` — reads tool metadata no
-external tool can access).
-Formalizing that taxonomy is future work, out of scope here.
+This distinguishes two kinds of builtins: *bundled* builtins like `tell_user`,
+which use only generic tool mechanisms and ship in the binary for convenience,
+and *privileged* builtins like `describe_tools`, which read internal tool
+metadata that external tools cannot access.
+Formalizing that taxonomy is left to a future RFD.
 
 ## Drawbacks
 
-- **One more built-in with overuse potential.** An assistant that narrates every
-  step through `tell_user` degrades the experience.
-  The description discourages this; real usage should be monitored.
-- **The message is stored twice on disk** (request arguments and response
-  block).
-  It is never duplicated on the wire: the provider sees it once, in the replayed
-  tool-call arguments the assistant authored; the tool result carries only the
+- **Overuse potential.** An assistant that narrates routine steps through
+  `tell_user` adds noise to the conversation.
+  The tool description discourages narration, and actual usage should be
+  monitored.
+- **Duplicate storage on disk.** The message is persisted both in the
+  `ToolCallRequest` arguments and in the `ToolCallResponse` content block.
+  It is not duplicated on the wire: the provider sees the message only in the
+  replayed tool-call arguments, while the tool result carries only the
   acknowledgement.
-- **Audience-split responses can diverge.** A tool may show the user one thing
-  and the assistant another; both are right and neither knows.
-  The raw stream persists every block with its annotation, the raw `ReadEvents`
-  view and `inline_results = "full"` expose the divergence on demand, and the
-  documented convention is that audience-split content must be additive or
-  reformulated, never contradictory.
-  For `tell_user` the assistant-facing content is a boilerplate ack, so the risk
-  here is nil; the convention exists for future adopters.
-- **Consumers must adopt the user view.** A consumer that pattern-matches raw
-  event kinds misses user-addressed tool content.
-  Post-[RFD 058] every consumer must become block-aware regardless; the
-  canonical accessor makes the correct behavior the easy path.
+- **Divergence between audience views.** A tool can show one block to the user
+  and a different block to the assistant without either party seeing both.
+  The raw event stream persists all blocks with their annotations, and both the
+  `raw` `ReadEvents` view and `inline_results = "full"` expose the full output
+  on demand.
+  By convention, audience-split blocks must be additive or reformulated, never
+  contradictory; for `tell_user`, the assistant block is a fixed
+  acknowledgement, so divergence is not a concern.
+- **Consumers must adopt the user view.** Consumers that pattern-match raw event
+  kinds will miss user-addressed tool blocks.
+  Because [RFD 058] already requires consumers to handle content blocks, the
+  canonical user-view accessor gives chat-style consumers a single entry point.
 
 ## Alternatives
 
 ### Strip the tool call and persist a `ChatResponse` instead
 
-Rejected.
-The acknowledgement is the loop-continuation mechanism itself: without a tool
-result, the next request has nothing legal to send — the alternatives are
-fabricating a user message or relying on assistant-prefill continuation, which
-does not compose with tool use across providers.
-Providers also validate the replayed shape: Anthropic thinking signatures and
-Google thought signatures are tied to the exact event structure, and JP already
-carries recovery machinery for when they drift.
-Rewriting a tool call into text at the position providers validate manufactures
-that failure mode.
-Finally, the swap erases the record's semantics: a mid-loop note and a final
-answer become indistinguishable.
+The tool result acknowledgement is what continues the turn loop: without a tool
+result, the next provider request has nothing valid to send short of fabricating
+a user message or relying on assistant-prefill continuation, which does not
+compose with tool calls across providers.
+Providers also validate the replayed transcript structure: Anthropic thinking
+signatures and Google thought signatures are bound to the exact event sequence,
+and rewriting a tool call into chat text breaks signature validation.
+Replacing the tool call with a `ChatResponse` also erases the distinction
+between a mid-turn update and a final answer in the persisted record.
 
 ### Persist the pair plus a display-only `ChatResponse` event
 
-Rejected.
-Materializing the view duplicates content for every consumer (`grep`,
-compaction, export) and requires a provider-invisibility marker that fails
-silently when a code path forgets it.
-The audience filter computes the same view with nothing to keep in sync.
+Materializing the user view as a separate event duplicates the message for every
+stream consumer (`grep`, compaction, export) and requires a provider-ignore
+marker that silently leaks duplicate content if any code path omits the check.
+Filtering by `audience` computes the same view on read without duplicate state.
 
 ### Event-synthesis user-projection
 
-Swap `tell_user` pairs into synthetic `ChatResponse` events inside a projection
-applied at view boundaries.
-Rejected: its one advantage — consumers stay unchanged — is void once [RFD
-058] changes the serialized `ToolCallResponse` shape, which forces every
-consumer to become block-aware anyway.
-Audience filtering achieves the result without synthesizing events.
+Another option is to rewrite `tell_user` request/response pairs into synthetic
+`ChatResponse` events at view boundaries.
+Its only advantage, keeping downstream consumers unchanged, disappears once [RFD
+058] changes the serialized `ToolCallResponse` shape and requires every consumer
+to handle content blocks anyway.
+Audience filtering achieves the same result without synthesizing events.
 
 ### Carry the message in a `resource` block
 
-`resource` blocks have `mimeType` natively, which avoids the text-block
-extension.
-Rejected: a resource is *identified* content — the URI is required and
-load-bearing.
-Resource identity feeds URI canonicalization, checksums, and the deduplication
-work built on [RFD 058] ([RFD 066], [RFD 067]); a `tell_user` message has no
-identity, so every message would carry a fabricated URI and drag ephemeral prose
-into machinery designed for files.
-The optional `mimeType` field on `text` blocks ([RFD 058]) states the actual
-semantics — unidentified text with a presentation hint — in the same pattern
-as the JP extension fields [RFD 065] already defines on `Resource`.
+`resource` blocks already have a `mimeType` field, which would avoid extending
+`text` blocks.
+However, a resource represents identified content with a required URI that
+drives URI canonicalization, checksums, and content deduplication ([RFD 058],
+[RFD 066], [RFD 067]).
+A `tell_user` message has no resource identity, so wrapping it in a `resource`
+block would require a fabricated URI and feed ephemeral prose into file-oriented
+deduplication machinery.
+The optional `mimeType` field on `text` blocks ([RFD 058]) matches the actual
+semantics (unidentified text with a presentation hint) and follows the JP
+extension pattern [RFD 065] establishes on `Resource`.
 
 ### A typed `ToolCallResponse.user_message` field
 
-Rejected.
-A JP-only parallel mechanism for something the block model expresses natively
-once `audience` annotations are honored — two mechanisms for one job.
+Adding a dedicated `user_message` field on `ToolCallResponse` would introduce a
+JP-specific field for a concept that [RFD 058] content blocks already express
+through `audience` annotations.
 
 ### Custom argument formatter
 
-Render the message via `style.parameters = "<command>"`, the `fs_modify_file`
-pattern.
-Rejected: formatter output renders verbatim (never through the markdown
-pipeline), the mechanism is terminal-only by contract, and a builtin whose
-default rendering shells out to an external command is a portability wart.
+Rendering the message through `style.parameters = "<command>"` (the pattern used
+by `fs_modify_file`) fails on three counts: custom formatter output is printed
+verbatim rather than through the markdown pipeline, argument formatters only run
+in the terminal, and a builtin tool should not depend on spawning an external
+command for its default rendering.
 
 ### A `ParametersStyle::Markdown` variant
 
-Rejected: a documented, user-facing config value with a single plausible
-consumer.
-Superseded by mimeType-driven block rendering, which puts presentation on the
-response, where the content lives.
+Adding a `ParametersStyle::Markdown` config variant would expose a user-facing
+setting with only a single consumer.
+Driving markdown rendering from the response block's `mimeType` places the
+presentation hint on the content itself and works for any tool.
 
 ### Ship as a local tool instead of a builtin
 
-Viable by construction — see [Local-tool equivalence](#local-tool-equivalence).
-The builtin packaging wins on availability until a tool registry provides
-distribution for bundled tools.
+Shipping `tell_user` as a local tool is viable (see [Local-tool
+equivalence](#local-tool-equivalence)), but packaging it as a builtin makes it
+available out of the box until a tool registry exists for bundled tools.
 
 ## Non-Goals
 
 - **Cross-frontend rendering of custom argument formatters.** Custom formatter
-  output remains terminal-only; changing that is a separate RFD.
-- **Notification routing.** Queueing, deduplicating, or escalating
-  user-addressed messages is [RFD 011] territory.
-- **Acting on other MCP annotations.** `priority` and `lastModified` remain
-  carried-but-inert.
-- **The bundled-vs-privileged builtin taxonomy.** Named above; deserves its own
-  decision RFD alongside the registry work.
-- **Default elicitation language.** Persona and workspace configuration own when
-  the assistant is encouraged to call `tell_user`.
+  output remains terminal-only.
+- **Notification routing.** Queueing, deduplicating, and escalating
+  user-addressed messages belong to [RFD 011].
+- **Acting on other MCP annotations.** `priority` and `lastModified` remain on
+  the annotation types without runtime behavior.
+- **Formalizing the bundled-vs-privileged builtin taxonomy.** That distinction
+  belongs in a separate decision RFD alongside the tool registry work.
+- **Default elicitation prompts.** Persona and workspace configuration control
+  when the system prompt encourages the assistant to call `tell_user`.
 
 ## Risks and Open Questions
 
-- **[RFD 058] is in Discussion.** This RFD tracks its content block model,
-  including the optional text-block `mimeType` field defined there.
+- **Dependency on [RFD 058].** [RFD 058] is still in Discussion; this RFD builds
+  on its content block model and optional text-block `mimeType` field.
 
-- **Live/replay equivalence.** The live path renders blocks at outcome time;
-  terminal replay renders from raw events, applying the same display policy
-  (`hidden`, `header`, `inline_results`) per turn.
-  The user view plays no part in terminal replay; it serves chat-style
-  consumers.
-  One required appearance, two code paths — pinned by an equivalence test
-  comparing live terminal output against terminal replay, in the spirit of the
-  streaming-identity suite.
+- **Live and replay rendering equivalence.** Live rendering formats blocks when
+  the tool finishes, while terminal replay formats raw events per turn using the
+  same display settings (`hidden`, `header`, `inline_results`; terminal replay
+  does not use the user view).
+  Because two code paths must produce identical terminal output, an equivalence
+  test will compare live terminal output against replayed output, following the
+  existing streaming-identity test suite.
 
-- **Elicitation.** Models may under-call the tool without system-prompt
-  encouragement.
-  This is a utilization gap, not a correctness one: the tool description (always
-  model-visible) carries the usage contract, and an assistant that never calls
-  `tell_user` degrades to today's behavior — ending the turn to speak.
-  Monitor during rollout; if under-use proves chronic, a future RFD can explore
-  builtin-contributed prompt sections that ship with the tool and follow its
-  enable state, rather than JP injecting per-tool text into system prompts ad
-  hoc.
+- **Model elicitation.** Models may under-use `tell_user` without system-prompt
+  guidance.
+  This affects utilization rather than correctness: the tool description is
+  always visible to the model, and an assistant that never calls `tell_user`
+  falls back to ending the turn to speak.
+  If under-use persists during rollout, a future RFD can add tool-contributed
+  prompt sections tied to the tool's enable state instead of hardcoding per-tool
+  instructions in the system prompt.
 
-- **serve-web.** The web viewer needs the block-aware update [RFD 058] forces
-  anyway; rendering user-audience markdown blocks reuses its existing markdown
-  path.
-  Under the `user` view its tool rendering keys on responses rather than folding
-  responses into requests; that inversion folds into the same update.
+- **`serve-web` adaptation.** Updating the web viewer for [RFD 058] content
+  blocks can reuse its existing markdown renderer for user-audience blocks.
+  When rendering the `user` view, `serve-web` keys tool output on
+  `tool_call_response` events directly rather than pairing them with
+  `tool_call_request` events, which are omitted from that view.
 
-- **Inquiry events and the user view.** User-facing inquiry exchanges belong in
-  the user view — the user's own answers are user content — but
-  assistant-resolved inquiries do not, and the distinction requires [RFD 082]'s
-  source attribution.
-  The inquiry-family rules are deferred to that work.
+- **Inquiry events in the user view.** User-facing inquiry exchanges belong in
+  the user view because they contain the user's own answers, whereas
+  assistant-resolved inquiries do not.
+  Distinguishing the two requires [RFD 082]'s source attribution, so
+  inquiry-family filtering rules are deferred to that RFD.
 
 - **Compaction.** Tool-call compaction policies drop request/response pairs
-  wholesale, so a compacted history loses `tell_user` messages from its user
-  view.
-  Whether user-audience blocks deserve retention through compaction (the way
-  [RFD 058] retains resource metadata when content is dropped) is an open
-  question, deferred until compaction and this design coexist.
+  entirely, which removes `tell_user` messages from the compacted user view.
+  Whether compaction should retain user-audience blocks (similar to how [RFD
+  058] retains resource metadata when dropping content) remains an open
+  question.
 
   > [!WARNING]
-  > Compaction ranges are becoming assistant-selectable rather than user-chosen:
-  > a built-in compaction tool lets the assistant propose the ranges itself.
-  > An assistant compacting a range containing user-audience blocks would drop
-  > them from the user view without the user having picked that range, so this
-  > question has to be answered as part of this RFD's promotion rather than
-  > deferred further.
-  > The raw events are always preserved, so this is a view-fidelity problem, not
-  > data loss.
+  > With a built-in compaction tool, the assistant can select compaction ranges
+  > itself rather than relying on user-chosen ranges.
+  > Compacting a range that contains user-audience blocks would remove those
+  > messages from the user view without the user choosing that range, so this
+  > question must be resolved before promoting this RFD.
+  > Because raw events are always preserved, this affects view fidelity rather
+  > than data durability.
 
 ## Implementation Plan
 
-### Phase 1: Audience honoring and the user view
+### Phase 1: Audience filtering and the user view
 
-Depends on [RFD 058] phases 1–2 (types, `ToolCallResponse` migration, MCP
-passthrough).
-Add the user-view accessor to `jp_conversation`; apply the audience filter in
-the provider conversion; add the per-audience map form to `inline_results`
-(scalars preserved, applying to both audiences; `chat` valid on the `user` key);
-add the `view` selector (`raw` default, `user`) to `ReadEvents` with the
-filtering rules above; implement the empty-provider-result placeholder.
-Tests: assistant-audience blocks never reach the user view, user-audience blocks
-never reach a provider payload, an all-user-audience success reaches the
-provider as the neutral placeholder (one test per provider), unannotated blocks
-render under the more permissive of the two audience settings, `{ user = 10,
-assistant = "off" }` truncates user-addressed blocks while hiding
-assistant-addressed ones, `{ user = "chat" }` renders explicitly user-annotated
-blocks as speech on stdout while unannotated blocks stay in result display, and
-the `user` view passes message and structured chat responses, drops reasoning
-responses, and drops tool pairs without user-audience blocks.
-Add the *Audience* and *User View* glossary entries.
+Depends on [RFD 058] phases 1 and 2 (types, `ToolCallResponse` migration, and
+MCP passthrough).
+
+- Add the user-view accessor to `jp_conversation` and the *Audience* and *User
+  View* glossary entries.
+- Filter blocks by `audience` in provider conversion, substituting the neutral
+  placeholder when all blocks are filtered out.
+- Add the per-audience map form to `inline_results` (preserving scalar values
+  for both audiences and allowing `chat` on `user`).
+- Add the `view` selector (`raw` by default, or `user`) to `ReadEvents`.
+- Test that assistant-audience blocks never reach the user view, user-audience
+  blocks never reach provider payloads, and all-user-audience successes produce
+  the neutral placeholder across each provider.
+- Test `inline_results` audience precedence: unannotated blocks use the more
+  permissive setting, `{ user = 10, assistant = "off" }` truncates
+  user-addressed blocks and hides assistant-addressed blocks, and `{ user =
+  "chat" }` renders user-annotated blocks as speech on stdout while keeping
+  unannotated blocks in result display.
+- Test that the `user` view retains `Message` and `Structured` chat responses,
+  drops `Reasoning` responses, and drops tool calls without user-audience
+  blocks.
 
 ### Phase 2: Markdown block rendering
 
-Route `text/markdown` text blocks (the optional `mimeType` field from [RFD 058])
-through `jp_md`'s public rendering entry point; extend the shared contract
-tests.
+Route `text/markdown` text blocks (using the optional `mimeType` field from [RFD
+058]) through `jp_md`'s public rendering API, and extend the shared contract
+tests to cover block rendering.
 
 ### Phase 3: `style.header`
 
-Add the knob (bool or `"on"`/`"off"`) with the temp-line suppression, including
-`PartialConfigDelta` / `FillDefaults` / `ToPartial` coverage plus config
-snapshots.
+Add the `style.header` setting (boolean or `"on"` / `"off"`) and suppress the
+temporary streaming line when disabled, including `PartialConfigDelta`,
+`FillDefaults`, `ToPartial`, and config snapshot tests.
 
 ### Phase 4: The `tell_user` builtin
 
-Executor, registration, description, parameter schema.
-Tests: argument validation, response block shape, provider view carries only the
-ack, user view carries only the message, loop continuation, live/replay
-equivalence.
-The module comment records that the builtin uses only generic mechanisms and is
-a builtin for packaging reasons alone.
+Implement the `tell_user` executor, registration, description, and parameter
+schema, and document in the module comment that the tool uses only generic
+mechanisms and ships as a builtin for packaging alone.
+Test argument validation, response block structure, provider and user view
+filtering, turn-loop continuation, and live-versus-replay rendering equivalence.
 
 ## References
 
-- [RFD 058] — typed content blocks; defines the block model, the optional
-  text-block `mimeType`, and carries `audience` annotations type-level.
-  This RFD adds the first audience and mimeType behaviors.
-- [RFD 065] — the MCP-compatible superset principle governing the text-block
+- [RFD 058]: Typed content blocks; defines the block model, the optional
+  text-block `mimeType` field, and the `audience` annotation types.
+- [RFD 065]: The MCP-compatible superset principle governing the text-block
   `mimeType` extension.
-- [RFD 081] — the `enable = { state, allow_toggle }` shape.
-- [RFD 082] — unified inquiry event recording; its source attribution is the
-  prerequisite for the user view's inquiry-family rules, deferred to that work.
-- [RFD 083] — the built-in registration pattern and the `if_named` reasoning
-  this RFD mirrors.
-- [RFD 072] — the plugin registry direction referenced for future distribution
-  of bundled tools.
-- [RFD 048] — the four-channel output model; the terminal maps
-  `chat`-classified blocks to stdout under its contract.
-- [RFD 011] — system notification queue; adjacent, deliberately not addressed.
-- [Prompting Claude Fable] — Anthropic's `send_to_user` guidance for
-  long-running agents.
+- [RFD 081]: The `enable = { state, allow_toggle }` tool configuration shape.
+- [RFD 082]: Unified inquiry event recording, whose source attribution is a
+  prerequisite for filtering inquiry events in the user view.
+- [RFD 083]: The built-in tool registration pattern and `if_named` enable
+  policy.
+- [RFD 072]: The command plugin registry direction for distributing bundled
+  tools.
+- [RFD 048]: The four-channel output model under which the terminal routes
+  `chat`-classified blocks to stdout.
+- [RFD 011]: System notification queue (out of scope for this RFD).
+- [Prompting Claude Fable]: Anthropic's `send_to_user` guidance for long-running
+  agents.
 
 [Prompting Claude Fable]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5#create-a-send-to-user-tool
 [RFD 011]: 011-system-notification-queue.md
