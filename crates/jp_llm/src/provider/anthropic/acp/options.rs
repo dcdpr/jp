@@ -3,11 +3,14 @@
 use std::collections::BTreeMap;
 
 use async_anthropic::types::{Effort, ExtendedThinking, JsonOutputFormat, ThinkingDisplay};
-use jp_config::{assistant::request::CachePolicy, model::id::Name};
+use jp_config::assistant::request::CachePolicy;
 use serde::Serialize;
 use serde_json::Value;
 
-use super::transcript::{PreparedRequest, SESSION_TITLE};
+use super::{
+    subscription_model,
+    transcript::{PreparedRequest, SESSION_TITLE},
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +29,7 @@ struct ClaudeCode<'a> {
 #[serde(rename_all = "camelCase")]
 struct Options<'a> {
     system_prompt: CustomPrompt<'a>,
-    model: &'a Name,
+    model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     effort: Option<&'a Effort>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,7 +132,10 @@ pub(super) fn metadata(
                     prompt: &prepared.system_prompt,
                     snapshot: false,
                 },
-                model: &prepared.model,
+                // The session's starting model, sent before the adapter has
+                // listed what it offers; the session's `model` setting is set
+                // from that list once the session opens.
+                model: subscription_model(&prepared.model, &[]),
                 effort: prepared.effort.as_ref(),
                 thinking,
                 tools: [],

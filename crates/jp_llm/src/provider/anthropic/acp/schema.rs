@@ -187,11 +187,14 @@ pub(super) struct NewSessionRequest {
     pub meta: Option<Meta>,
 }
 
-/// The session the agent created.
+/// The session the agent created, and the settings it can be configured with.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct NewSessionResponse {
     pub session_id: SessionId,
+
+    #[serde(default)]
+    pub config_options: Vec<SessionConfigOption>,
 }
 
 /// Resumes a session whose transcript JP has already written to disk.
@@ -206,10 +209,13 @@ pub(super) struct LoadSessionRequest {
     pub meta: Option<Meta>,
 }
 
-/// Acknowledges the load.
-/// Everything it carries is optional and unread.
+/// Acknowledges the load, with the settings the session can be configured with.
 #[derive(Debug, Clone, Default, Deserialize)]
-pub(super) struct LoadSessionResponse {}
+#[serde(rename_all = "camelCase")]
+pub(super) struct LoadSessionResponse {
+    #[serde(default)]
+    pub config_options: Vec<SessionConfigOption>,
+}
 
 // Session configuration
 
@@ -252,12 +258,68 @@ pub(super) enum SessionConfigKind {
     /// A choice from a list, which is how the adapter models `model` and
     /// `mode`.
     #[serde(rename_all = "camelCase")]
-    Select { current_value: SessionConfigValueId },
+    Select {
+        current_value: SessionConfigValueId,
+
+        #[serde(default)]
+        options: Vec<SessionConfigSelectEntry>,
+    },
 
     /// Any other shape.
     /// JP sets no such setting and reads none.
     #[serde(other)]
     Other,
+}
+
+/// One entry in a select setting's list: a value, or a group of values under a
+/// header.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub(super) enum SessionConfigSelectEntry {
+    Option(SessionConfigSelectOption),
+    Group {
+        options: Vec<SessionConfigSelectOption>,
+    },
+}
+
+/// One value a select setting accepts.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SessionConfigSelectOption {
+    pub value: SessionConfigValueId,
+
+    /// The label the agent shows for this value.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// The values the `model` setting among `options` accepts.
+pub(super) fn offered_models(options: &[SessionConfigOption]) -> Vec<SessionConfigSelectOption> {
+    options
+        .iter()
+        .filter(|option| option.id.0 == "model")
+        .flat_map(|option| option.kind.select_options())
+        .cloned()
+        .collect()
+}
+
+impl SessionConfigKind {
+    /// The values a select setting accepts, with groups flattened in order.
+    ///
+    /// Empty for any other kind of setting.
+    pub(super) fn select_options(&self) -> Vec<&SessionConfigSelectOption> {
+        let Self::Select { options, .. } = self else {
+            return vec![];
+        };
+
+        options
+            .iter()
+            .flat_map(|entry| match entry {
+                SessionConfigSelectEntry::Option(option) => std::slice::from_ref(option),
+                SessionConfigSelectEntry::Group { options } => options.as_slice(),
+            })
+            .collect()
+    }
 }
 
 // Prompting

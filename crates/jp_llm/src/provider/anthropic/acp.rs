@@ -16,9 +16,9 @@ use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
 use serde::Deserialize;
 use serde_json::from_slice;
 use tokio::{io::AsyncReadExt as _, process::Command, time::timeout};
-use tracing::warn;
+use tracing::{debug, warn};
 
-use super::{BETWEEN_TOOLS_THINKING, model_overrides};
+use super::{BETWEEN_TOOLS_THINKING, MODEL_OVERRIDES, model_overrides};
 use crate::{
     credential::AccountIdentity,
     error::StreamError,
@@ -36,7 +36,7 @@ mod transport;
 mod usage;
 
 use rpc::RpcError;
-use schema::SessionConfigId;
+use schema::{SessionConfigId, SessionConfigSelectOption};
 pub(super) use transport::stream;
 
 /// A failure in the Claude Code subscription flow.
@@ -481,6 +481,144 @@ pub(super) fn model_details(name: &Name) -> ModelDetails {
     }
 
     model
+}
+
+/// The model families Claude Code serves, each with the name it is given when
+/// the adapter offers no list to choose from.
+///
+/// An API model belongs to the first family its name contains.
+/// A family Anthropic adds later needs an entry here.
+const FAMILIES: &[(&str, &str)] = &[
+    ("opus", "opus[1m]"),
+    ("fable", "claude-fable-5-1[1m]"),
+    ("sonnet", "sonnet"),
+    ("haiku", "haiku"),
+];
+
+/// The family `name` belongs to, and that family's fallback name.
+fn family_of(name: &str) -> Option<(&'static str, &'static str)> {
+    let name = name.to_ascii_lowercase();
+    FAMILIES
+        .iter()
+        .find(|(family, _)| name.contains(family))
+        .copied()
+}
+
+/// The name Claude Code is given for the API model `name`, chosen from the
+/// values its `model` setting `offers`.
+///
+/// Conversations and config name models by their API ID on both flows; only the
+/// ACP transport speaks Claude Code's names.
+/// The model is matched by family rather than version, so a conversation on
+/// `claude-opus-5` keeps working after Claude Code moves to a newer Opus:
+///
+/// - One offered value in the family is that value.
+/// - Several are narrowed to one, with a warning, since nothing the user
+///   configures can settle it: the 1M-context variant first, then the shortest
+///   value (a bare alias, which Claude Code points at its current model, over a
+///   pinned version), then the alphabetically first.
+/// - With none offered, the family's fallback name is sent.
+/// - A model in no known family, or in a family the list does not offer, is
+///   sent by its API name, which Claude Code refuses if it does not serve it.
+fn subscription_model(name: &str, offers: &[SessionConfigSelectOption]) -> String {
+    let Some((family, fallback)) = family_of(name) else {
+        return name.to_owned();
+    };
+    if offers.is_empty() {
+        return fallback.to_owned();
+    }
+
+    let mut matches: Vec<&str> = offers
+        .iter()
+        .map(|option| option.value.0.as_str())
+        .filter(|value| value.to_ascii_lowercase().contains(family))
+        .collect();
+    matches.sort_by_key(|value| (!value.ends_with("[1m]"), value.len(), *value));
+
+    match matches.as_slice() {
+        [] => {
+            warn!(
+                model = name,
+                family, "Claude Code offers no model in this family."
+            );
+            name.to_owned()
+        }
+        [only] => (*only).to_owned(),
+        [first, ..] => {
+            warn!(
+                model = name,
+                family,
+                candidates = ?matches,
+                chosen = first,
+                "Claude Code offers several models in this family; using the first."
+            );
+            (*first).to_owned()
+        }
+    }
+}
+
+/// The API model JP records for a value Claude Code offers, labelled
+/// `display_name`.
+///
+/// Tried in order, each against JP's model catalog:
+///
+/// - The value names an API model (`claude-fable-5-1[1m]`).
+/// - The label names one: `Sonnet 5` is `claude-sonnet-5`.
+///   A bare alias says nothing about its version, and the label is what does.
+/// - The newest cataloged model in the value's family.
+///
+/// `None` for a value in no known family, such as `default`.
+fn api_name(value: &str, display_name: Option<&str>) -> Option<&'static str> {
+    let (family, _) = family_of(value)?;
+    let base = value.split_once('[').map_or(value, |(base, _)| base);
+    let labelled = display_name.map(|name| {
+        format!(
+            "claude-{}",
+            name.trim().to_ascii_lowercase().replace([' ', '.'], "-")
+        )
+    });
+
+    MODEL_OVERRIDES
+        .get(base)
+        .or_else(|| labelled.as_deref().and_then(|id| MODEL_OVERRIDES.get(id)))
+        .filter(|model| model.id.contains(family))
+        .or_else(|| {
+            MODEL_OVERRIDES
+                .values()
+                .find(|model| model.id.contains(family))
+        })
+        .map(|model| model.id)
+}
+
+/// The models Claude Code offers the selected login, by API model ID.
+///
+/// Read from the adapter's `model` session setting.
+pub(super) async fn models(directory: Option<&Utf8Path>) -> Result<Vec<ModelDetails>, Error> {
+    let options = transport::list_models(directory).await?;
+    Ok(served_models(&options))
+}
+
+/// The listed models JP can name, once each.
+///
+/// A value in no known family is left out: picking it would record a name that
+/// only the ACP flow understands.
+/// That includes `default`, which stands for whichever model Claude Code
+/// recommends and is listed again under its own name.
+fn served_models(options: &[SessionConfigSelectOption]) -> Vec<ModelDetails> {
+    let mut models: Vec<ModelDetails> = vec![];
+    for option in options {
+        let Some(api) = api_name(&option.value.0, option.name.as_deref()) else {
+            debug!(value = %option.value, "Skipping a Claude Code model with no API name.");
+            continue;
+        };
+        if models.iter().any(|model| model.id.name.as_ref() == api) {
+            continue;
+        }
+        let mut model = model_details(&Name(api.to_owned()));
+        model.display_name.clone_from(&option.name);
+        models.push(model);
+    }
+    models
 }
 
 fn removes_variable(name: &str) -> bool {

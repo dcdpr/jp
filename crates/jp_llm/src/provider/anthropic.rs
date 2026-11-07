@@ -472,7 +472,7 @@ impl Provider for Anthropic {
 
             if let Route::Acp(directory) = attempt.route {
                 acp::inspect(directory.as_deref()).await?;
-                return Ok(vec![acp::model_details(&"claude-opus-5".parse()?)]);
+                return Ok(acp::models(directory.as_deref()).await?);
             }
             let (client, _) = self.client_for(&attempt.route)?;
             let mut all_models = vec![];

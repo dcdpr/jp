@@ -11,7 +11,7 @@ expression: "params[\"_meta\"]"
         "prompt": "Use JP's history.",
         "snapshot": false
       },
-      "model": "claude-opus-5",
+      "model": "opus[1m]",
       "tools": [],
       "allowedTools": [],
       "strictMcpConfig": true,
