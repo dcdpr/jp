@@ -30,7 +30,7 @@ use serde_json::Value;
 use tracing::{debug, trace, warn};
 use url::Url;
 
-use super::{EventStream, ModelDetails, Provider, trace_to_tmpfile};
+use super::{EventStream, ModelDetails, Provider, lookup::find_listed, trace_to_tmpfile};
 use crate::{
     error::{Error, Result, StreamError},
     event::{Event, FinishReason},
@@ -50,12 +50,9 @@ impl Provider for Ollama {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| ModelDetails::empty(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {

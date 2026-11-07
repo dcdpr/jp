@@ -39,10 +39,15 @@ use jp_conversation::{
 use jp_credentials::CredentialStore;
 use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use serde_json::{Map, Value, json};
+use tokio::time::timeout;
 use tracing::{debug, info, trace, warn};
 
 use self::resolve::Route;
-use super::{CONTINUE_MESSAGE, Provider, output_schema_is_open, trace_to_tmpfile};
+use super::{
+    CONTINUE_MESSAGE, Provider,
+    lookup::{self, MODEL_LOOKUP_TIMEOUT},
+    output_schema_is_open, trace_to_tmpfile,
+};
 use crate::{
     credential::Credential,
     error::{
@@ -453,10 +458,23 @@ impl Provider for Anthropic {
                 return Ok(model);
             }
             let (client, _) = self.client_for(&attempt.route)?;
-            match client.models().get(name).await {
-                Ok(model) => return map_model(model),
-                Err(error) => attempt = self.advance_or_fail(&attempt, error, name).await?,
-            }
+            let failure = match timeout(MODEL_LOOKUP_TIMEOUT, client.models().get(name)).await {
+                Ok(Ok(model)) => return map_model(model),
+
+                // Credential errors will also fail the chat request, so advance
+                // the credential chain now or fail if it is exhausted.
+                Ok(Err(error)) if is_switchable(&error) => {
+                    attempt = self.advance_or_fail(&attempt, error, name).await?;
+                    continue;
+                }
+
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => lookup::TIMED_OUT.to_owned(),
+            };
+
+            let details = table_details(name)?;
+            lookup::skipped(&details.id, &failure);
+            return Ok(details);
         }
     }
 
@@ -2172,6 +2190,29 @@ fn create_request(
                 );
             }
         }
+    } else if model.reasoning.is_none()
+        && parameters.reasoning.is_none()
+        && !model.served_by_subscription()
+    {
+        // Support is unknown, as after a failed model lookup, and reasoning is
+        // unconfigured. Infer adaptive for the same reason as the configured
+        // case above: sending nothing takes the provider default, which on
+        // current models thinks with `display: "omitted"` and bills reasoning
+        // the transcript never receives. No effort is sent, so the API's
+        // default effort applies.
+        //
+        // Not on the Claude Code route, where support is never reported and
+        // Claude Code picks the thinking mode when none is sent. Inferring
+        // adaptive there would reach models that reject it, such as Haiku 4.5.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; requesting summarized adaptive thinking."
+        );
+
+        builder.thinking(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        });
     } else if model.features.contains(&BETWEEN_TOOLS_THINKING) {
         // Reasoning is off on a model that rejects `thinking: disabled`.
         // `between_tools` is the lowest setting it accepts; omitting the field
@@ -2586,6 +2627,38 @@ fn derive_features(capabilities: &types::ModelCapabilities) -> Vec<&'static str>
     }
 
     features
+}
+
+/// Build [`ModelDetails`] for `name` from [`MODEL_OVERRIDES`] alone.
+///
+/// Returns [`ModelDetails::empty`] if `name` is not in the table.
+fn table_details(name: &Name) -> Result<ModelDetails> {
+    let id = (PROVIDER, name.as_ref()).try_into()?;
+    let Some(overrides) = model_overrides(name.as_ref()) else {
+        return Ok(ModelDetails::empty(id));
+    };
+
+    let mut features = vec![];
+    if overrides.between_tools {
+        features.push(BETWEEN_TOOLS_THINKING);
+    }
+    if overrides.sampling {
+        features.push(SAMPLING_PARAMETERS);
+    }
+
+    Ok(ModelDetails {
+        id,
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: overrides.knowledge_cutoff,
+        deprecated: Some(overrides.deprecated.clone()),
+        structured_output: None,
+        prefill: Some(overrides.prefill),
+        subscription: None,
+        features,
+    })
 }
 
 fn map_model(model: types::Model) -> Result<ModelDetails> {

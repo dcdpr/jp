@@ -25,7 +25,7 @@ use jp_tool::ToolDefinition;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use super::{CONTINUE_MESSAGE, EventStream, Provider, trace_to_tmpfile};
+use super::{CONTINUE_MESSAGE, EventStream, Provider, lookup::find_listed, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{
@@ -70,12 +70,9 @@ impl Provider for Google {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| table_details(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -546,6 +543,20 @@ fn map_model(model: types::Model) -> ModelDetails {
     // levels, so any ladder still comes from the catalog.
     details.reasoning = apply_thinking_support(details.reasoning, model.thinking);
 
+    details
+}
+
+/// Build [`ModelDetails`] for `id` from [`MODEL_OVERRIDES`] alone.
+///
+/// Returns [`ModelDetails::empty`] if `id` is not in the table.
+fn table_details(id: ModelIdConfig) -> ModelDetails {
+    let mut details = model_overrides(&id.name)
+        .cloned()
+        .unwrap_or_else(|| ModelDetails::empty(id.clone()));
+
+    // Preserve the requested ID when `id.name` matched an alias entry in
+    // `MODEL_OVERRIDES`.
+    details.id = id;
     details
 }
 

@@ -1,12 +1,12 @@
 {
   "version": 2,
-  "quality_score": 0.7279744445410776,
-  "iosp_score": 0.9204309656823624,
-  "violations": 997,
-  "total": 17151,
+  "quality_score": 0.7283249618052585,
+  "iosp_score": 0.9205931595312127,
+  "violations": 996,
+  "total": 17171,
   "complexity_warnings": 198,
   "magic_number_warnings": 267,
-  "nesting_depth_warnings": 30,
+  "nesting_depth_warnings": 31,
   "function_length_warnings": 493,
   "unsafe_warnings": 74,
   "error_handling_warnings": 203,
@@ -4628,97 +4628,97 @@
     {
       "name": "get_provider",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 101
+      "line": 102
     },
     {
       "name": "output_schema_is_open",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 192
+      "line": 193
     },
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 872
+      "line": 883
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1065
+      "line": 1076
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1380
+      "line": 1391
     },
     {
       "name": "prepare_soft_force_retry_request",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 310
+      "line": 307
     },
     {
       "name": "MultiProviderMetadata::from_details",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 416
+      "line": 413
     },
     {
       "name": "Map<String,Value>::from",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 481
+      "line": 478
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 531
+      "line": 528
     },
     {
       "name": "prepare_forced_tool_fallback",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 692
+      "line": 689
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 771
+      "line": 768
     },
     {
       "name": "RequestMessages::try_from",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 1055
+      "line": 1052
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/openrouter.rs",
-      "line": 1256
+      "line": 1253
     },
     {
       "name": "fetch_public_catalog",
       "file": "crates/jp_llm/src/provider/cerebras.rs",
-      "line": 282
+      "line": 280
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/cerebras.rs",
-      "line": 477
+      "line": 475
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/cerebras.rs",
-      "line": 653
+      "line": 651
     },
     {
       "name": "handle_sse_event_sync",
       "file": "crates/jp_llm/src/provider/cerebras.rs",
-      "line": 858
+      "line": 856
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/ollama.rs",
-      "line": 149
+      "line": 146
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/ollama.rs",
-      "line": 258
+      "line": 255
     },
     {
       "name": "MockProvider::with_chunked_message",
@@ -4803,57 +4803,57 @@
     {
       "name": "Anthropic::mcp_tool_metadata",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 413
+      "line": 418
     },
     {
       "name": "Anthropic::chat_completion_stream",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 507
+      "line": 525
     },
     {
       "name": "force_tool_retry",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1078
+      "line": 1096
     },
     {
       "name": "soft_force_retry",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1160
+      "line": 1178
     },
     {
       "name": "resolve_cache_control",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1703
+      "line": 1721
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1735
+      "line": 1753
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2637
+      "line": 2710
     },
     {
       "name": "transform_schema",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2695
+      "line": 2768
     },
     {
       "name": "map_content_start",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3112
+      "line": 3185
     },
     {
       "name": "map_content_delta",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3153
+      "line": 3226
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3198
+      "line": 3271
     },
     {
       "name": "walk_chain",
@@ -4876,69 +4876,64 @@
       "line": 489
     },
     {
-      "name": "Openai::model_details",
-      "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 582
-    },
-    {
       "name": "Openai::models",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 618
+      "line": 606
     },
     {
       "name": "synthesize_non_streaming_output_item_events",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 1080
+      "line": 1068
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 1381
+      "line": 1369
     },
     {
       "name": "map_error",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 2685
+      "line": 2673
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 2817
+      "line": 2805
     },
     {
       "name": "classify_stream_error",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3030
+      "line": 3018
     },
     {
       "name": "ensure_flattened",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3152
+      "line": 3140
     },
     {
       "name": "flatten_all_of",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3185
+      "line": 3173
     },
     {
       "name": "fits_strict_subset",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3201
+      "line": 3189
     },
     {
       "name": "flatten_node",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3207
+      "line": 3195
     },
     {
       "name": "process_strict",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3333
+      "line": 3321
     },
     {
       "name": "parameters_with_decoding",
       "file": "crates/jp_llm/src/provider/openai.rs",
-      "line": 3514
+      "line": 3502
     },
     {
       "name": "generate",
