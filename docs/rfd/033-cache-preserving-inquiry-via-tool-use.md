@@ -10,17 +10,17 @@
 
 ## Summary
 
-This RFD replaces the structured output mechanism (`output_config.format`) in
-the inquiry system ([RFD 028]) with a forced tool call.
-A built-in `answer_inquiry` tool stays in the tool list and is invoked via
-`tool_choice: Function("answer_inquiry")` during inquiries to avoid invalidating
+This RFD replaces structured output (`output_config.format`) in the inquiry
+system ([RFD 028]) with a forced tool call.
+A built-in `answer_inquiry` tool stays in the tool list across all requests, and
+inquiries invoke it via `tool_choice: Function("answer_inquiry")` to preserve
 the system prompt cache.
 
 ## Motivation
 
 The inquiry system ([RFD 028]) makes a separate LLM call when a tool needs input
 from the assistant.
-These calls use structured output (`output_config.format`) to guarantee the
+These calls use structured output (`output_config.format`) to guarantee that the
 response matches a JSON schema.
 
 In practice, every inquiry request triggers a **complete prompt cache miss** on
@@ -34,12 +34,11 @@ The inquiry backend sends `tools: vec![]` while normal requests include the full
 tool definitions.
 Anthropic's prompt cache prefix follows the hierarchy `tools → system →
 messages`.
-Removing the tools section changes the prefix at the top level, invalidating
-everything.
+Omitting the tools section changes the top-level prefix and invalidates the
+entire cache.
 
-This is a straightforward bug, fixed by passing the same tool definitions to the
-inquiry backend (merged separately).
-But fixing it alone is not sufficient because of issue 2.
+Passing the same tool definitions to the inquiry backend fixes this bug (merged
+separately), but structured output still invalidates the cache.
 
 ### 2. Structured output invalidates the system cache
 
@@ -52,9 +51,8 @@ From the [Anthropic docs][cache-docs]:
 > Changing the output_config.format parameter will invalidate any prompt cache
 > for that conversation thread.
 
-Even with matching tool definitions, the inquiry request gets a system-level
-cache miss because the system content differs (injected structured output
-prompt).
+Even with matching tool definitions, the injected prompt causes a system-level
+cache miss on every inquiry.
 With ~95k tokens of conversation context, each inquiry wastes roughly:
 
 ```
@@ -63,17 +61,16 @@ Cache read:  95,000 × $5.00/MTok × 0.10 = $0.05
 Waste per inquiry: ~$0.55
 ```
 
-For turns with 3 inquiries (common with multi-file modifications), that is
-~$1.65 in avoidable cost per turn, plus the latency of reprocessing the full
+For turns with 3 inquiries (common with multi-file modifications), that adds
+~$1.65 in avoidable cost per turn plus the latency of reprocessing the full
 context.
 
 ### Cross-provider applicability
 
-While the data above is from Anthropic, other providers with prefix-based prompt
-caching (OpenAI, Google) are likely to exhibit the same behavior: structured
-output changes the effective request shape, busting the cache.
-A solution that works within the existing tool use mechanism avoids this class
-of problem across all providers.
+Other providers with prefix-based prompt caching (OpenAI, Google) face the same
+issue when structured output alters the request prefix.
+Handling inquiries through standard tool use preserves the prompt cache across
+all providers.
 
 ## Design
 
@@ -81,10 +78,10 @@ of problem across all providers.
 
 Replace `output_config.format` with a built-in `answer_inquiry` tool that uses
 `strict: true` for schema validation.
-The tool is always present in the tool definitions — even when no inquiry is
-active — so it never changes the tools prefix.
+The tool stays in the tool definitions even when no inquiry is active, keeping
+the tools prefix constant.
 During an inquiry, the backend sets `tool_choice: Function("answer_inquiry")` to
-force the LLM to call it.
+force the LLM to call the tool.
 
 Cache impact per the [Anthropic docs][cache-invalidation]:
 
@@ -95,12 +92,11 @@ Cache impact per the [Anthropic docs][cache-invalidation]:
 | `tool_choice`    | Yes (`Auto` → `Function(...)`)  | Message blocks only |
 | Messages         | Yes (inquiry question appended) | Expected miss       |
 
-The only cache miss is on the new message content, which is unavoidable and
-minimal.
+Only the appended inquiry message misses the cache.
 
 ### The `answer_inquiry` tool
 
-A generic tool with a deliberately simple, stable schema:
+`answer_inquiry` uses a fixed schema across all inquiries:
 
 ```json
 {
@@ -125,20 +121,15 @@ A generic tool with a deliberately simple, stable schema:
 }
 ```
 
-The `answer` field is always a string.
-Type-specific constraints (boolean values, select options) are communicated in
-the question prompt and validated after extraction.
-
 ### Why `answer` is a string
 
-A per-inquiry typed schema (boolean, enum, etc.) would require changing the tool
-definition per inquiry, which invalidates the tools cache — the exact problem
-we're solving.
-A stable, generic schema means the tool definition never changes.
+Typing `answer` per inquiry (boolean, enum, string) would alter the tool
+definition on each call and invalidate the tools cache.
+Keeping `answer` as a string leaves the tool definition static.
 
-The tradeoff is that validation moves from the provider (constrained decoding)
-to our code (post-hoc parsing).
-For the three answer types:
+This shifts type validation from provider-side constrained decoding to post-hoc
+parsing in JP.
+The question prompt specifies the expected format for each answer type:
 
 | Type    | Prompt instruction                  | Validation       |
 | ------- | ----------------------------------- | ---------------- |
@@ -148,7 +139,7 @@ For the three answer types:
 
 ### Inquiry flow
 
-The revised flow in `LlmInquiryBackend::inquire`:
+`LlmInquiryBackend::inquire` executes an inquiry in six steps:
 
 ```
 1. Build ChatRequest with question text + formatting instructions
@@ -164,8 +155,9 @@ The revised flow in `LlmInquiryBackend::inquire`:
 
 ### Answer extraction and validation
 
-The response is a `ToolCallRequest` instead of a structured text response.
-Extraction pulls `inquiry_id` and `answer` from the tool call arguments:
+The provider returns a `ToolCallRequest` rather than structured text.
+`extract_answer` reads `inquiry_id` and `answer` from the tool call arguments
+and parses the answer into the expected type:
 
 ```rust
 fn extract_answer(
@@ -214,9 +206,10 @@ fn extract_answer(
 
 ### Retry on validation failure
 
-Since the schema is generic (string answer), the LLM might return a malformed
-answer — e.g., `"yes"` instead of `"true"` for a boolean.
-The backend retries up to 2 times, appending the error as a user message:
+Because the schema accepts any string, the LLM can return a value that fails
+type parsing, such as `"yes"` instead of `"true"` for a boolean.
+On validation failure, the backend retries up to 2 times, appending the error as
+a user message:
 
 ```
 Turn 1 (inquiry):
@@ -228,17 +221,19 @@ Turn 2 (retry):
   Assistant: answer_inquiry(id="...", answer="true")  ← valid
 ```
 
-Each retry reuses the same cached prefix (tools + system + prior messages), so
-only the new error message is a cache write.
+Each retry reuses the cached prefix (tools, system prompt, and prior messages),
+writing only the new error message to the cache.
 
 ### Tool registration
 
-`answer_inquiry` is registered as a `BuiltinTool` alongside `describe_tools`.
-It is always included in the tool definitions when any tools are enabled.
-The tool's `execute` method is never called during normal tool execution — it
-only serves as a schema carrier for the LLM.
-If the LLM calls it outside an inquiry context, the executor returns an error
-message.
+`jp_llm::tool::builtin` defines `answer_inquiry` as a `BuiltinTool`, and the
+query command includes it in the tool definitions alongside `describe_tools`
+whenever tools are enabled.
+
+The tool exists only to expose its schema to the LLM; the inquiry backend
+extracts the tool call arguments directly without running the tool executor.
+If the LLM calls `answer_inquiry` during the normal tool loop, `execute` returns
+an error:
 
 ```rust
 // In BuiltinExecutors setup:
@@ -248,132 +243,114 @@ executors.register("answer_inquiry", AnswerInquiryTool);
 // only be called via the inquiry backend, not the normal tool loop.
 ```
 
-The tool definition is constructed in `jp_llm::tool::builtin` and added to the
-tool list by the query command alongside `describe_tools`.
-
 ### Changes to `LlmInquiryBackend`
 
-The backend no longer needs to set a schema on the `ChatRequest`.
-Instead:
+`LlmInquiryBackend` changes as follows:
 
-1. The `ChatRequest.schema` field is `None`.
-2. The `ChatQuery.tool_choice` is `ToolChoice::Function("answer_inquiry")`.
-3. The response is processed as tool call events instead of structured text
-   events.
+1. `ChatRequest.schema` is `None`.
+2. `ChatQuery.tool_choice` is `ToolChoice::Function("answer_inquiry")`.
+3. The backend processes the response as tool call events rather than structured
+   text events.
 
-The `InquiryBackend` trait and `MockInquiryBackend` are unchanged — the trait
+The `InquiryBackend` trait and `MockInquiryBackend` are unchanged, as the trait
 returns `Value` regardless of the underlying mechanism.
 
 ## Drawbacks
 
-- **Weaker type safety.** Structured output guarantees the response matches the
-  schema via constrained decoding.
-  Tool use with a generic string answer relies on prompt instructions and
-  post-hoc validation.
-  In practice, boolean and select answers are simple enough that LLMs get them
-  right on the first attempt the vast majority of the time, and the retry
-  mechanism handles the rest.
+- **Weaker type safety.** Structured output guarantees schema compliance via
+  constrained decoding, whereas a string-typed tool parameter relies on prompt
+  instructions and post-hoc validation.
+  In practice, boolean and select formats are simple enough that LLMs rarely
+  misformat them, and retries handle the remaining cases.
 
-- **Extra retries on malformed answers.** A structured output response never
-  needs a retry for schema violations.
-  The tool use approach may occasionally need 1 retry (estimated <5% of
-  inquiries based on the simplicity of the answer types).
-  Each retry is cheap (cache hit + small message delta).
+- **Extra retries on malformed answers.** Structured output never retries for
+  schema violations.
+  Tool use may require a retry on an estimated <5% of inquiries, though each
+  retry hits the prompt cache and adds only a short error message.
 
-- **Always-present tool.** `answer_inquiry` appears in every request even when
-  no inquiry is happening.
-  This adds a small constant to the tool definitions token count (~50-100
-  tokens).
-  The LLM may occasionally try to call it unprompted, though this is mitigated
-  by the description making its purpose clear and the executor returning an
-  error.
+- **Always-present tool.** Including `answer_inquiry` in every request adds
+  ~50-100 tokens to the tool definitions even when no inquiry runs.
+  The LLM might also call the tool unprompted, though the tool description and
+  the error returned by the executor mitigate this.
 
 ## Alternatives
 
 ### Keep structured output, pass same tools
 
-This is the partial fix already implemented: pass the same tool definitions to
-the inquiry backend to avoid the empty-tools cache bust.
-However, the structured output system prompt injection still causes a
-system-level cache miss on every inquiry.
-For conversations with ~95k tokens of context and multiple inquiries per turn,
-the cost is substantial.
+Passing the full tool definitions to the inquiry backend (already implemented)
+fixes the empty-tools cache invalidation, but structured output still injects a
+system prompt and causes a system-level cache miss on every inquiry.
+With ~95k tokens of context and multiple inquiries per turn, the remaining cache
+misses are still expensive.
 
 ### Provider-specific strategy selection
 
-Choose between structured output and tool use based on provider caching
-heuristics — e.g., use structured output for providers without prefix caching,
-tool use for those with it.
+Select structured output or tool use per provider based on caching behavior (for
+example, using structured output on providers without prefix caching and tool
+use on providers with it).
 
-Rejected for now: adds complexity with unclear benefit.
-All major providers (Anthropic, OpenAI, Google) use some form of prefix-based
-caching, and structured output is likely to bust the cache on all of them.
-If a provider is found where structured output doesn't affect caching, this can
-be revisited.
+Rejected because it adds branching complexity without a clear benefit.
+All major providers (Anthropic, OpenAI, Google) use prefix-based caching that
+structured output invalidates.
+We can revisit this if we add a provider where structured output preserves the
+cache.
 
 ### Per-inquiry dynamic tool schema
 
 Define the `answer` parameter with the exact type for each inquiry (boolean,
 enum, string) instead of a generic string.
 
-Rejected: changing the tool schema per inquiry changes the tools prefix, which
-invalidates the tools cache — the same problem as the current approach, just at
-a different level.
-A stable, generic schema is the whole point.
+Rejected because changing the tool schema per inquiry alters the tools prefix
+and invalidates the tools cache, trading a system-level cache miss for a
+tools-level cache miss.
 
 ## Non-Goals
 
-- **Batching multiple inquiry questions into a single tool call.** The
-  `answer_inquiry` tool answers one question at a time.
-  Batching is orthogonal and can be layered on later.
-- **Rendering inquiry tool calls in conversation output.** The inquiry remains
-  invisible to the user (same as today).
+- **Batching multiple inquiry questions into a single tool call.**
+  `answer_inquiry` answers one question at a time.
+  Batching is independent and can be added later.
+- **Rendering inquiry tool calls in conversation output.** Inquiries remain
+  hidden from user-facing output.
 - **Replacing structured output for non-inquiry uses.** The `schema` field on
-  `ChatRequest` and `output_config.format` support remain for other features
-  (e.g., scriptable structured output via `jp query --schema`).
+  `ChatRequest` and `output_config.format` remain available for other features,
+  such as scriptable structured output via `jp query --schema`.
 
 ## Risks and Open Questions
 
-- **LLM calling `answer_inquiry` unprompted.** If the LLM calls the tool outside
-  an inquiry context, the executor returns an error and the turn continues
-  normally.
-  The tool description should be clear enough to prevent this in practice, but
-  it should be monitored.
+- **Unprompted `answer_inquiry` calls.** If the LLM calls `answer_inquiry`
+  outside an inquiry, the executor returns an error and the turn continues.
+  The tool description discourages unprompted calls, but we should monitor how
+  often they occur.
 
 - **Answer parsing edge cases.** The LLM might return `"True"` or `"TRUE"`
   instead of `"true"`.
-  The parser should be case-insensitive for booleans.
-  For selects, exact match is required (the prompt lists the exact options).
+  Boolean parsing should be case-insensitive, while select parsing requires an
+  exact match against the options listed in the prompt.
 
 - **Interaction with `ToolChoice::Function` and reasoning.** Anthropic does not
   support extended thinking when `tool_choice` forces a specific tool.
-  The inquiry backend currently does not enable reasoning, so this is not a
-  problem today.
-  If reasoning is later enabled for inquiries, this constraint will need to be
-  handled (the existing soft-force fallback in `create_request` already covers
-  this case).
+  The inquiry backend does not enable reasoning, and if it does later, the
+  existing soft-force fallback in `create_request` already handles this
+  constraint.
 
 ## Implementation Plan
 
 ### Phase 1: `answer_inquiry` builtin tool
 
-Add `AnswerInquiryTool` to `jp_llm::tool::builtin`.
-Implement the `BuiltinTool` trait (executor returns an error — it's only called
-via the inquiry backend).
-Add the `ToolDefinition` constructor.
-
-Register it in the builtin executors alongside `describe_tools`.
+- Add `AnswerInquiryTool` and its `ToolDefinition` constructor to
+  `jp_llm::tool::builtin`.
+- Implement the `BuiltinTool` trait so the executor returns an error when called
+  outside the inquiry backend.
+- Register `answer_inquiry` in the builtin executors alongside `describe_tools`.
 
 Can be merged independently.
 
 ### Phase 2: Always include `answer_inquiry` in tool definitions
 
-Wire the `answer_inquiry` definition into the tool list construction in
-`jp_cli::cmd::query`.
-Ensure it's present whenever tools are enabled.
-
-Verify that the tool appears in the API request and doesn't change token counts
-unexpectedly.
+- Wire the `answer_inquiry` definition into the tool list construction in
+  `jp_cli::cmd::query` whenever tools are enabled.
+- Verify that the tool appears in the API request without unexpected token count
+  changes.
 
 Can be merged independently.
 
@@ -383,29 +360,29 @@ Can be merged independently.
 - Set `tool_choice: ToolChoice::Function("answer_inquiry")`.
 - Process the response as tool call events instead of structured text.
 - Add answer parsing (string → bool/select/text) with validation.
-- Add retry loop (up to 2 retries) with error feedback messages.
+- Add a retry loop (up to 2 retries) with error feedback messages.
 - Update unit tests.
 
 Depends on Phase 2.
 
 ### Phase 4: Cleanup
 
-- Remove the `tools: vec![]` workaround from the previous fix (tools are now
-  always passed through and `answer_inquiry` is always present).
+- Remove the `tools: vec![]` workaround now that tools are always passed through
+  and `answer_inquiry` is always present.
 - Update [RFD 028] status to Superseded by this RFD.
-- Verify cache behavior with Anthropic API logs: inquiry requests should show
+- Verify cache behavior in Anthropic API logs: inquiry requests should show
   cache reads matching normal requests.
 
 Depends on Phase 3.
 
 ## References
 
-- [RFD 028: Structured Inquiry System for Tool Questions][RFD 028] — the
-  current implementation this RFD supersedes.
-- [Anthropic prompt caching docs][cache-docs] — cache prefix hierarchy and
+- [RFD 028: Structured Inquiry System for Tool Questions][RFD 028]: the
+  structured-output inquiry implementation superseded by this RFD.
+- [Anthropic prompt caching docs][cache-docs]: cache prefix hierarchy and
   invalidation rules.
-- [Anthropic structured outputs docs][structured-docs] — documents the system
-  prompt injection that causes cache invalidation.
+- [Anthropic structured outputs docs][structured-docs]: system prompt injection
+  that causes cache invalidation.
 
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md
