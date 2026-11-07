@@ -11,18 +11,19 @@
 ## Summary
 
 This RFD adds an `overrides` section to tool group definitions.
-Unlike `defaults` (which tool-level config can override), `overrides` enforces
-configuration that takes priority over tool-level settings.
-Only CLI flags can override group overrides.
+Unlike `defaults`, which tool-level config can override, `overrides` take
+priority over tool-level settings and yield only to CLI flags.
 
 ## Motivation
 
-[RFD 056] adds group defaults — fallback config that tools can override.
-This covers the common case of reducing repetition.
-But a different use case remains unsolved: **group-level config enforcement**.
+[RFD 056] adds group defaults: fallback configuration that individual tools can
+override to reduce repetition.
+However, group defaults cannot support **group-level config enforcement** when a
+tool already defines its own setting.
 
-Consider a workflow where tools are configured per-tool in the workspace config,
-and a config file loaded via `--cfg` needs to guarantee certain behavior:
+Consider a workspace config that sets `run` on individual tools, paired with a
+config file loaded via `--cfg` that must enforce a policy across all write
+tools:
 
 ```toml
 # Workspace config: tools set their own run mode
@@ -39,12 +40,11 @@ run = "unattended"
 # Problem: group defaults can't do this — tool-level "unattended" overrides them.
 ```
 
-With `defaults.run = "ask"` on the write group, each tool's `run = "unattended"`
-wins (tool config overrides group defaults).
-The config cannot enforce its policy.
+Setting `defaults.run = "ask"` on the `write` group does not work here because
+each tool's `run = "unattended"` overrides the group default.
 
-Group overrides solve this: they sit *after* tool-level config in the merge
-chain, so the config's `run = "ask"` takes priority over per-tool settings.
+Group overrides solve this by sitting *after* tool-level config in the merge
+chain, so `overrides.run = "ask"` takes priority over per-tool settings:
 
 ```toml
 # review.toml
@@ -56,7 +56,7 @@ overrides.run = "ask"
 
 ### `overrides` Section
 
-Groups gain an optional `overrides` section, alongside the existing `defaults`:
+Groups gain an optional `overrides` section alongside `defaults`:
 
 ```toml
 [conversation.tools.groups.write]
@@ -67,10 +67,9 @@ defaults.run = "ask" # fallback if tool doesn't set run
 overrides.run = "ask" # enforced regardless of tool config
 ```
 
-Both sections accept the same fields (see [RFD 056] for the field list):
-`enable`, `run`, `result`, `style`, `questions`.
-
-A group can use `defaults`, `overrides`, or both:
+Both sections accept the same fields: `enable`, `run`, `result`, `style`, and
+`questions` (see [RFD 056]).
+A group can define `defaults`, `overrides`, or both:
 
 ```toml
 [conversation.tools.groups.safety]
@@ -80,22 +79,19 @@ overrides.run = "ask" # tool cannot skip confirmation
 
 ### Merge Chain
 
-The full merge chain with both defaults and overrides:
+With both defaults and overrides, tool configuration resolves in the following
+order (later positions win):
 
 ```txt
 * > group[0..n].defaults > tool config > group[0..n].overrides > CLI flags
 ```
 
-Overrides sit between tool config and CLI flags.
-This means:
+Because overrides sit between tool config and CLI flags, they take precedence
+over per-tool settings while leaving CLI flags as the final authority.
+When a tool belongs to multiple groups, overrides are applied in the order of
+the tool's `groups` array, so later groups win, matching `defaults`.
 
-- Tool config cannot override them (that's the point).
-- CLI flags can still override them (CLI authority is preserved).
-
-Within the overrides position, group ordering follows the tool's `groups` array
-— later groups have higher priority, same as defaults.
-
-**Example:**
+For example:
 
 ```toml
 [conversation.tools.groups.dev]
@@ -122,7 +118,7 @@ run = "unattended"
 
 ### Force-Enabling via `enable`
 
-A common use case is a `--cfg` file that force-enables a group of tools:
+A `--cfg` file can use `overrides.enable` to force-enable every tool in a group:
 
 ```toml
 # dev-tools.toml
@@ -130,10 +126,9 @@ A common use case is a `--cfg` file that force-enables a group of tools:
 overrides.enable = true
 ```
 
-This overrides per-tool `enable` settings.
-A tool with `enable = false` in the workspace config becomes enabled when the
-config file is loaded.
-CLI flags can still disable it:
+This overrides per-tool `enable` settings, so a tool with `enable = false` in
+the workspace config is enabled when `dev-tools.toml` is loaded.
+CLI flags can still disable individual tools:
 
 ```sh
 # Config file force-enables dev tools, but CLI can override
@@ -142,44 +137,39 @@ jp query -c dev-tools.toml -t dev -T fs_modify_file "review this"
 
 ### `apply_enable_tools` Group Awareness
 
-The `apply_enable_tools` function in `query.rs` resolves each tool's effective
-enable through `PartialEnableConfig::effective` (per-field over the `*`
-defaults; see RFD 081) before applying `--tools` / `--no-tools` flags.
-With group overrides, a tool's effective enable may also come from a group's
-`overrides.enable`, not the tool's own field.
-
-The CLI enable/disable logic must therefore resolve each tool's effective enable
-through the full chain (`* > group.defaults > tool > group.overrides`) before
-applying the directive engine's scope/policy rules.
+In `query.rs`, `apply_enable_tools` resolves each tool's effective enable state
+through `PartialEnableConfig::effective` (merging per-field over the `*`
+defaults; see RFD 081) before applying `--tools` and `--no-tools`.
+Because `overrides.enable` on a group can override a tool's own `enable` field,
+`apply_enable_tools` must resolve effective enable state through the full chain
+(`* > group.defaults > tool > group.overrides`) before running the directive
+engine's scope and policy rules.
 
 ## Drawbacks
 
 **Five-position merge chain.** `* > group.defaults > tool > group.overrides >
-CLI` is the deepest merge chain in the config system.
-Debugging "where did this value come from?" requires understanding all five
-positions.
-This cost is justified by the config enforcement use case but should be
-mitigated by future `jp config show` tracing.
+CLI` is the deepest merge chain in the config system, making it harder to trace
+where an effective value came from.
+The config enforcement use case justifies this complexity, and future `jp config
+show` tracing can make value provenance visible.
 
-**Override power.** A `--cfg` file with group overrides can silently change tool
-behavior in ways that are hard to trace.
-A misconfigured override (e.g., `overrides.enable = false` on a group containing
-important tools) could cause subtle issues.
-The mitigation is that CLI flags always win, so the user retains final
-authority.
+**Override power.** A `--cfg` file with group overrides can alter tool behavior
+without touching per-tool config.
+A misconfigured override (such as `overrides.enable = false` on a group of
+important tools) can cause subtle issues, though CLI flags always win and leave
+final authority with the user.
 
-**Two config sections per group.** Users must understand the difference between
-`defaults` and `overrides`.
-Most groups will only use `defaults` — the `overrides` section is a power-user
-feature.
-But its existence means users encounter a design decision when creating groups.
+**Two config sections per group.** Group authors must understand the difference
+between `defaults` and `overrides`.
+Most groups only need `defaults`, so `overrides` is a power-user feature, but
+having both sections adds a design choice whenever a group is defined.
 
 ## Alternatives
 
 ### Group-level `mode` instead of two sections
 
-Instead of separate `defaults` and `overrides`, a group could carry a single
-`config` section with a `mode` field:
+Instead of separate `defaults` and `overrides` sections, a group could carry a
+single `config` section with a `mode` field:
 
 ```toml
 [conversation.tools.groups.safety]
@@ -188,10 +178,10 @@ config.run = "ask"
 config.style.hidden = false
 ```
 
-This was rejected because it's all-or-nothing: if you want `run` to override but
-`style` to be a default, you need two separate groups.
-The `defaults`/`overrides` split gives per-field control without per-field
-syntax.
+This is all-or-nothing: setting a default for `style` while overriding `run`
+requires two separate groups.
+Splitting `defaults` and `overrides` gives per-field control without per-field
+annotations.
 
 ### Per-field priority flags
 
@@ -202,34 +192,32 @@ Each value could carry its own priority annotation:
 config.run = { value = "ask", priority = "override" }
 ```
 
-Maximum flexibility, but every field becomes a tagged union.
-The config syntax gets ugly, the implementation is complex, and the mental model
-is harder.
+This allows per-field priority within a single section, but turns every field
+into a tagged union, complicating both the TOML syntax and the implementation.
 
 ## Non-Goals
 
-- **`jp config show` tracing.** Displaying which layer (defaults vs overrides vs
-  tool) set which value.
-  Useful but orthogonal.
-- **Override-of-override resolution.** If two `--cfg` files both define
-  overrides for the same group, normal config layer merging applies (later
-  `--cfg` wins).
-  No special conflict resolution is needed.
+- **`jp config show` tracing.** Showing whether an effective value came from
+  `defaults`, tool config, or `overrides` is useful but orthogonal to this RFD.
+- **Override-of-override resolution.** When two `--cfg` files define overrides
+  for the same group, standard config layer merging applies and the later
+  `--cfg` wins.
 
 ## Risks and Open Questions
 
-**Interaction with `allow_toggle = "if_named"`.** If a group has
-`overrides.enable` with `allow_toggle = "if_named"`, the tool won't respond to
-`--tools GROUP` (per the enable table in [RFD 055]).
-This is internally consistent but surprising — the group's own override
-prevents group activation.
-This should be documented: use `allow_toggle = "if_named_or_group"` (RFD 081) if
-you want the tool hidden by default but still responsive to group activation.
+**Interaction with `allow_toggle = "if_named"`.** If a group sets
+`overrides.enable` with `allow_toggle = "if_named"`, member tools do not respond
+to `--tools GROUP` (per the enable table in [RFD 055]).
+This is internally consistent, since `if_named` requires naming the tool
+directly, but surprising because the group's own override blocks group
+activation.
+Documentation should direct users to `allow_toggle = "if_named_or_group"` (RFD
+081) when a tool should stay hidden by default while still responding to group
+activation.
 
-**CLI vs group `allow_toggle = "never"`.** A group override that sets
-`allow_toggle = "never"` would, under RFD 081's directive engine, block a named
-CLI directive — conflicting with this RFD's commitment that CLI flags win over
-group overrides.
+**CLI vs. group `allow_toggle = "never"`.** Under RFD 081's directive engine, a
+group override that sets `allow_toggle = "never"` would block a named CLI
+directive, conflicting with the rule that CLI flags override group overrides.
 This RFD must decide whether group-sourced `allow_toggle` blocks CLI directives
 or whether CLI directives bypass it.
 
@@ -239,17 +227,17 @@ Depends on [RFD 056] (group configuration defaults).
 
 ### Phase 1: Overrides type and merge chain
 
-1. Add `overrides: ToolGroupDefaults` to `ToolGroupConfig` (reuses the same
-   struct as `defaults`).
+1. Add `overrides: ToolGroupDefaults` to `ToolGroupConfig`, reusing the same
+   struct as `defaults`.
 
-2. Add `overrides: Vec<ToolGroupDefaults>` to `ToolConfigWithDefaults`
-   (alongside the existing `groups` field for defaults).
+2. Add `overrides: Vec<ToolGroupDefaults>` to `ToolConfigWithDefaults` alongside
+   the existing `groups` field for defaults.
 
 3. Update `ToolsConfig::get()` and `ToolsConfig::iter()` to pass group overrides
    when constructing `ToolConfigWithDefaults`.
 
-4. Update accessor methods to resolve through the full chain.
-   Overrides take priority over tool config:
+4. Update accessor methods to resolve through the full chain so overrides take
+   priority over tool config:
 
    ```rust
    pub fn run(&self) -> RunMode {
@@ -267,15 +255,15 @@ Depends on [RFD 056] (group configuration defaults).
 ### Phase 2: CLI integration
 
 1. Update `apply_enable_tools` to resolve each tool's effective enable through
-   the full chain (`* → group.defaults → tool → group.overrides`) before
+   the full chain (`* > group.defaults > tool > group.overrides`) before
    applying CLI flags.
 
 ## References
 
-- [RFD 055] — tool groups (membership, exhaustive validation, CLI integration)
-- [RFD 056] — group configuration defaults
-- `crates/jp_cli/src/cmd/query.rs` — `apply_enable_tools`
-- `crates/jp_config/src/conversation/tool.rs` — `ToolConfigWithDefaults`
+- [RFD 055]: tool groups (membership, exhaustive validation, CLI integration)
+- [RFD 056]: group configuration defaults
+- `crates/jp_cli/src/cmd/query.rs`: `apply_enable_tools`
+- `crates/jp_config/src/conversation/tool.rs`: `ToolConfigWithDefaults`
 
 [RFD 055]: 055-tool-groups.md
 [RFD 056]: 056-group-configuration-defaults.md
