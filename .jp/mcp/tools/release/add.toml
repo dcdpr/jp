@@ -1,5 +1,4 @@
 [conversation.tools.changelog_add]
-enable = false
 source = "plugin.command.release.add"
 summary = "Record a change users notice as a changelog fragment."
 description = """
