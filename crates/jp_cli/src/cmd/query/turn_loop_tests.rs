@@ -331,6 +331,10 @@ impl Provider for RejectingProvider {
 struct RejectedTurn {
     result: Result<(), Error>,
     recorded: String,
+    /// The model in the config of the last turn's first event, which is what
+    /// `jp conversation print` names in the turn's header.
+    turn_model: String,
+    events: Vec<&'static str>,
     chrome: String,
 }
 
@@ -409,12 +413,40 @@ async fn run_rejected_turn(
         .name
         .to_string();
 
+    let stream = lock.events();
+    let turn_model = stream
+        .iter_turns()
+        .next_back()
+        .and_then(|turn| {
+            turn.iter()
+                .next()
+                .map(|e| e.config.assistant.model.id.to_string())
+        })
+        .unwrap_or_default();
+    let events = stream
+        .iter()
+        .map(|e| {
+            if e.event.is_turn_start() {
+                "TurnStart"
+            } else if e.event.is_chat_request() {
+                "ChatRequest"
+            } else if e.event.as_chat_response().is_some() {
+                "ChatResponse"
+            } else {
+                "other"
+            }
+        })
+        .collect();
+    drop(stream);
+
     printer.flush();
     let chrome = String::from_utf8(strip_ansi_escapes::strip(chrome.lock().as_str())).unwrap();
 
     RejectedTurn {
         result,
         recorded,
+        turn_model,
+        events,
         chrome,
     }
 }
@@ -481,6 +513,15 @@ async fn unknown_model_picked_replacement_answers_the_turn() {
         "deepseek-v4.1-flash".to_owned(),
     ]);
     assert_eq!(turn.recorded, "deepseek-v4.1-flash");
+    // The turn restarted on the picked model: the refused attempt left no
+    // second `TurnStart`, and the turn's config names the picked model from its
+    // first event, so replay labels the answer with it.
+    assert_eq!(turn.events, vec![
+        "TurnStart",
+        "ChatRequest",
+        "ChatResponse"
+    ]);
+    assert_eq!(turn.turn_model, "test/deepseek-v4.1-flash");
     assert_eq!(
         turn.chrome,
         "\n── jp (test/deepseek-v4.1-flash) ───────────────────────────────────────────────\n\n"
@@ -496,7 +537,11 @@ async fn unknown_model_dismissed_picker_ends_with_the_error() {
 
     // An empty `MockPromptBackend` returns a cancelled-prompt error.
     let RejectedTurn {
-        result, recorded, ..
+        result,
+        recorded,
+        turn_model,
+        events,
+        ..
     } = run_rejected_turn(provider.clone(), true, MockPromptBackend::new()).await;
 
     let Err(Error::UnknownModel { model, available }) = result else {
@@ -506,6 +551,8 @@ async fn unknown_model_dismissed_picker_ends_with_the_error() {
     assert_eq!(available.len(), 2);
     assert_eq!(provider.requested(), vec!["glm-5.3".to_owned()]);
     assert_eq!(recorded, "glm-5.3");
+    assert_eq!(events, vec!["TurnStart", "ChatRequest"]);
+    assert_eq!(turn_model, "test/glm-5.3");
 }
 
 /// A provider whose stream yields the given events and then stays pending
