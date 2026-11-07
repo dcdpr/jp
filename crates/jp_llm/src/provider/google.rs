@@ -1454,25 +1454,18 @@ impl From<GeminiError> for Error {
 
 /// Extract the rejected model name from a Gemini `404` unknown-model error.
 ///
-/// Gemini reports unknown models with a `404` status and a message matching
-/// `models/<name> is not found ... Call ListModels ...`.
+/// Gemini reports unknown models with a `404` status and a message naming the
+/// model resource: `models/<name> is not found for API version ...`.
+/// A `404` for a wrong endpoint carries no such message.
 fn unknown_model_name(api: &Value) -> Option<&str> {
     if api.get("status").and_then(Value::as_u64) != Some(404) {
         return None;
     }
 
     let message = api.pointer("/message/error/message")?.as_str()?;
-    if !message.contains("Call ListModels") {
-        return None;
-    }
+    let name = message.strip_prefix("models/")?.split(' ').next()?;
 
-    Some(
-        message
-            .split('/')
-            .nth(1)
-            .and_then(|v| v.split(' ').next())
-            .unwrap_or("unknown"),
-    )
+    (!name.is_empty()).then_some(name)
 }
 
 /// Returns `true` if the error is a Google API 400 "Corrupted thought

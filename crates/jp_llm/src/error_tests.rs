@@ -154,6 +154,18 @@ async fn an_archived_cerebras_model_is_an_unknown_model() {
     assert_eq!(err.kind, StreamErrorKind::UnknownModel);
 }
 
+/// OpenAI's subscription host refuses a model with a `400`, not a `404`.
+#[tokio::test]
+async fn a_subscription_400_model_not_found_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        400,
+        r#"{"detail":"The 'foobarbaz' model is not supported when using Codex with a ChatGPT account.","error":{"type":"invalid_request_error","code":"model_not_found","message":"The 'foobarbaz' model is not supported when using Codex with a ChatGPT account."}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+}
+
 #[tokio::test]
 async fn a_404_for_an_unknown_route_is_not_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(404, r#"{"detail":"Not Found"}"#)).await;

@@ -4,6 +4,23 @@ use serde_json::json;
 use super::*;
 use crate::query::Truncation;
 
+#[test]
+fn an_unknown_model_body_yields_its_message() {
+    assert_eq!(
+        unknown_model_message(r#"{"error":"model 'foobarbaz' not found"}"#).as_deref(),
+        Some("model 'foobarbaz' not found")
+    );
+}
+
+#[test]
+fn other_error_bodies_are_not_an_unknown_model() {
+    assert_eq!(
+        unknown_model_message(r#"{"error":"json: cannot unmarshal string"}"#),
+        None
+    );
+    assert_eq!(unknown_model_message("404 page not found"), None);
+}
+
 /// Ollama drops `$ref` while decoding a tool's parameters, so a referenced type
 /// has to arrive expanded or the model sees a property with no type.
 #[test]
