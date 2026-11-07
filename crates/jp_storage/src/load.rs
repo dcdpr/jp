@@ -7,7 +7,9 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream, StreamError};
+use jp_conversation::{
+    Conversation, ConversationEvent, ConversationId, ConversationStream, StreamError,
+};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use serde::{
     Deserialize, Deserializer,
@@ -181,31 +183,8 @@ impl Storage {
         id: &ConversationId,
         fallback: &PartialAppConfig,
     ) -> Result<ConversationStream> {
-        let workspace_dir = find_conversation_dir_path(&self.root, id);
-        let user_dir = self
-            .user
-            .as_deref()
-            .and_then(|user| find_conversation_dir_path(user, id));
-
-        // The stream (`base_config.json` + `events.json`) is one unit: load both
-        // files from whichever root has the newer combined mtime, with ties
-        // going to the durable user-local copy.
-        let Some(conv_dir) =
-            pick_newer(user_dir.as_deref(), workspace_dir.as_deref(), stream_mtime)
-        else {
-            return Err(LoadError::new(
-                build_conversation_dir_prefix(&self.root, id),
-                LoadErrorInner::MissingConversationStream(*id),
-            ));
-        };
-
+        let conv_dir = self.stream_dir(id)?;
         let events_path = conv_dir.join(EVENTS_FILE);
-        if !events_path.is_file() {
-            return Err(LoadError::new(
-                build_conversation_dir_prefix(&self.root, id),
-                LoadErrorInner::MissingConversationStream(*id),
-            ));
-        }
 
         let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
         if base_config_path.is_file() {
@@ -215,9 +194,7 @@ impl Storage {
 
             return ConversationStream::from_parts(base_config, events, fallback)
                 .map(|stream| stream.with_created_at(id.timestamp()))
-                .map_err(|error| {
-                    LoadError::new(conv_dir.to_owned(), LoadErrorInner::Stream(error))
-                });
+                .map_err(|error| LoadError::new(conv_dir, LoadErrorInner::Stream(error)));
         }
 
         // Legacy format: base config packed as first element in events.json.
@@ -225,14 +202,52 @@ impl Storage {
         match ConversationStream::from_legacy_events(events, fallback) {
             Ok(Some(stream)) => Ok(stream.with_created_at(id.timestamp())),
             Ok(None) => Err(LoadError::new(
-                conv_dir.to_owned(),
+                conv_dir,
                 LoadErrorInner::Stream(StreamError::FromEmptyIterator),
             )),
-            Err(error) => Err(LoadError::new(
-                conv_dir.to_owned(),
-                LoadErrorInner::Stream(error),
-            )),
+            Err(error) => Err(LoadError::new(conv_dir, LoadErrorInner::Stream(error))),
         }
+    }
+
+    /// Load a conversation's events without reading its config.
+    ///
+    /// Reads `events.json` from the same conversation directory selected by
+    /// [`Self::load_conversation_stream`] without reading `base_config.json` or
+    /// parsing `config_delta` entries.
+    pub fn load_conversation_events(&self, id: &ConversationId) -> Result<Vec<ConversationEvent>> {
+        let conv_dir = self.stream_dir(id)?;
+        let events = load_json(&conv_dir.join(EVENTS_FILE))?;
+
+        ConversationStream::events_from_parts(events)
+            .map_err(|error| LoadError::new(conv_dir, LoadErrorInner::Stream(error)))
+    }
+
+    /// Resolve the directory containing a conversation's `events.json`.
+    ///
+    /// The stream (`base_config.json` + `events.json`) is treated as one unit
+    /// and read from whichever storage root has the newer combined mtime, with
+    /// ties going to user storage.
+    fn stream_dir(&self, id: &ConversationId) -> Result<Utf8PathBuf> {
+        let workspace_dir = find_conversation_dir_path(&self.root, id);
+        let user_dir = self
+            .user
+            .as_deref()
+            .and_then(|user| find_conversation_dir_path(user, id));
+
+        let missing = || {
+            LoadError::new(
+                build_conversation_dir_prefix(&self.root, id),
+                LoadErrorInner::MissingConversationStream(*id),
+            )
+        };
+
+        let conv_dir = pick_newer(user_dir.as_deref(), workspace_dir.as_deref(), stream_mtime)
+            .ok_or_else(missing)?;
+        if !conv_dir.join(EVENTS_FILE).is_file() {
+            return Err(missing());
+        }
+
+        Ok(conv_dir.to_owned())
     }
 
     pub fn load_conversation_metadata(&self, id: &ConversationId) -> Result<Conversation> {

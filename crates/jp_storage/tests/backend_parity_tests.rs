@@ -8,7 +8,7 @@ use std::sync::Arc;
 use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{Conversation, ConversationId, ConversationStream, event::ChatRequest};
 use jp_storage::backend::{
     ConversationFilter, FsStorageBackend, InMemoryStorageBackend, LoadBackend, LockBackend,
     NullLockBackend, PersistBackend, Projection, SessionBackend,
@@ -75,6 +75,32 @@ with_backends!(write_then_load_stream, |b| {
         .load_conversation_stream(&id, &PartialAppConfig::empty())
         .unwrap();
     assert!(loaded.is_empty());
+});
+
+with_backends!(write_then_load_events, |b| {
+    let id = test_id(1_000_000);
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest::from("hello"));
+
+    b.write(
+        &id,
+        &Conversation::default(),
+        &events,
+        Projection::Projected,
+    )
+    .unwrap();
+
+    let loaded = b.load_conversation_events(&id).unwrap();
+    assert_eq!(loaded.len(), 2, "TurnStart and ChatRequest");
+    assert_eq!(
+        loaded[1].as_chat_request().map(|req| req.content.as_str()),
+        Some("hello")
+    );
+});
+
+with_backends!(load_missing_events_errors, |b| {
+    let id = test_id(1_000_000);
+    assert!(b.load_conversation_events(&id).is_err());
 });
 
 with_backends!(remove_then_load_fails, |b| {

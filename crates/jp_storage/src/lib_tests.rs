@@ -5,7 +5,10 @@ use std::{
 
 use camino_tempfile::tempdir;
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{
+    Conversation, ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
+};
 use test_log::test;
 
 use super::*;
@@ -975,6 +978,76 @@ fn stream_loads_from_newer_root() {
         stream.is_ok(),
         "the newer user-local stream is selected over the stale workspace copy"
     );
+}
+
+fn one_turn_stream() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.push_event(ChatResponse::message("hi there"));
+    stream
+}
+
+fn write_stream(conv_dir: &Utf8Path, stream: &ConversationStream) {
+    let (base_config, events) = stream.to_parts().unwrap();
+    fs::write(
+        conv_dir.join(BASE_CONFIG_FILE),
+        serde_json::to_string(&base_config).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        conv_dir.join(EVENTS_FILE),
+        serde_json::to_string(&events).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn events_load_without_reading_the_base_config() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, _user_dir) = dual_root_storage(tmp.path());
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&conv).unwrap();
+
+    let stream = one_turn_stream();
+    write_stream(&conv, &stream);
+    fs::write(conv.join(BASE_CONFIG_FILE), "not valid json").unwrap();
+
+    assert!(
+        storage
+            .load_conversation_stream(&id, &PartialAppConfig::empty())
+            .is_err()
+    );
+
+    let events = storage.load_conversation_events(&id).unwrap();
+    let expected: Vec<_> = stream
+        .iter_events_by_turn()
+        .map(|event| event.event.clone())
+        .collect();
+    assert_eq!(events, expected);
+}
+
+#[test]
+fn events_load_from_newer_root() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let ws_conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    let user_conv = user_dir.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&ws_conv).unwrap();
+    fs::create_dir_all(&user_conv).unwrap();
+
+    // Newer, valid stream in user-local; older, corrupt copy in the workspace.
+    write_stream(&user_conv, &one_turn_stream());
+    set_mtime(&user_conv.join(EVENTS_FILE), 2_000);
+    set_mtime(&user_conv.join(BASE_CONFIG_FILE), 2_000);
+    fs::write(ws_conv.join(EVENTS_FILE), "not valid json").unwrap();
+    set_mtime(&ws_conv.join(EVENTS_FILE), 1_000);
+
+    let events = storage.load_conversation_events(&id).unwrap();
+    assert_eq!(events.len(), 3, "TurnStart, ChatRequest, ChatResponse");
 }
 
 /// Write a legacy-format conversation stream: no `base_config.json`, with the
