@@ -5,16 +5,19 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-14
 - **Requires**: [RFD 122]
-- **Summary**: Release tags publish prebuilt, attested `jp` binaries and install
-  scripts to GitHub Releases, built with dist.
+- **Summary**: Each release tag gets a GitHub Release with its notes, and the
+  prebuilt, attested `jp` binaries and install scripts dist builds for it.
 
 ## Summary
 
-Pushing a release tag publishes prebuilt `jp` binaries for Linux, macOS, and
-Windows to a GitHub Release, alongside SHA-256 checksums, GitHub artifact
-attestations, install scripts, and the rendered release notes.
-[dist] (the `cargo-dist` crate) builds the binaries, generates the installers,
-and uploads the release assets.
+Every release tag gets a GitHub Release, which JP's own workflow creates and
+describes with the release notes rendered from `main`, as the documentation site
+renders them.
+[dist] (the `cargo-dist` crate) builds prebuilt `jp` binaries for Linux, macOS,
+and Windows, uploads them to that Release alongside SHA-256 checksums, GitHub
+artifact attestations, and install scripts, and publishes it.
+Release notes come first: releases get a GitHub Release with their notes before
+`dist` is set up, and binaries once it is.
 This RFD covers only the `jp` binary; command plugins, the macOS app, the web
 client, and macOS notarization are out of scope.
 
@@ -25,6 +28,10 @@ minutes of compilation.
 [RFD 122] cuts and tags a release every two weeks, but a tag alone gives users
 nothing to download.
 The first official release needs prebuilt binaries.
+
+[RFD 122]'s commands end at a pushed tag and talk to no forge, so everything
+GitHub shows of a release happens here, in JP's CI: the Release that announces
+it, and the binaries built for it.
 
 Cross-platform binary releases are a solved problem, and JP should use an
 existing tool rather than maintain a custom workflow.
@@ -63,9 +70,10 @@ Each archive also receives a GitHub artifact attestation: a Sigstore-signed
 record of the workflow run and commit that built it, stored by GitHub rather
 than uploaded as a release asset.
 
-The GitHub Release description contains the release notes rendered from the
-release's directory on `main` (see [Release Notes](#release-notes)), placed
-above the install instructions.
+The GitHub Release is titled like the tag's subject, `Release 0.3.0`, and its
+description contains the release notes rendered from the release's directory on
+`main` (see [Release Notes](#release-notes)), followed by installation
+instructions.
 
 The target list matches the four targets built by `plugins.yml`, plus
 `aarch64-unknown-linux-gnu` for ARM64 servers and Linux containers on Apple
@@ -113,7 +121,6 @@ members = ["cargo:."]
 cargo-dist-version = "0.33.0"
 ci = ["github"]
 packages = ["jp"]
-display-name = "JP CLI"
 precise-builds = true
 targets = [
     "x86_64-unknown-linux-gnu",
@@ -126,6 +133,8 @@ installers = ["shell", "powershell"]
 github-attestations = true
 source-tarball = false
 pr-run-mode = "skip"
+create-release = false
+plan-jobs = ["./release-notes"]
 post-announce-jobs = ["./release-notes"]
 github-build-setup = "build-setup.yml" # steps that select the release toolchain
 
@@ -138,9 +147,6 @@ aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
 
 - `packages = ["jp"]` restricts builds to the `jp` package, ignoring all other
   workspace crates (including plugins) regardless of their `publish` setting.
-- `display-name = "JP CLI"` sets the heading in the install section that `dist`
-  writes on the release page ("Install JP CLI 0.3.0"), while asset filenames
-  keep the `jp-` prefix.
 - `precise-builds = true` builds only the `jp` package (`cargo build -p jp`),
   matching `cargo install`, instead of `dist`'s default of building the entire
   workspace with unified Cargo features.
@@ -151,8 +157,16 @@ aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
   check](#release-branch-build-check) validates release builds instead.
 - `github-action-commits` pins every GitHub Action in `dist`'s generated
   workflow to a commit SHA.
+- `create-release = false` leaves the GitHub Release to JP: `dist` uploads to
+  the draft that `release-notes.yml` creates and publishes it once every upload
+  is done (see [Release Notes](#release-notes)).
+- `plan-jobs` and `post-announce-jobs` run `release-notes.yml` at the start of
+  `dist`'s run, so the draft exists before anything is uploaded, and again after
+  `dist` publishes the Release.
 
-`dist` owns the workflow it generates at `.github/workflows/release.yml`.
+`dist` owns the workflow it generates at `.github/workflows/release.yml` and
+has no setting for another name, so [RFD 122]'s workflow of that name (the
+release reminder and the site build on a tag) moves to `release-train.yml`.
 `dist generate` writes the file from `dist-workspace.toml`, and `dist plan`
 fails if the workflow is out of sync with the configuration, so
 `dist-workspace.toml` is the source of truth and `release.yml` is never edited
@@ -160,7 +174,7 @@ manually.
 The workflow runs when a version tag is pushed: `dist` builds the packages whose
 version matches the tag (`jp`, updated on the release branch by [RFD 122]'s
 `bump` command), compiles each target on a native runner, generates
-attestations, uploads the archives, and publishes the GitHub Release.
+attestations, uploads the archives to the tag's draft Release, and publishes it.
 
 Because a maintainer pushes the tag directly rather than from a workflow, the
 release workflow starts automatically without manual approval (see [RFD 122]'s
@@ -177,7 +191,8 @@ package is renamed to `jp` before the first release, while `[lib] name =
 Only references to the Cargo package name need updating:
 
 - `crates/jp_cli/Cargo.toml` and its entry in `Cargo.lock`.
-- `--package jp_cli` in the justfile's `run` and `serve-web` recipes.
+- `--package jp_cli` in the justfile's recipes that build or run `jp`, such as
+  `run`, `serve-web`, and `release`.
 - The `debug_jp` tools in `.config/jp/tools`, which build with `-p jp_cli`.
 - The `cargo install` command in `README.md` and `docs/installation.md`.
 - The example in the `cargo_check` tool's description.
@@ -223,42 +238,57 @@ before `jp release finalize` ([RFD 122]) tags the release.
 
 ### Release Notes
 
-The GitHub Release description contains the release notes that [RFD 122] renders
-from `changelog.d/<version>/` on `main`, followed by a link to the upgrade guide
-when present, and then `dist`'s install instructions.
+JP's own workflow, `release-notes.yml`, owns each GitHub Release; `dist` only
+uploads to it.
+It is a reusable workflow, and each run brings the GitHub Releases in line with
+`main`:
 
-A reusable workflow, `release-notes.yml`, writes the description.
-`dist` calls `release-notes.yml` after publishing the release
-(`post-announce-jobs`), and the workflow also runs on every push to `main` that
-modifies a version's directory, updating the description of each existing GitHub
-Release affected by the change.
-Edits to an older release's notes on `main` therefore propagate to its GitHub
-Release.
+- Every release tag has a Release, titled `Release 0.3.0`.
+  A Release the workflow makes starts as a draft, which dist publishes once its
+  uploads are done; before dist is set up, the workflow publishes it at once,
+  with no binaries.
+- Each Release's description is the release's notes, rendered from
+  `changelog.d/<version>/` on `main` with its breaking entries linking to the
+  upgrade guide on JP's site, followed by how to install that release: building
+  it from source with its tag until binaries ship, and its own install scripts
+  once they do.
+- The release with the highest version is GitHub's latest.
+
+The workflow runs as `dist`'s plan job, so the draft exists before anything is
+uploaded; as its post-announce job, once `dist` has published the Release; and
+on every push to `main` that modifies a version's directory, so edits to an
+older release's notes on `main` propagate to its GitHub Release.
+Before `dist` is set up, pushing a release tag starts it directly.
 Like the docs build ([RFD 122]'s On the site section), the workflow renders
 notes with the `changelog` binary using the forge and headings from the settings
 snapshot, compiling only that small crate rather than `jp`.
-It preserves the install instructions `dist` wrote below a marker and replaces
-everything above it.
 
-`release-notes.yml` also marks the release with the highest version as GitHub's
-`latest` release, which controls what `releases/latest/download/` serves.
-`dist` publishes releases with `gh release create` without `--latest`, omitting
-the `make_latest` parameter.
-GitHub's API documentation states that `make_latest` defaults to marking each
-newly published release as `latest`, whereas `gh` describes the default as
-"automatic based on date and version".
+The description follows `main`, as the site does, while the tag keeps the notes
+the release was tagged with ([RFD 122]'s Finalizing a release).
+It links to the upgrade guide on the site rather than holding it, as the tag's
+message does: GitHub gives a Release's description no heading anchors, so links
+to its own sections would go nowhere ([GitHub discussion 48311]).
+
+GitHub always has a `latest` release, which controls what
+`releases/latest/download/` serves.
+GitHub's API documentation states that publishing a release marks it as
+`latest` unless the request says otherwise, whereas `gh` describes the default
+as "automatic based on date and version".
 Because a patch release on an older line (such as 0.3.1) can be published after
-a newer release (0.4.0; see [RFD 122]'s Releases in parallel section), relying
-on the API default would mark 0.3.1 as `latest` and cause the install command to
-install 0.3.1 instead of 0.4.0.
-Explicitly marking the highest version as `latest` is correct under either
+a newer release (0.4.0; see [RFD 122]'s Releases in parallel section), the API's
+behavior would mark 0.3.1 as `latest` and cause the install command to install
+0.3.1 instead of 0.4.0.
+Marking the highest version as `latest` on every run is correct under either
 behavior.
 
-If a release is tagged before its cut's change request merges, its
-`changelog.d/<version>/` directory does not exist on `main` yet.
-Until that change request merges and triggers `release-notes.yml`, the release
-description shows a placeholder note with a link to the release page on the
-site.
+A release whose notes have not reached `main`, such as one finalized from a
+branch ahead of it, gets a description saying they are on their way, until they
+reach `main` and the workflow writes them.
+
+GitHub's immutable releases lock a published Release's tag and assets, but not
+its description.
+This ordering works with them enabled: binaries are uploaded to the draft before
+it is published, and descriptions are rewritten afterwards.
 
 ## Drawbacks
 
@@ -279,6 +309,12 @@ site.
 - **Unsigned binaries.** Windows may warn when running an unsigned binary
   downloaded through a browser, and macOS blocks a browser-downloaded binary
   until its quarantine attribute is removed.
+- **Two workflows meet at a draft.** dist uploads to the Release
+  `release-notes.yml` makes at the start of its run; if that job fails, so do
+  the uploads, until dist's workflow runs again.
+- **Releases before dist stay without binaries.** With immutable releases on, a
+  Release published before Phase 3 can't take assets later; installing one of
+  those releases means building it from source.
 
 ## Alternatives
 
@@ -304,6 +340,13 @@ site.
   on nightly, but `rust-toolchain.toml` specifies stable for releases, and
   shipping binaries built with a nightly compiler is an unnecessary risk for
   users.
+- **dist making the Release**, with a description and install instructions of
+  its own, and JP's notes written above a marker after it publishes.
+  Two workflows would write one description, and the Releases made before dist
+  would need a path of their own.
+- **The tag's message as the description**, upgrade guide included.
+  GitHub gives a Release's description no heading anchors, so the breaking
+  entries' links into the guide would go nowhere.
 
 ## Non-Goals
 
@@ -345,7 +388,16 @@ site.
 
 ## Implementation Plan
 
-### Phase 1: Rename and Stable Builds
+### Phase 1: Release Notes on GitHub
+
+Add `release-notes.yml`, triggered by pushing a release tag and by pushes to
+`main` that modify a version's directory: it creates and publishes a GitHub
+Release for each tag, writes each description from `main` with building from
+source as the install method, and marks the highest version as `latest`.
+Depends on [RFD 122] Phases 1, 2, and 4, which render the notes, tag releases,
+and publish the upgrade guide on the site.
+
+### Phase 2: Rename and Stable Builds
 
 Rename the `jp_cli` package to `jp`, keeping its library name, and update all
 references to the package name (see [Renaming the `jp_cli` Package to
@@ -355,19 +407,16 @@ Add the release toolchain and `just release-build` to the justfile, and run
 `just release-build` in CI on pushes to `release/*` for each target.
 This phase can merge on its own before the first release cut.
 
-### Phase 2: `dist` and the Release Workflow
+### Phase 3: `dist` and the Release Workflow
 
-Add `dist-workspace.toml` and the `dist` Cargo profile, generate `release.yml`,
-pin its actions, and configure the release toolchain through
-`github-build-setup`.
-Depends on Phase 1 and on [RFD 122] Phase 2, which tags releases.
-
-### Phase 3: Release Notes
-
-Add `release-notes.yml`, triggered after each release is published and on pushes
-to `main` that modify a version's directory, to write the GitHub Release
-description and mark the highest version as the `latest` release.
-Depends on Phase 2 and on [RFD 122] Phase 1, which renders release notes.
+Move [RFD 122]'s `release.yml` to `release-train.yml`, then add
+`dist-workspace.toml` and the `dist` Cargo profile, generate `release.yml`, pin
+its actions, and configure the release toolchain through `github-build-setup`.
+`release-notes.yml` stops responding to tag pushes directly: `dist` runs it as a
+plan job, where it creates each Release as a draft for `dist` to publish, and as
+a post-announce job, and its descriptions switch to the release's install
+scripts.
+Depends on Phases 1 and 2.
 
 ### Phase 4: Installation Guide
 
@@ -375,22 +424,26 @@ Replace the "no binaries" warning in `docs/installation.md` with instructions
 for the install scripts, manual archive download and checksum verification,
 attestation verification, clearing the macOS quarantine attribute, and building
 from source.
-Depends on Phase 2.
+Depends on Phase 3.
 
 ## References
 
 - [RFD 122: Release Pipeline][RFD 122], which tags releases and renders their
   notes.
-- [dist], its [configuration reference][dist-config], and [GitHub artifact
-  attestations][dist-attestations] in `dist`.
+- [dist], its [configuration reference][dist-config], [GitHub artifact
+  attestations][dist-attestations] in `dist`, and [bringing your own
+  release][dist-own-release], which leaves the GitHub Release to JP.
+- [GitHub discussion 48311], on Release descriptions having no heading anchors.
 - [upload-rust-binary-action] and [create-gh-release-action], the alternative
   built from GitHub Actions.
 - [GoReleaser]'s Rust builder.
 
+[GitHub discussion 48311]: https://github.com/orgs/community/discussions/48311
 [GoReleaser]: https://goreleaser.com/customization/builds/builders/rust/
 [RFD 122]: 122-release-pipeline.md
 [create-gh-release-action]: https://github.com/taiki-e/create-gh-release-action
 [dist]: https://axodotdev.github.io/cargo-dist/book/
 [dist-attestations]: https://axodotdev.github.io/cargo-dist/book/supplychain-security/attestations/github.html
 [dist-config]: https://axodotdev.github.io/cargo-dist/book/reference/config.html
+[dist-own-release]: https://axodotdev.github.io/cargo-dist/book/ci/customizing.html#bring-your-own-release
 [upload-rust-binary-action]: https://github.com/taiki-e/upload-rust-binary-action
