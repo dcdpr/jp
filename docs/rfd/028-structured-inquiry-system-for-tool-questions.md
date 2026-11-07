@@ -10,18 +10,18 @@
 
 ## Summary
 
-This RFD replaces the `tool_answers` re-invocation pattern, in which the LLM
-re-calls a tool with all original arguments plus answers, with a structured
+This RFD replaces the `tool_answers` re-invocation pattern with a structured
 inquiry system.
 When a tool requests input from the assistant, `ToolCoordinator` runs a
 structured-output inquiry against the LLM, extracts the answer, and re-executes
-the tool internally without the LLM re-transmitting the original arguments.
+the tool internally instead of having the LLM re-call the tool with its original
+arguments and answers.
 
 ## Motivation
 
 When a tool returns `NeedsInput` with `QuestionTarget::Assistant`, the system
-needs to get an answer from the LLM without the user's involvement.
-The original approach works like this:
+must get an answer from the LLM without prompting the user.
+The original approach re-invokes the tool across turns:
 
 ```txt
 1. Assistant: ToolCallRequest(call_123, fs_modify_file, args={path, patterns})
@@ -40,30 +40,29 @@ This has three problems:
   A tool with 5000-token arguments wastes ~5000 tokens per question.
 - **Latency.** The LLM must re-generate the entire tool call, including all
   original arguments.
-- **Error-prone.** The LLM might make mistakes reconstructing arguments, change
-  values, or include the internal `tool_answers` field incorrectly — which
-  contaminates conversation history and causes argument validation failures in
-  subsequent tool calls.
+- **Error-prone.** The LLM can corrupt arguments when reconstructing them or
+  misuse the internal `tool_answers` field.
+  Either mistake contaminates conversation history and causes argument
+  validation failures in subsequent tool calls.
 
-The `tool_answers` field is embedded inside the `arguments` map of
-`ToolCallRequest` and threaded through custom serde logic.
-This creates a hidden coupling: the serialization layer injects `tool_answers`
-into `arguments` during deserialization (even when empty), providers pass
-`arguments` to the LLM in conversation history, and the LLM learns to include
-`tool_answers` in new tool calls — triggering "unknown argument" validation
-errors.
+Embedding `tool_answers` inside the `arguments` map of `ToolCallRequest` via
+custom serde logic creates a hidden coupling.
+The deserializer injects `tool_answers` into `arguments` even when empty,
+providers pass `arguments` to the LLM in conversation history, and the LLM
+learns to include `tool_answers` in new tool calls, which triggers "unknown
+argument" validation errors.
 
 ## Design
 
 ### Overview
 
-When a tool returns `NeedsInput` with `QuestionTarget::Assistant`, the
+When a tool returns `NeedsInput` with `QuestionTarget::Assistant`,
 `ToolCoordinator` spawns an async inquiry task instead of returning control to
 the LLM.
-The task makes a structured output request to get the answer, then re-executes
-the tool with accumulated answers.
+The task makes a structured-output request for the answer, then re-executes the
+tool with the accumulated answers.
 The turn loop, the terminal, and the persisted conversation stream see none of
-this — the tool simply takes longer to complete.
+this: the tool simply takes longer to complete.
 
 ```txt
 1. Assistant: ToolCallRequest(call_123, fs_modify_file, args={path, patterns})
@@ -77,27 +76,24 @@ this — the tool simply takes longer to complete.
 
 ### Design Goals
 
-| Goal                   | Description                            |
-| ---------------------- | -------------------------------------- |
-| Token efficiency       | No re-transmission of tool arguments   |
-| Type safety            | Structured output schemas guarantee    |
-|                        | answer types                           |
-| Full context           | LLM sees conversation history when     |
-|                        | answering                              |
-| Cache-friendly         | Conversation prefix overlaps with main |
-|                        | stream                                 |
-| Invisible to turn loop | Inquiry is encapsulated in             |
-|                        | `ToolCoordinator`                      |
-| No rendering artifacts | Inquiry runs in a background task,     |
-|                        | nothing printed                        |
-| No stream mutation     | Real conversation stream untouched     |
-|                        | during inquiry                         |
-| Parallel inquiries     | Multiple tools can have concurrent     |
-|                        | inquiries                              |
+| Goal                   | Description                                  |
+| ---------------------- | -------------------------------------------- |
+| Token efficiency       | No re-transmission of tool arguments         |
+| Type safety            | Structured-output schemas guarantee answer   |
+|                        | types                                        |
+| Full context           | LLM sees conversation history when answering |
+| Cache-friendly         | Conversation prefix overlaps with main       |
+|                        | stream                                       |
+| Invisible to turn loop | Inquiry is encapsulated in `ToolCoordinator` |
+| No rendering artifacts | Inquiry runs in a background task with       |
+|                        | nothing printed                              |
+| No stream mutation     | Real conversation stream stays untouched     |
+|                        | during inquiry                               |
+| Parallel inquiries     | Multiple tools can run concurrent inquiries  |
 
 ### InquiryBackend Trait
 
-The inquiry backend is a trait for testability:
+`InquiryBackend` abstracts inquiry execution for testability:
 
 ```rust
 #[async_trait]
@@ -112,21 +108,20 @@ pub trait InquiryBackend: Send + Sync {
 }
 ```
 
-The real implementation (`LlmInquiryBackend`) holds an `Arc<dyn Provider>`, the
-model details, and the static thread parts (system prompt, sections,
-attachments).
-These are set once per turn.
+`LlmInquiryBackend` is constructed once per turn and holds an `Arc<dyn
+Provider>`, the model details, and the static thread parts (system prompt,
+sections, and attachments).
 
 The `inquire` method:
 
 1. Creates a JSON schema from the question type (boolean, select, text).
 2. Appends a `ChatRequest` with the question text and schema to the cloned
    stream.
-3. Makes a structured output call to the LLM (with retry support).
+3. Makes a structured-output call to the LLM (with retry support).
 4. Extracts and validates the answer from the structured response.
 
-A `MockInquiryBackend` returns pre-configured answers keyed by inquiry ID for
-testing purposes.
+For tests, `MockInquiryBackend` returns pre-configured answers keyed by inquiry
+ID.
 
 ### Schema Generation
 
@@ -152,14 +147,14 @@ Each inquiry generates a schema matching the question type:
 }
 ```
 
-The `inquiry_id` field uses `const`, but individual providers will transform the
-schema to use s single-value `enum` if the provider does not support `const` in
-the schema.
+The `inquiry_id` field uses `const`.
+Providers that do not support `const` in JSON schemas transform it into a
+single-value `enum`.
 
 ### ToolCoordinator Integration
 
-The inquiry follows the same pattern as interactive user prompts, which already
-exist in the coordinator:
+Structured inquiries follow the same pattern as interactive user prompts in
+`ToolCoordinator`:
 
 ```txt
 User prompt (existing):
@@ -172,38 +167,35 @@ Structured inquiry (new):
 
 `execute_with_prompting` takes an `Arc<dyn InquiryBackend>` and a
 `&ConversationStream` reference.
-The stream is only cloned if an inquiry actually fires — no upfront cost on
-cycles where no tool asks a question.
-
 When `handle_tool_result` encounters `NeedsInput` with
-`QuestionTarget::Assistant`, it calls `spawn_inquiry`, which inserts a synthetic
-`ToolCallResponse` ("Tool paused: ...") into the cloned stream so the LLM sees
-the tool call as resolved, then appends the question as a `ChatRequest` with a
-schema attached.
+`QuestionTarget::Assistant`, it calls `spawn_inquiry` to snapshot the
+conversation and run the inquiry task.
 
-The `InquiryResult` event handler mirrors `PromptAnswer`: insert the answer into
-`accumulated_answers`, re-spawn tool execution.
-On failure, mark the tool as completed with an error.
+The `InquiryResult` event handler mirrors `PromptAnswer`: it inserts the answer
+into `accumulated_answers` and re-spawns tool execution, or marks the tool as
+completed with an error if the inquiry fails.
 
 ### Conversation Snapshot
 
-The inquiry needs the current conversation events for context.
-Rather than cloning the stream eagerly, the coordinator holds a
-`&ConversationStream` reference and clones just-in-time when an inquiry fires.
-The clone gets a synthetic `ToolCallResponse` inserted so the LLM sees a
-well-formed tool call pair.
+An inquiry needs the current conversation events for context.
+Rather than cloning the stream eagerly, `ToolCoordinator` holds a
+`&ConversationStream` reference and clones it on demand when an inquiry fires,
+avoiding upfront cost on cycles where no tool asks a question.
+
+`spawn_inquiry` inserts a synthetic `ToolCallResponse` (`"Tool paused: ..."`)
+into the cloned stream so the LLM sees a well-formed, resolved tool call pair,
+then appends the question as a `ChatRequest` with the inquiry schema attached.
 
 ### Removal of `tool_answers`
 
-With the inquiry system in place, the `tool_answers` field is no longer needed:
+The inquiry system makes the `tool_answers` field obsolete:
 
-- The custom `Serialize`/`Deserialize` on `ToolCallRequest` that
-  extracts/injects `tool_answers` from/into `arguments` is removed.
-  `ToolCallRequest` uses derive serde instead.
-- The `Field::Map("tool_answers")` base64 encoding in `storage.rs` is removed.
-- Deserialization of old conversation files that contain a `tool_answers` field
-  silently ignores it (serde default behavior for unknown fields with non-strict
-  deserialization).
+- `ToolCallRequest` drops the custom `Serialize` and `Deserialize`
+  implementations that extracted and injected `tool_answers` in `arguments`, and
+  derives serde directly.
+- `storage.rs` drops the `Field::Map("tool_answers")` base64 encoding.
+- Deserializing old conversation files silently ignores `tool_answers` through
+  serde's default non-strict handling of unknown fields.
 
 ### Data Flow
 
@@ -221,21 +213,19 @@ merge answer, re-execute tool
   → Completed(response)
 ```
 
-**Multi-question:** Each question triggers the same cycle.
-Answers accumulate across re-executions.
+**Multi-question:** Each question triggers the same cycle, and answers
+accumulate across re-executions.
 
 **Parallel tools:** Each tool's inquiry runs as an independent async task.
 The event channel serializes results as they arrive.
 
 ## Drawbacks
 
-- **Extra LLM call per question.** Each inquiry is a separate structured output
-  request.
-  For tools that ask many questions, this adds up.
-  In practice, most tools ask 0-1 questions.
-- **No batching.** If multiple tools need answers simultaneously, each fires its
-  own inquiry.
-  Batching questions into a single request is left as a future enhancement.
+- **Extra LLM call per question.** Each inquiry makes a separate
+  structured-output request, which adds up if a tool asks many questions.
+  In practice, most tools ask 0 or 1 questions.
+- **No batching.** Concurrent tool questions each fire a separate inquiry.
+  Batching questions into a single request is left for future work.
 
 ## Alternatives
 
@@ -243,32 +233,32 @@ The event channel serializes results as they arrive.
 
 Let the LLM re-call the tool with all arguments plus answers.
 
-Rejected: wastes tokens proportional to argument size, introduces latency, and
-the `tool_answers` field in `arguments` causes history contamination.
+Rejected: wastes tokens proportional to argument size, adds latency, and
+contaminates conversation history with the `tool_answers` field in `arguments`.
 
 ### Route answers through the main conversation stream
 
 Instead of a side-channel inquiry, insert the question into the real
 conversation stream and let the normal turn loop handle it.
 
-Rejected: this would be visible to the user, would modify the persisted stream,
-and would break the `ToolCallRequest` → `ToolCallResponse` pairing that
-providers expect.
+Rejected: exposes internal questions to the user, mutates the persisted stream,
+and breaks the `ToolCallRequest` → `ToolCallResponse` pairing that providers
+expect.
 
 ## Non-Goals
 
-- **Rendering inquiry events in `conversation show`.** The inquiry is invisible.
-  Display formatting is deferred (see [RFD 005]).
+- **Rendering inquiry events in `conversation show`.** Inquiries are invisible
+  to the user; display formatting is deferred (see [RFD 005]).
 - **Batching multiple inquiries** into a single structured request.
-- **Non-tool inquiry sources** (conversation disambiguation, confirmation
-  prompts).
-  The infrastructure supports this but it is not proposed here.
+- **Non-tool inquiry sources.** The infrastructure supports conversation
+  disambiguation and confirmation prompts, but this RFD only covers tool
+  questions.
 
 ## Implementation Plan
 
 ### Phase 1: Inquiry infrastructure
 
-Add `ActiveInquiry` (schema generation + answer extraction),
+Add `ActiveInquiry` (schema generation and answer extraction),
 `create_inquiry_schema`, `tool_call_inquiry_id`, and unit tests.
 
 Location: `crates/jp_cli/src/cmd/query/tool/inquiry.rs`
@@ -277,45 +267,44 @@ Can be merged independently.
 
 ### Phase 2: InquiryBackend trait and LLM implementation
 
-Define the `InquiryBackend` trait.
-Implement `LlmInquiryBackend` and `MockInquiryBackend`.
-Unit tests with mock provider.
+Define the `InquiryBackend` trait, implement `LlmInquiryBackend` and
+`MockInquiryBackend`, and add unit tests with a mock provider.
 
 Can be merged independently.
 
 ### Phase 3: ToolCoordinator integration
 
-Add `InquiryResult` variant to `ExecutionEvent`.
-Add `spawn_inquiry` to `ToolCoordinator`.
-Wire `inquiry_backend` and `inquiry_events` into `execute_with_prompting`.
-Handle `InquiryResult` in the event loop.
+Add the `InquiryResult` variant to `ExecutionEvent` and `spawn_inquiry` to
+`ToolCoordinator`.
+Wire `inquiry_backend` and `inquiry_events` into `execute_with_prompting`, and
+handle `InquiryResult` in the event loop.
 
 Depends on Phase 2.
 
 ### Phase 4: Turn loop wiring
 
-Convert `Box<dyn Provider>` to `Arc<dyn Provider>`.
-Construct `LlmInquiryBackend` once before the main loop.
-Pass it to `execute_with_prompting` at each `Executing` phase.
+Convert `Box<dyn Provider>` to `Arc<dyn Provider>`, construct
+`LlmInquiryBackend` once before the main loop, and pass it to
+`execute_with_prompting` at each `Executing` phase.
 
 Depends on Phase 3.
 
 ### Phase 5: Cleanup
 
-Remove `tool_answers` serde machinery from `ToolCallRequest`.
-Remove `tool_answers` base64 encoding from `storage.rs`.
-Remove `pending_tool_call_questions` from `TurnState`.
+Remove the `tool_answers` serde machinery from `ToolCallRequest`, the
+`tool_answers` base64 encoding from `storage.rs`, and
+`pending_tool_call_questions` from `TurnState`.
 Route non-interactive user-targeted questions through the inquiry backend.
 
 Depends on Phase 4.
 
 ## References
 
-- [RFD 005: First-Class Inquiry Events][RFD 005] — recording
+- [RFD 005: First-Class Inquiry Events][RFD 005]: Recording
   `InquiryRequest`/`InquiryResponse` in the persisted stream.
-- [RFD 009: Stateful Tool Protocol][RFD 009] — future protocol for long-running
+- [RFD 009: Stateful Tool Protocol][RFD 009]: Future protocol for long-running
   tools (builds on inquiry infrastructure).
-- [RFD 018: Typed Prompt Routing Enum][RFD 018] — related follow-up work.
+- [RFD 018: Typed Prompt Routing Enum][RFD 018]: Related follow-up work.
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
