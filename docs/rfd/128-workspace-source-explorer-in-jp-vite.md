@@ -10,52 +10,54 @@
 
 ## Summary
 
-This document extends `jp-vite` with a hosted workspace source explorer at
-`/source/`.
+This RFD adds a hosted workspace source explorer to `jp-vite` at `/source/`.
 Relative links from RFDs, tickets, and wiki pages to repository files and line
 ranges (such as `../../crates/jp_llm/src/lib.rs#L12-L24`) resolve inside the
-site rather than bouncing out to GitHub, highlight the linked lines with Shiki,
-and display every RFD, ticket, and wiki page that references that file.
+site instead of opening on GitHub.
+The explorer highlights linked line ranges with Shiki and lists every RFD,
+ticket, and wiki page that references the file.
 
 ## Motivation
 
-RFDs, tickets, and wiki pages frequently link to source files and directories in
-the workspace using relative paths (for example,
+RFDs, tickets, and wiki pages frequently link to workspace source files and
+directories using relative paths (for example,
 `../../crates/plugins/command/rfd/src/links.rs#L88-L125`).
-Today, `rewriteRepositoryLinks` in `jp-vite/config.mjs` rewrites any relative
-link that climbs out of the VitePress source directory (`docs/`) into an
-external GitHub URL (`${repository}/blob/HEAD/<path>#L88-L125`).
+`rewriteRepositoryLinks` in `jp-vite/config.mjs` rewrites any relative link that
+resolves outside the VitePress source directory (`docs/`) into an external
+GitHub URL (`${repository}/blob/HEAD/<path>#L88-L125`).
 
-That approach has four limitations:
+Rewriting workspace links to external GitHub URLs has four limitations:
 
-1. **Broken or stale links on active branches.** During local work under `jp
-   vite serve`, clicking a link to a file added on the current branch returns a
-   404 on GitHub `HEAD`, and clicking a line-range link on a modified file
-   highlights the wrong lines because `HEAD` on `origin` does not reflect the
-   local checkout.
-2. **No offline or forge-free browsing.** Projects without a configured remote,
-   or contributors working offline, cannot follow source links from the site.
-3. **Silent dead links.** Because `rewriteRepositoryLinks` turns workspace links
-   into external URLs at parse time, VitePress skips them during dead-link
+1. **Broken or stale links on active branches.** Under `jp vite serve`, links to
+   files added on the current branch return 404 against GitHub `HEAD`, and
+   line-range links into modified files highlight the wrong lines because `HEAD`
+   on `origin` does not match the local working tree.
+2. **No offline or forge-free browsing.** Contributors working offline and
+   projects without a configured remote cannot follow source links from the
+   site.
+3. **Silent dead links.** Because `rewriteRepositoryLinks` converts workspace
+   links into external URLs at parse time, VitePress skips them during dead-link
    checking.
-   Deleting or moving a source file never fails `vitepress build`.
-4. **One-way navigation.** Clicking a link to GitHub leaves the site.
-   A contributor inspecting a source file cannot see which RFDs, tickets, or
-   wiki pages discuss or cite that file.
+   Deleting or moving a referenced source file never fails `vitepress build`.
+4. **One-way navigation.** Following a GitHub link leaves the documentation
+   site.
+   A contributor reading a source file cannot see which RFDs, tickets, or wiki
+   pages reference it.
 
-Hosting a lightweight source explorer inside `jp-vite` solves all four without
-changing how links are written in markdown.
+Hosting a source explorer in `jp-vite` solves all four problems without changing
+how links are written in markdown.
 
 ## Design
 
 ### Overview
 
-When the source explorer is enabled (the default), `jp-vite` adds a `/source/`
+When the source explorer is enabled (the default), `jp-vite` serves a `/source/`
 route that renders workspace files and directories inside the VitePress theme.
-The dev server always serves it; a static build includes it only when the
-project chooses to publish its source (see [Configuration](#configuration)).
+The dev server always serves `/source/` when enabled; static builds include it
+only when source publishing is enabled (see [Configuration](#configuration)).
 
-1. **Existing markdown links work unchanged.** A document still writes:
+1. **Existing markdown links work unchanged.** Documents continue to use
+   standard relative links:
 
    ```markdown
    [`Links::by_rfd`](../../crates/plugins/command/rfd/src/links.rs#L88-L125)
@@ -66,20 +68,20 @@ project chooses to publish its source (see [Configuration](#configuration)).
    In `jp-vite`, `rewriteRepositoryLinks` rewrites it to
    `/source/?path=crates/plugins/command/rfd/src/links.rs#L88-L125`.
 
-2. **Line-range highlighting and scrolling.** Fragments of the form `#L12`,
-   `#L12-L24`, `#L12-24`, and `#12-24` highlight the specified lines and scroll
-   the first highlighted line into view on load.
+2. **Line-range highlighting and scrolling.** URL fragments of the form `#L12`,
+   `#L12-L24`, `#L12-24`, and `#12-24` highlight the target lines and scroll the
+   first highlighted line into view on load.
    Clicking a line number in the gutter updates the URL hash (`#L12`), and
-   Shift-clicking selects a range (`#L12-L24`) for copying into a document.
+   Shift-clicking selects a range (`#L12-L24`) that can be copied into a
+   document.
 
-3. **Reverse document backlinks (`Referenced by`).** Above the file content, the
-   explorer renders `<RfdReferences />` showing every RFD, ticket, and wiki page
-   that links to this file (or to a parent directory), with the specific line
-   ranges each document cites.
+3. **Document backlinks (`Referenced by`).** Above the file content,
+   `<RfdReferences />` lists every RFD, ticket, and wiki page that links to the
+   file or one of its parent directories, along with the line ranges each
+   document cites.
 
-4. **External forge link preserved.** When `repository` is configured, the file
-   header includes a secondary `GitHub ↗` link pointing to
-   `${repository}/blob/HEAD/<path>#L...`.
+4. **External forge link.** When `repository` is configured, the file header
+   includes a `GitHub ↗` link to `${repository}/blob/HEAD/<path>#L...`.
 
 ### Configuration
 
@@ -103,54 +105,56 @@ source.publish = true
 source.exclude = ["crates/**/fixtures/**"]
 ```
 
-`enable` defaults to `true`, `publish` to `false`, and `exclude` to none.
-JP sets `publish = true`, as above.
+`enable` defaults to `true`, `publish` defaults to `false`, and `exclude`
+defaults to `[]`.
+JP's own configuration sets `publish = true`.
 
-The two switches split along what each costs.
-The dev server answers only the contributor running it, so serving source there
-publishes nothing.
-A static build is deployed, and git tracking a file says it belongs to the
-repository, not that it may be read by everyone the documentation reaches.
-A project with a private repository and public documentation turns on `publish`
-deliberately or not at all.
-With `publish` off, a static build rewrites source links to `repository`, as it
-does today, so following one still needs access to the repository.
+`enable` and `publish` are separate settings because local development and
+deployed static builds have different visibility guarantees.
+The dev server runs locally, so serving tracked files there does not expose
+repository source code externally.
+A static build is deployed to everyone who can access the documentation site,
+which may be public even when the repository is private.
+Keeping `publish` off by default requires projects to opt in before bundling
+tracked source files into the static site.
+When `publish` is `false`, static builds rewrite source links to `repository`,
+preserving the repository's access controls.
 
-`jp vite sync` records the three settings in
+`jp vite sync` writes all three settings to
 `docs/.vitepress/jp-vite/settings.json`.
 
 ### Eligible Files
 
-One rule decides which files the explorer can show, and the tree endpoint, the
-file endpoint, the static emitter, and link rewriting all apply it.
-A file is eligible when it is:
+The tree endpoint, file endpoint, static build emitter, and link rewriter all
+apply the same eligibility rules.
+A file is eligible when it satisfies all of the following:
 
-1. Tracked by git (`git ls-files --cached`), so untracked secrets, `.env` files,
-   and `target/` artifacts are never candidates, whatever the ignore files say.
-2. Not matched by `source.exclude`.
-   The explorer takes no rules from `.ignore`, which `rg` and JP's own file
-   walkers also read: hiding a fixture from the site shouldn't hide it from
-   search.
-3. A regular file, not a symlink, so a tracked link can't serve content from
-   outside the workspace.
-4. Text: a file with a null byte in its first 8,192 bytes shows a binary-file
-   notice with its size instead.
+1. **Tracked by Git** (`git ls-files --cached`).
+   Untracked secrets, `.env` files, and `target/` artifacts are never served or
+   published, regardless of ignore rules.
+2. **Not matched by `source.exclude`.** The explorer ignores `.ignore` files,
+   which `rg` and JP's file walkers read, so excluding a fixture from the
+   documentation site does not hide it from local search.
+3. **A regular file, not a symlink.** Rejecting symlinks prevents a tracked link
+   from serving files outside the workspace.
+4. **Text content.** If a file contains a null byte in its first 8,192 bytes,
+   the explorer renders a binary-file notice with the file size instead of
+   source lines.
 
-On the dev server, an eligible file's content is read from the working tree, so
-local edits show.
-A file created on a branch appears once it is added to the index.
+On the dev server, the explorer reads eligible files from the working tree, so
+uncommitted edits appear immediately.
+Newly created files become eligible once staged with `git add`.
 
-A directory is eligible when it holds at least one eligible file.
-A link to a file or directory that exists but isn't eligible is validated like
-any other source link and points at `repository`, never at an explorer page the
-build didn't write.
+A directory is eligible if it contains at least one eligible file.
+Links to existing but ineligible files or directories are still validated on
+disk, but rewrite to `repository` instead of `/source/`.
 
 ### Architecture: Dev Server vs. Static Build
 
 Generating a separate Vue SSR page per source file would add thousands of pages
 to `vitepress build` in medium-sized repositories.
 Instead, `jp-vite` uses a single `/source/` viewer component (`<SourceExplorer
-/>`) backed by on-demand loading in dev and static JSON/text chunks in
+/>`) backed by on-demand loading in the dev server and static JSON chunks in
 production builds:
 
 ```
@@ -168,62 +172,65 @@ Markdown link: ../../crates/jp_llm/src/lib.rs#L12-L24
         └── Code view: line numbers + Shiki syntax highlighting + active #L range
 ```
 
-#### In `jp vite serve` (Dev Server)
+#### Dev Server (`jp vite serve`)
 
 `middleware.mjs` registers `/__source`:
 
-- `GET /__source?tree=1` returns the tree of eligible files and the map of
-  workspace paths to the RFDs, tickets, and wiki pages that link to them.
+- `GET /__source?tree=1` returns the tree of eligible files and the reverse
+  reference map linking workspace paths to the RFDs, tickets, and wiki pages
+  that cite them.
 - `GET /__source?path=<workspace-relative-path>` reads an eligible file from the
-  working tree and highlights it with VitePress's Shiki highlighter, and refuses
-  any other path.
-  Edits made in `$EDITOR` appear immediately on refresh, with current line
+  working tree, highlights it with VitePress's Shiki instance, and rejects
+  ineligible or out-of-workspace paths.
+  Edits saved in `$EDITOR` appear immediately on page refresh with updated line
   numbers.
 
-#### In `vitepress build` (Static Build)
+#### Static Build (`vitepress build`)
 
-When `source.publish` is on, during `buildEnd` (alongside raw `.md` copying and
-RFD redirect generation):
+When `source.publish` is enabled, the `buildEnd` hook (which also copies raw
+`.md` files and generates RFD redirects) emits static assets for the explorer:
 
-- `jp-vite` writes `outDir/source-index.json` (the file tree and reverse
-  reference map) and copies or pre-highlights eligible files into
+- `jp-vite` writes `outDir/source-index.json` (the eligible file tree and
+  reverse reference map) and writes each eligible file to
   `outDir/source-files/<path>.json` (containing the Shiki HTML or raw lines).
-- `<SourceExplorer />` fetches `source-index.json` and the requested file's
-  chunk on navigation, so `vitepress build` compiles only one Vue page
+- `<SourceExplorer />` fetches `source-index.json` and the requested file's JSON
+  chunk on navigation, so `vitepress build` compiles only a single Vue page
   (`source/index.md`) regardless of repository size.
 
 ### Build-Time Link and Line-Range Validation
 
-Inside `rewriteRepositoryLinks` (which already runs on every markdown token
-across the entire VitePress site, including RFDs, tickets, wiki pages, and user
-docs), a link is classified by its target, not by whether it leaves the site
-directory:
+`rewriteRepositoryLinks` runs on every markdown token across the VitePress site,
+including RFDs, tickets, wiki pages, and user documentation.
+It classifies each relative link by its resolved target rather than by whether
+the path resolves outside the site directory:
 
-- A target that is a markdown page of the site, or a file in its `public/`
-  directory, is the site's own and stays with VitePress.
+- A target that resolves to a markdown page in the site or a file under
+  `public/` belongs to the documentation site and is left to VitePress.
 - Any other relative target that resolves inside the workspace is a **source
-  link**, whether or not it sits inside `settings.site`.
-  A site at the workspace root (`dir = "."`) has source links like any other.
+  link**, even if it sits inside `settings.site` (for example, when the site
+  root is the workspace root, `dir = "."`).
 
-For every source link:
+Every source link is validated and rewritten as follows:
 
-1. If the file or directory does not exist on disk, the build fails, naming the
-   markdown page and the missing target.
-2. If the link carries a `#L<start>[-L<end>]` fragment, the target must be a
-   file and `1 <= start <= end <= line_count` must hold, or the build fails.
-3. An eligible target is rewritten to the explorer; any other points at
-   `repository`.
+1. **Target existence**: If the file or directory does not exist on disk, the
+   build fails with an error naming the markdown page and the missing target.
+2. **Line-range bounds**: If the link includes a `#L<start>[-L<end>]` fragment,
+   the target must be a regular file and satisfy `1 <= start <= end <=
+   line_count`, or the build fails.
+3. **Link target**: If the target is eligible and the explorer is active for the
+   current mode, the link rewrites to `/source/?path=...`; otherwise it rewrites
+   to `repository`.
 
-Validation runs whatever `source.enable` and `source.publish` say: whether a
-file exists is a different question from whether the site may show it.
+Validation runs regardless of `source.enable` and `source.publish`, so broken
+paths and out-of-bounds line ranges fail the build even when the explorer is
+disabled or unpublished.
 
 ### Reverse Reference Index
 
-The data loaders for RFDs, tickets, and wiki pages already scan document bodies
-for cross-document citations (`referencedLabels` in `rfd-shared.mjs`).
-We add a companion pass, `referencedFiles(content, pageDir, settings)`, that
-extracts every workspace-relative link and its optional `#L<start>-L<end>`
-range:
+The data loaders for RFDs, tickets, and wiki pages scan document bodies for
+cross-document citations via `referencedLabels` in `rfd-shared.mjs`.
+A companion function, `referencedFiles(content, pageDir, settings)`, extracts
+every workspace-relative link and its optional `#L<start>-L<end>` range:
 
 ```json
 {
@@ -234,37 +241,38 @@ range:
 }
 ```
 
-When viewing `crates/plugins/command/rfd/src/links.rs` in `<SourceExplorer />`,
-the header displays these badges using the same status-colored pill style as
+When `<SourceExplorer />` displays `crates/plugins/command/rfd/src/links.rs`,
+the header renders these entries using the same status-colored pill badges as
 `<RfdReferences />`.
-Clicking a badge with `"lines": "L88-L125"` or hovering over it shows which
-lines that document references.
+Clicking or hovering over a badge with `"lines": "L88-L125"` shows the line
+range cited by that document.
 
 ## Drawbacks
 
-- **Publishing publishes everything eligible.** With `source.publish` on, the
-  deployed site carries every eligible file, including files no document links
-  to.
-  `source.exclude` is the only way to keep a tracked file off it.
-- **Static build output size.** Copying or pre-highlighting every eligible file
-  into `outDir/source-files/` grows the built site with the repository's tracked
-  text (a few megabytes for JP).
-  Projects with large tracked fixtures list them in `source.exclude`.
-- **New files need `git add`.** A file created on a branch is missing from the
-  dev explorer until it is added to the index, and a link to it points at
-  `repository` until then.
-- **Query-parameter or hash routing on static hosts.** Static hosts like GitHub
-  Pages cannot serve arbitrary `/source/crates/foo/bar.rs` paths without a HTML
-  stub per file.
-  Using `/source/?path=crates/foo/bar.rs#L12-L24` compiles a single
-  `/source/index.html` page and works on every static host without generating
-  thousands of HTML files.
+- **Publishing includes all eligible files.** Enabling `source.publish` bundles
+  every eligible tracked file into the deployed site, including files that no
+  document links to.
+  `source.exclude` is the only mechanism to omit tracked files from published
+  output.
+- **Larger static build output.** Writing every eligible file into
+  `outDir/source-files/` increases the built site size proportionally to the
+  repository's tracked text (a few megabytes for JP).
+  Projects with large tracked fixtures must exclude them via `source.exclude`.
+- **Untracked files require `git add`.** Because only Git-tracked files are
+  eligible, newly created files on a branch do not appear in the dev explorer
+  (and links to them rewrite to `repository`) until staged with `git add`.
+- **Query-parameter URLs on static hosts.** Static hosts such as GitHub Pages
+  cannot serve arbitrary `/source/crates/foo/bar.rs` paths without generating an
+  HTML stub per file.
+  Routing via `/source/?path=crates/foo/bar.rs#L12-L24` works on every static
+  host from a single `/source/index.html` page, at the cost of using a query
+  parameter instead of a clean path.
 
 ## Alternatives
 
 ### Generate one VitePress markdown page per source file
 
-Using VitePress dynamic routes (`source/[...file].paths.js`) gives clean path
+Using VitePress dynamic routes (`source/[...file].paths.js`) produces clean path
 URLs (`/source/crates/jp_llm/src/lib.rs`) without query strings.
 Rejected because VitePress runs full Vue SSR compilation and bundle chunking for
 every dynamic route, turning a 1,500-file repository into a multi-minute docs
@@ -272,40 +280,43 @@ build.
 
 ### Publish by default
 
-One `source.enable` switch covering both the dev server and the static build is
-simpler, but makes publishing source the default.
+Using a single `source.enable` setting for both the dev server and static builds
+is simpler, but publishes repository source code by default.
 A project with a private repository and public documentation would publish its
-source on its first deploy after upgrading `jp-vite`, and `jp vite sync`'s
-confirmation lists the files it writes into the project, not what the next
-deploy publishes.
-A disclosure like that can't be taken back, so publishing is opt-in.
+source tree on the first deploy after upgrading `jp-vite`, because `jp vite
+sync` only lists the template files it writes to the workspace, not the source
+files emitted during `vitepress build`.
+Because accidental source disclosure cannot be undone, static publishing
+requires an explicit opt-in via `source.publish`.
 
-### Never publish
+### Dev-server only
 
-Serving `/source/` only on the dev server avoids the question entirely, but the
-deployed site loses in-site browsing and `Referenced by` badges.
-JP wants both on its own site, so publishing stays available.
+Serving `/source/` only in `jp vite serve` avoids static publishing concerns
+entirely, but removes in-site source browsing and `Referenced by` backlinks from
+deployed sites.
+JP wants both features on its public documentation site, so static publishing is
+supported via `source.publish`.
 
 ## Non-Goals
 
 - **Editing source code in the browser.** The explorer is read-only.
 - **Git blame or commit history views.** The `GitHub ↗` header link delegates
   blame and commit history to the repository's forge.
-- **Semantic code navigation (go-to-definition).** Highlighting is lexical via
-  Shiki, not LSP-backed.
-- **Past revisions.** The explorer shows the working tree on the dev server and
-  the built revision on the deployed site.
-  Permalinks to a commit, which [RFD 127] `Snapshot` pages cite, are external
-  links and open on the forge.
+- **Semantic code navigation (go-to-definition).** Syntax highlighting is
+  lexical via Shiki, not backed by an LSP server.
+- **Historical revisions.** The explorer serves the working tree on the dev
+  server and the built commit on the deployed site.
+  Commit-pinned permalinks (such as those cited by [RFD 127] `Snapshot` wiki
+  pages) remain external URLs and open on the forge.
 
 ## Risks and Open Questions
 
-- **Links to non-markdown files inside the site.** Classifying a target as the
-  site's own assumes VitePress serves what sits in `public/` and resolves
-  markdown pages.
-  How it treats a plain link (not an image) to another file inside the source
-  directory, such as `[diagram](./x.png)`, needs checking before that case is
-  left to it or routed to the explorer.
+- **Links to non-markdown assets inside the site directory.** Target
+  classification leaves markdown pages and files under `public/` to VitePress.
+  We need to verify how VitePress handles plain links (as opposed to image
+  embeds) to other files inside the docs source directory, such as
+  `[diagram](./x.png)`, before deciding whether to leave them to VitePress or
+  route them to `/source/`.
 
 ## Implementation Plan
 
@@ -313,32 +324,34 @@ JP wants both on its own site, so publishing stays available.
 
 Update `rewriteRepositoryLinks` in
 `crates/plugins/command/vite/site/jp-vite/config.mjs` to classify links by
-target and to verify that source links and their `#L<start>-L<end>` ranges exist
-on disk during build and dev rendering.
+resolved target and verify that source links and `#L<start>-L<end>` line ranges
+exist on disk during both builds and dev rendering.
 
-Source files become inputs to the site build, so a pull request that changes,
-renames, or deletes a workspace file a document links to must run that build.
-JP's `docs.yml` builds a pull request only when it touches `docs/`, the
-justfile, or the workflow, so a deleted source file passes review and fails the
-deployment build on `main`.
-The workflow's trigger grows to cover those files: each changed path outside
-`docs/` is looked up in `docs/`, which finds every relative link ending in it.
+Because link validation makes referenced source files inputs to the
+documentation build, pull requests that modify, rename, or delete a linked
+workspace file must run the docs check.
+JP's `docs.yml` workflow only runs on pull requests that touch `docs/`, the
+`justfile`, or the workflow file itself, so deleting or editing a linked source
+file would pass PR checks and fail only during deployment on `main`.
+Update `docs.yml` to search `docs/` for relative links matching any file changed
+outside `docs/`, and trigger the docs build when a match is found.
 
 Mergeable independently.
 
 ### Phase 2: `<SourceExplorer />` and dev-server `/__source` endpoint
 
 Add `source/index.md` to `jp vite sync`, implement `<SourceExplorer />` with the
-file tree, Shiki highlighting, `#L<start>-L<end>` highlighting/selection, and
-reverse `Referenced by` badges, and add `/__source` to `middleware.mjs`.
+file tree sidebar, Shiki highlighting, `#L<start>-L<end>` highlighting and range
+selection, and `Referenced by` backlink badges, and register `/__source` in
+`middleware.mjs`.
 
 Depends on Phase 1.
 
 ### Phase 3: Static build emission (`buildEnd`)
 
-Emit `source-index.json` and `source-files/` in `withJpVite`'s `buildEnd` hook
-when `source.publish` is on, and point a static build's eligible source links at
-`/source/?path=<path>#L...`.
+Update `withJpVite`'s `buildEnd` hook to emit `source-index.json` and
+`source-files/` when `source.publish` is enabled, and rewrite eligible source
+links in static builds to `/source/?path=<path>#L...`.
 Set `source.publish = true` in JP's `.jp/config.toml`.
 
 Depends on Phase 2.
