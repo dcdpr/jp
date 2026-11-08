@@ -3379,6 +3379,133 @@ mod transform_schema {
         assert_eq!(out.len(), 1);
     }
 
+    /// The shape pydantic's `RootModel` emits: the root is a `$ref` into the
+    /// definitions sitting beside it.
+    #[test]
+    fn root_ref_keeps_transformed_defs() {
+        let input = schema(json!({
+            "$ref": "#/$defs/Address",
+            "$defs": {
+                "Address": {
+                    "type": "object",
+                    "properties": { "city": { "type": "string" } },
+                    "additionalProperties": true
+                }
+            }
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "$ref": "#/$defs/Address",
+                "$defs": {
+                    "Address": {
+                        "type": "object",
+                        "properties": { "city": { "type": "string" } },
+                        "additionalProperties": false
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn root_ref_keeps_transformed_definitions() {
+        let input = schema(json!({
+            "$ref": "#/definitions/Address",
+            "definitions": {
+                "Address": {
+                    "type": "object",
+                    "properties": { "city": { "type": "string" } },
+                    "additionalProperties": true
+                }
+            }
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "$ref": "#/definitions/Address",
+                "definitions": {
+                    "Address": {
+                        "type": "object",
+                        "properties": { "city": { "type": "string" } },
+                        "additionalProperties": false
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn enum_list_is_kept() {
+        let input = schema(json!({
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Priority"
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Priority"
+            })
+        );
+    }
+
+    #[test]
+    fn enum_list_is_kept_in_nested_property() {
+        let input = schema(json!({
+            "type": "object",
+            "properties": {
+                "level": { "type": "integer", "enum": [1, 2, 3] }
+            },
+            "required": ["level"]
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "type": "object",
+                "properties": {
+                    "level": { "type": "integer", "enum": [1, 2, 3] }
+                },
+                "required": ["level"],
+                "additionalProperties": false
+            })
+        );
+    }
+
+    /// A non-list `enum` is not valid JSON Schema; it is passed to the model as
+    /// a hint rather than sent as a constraint the API would reject.
+    #[test]
+    fn non_list_enum_moves_to_description() {
+        let input = schema(json!({
+            "type": "string",
+            "enum": "low"
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "type": "string",
+                "description": "{enum: \"low\"}"
+            })
+        );
+    }
+
     #[test]
     fn defs_recursively_transformed() {
         let input = schema(json!({

@@ -2693,24 +2693,7 @@ fn quota_reset_at(seconds: u64) -> Option<chrono::DateTime<chrono::Utc>> {
 /// See:
 /// <https://docs.claude.com/en/docs/build-with-claude/structured-outputs#json-schema-limitations>
 fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
-    if let Some(r) = src.remove("$ref") {
-        return Map::from_iter([("$ref".into(), r)]);
-    }
-
     let mut out = Map::new();
-
-    // Helper macro to move a field from src to out.
-    macro_rules! move_field {
-        ($key:literal) => {
-            if let Some(v) = src.remove($key) {
-                out.insert($key.into(), v);
-            }
-        };
-    }
-
-    // Extract common fields
-    move_field!("title");
-    move_field!("description");
 
     // Recursive Transformation Helpers
     let transform_val = |v: Value| match v {
@@ -2726,9 +2709,40 @@ fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
         |v: Vec<Value>| -> Vec<Value> { v.into_iter().map(transform_val).collect() };
 
     // Handle Recursive Dictionaries
+    //
+    // Before the `$ref` early return: a root `$ref` pointing into definitions
+    // beside it (what pydantic's `RootModel` emits) needs them kept.
     for key in ["$defs", "definitions"] {
         if let Some(Value::Object(defs)) = src.remove(key) {
             out.insert(key.into(), Value::Object(transform_map(defs)));
+        }
+    }
+
+    if let Some(r) = src.remove("$ref") {
+        out.insert("$ref".into(), r);
+        return out;
+    }
+
+    // Helper macro to move a field from src to out.
+    macro_rules! move_field {
+        ($key:literal) => {
+            if let Some(v) = src.remove($key) {
+                out.insert($key.into(), v);
+            }
+        };
+    }
+
+    // Extract common fields
+    move_field!("title");
+    move_field!("description");
+
+    // A non-list `enum` is invalid JSON Schema, so it falls through to the
+    // description rather than being sent as a constraint.
+    if let Some(values) = src.remove("enum") {
+        if values.is_array() {
+            out.insert("enum".into(), values);
+        } else {
+            src.insert("enum".into(), values);
         }
     }
 
