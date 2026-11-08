@@ -17,63 +17,53 @@ terminal rendering under real configuration.
 
 ## Motivation
 
-JP has no binary-level tests.
-There is no `crates/jp_cli/tests/` directory; every test calls a function like
-`run_turn_loop` in-process, with a `Printer::memory` and a hand-built
-`AppConfig`.
+JP has no binary-level tests (`crates/jp_cli/tests/` does not exist).
+Every CLI test calls functions like `run_turn_loop` in-process with
+`Printer::memory` and a hand-built `AppConfig`, leaving four gaps:
 
-That leaves four gaps.
+**`main` wiring is unverified.** `build_printer` combines the output format,
+chrome policy, output width, and stderr tracing status.
+[RFD 091]'s enabling predicate depends on whether a tracing layer writes to
+stderr, yet no test verifies the documented contract that `-v` disables status
+regions.
 
-**`main`'s wiring is unverified.** `build_printer` composes the output format,
-the chrome policy, the output width, and whether a tracing layer writes to
-stderr.
-Nothing tests it.
-[RFD 091]'s enabling predicate depends on that last input, so "`-v` disables
-status regions" is a documented user-facing contract whose only evidence is that
-someone read the code and agreed.
+**Config loading from disk is unverified.** `jp_config` tests partial merging in
+memory, but no test runs the CLI loader against a real directory across `--cfg
+@path`, `extends`, the `.jp.toml` chain walked up from CWD, or the user-global
+and user-workspace layers.
 
-**Config loading from disk is unverified.** `--cfg @path`, the `.jp.toml` chain
-walked up from CWD, `extends`, the user-global and user-workspace layers.
-`jp_config` tests the merge machinery on partials it builds in memory; nothing
-runs the loader against a real directory through the real CLI.
+**Process lifecycle is unverified.** In-process tests do not cover exit codes,
+signal handling, or `Ctx::drop` calling `Printer::shutdown`.
+[RFD 091] guarantees that Ctrl-C during a drawn status region leaves the
+terminal clean, but no test checks it.
 
-**Process lifecycle is unverified.** Exit codes, signal handling, `Ctx::drop`
-calling `Printer::shutdown`.
-Whether Ctrl-C during a drawn status region leaves the terminal clean is a
-guarantee [RFD 091] states and nothing checks.
+**Terminal rendering and configuration are never composed.** [T-0994dfa]
+provides a PTY and screen model that `jp_printer`'s tests drive through a probe
+binary, but the probe constructs its region by hand.
+No test verifies what `jp query` renders from a config file.
 
-**Terminal rendering and configuration are never composed.** [T-0994dfa] gives a
-pty and a screen model, and `jp_printer`'s tests drive a probe binary through it
-— but the probe constructs its region by hand.
-No test asks what `jp query` renders given a config file.
-
-The gap has a visible cost already: two manual verification fixtures live in
-`crates/jp_printer/examples/` (`mcp_window_fixture.toml`,
-`tool_window_fixture.toml`) whose entire purpose is to let a human watch
-something no test can assert.
-They exist because the paths they exercise — config from disk, a real terminal,
-a real process — have no automated equivalent.
-
-Doing nothing means each of those claims stays a reading of the code, and the
-next person to touch `main`'s wiring finds out from a user.
+Because no automated test exercises on-disk config, a real terminal, and a real
+process together, `crates/jp_printer/examples/` carries two manual verification
+fixtures (`mcp_window_fixture.toml` and `tool_window_fixture.toml`) for
+inspecting terminal windows by hand.
+Without binary-level tests, regressions in `main` wiring go undetected until a
+user hits them.
 
 ## Design
 
-### What already exists
+### Existing Components
 
-Most of the machinery is in the tree.
-This RFD is composition, not construction.
+The underlying test components already exist in the workspace; only the
+outermost layer that spawns `jp` is missing.
 
-| Piece                                    | Where                                | What it gives                                                                                                                     |
-| ---------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `jp_test::Vcr`                           | `crates/jp_test/src/mock.rs`         | HTTP cassettes over `httpmock`, recorded from real providers with `RECORD=1`                                                      |
-| `MockProvider`, `SequentialMockProvider` | `crates/jp_llm/src/provider/mock.rs` | Scripted event streams, in-process                                                                                                |
-| `jp_pty`                                 | [T-0994dfa]                        | A real pty where the platform has one, a `vt100` screen model where it does not, and a `Screen` to assert rows and cursor against |
-| `region_probe`                           | `crates/jp_printer/src/bin/`         | The pattern: a `[[bin]]` spawned into a pty by a test that asserts on the rendered screen                                         |
+| Component                                | Location                             | Role                                                                                                |
+| ---------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `jp_test::Vcr`                           | `crates/jp_test/src/mock.rs`         | HTTP cassettes over `httpmock`, recorded from real providers with `RECORD=1`                        |
+| `MockProvider`, `SequentialMockProvider` | `crates/jp_llm/src/provider/mock.rs` | In-process scripted event streams                                                                   |
+| `jp_pty`                                 | [T-0994dfa]                        | Platform PTY with a `vt100` screen model fallback and `Screen` assertions for rows and cursor state |
+| `region_probe`                           | `crates/jp_printer/src/bin/`         | Test binary (`[[bin]]`) spawned in a PTY to assert on the rendered screen                           |
 
-What is missing is the outermost layer: nothing spawns `jp`.
-
-### Shape
+### Harness Structure
 
 Tests live in `crates/jp_cli/tests/`, spawn the built binary via
 `CARGO_BIN_EXE_jp`, and assert on either a rendered screen or the process's
@@ -90,158 +80,150 @@ fn verbose_logging_disables_the_status_region() {
 }
 ```
 
-Three inputs have to be controlled for that to be deterministic.
+Deterministic execution requires controlling three external inputs:
 
-**The provider.** A scripted mock, not a cassette.
-The test above is about terminal rendering; tying it to a recorded provider
-fixture would make it churn whenever those fixtures are re-recorded, and would
-couple two axes that vary independently.
-Cassettes stay where they are, testing provider behaviour.
+**The provider.** The harness uses a scripted mock rather than a recorded
+cassette.
+Terminal rendering tests should not churn when provider fixtures are
+re-recorded, and rendering should not be coupled to provider HTTP traffic;
+cassettes remain dedicated to testing provider behavior.
+The binary already resolves `ProviderId::Test`, so a config file selecting it
+with a scripted response is sufficient.
+Whether the script is passed in the config, in an environment variable, or in a
+file written by the test is an implementation detail.
 
-The mechanism is the existing `ProviderId::Test`: the binary already resolves
-it, and a config file naming it with a scripted response is enough.
-Whether the script travels in the config, in an environment variable, or in a
-file the test writes is an implementation detail.
-
-**The shell.** `run_tool_command` shells out, so any test involving tool
-execution inherits the host's shell, its timing, and its `sleep` granularity.
-The fix is the one [aico] uses: a stub executable named `sh` placed first on
-`PATH` for the test's lifetime, reading a script that says what to emit on
-stderr and when.
+**The shell.** Because `run_tool_command` shells out, tool execution tests would
+otherwise inherit the host shell, its timing, and its `sleep` granularity.
+Following [aico], the harness prepends a stub `sh` executable to `PATH` for the
+test's lifetime, reading a script that specifies what to emit on stderr and
+when.
 This makes tool progress and the output window testable without `sleep 0.5`
 loops.
 
-**The terminal.** `jp_pty`'s `Terminal`, as `jp_printer`'s region tests already
-use it.
-Where a case needs no terminal — exit codes, `--format json` output shape —
-`assert_cmd` is simpler and faster than a pty.
+**The terminal.** Interactive cases run in `jp_pty`'s `Terminal`, matching
+`jp_printer`'s region tests.
+Cases that do not need a terminal, such as exit code and `--format json` output
+checks, use `assert_cmd` directly.
 
-### Which tests belong here
+### Initial Test Cases
 
-The tier earns its cost only for behaviour that the outermost layer alone can
-show.
-Five to start, each of which is currently a claim in [RFD 091]'s pull request
-with no test behind it:
+This suite covers only behavior that requires spawning the `jp` binary.
+It starts with five unverified claims from [RFD 091]:
 
 1. `jp -v query` renders no status region.
-2. `jp query 2>file` writes no cursor-control bytes into the file.
-3. `jp --format text-pretty query > out.txt` still renders one, because stderr
-   is a terminal.
-4. `jp --quiet query` renders none.
+2. `jp query 2>file` writes no cursor-control bytes into `file`.
+3. `jp --format text-pretty query > out.txt` still renders a status region
+   because stderr is a terminal.
+4. `jp --quiet query` renders no status region.
 5. Ctrl-C during a drawn region leaves the terminal clean.
 
-Beyond those, the tier grows only when a bug escapes the in-process suite
-because it lived in the wiring.
+Beyond these five cases, the suite grows only when a wiring bug escapes the
+in-process tests.
 
-### New dependencies
+### Dependencies
 
-`assert_cmd` for spawning and asserting on non-terminal runs.
-Everything else is already in the tree.
+Non-terminal process assertions add `assert_cmd`.
+All other dependencies are already in the workspace.
 
 ## Drawbacks
 
-- **Each test costs a process spawn**, and the pty cases cost a terminal
-  round-trip on top.
-  A suite of these would be the slowest thing in CI; the discipline that keeps
-  it cheap is refusing to grow it.
-- **The inverted pyramid is a real hazard.** End-to-end tests are the easiest to
-  write badly: they touch everything, so they fail for reasons unrelated to what
-  they name, and a flaky one trains people to re-run rather than read.
-- **A stub `sh` on `PATH` is a sharp tool.** It shadows a binary every test in
-  the process might reach, and a leaked `PATH` entry would be a confusing
-  failure somewhere else entirely.
-- **Three new seams to keep working**: the scripted provider, the stub shell,
-  and the pty.
-  Each is a thing that can rot silently, and a rotted seam turns a test green
-  without testing anything.
+- **Process and PTY overhead.** Every test spawns a child process, and PTY cases
+  add a terminal round-trip.
+  Keeping the suite fast in CI requires keeping it small.
+- **Broad failure surface.** Because end-to-end tests exercise the entire
+  binary, they can fail for reasons unrelated to the behavior under test, and
+  flaky failures train contributors to re-run CI rather than investigate.
+- **`PATH` shadowing with a stub `sh`.** Prepending a stub `sh` shadows a binary
+  that other tests in the process might invoke, so a leaked `PATH` entry can
+  cause unrelated failures elsewhere.
+- **Test-double maintenance.** The scripted provider, stub shell, and PTY
+  introduce three test seams that can drift silently and allow tests to pass
+  without exercising the real code path.
 
 ## Alternatives
 
-- **Keep the manual fixtures.** They work, and a human watching a real terminal
-  catches things no assertion would.
-  Rejected as the whole answer: nothing runs them, so a regression is found when
-  someone happens to look.
-  The fixtures stay useful for exploratory checks — this tier does not replace
-  them, it removes the need to run them before every merge.
-- **More in-process tests.** Cheaper and faster, and where most coverage
-  belongs.
-  They cannot reach `main`, argument parsing, or config on disk, which is
-  exactly the gap.
-- **`mockito`-style hand-written HTTP stubs**, as [aico] uses.
-  Rejected: `jp_test::Vcr` already records real provider traffic, which is
-  strictly better evidence than a stub someone wrote from memory.
-- **Extend `region_probe` rather than spawn `jp`.** A probe is easier to
-  control, but it constructs its own region — so it tests `jp_printer`, which
-  is already covered, and not the wiring, which is not.
+- **Keep only the manual fixtures.** Visual inspection in a real terminal
+  catches issues that assertions miss, and the manual fixtures remain useful for
+  exploratory checks.
+  However, nothing runs them automatically, so regressions go unnoticed until
+  someone checks by hand.
+- **Write more in-process tests.** In-process tests are faster and carry most of
+  the test coverage, but they cannot reach `main`, CLI argument parsing, or
+  on-disk config loading.
+- **`mockito`-style hand-written HTTP stubs.** [aico] stubs provider HTTP
+  responses by hand.
+  `jp_test::Vcr` already records real provider traffic, which is more accurate
+  than hand-written stubs.
+- **Extend `region_probe` rather than spawn `jp`.** A probe binary is easier to
+  control, but it constructs its own region and tests `jp_printer` rather than
+  CLI wiring.
 
 ## Non-Goals
 
-- **Mirroring the in-process suite.** The pyramid stays the right shape: many
-  unit tests, fewer integration tests, minimal end-to-end.
-- **Testing provider behaviour.** Cassettes do that, and keep doing it.
-- **Replacing the manual fixtures**, which stay for exploratory verification.
-- **A general CLI testing framework.** This is a handful of tests and the
-  smallest support code they need.
+- **Mirroring the in-process suite.** Most coverage stays in unit and
+  integration tests; the end-to-end suite stays minimal.
+- **Testing provider behavior.** VCR cassettes already cover provider traffic.
+- **Replacing the manual fixtures.** The example fixtures stay for exploratory
+  verification.
+- **A general CLI testing framework.** This suite adds only the support code
+  needed for these tests.
 
 ## Risks and Open Questions
 
-- **Flakiness is the main risk.** A pty test that waits on the clock rather than
-  on a condition will fail under CI load.
-  `jp_pty`'s `wait_for` exists for this and returns the screen that satisfied
-  the predicate; nothing in this tier should call `sleep`.
-- **Windows.** `jp_pty` reaches ConPTY there, but a stub `sh` on `PATH` does not
-  translate, and neither does Ctrl-C delivery.
-  The likely answer is that the pty cases run everywhere and the shell-stub
-  cases are Unix-only, but that needs deciding rather than discovering.
-- **Where the scripted provider's script lives** is unresolved.
-  A config key is discoverable and reuses the loader the test wants to exercise;
-  an environment variable keeps test-only shape out of the config tree.
-- **Whether this belongs in `crates/jp_cli/tests/` or its own crate.** A
-  separate crate keeps `assert_cmd` and the stub binaries out of `jp_cli`'s
-  dependency graph, at the cost of another workspace member.
-- **The stub shell's contract is a small language** — what to emit, on which
-  stream, with what delay, and what exit code.
-  Designing it badly means every tool test works around it.
+- **Timing-dependent flakiness.** A PTY test that waits on wall-clock time
+  rather than a condition will fail under CI load.
+  Tests must use `jp_pty`'s `wait_for` (which returns the screen that satisfied
+  the predicate) and never call `sleep`.
+- **Windows support.** `jp_pty` uses ConPTY on Windows, but a `sh` stub on
+  `PATH` and Ctrl-C delivery do not carry over directly.
+  Running the PTY cases on all platforms while restricting shell-stub cases to
+  Unix is the likely split, but it needs an explicit decision.
+- **Scripted provider input location.** Passing the script via a config key is
+  discoverable and reuses the config loader under test, whereas an environment
+  variable keeps test-only fields out of the config tree.
+- **Crate placement.** Placing the suite in a separate crate keeps `assert_cmd`
+  and the stub binaries out of `jp_cli`'s dependency graph, at the cost of
+  another workspace member instead of `crates/jp_cli/tests/`.
+- **Stub shell script design.** The stub shell needs a small command format for
+  specifying output streams, delays, and exit codes; a clumsy format will force
+  workarounds in every tool test.
 
 ## Implementation Plan
 
-Phase 1 stands alone; the rest depend on it.
-All of it depends on [T-0994dfa] having landed, since `jp_pty` is the terminal
-half.
+Phase 1 stands alone; phases 2 through 4 build on it, and the PTY cases depend
+on `jp_pty` from [T-0994dfa].
 
 1. **Spawn and assert.** Add `crates/jp_cli/tests/` with `assert_cmd`, a
-   `Fixture` that builds a temp workspace and writes config files, and the
-   non-terminal cases: exit codes and `--format json` output shape.
-   No pty, no provider.
+   `Fixture` that builds a temporary workspace and writes config files, and the
+   non-terminal cases covering exit codes and `--format json` output shape
+   without a PTY or provider.
 
-2. **The scripted provider.** Settle where the script lives, wire it through
-   `ProviderId::Test`, and prove it with one test that runs a full query and
-   asserts on stdout.
+2. **Scripted provider.** Decide where the provider script lives, wire it
+   through `ProviderId::Test`, and verify it with a test that runs a full query
+   and asserts on stdout.
 
-3. **The pty cases.** Compose `jp_pty`'s `Terminal` with the fixture, and land
-   the five cases named in the design.
-   This is the phase that closes [RFD 091]'s unverified claims.
+3. **PTY cases.** Compose `jp_pty`'s `Terminal` with `Fixture` and add the five
+   status-region tests to verify [RFD 091]'s claims.
 
-4. **The stub shell.** A `sh` stub on `PATH` and the tool-execution cases it
-   makes deterministic: the progress window, parallel tool labelling, a tool
-   result rendering over a live window.
-   Retires `tool_window_fixture.toml`.
+4. **Stub shell.** Add the `sh` stub on `PATH` and deterministic tool-execution
+   tests for the progress window, parallel tool labeling, and a tool result
+   rendering over a live window, then retire `tool_window_fixture.toml`.
 
 ## References
 
-- [T-0994dfa] — the pty harness this builds on; introduced `jp_pty`, its
-  `Terminal`, `Screen`, and `wait_for`.
-- [RFD 091] — the status region, whose enabling predicate and lifecycle
-  guarantees are the first things this tier would verify.
-- [RFD 048] — the four-channel output model; the stdout/stderr/tty split is
-  what the pty cases assert.
-- [aico] — a comparable CLI, whose `test_bins/` stub shells and `assert_cmd`
-  suite are the direct inspiration for phases 1 and 4.
-- `crates/jp_test/src/mock.rs` — `Vcr`, the existing cassette recorder.
-- `crates/jp_printer/src/bin/region_probe.rs` — the spawn-into-a-pty pattern
-  this generalises.
+- [T-0994dfa]: Introduces `jp_pty`, including `Terminal`, `Screen`, and
+  `wait_for`.
+- [RFD 091]: Defines the status region whose enabling predicate and lifecycle
+  guarantees this suite verifies.
+- [RFD 048]: Defines the four-channel output model (the stdout/stderr/tty split)
+  asserted by the PTY cases.
+- [aico]: Comparable CLI whose `test_bins/` stub shells and `assert_cmd` suite
+  inspired phases 1 and 4.
+- `crates/jp_test/src/mock.rs`: `Vcr`, the existing cassette recorder.
+- `crates/jp_printer/src/bin/region_probe.rs`: The spawn-into-a-PTY pattern this
+  harness generalizes.
 - `crates/jp_printer/examples/mcp_window_fixture.toml` and
-  `tool_window_fixture.toml` — the manual fixtures this tier automates.
+  `tool_window_fixture.toml`: The manual fixtures this suite automates.
 
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 091]: ../091-printer-owned-status-region.md
