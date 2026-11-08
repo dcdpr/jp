@@ -21,54 +21,58 @@
 ## Summary
 
 This RFD introduces `elelem`, a standalone, feature-gated crate that owns the
-LLM streaming pipeline through a shared SSE driver, a normalized event model,
-and a per-provider chunk parser trait.
-It replaces the external provider SDKs and forks that `jp_llm` wraps for
-streaming.
+LLM streaming pipeline: a shared SSE driver, a normalized event model, and a
+`ChunkParser` trait implemented per API shape.
+It replaces the external provider SDKs and forks wrapped by `jp_llm`.
 
 ## Motivation
 
-A recent bug, in which the `cerebras` and `llamacpp` SSE adapters silently
-swallowed stream errors via `take_while(is_ok)`, exposed a structural problem:
-JP has one streaming contract with several divergent implementations, and the
-contract is written down nowhere that a compiler or test enforces it.
-Each provider wraps a different external crate, and those crates do two things:
-serde types and SSE stream processing.
-Several of them JP forks and maintains.
+The `cerebras` and `llamacpp` SSE adapters recently had a bug where
+`take_while(is_ok)` silently swallowed stream errors.
+This exposed a structural problem: JP has a single streaming contract, but each
+provider implements it separately without a shared type or test suite to enforce
+it.
+Each provider wraps a different external crate that bundles serde wire types
+with SSE stream processing, and JP forks and maintains several of those crates.
 
-This conflates two concerns.
-Generic streaming plumbing (connect, drive the SSE stream, surface errors, emit
-a normalized event stream with consistent flush and finish semantics) should be
-DRY, owned, and tested once.
-Provider-specific logic (request building, chunk parsing, quirks) is irreducible
-and stays per provider.
-Today the generic part is copied and re-derived per provider, which is how one
-copy drifted into a silent-error bug.
+Bundling wire types with stream processing conflates two concerns:
 
-Doing nothing means continued divergence, more latent bugs of this class, and
-ongoing fork maintenance across several crates.
+- **Generic streaming plumbing**: connecting, driving the SSE stream, surfacing
+  transport errors, and emitting normalized events with consistent flush and
+  finish semantics.
+  This logic is identical across providers and should be implemented and tested
+  once.
+- **Provider-specific logic**: building requests, parsing chunks, and handling
+  provider quirks.
+  This logic is irreducible and belongs in each provider or wire shape.
+
+Because the generic plumbing is re-implemented per provider, individual adapters
+drift and introduce silent failures while JP carries the maintenance cost of
+multiple forked SDKs.
 
 ## Design
 
-### What a consumer sees
+### Crate interface and features
 
-One crate, one dependency, providers behind features:
+Consumers depend on a single crate and enable providers through Cargo features:
 
 ```toml
 elelem = { version = "0", features = ["anthropic"] }
 ```
 
-The generic core is always available: the `Event` and `StreamError` types and
-the `ChunkParser` trait.
-Each provider feature adds that shape's typed wire request and response types
-and its parser.
-The SSE driver and the `reqwest` client builder sit behind the `transport`
-feature, on by default, so a consumer that only wants the wire types and parsers
-(to validate or transform chunks, or drive its own HTTP stack) can depend on
-`elelem` with `default-features = false` and pull in no HTTP dependencies.
-Provider features are the only public Cargo feature switches; the shared shape
-module is enabled internally via `#[cfg(any(feature = "cerebras", …))]`, not
-separately feature-gated:
+The core types (`Event`, `StreamError`, and the `ChunkParser` trait) are always
+available.
+Each provider feature enables the corresponding API shape's wire request and
+response types and its chunk parser.
+The `transport` feature (enabled by default) gates the SSE driver and the
+`reqwest` client builder.
+Consumers that only need wire types and parsers, such as chunk validators or
+callers with a custom HTTP stack, can set `default-features = false` to avoid
+pulling in HTTP dependencies.
+
+Provider names are the only other public Cargo features.
+Shared shape modules are enabled internally via `#[cfg(any(feature = "cerebras",
+…))]` rather than exposed as separate feature flags:
 
 ```toml
 [features]
@@ -82,32 +86,32 @@ anthropic  = []
 # ...
 ```
 
-### What elelem owns, and what JP keeps
+### Boundary between elelem and JP
 
-elelem owns the wire: the typed request and response types for each API shape,
-the shape parsers, the SSE driver, and the `Event` and `StreamError` types.
-It does not own request *building*.
-JP populates elelem's exported request types from a `ChatQuery`, including every
-provider quirk (cache control, thinking budgets, reasoning effort, schema
-transforms, Ollama's forced-tool system message), and hands that to elelem as
-data: the typed body, the base URL, and auth headers. elelem alone builds the
-`reqwest` client and the `EventSource`; no public API accepts a prebuilt client
-or stream, which is what makes the connect-timeout and `Never` guarantees
-unforgeable.
-Request construction has never been a source of streaming bugs, and a
-provider-neutral input model expressive enough for every quirk would cost far
-more than it saves, so it stays in JP.
+`elelem` owns the wire layer: the typed request and response schemas for each
+API shape, the shape parsers, the SSE driver, and the `Event` and `StreamError`
+types.
+It does not build requests.
 
-This makes elelem a typed wire client plus a streaming engine, a lower tier than
-a high-level `chat()` abstraction.
-The reusable, bug-prone part (driving and normalizing the stream) is shared; the
-request ergonomics are not.
+JP constructs `elelem`'s exported request types from a `ChatQuery`, applying all
+provider quirks (cache control, thinking budgets, reasoning effort, schema
+transforms, and Ollama's forced-tool system message), and passes the typed
+request body, base URL, and auth headers to `elelem`.
+`elelem` alone builds the `reqwest` client and the `EventSource`.
+No public API accepts a prebuilt client or stream, which guarantees that every
+request enforces the connect timeout and `Never` retry policy.
 
-### The normalized event model is the contract
+Request construction stays in JP because it has not been a source of streaming
+bugs, and a provider-neutral input model expressive enough for every provider
+quirk would add complexity without improving stream reliability.
+This boundary makes `elelem` a typed wire client and streaming engine rather
+than a high-level `chat()` abstraction: it shares the bug-prone stream driving
+and event normalization without imposing unified request ergonomics.
 
-`Event` and `StreamError` move out of `jp_llm` and become `elelem`'s public API;
-`jp_llm` re-exports them so JP keeps one event type, not a parallel copy.
-The model is small:
+### Normalized event model
+
+`Event` and `StreamError` move from `jp_llm` into `elelem`'s public API, and
+`jp_llm` re-exports them so JP uses a single event type:
 
 ```rust
 enum Event {
@@ -120,41 +124,45 @@ enum Event {
 }
 ```
 
-`index` is an opaque grouping key, not a fixed slot: parts sharing an index
-accumulate until their `Flush`, and parsers emit flushes in stream order.
-Some shapes number them `0/1/2+` (chat completions), others use provider-native
-indices (Anthropic content blocks, OpenAI `output_index`, Google virtual
-indices).
-Callers must not attach meaning to the number.
-This matches [RFD 012], which defined the index as a grouping key, not a
+As defined in [RFD 012], `index` is an opaque grouping key rather than a
 semantic slot.
+`Part` events sharing an `index` accumulate until a matching `Flush` commits
+them, and parsers emit flushes in stream order.
+Shapes assign indices differently: chat completions use `0/1/2+`, while other
+shapes use provider-native indices (Anthropic content blocks, OpenAI
+`output_index`, Google virtual indices).
+Callers must not attach meaning to the number beyond grouping parts for a flush.
 
-### One SSE driver
+### Shared SSE driver
 
-A single driver owns the stream lifecycle, so it cannot diverge per provider:
+A single driver owns the stream lifecycle across all providers:
 
-- It is built only through the shared client builder, the one place that sets
-  the connect timeout and `EventSource::set_retry_policy(Never)`.
-  A new provider cannot forget either, which is the exact failure mode behind
-  the original bug.
-- It enforces a stream-idle timeout from a value the caller passes in (JP
-  supplies `assistant.request.stream_idle_timeout_secs`, where `0` disables).
-  elelem owns the timeout *mechanism* and emits a retryable `StreamError` when
-  it fires; JP owns the *value*.
-- It surfaces transport errors before completion as a retryable `StreamError`,
-  converts a stream that ends without a terminal `Finished` into a retryable
-  error, and drops the benign close that follows that `Finished`.
-  The terminal signal is the shape's own (`[DONE]` for chat completions, a named
-  event elsewhere); the driver keys off `Finished`, not any protocol literal.
-  These rules are the regression guard the whole crate exists for.
-- Retry budget, backoff, and user notification stay in JP. elelem never retries
-  on its own, and the contract suite asserts no shape or driver does.
+- **Client construction**: The driver is built exclusively through the shared
+  client builder, which sets the connect timeout and
+  `EventSource::set_retry_policy(Never)`.
+  A new provider cannot omit either setting.
+- **Stream-idle timeout**: The driver enforces a stream-idle timeout from a
+  caller-supplied duration and emits a retryable `StreamError` when it fires.
+  JP passes `assistant.request.stream_idle_timeout_secs` (where `0` disables the
+  timeout), so `elelem` owns the timeout mechanism while JP owns the configured
+  value.
+- **Completion and error handling**: The driver surfaces transport errors before
+  completion as retryable `StreamError`s, converts a stream that ends before
+  emitting `Finished` into a retryable error, and ignores the normal stream
+  close that follows `Finished`.
+  Each shape parser translates its protocol termination signal (`[DONE]` for
+  chat completions, or a named event elsewhere) into `Finished`, so the driver
+  keys off `Finished` rather than any protocol literal.
+- **No internal retries**: Retry budgets, backoff, and user notifications stay
+  in JP.
+  Neither `elelem`'s driver nor any shape parser retries on its own, and the
+  contract suite asserts this invariant.
 
-### The parser seam and the four shapes
+### Chunk parser and wire shapes
 
-A *shape* implements the parser, not a provider.
-The driver feeds it lifecycle frames and the parser emits normalized events;
-provider-specific parsers exist only when a wire shape is genuinely unique.
+An API *shape* implements `ChunkParser`, not an individual provider.
+The driver feeds lifecycle frames into the parser, and the parser emits
+normalized events:
 
 ```rust
 enum Frame<'a> {
@@ -168,16 +176,17 @@ trait ChunkParser {
 }
 ```
 
-The `Frame` makes the lifecycle explicit, which is the point: the parser flushes
-any trailing state on `Eof`, and the driver, tracking whether a terminal
-`Finished` was emitted, suppresses the benign post-`[DONE]` close and converts a
-premature `Eof` into a retryable error.
-`event_name` is carried because Anthropic sends named SSE events (`event:
-content_block_delta`) while OpenAI-style streams are anonymous `data:` frames;
-`reqwest_eventsource` already exposes the name.
+`Frame` makes stream lifecycle transitions explicit to the parser.
+On `Eof`, the parser flushes any trailing state, while the driver checks whether
+`Finished` was emitted to distinguish a clean post-`[DONE]` close from a
+premature `Eof`.
+`Frame::Message` carries `event_name` (already exposed by `reqwest_eventsource`)
+because Anthropic sends named SSE events (`event: content_block_delta`) whereas
+OpenAI-style streams send anonymous `data:` frames.
 
-A *provider* selects a shape and supplies its request construction and quirks.
-The four chat-completions providers share one shape parser:
+Each *provider* selects one of four shapes and supplies its request construction
+and quirks.
+All four chat-completions providers share one shape parser:
 
 | Shape                           | Providers                              |
 | ------------------------------- | -------------------------------------- |
@@ -186,16 +195,16 @@ The four chat-completions providers share one shape parser:
 | Messages (Anthropic)            | anthropic                              |
 | Gemini                          | google                                 |
 
-### Recovery: request rejection without a side channel
+### Request recovery on the error channel
 
-Some providers reject an otherwise-valid request because of stale metadata:
-Anthropic and Google invalidate old thinking and thought signatures.
-The fix is to strip the offending metadata from the conversation history and
-retry.
-That is recovery, not response content, so it rides the error channel, not the
-event stream.
-`Event` has no `Patch` variant and `FinishReason` has no `Retry`; both are
-deleted.
+Some providers reject an otherwise-valid request because of stale metadata; for
+example, Anthropic and Google invalidate old thinking and thought signatures.
+Recovering requires stripping the offending metadata from the conversation
+history and retrying.
+Because this is error recovery rather than response content, it belongs on the
+error channel rather than the event stream.
+This replaces `Event::Patch` and `FinishReason::Retry`, which routed history
+mutations through the content stream, with a recoverable error variant:
 
 ```rust
 enum StreamError {
@@ -208,148 +217,159 @@ enum   Match  { MetadataValue { key: String, value: String } }
 enum   Action { RemoveMetadata(String) }
 ```
 
-The shape builds the patch from the wire request and the rejection error (it
-owns the metadata-key vocabulary it emitted on the success path) and surfaces it
-as `StreamError::Recoverable`.
-Because that needs the request and error, not stream frames, it is a separate
-function on the shape from the frame-oriented `ChunkParser`; the shape owns both
-seams.
-JP applies it: find the persisted event whose `metadata[key] == value`, remove
-the key, rebuild the request, and retry.
-The match is by value, so JP needs no provider knowledge and stays a generic
-applier.
-`Event::Patch` was a transport hack that routed a history mutation through the
-content channel; moving it to the error channel removes both the conflation and
-any second `Event` type.
+Because the shape owns the metadata keys emitted on the success path, it builds
+the `Patch` from the wire request and the rejection error and surfaces it as
+`StreamError::Recoverable`.
+Constructing a patch requires the request and rejection error rather than stream
+frames, so it is a separate function on the shape alongside `ChunkParser`.
+JP then finds every persisted event where `metadata[key] == value`, removes
+`key`, rebuilds the request, and retries.
+Matching by value keeps JP a generic patch applier with no provider-specific
+recovery logic.
 
-`Recoverable` is caller-action-required, not a transient transport failure, so
+Unlike a transient transport failure, `Recoverable` requires caller action.
 JP applies the patches and retries immediately, without backoff and without
 spending the transient-error retry budget.
-It carries the underlying provider error: a caller that will not patch, or where
-no stored metadata matches, surfaces that error as an ordinary failure rather
-than looping.
-Each applied patch makes progress and an unmatched patch terminates, so recovery
-is bounded.
+`Recoverable` also carries the underlying provider error: if a caller does not
+apply patches, or if no stored metadata matches, the caller surfaces that error
+as an ordinary failure rather than looping.
+Because each applied patch removes metadata and an unmatched patch terminates,
+recovery is bounded.
 
-### Transport is uniform SSE
+### Uniform SSE transport
 
 Every provider streams SSE through `reqwest_eventsource`.
-Two decisions make that hold:
+Two endpoint choices keep transport uniform across providers:
 
-- **Ollama** uses `/v1/chat/completions`, folding it into the chat shape with no
-  new parser.
+- **Ollama** uses `/v1/chat/completions`, sharing the chat-completions shape
+  with no new parser.
   That endpoint supports streaming, tools, vision, structured output, and
   reasoning via `reasoning_content` and `reasoning_effort`.
-  Ollama's `/v1/responses` endpoint is non-stateful only and drops vision and
-  structured output while adding nothing JP uses, so it is rejected.
-  The chat endpoint has no `tool_choice`; JP keeps its existing forced-tool
-  system-message workaround when it builds the request.
+  Ollama's `/v1/responses` endpoint is stateless only and drops vision and
+  structured output while adding nothing JP uses, so it is not used.
+  Because `/v1/chat/completions` has no `tool_choice` field, JP keeps its
+  forced-tool system-message workaround when building requests.
   See [Ollama OpenAI compatibility] and [Ollama Anthropic compatibility].
 - **Gemini** uses `?alt=sse`.
 
-### JP side
+### Integration in jp_llm
 
-JP's `Provider` trait is unchanged from JP CLI's point of view: it still returns
-a stream of `Event` (now elelem's, re-exported).
+JP's `Provider` trait is unchanged for callers such as `jp_cli`: it still
+returns a stream of `Event` (re-exported from `elelem`).
 Below the trait, each provider implementation builds the wire request, calls
-elelem to drive and parse it, and owns everything that is not single-request
-wire handling: request construction and quirks, retry budget and backoff, the
-idle-timeout value (passed to elelem per request, so JP no longer wraps the
-stream with `with_idle_timeout`), recovery (applying `Recoverable` patches and
-retrying), the multi-request orchestration some providers need (Anthropic
-max-token chaining and forced-tool fallback, Google unexpected-tool-call retry),
-and `EventBuilder`, which stays in `jp_llm` because it translates `EventPart`
-into the persistence type `ConversationEvent`. elelem owns the OpenAI Responses
-wire types for both streaming and non-streaming responses but only the streaming
-transport, so the non-streaming fallback for `streaming_unsupported` models is
-JP's HTTP call mapping elelem's response type into events.
+`elelem` to drive and parse the stream, and owns everything outside
+single-request wire streaming:
+
+- **Request construction and quirks**: translating `ChatQuery` into the shape's
+  request type.
+- **Retries and idle timeout**: managing retry budgets and backoff, and passing
+  the idle-timeout duration to `elelem` per request (replacing JP's
+  `with_idle_timeout` stream wrapper).
+- **Recovery**: applying `Recoverable` patches to conversation history and
+  retrying.
+- **Multi-request orchestration**: Anthropic max-token chaining and forced-tool
+  fallback, and Google unexpected-tool-call retries.
+- **Event accumulation**: `EventBuilder` stays in `jp_llm` because it translates
+  `EventPart` into JP's persistence type `ConversationEvent`.
+- **Non-streaming fallback**: `elelem` owns the OpenAI Responses wire types for
+  both streaming and non-streaming responses, but only provides streaming
+  transport.
+  For `streaming_unsupported` models, JP performs the single HTTP call and maps
+  `elelem`'s response type into `Event`s.
 
 ## Drawbacks
 
-- Re-inlining forked crates risks re-discovering edge cases they quietly encode.
-  Chesterton's Fence applies per crate; the vendor-first step and the contract
-  suite are the mitigations.
-- `elelem`'s event model becomes a semver commitment once published.
-  That is the price of "standalone, reusable."
-- The effort is wide and asymmetric: chat-completions is nearly free (already
-  hand-rolled), but Responses, Messages, and Gemini carry real request-schema
-  work.
-- A standalone multi-provider client enters a populated space (genai,
-  async-openai, and others).
-  Maintaining a public crate is its own ongoing cost.
+- **Replacing forked SDKs can expose hidden edge cases.** Forked crates may
+  quietly encode provider edge cases; vendoring them first (Phase 0) and gating
+  each migration on the contract suite and cassettes mitigates this risk.
+- **Public API commitment.** Publishing `elelem` makes its `Event` model,
+  `StreamError`, and wire types a semver commitment.
+- **Asymmetric migration effort.** The chat-completions shape is nearly free
+  because `cerebras` and `llamacpp` are already hand-rolled, whereas OpenAI
+  Responses, Anthropic Messages, and Gemini require full request and response
+  schema definitions.
+- **Ongoing crate maintenance.** Maintaining a standalone multi-provider crate
+  alongside existing libraries (`genai`, `async-openai`, and others) carries
+  long-term maintenance cost.
 
 ## Alternatives
 
-- **Extract a shared driver for cerebras/llamacpp only, keep the SDKs.** Fixes
-  the immediate duplication but leaves the fork-maintenance burden, does nothing
-  for the SDK-wrapped providers, and gives the plugin future no foundation.
-- **A core crate plus N shape crates plus N provider crates.** More granular,
-  but worse ergonomics for a reusable standalone library; consumers want one
-  dependency and a feature, not a crate-assembly job.
-- **One driver and one parser for all providers, dropping the SDKs entirely.** A
-  Golden Hammer: the wire shapes genuinely differ, and forcing Anthropic and
-  Gemini through a chat-completions parser would trade correctness for
-  uniformity.
-- **Route everything through the Responses API.** Responses earns its place for
-  OpenAI proper (encrypted reasoning continuity, hosted tools, the o-series),
-  but a chat-completions-compatible backend gains nothing from its Responses
-  shim.
+- **Extract a shared driver for `cerebras` and `llamacpp` only, and keep the
+  SDKs.** This fixes the immediate duplication between those two providers, but
+  leaves the fork-maintenance burden, does not enforce the streaming contract on
+  SDK-wrapped providers, and provides no foundation for external plugins.
+- **Split into a core crate, shape crates, and provider crates.** Finer crate
+  granularity hurts ergonomics for consumers, who want a single dependency with
+  feature flags rather than multiple crates to assemble.
+- **Use one driver and one parser for all providers.** The wire protocols differ
+  substantially, and forcing Anthropic Messages and Gemini through a
+  chat-completions parser would trade correctness for uniformity.
+- **Route every provider through the Responses API.** The Responses API is
+  worthwhile for OpenAI proper (encrypted reasoning continuity, hosted tools,
+  and o-series models), but a chat-completions backend gains nothing from a
+  Responses compatibility shim.
 
 ## Non-Goals
 
-- Re-implementing `reqwest_eventsource`.
-  The bug was JP's usage, not the crate; it stays.
-- Adding new providers.
-- Stateful Responses API support (JP does not use it for OpenAI either).
+- **Re-implementing `reqwest_eventsource`.** The silent-error bug was in JP's
+  stream handling, not in `reqwest_eventsource`.
+- **Adding new providers.**
+- **Stateful Responses API support.** JP does not use stateful Responses for
+  OpenAI either.
 
 ## Risks and Open Questions
 
 - **Quirk parity.** The Anthropic and Google signature-strip-and-retry behaviors
-  must survive the migration unchanged.
-  The contract suite plus re-recorded cassettes are the guard.
+  must survive the migration unchanged, guarded by the contract suite and
+  re-recorded cassettes.
 - **Cassette re-recording needs live endpoints.** `llamacpp` and `ollama`
   require local servers; the stale `llamacpp` cassettes surfaced by the original
   fix are the first to re-record.
-- **Publication timing.** Publishing elelem overrides the workspace `publish =
-  false` and freezes its feature names, `Event`, `StreamError`, and per-shape
-  request types as public API.
-  Don't publish until at least two non-chat shapes are migrated, so the surface
-  isn't frozen chat-biased.
+- **Publication timing.** Publishing `elelem` overrides the workspace `publish =
+  false` setting and freezes its feature names, `Event`, `StreamError`, and
+  per-shape request types as public API.
+  `elelem` should not be published until at least two non-chat shapes are
+  migrated so the public surface is not biased toward chat completions.
 
 ## Implementation Plan
 
 - **Phase 0: Vendor.** Pull the forked external crates into the workspace as
   plain members, keep every cassette green, and drop the upstream forks.
-  Reviewable on its own, and independent of Phase 1, which extracts from the
-  hand-rolled `cerebras` / `llamacpp` and needs no vendored SDK.
+  This phase is independently reviewable and does not block Phase 1, which
+  extracts from the hand-rolled `cerebras` and `llamacpp` adapters and needs no
+  vendored SDK.
 - **Phase 1: Core plus chat shape.** Create `crates/contrib/elelem`.
-  Extract the generic core (types, `ChunkParser`, driver, client builder) from
-  `cerebras` / `llamacpp`, implement the chat-completions shape, and seed the
-  stream-contract test suite (the surface/swallow cases already written).
-  Move `cerebras` and `llamacpp` onto it.
-- **Phase 2: Fold the chat family.** Move `ollama` (switched to
-  `/v1/chat/completions`) and `openrouter` onto the chat shape.
+  Extract the generic core (types, `ChunkParser`, driver, and client builder)
+  from `cerebras` and `llamacpp`, implement the chat-completions shape, seed the
+  stream-contract test suite with the error-surfacing and premature-EOF cases,
+  and migrate `cerebras` and `llamacpp` onto `elelem`.
+- **Phase 2: Fold the chat family.** Switch `ollama` to `/v1/chat/completions`
+  and migrate `ollama` and `openrouter` onto the chat shape.
   Delete `ollama-rs` and `jp_openrouter`, including `openrouter`'s internal
-  `backon` retry loop, since JP owns retry.
-- **Phase 3: Anthropic Messages.** Add the shape, drop `async_anthropic`.
-  First real exercise of the named-event seam and the `StreamError::Recoverable`
-  path.
-- **Phase 4: OpenAI Responses.** Add the shape, drop `openai_responses`.
-- **Phase 5: Gemini.** Add the shape on `alt=sse`, drop `gemini_client_rs`.
+  `backon` retry loop (since JP owns retries).
+- **Phase 3: Anthropic Messages.** Implement the Messages shape, migrate
+  `anthropic`, and drop `async_anthropic`.
+  This phase is the first to exercise named SSE events and the
+  `StreamError::Recoverable` recovery path.
+- **Phase 4: OpenAI Responses.** Implement the Responses shape, migrate
+  `openai`, and drop `openai_responses`.
+- **Phase 5: Gemini.** Implement the Gemini shape over `alt=sse`, migrate
+  `google`, and drop `gemini_client_rs`.
 
 Each phase is gated by the contract suite and re-recorded cassettes, and each
-provider cuts over independently, so the migration stays reviewable and
-reversible throughout.
+provider cuts over independently so the migration stays reviewable and
+reversible.
 
 ## References
 
-- [RFD 012], which defined the typed `Event` / `EventPart` streaming model that
-  `elelem` relocates out of `jp_llm` and owns.
-- The Ollama compatibility docs behind the transport decision.
-- [RFD 043] (Discussion) stays JP-side: elelem emits raw tool-call chunks;
-  `EventBuilder` owns their accumulation and any UI progress.
-- [RFD 064] (Discussion) may later move patch application from in-place mutation
-  to stored events applied at projection time.
+- [RFD 012] defines the typed `Event` and `EventPart` streaming model that
+  `elelem` relocates out of `jp_llm`.
+- [Ollama OpenAI compatibility] and [Ollama Anthropic compatibility] document
+  the endpoints behind the Ollama transport decision.
+- [RFD 043] (Discussion) stays in `jp_llm`: `elelem` emits raw tool-call chunks,
+  while `EventBuilder` owns their accumulation and UI progress.
+- [RFD 064] (Discussion) may later move patch application from in-place history
+  mutation to stored events applied at projection time.
 
 [Ollama Anthropic compatibility]: https://docs.ollama.com/api/anthropic-compatibility
 [Ollama OpenAI compatibility]: https://docs.ollama.com/api/openai-compatibility
