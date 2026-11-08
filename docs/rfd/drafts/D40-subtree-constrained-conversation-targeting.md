@@ -19,21 +19,20 @@ loading, so a conversation outside the allowed subtree never contributes config.
 
 In agentic workflows ([RFD 040]), an orchestrator spawns sub-conversations under
 a parent.
-The sub-agent should only be able to target conversations within its assigned
-subtree — not the orchestrator's own conversation, and not conversations
-belonging to other sub-agents.
+A sub-agent should only target conversations within its assigned subtree, not
+the orchestrator's own conversation or conversations belonging to other
+sub-agents.
 
-Today nothing expresses that scope.
-A sub-agent handed `--id` can name any conversation in the workspace, and the
-orchestrator has no way to fence it in.
-Doing nothing means every sub-agent workflow has to trust its sub-agents to stay
-in their lane, or wrap `jp` in a shell that validates IDs itself —
-reimplementing ancestry checks outside JP against a tree only JP can see.
+A sub-agent given `--id` can target any conversation in the workspace, and the
+orchestrator has no way to restrict that scope.
+Without a built-in constraint, every sub-agent workflow must either trust its
+sub-agents to stay within their subtree or wrap `jp` in a shell that validates
+IDs itself, duplicating ancestry checks outside JP against a tree that only JP
+can read.
 
-This was originally Phase 4 of [RFD 050].
-It is split out because it is the only part of that RFD that needs the
-conversation tree, and holding the rest of 050's scripting ergonomics behind
-[RFD 039] costs more than it buys.
+This feature was split out from Phase 4 of [RFD 050] because it is the only part
+of that proposal that depends on the conversation tree, so the rest of [RFD
+050]'s scripting ergonomics do not have to wait on [RFD 039].
 
 ## Design
 
@@ -42,12 +41,10 @@ jp query --id=jp-c17528842001 --root-id=jp-c17528832001 "Continue"
 ```
 
 `--root-id` constrains the target conversation to be a **strict descendant** of
-the specified conversation.
-The check is strict: the target must be a child, grandchild, or deeper
-descendant.
-The target **cannot** be the root-id itself.
+the specified conversation: it must be a child, grandchild, or deeper
+descendant, and **cannot** be the `--root-id` conversation itself.
 
-### Enforcement timing
+### Enforcement Timing
 
 The constraint lives on `ConversationLoadRequest`, not on `Query`, so it is
 checked between handle resolution and per-conversation config loading:
@@ -62,15 +59,16 @@ load_workspace  → load_base_partial
 ```
 
 If the check ran inside `Query::run` instead, the merged `AppConfig` would
-already contain config keys (model, system prompts, tools, ...) from a
+already contain config keys (such as model, system prompts, and tools) from a
 conversation outside the allowed subtree, even if the run aborted before
 persisting anything.
-That undermines the scoping intent — see [Non-Goals](#non-goals) for why this
-is *not* a security boundary, but it is still a correctness issue.
+While `--root-id` is not a security boundary (see [Non-Goals](#non-goals)),
+loading config from an out-of-scope conversation would still violate the scoping
+constraint.
 
-### Errors and precedence
+### Errors and Precedence
 
-Errors are checked in this order, so the most informative message wins:
+Conditions are checked in this order so the most specific error is reported:
 
 | Order | Condition                                | Error                                                                  |
 | ----- | ---------------------------------------- | ---------------------------------------------------------------------- |
@@ -80,96 +78,91 @@ Errors are checked in this order, so the most informative message wins:
 | 4     | Target is not a descendant of root-id    | `Conversation <target> is not a descendant of <root>.`                 |
 | 5     | Target is a strict descendant of root-id | OK, query proceeds                                                     |
 
-Existence checks must precede the equality check; otherwise the "target == root"
-message is misleading when neither conversation actually exists.
+Existence checks must precede the equality check; otherwise, passing the same
+nonexistent ID for both flags would report a target-equals-root error instead of
+the missing conversation.
 
-### Other constraints
+### Other Constraints
 
 - `--root-id` requires `--id`.
-  A script using `--root-id` knows which conversation it wants — implicit
-  resolution via session mapping or `--last` would defeat the purpose of the
-  constraint.
+  A script using `--root-id` targets a known conversation; implicit resolution
+  via session mapping or `--last` would defeat the purpose of the constraint.
 - `--root-id` is mutually exclusive with `--new` and `--fork`.
-  It constrains targeting of existing conversations; `--new` and `--fork` create
-  new ones.
+  It constrains targeting of existing conversations, whereas `--new` and
+  `--fork` create new ones.
 - `--root-id` requires the tree index from [RFD 039].
-  The ancestry check walks the `parent_id` chain using the in-memory tree index,
-  which is O(depth) — trivial for realistic tree depths.
+  The ancestry check walks the `parent_id` chain in the in-memory tree index in
+  O(depth) time, which is negligible for realistic tree depths.
 
 ## Drawbacks
 
-**It buys nothing until the tree exists.** `parent_id` and the tree index are
-[RFD 039] Phase 1, and there is no flat-conversation fallback that means
-anything — without ancestry, every conversation is a root and the constraint is
-either vacuous or universal.
-This RFD is therefore entirely gated on 039, which is the reason it is a
-separate document rather than a phase of [RFD 050].
+**Requires the conversation tree.** `parent_id` and the tree index are defined
+in [RFD 039] Phase 1.
+There is no meaningful fallback for flat conversations: without parent links,
+every conversation is a root, making an ancestry constraint either always pass
+or always fail.
+This RFD is therefore gated on [RFD 039], which is why it was split out from
+[RFD 050].
 
 ## Alternatives
 
 ### `--scope` or `--within` instead of `--root-id`
 
-Alternative names for the ancestry constraint flag.
-`--scope` is shorter but more abstract.
-`--within` reads well (`--within=<id>`) but does not convey that the value is a
+`--scope` and `--within` are alternative names for the ancestry constraint flag.
+`--scope` is shorter but more abstract, and `--within` (`--within=<id>`) does
+not indicate that the value is a conversation ID.
+`--root-id` matches `--root` on `conversation ls` ([RFD 039]), since both refer
+to tree roots, and the `-id` suffix makes clear that the flag takes a
 conversation ID.
-`--root-id` is consistent with `--root` on `conversation ls` ([RFD 039]) — both
-refer to tree roots — and the `-id` suffix makes clear it takes a conversation
-ID.
 
 ### `--root-id` applies to `--new` / `--fork`
 
-`--root-id` could constrain `--new` and `--fork` to create conversations *under*
-the specified root, rather than being mutually exclusive.
-Rejected because it would give the flag two purposes: constraining existing
-targets and influencing creation.
+Instead of conflicting with `--new` and `--fork`, `--root-id` could place newly
+created or forked conversations *under* the specified root.
+This was rejected because it gives the flag two distinct roles: validating
+existing targets and selecting a parent on creation.
 `--fork=0 --id=<parent>` ([RFD 039]) already creates a child under a specified
-parent, making the creation case redundant.
+parent, making the creation role redundant.
 
 ### Enforce in the sub-agent orchestrator instead of in `jp`
 
-The orchestrator knows which subtree it handed out, so it could validate the
-sub-agent's chosen ID before invoking `jp`.
-Rejected because the orchestrator would have to read the tree itself to walk
-ancestry, duplicating logic that belongs next to the tree index, and because
-every orchestrator would reimplement it.
+Because the orchestrator assigns the subtree, it could validate the sub-agent's
+target ID before invoking `jp`.
+This was rejected because every orchestrator would have to read the conversation
+tree and reimplement ancestry traversal that belongs alongside the tree index in
+`jp`.
 
 ## Non-Goals
 
 - **Conversation access control.** `--root-id` constrains targeting based on
   tree ancestry, not permissions.
-  It is a scoping mechanism, not a security boundary.
-  A sub-agent that can invoke `jp` at all can omit the flag.
+  It is a scoping mechanism, not a security boundary: a sub-agent that can
+  invoke `jp` directly can omit the flag.
 
-- **Constraining anything other than `jp query`.** Management commands
-  (`conversation rm`, `conversation archive`) take no `--root-id`.
-  Extending the constraint to them is separate work, and needs a decision about
-  what a subtree constraint means for a command that takes many targets.
+- **Constraining commands other than `jp query`.** Management commands
+  (`conversation rm`, `conversation archive`) do not accept `--root-id`.
+  Extending the constraint to them requires deciding how a subtree constraint
+  applies when a command accepts multiple targets.
 
 ## Implementation Plan
 
-Single phase.
-
-Add the `--root-id` flag to `Query`.
-Model the constraint on `ConversationLoadRequest` and enforce it between
-`resolve_request` and `apply_conversation_config` so the per-conversation config
-layer never loads from a conversation outside the allowed subtree (see
-[Enforcement timing](#enforcement-timing)).
-Requires `--id`.
-Mutually exclusive with `--new` and `--fork`.
-
-Depends on [RFD 039] Phase 1 (`parent_id` and tree index).
+Implementation is a single phase that depends on [RFD 039] Phase 1 (`parent_id`
+and the tree index).
+Add the `--root-id` flag to `Query` (requiring `--id` and conflicting with
+`--new` and `--fork`), model the constraint on `ConversationLoadRequest`, and
+enforce it between `resolve_request` and `apply_conversation_config` so the
+per-conversation config layer never loads from a conversation outside the
+allowed subtree (see [Enforcement Timing](#enforcement-timing)).
 
 ## References
 
-- [RFD 039: Conversation Trees][RFD 039] — defines `parent_id` and the tree
-  index the ancestry check walks.
-- [RFD 040: Hidden Conversations and Tool Context][RFD 040] — sub-agent
-  conversations organized as children, motivating the constraint.
-- [RFD 050: Scripting Ergonomics for Conversation Management][RFD 050] — the
-  RFD this was split out of; defines `--id`, `--no-activate`, and the
-  management-command conventions a constrained sub-agent uses alongside
-  `--root-id`.
+- [RFD 039: Conversation Trees][RFD 039]: Defines `parent_id` and the tree index
+  used by the ancestry check.
+- [RFD 040: Hidden Conversations and Tool Context][RFD 040]: Organizes sub-agent
+  conversations as child conversations, motivating subtree-scoped targeting.
+- [RFD 050: Scripting Ergonomics for Conversation Management][RFD 050]: Defines
+  `--id`, `--no-activate`, and the management-command conventions that a
+  constrained sub-agent uses alongside `--root-id`.
 
 [RFD 039]: ../039-conversation-trees.md
 [RFD 040]: ../040-hidden-conversations-and-tool-context.md
