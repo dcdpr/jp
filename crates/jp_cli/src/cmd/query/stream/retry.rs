@@ -230,6 +230,10 @@ impl StreamRetryState {
     /// timeout, up to [`MAX_IDLE_TIMEOUT_DOUBLINGS`] times.
     /// [`reset`] returns it to the configured value.
     ///
+    /// The caller reads this once per request, when it wraps the new stream, so
+    /// neither a timeout nor a reset changes the window of a stream already in
+    /// flight.
+    ///
     /// [`reset`]: Self::reset
     pub fn idle_timeout(&self) -> Option<Duration> {
         let secs = self.config.stream_idle_timeout_secs;
