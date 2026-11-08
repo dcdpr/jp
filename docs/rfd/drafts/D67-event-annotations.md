@@ -20,63 +20,57 @@
 
 ## Summary
 
-A conversation records what happened.
-This RFD adds a place to record what you concluded about it: annotations, JSON
-records attached to a location in a conversation, kept in `annotations.json`
-beside `events.json` and never sent to the model.
-Each names the shape of its own data with a `schema_id`, so a tool that does not
-recognize a format can skip it.
+This RFD introduces **annotations**: structured JSON records attached to
+locations in a conversation.
+Annotations are stored in `annotations.json` alongside `events.json` and are
+never sent to the model.
+Each annotation declares the schema of its payload with a `schema_id`, so tools
+can skip formats they do not recognize.
 
 ## Terminology
 
-- **Annotation**: structured data about a location in a conversation.
-- **Stream entry**: one element of the ordered sequence that makes up a
-  conversation.
-  Conversation events and overlays are both stream entries.
-- **Overlay**: a stream entry that applies to the conversation regardless of its
-  position, governing how the events around it are interpreted.
-  Introduced by [RFD 064].
-- **Event ID**: the per-event identifier introduced by [RFD 097].
-
-Terms this RFD borrows from the rest of the system:
-
-- **Address**: a reference naming a location in a conversation, defined by [RFD
-  D68].
+- **Annotation**: structured data attached to a location in a conversation.
+- **Address**: a reference to a location in a conversation (an entry, a text
+  span within an entry, or a range between two points), defined by [RFD D68].
+- **Stream entry**: an element in a conversation's ordered stream, either a
+  conversation event or an overlay.
+- **Overlay**: a position-independent stream entry that governs how surrounding
+  events are interpreted ([RFD 064]).
+- **Event ID**: the stable per-event identifier introduced by [RFD 097].
 - **Thread**: the rendered form of a conversation sent to an LLM provider,
   assembled at query time from the event stream.
-- **Storage root**: either of the two directories a conversation is written to,
+- **Storage root**: either of the two directories a conversation is written to:
   the user's data directory or the workspace.
 - **User-local copy**: the copy of a conversation in the user's data directory,
-  and the source of truth for its contents.
-- **Workspace projection**: the copy of a conversation written into the
-  workspace's `.jp/conversations/` directory so it can be committed alongside
-  the project.
-- **Trash**: to move a conversation directory into `.trash/`, preserving its
-  contents, with a `TRASHED.md` recording the reason.
+  which is the source of truth for its contents.
+- **Workspace projection**: the copy of a conversation written to
+  `.jp/conversations/` in the workspace so it can be committed to version
+  control.
+- **Trash**: moving a corrupt or invalid conversation directory into `.trash/`,
+  preserving its contents alongside a `TRASHED.md` file recording the reason.
 
 ## Motivation
 
-The event stream records what happened.
-Nothing in it holds what you concluded about it: that a tool result was wrong,
-that one paragraph of a response is the part worth keeping, that a claim needs
-checking before anyone acts on it.
+The event stream records what happened in a conversation, but provides no place
+to record conclusions about it: that a tool result was wrong, that a specific
+paragraph is worth keeping, or that a claim needs verification before anyone
+acts on it.
 
-Two workarounds exist and both cost something.
-Editing `events.json` puts the note inside the conversation, so the model reads
-it on the next turn and it changes what happens next.
-Keeping notes outside the workspace preserves the conversation but loses the
-link: the note says "the third tool call" and then the third tool call moves.
+Today, users have two workarounds.
+Editing `events.json` injects the note into the conversation stream, where the
+model reads it on the next turn and changes its behavior.
+Keeping notes outside the workspace preserves the conversation stream, but the
+link is fragile: a note referencing "the third tool call" breaks as soon as
+entries move.
+Commentary either contaminates the conversation or drifts away from it.
 
-Doing nothing leaves those as the only options.
-Commentary either contaminates the thing it is about or drifts away from it.
-
-Annotations are a third place.
-They live with the conversation, travel with it into version control, point at a
-specific location, and stay out of the model's input.
+Annotations solve both problems.
+They live alongside the conversation, travel with it into version control, point
+at a specific address in the stream, and never enter the model's input.
 
 ## Design
 
-### The record
+### Annotation Record
 
 ```json
 {
@@ -96,42 +90,38 @@ specific location, and stay out of the model's input.
 }
 ```
 
-- `id` identifies the annotation, so one can be edited or removed on its own.
-  Two annotations may share a target and a schema, so the target is not an
-  identity.
-- `target` is an address.
-  It names a stream entry, a run of text within one, or a range between two
-  points.
-  [RFD D68] defines the shape, including the `start` and `end` form a range
-  takes.
-  The quote is stored as written rather than encoded, so `jq` over this file
-  shows what was pointed at.
-- `schema_id` names the shape of `data`.
-  Required.
-  Either an absolute URI or a path relative to the workspace root.
-- `data` is JSON.
-  JP stores it and never looks inside.
+- `id`: unique identifier for the annotation, used to edit or remove individual
+  records.
+  Because multiple annotations can share the same `target` and `schema_id`,
+  `target` cannot serve as the record's identity.
+- `target`: an address naming a stream entry, a text span within an entry, or a
+  range between `start` and `end` points, as defined by [RFD D68].
+  Quotes are stored as plain text rather than URL-encoded, so inspecting the
+  file with `jq` shows the quoted text directly.
+- `schema_id`: required identifier for the schema of `data`, written as an
+  absolute URI or a path relative to the workspace root.
+- `data`: arbitrary JSON payload.
+  JP stores `data` opaquely without inspecting its contents.
 
-**JP does not validate `data`.** `schema_id` is a promise made by whoever wrote
-the annotation, not a contract JP enforces.
-JP never resolves it, fetches it, or parses anything it points at.
-A reader that recognizes the `schema_id` knows what it is looking at, and one
-that does not skips the annotation.
-That is the whole mechanism.
+**JP does not validate `data`.** `schema_id` is a declaration by the writer, not
+a contract JP enforces: JP never resolves, fetches, or parses the referenced
+schema.
+Consumers that recognize the `schema_id` parse `data` accordingly; consumers
+that do not recognize it skip the annotation.
+Any format-specific metadata, such as who wrote the annotation, belongs in
+`data` as declared by its schema.
 
-Anything a format needs to record about itself, including who wrote the
-annotation, is a field in `data` that its schema declares.
+### File Layout
 
-### Where annotations live
-
-`annotations.json`, in the conversation directory beside `metadata.json`,
-`base_config.json` and `events.json`.
+Annotations live in `annotations.json` in the conversation directory alongside
+`metadata.json`, `base_config.json`, and `events.json`.
 
 Annotations travel with the conversation.
-`Projection::Projected` writes them to the user-local copy and to the workspace
-projection, so they are committed alongside the events they describe.
+`Projection::Projected` writes them to both the user-local copy and the
+workspace projection, so they are committed alongside the events they describe.
 
-The file is a flat array, matching the shape of `events.json`:
+`annotations.json` is a flat JSON array, matching the structure of
+`events.json`:
 
 ```json
 [
@@ -169,208 +159,219 @@ The file is a flat array, matching the shape of `events.json`:
 ]
 ```
 
-The second annotation covers a stretch of the conversation rather than a piece
-of text, so both of its endpoints name entries and stop there.
+The second annotation targets a range of entries rather than a text span, so its
+`start` and `end` endpoints specify only `entry` IDs.
 
-Flat rather than a map keyed by target, because a range address does not make a
-usable key, and because removing one annotation should not mean finding it
-inside a nested list.
+Storing a flat array rather than a map keyed by `target` avoids using range
+addresses as map keys and lets callers remove an annotation by `id` without
+searching nested lists.
 
-### One unit, two files
+### Loading and Saving with the Stream
 
-A conversation's stream and its annotations load and save together.
-`jp_storage::load` already states this about the two files it has: "The stream
+A conversation's stream and its annotations load and save as a single unit,
+extending the existing invariant in `jp_storage::load`: "The stream
 (`base_config.json` + `events.json`) is one unit: load both."
-Annotations join that unit.
 
-This follows from [RFD 097].
-The set of entry IDs that were duplicated at load is private, load-scoped state
-on `ConversationStream`, and RFD 097 requires a consumer to resolve ambiguous
-references within the same load cycle, before any save.
-Loading annotations separately would put that signal out of scope, and an
-annotation would silently rebind to the wrong copy of a duplicated entry.
+This coupling is required by [RFD 097].
+`ConversationStream` tracks entry IDs duplicated at load in private, load-scoped
+state, and RFD 097 requires consumers to resolve ambiguous references within the
+same load cycle before saving.
+Loading annotations separately would lose that duplication state, causing an
+annotation to silently rebind to the wrong copy of a duplicated entry.
 
-`ConversationStream::from_parts` and `to_parts` already map parts to files, so
-annotations become a third part.
-`PersistBackend::write` and `LoadBackend::load_conversation_stream` keep their
-signatures and no backend gains a method.
+`ConversationStream::from_parts` and `to_parts` gain annotations as a third
+part, so `PersistBackend::write` and `LoadBackend::load_conversation_stream`
+keep their existing signatures without new backend methods.
 
-Two files rather than one, because `stream_mtime` is the newer of `events.json`
-and `base_config.json` and it drives conversation ordering.
-Annotations stay out of that calculation: writing a note is not conversation
-activity and should not move a conversation to the top of `jp conversation ls`.
+Annotations remain in a separate file rather than inside `events.json` because
+`stream_mtime` (the newer modification time of `events.json` and
+`base_config.json`) drives conversation ordering.
+Excluding `annotations.json` from `stream_mtime` ensures that writing a note
+does not count as conversation activity or move a conversation to the top of `jp
+conversation ls`.
 
-### Writing
+### Write Ordering
 
-`write_json` is atomic per file and no atomic write spans the three.
+`write_json` is atomic per file, and no atomic write spans all three stream
+files.
 `persist_conversation_to` writes `annotations.json` last, after `events.json`.
-An interrupted save then loses a note, rather than leaving an annotation that
-points at an entry which was never persisted.
+If a save is interrupted, the conversation at worst loses a newly written
+annotation rather than persisting an annotation whose target entry was never
+written.
 
-### A missing or corrupt file
+### Missing or Corrupt Files
 
 A missing `annotations.json` means the conversation has no annotations.
 
-A malformed one is renamed to `annotations.json.invalid` and the conversation
-loads with no annotations.
-It is **not** trashed.
-`validate_entry` trashes a conversation directory for a missing or corrupt
-`events.json`, and a bad notes file must never cost someone their conversation.
-The rename preserves the user's bytes, which the next save would otherwise
-overwrite.
-`cleanup_tmp_files` removes only paths ending in `.tmp`, so the renamed file
-survives startup.
+A malformed `annotations.json` is renamed to `annotations.json.invalid`, and the
+conversation loads with no annotations.
+Unlike a missing or corrupt `events.json`, which causes `validate_entry` to
+trash the conversation directory, a malformed `annotations.json` **never**
+trashes the conversation.
+Renaming the file preserves the user's data from being overwritten on the next
+save, and because `cleanup_tmp_files` removes only paths ending in `.tmp`,
+`annotations.json.invalid` survives startup cleanup.
 
-### When an annotation stops pointing at anything
+### Unresolvable Addresses
 
 [RFD D68] defines when an address resolves.
-An annotation whose address does not resolve is dropped at load, and each drop
-is logged.
+At load time, any annotation whose target address does not resolve is dropped
+and logged.
 
-This is the same shape of rule `ConversationStream::retain` already applies to
-compaction overlays, which are dropped when a removal could have invalidated
-their anchors.
-Annotations track their own validity, keyed by entry ID rather than by turn
-range.
+This matches how `ConversationStream::retain` drops compaction overlays when an
+entry removal could have invalidated their anchors, except that annotations
+validate against entry IDs and quotes rather than turn ranges.
 
 ### Forking
 
-`jp conversation fork` carries annotations to the new conversation.
-`--last N` drops entries, and any annotation whose address no longer resolves
-against the forked stream is dropped with them.
+`jp conversation fork` copies annotations to the new conversation.
+When `--last N` drops earlier stream entries, any annotation whose target
+address no longer resolves against the forked stream is dropped with them.
 
-### Schemas in the workspace
+### Workspace Schema Convention
 
-A `schema_id` may be a path relative to the workspace root, for a format local
-to one project:
+For project-local formats, `schema_id` can be a path relative to the workspace
+root:
 
 ```
 .jp/schemas/review-note/v1.json
 ```
 
-`.jp/schemas/` is a convention, so that two tools in the same workspace do not
-invent two places to look.
-JP does not create the directory, read from it, or validate against anything in
+Placing workspace schemas under `.jp/schemas/` gives tools a shared convention
+for locating schema files.
+JP does not create `.jp/schemas/`, read from it, or validate against anything in
 it.
 
-The version belongs inside the identifier, whichever form it takes.
-"Skip what you do not recognize" fails the moment a format changes without its
-identifier changing.
+Whether `schema_id` is a relative path or an absolute URI, it should include a
+version identifier.
+Skipping unrecognized schemas fails if a format changes incompatibly without
+changing its `schema_id`.
 
 ### Library and CLI
 
-The write path is a library API in `jp_conversation`, with the CLI as a shell
-over it.
+The write path is a library API in `jp_conversation`, with the CLI as a thin
+wrapper around it.
 
-Addresses quote text from the stored stream, and RFD D68 compares those quotes
-exactly, so the library captures the quote from the entry itself.
-A hand-pasted quote may carry different bytes than the stored text and would
-then fail to match text that looks identical.
+Because RFD D68 compares quoted text by exact byte match, the library captures
+quotes directly from the stored entry rather than accepting caller-supplied
+text.
+Hand-pasted quotes can carry different bytes than the stored text and fail to
+match visually identical content.
 
 ## Drawbacks
 
-- **Every whole-conversation operation gains a third artifact.** Fork, export,
-  and the plugin protocol each grow a file to remember.
-  Archive and unarchive are directory renames, so they are free; the rest are
-  not.
-- **A malformed `data` is found only by whoever reads it.** JP validates
-  nothing, so a writer that gets its own format wrong produces annotations that
-  look fine until a reader chokes on them.
-- **Annotations load with the stream**, so a large `data` value is paid on every
-  open of that conversation, whether or not anything reads it.
-- **`schema_id` conventions are unenforced.** Nothing stops two tools using one
-  identifier for different shapes, or one tool changing its shape without
-  changing its identifier.
+- **Every whole-conversation operation gains a third file.** Archive and
+  unarchive are directory renames and need no changes, but fork, export, and the
+  plugin protocol must each handle `annotations.json`.
+- **Malformed `data` payloads are detected only at read time.** Because JP does
+  not validate `data`, a buggy writer can persist invalid payloads that fail
+  only when a consumer parses them.
+- **Annotations load with the stream.** Opening a conversation always
+  deserializes `annotations.json`, even when the caller never reads annotations.
+- **`schema_id` conventions are unenforced.** Nothing prevents two tools from
+  using the same `schema_id` for different schemas, or a tool from changing its
+  schema without updating the identifier.
 
 ## Alternatives
 
-**A fifth `EventPayload` variant in `events.json`.** RFD 097 makes every stream
-entry ID-addressable, so a new payload kind would fit.
-Rejected on two counts: annotating would change `stream_mtime` and reorder `jp
-conversation ls`, and it would put a concern the model never sees into the file
-the model's input is built from.
+**A fifth `EventPayload` variant in `events.json`.** Because RFD 097 makes every
+stream entry ID-addressable, annotations could be stored as another event
+payload kind.
+This was rejected for two reasons: annotating a conversation would update
+`stream_mtime` and reorder `jp conversation ls`, and it would mix metadata the
+model never sees into the file used to build the model's input.
 
-**A payload structured by JP.** Typed annotations with known fields would let JP
-render, search and validate them.
-Rejected because JP cannot anticipate what people annotate with, and every fixed
-field would be wrong for someone.
-`schema_id` gives any tool that wants structure the same benefit, without JP
-owning the vocabulary.
+**A schema defined by JP.** Typed annotations with fixed fields would let JP
+validate, search, and render them directly.
+This was rejected because JP cannot anticipate every annotation workflow, and
+any fixed schema would be too narrow for some uses.
+Tagging payloads with `schema_id` gives external tools structured data without
+requiring JP to own the schema vocabulary.
 
-**Conversation-level notes.** Simpler, no addressing, no dependency on RFD D68.
-Rejected because the value is in the link.
-"This tool result is wrong" is worth recording; "something in this conversation
-was wrong" is not.
+**Conversation-level notes.** Attaching notes to the conversation as a whole is
+simpler, requires no text addressing, and removes the dependency on RFD D68.
+This was rejected because the value of an annotation lies in its target link:
+recording that a specific tool result is wrong is useful, whereas recording that
+"something in this conversation was wrong" is not.
 
-**Independently loadable annotations.** Loading and saving annotations on their
-own would let a long-running process write them without touching the stream.
-Rejected for now: it puts RFD 097's ambiguity signal out of scope and creates
-two writers over data that reference each other with no atomic write between
-them.
-Worth revisiting if plugin or background writes arrive.
+**Independently loadable annotations.** Loading and saving `annotations.json`
+independently of `ConversationStream` would let background processes write
+annotations without loading the stream.
+This is rejected for now because it bypasses RFD 097's load-scoped duplicate-ID
+resolution and creates two writers over cross-referenced files without atomic
+multi-file writes.
+This can be revisited if plugin or background write paths require it.
 
 ## Non-Goals
 
-- **Sending annotations to the model.** They never enter the Thread.
-- **Validating `data`.** `schema_id` is a promise.
-- **Assistant or plugin authorship.** The write path is the library and the CLI.
-  A protocol message for plugins is a later RFD, and [RFD 077] owns the trust
-  policy it would need.
-- **Searching inside `data`.** `jp conversation grep` searches the stream.
-- **Rendering.** How and where annotations display is left open.
+- **Sending annotations to the model.** Annotations never enter the Thread.
+- **Validating `data`.** `schema_id` is an unenforced declaration by the writer.
+- **Assistant or plugin authorship.** Only the `jp_conversation` library API and
+  the CLI write annotations in this RFD.
+  A plugin protocol message belongs in a later RFD, and [RFD 077] owns the trust
+  policy it would require.
+- **Searching inside `data`.** `jp conversation grep` searches only the
+  conversation stream.
+- **Rendering.** How and where annotations are displayed is left open.
 
 ## Risks and Open Questions
 
-- **No atomic write spans the files.** The write order makes the worst case a
-  lost note rather than an annotation pointing at nothing, but the window
-  exists.
-- **The annotation ID form is unsettled.** Following `EventId` (short, opaque,
-  unique within its file, assigned on insertion) is the obvious answer and costs
-  nothing to adopt, but it has not been decided.
-- **`.jp/schemas/` is a convention JP does not enforce**, so nothing stops it
-  being ignored.
+- **No atomic write spans the files.** Writing `annotations.json` after
+  `events.json` ensures an interrupted save at worst loses a note rather than
+  leaving an annotation pointing at a missing entry, but a crash mid-save can
+  still leave the files out of sync.
+- **The annotation ID format is unsettled.** Reusing the `EventId` format
+  (short, opaque, unique within its file, assigned on insertion) is the natural
+  choice and costs nothing to adopt, but it has not been finalized.
+- **`.jp/schemas/` is an unenforced convention.** Because JP does not inspect
+  the directory, tools can ignore it.
 
 ## Implementation Plan
 
-### Phase 1: the record type
+### Phase 1: Record Type
 
-`Annotation` in `jp_conversation`, carrying its ID, address, `schema_id` and
-`data`, with serde.
-Depends on RFD D68 for the address type.
-Mergeable on its own.
+Define `Annotation` in `jp_conversation` with its ID, target address,
+`schema_id`, and `data` fields, plus `serde` support.
+Depends on RFD D68 for the address type and can merge on its own.
 
-### Phase 2: storage
+### Phase 2: Storage
 
-Extend `from_parts` and `to_parts` to carry annotations.
-Write `annotations.json` after `events.json`.
-Add the missing-file and malformed-file behavior, and drop annotations whose
-address does not resolve at load.
+Extend `from_parts` and `to_parts` to carry annotations, and write
+`annotations.json` after `events.json`.
+Treat a missing `annotations.json` as empty, rename a malformed file to
+`annotations.json.invalid` without trashing the conversation, and drop
+annotations whose address does not resolve at load.
 
-Tests: round-trip through both files; a malformed file is renamed and the
-conversation still loads; removing an entry drops the annotations that named it.
+Tests cover round-trip serialization through both files, renaming a malformed
+file while still loading the conversation, and dropping annotations when their
+target entry is removed.
 
 Depends on Phase 1.
 
-### Phase 3: library and CLI
+### Phase 3: Library and CLI
 
-The write, edit and remove API, with the CLI over it.
-Quote capture reads from the stored entry rather than accepting pasted text.
+Add the `jp_conversation` API to write, edit, and remove annotations, with the
+CLI wrapping it.
+Quote capture reads directly from the stored entry rather than accepting pasted
+text.
+
 Depends on Phase 2.
 
-### Phase 4: fork and documentation
+### Phase 4: Fork and Documentation
 
-Carry annotations through `fork`, dropping any that no longer resolve.
+Carry annotations through `fork`, dropping any whose address no longer resolves.
 Document `.jp/schemas/`, and add "Annotation" to
 `docs/wiki/00dxybd-ubiquitous-language.md`.
+
 Depends on Phase 3.
 
 ## References
 
 - [RFD 064], compaction overlays, whose drop-on-mutation rule annotations follow
-- [RFD 072], the plugin protocol a future write path would extend
-- [RFD 077], plugin trust policy
-- [RFD 097], stable entry identifiers
-- [RFD D68], the addressing scheme `target` uses
+- [RFD 072], the plugin protocol that a future plugin write path would extend
+- [RFD 077], plugin configuration and trust policy
+- [RFD 097], stable stream entry identifiers
+- [RFD D68], the text addressing scheme used by `target`
 
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
 [RFD 072]: ../072-command-plugin-system.md
