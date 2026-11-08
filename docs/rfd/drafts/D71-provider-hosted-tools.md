@@ -13,7 +13,7 @@
 
 This RFD exposes provider-executed server tools (such as Anthropic's
 `web_search` and `code_execution`, OpenAI's `web_search`, and Google Search
-grounding) as **provider-hosted tools** configured inside each provider's own
+grounding) as **provider-hosted tools** configured inside each provider's
 settings block.
 Each provider adapter translates its hosted-tool settings into wire requests and
 maps the resulting activity onto [RFD D31]'s response artifacts without adding
@@ -22,15 +22,15 @@ Anthropic web search is the first implementation slice.
 
 ## Motivation
 
-Users want current information in a conversation without wiring up a search MCP
-server, and the provider already offers it — Anthropic charges $10 per 1,000
-searches and returns cited sources.
+Users want current web information in a conversation without setting up a search
+MCP server.
+Model providers already offer built-in search: Anthropic, for example, charges
+$10 per 1,000 searches and returns cited sources.
 
-The obvious approach is to make these tools appear as another tool source
-alongside `builtin`, `local`, and `mcp`.
-That is wrong, and the reason matters enough to state up front.
+Treating these tools as another tool source alongside `builtin`, `local`, and
+`mcp` conflates tool definition with tool execution.
 
-### Definition ownership and execution ownership are separate axes
+### Definition Ownership vs. Execution Ownership
 
 | Example                | Schema owner | Executor      | Agent loop |
 | ---------------------- | ------------ | ------------- | ---------- |
@@ -41,26 +41,26 @@ That is wrong, and the reason matters enough to state up front.
 | OpenAI `web_search`    | OpenAI       | OpenAI        | OpenAI     |
 | Google Search          | Google       | Google        | Google     |
 
-Anthropic's own documentation splits these: `bash` and `text_editor` are
-*client* tools whose schema Anthropic supplies but which the caller executes;
-`web_search` and `code_execution` are *server* tools Anthropic runs itself.
+Anthropic's documentation separates these two categories: `bash` and
+`text_editor` are *client* tools whose schema Anthropic supplies but which the
+caller executes, whereas `web_search` and `code_execution` are *server* tools
+that Anthropic executes on its own infrastructure.
 
-A `ToolSource::Llm` variant would therefore mean opposite things about who
-dispatches, depending on which tool it named.
-[RFD D10] already rejects this class of change — its Alternatives section
-rejects folding execution mechanics into `ToolSource` on the grounds that
-`ToolSource` answers "where does the definition come from?" and mixing in
-execution makes the enum a product of sources times runtimes.
+A single `ToolSource::Llm` variant would cover both categories, leaving it
+ambiguous whether JP or the provider dispatches the call.
+[RFD D10] rejects folding execution mechanics into `ToolSource` for the same
+reason: `ToolSource` identifies where a tool's definition comes from, and mixing
+in execution turns the enum into a cross-product of sources and runtimes.
 
-The `bash` row *is* a legitimate future `ToolSource` case: provider-supplied
-schema, JP execution, every `ToolConfig` field meaningful.
-This RFD does not cover it, and does not foreclose it.
+Client tools like Anthropic `bash` fit a future `ToolSource` variant because the
+provider supplies the schema while JP owns execution and applies every
+`ToolConfig` field.
+This RFD leaves that path open.
+Server tools like `web_search`, by contrast, are not JP tool calls at all.
 
-The `web_search` row is not a Tool Call at all.
+### Two Execution Planes
 
-### Two execution planes
-
-**Client tool** — the existing Tool Call:
+**Client tool** (the existing tool call):
 
 ```text
 assistant emits ToolCallRequest
@@ -80,12 +80,15 @@ JP enables the facility on a request
     -> JP records activity and assistant output
 ```
 
-JP observes the second.
-It never dispatches it, and never fabricates a `ToolCallResponse` for it.
+JP only observes provider-hosted tools.
+It never dispatches them or fabricates a `ToolCallResponse` for them.
 
 ## Design
 
-### Configuration lives in the provider block
+### Per-Provider Configuration
+
+Hosted tools are configured under each provider's settings block and default to
+**disabled**:
 
 ```toml
 [providers.llm.anthropic.hosted_tools.web_search]
@@ -94,329 +97,330 @@ max_uses = 5
 blocked_domains = ["reddit.com"]
 ```
 
-Typed, defined in `jp_config::providers::llm::anthropic`, validated by the
-Anthropic adapter, invisible to `jp_llm` core.
+These settings are typed in `jp_config::providers::llm::anthropic` and validated
+by the Anthropic adapter; `jp_llm` core does not inspect them.
 
-OpenAI's block has its own fields under its own names.
-No shared capability vocabulary is negotiated, because the knobs are not shared:
-`max_uses` has no OpenAI equivalent and `search_context_size` has no Anthropic
-one.
+Each provider defines its own fields without a shared capability vocabulary
+because the underlying parameters differ: `max_uses` has no OpenAI equivalent,
+and `search_context_size` has no Anthropic equivalent.
 
-Consequences of this placement:
+Placing configuration under the provider block has four consequences:
 
-- **No `source`, no aliases, no fallback ordering.** The provider serving the
-  request is already selected by `assistant.model.id`, and the config key is
-  scoped to that provider.
+- **No `source`, aliases, or fallback ordering.** `assistant.model.id` already
+  selects the active provider, and the config key is scoped to that provider.
 - **No `run`, `result`, `access`, `questions`, `command`, or `parameters`.**
-  None of them apply: there is no local execution and no approval point, because
-  the work has already happened by the time JP sees it.
-- **`ChatQuery` is unchanged.** `Anthropic` is built via
+  These `ToolConfig` fields do not apply because the provider executes the tool
+  before JP receives the event, leaving no local execution or interactive
+  approval step.
+- **`ChatQuery` is unchanged.** `Anthropic` is constructed via
   `TryFrom<&AnthropicConfig>` and `convert_events` already reads per-event
-  provider config, so hosted-tool settings arrive through the existing path with
-  no new plumbing.
-- **A plugin provider needs nothing from core.** Its config subtree is already
-  opaque to JP; its hosted tools ride along inside it.
+  provider config, so hosted-tool settings arrive through the existing config
+  path.
+- **Plugin providers require no core changes.** A plugin provider's config
+  subtree is already opaque to JP, so its hosted-tool settings pass through
+  untouched.
 
-Hosted tools default to **disabled**.
+### Configuration as the Consent Boundary
 
-### Configuration is the consent boundary
+Because the provider executes a hosted tool before JP can prompt the user,
+per-call approval is impossible.
+Setting `enable = true` grants blanket consent for that facility's network
+access, billing, and provider-side execution on every request to that provider.
 
-The provider executes the work before JP can prompt, so per-call approval is
-impossible.
-`enable = true` is therefore blanket consent for that facility: its network
-access, its spend, and its provider-side execution behavior for every matching
-request.
+That consent boundary matters even more for code execution and provider-side MCP
+connectors than for web search, which is why hosted tools default to disabled.
 
-This matters more for code execution and provider-side MCP connectors than for
-web search, and it is why the default is off.
+### Anthropic Adapter Responsibilities
 
-### The Anthropic adapter owns everything else
+All provider-specific protocol handling lives in `anthropic.rs`; core sees only
+the normalized hosted-activity event from [RFD D31].
 
-**Request.** `convert_tools` gains a branch emitting
+**Request.** `convert_tools` emits
 `types::Tool::WebSearch(ToolWebSearch::WebSearch20250305(..))` with the
-configured knobs.
+configured parameters.
 The adapter selects the native wire version (`web_search_20250305` through
-`web_search_20260318`) and records that selection in the payload, so a JP
-upgrade does not continue an activity under a contract it did not begin under.
-The native version is not user-configurable.
+`web_search_20260318`) and records it in the persisted payload so that replaying
+a conversation across a JP upgrade preserves the wire contract the activity
+started with.
+The native wire version is not user-configurable.
 
-**Validation.** Enabling a hosted tool the active model or endpoint cannot serve
-is a hard error raised by the adapter before the request goes out — web search
-is unavailable on Bedrock, and dynamic filtering requires Claude 4.6 or later.
-Silently dropping it would let an A/B run compare a model with search against
-one without while claiming to compare models.
+**Validation.** If a hosted tool is enabled for a model or endpoint that does
+not support it (for example, web search on Bedrock, or dynamic filtering on
+models earlier than Claude 4.6), the adapter returns a hard error before sending
+the request.
+Silently dropping the tool would invalidate A/B evaluations by running one model
+with search and another without.
 
 **Response.** `map_content_start` maps a `server_tool_use` block to a
 hosted-activity part.
-The result arrives as one complete `web_search_tool_result` block rather than
-deltas, so the adapter holds the activity open until the result lands and then
-emits it with the native payload attached.
-The user sees the activity line stay up while the search runs, which is the
-correct display.
+Because the result arrives as a single complete `web_search_tool_result` block
+rather than streaming deltas, the adapter holds the activity open until the
+result block arrives, keeps the activity line visible in the terminal while the
+search runs, and then emits the completed event with the native payload
+attached.
 
-**Replay.** `convert_events` reconstitutes both native blocks from the persisted
-payload — `server_tool_use` and `web_search_tool_result`, with
-`encrypted_content` byte-identical, since Anthropic rejects a modified or
-missing value.
-An activity whose payload is absent has neither block emitted.
+**Replay.** `convert_events` reconstructs both the `server_tool_use` and
+`web_search_tool_result` blocks from the persisted payload, preserving
+`encrypted_content` byte-for-byte because Anthropic rejects requests when that
+field is modified or missing.
+If an activity has no persisted payload, the adapter omits both blocks.
 
-**Continuation.** `pause_turn` joins the existing max-token chaining inside the
-adapter: resend the paused assistant message unchanged until the turn reaches a
-JP-visible boundary.
+**Continuation.** When the API stops with `pause_turn`, the adapter reuses its
+max-token chaining path and resends the paused assistant message unchanged until
+the turn reaches a JP-visible boundary.
 
-Every one of these lives in `anthropic.rs`.
-Core sees only the normalized hosted-activity event from [RFD D31].
-
-### Mixed client and hosted calls
+### Mixed Client and Hosted Calls
 
 When Claude calls web search and a client tool in the same parallel batch, the
-API returns `stop_reason: "tool_use"` and does *not* run the search yet:
+API returns `stop_reason: "tool_use"` and defers the search:
 
 1. JP persists the hosted activity in `started` state with its native payload.
 2. JP emits `ToolCallRequest` events for the client tools only.
-3. JP executes those normally.
-4. On the next request the adapter replays the pending activity and the client
-   results in the native order Anthropic requires.
-5. Anthropic runs the deferred search and resumes.
+3. JP executes the client tools as usual.
+4. On the next request, the adapter replays the pending activity and the client
+   tool results in the native block order that Anthropic requires.
+5. Anthropic executes the deferred search and resumes generation.
 
-The core invariant holds throughout: every `ToolCallRequest` is work JP must
-dispatch.
+The core invariant holds throughout: every `ToolCallRequest` represents work
+that JP dispatches.
 
-### Continuation is stateless; abandonment is explicit
+### Stateless Continuation and Explicit Abandonment
 
-Step 4 reads from the **conversation stream**, not adapter memory.
-The payload is persisted, so the adapter reconstitutes it on every request —
-exactly as it does for thinking signatures today.
-Retry, restart, and resumption after interrupt all rebuild the request from the
-stream, and adapter-held state would break all three.
+Replaying a deferred activity in step 4 reads from the **conversation stream**,
+not from adapter memory.
+Because the native payload is persisted in the stream, the adapter reconstructs
+it on every request, just as it does for thinking signatures.
+Retries, process restarts, and resumptions after an interrupt all rebuild the
+request from the stream; holding continuation state in adapter memory would
+break all three.
 
-[RFD 078] lets a tool change config between cycles, including the active model,
-so a pending activity can meet a config that cannot continue it.
-Two cases:
+Under [RFD 078], a tool can mutate configuration between cycles, including the
+active model, while a hosted activity is still pending:
 
-- **Same provider, declaration changed.** The adapter keeps declaring the tool
-  for as long as it holds a pending activity, reading its own persisted payload.
-  The freshly resolved config does not silently drop a declaration the
-  transcript depends on.
-- **Provider switched.** The new adapter preserves and ignores a payload it did
-  not write ([RFD D31]'s contract), so the request is valid and the activity
-  stays `started` with no terminal transition — an honest record that a search
-  began and never finished.
+- **Same provider, declaration changed.** As long as the conversation stream
+  holds a pending activity, the adapter continues to declare the hosted tool by
+  reading its own persisted payload.
+  The newly resolved config does not silently drop a tool declaration that the
+  provider transcript still requires.
+- **Provider switched.** Per [RFD D31], the new provider's adapter preserves and
+  ignores a payload written by another provider.
+  The outgoing request remains valid, and the activity stays in `started` state
+  with no terminal transition, recording that the search began and never
+  finished.
 
-In both cases the adapter **abandons explicitly**, recording the abandonment,
-rather than erroring mid-turn or silently corrupting the provider transcript.
-No config delta is rejected, and no capability [RFD 078] promises is blocked to
-protect a transcript detail.
+In both cases, when a pending activity cannot continue, the adapter **abandons
+it explicitly** and records the abandonment rather than failing mid-turn or
+corrupting the provider transcript.
+Config deltas are never rejected, and [RFD 078] config mutations are never
+blocked to protect provider transcript state.
 
-### `tool_choice` must not broaden silently
+### Scoping `tool_choice` to Client Tools
 
-Hosted tools go into the same native `tools` array as client tools, which is the
-wire shape.
-Two existing sites in `anthropic.rs` change behavior as a result, and both must
-be handled:
+Anthropic's wire format places hosted tools and client tools in the same `tools`
+array.
+Adding hosted tools to that array affects two places in `anthropic.rs`:
 
-- `convert_tool_choice` maps `ToolChoice::Required` to Anthropic's `any`,
-  meaning "use one of the provided tools."
-  Once `web_search` is in that array, a user who asked the model to call one of
-  *their* tools can have that satisfied by a search instead.
+- `convert_tool_choice` maps `ToolChoice::Required` to Anthropic's `any` ("use
+  one of the provided tools").
+  Once `web_search` is in the `tools` array, a `Required` constraint intended
+  for the user's client tools could be satisfied by a web search instead.
 - The documented single-tool quirk workaround (`tools.len() == 1 &&
   matches!(tool_choice, ToolChoice::Function(_))` downgrading to `Required`)
-  stops firing when a hosted tool makes the array length 2.
+  stops firing when a hosted tool brings the array length to 2.
 
-Policy: `assistant.tool_choice` stays scoped to JP-dispatched tools.
-The adapter ensures the native request does not extend it to hosted tools, and
-forcing a hosted tool is unsupported.
+`assistant.tool_choice` remains scoped to JP-dispatched client tools.
+The adapter excludes hosted tools when applying `tool_choice`, and forcing a
+hosted tool is unsupported.
 
 ### Activation
 
-Hosted tools sit outside `conversation.tools`, so `-T`, `--no-tool`, and tool
-groups do not apply to them — correctly, since they are not tools.
+Because hosted tools live outside `conversation.tools`, `-T`, `--no-tool`, and
+tool groups do not apply to them.
 
-For a single query, `--cfg` carries the override.
-The full path is long, so the documented form uses a config fragment resolved
-against `config_load_paths`:
+To enable a hosted tool for a single query, pass `--cfg` with either the full
+config path or a config fragment resolved against `config_load_paths`:
 
 ```sh
 jp query --cfg providers.llm.anthropic.hosted_tools.web_search.enable=true "..."
 jp query --cfg websearch "..."   # a websearch.toml fragment
 ```
 
-No new flag.
-If the pattern proves common enough, a dedicated selector can be added later.
+This RFD introduces no dedicated CLI flag; a shorthand selector can be added
+later if one-off activation proves common.
 
 ### Rendering
 
-Terminal output shows the activity while it runs and its outcome afterward:
+Terminal output displays the activity while it runs and its outcome when it
+completes:
 
 ```text
 ⚒ web search: "rust async trait object safety"
   3 results
 ```
 
-**Citations are a release gate, not a follow-up.** Anthropic, OpenAI, and Google
-all impose attribution or display obligations on search-backed output.
-Rendering search-backed assistant text without its citations is not an
-incomplete feature, it is a non-compliant one.
-The typed attributions from [RFD D31] are rendered inline or as a source list,
-and web rendering in the `serve-web` plugin follows the same rule.
+**Citation rendering is a release gate.** Anthropic, OpenAI, and Google all
+impose attribution display requirements on search-backed output, so shipping
+search-backed responses without citations violates provider terms.
+Both terminal output and the `serve-web` plugin must render the typed
+attributions from [RFD D31], either inline or as a source list.
 
-Hosted-activity spend is shown as the number of searches in the turn, counted
-from the recorded `HostedActivity` events.
-[RFD D31] persists no usage counters, so the provider's own count
-(`usage.server_tool_use.web_search_requests`) is a diagnostic, not a display
-source.
+Hosted-activity usage is displayed as the number of searches in the turn,
+counted from the recorded `HostedActivity` events.
+Because [RFD D31] does not persist provider usage counters, the provider's
+reported count (`usage.server_tool_use.web_search_requests`) is used only as a
+diagnostic.
 
 ## Drawbacks
 
-**Two configuration idioms for things users think of as tools.** Someone who
-enabled web search will look for it under `conversation.tools` and not find it.
-The split is honest — they are different execution planes — but it is a real
-learning cost, and the ubiquitous-language entries are the mitigation rather
-than a fix.
+**Two configuration locations for tool-like features.** Users who enable web
+search may look for it under `conversation.tools` and not find it.
+Separating client tools from provider-hosted tools reflects their different
+execution planes, but it adds a learning cost that ubiquitous-language
+definitions only partially mitigate.
 
-**Switching provider silently changes capability.** Configure Anthropic's web
-search, run a query on OpenAI, and that query has no search.
-This is deliberate: under this placement it is an *absent capability on an
-unconfigured provider*, not a degraded explicit setting, which matches how
-reasoning support already behaves.
-`adaptive_effort` warns when it clamps an explicitly requested level; nothing
-warns when a model simply does not reason.
+**Switching providers silently changes capability.** If a user configures
+Anthropic's web search and runs a query on OpenAI, that query runs without
+search.
+Under provider-scoped placement, OpenAI treats this as an unconfigured
+capability rather than a degraded cross-provider setting.
+This matches how reasoning support works: `adaptive_effort` warns when it clamps
+an explicitly requested level, whereas a model that does not support reasoning
+simply runs without it.
 
-**`--cfg providers.llm.anthropic.hosted_tools.web_search.enable=true` is long.**
-A direct cost of provider-scoped placement, mitigated by config fragments rather
-than removed.
+**Verbose `--cfg` overrides.** Passing `--cfg
+providers.llm.anthropic.hosted_tools.web_search.enable=true` on the command line
+is long, though config fragments (`--cfg websearch`) mitigate the typing cost.
 
-**Per-provider configuration duplicates intent.** Wanting web search on both
-Anthropic and OpenAI means two config blocks.
-The knobs genuinely differ, so some duplication is inherent, but the `enable`
-flag is duplicated for no reason other than placement.
+**Duplicated configuration across providers.** Enabling web search on both
+Anthropic and OpenAI requires two config blocks.
+Although the provider-specific parameters differ, the `enable` flag is
+duplicated across providers.
 
 ## Alternatives
 
-**`ToolSource::Llm` plus a no-op executor.** Rejected.
-`llm.bash` and `llm.web_search` would differ in who executes, so one source
-variant cannot describe both; and it requires exceptions in the turn loop, the
-execution plan, and orphan sanitization.
-[RFD D10] rejects this class of change explicitly.
+**`ToolSource::Llm` with a no-op executor.** Because `llm.bash` is executed by
+JP and `llm.web_search` is executed by the provider, a single `ToolSource::Llm`
+variant cannot describe both.
+Routing server tools through `ToolSource` would also require special cases in
+the turn loop, the execution plan, and orphan sanitization, which [RFD D10]
+explicitly rejects.
 
-**`assistant.request.hosted_tools.<capability>.<provider>`,** with a
-provider-agnostic capability key and per-provider sub-blocks.
-Genuinely attractive: one `enable` per capability, symmetric A/B arms, and the
-tool stays enabled across a model switch.
-Rejected because core would have to hold a capability namespace and a
-`ChatQuery.hosted_tools` field, and a plugin provider's hosted tools would need
-names core recognizes.
-Provider-scoped placement is a step toward providers-as-plugins; this is a step
-away.
-The earlier arguments for it — that provider config is not conversation-scoped,
-and that grants would sit next to credentials — do not hold:
-`PartialAppConfig::delta` covers `providers`, the tree holds only `api_key_env`
-rather than a secret, and [RFD 078] grants are per-path rather than per-section.
+**`assistant.request.hosted_tools.<capability>.<provider>`.** A
+provider-agnostic capability key with per-provider sub-blocks would provide one
+`enable` flag per capability, symmetric A/B test configurations, and persistent
+activation across model switches.
+However, it requires core to maintain a capability namespace and a
+`ChatQuery.hosted_tools` field, and it forces plugin providers to use capability
+names that core recognizes.
+Provider-scoped placement aligns with moving providers into plugins.
+Earlier objections to provider-scoped placement do not hold:
+`PartialAppConfig::delta` covers `providers`, the config tree stores
+`api_key_env` rather than raw secrets, and [RFD 078] grants are scoped per path
+rather than per section.
 
-**A `provider_alias` map on the tool entry**, or a provider-side `tools.<native>
-= "<jp name>"` map.
-Rejected with the tool-entry model itself.
-The provider-side form also reads backwards: understanding a tool would mean
-grepping every provider block for a reverse mapping, and it puts JP-namespace
-names inside a block that should describe the provider.
+**A `provider_alias` map on the tool entry, or a provider-side `tools.<native> =
+"<jp name>"` map.** Both rely on the rejected tool-entry model.
+The provider-side form also inverts lookup direction: understanding a tool would
+require searching every provider block for a reverse mapping, and provider
+config would contain JP-namespace tool names.
 
-**Ordered fallback variants** — one tool name resolving to a provider-hosted
-search, else an MCP search, else a local one.
-Rejected here.
-Their schemas, invocation protocols, pricing, security posture, and citation
-obligations all differ, and one runs inside the provider's loop while the other
-stops it for JP execution.
-Ordered fallback would hide those differences behind a single name.
-Capability routing is a separate feature; issue [#208] covers adjacent
-multi-exposure requirements and should not be mixed in.
+**Ordered fallback variants.** Resolving a single tool name to a provider-hosted
+search, then an MCP search, and then a local tool hides major operational
+differences behind one name.
+Provider-hosted and client-executed tools differ in schema, invocation protocol,
+pricing, security posture, and citation obligations, and one runs inside the
+provider's loop while the other pauses generation for JP execution.
+Capability routing and multi-exposure (tracked in [#208]) belong in a separate
+feature.
 
-**Automatic discovery** via a `Provider::executed_tools()` capability list.
-Rejected as premature — it exists to serve a discovery caller this design does
-not have.
-Typed fields inside each provider's config block give in-tree providers better
-diagnostics, and a plugin provider's own schema covers the open case without
-core arbitrating.
+**Automatic discovery via `Provider::executed_tools()`.** Nothing in this design
+queries a runtime capability list.
+Typed fields inside each provider's config block give built-in providers
+compile-time and schema diagnostics, and a plugin provider's own schema covers
+external providers without core arbitrating.
 
-**Silently dropping an unsupported hosted tool** with a warning, mirroring how
-an MCP tool whose server is down is skipped.
-Rejected: see Validation above.
+**Silently dropping an unsupported hosted tool with a warning.** Skipping an MCP
+tool when its server is unreachable is a runtime availability fallback, whereas
+enabling a hosted tool on an unsupported model or endpoint is a configuration
+error (see Validation above).
 
 ## Non-Goals
 
 - **Provider-supplied client tools** (Anthropic `bash`, `text_editor`,
   `computer_use`).
-  Provider-owned schema, JP execution — a `ToolSource` question, deliberately
-  separate.
+  These tools use a provider-owned schema with JP execution, which is a separate
+  `ToolSource` design.
 - **Forcing a hosted tool** via `assistant.tool_choice`.
 - **Fallback or capability routing** across hosted, MCP, and local
   implementations of one capability.
-- **A shared cross-provider capability vocabulary.** Each provider names its
-  own.
+- **A shared cross-provider capability vocabulary.** Each provider defines its
+  own hosted-tool names and parameters.
 - **Provider-hosted tools beyond web search** in the first slice.
-  OpenAI or Google follows as the test that the boundary generalizes.
+  OpenAI or Google follows in Phase 5 to test that the boundary generalizes.
 
 ## Risks and Open Questions
 
 - **The boundary is unproven until a second provider lands.** If adding OpenAI
   web search forces changes to [RFD D31]'s normalized activity shape, the
   normalization was derived from too few examples.
-  Finding that with one implementation in hand is the point of doing them in
-  this order.
+  Implementing a second provider in Phase 5 tests that boundary before more
+  hosted tools are added.
 - **Google may not fit `started | completed | failed`.** Search grounding may
   expose only completed metadata with attribution ranges and required Search
-  Suggestion content, with no call/result pair.
-- **Deferring the flush of a hosted activity until its result arrives** relies
-  on the result being a single complete block.
-  If Anthropic ever streams result content in deltas, the adapter needs a
+  Suggestion content, with no separate call and result pair.
+- **Single-block assumption for search results.** Holding a hosted activity open
+  until its result arrives relies on `web_search_tool_result` arriving as one
+  complete block.
+  If Anthropic later streams result content in deltas, the adapter will need a
   different accumulation strategy.
-- **Whether `pause_turn` interacts with max-token chaining** in ways the
-  existing `should_chain` logic mishandles needs testing against a long search
-  turn.
-- **Prompt injection.** Web search pulls untrusted content into context.
-  [RFD 096] covers terminal sanitization; whether hosted results need handling
-  beyond that is open.
+- **Interaction between `pause_turn` and max-token chaining.** Long search turns
+  need testing to verify that the existing `should_chain` logic handles
+  `pause_turn` alongside max-token continuation.
+- **Prompt injection.** Web search pulls untrusted content into the model
+  context.
+  [RFD 096] covers terminal sanitization; whether hosted results need additional
+  handling remains open.
 
 ## Implementation Plan
 
 Requires [RFD D31] phases 1 through 4.
 
-### Phase 1: Typed configuration
+### Phase 1: Typed Configuration
 
-`hosted_tools` on `AnthropicConfig` with the web-search fields, defaulting to
-disabled.
-Schema, delta, fill, and partial support.
-Independently mergeable; nothing reads it yet.
+Add `hosted_tools` to `AnthropicConfig` with the web-search fields, defaulting
+to disabled, along with schema, delta, fill, and partial support.
+This phase is independently mergeable before the adapter reads the new fields.
 
-### Phase 2: Request translation and validation
+### Phase 2: Request Translation and Validation
 
-`convert_tools` branch, native version selection, model and endpoint validation,
-and the two `tool_choice` corrections.
-At this point the tool is declared and the model can call it, but the response
-path drops the blocks.
+Add the `convert_tools` branch, native wire version selection, model and
+endpoint validation, and the two `tool_choice` adjustments in `anthropic.rs`.
+At this point the tool is declared and the model can call it, while the response
+path still drops returned server-tool blocks.
 
-### Phase 3: Response path
+### Phase 3: Response Path
 
-`server_tool_use` mapping, deferred flush with payload attachment,
-`convert_events` replay of both native blocks, `pause_turn` continuation, and
-the abandonment rules.
-This is the slice that makes web search work end to end.
+Implement `server_tool_use` mapping, deferred activity flush with native payload
+attachment, `convert_events` replay of both native blocks, `pause_turn`
+continuation, and explicit abandonment.
+This phase completes end-to-end web search execution.
 
-### Phase 4: Rendering and usage
+### Phase 4: Rendering and Usage
 
-Activity display, citation rendering in terminal and `serve-web`, and the
-per-turn search count.
-Gates the release, per Rendering above.
+Implement terminal activity display, citation rendering in the terminal and
+`serve-web`, and the per-turn search count.
+This phase gates the release.
 
-### Phase 5: Second provider
+### Phase 5: Second Provider
 
-OpenAI or Google, as the test that provider-owned translation generalizes
-without touching core.
+Implement web search for OpenAI or Google to verify that provider-owned
+translation generalizes without changes to `jp_llm` core.
 
 ## References
 
-- `crates/jp_llm/src/provider/anthropic.rs` — `convert_tools`,
+- `crates/jp_llm/src/provider/anthropic.rs`: `convert_tools`,
   `convert_tool_choice`, `convert_events`, chaining
-- `crates/jp_config/src/providers/llm/anthropic.rs` — `AnthropicConfig`
+- `crates/jp_config/src/providers/llm/anthropic.rs`: `AnthropicConfig`
 - <https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools>
 - <https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool>
 
