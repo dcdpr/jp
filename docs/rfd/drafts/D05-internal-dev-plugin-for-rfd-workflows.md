@@ -11,73 +11,67 @@
 > [!IMPORTANT]
 > This RFD is **Abandoned**.
 >
-> Its plugin was split by concern into later RFDs, and its remaining workflow
-> needs a redesign on the current plugin protocol.
+> Its plugin was split by concern into later RFDs, and the remaining workflow
+> needs a redesign for the current plugin protocol.
 >
-> The one internal `jp dev` plugin became a family of plugins.
-> [RFD 116] gives the RFD lifecycle commands this draft handed to `just
-> rfd-promote` to `jp rfd`, and [RFD 121] and [RFD 122] give releases to `jp
-> release`.
+> The single internal `jp dev` plugin became a family of plugins: [RFD 116]
+> moves the RFD lifecycle commands (which this draft delegated to `just
+> rfd-promote`) into `jp rfd`, and [RFD 121] and [RFD 122] move release
+> management into `jp release`.
 > The AI-assisted steps between lifecycle transitions (explore, converge, draft,
-> review, refine, implement) are not carried forward.
-> A future RFD on the new RFD-writing workflow takes them up, on top of `jp
-> rfd`, with the host's `query` request in place of this draft's `jp query`
-> subprocesses.
+> review, refine, implement) were not carried forward; a future RFD will build
+> them on top of `jp rfd`, using the host's `query` request instead of spawning
+> `jp query` subprocesses.
 >
 > The original text below is preserved for historical context.
 
 ## Summary
 
-This RFD introduces `jp-dev`, an internal command plugin that provides
-structured, AI-assisted workflows for the full RFD lifecycle: authoring new RFDs
-through a phased explore → converge → draft process, reviewing and refining
-drafts, and executing implementation plans phase by phase.
-The plugin manages a state directory alongside the RFD documents, orchestrates
-`jp` conversations for each workflow step with appropriate model and tool
-selection, and carries context (research summaries, locked decisions, reviews,
-phase summaries) across steps so that each AI interaction is focused and
-well-informed.
+This RFD introduces `jp-dev`, an internal command plugin that orchestrates
+AI-assisted workflows across the RFD lifecycle: authoring new RFDs through a
+phased explore → converge → draft process, reviewing and refining drafts, and
+executing implementation plans phase by phase.
+The plugin manages a state directory alongside the RFD documents, spawns `jp`
+conversations with step-specific models and tools, and carries artifacts
+(research summaries, locked decisions, reviews, and phase summaries) from one
+step to the next.
 
 ## Motivation
 
 The existing RFD tooling (`just rfd-*`) handles lifecycle transitions: creating
 drafts, promoting status, superseding, and abandoning.
-What it does not handle is the *work between transitions* — the iterative
-process of exploring a problem space, converging on design decisions, drafting
-the document section-by-section, reviewing and refining the draft, and executing
-the implementation plan phase by phase.
+It does not handle the work between transitions: exploring a problem space,
+converging on design decisions, drafting the document section by section,
+reviewing and refining the draft, and executing the implementation plan phase by
+phase.
 
-Today this work happens through ad-hoc `jp query` invocations.
-The contributor manually assembles the right persona, model, attachments, and
-prompt for each step.
-Research done in one conversation is not carried into the next.
-Design decisions made during a brainstorming session live only in conversation
-history.
-Reviews are not preserved as artifacts.
-Implementation summaries from one phase are not automatically carried into the
-next.
-There is no structured way to see "where am I in this RFD's lifecycle?"
+Today this work happens through ad-hoc `jp query` invocations where the
+contributor manually assembles the persona, model, attachments, and prompt for
+each step.
+Context does not carry across sessions: research stays in the conversation where
+it was gathered, brainstorming decisions remain buried in chat history, reviews
+are not saved as artifacts, and implementation summaries from one phase do not
+feed into the next.
+There is also no way to inspect where an RFD stands in its workflow.
 
 The authoring gap is especially costly.
-Complex RFDs benefit from a phased process: cheap, fast models for initial
+Complex RFDs benefit from a phased process: fast, cheap models for initial
 research (reading code, scanning prior art, searching crates); strong models for
-design convergence (evaluating trade-offs, locking decisions); and careful
+design convergence (evaluating trade-offs, locking decisions); and
 section-by-section drafting with explicit review gates.
 Today, contributors do all of this in a single conversation with one model and
-one tool set — or worse, across several disconnected conversations where
-context is lost between sessions.
+tool set, or across several disconnected conversations that lose context between
+sessions.
 
 The `dev` plugin automates this orchestration.
+It is internal to the JP project and is not intended for general distribution.
 Each workflow step is a subcommand that:
 
-1. Selects the appropriate model and tool set for the task.
-2. Attaches relevant artifacts from prior steps as context.
-3. Opens `$EDITOR` so the contributor can steer the interaction.
+1. Selects the model and tool set for the task.
+2. Attaches artifacts from prior steps as context.
+3. Opens `$EDITOR` so the contributor can steer the prompt.
 4. Saves the output as a durable artifact.
 5. Feeds that artifact into subsequent steps.
-
-The plugin is internal to the JP project — it is specific to how JP itself is
-built and is not intended for general distribution.
 
 ## Design
 
@@ -174,48 +168,39 @@ All state is derived from filesystem presence:
 | Active reviews      | Files in `reviews/`                      |
 | Active impl reviews | Files in `impl-reviews/`                 |
 
-No `state.json`.
-The filesystem *is* the state.
-Recovery from a broken state is trivial — delete or add a file.
+There is no `state.json`; the filesystem is the state, so recovering from a
+broken state only requires adding or deleting a file.
 
 ### Workflow Steps
 
-Each step spawns a `jp` subprocess that inherits the terminal so the contributor
-gets the full interactive experience: `$EDITOR` for composing the prompt,
-streaming markdown rendering, tool call display, and so on.
-
-After the subprocess completes, the plugin extracts the assistant's final
-response via the plugin protocol.
-It calls `read_events` for the conversation (identified by the conversation ID
-obtained during creation), finds the last `chat_response` event, and saves the
-message content as a Markdown file.
+Each step spawns a `jp` subprocess that inherits the terminal, giving the
+contributor `$EDITOR` for composing the prompt, streaming Markdown rendering,
+and tool call output.
+After the subprocess exits, the plugin fetches the conversation's last
+`chat_response` event over the plugin protocol and saves its message as a
+Markdown file (see [Response Extraction](#response-extraction)).
 
 #### Creating conversations
 
-Each workflow step creates a dedicated conversation for its interaction.
-The plugin uses `jp conversation new` ([RFD 050]) to create the conversation and
+Each workflow step runs in its own conversation so the contributor's active
+conversation stays unchanged.
+The plugin runs `jp conversation new` ([RFD 050]) to create a conversation and
 capture its ID, then runs `jp query --id=<ID>` against it.
-This keeps the contributor's active conversation unchanged.
 
-Before RFD 050 is implemented, the plugin falls back to parsing the conversation
-ID from `jp query --new` output, or identifies the most recently created
-conversation in the workspace after the subprocess exits.
+Before [RFD 050] is implemented, the plugin falls back to parsing the
+conversation ID from `jp query --new` output or selecting the most recently
+created conversation in the workspace after the subprocess exits.
 
 ### Author Workflow
 
-The author workflow covers the work *before* the RFD document exists.
-It manages three phases with distinct model and tool profiles, each producing a
-durable artifact that feeds into the next.
-
-The full lifecycle including the author workflow:
+The author workflow covers the three steps before the RFD document is complete:
+`explore`, `converge`, and `draft`.
+Each step uses a distinct model and tool profile and produces an artifact that
+feeds into the next step of the full lifecycle:
 
 ```
 explore → converge → draft → review → refine → accept → implement → done
 ```
-
-The author workflow covers `explore`, `converge`, and `draft`.
-The remaining steps (`review` through `done`) are unchanged from the original
-design.
 
 #### `explore`
 
@@ -227,25 +212,23 @@ jp dev rfd D32 explore                    # re-run after draft exists
 jp dev rfd D32 explore --model=flash       # override model
 ```
 
-- **Model**: sonnet (fast, cheap — this is research and brainstorming).
+- **Model**: sonnet (fast and cheap for research and brainstorming).
 - **Tools**: read-only (`fs_read_file`, `fs_grep_files`, `fs_list_files`,
-  `github_issues`, `github_pulls`), web access (`web_fetch`), crate research
+  `github_issues`, `github_pulls`), web access (`web_fetch`), and crate research
   (`crates_search`, `crate_readme`, `crate_search_items`).
-  No write tools.
+  No general write tools.
 - **Attaches**: the contributor's problem statement or notes.
-- **Behavior**: the assistant investigates the codebase, reads related RFDs,
-  searches for crates and prior art, asks clarifying questions.
-  The conversation is freeform.
-- **Artifact**: after the conversation ends, the plugin extracts the assistant's
-  final response and saves it to `explore.md`.
+- **Behavior**: freeform conversation in which the assistant investigates the
+  codebase, reads related RFDs, searches for crates and prior art, and asks
+  clarifying questions.
+- **Artifact**: `explore.md`, written from the assistant's final response when
+  the conversation ends.
 
-When invoked as `jp dev rfd author "title"`, the plugin creates a new state
-directory, records the title, and immediately enters the explore phase.
-When invoked as `jp dev rfd D32 explore`, it re-runs research for an existing
-draft, replacing the previous `explore.md`.
-
-The contributor can run `explore` multiple times to deepen research.
-Each run replaces the explore artifact.
+Running `jp dev rfd author "title"` creates a new state directory, records the
+title, and starts `explore` immediately.
+Running `jp dev rfd D32 explore` re-runs research for an existing draft;
+contributors can run `explore` multiple times to deepen research, and each run
+overwrites `explore.md`.
 
 #### `converge`
 
@@ -255,34 +238,23 @@ Converge on design decisions with a strong model.
 jp dev rfd D32 converge
 ```
 
-- **Model**: opus (deep reasoning — this is where design decisions get made).
-- **Tools**: read-only tools (same as explore), plus the `rfd_decision` tool
-  (see [Dedicated RFD Tools](#dedicated-rfd-tools)).
+- **Model**: opus (for evaluating trade-offs and making design decisions).
+- **Tools**: the `explore` read-only tools plus `rfd_decision` (see [Dedicated
+  RFD Tools](#dedicated-rfd-tools)).
   No general file write access.
-- **Attaches**: the explore artifact (`explore.md`), the original problem
-  statement, RFD 001 (the process document).
-- **Behavior**: the assistant proposes options, the contributor pushes back,
-  they iterate.
-  The assistant uses the `rfd_decision` tool to record each decision as it is
-  made — adding new decisions, updating existing ones, or marking them as
-  rejected.
-  The `decisions.md` file evolves through the conversation as the living record
-  of the design.
-- **Artifact**: `decisions.md`, maintained incrementally via `rfd_decision` tool
-  calls throughout the conversation.
+- **Attaches**: `explore.md`, the original problem statement, and [RFD 001].
+- **Behavior**: the assistant proposes options and iterates with the
+  contributor, calling `rfd_decision` to add decisions, update existing ones, or
+  mark them as rejected.
+- **Artifact**: `decisions.md`, updated incrementally through `rfd_decision`
+  calls during the conversation.
 
-The `rfd_decision` tool runs in `ask` mode — the contributor confirms each
-decision write.
-This provides a natural checkpoint: the contributor reviews each decision as it
-is recorded and can reject or revise it before it lands in the file.
+Because `rfd_decision` runs in `ask` mode, the contributor confirms each write
+and can reject or revise a decision before it lands in `decisions.md`.
 
-The conversation continues as long as needed.
-There is no forced end.
-When the contributor is satisfied, they end the conversation naturally.
-
-The state machine enforces ordering: `draft` is not available until
-`decisions.md` exists.
-The contributor can re-enter `converge` at any time to revise decisions, even
+The conversation continues until the contributor exits.
+The state machine requires `decisions.md` to exist before `draft` can run, and
+the contributor can re-enter `converge` at any time to revise decisions, even
 after drafting has started.
 
 ##### Decision file format
@@ -309,7 +281,7 @@ The `rfd_decision` tool maintains `decisions.md` with consistent structure:
 
 #### `draft`
 
-Draft the RFD document section-by-section with explicit review gates.
+Draft the RFD document section by section with explicit review gates.
 
 ```
 jp dev rfd D32 draft
@@ -322,42 +294,40 @@ jp dev rfd D32 draft
   See [Dedicated RFD Tools](#dedicated-rfd-tools).
   No general file write access.
 
-- **Attaches**: `decisions.md`, `explore.md`, RFD 001.
+- **Attaches**: `decisions.md`, `explore.md`, and [RFD 001].
 
 - **Behavior**: the assistant follows a two-stage confirmation process for each
   section:
 
-  1. **State intent.** The assistant announces which section it will write next,
-     describes its plan (what points it will cover, how it will frame them, what
-     it is deliberately excluding), and waits for approval.
-  2. **Contributor reviews intent.** Agrees, pushes back, or redirects.
-  3. **Write the section.** The assistant calls `rfd_section` with the content.
-     The tool runs in `ask` mode — the contributor sees the write and confirms.
-     Because they already reviewed the intent in step 1, they can correlate the
-     written content against the agreed plan and reject if they don't match.
-  4. **Proceed to next section.** The assistant does NOT continue to the next
-     section until the contributor confirms.
+  1. **State intent.** The assistant names the next section, outlines its plan
+     (what points to cover, how to frame them, and what to exclude), and waits
+     for approval.
+  2. **Contributor reviews intent.** The contributor approves, pushes back, or
+     redirects the plan.
+  3. **Write the section.** The assistant calls `rfd_section` in `ask` mode.
+     The contributor compares the written section against the agreed plan and
+     confirms or rejects the write.
+  4. **Proceed to next section.** The assistant waits for confirmation before
+     moving on.
 
-- **Artifact**: the RFD file itself, created by `rfd_draft` and populated by
+- **Artifact**: the RFD file, created by `rfd_draft` and populated by
   `rfd_section`.
 
 The system prompt encodes the two-stage confirmation rule:
 
 > Before writing each section: (1) state which section you will write next, (2)
-> describe your plan — what points you will cover, how you will frame them, and
-> what you are deliberately excluding, (3) wait for approval before writing, (4)
-> do not proceed to the next section until the contributor confirms.
+> describe your plan (what points you will cover, how you will frame them, and
+> what you are deliberately excluding), (3) wait for approval before writing,
+> (4) do not proceed to the next section until the contributor confirms.
 
-If the contributor is unsatisfied with a section after it is written, they can
-ask the assistant to revise it within the same conversation.
-The assistant calls `rfd_section` again for the same section, overwriting the
-previous content.
+To revise a section within the same conversation, the assistant calls
+`rfd_section` again for that section, overwriting its previous content.
 
 ### Dedicated RFD Tools
 
 The author workflow uses purpose-built tools instead of raw `fs_modify_file`.
-These tools encode the workflow semantics — the LLM interacts with "decisions"
-and "sections" rather than files and diffs.
+These tools expose domain operations ("decisions" and "sections") rather than
+raw file edits and diffs.
 
 #### `rfd_decision`
 
@@ -372,10 +342,8 @@ Parameters:
   reason:  string                         (required for reject)
 ```
 
-Internally writes to `docs/rfd/.state/<id>/decisions.md`.
-The tool manages the file format — the LLM never touches the raw markdown
-directly.
-Each call is confirmed by the contributor in `ask` mode.
+Writes to `docs/rfd/.state/<id>/decisions.md` in `ask` mode.
+The tool formats the file directly so the LLM never edits raw Markdown.
 
 #### `rfd_section`
 
@@ -387,10 +355,9 @@ Parameters:
   content:  string    (the markdown content for this section)
 ```
 
-Internally calls `fs_modify_file` on the RFD file, replacing the template
-placeholder or existing content for that section.
-The tool knows the RFD file path from the workflow state.
-Runs in `ask` mode.
+Resolves the RFD file path from workflow state and calls `fs_modify_file` in
+`ask` mode, replacing the template placeholder or existing content for that
+section.
 
 #### `rfd_explore_summary`
 
@@ -401,11 +368,10 @@ Parameters:
   content:  string    (the research summary markdown)
 ```
 
-Writes to `docs/rfd/.state/<id>/explore.md`.
-Runs in `ask` mode.
+Writes to `docs/rfd/.state/<id>/explore.md` in `ask` mode.
 
-These tools live alongside the existing `rfd_draft`, `rfd_promote`, etc. in
-`.jp/mcp/tools/rfd/` and `.config/jp/tools/src/rfd/`.
+These tools live alongside `rfd_draft`, `rfd_promote`, and the other RFD tools
+in `.jp/mcp/tools/rfd/` and `.config/jp/tools/src/rfd/`.
 
 ### Model and Tool Selection
 
@@ -427,16 +393,11 @@ All steps accept `--model=<id>` to override the default.
 #### `review`
 
 Spawns a `jp` conversation with the architect persona and a review-focused model
-(default: Gemini Pro).
-The RFD document is attached.
-The contributor sees a pre-filled prompt in `$EDITOR` asking for a review, which
-they can edit before sending.
-
-After the conversation ends, the assistant's final response is saved to
+(default: Gemini Pro), attaches the RFD document, and opens `$EDITOR` with a
+pre-filled review prompt that the contributor can edit before sending.
+When the conversation ends, the assistant's final response is saved to
 `reviews/<timestamp>.md`.
-
-Multiple reviews can coexist.
-Each is an independent conversation.
+Multiple reviews can coexist as independent conversations.
 
 ```
 jp dev rfd 045 review                  # default model
@@ -445,11 +406,11 @@ jp dev rfd 045 review --model=opus     # override model
 
 #### `refine`
 
-Spawns a conversation with the dev persona (default: Opus).
-Attaches the RFD document and all files in `reviews/`.
-The contributor steers the refinement via `$EDITOR`.
-
-After refinement completes, the plugin lists active reviews and prompts:
+Spawns a conversation with the dev persona (default: Opus), attaches the RFD
+document and all files in `reviews/`, and opens `$EDITOR` so the contributor can
+steer the refinement.
+When the conversation ends, the plugin lists active reviews and prompts to
+dismiss resolved ones:
 
 ```
 Active reviews:
@@ -460,16 +421,15 @@ Dismiss resolved reviews? [numbers, 'all', or enter to skip]: 1
 Dismissed reviews/1721500000.md
 ```
 
-Dismissed reviews are deleted from `reviews/`.
-They have served their purpose and no longer need to influence future refinement
-steps.
+Dismissed reviews are deleted from `reviews/` so they are not attached to future
+refinement steps.
 
 #### `accept`
 
-Two operations in sequence:
+Runs two operations in sequence:
 
-1. **Plan extraction.** Spawns a `jp` conversation with structured output.
-   The RFD's Implementation Plan section is parsed into a JSON array of phases:
+1. **Plan extraction.** Spawns a `jp` conversation with a JSON schema to extract
+   the phases defined in the RFD's Implementation Plan section into `plan.json`:
 
    ```json
    [
@@ -488,70 +448,54 @@ Two operations in sequence:
    ]
    ```
 
-   The schema constrains the output.
-   The model reads the RFD and extracts whatever phases the author defined in
-   the Implementation Plan section.
-
 2. **Lifecycle promotion.** Calls `just rfd-promote <NNN>` to transition the RFD
-   from Discussion to Accepted.
-   This creates the GitHub tracking issue and updates the metadata header per
-   the existing process.
+   from Discussion to Accepted, creating the GitHub tracking issue and updating
+   the metadata header.
 
-If plan extraction fails, the promotion does not run.
-The contributor can fix the Implementation Plan section and try again.
-
-If the RFD is in Draft status, `accept` first promotes to Discussion (assigning
-a permanent number), then promotes to Accepted.
-Both promotions happen through `just rfd-promote`.
+If plan extraction fails, the promotion does not run; the contributor can fix
+the Implementation Plan section and retry.
+If the RFD is still in Draft status, `accept` calls `just rfd-promote` twice:
+first to Discussion (assigning a permanent number), and then to Accepted.
 
 #### `implement`
 
-Determines the next unfinished phase from `plan.json` and the presence of
-`phases/N.md` files.
-Spawns a conversation with the dev persona (default: Opus).
-Attaches:
+Finds the next unfinished phase from `plan.json` and the existing `phases/N.md`
+files, then spawns a conversation with the dev persona (default: Opus) and
+attaches:
 
 - The RFD document
 - The phase description from `plan.json`
-- All previous `phases/N.md` summaries (so the assistant understands what was
-  already done)
+- All previous `phases/N.md` summaries
 
-The system prompt instructs the assistant to:
-
-1. Implement the specified phase.
-2. At the end, provide a brief summary of what was implemented, any deviations
-   from the RFD, and notes relevant to future phases.
-
-After the conversation ends, the assistant's final response is saved to
+The system prompt instructs the assistant to implement the phase and end with a
+summary of what was built, any deviations from the RFD, and notes for later
+phases.
+When the conversation ends, the assistant's final response is saved to
 `phases/N.md`.
 
-The contributor can continue the implementation conversation using `jp q` if the
-first pass was incomplete.
-The `phases/N.md` file is only written after the plugin-managed conversation
-ends, so continuing the conversation extends the work before the summary is
-captured.
+If the first pass is incomplete, the contributor can continue the conversation
+with `jp q`; `phases/N.md` is written when the plugin-managed conversation
+exits.
 
 #### `done`
 
-Calls `just rfd-promote <NNN>` to transition from Accepted to Implemented.
-No LLM interaction.
+Calls `just rfd-promote <NNN>` to transition the RFD from Accepted to
+Implemented without any LLM interaction.
 
-### How the Plugin Extracts Responses
+### Response Extraction
 
-After a `jp query` subprocess finishes, the plugin needs the assistant's last
-message.
-It uses the plugin protocol for this:
+After a `jp query` subprocess exits, the plugin fetches the assistant's last
+message over the plugin protocol:
 
-1. During the workflow step, the plugin tracks the conversation ID (obtained
-   from `jp conversation new` or parsed from `jp query` output).
-2. After the subprocess exits, the plugin sends a `read_events` request through
-   its host protocol connection for that conversation ID.
-3. The host responds with the conversation's events as JSON.
-4. The plugin scans backwards for the last `chat_response` event and extracts
-   the `message` field.
+1. Track the conversation ID obtained from `jp conversation new` (or parsed from
+   `jp query` output).
+2. Send a `read_events` request for that conversation ID over the host protocol
+   connection.
+3. Receive the conversation's events as JSON.
+4. Scan backward for the last `chat_response` event and extract its `message`
+   field.
 
-This keeps the plugin decoupled from the on-disk conversation format.
-The protocol handles serialization and format evolution.
+Using `read_events` decouples the plugin from the on-disk conversation format.
 
 ### Plugin Structure
 
@@ -580,17 +524,13 @@ It is not published to the plugin registry.
 
 ### Subprocess Spawning (`jp.rs`)
 
-The `jp.rs` module provides a helper for spawning `jp` as a subprocess.
-It constructs the argument list (persona, model, attachments, flags) and spawns
-the process with inherited stdin/stdout/stderr so the contributor gets the full
-terminal experience.
-
-The helper is designed for future migration to protocol-based query delegation
-([RFD D18]).
-The interface is a function that takes a conversation spec (persona, model,
-attachments, prompt) and returns the conversation ID after execution.
-Swapping the implementation from subprocess to protocol message is a localized
-change behind this interface.
+The `jp.rs` module spawns `jp` as a subprocess with inherited
+stdin/stdout/stderr, passing the configured persona, model, attachments, and
+flags.
+Its entry point takes a conversation specification (persona, model, attachments,
+prompt) and returns the conversation ID after execution, isolating the call site
+so subprocess spawning can later be replaced with protocol-based query
+delegation ([RFD D18]).
 
 ### Review and Refinement During Implementation
 
@@ -602,15 +542,14 @@ current status:
 | Discussion | The RFD document   | The RFD document   | `reviews/`      |
 | Accepted   | The implementation | The implementation | `impl-reviews/` |
 
-During the Discussion phase, reviews evaluate the *design*.
-During the Accepted phase, reviews evaluate the *implementation* — the plugin
-attaches completed phase summaries alongside the RFD so the reviewer can assess
-whether the implementation matches the design.
+During Discussion, reviews evaluate the *design*.
+During Accepted, reviews evaluate the *implementation*: the plugin attaches
+completed phase summaries alongside the RFD so the reviewer can check whether
+the implementation matches the design.
 
 ### Installation
 
-The plugin is built and installed locally via the existing `just`
-infrastructure:
+The plugin is built and installed locally via `just`:
 
 ```sh
 just plugin-build-local
@@ -618,63 +557,53 @@ just plugin-build-local
 
 This builds all command plugin binaries (including `jp-dev`) and copies them to
 the local plugin directory.
-Since `crates/internal/*` is already in the workspace members list, no workspace
-configuration changes are needed.
+Because `crates/internal/*` is already in the Cargo workspace members list, no
+workspace configuration changes are needed.
 
 ## Drawbacks
 
-- **Subprocess spawning.** The plugin spawns `jp` as a child process for each
-  workflow step.
-  This means a second `jp` instance performs workspace discovery, config
-  loading, and LLM interaction independently of the host `jp` that is running
-  the plugin.
-  This works but is inelegant.
+- **Subprocess spawning.** Spawning `jp` as a child process for each step runs a
+  second `jp` instance that repeats workspace discovery, config loading, and LLM
+  setup independently of the host process.
   [RFD D18] (query delegation) is the long-term fix.
 
-- **Conversation ID tracking before RFD 050.** Without `jp conversation new`,
-  the plugin must use a heuristic (most recently created conversation, or parse
-  stdout) to identify the conversation created by the subprocess.
-  This is fragile.
-  RFD 050 is the clean solution.
+- **Conversation ID tracking before RFD 050.** Without `jp conversation new`
+  ([RFD 050]), the plugin must parse stdout or select the most recently created
+  conversation to identify the subprocess's conversation, which is fragile.
 
-- **Internal-only scope.** The workflow patterns here (review → refine →
-  accept → implement → done) could be useful beyond JP's own development.
-  Keeping the plugin internal limits its reach.
-  However, the patterns are encoded in the plugin's structure, not hidden — a
-  future generalization is possible without redesigning the approach.
+- **Internal-only scope.** Keeping the plugin internal limits a workflow pattern
+  (`review → refine → accept → implement → done`) that could apply beyond
+  JP's own development, though the structure can be generalized later without
+  redesigning the approach.
 
-- **Terminal ownership during subprocess.** The `jp` subprocess takes over the
-  terminal for `$EDITOR` and streaming output.
-  The plugin cannot display progress or status while the subprocess runs.
+- **Terminal ownership during subprocess execution.** Because the `jp`
+  subprocess inherits the terminal for `$EDITOR` and streaming output, the
+  plugin cannot render its own progress or status while a step runs.
   This is acceptable for an interactive workflow where the contributor is
-  directly engaged.
+  directly engaged in the terminal.
 
 - **Dedicated tools add surface area.** `rfd_decision`, `rfd_section`, and
-  `rfd_explore_summary` are purpose-built tools that need to be implemented and
-  maintained.
-  They are thin wrappers around file writes, but they still need parameter
-  validation, error handling, and tests.
-  The payoff is stronger guarantees and better LLM ergonomics than raw
-  `fs_modify_file` with system prompt constraints.
+  `rfd_explore_summary` are thin wrappers around file writes, but they still
+  require parameter validation, error handling, and tests.
+  In return, they provide stronger format guarantees and simpler LLM calls than
+  raw `fs_modify_file` guided only by system prompt constraints.
 
-- **Two-stage confirmation is slower.** The intent-then-write pattern for
-  `draft` means each section involves two rounds of contributor interaction
-  (approve plan, then approve write).
-  For contributors who trust the AI and want speed, this is friction.
-  However, the quality of RFD output is measurably better when the contributor
-  shapes each section before it is written — the friction is the feature.
+- **Two-stage confirmation is slower.** Requiring plan approval before section
+  approval in `draft` takes two rounds of contributor interaction per section.
+  That extra round slows down contributors who want a quick draft, but steering
+  each section before it is written produces higher-quality RFDs.
 
 ## Alternatives
 
 ### Shell scripts in the justfile
 
-Implement the entire workflow as `just` tasks using shell scripts, similar to
-the existing `rfd-*` tasks.
+Implement the workflow as `just` tasks using shell scripts, similar to the
+existing `rfd-*` tasks.
 
 Rejected because:
 
-- The justfile is already 600+ lines.
-  Adding a stateful workflow manager in shell increases maintenance burden.
+- The justfile is already over 600 lines, and adding a stateful workflow manager
+  in shell increases maintenance burden.
 - Shell-based state management (parsing JSON with `jq`, interactive prompts,
   error handling) is fragile and hard to test.
 - Building this as a command plugin dogfoods the plugin system, surfacing gaps
@@ -682,91 +611,75 @@ Rejected because:
 
 ### `just` module with a standalone script
 
-A `just` module (`rfd.just`) that delegates to a standalone bash script for the
-workflow logic.
-Keeps the justfile clean while staying in shell.
+Delegate from a `just` module (`rfd.just`) to a standalone bash script to keep
+the main justfile small.
 
-Rejected for the same reasons as above, plus: splitting the logic across a
-`just` module and a script creates two places to look for RFD workflow logic.
+Rejected for the same reasons as shell scripts in the justfile, and because
+splitting the workflow across `rfd.just` and a bash script scatters the logic
+across two files.
 
 ### General-purpose `jp rfd` subcommand
 
-Build the workflow as a first-class `jp` subcommand in `jp_cli`, available to
-all users.
+Build the workflow as a built-in `jp` subcommand in `jp_cli`, available to all
+users.
 
-Rejected because this workflow is specific to JP's development process.
-The opinionated choices (which models to use, what personas to apply, how phases
-map to the Implementation Plan section) reflect how *this project* works.
-A general tool should be configurable; this plugin is deliberately opinionated.
+Rejected because the workflow's choices (models, personas, and how phases map to
+the Implementation Plan section) are specific to how JP itself is developed
+rather than configurable for general use.
 
 ### Command aliases for ergonomics
 
 Allow `jp rfd` as an alias for `jp dev rfd`.
-This would require a command alias feature in JP itself.
-Deferred as a separate concern — the `dev` subcommand path works fine, and
-aliases can be added later without changing the plugin.
+Deferred because command aliases would require a new feature in JP itself, and
+`jp dev rfd` works without plugin changes until aliases exist.
 
 ## Non-Goals
 
-- **Registry publication.** The plugin is not advertised in the plugin registry.
-  It is built and installed locally.
-- **Generalization.** The workflow is tailored to JP's RFD process.
-  Making it configurable for other projects is future work.
-- **Query delegation via protocol.** The plugin spawns `jp` as a subprocess.
-  Migrating to [RFD D18]'s protocol-based query delegation is a future
-  improvement.
-- **Automated review satisfaction tracking.** The plugin does not use AI to
-  determine whether review points have been addressed.
-  Dismissal is an explicit human action after each refinement step.
+- **Registry publication.** The plugin is built and installed locally, not
+  published to the plugin registry.
+- **Generalization.** Making the workflow configurable for other projects is
+  future work.
+- **Query delegation via protocol.** The plugin spawns `jp` as a subprocess;
+  migrating to [RFD D18]'s protocol-based query delegation is future work.
+- **Automated review satisfaction tracking.** The plugin does not use an LLM to
+  judge whether review points have been addressed; the contributor dismisses
+  reviews explicitly after each refinement step.
 
 ## Risks and Open Questions
 
-- **RFD 050 dependency.** The clean conversation ID flow depends on `jp
-  conversation new`.
-  Without it, the plugin uses heuristics to identify the conversation created by
-  the subprocess.
-  The heuristic (most recently created conversation) can fail if another `jp`
-  process creates a conversation concurrently.
-  For a single-user development workflow this is unlikely but not impossible.
-  Mitigation: implement RFD 050 first, or accept the race condition for v1.
+- **RFD 050 dependency.** Without `jp conversation new`, the fallback heuristic
+  (selecting the most recently created conversation) can pick the wrong
+  conversation if another `jp` process starts one concurrently.
+  Mitigation: implement [RFD 050] first, or accept the race condition in v1.
 
 - **Plan extraction accuracy.** Extracting phases from the Implementation Plan
-  section using structured output depends on the LLM correctly identifying the
-  phase boundaries.
-  RFD Implementation Plans are already structured with `### Phase N:` headings,
-  so the extraction is mostly mechanical.
-  A regex-based fallback could be added if the LLM consistently misidentifies
-  phases.
+  section with structured output depends on the LLM identifying phase boundaries
+  accurately.
+  Because RFD Implementation Plans use `### Phase N:` headings, extraction is
+  mostly mechanical, and a regex fallback can be added if needed.
 
 - **Phase summary quality.** The `implement` step relies on the assistant
-  producing a useful summary at the end of the conversation.
-  If the conversation is long and complex, the summary may miss important
-  details.
-  Mitigation: the system prompt explicitly requests the summary format, and the
-  contributor can edit the saved `phases/N.md` file manually.
+  producing a complete summary at the end of the conversation, which may omit
+  details after a long session.
+  Mitigation: the system prompt specifies the summary format, and the
+  contributor can edit `phases/N.md` directly.
 
-- **Review attachment cost.** Each active review file is attached to `refine`
-  conversations.
-  If reviews are verbose (multi-page), the token cost grows.
-  The dismiss-after-refine workflow limits accumulation, but a single review
-  from a thorough model can still be large.
-  Mitigation: the contributor can edit review files to trim them, or dismiss
-  reviews they consider addressed without running `refine`.
+- **Review attachment cost.** Attaching every active review file to `refine`
+  conversations increases token cost when reviews are long.
+  Mitigation: dismissing addressed reviews after each `refine` run bounds
+  accumulation, and contributors can trim or delete review files manually.
 
-- **Explore quality varies by model.** The explore phase uses a cheap model
-  (sonnet) for cost efficiency.
-  If the model's research summary is shallow or misses relevant code paths, the
-  converge phase starts from a weak foundation.
-  Mitigation: the contributor can re-run explore with `--model=opus`, or
-  manually edit `explore.md` to add context the model missed.
+- **Explore quality varies by model.** The `explore` step uses a cheap model
+  (sonnet) by default; if its summary is shallow or misses code paths,
+  `converge` starts with incomplete context.
+  Mitigation: re-run `explore` with `--model=opus`, or edit `explore.md`
+  manually.
 
 - **Section-by-section drafting assumes template structure.** The `rfd_section`
-  tool needs to know which sections exist and where they start/end in the file.
-  This works for RFDs created from the standard templates (which have `##
-  Section` headers).
-  Free-form RFDs that deviate from the template structure may confuse the tool.
-  Mitigation: the tool can fall back to appending content at the end of the
-  file, and the contributor can rearrange manually.
+  tool locates sections by the `## Section` headings from the standard RFD
+  templates, which may not match free-form RFDs.
+  Mitigation: fall back to appending new sections at the end of the file for the
+  contributor to reorder.
 
 ## Implementation Plan
 
@@ -774,9 +687,8 @@ aliases can be added later without changing the plugin.
 
 Scaffold `crates/internal/dev/` with the plugin protocol boilerplate.
 Implement `jp dev rfd <NNN>` to resolve the RFD file, parse its metadata, scan
-the state directory, and print the status summary.
-Include the authoring state (explore, decisions, sections drafted) in the status
-display.
+the state directory, and print the status summary (including authoring state for
+explore, decisions, and drafted sections).
 No LLM interaction.
 
 Depends on: [RFD 072] Phase 1 (plugin protocol core).
@@ -785,70 +697,62 @@ Can be merged independently of other phases.
 ### Phase 2: Dedicated RFD tools
 
 Implement `rfd_decision`, `rfd_section`, and `rfd_explore_summary` as MCP tools
-in `.config/jp/tools/src/rfd/`.
-These are thin wrappers around file writes with parameter validation and
-consistent formatting.
-Register them in `.jp/mcp/tools/rfd/`.
+in `.config/jp/tools/src/rfd/` and register them in `.jp/mcp/tools/rfd/`.
 
-Can be merged independently of the plugin (the tools are useful even when
-invoked manually via `jp query --cfg skill/rfd`).
+Can be merged independently of the plugin (the tools can also be invoked
+manually via `jp query --cfg skill/rfd`).
 
 ### Phase 3: Author workflow (explore, converge, draft)
 
 Implement `jp dev rfd author "title"`, `jp dev rfd <NNN> explore`, `jp dev rfd
 <NNN> converge`, and `jp dev rfd <NNN> draft`.
-The `jp.rs` helper handles subprocess spawning with inherited terminal.
-Each step configures the appropriate model, tools, and attachments.
-Response extraction uses the plugin protocol's `read_events` for the explore
-artifact.
-
-The converge step enables `rfd_decision` in ask mode.
-The draft step enables `rfd_draft` and `rfd_section` in ask mode and encodes the
-two-stage confirmation rule in the system prompt.
+Use `jp.rs` to spawn `jp` subprocesses with an inherited terminal, configure the
+step-specific model, tools, and attachments, and extract `explore.md` via
+`read_events`.
+Enable `rfd_decision` in `ask` mode for `converge`, and enable `rfd_draft` and
+`rfd_section` in `ask` mode with the two-stage confirmation prompt for `draft`.
 
 Depends on: Phase 1 (skeleton), Phase 2 (tools).
 
 ### Phase 4: Review and refine
 
-Implement `jp dev rfd <NNN> review` and `jp dev rfd <NNN> refine`.
-The post-refine dismiss prompt is a simple stdin interaction.
+Implement `jp dev rfd <NNN> review` and `jp dev rfd <NNN> refine`, including the
+stdin prompt to dismiss resolved reviews after refinement.
 
 Depends on: Phase 1.
 
 ### Phase 5: Accept and plan extraction
 
-Implement `jp dev rfd <NNN> accept`.
-Plan extraction uses `jp query` with `--schema` and `--format=json` (no terminal
-needed for this step).
-Lifecycle promotion calls `just rfd-promote`.
+Implement `jp dev rfd <NNN> accept`: run `jp query` with `--schema` and
+`--format=json` to extract `plan.json`, then call `just rfd-promote`.
 
-Depends on: Phase 4 (for the established `jp.rs` helper).
+Depends on: Phase 4 (for the `jp.rs` helper).
 
 ### Phase 6: Implement and done
 
-Implement `jp dev rfd <NNN> implement` and `jp dev rfd <NNN> done`.
-Phase summaries are written to `phases/N.md`.
-The `done` command calls `just rfd-promote`.
+Implement `jp dev rfd <NNN> implement` (writing phase summaries to
+`phases/N.md`) and `jp dev rfd <NNN> done` (calling `just rfd-promote`).
 
-Depends on: Phase 5 (plan must exist for `implement` to know the next phase).
+Depends on: Phase 5 (`plan.json` must exist for `implement` to select the next
+phase).
 
 ### Phase 7: Implementation-phase review
 
-Adapt `review` and `refine` to work in the Accepted state, attaching phase
-summaries and storing reviews in `impl-reviews/`.
+Extend `review` and `refine` to handle RFDs in the Accepted state by attaching
+completed phase summaries and storing reviews under `impl-reviews/`.
 
 Depends on: Phase 6.
 
 ## References
 
-- [RFD 001: The JP RFD Process][RFD 001] — the lifecycle this plugin automates.
-- [RFD 003: JP-Assisted RFD Writing][RFD 003] — the `rfd` skill that provides
-  the foundation for AI-assisted RFD work.
-- [RFD 050: Scripting Ergonomics][RFD 050] — `jp conversation new` for
-  capturing conversation IDs.
-- [RFD 072: Command Plugin System][RFD 072] — the plugin protocol this binary
+- [RFD 001: The JP RFD Process][RFD 001]: the lifecycle this plugin automates.
+- [RFD 003: JP-Assisted RFD Writing][RFD 003]: the `rfd` skill that provides the
+  foundation for AI-assisted RFD work.
+- [RFD 050: Scripting Ergonomics][RFD 050]: `jp conversation new` for capturing
+  conversation IDs.
+- [RFD 072: Command Plugin System][RFD 072]: the plugin protocol this binary
   uses.
-- [RFD D18: Plugin Event Subscriptions and Query Delegation][RFD D18] — future
+- [RFD D18: Plugin Event Subscriptions and Query Delegation][RFD D18]: future
   protocol-based query delegation.
 
 [RFD 001]: ../001-jp-rfd-process.md
