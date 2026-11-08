@@ -63,6 +63,14 @@ pub(crate) const MAX_CONSECUTIVE_REBUILDS: u32 = 10;
 /// the tenth-of-a-second cadence a ticking elapsed time asks for.
 const NOTICE_INTERVAL: Duration = Duration::from_secs(1);
 
+/// How many times the idle timeout doubles as a turn retries idle timeouts.
+///
+/// Two doublings put the ceiling at four times the configured window.
+/// A timed-out request is resent unchanged, so it needs a longer window to
+/// succeed; the ceiling bounds how long a connection that never answers can
+/// hold up each remaining attempt.
+const MAX_IDLE_TIMEOUT_DOUBLINGS: u32 = 2;
+
 /// Why a provider-requested rebuild was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RebuildRefusal {
@@ -121,6 +129,12 @@ pub struct StreamRetryState {
     /// cycle.
     consecutive_rebuilds: u32,
 
+    /// Number of idle timeouts retried since the last successful cycle.
+    ///
+    /// Counted apart from `consecutive_failures` because only a timeout says
+    /// the window was too short; a rate limit in between does not reset it.
+    idle_timeouts: u32,
+
     /// The status region holding the current retry notice, if one is up.
     notice: StatusRegion,
 }
@@ -134,6 +148,7 @@ impl StreamRetryState {
             patch_changed_projection: false,
             patch_sets_shrink: true,
             consecutive_rebuilds: 0,
+            idle_timeouts: 0,
             notice: StatusRegion::inert(),
         }
     }
@@ -150,6 +165,7 @@ impl StreamRetryState {
         self.patch_changed_projection = false;
         self.patch_sets_shrink = true;
         self.consecutive_rebuilds = 0;
+        self.idle_timeouts = 0;
     }
 
     /// Retire the retry notice, erasing its row.
@@ -205,6 +221,24 @@ impl StreamRetryState {
         }
 
         Ok(())
+    }
+
+    /// The idle timeout to apply to the next provider request, or `None` when
+    /// it is disabled.
+    ///
+    /// Starts at `stream_idle_timeout_secs` and doubles with each retried idle
+    /// timeout, up to [`MAX_IDLE_TIMEOUT_DOUBLINGS`] times.
+    /// [`reset`] returns it to the configured value.
+    ///
+    /// [`reset`]: Self::reset
+    pub fn idle_timeout(&self) -> Option<Duration> {
+        let secs = self.config.stream_idle_timeout_secs;
+        if secs == 0 {
+            return None;
+        }
+
+        let factor = 1 << self.idle_timeouts.min(MAX_IDLE_TIMEOUT_DOUBLINGS);
+        Some(Duration::from_secs(u64::from(secs) * factor))
     }
 
     /// Check whether we should retry the given error.
@@ -402,6 +436,9 @@ pub async fn handle_stream_error(
 
     // Record the attempt (must happen before backoff calculation).
     retry_state.record_attempt();
+    if error.kind == StreamErrorKind::Timeout {
+        retry_state.idle_timeouts += 1;
+    }
 
     // Reset the coordinator for the next streaming cycle. The committed partial
     // response becomes continuation context in the rebuilt Thread; the Provider

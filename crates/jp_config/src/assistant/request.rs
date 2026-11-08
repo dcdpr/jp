@@ -83,6 +83,11 @@ pub struct RequestConfig {
     /// allowance has passed.
     /// A timed-out stream is treated as a transient error and retried according
     /// to `max_retries` and the backoff settings.
+    /// Each retry after a timeout doubles the window, up to four times this
+    /// value, so a response that is slow to start (a large prompt, or a long
+    /// tool call written before anything is sent) gets longer each attempt
+    /// rather than failing the same way every time.
+    /// The window returns to this value once the provider sends content.
     ///
     /// Raise this for models with a very long time-to-first-token (such as
     /// deep-research models) if you observe spurious retries.
