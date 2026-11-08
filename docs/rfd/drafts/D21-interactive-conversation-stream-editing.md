@@ -11,31 +11,28 @@
 
 This RFD introduces `jp conversation edit --interactive`, an `$EDITOR`-based
 workflow for destructively editing a conversation's event stream.
-The editor opens a temporary directory containing a manifest plan file alongside
+The editor opens a temporary directory containing a `CONVERSATION` plan file and
 individual Markdown and TOML event files that the user can reorder, delete, or
 edit before JP validates and rebuilds the `ConversationStream`.
 
 ## Motivation
 
-JP users already edit conversations by opening `events.json` directly —
-tweaking context, removing noisy tool calls, editing responses, trimming
-history.
-This works but is painful: the JSON is base64-encoded in places, events are
-interleaved with config deltas, and the structure is fragile (orphaned tool
-responses, broken request/response alternation).
+JP users already edit conversations by opening `events.json` directly to tweak
+context, remove noisy tool calls, edit responses, or trim history.
+Editing `events.json` by hand is error-prone: some fields are base64-encoded,
+conversation events are interleaved with config deltas, and stream invariants
+(paired tool calls and results, alternating requests and responses) are easy to
+break.
 
-[RFD 064] introduced non-destructive compaction as an overlay — the right
-approach for routine context reduction.
-But compaction is a *projection*: it changes what the LLM sees without changing
-what's stored.
-Sometimes you need actual surgery: fix a wrong tool result, reword the user's
-request, delete an entire tangent, inject a clarifying message.
-Compaction can't do this.
+[RFD 064] introduced non-destructive compaction for routine context reduction.
+Compaction is a *projection*: it changes what the LLM sees without modifying the
+stored event stream.
+It cannot fix a wrong tool result, reword a user request, delete a tangent, or
+inject a clarifying message.
 
-`jp conversation fork --last N` is the blunt instrument for this today.
-It discards everything before the last N turns.
-There's no way to selectively keep turn 1, drop turns 2-4, and keep turn 5
-onward.
+`jp conversation fork --last N` only discards everything before the last `N`
+turns.
+It cannot keep turn 1, drop turns 2 through 4, and keep turn 5 onward.
 
 Users need a way to make precise, destructive edits to the conversation stream
 in a format they can read and manipulate with their existing editor.
@@ -50,9 +47,9 @@ in a format they can read and manipulate with their existing editor.
 jp conversation edit --interactive [ID]
 ```
 
-Opens an interactive editing session for the active conversation (or the
-specified one).
-This is a destructive operation — it modifies the stored event stream.
+`--interactive` opens an interactive editing session for the active
+conversation, or for `ID` when specified, and modifies the stored event stream
+in place.
 
 The short flag is `-i`:
 
@@ -60,7 +57,7 @@ The short flag is `-i`:
 jp conversation edit -i
 ```
 
-#### What the Editor Sees
+#### Temporary Directory Layout
 
 JP creates a temporary directory with this structure:
 
@@ -81,17 +78,17 @@ JP creates a temporary directory with this structure:
 └── ...
 ```
 
-The editor is invoked with this directory as its argument.
+JP passes this directory to `$EDITOR`.
 Most editors (VS Code, Vim, Neovim, Emacs) open a directory as a file browser or
-project root, giving the user a tree view of all files.
+project root and display a tree view of all files.
 
 #### The Plan File
 
-`CONVERSATION` is the manifest.
-It lists every event file, grouped by turn with comment headers.
-The all-caps name sorts to the top in file explorers (uppercase before lowercase
-in most locales) and gives editors a recognizable filename for syntax
-highlighting — the same pattern as `Makefile` or `Dockerfile`.
+`CONVERSATION` is the edit manifest: it lists every event file, grouped into
+turns by comment headers.
+The all-caps name, like `Makefile` or `Dockerfile`, sorts to the top in file
+explorers in most locales and gives editors a fixed filename for syntax
+highlighting.
 
 ```txt
 # Conversation Edit Plan
@@ -119,27 +116,23 @@ highlighting — the same pattern as `Makefile` or `Dockerfile`.
 012-message.md
 ```
 
-The `CONVERSATION` file controls **structure**: which events survive and in what
-order.
-Users delete lines to drop events and reorder lines to reorder events.
+`CONVERSATION` is authoritative for stream structure: it determines which events
+are kept and in what order.
+Reordering lines reorders events; deleting a line drops the event even if its
+file remains on disk.
 Comment lines (`#`) are ignored during parsing.
 
-Each turn header names the turn's `TurnStart` `event_id` ([RFD 097]) and its
+Each turn header shows the turn's `TurnStart` `event_id` ([RFD 097]) and its
 turn summary ([RFD 126]).
-A turn with no stored summary shows the mechanical fallback instead: the first
-line of its request, truncated to 72 characters.
-Headers are comments like any other, so editing one changes nothing.
-
-The `CONVERSATION` file is authoritative for structure.
-If a line is removed, the event is dropped — regardless of whether the file
-still exists on disk.
+If a turn has no stored summary, the header shows the fallback summary instead:
+the first line of the turn's opening request, truncated to 72 characters.
+Turn headers are ordinary comments, so editing them has no effect.
 
 #### Event Files
 
-Each event is written to an individual file.
-The file format depends on the event type:
+Each event is written to its own file in a format determined by the event type.
 
-**Conversation events** use markdown with YAML frontmatter:
+**Conversation events** use Markdown with YAML frontmatter:
 
 ```markdown
 ---
@@ -205,8 +198,8 @@ policy = "strip"
 ```
 
 The frontmatter carries the metadata needed to reconstruct the
-`ConversationEvent`: event type, tool name, call ID, error status.
-The body carries the user-editable content.
+`ConversationEvent` (event type, tool name, call ID, and error status), and the
+body holds the editable content.
 
 #### File Naming
 
@@ -225,73 +218,69 @@ suffix:
 | `ConfigDelta`  | `config-delta`            | `.toml`   |
 | `Compaction`   | `compaction`              | `.toml`   |
 
-The numeric prefix establishes original ordering for orientation — it is an
-address, not a sort key.
-The `CONVERSATION` file determines final ordering.
+The numeric prefix records the original position for orientation; it is an
+identifier, not a sort key.
+`CONVERSATION` determines the final event order.
 
 #### Turn Markers
 
-`TurnStart` events are not represented as files, and the turn headers in the
-plan file have no semantic effect.
-Turn boundaries are inferred during reconstruction: each `request` file starts a
-turn.
+`TurnStart` events are not written as files, and the turn headers in
+`CONVERSATION` are comments with no semantic effect.
+JP infers turn boundaries during reconstruction: each `request` file starts a
+new turn.
 
-A `ChatRequest` is not always the first in its turn.
-Replying to an interrupt (`InterruptAction::Reply`) adds one to the running
-turn, after whatever the assistant had written by then.
-Such a request is written as a `reply` file (`type: reply`) and continues the
-turn it appears in.
-Changing a file's `type` from `reply` to `request` splits its turn in two, and
-the reverse joins two turns into one.
+Not every `ChatRequest` starts a turn.
+When the user replies to an interrupt (`InterruptAction::Reply`), JP appends a
+`ChatRequest` to the active turn after the assistant's partial output.
+That request is written as a `reply` file (`type: reply`) and continues the
+current turn.
+Changing a file's `type` from `reply` to `request` splits the turn in two;
+changing `request` to `reply` merges the turn into the preceding one.
 
-A reconstructed turn opened by a `request` that opened a turn before the edit
-reuses that turn's `TurnStart`, so it keeps its `event_id`:
+Turn identity and summaries follow the stream-rewriting contract in [RFD 126]:
 
-- The turn summary survives only if the turn is unchanged: the same event files
-  in the same order, each with its original hash.
-  Config deltas and compactions belong to no turn and do not count.
-  Otherwise the summary is cleared, and the next `jp query` regenerates it.
-- A turn opened by a new `request` file, or by a `reply` changed to a `request`,
-  gets a fresh `TurnStart` with no summary.
-
-This is the contract [RFD 126] sets for any consumer that rewrites the stream.
+- When a `request` file that originally started a turn still starts a turn after
+  editing, the reconstructed turn reuses the original `TurnStart` and keeps its
+  `event_id`.
+- A turn's stored summary is preserved only when the turn is unchanged: the same
+  event files in the same order, each with its original content hash
+  (`ConfigDelta` and `Compaction` events belong to no turn and are ignored).
+  If any event in the turn changed, JP clears the summary and the next `jp
+  query` regenerates it.
+- A turn started by a new `request` file, or by a `reply` file changed to `type:
+  request`, gets a new `TurnStart` with a fresh `event_id` and no summary.
 
 #### The Edit Cycle
 
-1. JP creates the temporary directory and writes all files.
-2. JP hashes every file.
-3. JP opens the editor with the directory path.
-4. The user edits the plan and/or event files.
-5. The editor exits.
-6. JP re-reads the plan file and all referenced event files.
-7. JP validates the result (see [Validation](#validation)).
-8. If valid: JP rebuilds the `ConversationStream` and persists it.
-9. If invalid: JP writes error annotations to the top of `CONVERSATION` and
-   re-opens the editor.
-   The user can fix the issue or clear the file to abort.
+1. JP creates the temporary directory, writes all files, and hashes each event
+   file.
+2. JP opens `$EDITOR` with the directory path.
+3. The user edits `CONVERSATION` and any event files, then closes the editor.
+4. JP reads `CONVERSATION` and all referenced event files.
+5. JP validates the reconstructed stream (see [Validation](#validation)).
+6. If valid, JP rebuilds the `ConversationStream` and persists it.
+7. If invalid, JP prepends error annotations to `CONVERSATION` and re-opens the
+   editor so the user can fix the errors or clear the file to abort.
 
-**Abort:** If `CONVERSATION` is empty (all lines deleted or cleared) when the
-editor exits, the edit is aborted with no changes.
-If the editor exits with a non-zero status code, the edit is also aborted.
+**Abort:** If the editor exits with a non-zero status code, or if `CONVERSATION`
+contains no event lines when the editor exits, JP aborts the edit without
+modifying the conversation.
 
-**Unchanged files:** If a file's hash matches its original, JP uses the original
-event data.
-Only files with changed hashes are re-parsed.
-This avoids round-trip fidelity issues for events the user didn't touch.
+**Unchanged files:** If an event file's hash matches its original hash, JP
+reuses the original event data and only re-parses modified files.
+Unmodified events are not round-tripped through the file parser.
 
-#### New Events
+#### Injecting New Events
 
-Users can create new event files in the temporary directory and add their
-filenames to the plan.
-JP parses new files the same way as modified files — the frontmatter must
-contain valid metadata for the event type.
+Users can inject new events, such as a clarifying user request, a corrected tool
+result, or a config delta, by creating files in the temporary directory and
+adding their filenames to `CONVERSATION`.
+JP parses new files the same way as modified files: the frontmatter must contain
+valid metadata for the event type.
 
-For tool calls, the user must provide a call ID in the frontmatter.
-If omitted, JP generates one.
-Tool results must reference an existing call ID.
-
-This enables injecting events: adding a clarifying user message, inserting a
-corrected tool result, or adding a config delta.
+A `tool-call` file may specify an `id` in its frontmatter, or omit it to let JP
+generate one.
+A `tool-result` file must reference a `tool-call` ID present in the plan.
 
 ### Integration with `fork`
 
@@ -302,41 +291,39 @@ jp conversation fork --edit
 jp conversation fork --last 5 --edit
 ```
 
-This forks the conversation first (with any applicable filtering), then opens
-the interactive editor on the forked conversation.
-The original conversation is untouched.
-This is the safe workflow for destructive edits — you always work on a copy.
+`--edit` forks the conversation (applying any turn filters such as `--last`) and
+opens the interactive editor on the new fork, leaving the original conversation
+untouched.
 
-The `--edit` flag is incompatible with `--compact` (compaction is
-non-destructive and additive; editing is destructive).
+`--edit` is incompatible with `--compact`, because compaction adds a
+non-destructive overlay whereas interactive editing rewrites the event stream.
 
 ### Validation
 
-When the editor exits, JP validates the rebuilt stream.
-Validation enforces structural invariants that providers require:
+When the editor exits, JP validates the rebuilt stream against the structural
+invariants that model providers require:
 
 1. **Tool result follows its tool call.** A `tool-result` must appear after the
    `tool-call` with the matching call ID.
 2. **Request/response alternation.** A `ChatRequest` (user role) must not be
    immediately followed by a `request` without an intervening assistant
    response.
-   A `reply` may directly follow a `ChatRequest`: an interrupt can come before
-   the assistant has written anything.
-3. **Orphaned references.** A `tool-result` whose call ID doesn't match any
+   A `reply` may directly follow a `ChatRequest`, because an interrupt can occur
+   before the assistant emits a response.
+3. **Orphaned references.** A `tool-result` whose call ID does not match any
    `tool-call` in the plan is rejected.
-   Similarly for inquiry responses.
-4. **Missing references.** A `tool-call` without a matching `tool-result` in the
-   plan gets a synthetic error response injected (consistent with
-   `sanitize_orphaned_tool_calls`).
+   An `inquiry-response` without a matching `inquiry-request` is also rejected.
+4. **Unanswered tool calls.** A `tool-call` without a matching `tool-result` in
+   the plan receives a synthetic error response, matching
+   `sanitize_orphaned_tool_calls`.
 5. **Non-empty stream.** The plan must contain at least one `ChatRequest`.
-6. **Reply placement.** A `reply` continues a turn, so it cannot come before the
-   plan's first `request`.
+6. **Reply placement.** Because a `reply` continues an existing turn, it cannot
+   appear before the plan's first `request`.
 
-Validation reuses and extends the existing `ConversationStream::sanitize()`
-logic.
-The difference: `sanitize()` silently fixes issues (it's designed for automatic
-recovery), while the editor validation reports errors and re-opens the editor so
-the user can fix them intentionally.
+Validation reuses and extends the rules in `ConversationStream::sanitize()`.
+Whereas `sanitize()` repairs broken streams silently for automatic recovery,
+interactive validation reports errors and re-opens the editor so the user can
+fix them.
 
 When validation fails, JP prepends error messages to `CONVERSATION`:
 
@@ -353,248 +340,234 @@ When validation fails, JP prepends error messages to `CONVERSATION`:
 
 ### Round-Trip Fidelity
 
-The editing format must preserve all data needed to reconstruct events exactly.
-Key concerns:
+The editing format preserves all data needed to reconstruct events:
 
-- **Tool call arguments.** Complex nested JSON must survive the round-trip
-  through the markdown frontmatter format.
-  Arguments are stored as a JSON code block in the file body, not inlined into
-  YAML.
-- **Timestamps.** Original event timestamps are preserved in the frontmatter but
-  hidden from casual editing (they appear as a `timestamp` field).
-  If the user modifies a timestamp, the new value is used.
-  If omitted from a new event, the current time is used.
+- **Tool call arguments.** Arguments are written as a fenced JSON code block in
+  the Markdown body rather than inlined into YAML frontmatter, so nested JSON
+  structures survive round-tripping.
+- **Timestamps.** Each event's timestamp is serialized in the frontmatter as
+  `timestamp`.
+  Modifying the field updates the event's timestamp; omitting it on a new event
+  defaults to the current time.
 - **Metadata.** The `metadata` map on `ConversationEvent` (cache breakpoints,
-  rendered arguments, etc.) is serialized into the YAML frontmatter.
-  Fields the user doesn't touch are preserved via the hash-based change
-  detection.
-- **Base64 encoding.** The storage layer base64-encodes certain fields (tool
-  arguments, response content).
-  The editor files contain decoded (plain text) content.
-  Re-encoding happens during reconstruction.
-- **Base config.** The conversation's `base_config.json` is not part of the edit
-  session.
-  It is immutable and preserved as-is.
-- **Event identity.** Every listed file maps back to the stream entry it was
-  written from, so an edited event keeps its `event_id` ([RFD 097]).
-  A new file gets a fresh ID.
-  A file listed twice is a copy, and its second occurrence gets a fresh ID.
+  rendered arguments, and provider metadata) is serialized into the YAML
+  frontmatter.
+  For unmodified files, hash-based change detection preserves the original event
+  directly.
+- **Base64 encoding.** The storage layer base64-encodes fields such as tool
+  arguments and response content.
+  Edit files contain decoded plain text, and JP re-encodes them during
+  reconstruction.
+- **Base config.** The conversation's `base_config.json` is immutable and
+  excluded from the edit session.
+- **Event identity.** Each generated file maps back to its source stream entry,
+  so an edited event keeps its `event_id` ([RFD 097]).
+  A newly created file gets a fresh ID.
+  If a filename appears more than once in `CONVERSATION`, each additional
+  occurrence is treated as a copy and gets a fresh ID.
 
 ## Drawbacks
 
-- **Destructive by nature.** Unlike compaction, this modifies the actual stored
-  events.
-  There is no undo.
-  Mitigation: `fork --edit` is the recommended workflow, and we document it
-  prominently.
-  The original conversation is untouched.
+- **Destructive edits.** Unlike compaction, interactive editing overwrites the
+  stored event stream with no undo.
+  `jp conversation fork --edit` mitigates this by editing a copy while leaving
+  the original conversation untouched.
 
-- **Format complexity.** The markdown-with-frontmatter format for events is a
-  new serialization format that must be maintained alongside the JSON storage
-  format.
-  It adds code surface for parsing and round-tripping.
+- **Format maintenance.** The Markdown-with-frontmatter format is a second event
+  serialization format to maintain alongside the JSON storage format.
 
-- **Editor compatibility.** The design assumes the editor can open a directory.
-  Most modern editors support this, but some minimal editors (e.g. `ed`, `nano`)
-  do not.
-  For these editors, the experience degrades — the user would need to open
-  `CONVERSATION` directly and navigate to event files manually.
+- **Editor compatibility.** Passing a directory to `$EDITOR` works in editors
+  with a file tree (VS Code, Vim, Neovim, Emacs), but minimal editors such as
+  `ed` or `nano` cannot open directories.
+  Users of those editors must open `CONVERSATION` and individual event files
+  manually.
 
-- **Large conversations.** A conversation with 500 events produces 500+ files in
-  the temporary directory.
-  This is fine for filesystems and editors, but the plan file becomes long.
-  Mitigation: the turn-grouped comments help navigation, and users typically
-  edit recent portions of the conversation.
+- **Large conversations.** A conversation with 500 events produces over 500
+  files and a long `CONVERSATION` file.
+  Turn header comments keep the plan navigable, and users typically edit recent
+  turns.
 
 ## Alternatives
 
-### Single-file editing (git rebase model)
+### Single-File Editing (`git rebase` Model)
 
-Present all events in a single plan file with inline content.
-The user edits everything in one file, using `pick`/`drop`/`edit` verbs like
-`git rebase -i`.
+Present all events in a single plan file with inline content, using `pick`,
+`drop`, and `edit` verbs like `git rebase -i`.
 
-Rejected because conversation events are contextual — when editing event 7, you
-want to see events 6 and 8 simultaneously.
-A single-file model either inlines all content (making the file enormous and
-hard to navigate) or forces a sequential `edit` workflow where you're walked
-through events one at a time.
-The directory model lets you open multiple files side-by-side in your editor.
+We rejected this because conversation events are contextual: editing event 7
+often requires reading events 6 and 8 alongside it.
+A single-file model either inlines every event body into one large file or steps
+through marked events one at a time.
+The directory layout lets users open multiple event files side by side.
 
-### Git rebase `pick`/`drop` verbs
+### Git Rebase `pick` and `drop` Verbs
 
-Add `pick` and `drop` verbs to the plan file lines, matching git rebase's
-interface.
+Prefix each line in `CONVERSATION` with a `pick` or `drop` verb, matching `git
+rebase -i`.
 
-Rejected as unnecessary complexity.
-Since the plan file only supports two structural operations (delete and
-reorder), the simpler model works: lines present = kept, lines absent = dropped,
-line order = event order.
-No verbs to learn.
+We rejected this because the plan file only supports two structural operations:
+deleting and reordering events.
+Keeping present lines, dropping deleted lines, and using line order as event
+order expresses both operations without extra syntax.
 
-### Edit `events.json` directly
+### Editing `events.json` Directly
 
-The status quo.
-Users open the raw JSON file and edit it.
+Have users open and edit the raw `events.json` file in storage.
 
-This already works but is error-prone: base64-encoded fields, interleaved config
-deltas, fragile structural invariants.
-The interactive editor provides a human-readable format with validation on save.
+This requires no dedicated tooling, but `events.json` has base64-encoded fields,
+interleaved config deltas, and no validation on save.
+The interactive editor provides human-readable files and validates stream
+invariants before persisting.
 
-### Non-destructive editing via overlay
+### Non-Destructive Editing via Overlay
 
-Extend the compaction overlay model to support content replacement — store
-"event X should have this content instead" as a projection event.
+Extend the compaction overlay model ([RFD 064]) to store content replacements as
+projection events without modifying stored events.
 
-Rejected because it conflates two different concerns.
-Compaction reduces what the LLM sees while preserving history.
-Content editing changes history itself.
-Overlaying content edits would make the projection layer significantly more
-complex and would still not support structural changes (reordering, deletion of
-arbitrary events).
+We rejected this because compaction and content editing solve different
+problems.
+Compaction reduces what the LLM sees while preserving history; stream editing
+rewrites history itself.
+Layering content edits onto the projection pipeline would complicate projection
+and still would not support reordering or deleting arbitrary events.
 
 ## Non-Goals
 
-- **Automatic conflict resolution.** If two users edit the same conversation
-  simultaneously, the last writer wins.
-  Interactive editing acquires the conversation lock, so concurrent edits are
-  prevented during the session.
+- **Automatic conflict resolution.** Interactive editing acquires the
+  conversation lock for the duration of the session rather than merging
+  concurrent edits.
 
-- **Undo/redo.** There is no undo for destructive edits.
-  Use `fork --edit` to work on a copy.
-  The original conversation is the "undo."
+- **Undo/redo.** Destructive edits have no undo stack.
+  Use `jp conversation fork --edit` to edit a copy while keeping the original
+  conversation intact.
 
 - **TUI-based editing.** This RFD uses `$EDITOR` exclusively.
-  A built-in terminal UI for event editing (with live validation, drag-and-drop
-  reordering, etc.) is a separate feature.
+  A built-in terminal UI with live validation and interactive reordering is a
+  separate feature.
 
-- **Partial stream editing.** The editor session covers the entire conversation
-  stream.
-  Editing a subset (e.g. "only turns 5-10") can be achieved by forking with
-  `--last` first, then editing the fork.
+- **Partial stream editing.** An edit session always exports the entire
+  conversation stream.
+  To edit only recent history (for example, turns 5 through 10), fork with
+  `--last` first and edit the fork.
 
-- **Custom editor invocation.** The editor is resolved using `EditorConfig` (the
-  existing `JP_EDITOR` / `VISUAL` / `EDITOR` chain).
-  Adding a conversation-edit-specific editor config (e.g. for opening a
-  directory vs. a file) is deferred.
+- **Custom editor invocation.** The editor is resolved through `EditorConfig`
+  (`JP_EDITOR`, `VISUAL`, `EDITOR`).
+  A separate editor configuration for directory-based editing is deferred.
 
-- **On-demand turn summaries.** The plan file shows stored summaries and the
-  mechanical fallback; JP makes no LLM request before opening `$EDITOR`.
-  The most recent turn usually has no summary yet, because [RFD 126] generates
-  it during the next query, so its header shows the fallback.
+- **On-demand turn summaries.** The plan file shows stored summaries and falls
+  back to the truncated request line when a turn has no summary; JP makes no LLM
+  request before opening `$EDITOR`.
+  Because [RFD 126] generates a turn's summary during the next query, the most
+  recent turn typically uses the fallback.
 
 ## Risks and Open Questions
 
-- **Frontmatter parsing robustness.** YAML frontmatter in markdown is a de-facto
-  standard but has edge cases (content that looks like YAML, `---` in code
-  blocks).
-  We need a robust parser that handles these correctly.
-  The existing `jp_md` crate does not parse frontmatter today.
+- **Frontmatter parsing.** YAML frontmatter in Markdown has delimiter edge cases
+  (content that resembles YAML, or `---` inside code blocks).
+  The `jp_md` crate does not parse frontmatter, so interactive editing needs a
+  parser that handles these cases cleanly.
 
-- **Inquiry event editing.** `InquiryRequest` and `InquiryResponse` have complex
-  structures (answer types, select options, default values).
-  The frontmatter representation needs to be both human-readable and
-  round-trippable.
-  This may require a more structured format for inquiry events specifically.
+- **Inquiry event editing.** `InquiryRequest` and `InquiryResponse` have
+  structured fields (answer types, select options, default values) that must be
+  both human-readable and lossless across a round-trip.
+  Inquiry events may need a more structured representation than plain
+  frontmatter.
 
-- **Structured response editing.** `ChatResponse::Structured` contains a
+- **Structured response editing.** `ChatResponse::Structured` holds a
   `serde_json::Value`.
-  The editing format needs to present this as editable JSON while preserving the
-  value's structure on round-trip.
+  The editing format must present this payload as editable JSON while preserving
+  its structure on round-trip.
 
 - **Editor directory support.** If the configured editor cannot open a
-  directory, the experience breaks.
-  We should detect this and fall back to opening `CONVERSATION` directly, with a
-  note about how to edit individual event files.
+  directory, JP should detect the failure and fall back to opening
+  `CONVERSATION` directly, with a comment explaining how to open individual
+  event files.
 
-- **Conversation lock duration.** The conversation lock is held for the entire
-  editor session.
-  If the user leaves the editor open for hours, other operations on that
-  conversation are blocked.
-  This matches the behavior of `git rebase` holding a lock, but may need a
-  warning or timeout.
+- **Conversation lock duration.** JP holds the conversation lock for the entire
+  editor session, matching `git rebase -i`.
+  Leaving the editor open blocks other commands on that conversation, which may
+  warrant a warning or timeout.
 
 ## Implementation Plan
 
 ### Phase 1: Event Serialization Format
 
-1. Define the markdown-with-frontmatter format for each `EventKind` variant,
+1. Define the Markdown-with-frontmatter format for each `EventKind` variant,
    including the `request` and `reply` types of a `ChatRequest`.
 2. Define the TOML format for `ConfigDelta` and `Compaction` events.
 3. Implement `serialize_to_edit_file()` and `deserialize_from_edit_file()` for
    each event type.
-4. Add round-trip unit tests: serialize an event, deserialize it, assert
+4. Add round-trip unit tests that serialize an event, deserialize it, and assert
    equality.
 
-Can be merged independently.
-No behavioral changes.
+This phase introduces no behavioral changes and can be merged independently.
 
 ### Phase 2: Plan File and Directory Builder
 
 1. Implement the temporary directory builder: given a `ConversationStream`,
-   produce the file tree (`CONVERSATION` + event files).
-2. Implement the file naming scheme (numeric prefix + descriptive suffix), with
-   each `ChatRequest` after the first in its turn written as a `reply`.
-3. Implement turn-grouped comments in the plan file, naming each turn's
-   `TurnStart` `event_id` and its stored summary or mechanical fallback.
+   produce the file tree (`CONVERSATION` and event files).
+2. Implement the file naming scheme (numeric prefix and descriptive suffix),
+   writing each `ChatRequest` after the first in a turn as a `reply`.
+3. Write turn-grouped header comments in `CONVERSATION` with each turn's
+   `TurnStart` `event_id` and its stored or fallback summary.
 4. Add unit tests for directory generation from sample streams.
 
-Depends on Phase 1.
+This phase depends on Phase 1.
 
 ### Phase 3: Plan Parser and Stream Reconstruction
 
-1. Implement the plan file parser: read `CONVERSATION`, produce an ordered list
-   of filenames.
-2. Implement the reconstruction pipeline: parse the plan, read event files
-   (using originals for unchanged files), rebuild the `ConversationStream`.
-3. Implement hash-based change detection for event files.
-4. Carry identity through reconstruction: edited events keep their `event_id`,
-   each turn reuses the `TurnStart` its opening request came from, and a changed
-   turn has its summary cleared.
-5. Add unit tests for plan parsing, reconstruction, and change detection.
-   Turn-marker tests cover an untouched turn (ID and summary kept), a turn with
-   an edited event (ID kept, summary cleared), a reordered turn, and a turn
-   opened by a new request (fresh `TurnStart`).
-   They also cover a turn holding an interrupt reply (kept as one turn) and a
-   `reply` changed to a `request` (the turn split, its second half with a fresh
-   `TurnStart`).
+1. Implement the plan file parser to read `CONVERSATION` and return an ordered
+   list of filenames.
+2. Implement hash-based change detection for event files.
+3. Implement the reconstruction pipeline: parse the plan, read modified or new
+   event files, reuse original events for unchanged files, and rebuild the
+   `ConversationStream`.
+4. Preserve event and turn identity during reconstruction: edited events keep
+   their `event_id`, turns started by an existing `request` file reuse their
+   original `TurnStart`, and modified turns have their stored summary cleared.
+5. Add unit tests for plan parsing, change detection, and turn reconstruction:
+   unchanged turns (`event_id` and summary preserved), modified turns
+   (`event_id` preserved, summary cleared), reordered turns, new `request` files
+   (fresh `TurnStart`), turns containing an interrupt `reply`, and `reply` files
+   changed to `request` (splitting the turn and assigning a fresh `TurnStart` to
+   the second turn).
 
-Depends on Phase 2.
+This phase depends on Phase 2.
 
 ### Phase 4: Validation
 
 1. Implement structural validation on the rebuilt stream (tool call pairing,
    request/response alternation, orphaned references).
-2. Implement error annotation in `CONVERSATION` for re-opening.
+2. Implement error annotation in `CONVERSATION` when re-opening the editor.
 3. Add unit tests for each validation rule and the error-annotation format.
 
-Depends on Phase 3.
-Can partially reuse `ConversationStream::sanitize()`.
+This phase depends on Phase 3 and can reuse validation rules from
+`ConversationStream::sanitize()`.
 
 ### Phase 5: CLI Integration
 
-1. Add `--interactive` / `-i` flag to `jp conversation edit`.
-2. Implement the edit cycle: create directory, hash files, open editor, read
-   back, validate, rebuild, persist.
-3. Implement abort detection (empty plan, non-zero exit).
-4. Add `--edit` flag to `jp conversation fork`.
-5. Integration tests with `MockEditorBackend`.
+1. Add the `--interactive` / `-i` flag to `jp conversation edit`.
+2. Implement the edit cycle: create the directory, hash files, open the editor,
+   read back the plan, validate, rebuild, and persist.
+3. Implement abort detection (empty plan or non-zero editor exit status).
+4. Add the `--edit` flag to `jp conversation fork`.
+5. Add integration tests using `MockEditorBackend`.
 
-Depends on Phase 4.
+This phase depends on Phase 4.
 
 ## References
 
-- [RFD 047] — Editor and Path Access for Conversations
-- [RFD 064] — Non-Destructive Conversation Compaction (defers interactive
-  editing as a non-goal)
-- [RFD 097] — Stable Event Identifiers (`event_id` kept across edits)
-- [RFD 126] — Turn Summaries (summaries in turn headers, consumer contract)
-- [Issue #57] — Make conversation management more powerful
-- `crates/jp_conversation/src/stream.rs` — `ConversationStream` and
+- [RFD 047]: Editor and Path Access for Conversations
+- [RFD 064]: Non-Destructive Conversation Compaction (defers interactive editing
+  as a non-goal)
+- [RFD 097]: Stable Event Identifiers (`event_id` kept across edits)
+- [RFD 126]: Turn Summaries (summaries in turn headers, consumer contract)
+- [Issue #57]: Make conversation management more powerful
+- `crates/jp_conversation/src/stream.rs`: `ConversationStream` and
   `InternalEvent` definitions
-- `crates/jp_conversation/src/event.rs` — `EventKind` variants
-- `crates/jp_editor/src/lib.rs` — `EditorBackend` trait
-- `crates/jp_config/src/editor.rs` — `EditorConfig` and editor resolution
+- `crates/jp_conversation/src/event.rs`: `EventKind` variants
+- `crates/jp_editor/src/lib.rs`: `EditorBackend` trait
+- `crates/jp_config/src/editor.rs`: `EditorConfig` and editor resolution
 
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
 [RFD 047]: ../047-editor-and-path-access-for-conversations.md
