@@ -11,46 +11,37 @@
 
 This RFD makes tool `run` and `result` policies (`ask`, `unattended`, `edit`,
 and `skip`) conditional on tool call arguments instead of applying a single mode
-to every invocation of a tool.
+to every invocation.
 The `run` and `result` settings move under a `policy` namespace and accept
 either a mode string or an ordered list of argument-matching rules evaluated
 with first-match-wins semantics.
 
 ## Motivation
 
-JP's current permission model is binary: a tool either always asks for
-confirmation or never does.
-The `run` field on tool configuration accepts a single `RunMode` value that
-applies to every invocation regardless of what the tool is asked to do.
+Tool `run` configuration currently accepts a single `RunMode` that applies to
+every call regardless of its arguments.
+This per-tool granularity forces a trade-off between safety and flow:
 
-This creates a tension between safety and flow:
+1. **Overly permissive.** Setting `fs_modify_file.run = "unattended"` lets the
+   assistant modify any file without approval, including `.env`, `Cargo.toml`,
+   or files outside the working area.
 
-1. **Overly permissive.** Setting `fs_modify_file.run = "unattended"` means the
-   assistant can modify any file without approval — including `.env`,
-   `Cargo.toml`, or files outside the intended working area.
+2. **Overly restrictive.** Setting `fs_modify_file.run = "ask"` prompts on every
+   file modification, including routine edits under `src/`.
+   Constant prompts interrupt flow and train users to approve without reading.
 
-2. **Overly restrictive.** Setting `fs_modify_file.run = "ask"` means every file
-   modification requires a confirmation prompt, including routine changes to
-   `src/` files that the user trusts completely.
-   This interrupts flow and trains users to approve without reading.
+3. **No middle ground.** There is no way to run edits under `src/` unattended
+   while prompting for every other path.
 
-3. **No middle ground.** There is no way to express "unattended for files in
-   `src/`, ask for everything else."
-   The granularity is per-tool, not per-argument.
-
-The same problem applies to `result` (how tool results are delivered to the
-assistant) and will apply to any future per-invocation policy.
-
-This RFD solves the problem by making run policy conditional on the actual
-arguments of each tool call.
+The same limitation applies to `result` (how tool results are delivered to the
+assistant) and to any future per-invocation policy.
 
 ### Relationship to RFD 076 and D04
 
-[RFD 076] defines typed access grants (`AccessPolicy`) that declare what
-resources a tool *can* access.
-[RFD 075] enforces those grants at the OS level.
-This RFD addresses a different concern: not *what* a tool can do, but *whether
-the user is prompted* before the tool runs.
+[RFD 076] defines typed access grants (`AccessPolicy`) that declare which
+resources a tool can access, and [RFD 075] enforces those grants at the OS
+level.
+This RFD controls whether JP prompts the user before the tool runs.
 
 | Concern         | RFD 076 / D04                         | This RFD                           |
 | --------------- | ------------------------------------- | ---------------------------------- |
@@ -61,14 +52,10 @@ the user is prompted* before the tool runs.
 
 The two systems are complementary.
 A tool may have broad access rights (095) but still require approval for
-sensitive arguments (this RFD).
-Or a tool may have restricted access but run unattended because the access
-policy already constrains it sufficiently.
-
-Both systems share the `path` parameter type introduced in this RFD, and both
-use path-prefix matching where applicable.
-The matching infrastructure (prefix evaluation, path normalization) can be
-shared at the implementation level.
+sensitive arguments, or it may run unattended because its access policy already
+constrains what it can touch.
+Both systems use the `path` parameter type introduced in this RFD and can share
+path normalization and prefix-matching logic.
 
 ## Design
 
@@ -94,9 +81,8 @@ run = "ask"
 run = "ask"
 ```
 
-If both are present, `policy.run` takes precedence and the top-level `run` is
-ignored with a deprecation warning.
-The same applies to `result`.
+When both forms are present, `policy.run` and `policy.result` take precedence
+and the top-level fields are ignored with a deprecation warning.
 
 The `policy` namespace also applies to `ToolsDefaultsConfig`:
 
@@ -108,8 +94,8 @@ result = "unattended"
 
 ### Run policy: string or rules array
 
-The `policy.run` field accepts either a string (backward-compatible alias) or an
-ordered array of conditional rules:
+The `policy.run` field accepts either a mode string or an ordered array of
+conditional rules:
 
 ```toml
 # String alias (equivalent to a single catch-all rule):
@@ -125,21 +111,15 @@ run = [
 ```
 
 The string aliases `"ask"`, `"unattended"`, `"edit"`, and `"skip"` desugar to
-`[{ mode = "<value>" }]` — a single catch-all rule with no conditions.
-This preserves the existing behavior: a plain `run = "ask"` or `run =
-"unattended"` requires no argument inspection and can be decided before any
-arguments arrive.
+`[{ mode = "<value>" }]`, a single catch-all rule with no condition.
+A plain mode string requires no argument inspection and can be decided before
+any arguments arrive.
 
 ### Rule structure
 
-Each rule in the array has:
-
-- **Zero or one condition** (`arg` + matcher).
-  A rule with no condition is a catch-all.
-- **A mode** (`mode`).
-  The `RunMode` to use when this rule matches.
-
-<!-- end list -->
+Each rule has an optional condition (`arg` plus a matcher keyword) and a `mode`
+(`RunMode`).
+A rule with no condition is a catch-all that matches any invocation:
 
 ```toml
 # Condition on a top-level parameter:
@@ -152,16 +132,14 @@ Each rule in the array has:
 { mode = "ask" }
 ```
 
-Compound conditions (matching multiple parameters simultaneously) are out of
-scope for this RFD.
-See [Non-Goals](#non-goals).
+Compound conditions that match multiple parameters at once are out of scope (see
+[Non-Goals](#non-goals)).
 
 ### Evaluation: first-match-wins
 
-Rules are evaluated top to bottom.
-The first rule whose condition is satisfied determines the run mode.
-If no rule matches, an implicit `{ mode = "ask" }` is appended as a safety
-fallback.
+Rules are evaluated top to bottom, and the first matching rule determines the
+run mode.
+If no rule matches, evaluation falls back to an implicit `{ mode = "ask" }`.
 
 ```toml
 run = [
@@ -186,10 +164,9 @@ For `path = "README.md"`:
 - Rule 2: no match → skip
 - Rule 3: catch-all → **`ask`**
 
-First-match-wins means the user controls priority through declaration order.
-More specific rules go first; broader rules and catch-alls go last.
-This is the same model used by firewalls, nginx location blocks, and route
-tables.
+Declaration order controls priority: specific rules come first, followed by
+broader rules and a final catch-all, matching the evaluation model of firewall
+rules, nginx location blocks, and route tables.
 
 ### Argument paths (JSON Pointer)
 
@@ -209,10 +186,10 @@ JSON Pointer parsing uses the [`jsonptr`][jsonptr] crate, which implements RFC
 **Array traversal.** Standard JSON Pointer uses numeric indices to address
 specific array elements (`/patterns/0/paths/0`).
 For run policy evaluation, the pointer navigates the tool's **parameter schema**
-rather than a specific document instance.
-When a pointer segment resolves to an array type in the schema, it implicitly
-means "any element" — the matcher is evaluated against every element at that
-position in the actual arguments.
+rather than a single document instance.
+When a pointer segment resolves to an array type in the schema, it matches
+against any element: the evaluator tests the matcher against every element at
+that position in the call arguments.
 
 For example, given `arg = "/patterns/paths"` and arguments:
 
@@ -237,24 +214,23 @@ For example, given `arg = "/patterns/paths"` and arguments:
 }
 ```
 
-The evaluator walks: `patterns[0].paths[0]` → `"src/a.rs"`,
-`patterns[0].paths[1]` (if any), `patterns[1].paths[0]` → `".env"`, etc. If
-**any** resolved value satisfies the matcher, the condition is met.
+The evaluator checks `patterns[0].paths[0]` (`"src/a.rs"`), any remaining
+elements in `patterns[0].paths`, `patterns[1].paths[0]` (`".env"`), and so on.
+The condition is met if **any** resolved element satisfies the matcher.
 
-This existential ("any element matches") semantics is the secure default: since
-tool calls are atomic and cannot be partially executed, a single sensitive value
-anywhere in the arguments should trigger the restrictive policy.
+Existential ("any element matches") semantics is the safe default: tool calls
+execute atomically, so a single sensitive value anywhere in the arguments must
+trigger the matching rule.
 
 **Validation at config load time.** JP walks the tool's `ToolParameterConfig`
-tree following the pointer segments.
-Each segment must resolve to a valid property or array item type.
-Mismatches (e.g., treating a string field as an object, referencing a
-nonexistent property) are config errors.
+tree along the pointer segments.
+Each segment must resolve to a valid property or array item type; traversing a
+scalar field or referencing a nonexistent property is a config error.
 
 ### The `path` parameter type
 
-This RFD introduces `path` as a recognized parameter type alongside the existing
-`string`, `number`, `integer`, `boolean`, `array`, and `object` types:
+This RFD introduces `path` as a parameter type alongside `string`, `number`,
+`integer`, `boolean`, `array`, and `object`:
 
 ```toml
 [conversation.tools.fs_modify_file.parameters.path]
@@ -262,32 +238,27 @@ type = "path"
 summary = "The path to the file to modify."
 ```
 
-The `path` type affects two things:
+The `path` type affects two behaviors:
 
-1. **JSON Schema generation.** `to_json_schema()` emits `"type": "string"` for
-   `path` parameters.
-   LLMs see a standard string field.
-   The `path` type is a JP-internal semantic annotation, not a JSON Schema type.
+1. **JSON Schema generation.** `path` is a JP-internal semantic annotation.
+   `to_json_schema()` emits `"type": "string"`, so LLMs see a standard string
+   parameter.
 
-2. **Matcher behavior.** The `prefix` matcher on a `path`-typed parameter uses
-   path-component-count for matching instead of byte-length string prefix.
-   `prefix = "src/"` matches `"src/lib.rs"` (component match) but not
-   `"src-old/lib.rs"` (byte prefix but not component prefix).
-   Path values are normalized before matching (resolve `.`, `..`, strip trailing
-   separators).
+2. **Matcher behavior.** On a `path` parameter, the `prefix` matcher compares
+   normalized path components rather than raw byte prefixes.
+   Paths are normalized before matching (resolving `.` and `..` and stripping
+   trailing separators), so `prefix = "src/"` matches `"src/lib.rs"` but not
+   `"src-old/lib.rs"`.
 
-Tool definitions should migrate path-like `string` parameters to `path` where
-the value represents a filesystem path.
-This is backward-compatible for LLMs (they still see `"type": "string"`) and
-enables more accurate policy matching.
+Tool definitions should use `type = "path"` for parameters that represent
+filesystem paths.
 
 ### Type-constrained matchers
 
-Each rule condition consists of an `arg` (JSON Pointer to the parameter) and
-exactly one matcher keyword.
-The available matchers depend on the resolved parameter type.
-This follows [JSON Schema validation vocabulary][json-schema-validation] where
-applicable, with a JP-specific `prefix` extension for path matching.
+Each rule condition consists of an `arg` pointer and a single matcher keyword.
+The valid matchers depend on the resolved parameter type, following the [JSON
+Schema validation vocabulary][json-schema-validation] with a JP-specific
+`prefix` extension for path matching.
 
 #### Matchers for any type
 
@@ -314,10 +285,9 @@ applicable, with a JP-specific `prefix` extension for path matching.
 { arg = "/patterns/old", pattern = "rm\\s+-rf", mode = "ask" }
 ```
 
-The `prefix` matcher is not part of JSON Schema.
-It exists because path-prefix matching is the primary use case for run policies
-and regex (`pattern = "^src/"`) does not provide path-component-aware matching
-or normalization.
+`prefix` is a JP extension to JSON Schema: path-prefix matching is the primary
+use case for run policies, and regex (`pattern = "^src/"`) neither normalizes
+paths nor matches on path-component boundaries.
 
 #### Matchers for `number` and `integer` types
 
@@ -332,35 +302,33 @@ or normalization.
 { arg = "/start_line", minimum = 1000, mode = "ask" }
 ```
 
-Each rule supports exactly one matcher keyword.
-Range constraints (min AND max on the same parameter) require compound
-conditions, which are out of scope for this RFD.
+Because each rule accepts one matcher keyword, range constraints (combining a
+lower and upper bound on the same parameter) require compound conditions and are
+out of scope.
 
 #### Matchers for `boolean` type
 
 Only `const` is available for boolean parameters.
-`enum` is technically valid but redundant (booleans have only two values).
+`enum` is redundant because booleans have only two values.
 
 #### Validation
 
-At config load time, JP validates:
+At config load time, JP validates that:
 
 1. The `arg` pointer resolves to a valid parameter in the tool's schema.
 2. The matcher keyword is valid for the resolved parameter's type.
-3. The matcher value's type is compatible (e.g., `const = true` on a `number`
-   parameter is an error).
+3. The matcher value's type matches the parameter (e.g., `const = true` on a
+   `number` parameter is an error).
 
-If validation fails, the configuration is rejected with a specific error
-identifying the rule, the parameter, and the type mismatch.
+Invalid rules are rejected at config load time with an error identifying the
+rule, parameter, and type mismatch.
 
 ### Unreachable rule detection
 
-JP detects rules that can never match because an earlier rule on the same `arg`
+JP rejects rules that can never fire because an earlier rule on the same `arg`
 always matches first.
-These are **config errors**, not warnings, because they indicate the user's
-intent does not match their configuration.
-
-Detected cases:
+Shadowed rules are **config errors**, not warnings, because they indicate that
+the rule order contradicts the user's intent.
 
 | Earlier rule                  | Later rule                  | Why it's unreachable                                                            |
 | ----------------------------- | --------------------------- | ------------------------------------------------------------------------------- |
@@ -370,33 +338,29 @@ Detected cases:
 | `enum = ["jq", "wc", "date"]` | `enum = ["jq", "wc"]`       | The later set is a subset of the earlier set.                                   |
 | Catch-all `{ mode = "ask" }`  | Any rule after it           | A catch-all matches everything; nothing after it can fire.                      |
 
-The detection is mechanical and has zero false positives.
-Every detected case is provably unreachable under first-match-wins evaluation.
+Each case above is provably unreachable under first-match-wins evaluation, so
+detection has no false positives.
 
-JP also warns (not errors) when no catch-all rule is present at the end of the
-array.
-An implicit `{ mode = "ask" }` is appended for safety, but the user should make
-the fallback explicit.
+When a rule array has no trailing catch-all rule, JP emits a warning and appends
+an implicit `{ mode = "ask" }`.
 
 ### Interaction with argument streaming
 
-String aliases and catch-all-only policies (no conditions) are decided before
-any arguments arrive — identical to the current behavior where `run = "ask"` or
-`run = "unattended"` requires no argument inspection.
+String aliases and catch-all-only policies have no conditions, so JP resolves
+them before any arguments stream in.
 
-Rules with conditions are evaluated after all arguments arrive.
-Each rule's `arg` pointer identifies exactly which parameter it depends on,
-which enables a future optimization: evaluating rules incrementally as
-individual parameters finish streaming, rather than waiting for the complete
-argument object.
+Conditional rules are evaluated once the complete argument object arrives.
+Because each rule's `arg` pointer names the exact parameter it inspects, a
+future optimization can evaluate rules incrementally as individual parameters
+finish streaming.
 
 > [!TIP]
 > [RFD D26] defines this streaming evaluation model.
 
-### Applying `policy.run` to `result`
+### Result policy (`policy.result`)
 
-The same rule structure applies to `policy.result`.
-The `mode` values correspond to `ResultMode` instead of `RunMode`:
+`policy.result` uses the same rule structure, argument paths, matchers, and
+validation, with `mode` taking a `ResultMode` instead of a `RunMode`:
 
 ```toml
 [conversation.tools.fs_modify_file.policy]
@@ -406,77 +370,62 @@ result = [
 ]
 ```
 
-The evaluation model, argument paths, matchers, and validation are identical.
-
 ## Drawbacks
 
-- **Ordering burden.** First-match-wins requires users to order rules from most
-  specific to least specific.
-  Users familiar with specificity-based systems (CSS, 095's
-  longest-prefix-match) may find this counterintuitive.
-  Config error detection for shadowed rules mitigates this, but the user must
-  still understand the ordering model.
+- **Ordering burden.** First-match-wins requires ordering rules from most
+  specific to least specific, which can surprise users accustomed to
+  specificity-based systems (such as CSS or 095's longest-prefix-match).
+  Unreachable-rule errors catch shadowed rules on the same parameter, but users
+  still need to understand declaration-order priority.
 
-- **No compound conditions.** Cross-parameter conditions ("ask when path is in
-  src/ AND regex is enabled") cannot be expressed.
-  The user must approximate with single-parameter rules, which may be overly
-  broad.
-  See [Non-Goals](#non-goals).
+- **No compound conditions.** Cross-parameter conditions ("ask when `path` is in
+  `src/` and regex is enabled") cannot be expressed; users must approximate them
+  with broader single-parameter rules (see [Non-Goals](#non-goals)).
 
-- **New dependency.** The `jsonptr` crate is added for JSON Pointer parsing.
-  This is a well-maintained crate (37M downloads) with minimal transitive
-  dependencies, but it is a new dependency nonetheless.
+- **New dependency.** Adding the `jsonptr` crate for JSON Pointer parsing
+  introduces a new dependency, though it has minimal transitive dependencies.
 
-- **Migration cost.** Moving `run` and `result` into `policy` requires a
-  backward-compatibility shim and eventual deprecation of the top-level fields.
-  During the transition, both forms coexist, which adds surface area to the
-  config system.
+- **Migration cost.** Moving `run` and `result` under `policy` requires
+  supporting the top-level fields as deprecated aliases during migration.
 
-- **Nested argument paths are complex.** Matching against `/patterns/paths`
-  requires walking the parameter schema tree and iterating over array elements.
-  This adds implementation complexity beyond simple top-level parameter
-  matching.
+- **Nested argument paths.** Resolving pointers like `/patterns/paths` requires
+  walking the parameter schema tree and iterating over nested array elements
+  rather than looking up a top-level key.
 
 ## Alternatives
 
 ### Specificity-based matching
 
-Instead of first-match-wins, evaluate all rules and pick the most specific match
-(longest prefix wins, exact match beats prefix, etc.).
-This is the model used by [RFD 076] for access grants.
+Evaluate all rules and pick the most specific match (longest prefix wins, exact
+match beats prefix), following the [RFD 076] model for access grants.
 
-Rejected because the specificity model introduces hidden ordering that is
-difficult to reason about.
-Within a single matcher type (prefix vs prefix), specificity is intuitive.
-Across types (does `const` beat `prefix`?
-does a longer prefix beat an `enum`?), the ordering is arbitrary and must be
-memorized.
-First-match-wins makes the priority explicit and visible in the configuration.
-
-The cost is that users must order rules correctly, but config error detection
-catches the most common mistake (shorter prefix before longer prefix on the same
-parameter).
+Rejected because specificity across different matcher types has no natural
+order.
+Comparing two prefixes is intuitive, but ranking `const` against `prefix` or a
+long prefix against `enum` requires arbitrary tie-breaking rules that users must
+memorize.
+First-match-wins makes priority explicit in the configuration, and
+unreachable-rule detection catches the most common ordering mistake (placing a
+shorter prefix before a longer one on the same parameter).
 
 ### Embed run mode in 095's `FsRule`
 
-Attach a `run` field to `access.fs` rules, sharing 095's configuration surface
-entirely.
+Attach a `run` field to `access.fs` rules so access grants and run modes share a
+single configuration block.
 
-Rejected because access grants and run policy are different concerns.
-`access` controls what a tool *can* do (capability grant).
-`policy.run` controls whether the user is *prompted* (UX decision).
-Coupling them means you must configure access rules to get run-mode overrides,
-even when the default access policy is sufficient.
+Rejected because `access` (capability grants) and `policy.run` (confirmation
+prompts) are independent concerns.
+Coupling them would force users to write `access.fs` rules just to customize
+prompt behavior when the default access policy is already sufficient.
 
 ### Generic predicate system with AND/OR combinators
 
-A fully expressive predicate language supporting nested `and`/`or`/`not`
-combinators across multiple parameters.
+Provide a predicate language with nested `and`, `or`, and `not` combinators
+across multiple parameters.
 
-Rejected as over-engineered for current needs.
-Single-parameter conditions cover the vast majority of use cases (path-based
-policies, command-name-based policies).
-Compound conditions can be added later via the `all` key without breaking
+Rejected because single-parameter conditions cover the common cases (matching
+paths or command names).
+Multi-parameter conjunction can be added later via an `all` key without breaking
 existing configurations.
 
 ### Object-keyed `run` (grouped by parameter)
@@ -491,87 +440,75 @@ mode = "ask"
 "src/" = "unattended"
 ```
 
-Rejected because: compound conditions don't fit the shape, matcher type is
-implicit (the key is a prefix?
-a const?), and cross-parameter rules have no natural location.
+Rejected because the matcher type is implicit in the key (is `"src/"` a prefix
+or a `const`?), cross-parameter priority has no natural order, and future
+compound conditions do not fit the table structure.
 
 ## Non-Goals
 
-- **Compound conditions.** Matching on multiple parameters simultaneously (e.g.,
-  "path in src/ AND regex enabled") is not supported.
-  A future RFD can add this via an `all` key on rules without breaking existing
+- **Compound conditions.** Matching multiple parameters simultaneously (e.g.,
+  "path in `src/` AND regex enabled") is not supported.
+  A future RFD can add an `all` key on rules without breaking existing
   configurations.
 
 - **Streaming argument evaluation.** Evaluating rules as individual parameters
-  stream in (before the full argument object is available) is a future
-  optimization.
-  This RFD evaluates conditional rules after all arguments arrive.
+  stream in is left to a follow-up RFD; this RFD evaluates conditional rules
+  after all arguments arrive.
 
 > [!TIP]
 > [RFD D26] extends D25 with streaming policy evaluation, consuming [RFD 043]'s
 > per-parameter completion signals to resolve conditional rules before the full
 > argument object arrives.
 
-- **Access policy enforcement.** This RFD does not restrict what a tool can do.
-  It only controls whether the user is prompted.
-  Access restriction is handled by [RFD 076] (cooperative) and [RFD 075]
+- **Access policy enforcement.** This RFD controls confirmation prompts, not
+  tool capabilities.
+  Access restrictions are handled by [RFD 076] (cooperative) and [RFD 075]
   (OS-level).
 
-- **Result content inspection.** Conditioning `policy.result` on the tool's
-  output (e.g., "ask before delivering results containing error messages") is
-  out of scope.
-  `policy.result` conditions match on the tool call's input arguments, not its
-  output.
+- **Result content inspection.** `policy.result` conditions match on the tool
+  call's input arguments, not on its output (such as prompting only when output
+  contains an error message).
 
-- **MCP tool arguments.** MCP tools receive arguments through the MCP protocol.
-  Run policy evaluation applies to MCP tool calls the same way — the arguments
-  are available as JSON before execution.
-  No MCP-specific handling is needed.
+- **MCP-specific argument handling.** MCP tool calls provide JSON arguments
+  before execution and use the same policy evaluation path as built-in tools.
 
 ## Risks and Open Questions
 
-1. **JSON Pointer array traversal semantics.** Standard JSON Pointer uses
-   numeric indices; this RFD uses implicit "any element" traversal for array
-   types in the schema.
-   This is a non-standard extension.
-   Should the config syntax make array traversal explicit (e.g., requiring `/-`
-   or `/*` at array positions) rather than inferring it from the schema?
+1. **JSON Pointer array traversal semantics.** Standard JSON Pointer requires
+   numeric array indices, whereas this RFD infers "any element" traversal from
+   array types in the parameter schema.
+   Should the config syntax require an explicit wildcard segment (such as `/-`
+   or `/*`) at array positions instead?
 
-2. **Parameter ordering for future streaming.** When conditional rules are
-   evaluated during argument streaming (future RFD), the order in which
-   parameters arrive matters.
-   LLMs typically respect JSON schema property ordering, which comes from
-   `IndexMap` iteration order in the tool TOML.
-   This is not guaranteed by all providers.
-   Should the future streaming RFD validate provider behavior, or treat
-   out-of-order arrival as a graceful degradation (wait for all arguments)?
+2. **Parameter ordering for future streaming.** Incremental evaluation during
+   argument streaming depends on the order in which parameters arrive.
+   LLMs usually follow the JSON Schema property order (`IndexMap` iteration
+   order in the tool TOML), but providers do not guarantee this.
+   Should the streaming RFD validate provider ordering or degrade gracefully by
+   waiting for all arguments when parameters arrive out of order?
 
 > [!TIP]
 > [RFD D26] addresses this: out-of-order arrival is graceful degradation.
 > The evaluator returns `Waiting` until the needed parameter arrives.
 > No incorrect decisions, just lost optimization.
 
-3. **`prefix` on `string`-typed parameters.** For `string`-typed parameters (not
-   `path`), `prefix` uses byte-length string prefix matching.
-   Should `prefix` be restricted to `path`-typed parameters only, forcing
-   `string` parameters to use `pattern = "^..."` instead?
+3. **`prefix` on `string`-typed parameters.** On `string` parameters (as opposed
+   to `path`), `prefix` performs a byte-prefix match.
+   Should `prefix` be restricted to `path` parameters so `string` parameters
+   must use `pattern = "^..."`?
 
 4. **Interaction with `RunMode::Edit`.** When a conditional rule resolves to
-   `mode = "edit"`, the user edits the arguments.
-   If the edit changes the matched parameter (e.g., changes the path from `src/`
-   to `.env`), should JP re-evaluate the rules with the edited arguments?
-   The current design does not re-evaluate — the mode is determined before the
-   edit.
+   `mode = "edit"`, the user can modify the matched parameter (for example,
+   changing `path` from `src/` to `.env`).
+   In this design, JP determines the mode before the edit and does not
+   re-evaluate the rules afterward.
    Documenting this behavior may be sufficient.
 
-5. **Global defaults with conditions.** Can `conversation.tools.*.policy.run`
-   accept an array of rules?
-   This would apply conditional rules as defaults for all tools, not just
-   specific ones.
-   The main question is whether the `arg` pointers make sense across tools with
+5. **Global defaults with conditions.** If `conversation.tools.*.policy.run`
+   accepts an array of rules, its `arg` pointers apply across tools with
    different parameter schemas.
-   An `arg` that doesn't exist in a tool's schema would cause that rule to be
-   skipped (not an error), since it's a default, not a tool-specific config.
+   A rule whose `arg` does not exist in a tool's schema would need to be skipped
+   rather than treated as a config error.
 
 ## Implementation Plan
 
@@ -648,25 +585,24 @@ Depends on Phase 4.
 - Optionally add example `policy.run` configurations to tool documentation.
 
 Depends on Phase 1.
-Can proceed in parallel with Phases 2–5.
+Can proceed in parallel with Phases 2 to 5.
 
 ## References
 
-- [RFD 076] — Tool access grants.
-  Defines `AccessPolicy` types and cooperative enforcement.
-  This RFD shares the `path` parameter type and path-prefix matching
-  infrastructure.
-- [RFD 075] — Tool sandbox and access policy.
-  OS-level enforcement of access grants.
-  Complements this RFD's prompt-level control.
-- [RFD 042] — Tool options.
-  Established per-tool `options` configuration.
-- [RFC 6901] — JSON Pointer.
+- [RFD 076]: Tool access grants.
+  Defines `AccessPolicy` types and cooperative enforcement, and shares the
+  `path` parameter type and path-prefix matching logic.
+- [RFD 075]: Tool sandbox and access policy.
+  Enforces access grants at the OS level, complementing this RFD's prompt-level
+  control.
+- [RFD 042]: Tool options.
+  Establishes per-tool `options` configuration.
+- [RFC 6901]: JSON Pointer.
   Defines the syntax used for `arg` paths.
-- [JSON Schema Validation] — Validation vocabulary.
-  This RFD reuses `const`, `enum`, `pattern`, `minimum`, `maximum`,
-  `exclusive_minimum`, and `exclusive_maximum` keywords.
-- [`jsonptr` crate] — Rust implementation of RFC 6901 used for pointer parsing.
+- [JSON Schema Validation]: Validation vocabulary.
+  Defines the `const`, `enum`, `pattern`, `minimum`, `maximum`,
+  `exclusive_minimum`, and `exclusive_maximum` keywords reused here.
+- [`jsonptr` crate]: Rust implementation of RFC 6901 used for pointer parsing.
 
 [JSON Schema Validation]: https://www.ietf.org/archive/id/draft-bhutton-json-schema-validation-01.html
 [RFC 6901]: https://www.rfc-editor.org/rfc/rfc6901.html
