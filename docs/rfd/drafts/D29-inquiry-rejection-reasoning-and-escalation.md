@@ -11,10 +11,10 @@
 
 ## Summary
 
-This RFD adds mandatory reasoning to assistant-answered inquiries and introduces
-an escalation mechanism that routes rejected inquiries to the user instead of
-failing the tool.
-Together these address two observed failure modes: the main model spiraling
+This RFD requires assistant-answered inquiries to include reasoning and adds an
+escalation target that routes rejected inquiries to the user instead of failing
+the tool call.
+Together, these changes address two failure modes: the main model spiraling
 after opaque sub-agent rejections, and sub-agent misjudgments causing
 unnecessary tool failures.
 
@@ -28,54 +28,51 @@ If the sub-agent answers `false`, the tool fails with:
 `apply_changes` inquiry was answered with `false`. Changes discarded.
 ```
 
-This message is problematic on three levels:
+This failure has three problems:
 
-1. **Opaque to the main model.** The main model does not know *who* answered the
-   question, *why* they rejected it, or that it was a sub-agent decision rather
-   than a user rejection.
-   The term "inquiry" is internal jargon with no meaning to the model.
+1. **Opaque to the main model.** The message does not state *who* rejected the
+   change (a sub-agent or the user) or *why*.
+   The term "inquiry" is also internal jargon with no meaning to the model.
 
-2. **No reasoning trail.** The inquiry system extracts a raw `Value` from the
-   sub-agent's structured response.
-   There is no mechanism for the sub-agent to explain its decision.
+2. **No reasoning trail.** The inquiry system extracts only a raw `Value` from
+   the sub-agent's structured response, giving the sub-agent no way to explain
+   its decision.
    The main model cannot distinguish a deliberate rejection ("the change is
    incorrect") from a misjudgment ("I didn't understand the diff").
 
-3. **No recovery path.** The tool fails, and the main model's only options are
-   to retry the identical call (same arguments, same sub-agent, same result) or
-   work around it with destructive alternatives (deleting and recreating files).
-   In practice, the main model often spirals — retrying multiple times, then
-   falling back to `fs_delete_file` + `fs_create_file`, which loses the
-   confirmation safeguard entirely.
+3. **No recovery path.** When the tool fails, the main model can only retry the
+   identical call (same arguments, same sub-agent, same result) or work around
+   the failure with destructive alternatives.
+   In practice, the model often retries several times before falling back to
+   `fs_delete_file` and `fs_create_file`, losing the confirmation safeguard
+   entirely.
 
-Observed consequences in production:
+Both failure modes have occurred in production:
 
 - A main model (Opus) attempted 13 RFD cross-reference additions.
   The sub-agent (Haiku) rejected the first two, then accepted identical changes
   on later retries.
-  The main model wasted turns reasoning about why its changes were being
-  rejected.
+  The main model wasted turns reasoning about why its changes had been rejected.
 
-- A main model tried to modify a file three times.
-  After repeated rejections, it deleted and recreated the file from scratch —
-  bypassing the review mechanism the inquiry was designed to provide.
+- After three rejected attempts to modify a file, a main model deleted and
+  recreated the file from scratch, bypassing the review mechanism the inquiry
+  provides.
 
 ## Design
 
 ### Overview
 
-Two changes, designed to be implemented independently:
+The design has two independent parts:
 
 1. **Reasoning in inquiry responses.** The structured output schema gains a
-   `reason` field.
-   The sub-agent must explain its answer before committing to it.
-   The reason is threaded through the error path so the main model receives
-   actionable context.
+   `reason` field so the sub-agent must explain its answer before committing to
+   it.
+   On rejection, the coordinator threads that reason into the tool error message
+   to give the main model actionable context.
 
 2. **Escalation target.** A new `QuestionTarget` variant routes the question to
-   the sub-agent first, then escalates to the user if the sub-agent rejects.
-   This preserves the speed advantage of sub-agent approval while providing a
-   safety net for misjudgments.
+   the sub-agent first and escalates to the user if the sub-agent rejects it.
+   This preserves fast sub-agent approval while catching misjudgments.
 
 ### Part 1: Reasoning in Inquiry Responses
 
@@ -115,13 +112,13 @@ Proposed:
 }
 ```
 
-The `reason` field is stable across inquiries of the same answer type.
-This preserves the cache stability property from [RFD 034] — the schema does
-not change between inquiries.
+Because the `reason` field does not vary across inquiries of the same answer
+type, the schema stays static between inquiries and preserves the prompt-cache
+stability from [RFD 034].
 
 #### `InquiryResponse` extension
 
-Add an optional `reason` field:
+`InquiryResponse` gains an optional `reason` field:
 
 ```rust
 pub struct InquiryResponse {
@@ -133,14 +130,14 @@ pub struct InquiryResponse {
 }
 ```
 
-Backward-compatible: existing serialized responses without `reason` deserialize
-with `None`.
+Existing serialized responses without `reason` deserialize with `None`,
+preserving backward compatibility.
 
 #### `InquiryBackend` return type
 
-The `InquiryBackend::inquire` method currently returns `Result<Value,
-InquiryError>`.
-Change the success type to carry the reason:
+`InquiryBackend::inquire` changes from returning `Result<Value, InquiryError>`
+to returning `Result<InquiryAnswer, InquiryError>`, where `InquiryAnswer`
+carries the reason alongside the answer value:
 
 ```rust
 pub struct InquiryAnswer {
@@ -149,37 +146,37 @@ pub struct InquiryAnswer {
 }
 ```
 
-The `LlmInquiryBackend` extracts both fields from the structured response.
-The `MockInquiryBackend` returns `None` for reason by default.
+`LlmInquiryBackend` extracts both fields from the structured response.
+`MockInquiryBackend` defaults `reason` to `None`.
 
 #### Threading reason into tool error messages
 
 When the coordinator receives an `InquiryResult` with a successful answer, it
 stores the reason in the `InquiryResponse` event.
-When the tool subsequently fails because the answer was a rejection (e.g.
-`apply_changes = false`), the error response needs the reason.
+If the tool subsequently fails because the answer was a rejection (e.g.
+`apply_changes = false`), the error response needs that reason.
 
-Two approaches:
+There are three ways to pass the reason into the error response:
 
-**Option A: Pass reason through `accumulated_answers`.** Extend the answers map
-to carry metadata alongside values.
-This is invasive — it changes the tool contract.
+- **Option A: Pass the reason through `accumulated_answers`.** Extend the
+  answers map to carry metadata alongside values.
+  This is invasive because it changes the tool contract.
 
-**Option B: Coordinator intercepts rejections.** For boolean inquiries where the
-sub-agent answers `false`, the coordinator synthesizes the error response
-directly instead of re-executing the tool.
-The tool never sees `false`.
+- **Option B: Intercept rejections in the coordinator.** For boolean inquiries
+  where the sub-agent answers `false`, synthesize the error response in the
+  coordinator instead of re-executing the tool.
+  The tool never sees `false`.
 
-**Option C: Enrich the tool error message in the coordinator.** The coordinator
-re-executes the tool as today.
-When the tool returns an error, and the most recent inquiry for that tool had a
-`false` answer with a reason, the coordinator replaces the tool's error message
-with a richer one that includes the reason and attribution.
+- **Option C: Enrich the tool error message in the coordinator.** Re-execute the
+  tool as usual.
+  Track which tools received sub-agent inquiry answers during the current
+  execution cycle; when a tool returns an error after a `false` boolean inquiry
+  answer with a reason, replace its error message with one that includes the
+  reason and model attribution.
 
-Option C is the least invasive.
-The tool's error message is an implementation detail that the coordinator
-already wraps in a `ToolCallResponse`.
-The enriched message would look like:
+This RFD chooses Option C. It leaves the tool contract untouched because the
+coordinator already wraps the tool's error string in a `ToolCallResponse`.
+The enriched message has this form:
 
 ```
 The proposed changes to 'docs/rfd/008-knowledge-base.md' were reviewed by a
@@ -193,16 +190,12 @@ The changes were not applied. You may retry with different changes or ask the
 user to review.
 ```
 
-The coordinator can detect this case by tracking which tools had sub-agent
-answered inquiries in the current execution cycle.
-When a tool error follows a `false` boolean inquiry answer, the coordinator
-enriches the error.
+#### Inquiry prompt
 
-#### Prompt text adjustment
+The prompt constructed in `LlmInquiryBackend::inquire` instructs the sub-agent
+to populate the `reason` field.
 
-The inquiry question sent to the sub-agent should instruct it to provide
-reasoning.
-The current prompt format in `LlmInquiryBackend::inquire`:
+Current prompt:
 
 ```
 The tool `fs_modify_file` requires additional input.
@@ -214,7 +207,7 @@ Do you want to apply the following patch?
 Provide your answer based on the conversation context.
 ```
 
-Add an instruction for the reason field:
+Proposed prompt:
 
 ```
 The tool `fs_modify_file` requires additional input.
@@ -230,6 +223,8 @@ briefly explain why you chose your answer.
 ### Part 2: Escalation
 
 #### New `QuestionTarget` variant
+
+`QuestionTarget` gains an `AssistantWithEscalation` variant:
 
 ```rust
 pub enum QuestionTarget {
@@ -263,19 +258,18 @@ model.id = "anthropic/claude-haiku-4-5"
 escalation = true
 ```
 
-The `escalation` field in the map form distinguishes `Assistant` from
-`AssistantWithEscalation`.
-When `escalation` is absent or `false`, the target is `Assistant`.
-When `true`, it is `AssistantWithEscalation`.
+In the map form, the `escalation` field selects between `Assistant` (when
+`false` or absent) and `AssistantWithEscalation` (when `true`).
 
-Deserialization:
+Deserialization rules:
 
 - `"user"` → `User`
 - `"assistant"` → `Assistant(default())`
 - `"assistant_with_escalation"` → `AssistantWithEscalation(default())`
 - `{ model.id = "...", escalation = false }` → `Assistant(config)`
 - `{ model.id = "...", escalation = true }` → `AssistantWithEscalation(config)`
-- `{ model.id = "..." }` → `Assistant(config)` (escalation defaults to false)
+- `{ model.id = "..." }` → `Assistant(config)` (`escalation` defaults to
+  `false`)
 
 #### Escalation flow
 
@@ -294,25 +288,25 @@ and the question target is `AssistantWithEscalation`:
    <original patch>
    ```
 
-   The user sees the sub-agent's reasoning and makes the final call.
-   If the user approves, the tool proceeds.
-   If the user rejects, the tool fails with a user-rejection message (distinct
-   from a sub-agent rejection).
+   The user sees the sub-agent's reasoning and makes the final decision.
+   If the user approves, the tool proceeds; if the user rejects, the tool fails
+   with a user-rejection message distinct from a sub-agent rejection.
 
 2. **Non-interactive mode.** Escalation follows the detached prompt policy ([RFD
    049]):
 
    - `deny`: fail with the sub-agent's rejection (same as `Assistant`).
    - `defaults`: use the question's default value (`true` for `apply_changes`).
-   - `auto`: fail (the sub-agent already said no; auto-approving over a
-     rejection would undermine the review).
+   - `auto`: fail (the sub-agent already rejected the change, and auto-approving
+     over that rejection would undermine the review).
 
-#### When does escalation trigger?
+#### Escalation trigger
 
 Escalation triggers when the sub-agent's answer would cause the tool to fail.
-For the common case (boolean `apply_changes`-style questions), this is a `false`
-answer.
-Generalizing:
+Only boolean inquiries (such as `apply_changes`) have a general rejection value
+(`false`) that the coordinator can detect before re-executing the tool.
+For select and text inquiries, any valid answer proceeds, so escalation in this
+RFD is defined only for boolean inquiries:
 
 | Answer type | Escalation trigger                            |
 | ----------- | --------------------------------------------- |
@@ -320,22 +314,15 @@ Generalizing:
 | Select      | Not applicable (any valid selection proceeds) |
 | Text        | Not applicable (any text proceeds)            |
 
-For boolean questions, the coordinator can detect the rejection before
-re-executing the tool.
-For select and text questions, there's no general concept of "rejection" — any
-valid answer proceeds.
-Escalation is therefore only defined for boolean inquiries in this RFD.
-
-Future extension: a tool could return `NeedsInput` again after receiving an
-answer it considers invalid.
-The coordinator could detect this re-ask cycle and escalate.
-This is left to a future RFD.
+A future RFD could extend escalation to non-boolean questions by detecting when
+a tool returns `NeedsInput` again after receiving an answer it considers
+invalid.
 
 #### Coordinator changes
 
-The `handle_tool_result` path for `InquiryResult` currently has two branches:
-`Ok(answer)` (re-execute tool) and `Err(error)` (fail tool).
-Escalation adds a third path within the `Ok` branch:
+The `handle_tool_result` path for `InquiryResult` has two branches: `Ok(answer)`
+(re-execute tool) and `Err(error)` (fail tool).
+Escalation adds a branch within `Ok`:
 
 ```rust
 ExecutionEvent::InquiryResult { index, question_id, question_text, result }
@@ -367,14 +354,14 @@ ExecutionEvent::InquiryResult { index, question_id, question_text, result }
 }
 ```
 
-The coordinator needs to know the `QuestionTarget` for the tool/question pair.
-It already has `question_target()` — the same lookup used when routing the
-initial inquiry.
+The coordinator resolves `target` for the tool/question pair with
+`question_target()`, the same lookup used when routing the initial inquiry.
 
 ### Improved error message (immediate fix)
 
-Independent of Parts 1 and 2, the error message in `modify_file.rs` should be
-improved:
+Independent of Parts 1 and 2, `modify_file.rs` replaces its static rejection
+error message to drop internal jargon ("inquiry"), state the outcome clearly,
+and suggest a recovery action.
 
 Current:
 
@@ -389,183 +376,175 @@ Proposed:
  You may retry with different changes."
 ```
 
-This removes internal jargon ("inquiry"), states the outcome clearly, and
-suggests a recovery action.
-
 ## Drawbacks
 
-- **Reason field adds tokens.** Every inquiry response now includes a reason
-  string (typically 1-3 sentences).
-  At ~50-100 tokens per reason on a cheap model (Haiku), the cost is negligible
+- **Reason field adds tokens.** Every inquiry response includes a 1-3 sentence
+  `reason` string.
+  At ~50-100 tokens per reason on a small model (Haiku), the cost is negligible
   per inquiry but adds up for tools that ask many questions.
 
-- **Escalation adds latency in the rejection case.** When the sub-agent rejects
-  and escalation triggers, the user sees the prompt after the sub-agent's round
-  trip (~1-3 seconds on Haiku).
-  This is acceptable — the alternative is a failed tool and model spiraling.
+- **Escalation adds latency on rejection.** When the sub-agent rejects an answer
+  and escalation triggers, the user sees the prompt only after the sub-agent's
+  round trip (~1-3 seconds on Haiku).
+  That delay is preferable to a failed tool call and a spiraling main model.
 
-- **Config surface grows.** `AssistantWithEscalation` is a third target variant.
-  The string shorthand keeps simple cases simple, but the concept of "sub-agent
-  with user fallback" needs documentation.
+- **Larger configuration surface.** `AssistantWithEscalation` adds a third
+  `QuestionTarget` variant.
+  The string shorthand keeps simple cases concise, but the "sub-agent with user
+  fallback" behavior needs documentation.
 
 - **Escalation is only defined for boolean inquiries.** Select and text
-  questions don't have a clear "rejection" semantic.
-  This is a limitation, not a flaw — boolean confirmation is the dominant use
-  case for `apply_changes`-style questions.
+  questions lack a general rejection semantic, so escalation covers only boolean
+  confirmations such as `apply_changes`, which are the primary use case.
 
 ## Alternatives
 
 ### Retry with feedback instead of escalation
 
-Before escalating to the user, retry the inquiry with the main model's original
-intent as additional context: "The main assistant intended to add a TIP
-admonition.
-The sub-agent rejected because X. Please reconsider."
+Before escalating to the user, the coordinator could retry the inquiry with the
+main model's intent as additional context (for example: "The main assistant
+intended to add a TIP admonition.
+The sub-agent rejected because X. Please reconsider.").
 
-Rejected for now: risks infinite loops (sub-agent might reject again for the
-same reason), adds complexity, and the failure case (main model spiraling) is
-worse than prompting the user.
-Could be layered on top of escalation as a future optimization — retry once,
-then escalate.
+Rejected.
+Retrying risks infinite loops if the sub-agent rejects again for the same
+reason, adds complexity to the coordinator, and still leaves the main model
+spiraling when the retry fails.
+A single retry before escalation could be layered on later as an optimization.
 
 ### Coordinator intercepts `false` answers
 
-Instead of re-executing the tool with `false`, the coordinator synthesizes the
-error response directly.
-The tool never sees `false`.
+Instead of re-executing the tool with `false`, the coordinator could synthesize
+the error response directly so the tool never sees `false`.
 
-Rejected: this changes the tool's contract.
-The tool's `apply_changes` logic exists for a reason — other answer sources
-(user, static config) can also produce `false`.
-Intercepting only sub-agent rejections creates a special case in the coordinator
-that doesn't generalize.
+Rejected.
+This changes the tool contract.
+Other answer sources (interactive user, static config) can also produce `false`,
+so the tool's `apply_changes` handling is still needed.
+Intercepting only sub-agent rejections in the coordinator would create a special
+case that does not generalize.
 
 ### Main model explicitly requests escalation
 
-After receiving a rejection error, the main model could call a builtin
+After receiving a rejection error, the main model could call a built-in
 `escalate_inquiry` tool to ask the user directly.
-More general than config-based escalation but adds a tool call round trip and
-relies on the model recognizing when to escalate.
 
-Deferred: could complement config-based escalation as a manual override.
-Worth exploring in a future RFD if the automatic escalation proves insufficient.
+Deferred.
+Although more general than config-based escalation, this adds a tool-call round
+trip and relies on the model choosing to escalate instead of retrying or working
+around the failure.
+It can be explored in a future RFD as a manual override if automatic escalation
+proves insufficient.
 
-### `reason` as optional (not required)
+### Optional `reason` field
 
-Make `reason` optional in the schema, letting the sub-agent skip it.
-Rejected: the whole point is chain-of-thought before the answer.
-Making it optional means many sub-agents will skip it, especially smaller
-models.
-A required field with a `description` hint produces reliable reasoning.
+Make `reason` optional in the schema so the sub-agent can skip it.
+
+Rejected.
+Requiring `reason` before `answer` ensures the sub-agent performs
+chain-of-thought before committing to a decision.
+If `reason` is optional, smaller models frequently skip it; a required field
+with a `description` hint produces reliable reasoning.
 
 ## Non-Goals
 
 - **Escalation for select/text inquiries.** Only boolean inquiries have a clear
-  rejection semantic.
-  Generalized escalation (e.g. tool re-asks after an unsatisfactory answer) is
-  future work.
+  rejection semantic; generalized escalation (e.g. when a tool re-asks after an
+  unsatisfactory answer) is future work.
 - **Batching inquiry retries.** Retrying a rejected inquiry with additional
-  context before escalating.
-  Possible future optimization.
+  context before escalating is left as a future optimization.
 - **User-initiated escalation override.** A mechanism for the main model to
-  explicitly escalate to the user.
-  Deferred.
+  explicitly escalate a rejected inquiry to the user is deferred.
 - **Rendering inquiry reasoning in `conversation show`.** Display formatting for
-  the reason field in CLI output is deferred.
+  the `reason` field in CLI output is deferred.
 
 ## Risks and Open Questions
 
 - **Should `assistant_with_escalation` be the default for `fs_modify_file`?**
-  Currently `target = "assistant"`.
-  The cost of a false rejection (model spirals, deletes files) far exceeds the
-  cost of an occasional user prompt.
-  Recommend changing the project default to `assistant_with_escalation`.
+  The current default is `target = "assistant"`.
+  Because a false rejection (the model spiraling or deleting files) costs far
+  more than an occasional user prompt, this RFD recommends changing the project
+  default to `assistant_with_escalation`.
 
-- **Reason quality on small models.** Haiku's reasoning may be shallow ("The
-  change looks incorrect" without specifics).
-  The `description` hint in the schema helps, but quality depends on model
-  capability.
-  Per-question model overrides ([RFD 034]) let users route important questions
-  to more capable models.
+- **Reason quality on small models.** Haiku's reasoning can be shallow (for
+  example, "The change looks incorrect" without specifics).
+  The schema's `description` hint helps, and per-question model overrides ([RFD
+  034]) let users route important questions to more capable models.
 
-- **Escalation UX.** When escalation triggers, the user sees a prompt they
-  didn't expect — the sub-agent was supposed to handle it silently.
-  The prompt should clearly indicate why escalation occurred ("The assistant
-  recommended rejecting...") so the user understands the context.
+- **Escalation UX.** When escalation triggers, the user sees a prompt for a
+  question the sub-agent normally handles silently.
+  Prefixing the prompt with the sub-agent's rejection ("The assistant
+  recommended rejecting...") explains why the prompt appeared.
 
-- **Interaction with RFD 018 and 049.** Both are in Discussion status.
-  Escalation is a routing decision that fits into `route_prompt()` from RFD 018.
-  The detached policy from RFD 049 governs escalation in non-interactive mode.
-  Implementation should coordinate with those RFDs' timelines.
+- **Interaction with RFD 018 and 049.** Both RFDs are in Discussion status.
+  Escalation is a routing decision that fits into `route_prompt()` from RFD 018,
+  and the detached prompt policy from RFD 049 governs escalation in
+  non-interactive mode.
+  Implementation must coordinate with those RFDs' timelines.
 
 - **`auto` detached policy and escalation.** When the detached policy is `auto`
   and escalation triggers, should `auto` approve (overriding the sub-agent) or
   fail?
-  This RFD proposes fail — auto-approving over a sub-agent rejection defeats
-  the purpose of the review.
-  But this means `auto` behaves differently for escalated vs. direct questions,
-  which may be surprising.
+  This RFD proposes failing because auto-approving over a sub-agent rejection
+  defeats the purpose of the review, even though `auto` then behaves differently
+  for escalated questions than for direct questions.
 
 ## Implementation Plan
 
 ### Phase 0: Improve error message
 
-Change the static error string in `modify_file.rs` to a clearer message.
-
-No dependencies.
-Can be merged immediately.
+Replace the static rejection error string in `modify_file.rs` with a clearer
+message.
+This phase has no dependencies and can be merged immediately.
 
 ### Phase 1: Reasoning in inquiry schema
 
-Extend `create_inquiry_schema` to include the `reason` field.
-Update the prompt text to instruct the sub-agent to provide reasoning.
-Update `LlmInquiryBackend::inquire` to extract both `reason` and `answer`.
-Add `InquiryAnswer` return type.
+Extend `create_inquiry_schema` to include the `reason` field, update the prompt
+text to instruct the sub-agent to provide reasoning, and update
+`LlmInquiryBackend::inquire` to return `InquiryAnswer` with both `reason` and
+`answer`.
+Add `reason: Option<String>` to `InquiryResponse`, and update the coordinator to
+store the reason in `InquiryResponse` events and track the most recent reason
+per tool for error enrichment.
 
-Add `reason: Option<String>` to `InquiryResponse`.
-
-Update the coordinator to store the reason in `InquiryResponse` events and track
-the most recent reason per tool for error enrichment.
-
-Depends on Phase 0.
-Can be merged independently of Phase 2.
+Depends on Phase 0, and can be merged independently of Phase 2.
 
 ### Phase 2: Error message enrichment
 
-When a tool fails after a sub-agent rejection, the coordinator enriches the
-error with the sub-agent's reason and model attribution.
-The main model receives a structured, actionable error message.
+When a tool fails after a sub-agent rejection, enrich the error in the
+coordinator with the sub-agent's reason and model attribution so the main model
+receives a structured, actionable error message.
 
 Depends on Phase 1.
 
 ### Phase 3: Escalation target
 
-Add `AssistantWithEscalation` to `QuestionTarget`.
-Implement config deserialization (string and map forms).
-Add escalation logic to the coordinator's `InquiryResult` handler.
+Add `AssistantWithEscalation` to `QuestionTarget`, implement config
+deserialization for the string and map forms, and add escalation logic to the
+coordinator's `InquiryResult` handler.
 
-Depends on Phase 1 (needs reason for escalation prompt context).
-Can be merged independently of Phase 2.
+Depends on Phase 1 (which provides the reason for the escalation prompt), and
+can be merged independently of Phase 2.
 
 ### Phase 4: Default configuration
 
 Change the project default for `fs_modify_file` from `target = "assistant"` to
-`target = "assistant_with_escalation"`.
-Evaluate other tools with boolean inquiries for the same change.
+`target = "assistant_with_escalation"`, and evaluate other tools with boolean
+inquiries for the same change.
 
 Depends on Phase 3.
 
 ## References
 
-- [RFD 028: Structured Inquiry System][RFD 028] — the inquiry system this
+- [RFD 028: Structured Inquiry System][RFD 028]: the inquiry system this RFD
   extends.
-- [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034] — per-question
+- [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034]: per-question
   model overrides and cache optimization.
-- [RFD 018: Typed Prompt Routing Enum][RFD 018] — the `Prompt` enum and
+- [RFD 018: Typed Prompt Routing Enum][RFD 018]: the `Prompt` enum and
   `route_prompt()` function that escalation integrates with.
-- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049] —
-  detached policy governs escalation in non-interactive mode.
-- [RFD 005: First-Class Inquiry Events][RFD 005] — persisted inquiry events
+- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049]: detached
+  policy governing escalation in non-interactive mode.
+- [RFD 005: First-Class Inquiry Events][RFD 005]: persisted inquiry events that
   gain the `reason` field.
 
 [RFD 005]: ../005-first-class-inquiry-events.md
