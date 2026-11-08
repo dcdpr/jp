@@ -1,6 +1,6 @@
 # Changelog Fragments and Validation
 
-- **Status**: In Progress
+- **Status**: Done
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-03
 - **Label**: tracking-rfd=121
@@ -23,15 +23,27 @@ Tracking ticket for [RFD 121].
       `highlights/` notes.
       Depends on Phase 1.
 - [x] **Build the `jp release` plugin**: Create `crates/plugins/command/release`
-      with `init`, `check`, and `add`, and admit it in `.jp/config.toml`.
+      with `init`, `check`, a command per type, and `highlight`, and admit it in
+      `.jp/config.toml`.
       `init` writes Phase 1's README into other workspaces.
-      Serve `add` as the `changelog_add` tool with `tools init`, and enable it
-      in the `dev` and `rfd-implementor` personas.
+      Serve writing a fragment as the `changelog_add` tool, with `tools init`.
       Depends on Phase 1.
-- [ ] **Auto-apply the no-changelog label (optional)**: Add the gate's
-      best-effort step that sets `no-changelog` when a pull request opens, using
-      a documented path classification (shipping, non-shipping, ambiguous,
-      unlisted) that a human can override by toggling the label.
-      Optional polish, since the gate works with manually applied labels.
+
+The repository settings the plan names are T-1fev06m, and applying the
+`no-changelog` label automatically, the optional fourth phase, is T-1fets19.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-08T00:10:46Z
+
+Phase 4, applying the `no-changelog` label automatically, moved to T-1fets19 so
+RFD 121 could be marked Implemented without it; the RFD now mentions that ticket
+instead of planning the phase.
+The repository settings the plan names are T-1fev06m.
+The plugin's item names the command per type and `highlight`, which replaced
+`add` while RFD 122 was implemented.
 
 [RFD 121]: ../rfd/121-changelog-fragments-and-validation.md

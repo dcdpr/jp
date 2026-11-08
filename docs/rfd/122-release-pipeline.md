@@ -1,12 +1,10 @@
 # RFD 122: Release Pipeline
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
 - **Extends**: [RFD 116]
-- **Requires**: [RFD 121]
-- **Required by**: [RFD 123]
 - **Summary**: The `jp release` plugin cuts releases onto branches, files their
   notes on `main` through a pull request, and tags them, all in the local
   repository for the person releasing to push.
@@ -590,8 +588,11 @@ reports, in this order:
 
 ### JP's CI
 
-Every GitHub Actions workflow invokes a `just` recipe so the same steps can run
-locally without GitHub, and no workflow pushes commits to any branch:
+Format validation, the checks on pushes, `due`, and the site build invoke `just`
+recipes, so the same steps can run locally without GitHub.
+The changelog gate, the release reminder, and the site build on a tag depend on
+GitHub labels, issues, and workflow runs, which they access with `gh`.
+No workflow pushes commits to any branch:
 
 | Trigger                       | Runs                                                                                                 | Side effects                                                               |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -838,6 +839,8 @@ protection to prevent history rewrites:
 
 - On `release/*`: block force pushes and branch deletion.
 - On `v*` tags: block tag updates and deletion.
+
+T-1f2jmb7 tracks applying them.
 
 ### Phase 4: Documentation site and retiring `jilu`
 

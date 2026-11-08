@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-14
-- **Requires**: [RFD 122]
 - **Summary**: Each release tag gets a GitHub Release with its notes, and the
   prebuilt, attested `jp` binaries and install scripts dist builds for it.
 

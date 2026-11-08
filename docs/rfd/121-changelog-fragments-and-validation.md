@@ -1,11 +1,10 @@
 # RFD 121: Changelog Fragments and Validation
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
 - **Extends**: [RFD 116]
-- **Required by**: [RFD 122]
 - **Summary**: Contributors record user-facing changes as typed fragments and
   highlight notes, written by a `jp release` plugin and required by CI.
 
