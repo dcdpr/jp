@@ -11,42 +11,38 @@
 ## Summary
 
 This RFD extends the command plugin protocol ([RFD 072]) with live event
-subscriptions and agent loop delegation.
+subscriptions and agent loop delegation so plugins can run full chat frontends.
 Plugins can subscribe to streaming conversation events, answer interactive
 approval and inquiry prompts, and trigger LLM queries that JP executes on their
-behalf, allowing plugins to serve as full chat frontends.
+behalf.
 
 ## Motivation
 
-[RFD 072] defines a request/response protocol that covers workspace queries and
-mutations.
-A plugin can list conversations, read events, lock, write, and produce formatted
-output.
-This is sufficient for read-only tools (web viewer, exporters) and simple write
-tools (importers, bulk editors).
+The request/response protocol in [RFD 072] covers workspace queries and
+mutations: a plugin can list conversations, read and write events, acquire
+locks, and render formatted output.
+That model supports read-only tools (web viewers, exporters) and batch write
+tools (importers, bulk editors), but it cannot drive a chat interface.
 
-It is not sufficient for a chat interface.
 A chat plugin needs to:
 
-1. **Stream LLM responses in real time** — tokens must arrive at the plugin as
-   they are generated, not after the full response is complete.
-2. **Handle tool approval prompts** — when the agent loop wants to run a tool,
-   the plugin must present the approval UI and send the decision back.
-3. **Handle inquiry questions** — tools may ask questions that need user input.
-4. **Observe concurrent activity** — if another `jp query` session writes to
-   the same conversation, the plugin should see those events too.
+1. **Stream LLM responses in real time**: Tokens must arrive at the plugin as
+   they are generated, not after the full response completes.
+2. **Handle tool approval prompts**: When the agent loop wants to run a tool,
+   the plugin must present the approval UI and return the user's decision.
+3. **Handle inquiry questions**: Tools may ask questions that require user
+   input.
+4. **Observe concurrent activity**: If another `jp query` session writes to the
+   same conversation, the plugin must see those events as they happen.
 
-All four require JP to *push* messages to the plugin, which the request/response
+All four require JP to push messages to the plugin, which the request/response
 model from [RFD 072] does not support.
-This RFD adds that capability.
 
 ## Design
 
 ### Subscriptions
 
-A plugin subscribes to a conversation to receive events as they occur.
-
-**Subscribe:**
+A plugin subscribes to a conversation to receive events as they occur:
 
 ```json
 {
@@ -61,7 +57,7 @@ A plugin subscribes to a conversation to receive events as they occur.
 }
 ```
 
-Response:
+JP confirms the subscription:
 
 ```json
 {
@@ -70,18 +66,16 @@ Response:
 }
 ```
 
-The `sub_id` is chosen by the plugin and must be unique among its active
-subscriptions.
-JP echoes it on every pushed event, allowing the plugin to maintain multiple
-independent subscriptions — e.g., two chat windows side-by-side, or one
-subscription for rendering and another for logging.
+The plugin chooses a `sub_id` that is unique among its active subscriptions.
+JP echoes `sub_id` on every pushed event so the plugin can multiplex independent
+subscriptions (for example, two side-by-side chat windows, or separate rendering
+and logging streams).
+The optional `events` filter restricts delivery to the listed event types; when
+omitted, JP delivers all event types.
 
-The `events` filter is optional.
-When omitted, all event types are delivered.
-
-Once subscribed, JP pushes events as they occur on the conversation (from any
-source — a concurrent `jp query` session, another plugin, or this plugin's own
-`query` operation):
+While a subscription is active, JP pushes conversation events as they occur,
+whether they originate from a concurrent `jp query` session, another plugin, or
+this plugin's own `query` operation:
 
 ```json
 {
@@ -95,7 +89,7 @@ source — a concurrent `jp query` session, another plugin, or this plugin's own
 }
 ```
 
-**Unsubscribe:**
+To stop receiving events, the plugin sends `unsubscribe`:
 
 ```json
 {
@@ -104,7 +98,7 @@ source — a concurrent `jp query` session, another plugin, or this plugin's own
 }
 ```
 
-Response:
+JP confirms removal:
 
 ```json
 {
@@ -113,12 +107,14 @@ Response:
 }
 ```
 
-Subscriptions are automatically removed when the plugin exits.
+JP also removes all active subscriptions when the plugin exits.
 
 ### Interactive Events
 
-Some pushed events require a response from the plugin.
-These carry a `respond` field indicating what kind of response JP expects.
+Pushed events without a `respond` field are informational: the plugin observes
+them and does not reply.
+Events that require user input carry a `respond` field naming the expected
+response kind.
 
 **Tool call approval:**
 
@@ -148,8 +144,8 @@ The plugin responds:
 }
 ```
 
-Valid actions: `approve`, `reject`, `modify` (with an `arguments` field
-containing the modified arguments).
+Valid `action` values are `approve`, `reject`, and `modify` (which includes an
+`arguments` field containing the modified tool arguments).
 
 **Inquiry question:**
 
@@ -182,18 +178,16 @@ The plugin responds:
 }
 ```
 
-If the plugin does not respond within a configurable timeout, JP falls back to
-the default behavior configured for non-interactive mode (auto-approve, reject,
+If the plugin does not reply within a configurable timeout, JP falls back to the
+default behavior configured for non-interactive mode (auto-approve, reject,
 etc.).
 
-Events without a `respond` field are informational — the plugin observes them
-but does not need to reply.
+### Query Delegation
 
-### Query (Agent Loop Delegation)
-
-The `query` operation triggers JP's agent loop on behalf of the plugin.
-The plugin sends a user message, JP runs the full turn loop (streaming, tool
-calls, retries), and events flow back to the plugin via its subscription.
+The `query` operation runs JP's agent loop on behalf of the plugin.
+The plugin sends a user message, JP executes the full turn loop (streaming, tool
+calls, and retries), and events stream back to the plugin through its
+subscription:
 
 ```json
 {
@@ -203,18 +197,19 @@ calls, retries), and events flow back to the plugin via its subscription.
 }
 ```
 
-The `query` payload supports optional fields for the full range of
+The `query` payload accepts two optional fields covering the remaining
 `run_turn_loop` inputs:
 
 - `attachments` (array, optional): Attachments to include in the turn,
   equivalent to `jp query -a`.
-  Each entry follows the attachment serialization format (inline content with a
-  `type` discriminator).
-- `schema` (object, optional): A JSON Schema constraining the assistant's
-  response format, triggering structured output.
-  Equivalent to the `schema` field on `ChatRequest`.
+  Each entry uses the serialized attachment format (inline content with a `type`
+  discriminator).
+  Defaults to an empty list.
+- `schema` (object, optional): A JSON Schema for structured output, equivalent
+  to the `schema` field on `ChatRequest`.
+  Defaults to `null` (free-form response).
 
-Example with both:
+A `query` request with both optional fields:
 
 ```json
 {
@@ -242,10 +237,7 @@ Example with both:
 }
 ```
 
-When omitted, `attachments` defaults to an empty list and `schema` defaults to
-`null` (free-form response).
-
-Response (acknowledges the query has started):
+JP acknowledges that the query has started:
 
 ```json
 {
@@ -254,9 +246,12 @@ Response (acknowledges the query has started):
 }
 ```
 
-JP locks the conversation, starts a turn, and runs the agent loop.
-Events stream to the plugin via its active subscription on that conversation.
-When the turn completes:
+JP then locks the conversation, starts a turn, and runs the agent loop.
+During the turn, the plugin receives all intermediate events on its active
+subscription: `chat_response` chunks (for streaming tokens to a client),
+`tool_call_request` events (which may require approval via `respond`),
+`inquiry_request` events, and `tool_call_response` results.
+When the turn completes, JP pushes a `query_complete` event:
 
 ```json
 {
@@ -268,26 +263,21 @@ When the turn completes:
 }
 ```
 
-During the turn, the plugin receives all intermediate events: `chat_response`
-chunks (for streaming tokens to a browser), `tool_call_request` events (which
-may require approval via `respond`), `inquiry_request` events, and
-`tool_call_response` results.
-The plugin is effectively an alternative frontend to the same agent loop that
-powers `jp query` in the terminal.
+This makes the plugin an alternative frontend to the same agent loop that powers
+`jp query` in the terminal.
 
-The conversation must either be already locked by the plugin or unlocked (in
-which case JP acquires the lock for the duration of the query and releases it on
-completion).
-If another process holds the lock, the request returns an error.
-
-If the plugin sends `query` without an active subscription on that conversation,
-JP returns an error — there would be no way to deliver the streaming events or
+A `query` request requires an active subscription on the target conversation;
+without one, JP returns an error because it cannot deliver streaming events or
 interactive prompts.
+The conversation must also be either unlocked or already locked by the plugin.
+When the conversation is unlocked, JP acquires the lock for the duration of the
+query and releases it on completion.
+If another process holds the lock, JP returns an error.
 
 ### Integration with the Agent Loop
 
-The agent loop is currently implemented in `jp_cli::cmd::query::turn_loop`.
-Some of its external dependencies are trait-based today:
+The agent loop currently lives in `jp_cli::cmd::query::turn_loop`.
+Three of its four external dependencies are already trait-based:
 
 | Dependency      | Current abstraction    | Status          |
 | --------------- | ---------------------- | --------------- |
@@ -296,76 +286,66 @@ Some of its external dependencies are trait-based today:
 | Inquiry backend | `InquiryBackend` trait | Exists          |
 | Response output | `ChatResponseRenderer` | Concrete struct |
 
-`ChatResponseRenderer` is a concrete struct instantiated inside
-`TurnCoordinator::new()`.
-There is no `ResponseRenderer` trait in the current codebase —
-`TurnCoordinator` owns the renderer directly and is itself created inside
-`run_turn_loop`.
-This means a protocol-backed renderer cannot be injected without first
-extracting rendering behind a trait.
+`TurnCoordinator` is constructed inside `run_turn_loop` and owns the concrete
+`ChatResponseRenderer` directly, with no `ResponseRenderer` trait boundary.
+Injecting a protocol-backed renderer therefore requires extracting response
+rendering behind a trait.
 
-For `query` delegation, JP provides protocol-backed implementations of the
-required traits:
+For `query` delegation, JP provides protocol-backed implementations of these
+traits:
 
-- **`ProtocolPromptBackend`**: When the turn loop asks for tool approval, this
-  implementation sends a `respond: "tool_approval"` event to the plugin and
-  blocks until the plugin sends `respond` back.
-- **`ProtocolResponseRenderer`**: When the turn loop emits `ChatResponse`
-  chunks, this implementation pushes them as `event` messages on the plugin's
-  subscription.
-  Requires the `ResponseRenderer` trait extraction described above.
-- **`ProtocolInquiryBackend`**: When a tool asks a question, this implementation
-  sends a `respond: "inquiry"` event and awaits the answer.
+- **`ProtocolPromptBackend`**: Sends a `respond: "tool_approval"` event to the
+  plugin when the turn loop asks for tool approval, and blocks until the plugin
+  replies with `respond`.
+- **`ProtocolResponseRenderer`**: Pushes `ChatResponse` chunks from the turn
+  loop as `event` messages on the plugin's subscription (using the extracted
+  `ResponseRenderer` trait).
+- **`ProtocolInquiryBackend`**: Sends a `respond: "inquiry"` event when a tool
+  asks a question, and awaits the plugin's answer.
 
 [RFD 026] proposes extracting the turn loop into a standalone `jp_agent` crate
-with explicit trait boundaries, which would introduce a `ResponseRenderer` trait
-as part of that work.
-If RFD 026 has landed by the time Phase 3 begins, the protocol bridges plug into
-`jp_agent::run_turn_loop()` directly.
-If not, Phase 3 of this RFD must extract `TurnCoordinator`'s rendering into a
-trait as a prerequisite step before the protocol-backed implementations can be
-wired in.
+with explicit trait boundaries, including `ResponseRenderer`.
+If [RFD 026] lands before Phase 3, the protocol bridges plug into
+`jp_agent::run_turn_loop()` directly; otherwise, Phase 3 extracts
+`ResponseRenderer` from `TurnCoordinator` in `jp_cli` first.
 
 ### Web Chat Example
 
-A web server plugin (`jp-serve`) with chat support:
+A web server plugin (`jp-serve`) implements browser-based chat as follows:
 
 1. When a browser opens a conversation, `subscribe` to it with a unique `sub_id`
    per browser session.
 2. When the user sends a message, issue a `query` with the message content.
 3. Receive streaming `chat_response` events via the subscription and forward
    them to the browser over SSE or WebSocket.
-4. Receive `tool_call_request` events with `respond: "tool_approval"` and
-   present an approval UI in the browser.
-   Send the user's decision back via `respond`.
+4. Receive `tool_call_request` events with `respond: "tool_approval"`, present
+   an approval UI in the browser, and send the user's decision back via
+   `respond`.
 5. Receive `query_complete` and signal the browser that the turn is done.
-6. `unsubscribe` when the browser disconnects.
+6. Send `unsubscribe` when the browser disconnects.
 
-The plugin never calls the LLM directly, manages conversation locks, or persists
-events — JP handles all of that.
-The plugin is purely a presentation layer.
+JP handles LLM calls, conversation locks, and event persistence; the plugin is
+purely a presentation layer.
 
 ## Drawbacks
 
-- **Bidirectional complexity**: The protocol shifts from pure request/response
-  to a bidirectional event stream.
-  Plugins must handle unsolicited messages (pushed events) arriving at any time,
+- **Bidirectional complexity**: Subscriptions turn a request/response protocol
+  into a bidirectional event stream.
+  Plugins must handle unsolicited pushed events arriving at any time,
   interleaved with responses to their own requests.
-  Multi-threaded plugins handle this naturally; single-threaded plugins (shell
-  scripts) cannot easily participate in subscriptions.
+  Multi-threaded plugins handle this naturally, whereas single-threaded plugins
+  (such as shell scripts) cannot easily participate in subscriptions.
 
 - **Timeout semantics**: Interactive events require the plugin to respond within
-  a timeout.
-  The right default timeout and fallback behavior may vary by use case (a web UI
-  might want a long timeout to let the human think; a batch script might want to
-  auto-approve immediately).
+  a timeout, and the right default timeout and fallback behavior depend on the
+  use case (a web UI needs a long timeout while a human decides, whereas a batch
+  script may want to auto-approve immediately).
 
 - **Agent loop coupling**: The `query` operation exposes JP's internal agent
-  loop behavior as a protocol surface.
-  Changes to how the turn loop handles tool calls, retries, or interrupts become
-  visible to plugins.
-  The trait boundaries from [RFD 026] help, but the protocol-level contract
-  (which event types arrive and in what order) is an additional compatibility
+  loop behavior as a protocol surface: changes to tool-call handling, retries,
+  or interrupts become visible to plugins.
+  The trait boundaries in [RFD 026] help, but the protocol-level contract (which
+  event types arrive and in what order) remains an additional compatibility
   surface.
 
 ## Alternatives
@@ -378,99 +358,92 @@ manage tool execution, and use JP only for conversation storage via
 
 Rejected because:
 
-- Duplicates the agent loop (streaming, retries, tool coordination, inquiry
-  handling) in every chat-capable plugin.
-- The plugin would need LLM API keys and provider configuration, breaking the
-  principle that JP manages credentials.
-- Tool execution requires access to JP's tool definitions and MCP servers, which
-  are not exposed through the current protocol.
+- It duplicates the agent loop (streaming, retries, tool coordination, and
+  inquiry handling) in every chat-capable plugin.
+- It requires the plugin to hold LLM API keys and provider configuration instead
+  of keeping credential management in JP.
+- It requires access to JP's tool definitions and MCP servers, which the current
+  protocol does not expose.
 
 ### Polling instead of subscriptions
 
 The plugin could repeatedly call `read_events` to check for new events.
 
-Rejected as the primary mechanism because polling adds latency and wastes
-resources for streaming use cases.
-However, polling remains available as a fallback for simple plugins that don't
-need real-time updates.
+Polling is rejected as the primary mechanism because it adds latency and wastes
+work during token streaming.
+Simple plugins that do not need real-time updates can still poll `read_events`
+as a fallback.
 
 ## Non-Goals
 
 - **Multi-conversation queries**: A single `query` operates on one conversation.
   Orchestrating parallel queries across conversations is the plugin's
   responsibility.
-- **Plugin-side tool execution**: Tools are executed by JP, not by the plugin.
+- **Plugin-side tool execution**: JP executes tools, not the plugin.
   The plugin can approve, reject, or modify tool calls, but cannot provide its
-  own tool implementations through this protocol.
-  (Wasm plugins via [RFD 016] serve that purpose.)
-- **Streaming protocol optimization**: The JSON-lines format is kept for
-  consistency with [RFD 072].
-  A binary framing format (msgpack, protobuf) is future work if latency becomes
-  measurable.
+  own tool implementations through this protocol (Wasm plugins via [RFD 016]
+  serve that purpose).
+- **Streaming protocol optimization**: This protocol keeps the JSON-lines format
+  for consistency with [RFD 072].
+  A binary framing format (msgpack, protobuf) is deferred unless serialization
+  latency becomes measurable.
 
 ## Risks and Open Questions
 
 - **Cross-process event delivery**: Subscriptions deliver events from any
   source.
-  For events generated by the same plugin's `query` operation, delivery is
-  straightforward (JP controls the turn loop).
-  For events from a concurrent `jp query` session writing to the same
-  conversation, JP needs a notification mechanism.
-  The current storage layer uses append-only files with flock coordination but
-  has no change notification.
-  Polling the events file periodically is the simplest approach;
-  inotify/kqueue-based notification is an optimization for later.
+  Delivering events from the same plugin's `query` operation is direct because
+  JP controls the turn loop in-process.
+  Delivering events from a concurrent `jp query` session requires change
+  detection on the conversation store, which currently uses append-only files
+  with `flock` coordination and no change notifications.
+  Polling the events file periodically is the simplest initial mechanism;
+  `inotify`/`kqueue` notifications can follow as an optimization.
 
 - **Interactive event ordering**: When multiple tool calls arrive in a batch,
   the plugin receives multiple `respond: "tool_approval"` events.
-  The protocol does not currently define whether the plugin must respond in
-  order or can respond out of order.
-  The simplest rule: responses can arrive in any order, matched by
-  `tool_call_id`.
+  Rather than requiring in-order replies, JP can accept `respond` messages in
+  any order and match them by `tool_call_id`.
 
-- **Query cancellation**: If the plugin wants to cancel a running `query` (e.g.,
-  the user navigated away in the browser), there is no cancellation message
-  defined.
-  A `cancel_query` message type would be a natural addition but is deferred
-  until the need is validated.
+- **Query cancellation**: The protocol does not yet define a message to cancel a
+  running `query` (for example, when the user navigates away in the browser).
+  A `cancel_query` message type is a natural addition once the need is
+  validated.
 
-- **Backpressure**: If the LLM streams tokens faster than the plugin can consume
-  them (e.g., the browser connection is slow), pushed events queue up in JP's
-  pipe buffer.
-  For human-speed interactions this is unlikely to be a problem.
-  For high-throughput scenarios, a flow control mechanism may be needed.
+- **Backpressure**: If the LLM streams tokens faster than the plugin consumes
+  them (for example, over a slow browser connection), pushed events queue in
+  JP's pipe buffer.
+  This is unlikely at human interaction speeds, but high-throughput scenarios
+  may need flow control.
 
 ## Implementation Plan
 
 ### Phase 1: Subscriptions
 
-- Add `subscribe`, `unsubscribe` message types to `jp_plugin`.
-- Implement the event push mechanism in JP's dispatcher.
-- For events from the same process (e.g., `push_events` by the same plugin),
-  push to active subscriptions immediately.
-- For cross-process events, implement file-based polling as the initial
-  notification mechanism.
+- Add `subscribe` and `unsubscribe` message types to `jp_plugin`.
+- Implement event pushing in JP's dispatcher: push same-process events (such as
+  `push_events` from the same plugin) to active subscriptions immediately, and
+  poll the events file for cross-process writes.
 - Test with a plugin that watches a conversation while `jp query` writes to it.
 - Depends on [RFD 072] Phase 1 (protocol core).
 
-### Phase 2: Interactive events
+### Phase 2: Interactive Events
 
-- Add `respond` field to pushed events and `respond` message type.
+- Add the `respond` field to pushed events and the `respond` message type.
 - Implement timeout and fallback behavior.
 - Test with a shell script that auto-approves tool calls.
 - Depends on Phase 1.
 
-### Phase 3: Query delegation
+### Phase 3: Query Delegation
 
-- If [RFD 026] has not landed: extract `TurnCoordinator`'s rendering into a
+- If [RFD 026] has not landed, extract `TurnCoordinator`'s rendering into a
   `ResponseRenderer` trait so protocol-backed and terminal-backed renderers can
   be swapped.
-- Implement `query`, `query_started`, `query_complete` message types.
+- Implement `query`, `query_started`, and `query_complete` message types,
+  including `attachments` and `schema` on `query`.
 - Build protocol-backed implementations of `PromptBackend`, `ResponseRenderer`,
-  and `InquiryBackend`.
-- Support `attachments` and `schema` fields in the `query` payload.
-- Bridge into `run_turn_loop` (via `jp_agent` if [RFD 026] has landed, otherwise
-  via `jp_cli` internals with the trait extraction above).
+  and `InquiryBackend`, and bridge them into `run_turn_loop` (via `jp_agent` if
+  [RFD 026] has landed, or `jp_cli` internals otherwise).
 - Test with `jp-serve` serving a chat interface.
 - Depends on Phases 1 and 2, and [RFD 072] Phase 4 (write operations).
 
