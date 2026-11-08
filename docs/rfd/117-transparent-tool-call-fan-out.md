@@ -14,12 +14,12 @@ This RFD adds **fan-out**: a per-tool configuration setting that lets a single
 tool call carry multiple independent operations without changing the tool's
 implementation.
 JP's in-process MCP server ([RFD 109]) advertises an `ops` envelope schema,
-expands each call into separate child invocations under the tool's error policy,
-and folds their results back into a single response.
+expands each call into child invocations under the tool's concurrency and error
+policies, and folds their results into a single response.
 
 ## Motivation
 
-An assistant that already knows which files it wants pays for one
+An assistant that already knows which files it wants to read pays for one
 request-response cycle per call:
 
 ```text
@@ -30,38 +30,37 @@ fs_read_file(path: "scripts/migrate.sh", start_line: 2072, end_line: 2082)
 ```
 
 Each cycle re-sends the accumulated context.
-Cached input is roughly a tenth the price of uncached input, so ten cached
-cycles cost about one uncached request, but fourteen sequential cycles also cost
-fourteen units of latency and fourteen turns of the agent loop.
+Cached input costs roughly a tenth of uncached input, so ten cached cycles cost
+about as much as one uncached request, but fourteen sequential cycles still add
+fourteen round-trips of latency and fourteen turns of the agent loop.
 
-The obvious fix is to give each tool a multi-argument schema.
-That fix has two problems.
+The obvious fix is to give each tool a multi-argument schema, but that approach
+has two problems:
 
-**It does not reach MCP tools.** `jp_mcp::server::resolve_tool` builds a
-`ToolDefinition` uniformly for local, built-in, and MCP sources; for MCP it
-takes the server's own `inputSchema` and applies configured overrides.
-JP does not own those schemas and cannot edit them.
-A per-tool fix helps only the tools JP wrote.
+**It does not reach external MCP tools.** `jp_mcp::server::resolve_tool` builds
+a `ToolDefinition` for local, built-in, and MCP tools alike; for MCP tools, it
+takes the upstream server's `inputSchema` and applies configured overrides.
+Because JP does not own external MCP schemas, a per-tool schema change only
+helps tools implemented in JP.
 
-**It entangles two axes.** "What this tool does" and "how many operations fit in
-one call" want to vary independently.
-Hand-writing the second into every tool's schema means every new tool re-decides
-it, and every existing tool that wants it needs a schema change, a validation
-change, and a result-format change.
+**It entangles two independent concerns.** What a tool does and how many
+operations fit in a single call are separate axes.
+Baking batching into each tool's schema forces every new tool to re-implement
+it, and adding it to an existing tool requires changing its schema, validation,
+and result formatting.
 
-Fan-out makes the second axis a property of the tool *configuration* rather than
-the tool *implementation*, so it applies uniformly to every source, including
-MCP servers JP does not control.
+Fan-out moves batching from tool implementation to tool configuration, so it
+applies uniformly across local, built-in, and external MCP tools.
 
 ## Design
 
-### What the user sees
+### User-Facing Behavior
 
-Nothing changes.
-Fan-out exists on the wire and is invisible in the terminal.
+Fan-out exists only on the wire; terminal output and permission prompts do not
+change.
 
 A call carrying three operations renders as three tool calls, prompts for
-permission three times unless the tool runs with `run = "allow"`, and shows
+permission three times unless the tool runs with `run = "allow"`, and displays
 three results:
 
 ```text
@@ -70,36 +69,37 @@ Calling tool fs_read_file(path: "scripts/migrate.sh", start_line: 1928, end_line
 Calling tool fs_read_file(path: "scripts/migrate.sh", start_line: 2072, end_line: 2082)
 ```
 
-A call carrying one operation, in the envelope or bare, renders as one tool
-call, indistinguishable from a call made without fan-out.
+A call carrying a single operation, whether wrapped in the `ops` envelope or
+sent bare, renders as a single tool call, indistinguishable from a tool without
+fan-out.
 
-This invariant settles the permission question: whatever is rendered as a
-distinct call is approved as a distinct call.
-Collapsing three rendered calls into one approval prompt would ask the user to
-approve something other than what they were shown.
-The savings this RFD delivers are entirely in round-trips to the provider, not
-in user interaction, and the tools that dominate the cost (`run = "allow"`
-readers) prompt zero times either way.
+Each rendered call gets its own approval prompt.
+Collapsing three rendered calls into a single prompt would ask the user to
+approve something different from what the terminal displayed.
+Fan-out reduces provider round-trips rather than user prompts, and the read-only
+tools that dominate call volume (`run = "allow"`) do not prompt at all.
 
-### The provider boundary
+### MCP Server Boundary
 
-Fan-out is a property of the tool as JP's MCP server advertises it, not of any
-provider or client.
+Fan-out is a property of the tool as advertised by JP's in-process MCP server,
+not of any LLM provider or MCP client:
 
-- Every caller learns a tool's shape from one place, `Service::definitions()`:
-  JP's own provider request, MCP `tools/list` for Claude Code on the ACP route
-  ([RFD 110]) or any other client, and the `describe_tools` built-in.
-- Every call reaches the server the same way, whoever submits it, and the server
-  expands it.
+- Every caller obtains tool schemas from `Service::definitions()`, including
+  JP's own provider requests, MCP `tools/list` responses for external clients
+  such as Claude Code over ACP ([RFD 110]), and the `describe_tools` built-in
+  tool.
+- Every tool call passes through the server, which expands the envelope
+  regardless of which client submitted the call.
 
-A provider sends the schema it is given, so `jp_llm` has no fan-out code, and
-`jp_tool::ToolDefinition` has no fan-out field.
-A route that bypassed the server for a fanned-out tool would be a bug in that
-route, not a case this design has to handle.
+Providers forward the schema they receive, so neither `jp_llm` nor
+`jp_tool::ToolDefinition` contains fan-out logic.
+Any execution path that bypassed the MCP server for a fan-out tool would be a
+bug in that path.
 
-### The envelope
+### Schema Envelope
 
-When a tool opts in, the schema the server advertises is wrapped:
+When a tool enables `fan_out`, the server wraps its advertised parameter schema
+in an `ops` envelope:
 
 ```json
 {
@@ -121,194 +121,210 @@ When a tool opts in, the schema the server advertises is wrapped:
 }
 ```
 
-`ops` rather than `arguments` or `args`: each element is one **operation**, and
-the tool's existing parameter object is already "the arguments".
+The array field is named `ops` rather than `arguments` or `args` because each
+element represents a complete **operation**, and the tool's existing parameter
+object is already its arguments.
 
-A `$defs` or `definitions` block moves from the tool's schema to the envelope's
-root.
-Same-document references are anchored at the root (`#/$defs/Name`), so leaving
-the block nested under `properties.ops.items` would point every reference at a
-root that no longer holds it.
-MCP servers routinely declare such blocks, and they are the tools fan-out exists
-to reach.
-A schema that refers to its own root (`$ref: "#"`) is not rewritten.
+Any `$defs` or `definitions` block in the tool's schema is hoisted to the
+envelope root.
+Because JSON Schema resolves local references against the document root (for
+example, `#/$defs/Name`), leaving those definitions nested under
+`properties.ops.items` would break them, and external MCP servers routinely emit
+`$defs` blocks.
+Self-root references (`$ref: "#"`) are not rewritten.
 
-The advertised description gains one sentence asking the assistant to batch
-every operation it already knows it needs into one call.
-It does not explain the tool's examples: each shows one bare operation, which is
-itself a valid call (see below).
+The server also appends a sentence to the advertised description instructing the
+assistant to batch all known operations into a single call.
+The tool's existing usage examples are left unchanged because each example shows
+a single bare operation, which remains a valid call.
 
-### Bare calls
+### Bare Calls
 
-A call to a fan-out tool whose arguments are not an envelope runs as an ordinary
-call, exactly as if the tool had no `fan_out`: no child invocations, no framing.
-What counts as an envelope depends on whether the tool's own schema declares a
-top-level `ops` parameter.
+If a caller invokes a fan-out tool with bare arguments instead of an `ops`
+envelope, the server executes it as an ordinary single call without child
+invocations or result framing.
+How the server distinguishes an envelope from a bare call depends on whether the
+tool's own schema declares a top-level `ops` parameter:
 
 **The tool does not declare `ops`** (the common case).
-An `ops` key is always the envelope, and its absence is a bare call.
-An envelope that is not a non-empty array of objects, or whose operation fails
-validation, answers with an error naming the operation and what is wrong with
-it.
-Falling back to a bare call here would replace "operation 2: unknown argument
-`pth`" with "unknown argument `ops`".
+The presence of an `ops` key always indicates an envelope, and its absence
+indicates a bare call.
+If `ops` is not a non-empty array of objects, or if an element fails validation,
+the server returns an error identifying the invalid operation rather than
+falling back to a bare call.
+Falling back would mask the real mistake by replacing `"operation 2: unknown
+argument pth"` with `"unknown argument ops"`.
 
-**The tool declares `ops`.** The arguments are an envelope only if every check
-passes: `ops` is a non-empty array, every element is an object, and every
-element validates against the tool's own schema, with coercion and defaults
-applied to a copy.
-If any check fails, the `ops` is the tool's own and the call runs bare.
-When both readings validate (possible when the tool requires nothing, as in
-`{"ops": [{"dry_run": true}]}`), the envelope wins: it is the shape every caller
-was shown.
+**The tool declares `ops`.** The server treats the arguments as an envelope only
+if `ops` is a non-empty array of objects and every element validates against a
+copy of the tool's schema after type coercion and default injection.
+If any check fails, `ops` is treated as the tool's own parameter and the call
+runs bare.
+When both interpretations validate (which can occur when all tool parameters are
+optional, as in `{"ops": [{"dry_run": true}]}`), the envelope interpretation
+wins because that is the advertised schema.
 
-The advertised schema still requires `ops`.
-Strict tool use on OpenAI and Anthropic rejects a schema whose root is an
-`anyOf`, so a schema permitting both shapes at the root cannot be advertised to
-them, and merging the tool's properties into the envelope as optional would drop
-every `required` the tool declares.
-Bare calls are accepted, not advertised: a model or client that sends one gets a
-working call, and one that follows the schema batches.
+The advertised schema always requires `ops`.
+Strict tool use on OpenAI and Anthropic rejects schemas with a root-level
+`anyOf`, so the server cannot advertise both shapes at the root, and merging the
+tool's properties into the envelope as optional fields would strip the tool's
+`required` constraints.
+Bare calls are therefore accepted by the server without being advertised in the
+schema: clients that follow the schema batch operations, and clients that send
+bare arguments still succeed.
 
-### Where expansion happens
+### Parent and Child Invocations
 
-`Service::start_call` receives a call.
-For a fan-out tool carrying an envelope it becomes a **parent invocation**, and
-each operation becomes a **child invocation**:
+When `Service::start_call` receives an envelope call for a fan-out tool, it
+creates a **parent invocation** and expands each element of `ops` into a **child
+invocation**:
 
-- A child is an ordinary invocation with its own `InvocationId`, its own
-  cancellation token (a child of the parent's), its own attempts, and its own
-  stderr progress stream.
-  It runs the same `run_call` state machine a plain call does, against the
-  tool's own schema, so coercion, defaults, validation, the argument formatter,
-  and questions work per operation unchanged.
-- The parent runs no tool.
-  It starts the children, applies the concurrency and error policy, waits for
-  every child to settle, folds the results, and owns the one `Record` barrier
-  and the one MCP response.
+- Each **child invocation** is an ordinary invocation with its own
+  `InvocationId`, cancellation token (derived from the parent's token),
+  execution attempts, and `stderr` progress stream.
+  It runs the standard `run_call` state machine against the tool's unwrapped
+  schema, so type coercion, defaults, validation, custom argument formatting,
+  and questions work per operation without change.
+- The **parent invocation** does not execute the tool itself.
+  It spawns the children, enforces the concurrency and error policies, waits for
+  all children to settle, folds their results, and owns the single `Record`
+  barrier and MCP response.
 
-The server re-executes a tool after an answered question.
-Because each operation is its own child, that re-runs only the child that asked;
-operations that already finished are never recomputed.
+When a tool asks a question and receives an answer, the server re-executes the
+invocation.
+Because each operation is an independent child invocation, only the child that
+asked the question re-runs; already completed operations are never recomputed.
 
-Two Host-side mechanisms carry over without modification:
+Two Host-side mechanisms work across child invocations without modification:
 
-- **Inquiry ids do not collide.** `TurnState::next_inquiry_attempt` increments
+- **Inquiry IDs do not collide.** `TurnState::next_inquiry_attempt` increments
   per `(tool_id, question_id)`, so two operations asking the same question under
-  one tool call id get distinct attempts.
-- **"Answer once for the whole call" already works.** Before prompting, the Host
-  consults `remembered_tool_answers`, keyed by `(tool_name, question_id)`.
-  An answer given at `PersistLevel::Turn` resolves every later operation
-  silently, each still recorded as its own inquiry pair.
+  one tool call ID receive distinct attempt numbers.
+- **Turn-scoped answers apply across operations.** Before prompting the user,
+  the Host checks `remembered_tool_answers`, keyed by `(tool_name,
+  question_id)`.
+  An answer saved at `PersistLevel::Turn` resolves subsequent operations in the
+  batch automatically while still recording each as its own inquiry pair.
 
-### Child invocations on the Host channel
+### Host Channel Protocol
 
-A child talks to the Host through the same private channel and interactions as
-any call, with three additions.
+Each child invocation communicates with the Host over the same channel and
+interaction protocol as a plain call, with three additions:
 
-**Every interaction says which operation it is for.** `CallInfo` gains
-`operation: Option<Operation>`, where `Operation` carries the parent's
-`InvocationId`, the operation's zero-based `index`, and the operation `count`.
-`CallInfo::request` stays the caller's original request, envelope included, so
-the Host's correlation check sees the same request for every child.
-The operation's own arguments arrive where they always do, in `Prepare` and
-`Release`.
+**Every interaction identifies its operation.** `CallInfo` gains `operation:
+Option<Operation>`, where `Operation` carries the parent's `InvocationId`, the
+operation's zero-based `index`, and the total operation `count`.
+`CallInfo::request` retains the caller's original request, including the `ops`
+envelope, so the Host's request-correlation check sees the same request for
+every child.
+The individual operation's arguments are passed in `Prepare` and `Release`, as
+with any call.
 
-**A child ends with `Settled`, not `Record`.** The conversation records one
-response per tool call, so a child is never recorded on its own.
-Its last interaction is a new `Interaction::Settled`, carrying a `Recording` of
-the operation: its executed arguments, its unedited result (absent if it never
-executed), and the result approved for delivery.
-The Host takes it and replies at once, so the parent can fold without waiting on
-the terminal.
+**A child ends with `Settled` instead of `Record`.** Because the conversation
+stream records a single response per tool call, individual child invocations are
+never recorded directly.
+Each child finishes with `Interaction::Settled`, which carries a `Recording` of
+the operation: its executed arguments, its raw tool result (`None` if the tool
+never ran), and the result approved for delivery.
+The Host acknowledges `Settled` immediately so the parent can fold the results
+without waiting on terminal rendering.
 
-Every child the service concludes sends exactly one `Settled`, including one a
-`stop` policy ruled out.
-A child the Host resolves itself with `complete_call` (as it does for Stop &
-respond) sends none, because the Host already holds its result.
+Every child completed by the service sends exactly one `Settled`, including
+children skipped under `on_error = "stop"`.
+A child resolved directly by the Host via `complete_call` (such as during a
+"Stop & respond" interrupt) does not send `Settled`, because the Host already
+holds its result.
 
-**The parent ends with `Record`, holding the folded body.** Its `result` is also
-what the MCP caller receives, so what JP records and what it delivers are the
-same text.
-Each operation's own result already reached the Host in its `Settled`.
+**The parent ends with `Record`, carrying the folded body.** The parent's
+`result` is both persisted to the conversation and returned to the MCP caller.
+The Host already received each operation's individual result in `Settled`.
 
-A plain call, including a bare call to a fan-out tool, has `operation: None` on
-every interaction and sees no change.
+Plain calls, including bare calls to a fan-out tool, carry `operation: None` on
+every interaction and use `Record` as usual.
 
 ### Scheduling
 
-Every child prepares as soon as the parent starts it: it asks for argument
-rendering and for admission immediately, so the user approves every operation of
-a call before any of them runs, as with separate calls in one turn.
+Every child invocation enters `Prepare` as soon as the parent starts it,
+requesting argument formatting and permission immediately so the user approves
+all operations in the batch before any operation executes, matching the behavior
+of separate calls in a turn.
 
-The policy sits between release and execution.
-Once the Host releases a child, the child waits for a concurrency slot before
-its tool runs.
-Under a limit, children take slots in the order the assistant wrote them, so
-`concurrency = 1` runs them in that order whatever order the Host released them
-in.
-Once a slot is free, the parent checks the error policy: under `on_error =
-"stop"`, a child behind a failed operation settles as not run instead of
-executing.
+Concurrency and error policies are enforced between Host release (`Release`) and
+tool execution.
+Once the Host releases a child, the child waits to acquire a concurrency slot
+before running the tool.
+When `concurrency` is bounded, children acquire slots in the order they appear
+in `ops`, so `concurrency = 1` executes operations in request order regardless
+of the order the Host released them.
+Once a child acquires a slot, the parent checks the error policy: under
+`on_error = "stop"`, if an earlier operation failed, the child settles
+immediately as not run instead of executing.
 
-A child released to run reports its failure before it gives up its slot, so the
-next child cannot slip through.
-That covers a tool that ran and reported an error, and one that could not be run
-at all (a command that fails to spawn, an upstream MCP error).
-The tool's own result decides, before result-mode policy applies, so `result =
-"skip"` or a declined `result = "ask"` review cannot hide the failure.
-A child that ended without running (a Host decision, an argument the tool
-rejects) reports a failure from the result it ended with.
+A running child records any failure before releasing its concurrency slot,
+preventing the next queued child from starting before the failure is visible.
+Failure detection uses the raw tool outcome (including command spawn failures
+and upstream MCP errors) before result-mode policy applies, so `result = "skip"`
+or a declined `result = "ask"` review cannot mask an error from `on_error =
+"stop"`.
+If a child terminates without running the tool (because of a Host decision or
+argument validation failure), its settled result determines whether it failed.
 
-The parent waits on its children, not on the Host, so a `stop` that rules out
-every remaining operation ends the call instead of leaving it waiting for work
-that will never start.
+Because the parent waits on its child invocations rather than on the Host, an
+`on_error = "stop"` trigger that skips all remaining operations finishes the
+call immediately instead of blocking on work that will never start.
 
 > [!TIP]
-> [RFD 129] moves the concurrency limit and the ordering to the MCP Host, which
-> applies them at release across every call to the tool, not only the operations
-> of one call.
-> The parent keeps only the `on_error = "stop"` check.
+> [RFD 129] moves the concurrency limit and execution ordering to the MCP Host,
+> applying them at release time across all calls to a tool rather than only
+> within a single fan-out call.
+> The parent invocation retains only the `on_error = "stop"` check.
 
-### What the Host does
+### Host Responsibilities
 
-The Host (`jp_cli::cmd::query::tool`) keeps its role: prompt, render, route
-questions, review, record.
-It neither schedules nor folds.
+The Host (`jp_cli::cmd::query::tool`) retains its existing responsibilities:
+prompting, rendering, routing questions, reviewing results, and recording
+events.
+It neither schedules operations nor folds results:
 
 - The Host submits a fan-out call like any other tool call.
-  It runs the same `split` the server does, only to open one executor per
-  operation before the first interaction arrives, and refuses to route an
-  operation the two sized differently.
-- It demultiplexes child interactions by `operation.index` into one executor per
-  operation.
-  An operation's display state is keyed by `<tool call id>#<index>`, so each
-  prompt, running state, and result belongs to its own line.
-- Each operation is a call of its own in the coordinator's batch: announced,
-  prompted for, and released in the order the assistant wrote it, like any call.
-- `Settled` completes an operation's executor; the parent's `Record` completes
-  the tool call and is what the conversation stores.
-  The Host asks for that `Record` once every operation has a response, and
-  counts the batch as settled only once it arrives.
-- Every operation, whoever decided its outcome (the tool, the user at its prompt
-  or result review, a cancellation), is resolved with `Executor::settle`, which
-  answers whatever barrier the child is parked on.
-  An operation cannot wait for the call's acknowledgement the way a plain call
-  does, because the call is only recorded once every operation is resolved.
-  Settling first makes sure the call's MCP request was sent: an operation
-  settled before any was prepared would otherwise wait on a child the service
-  never started.
-- An operation waiting behind a concurrency limit is an executor whose release
-  has not executed yet; the Host needs no queue of its own.
+  Before sending the request, it runs the same `split` helper as the server to
+  open one executor per operation before the first interaction arrives, and
+  refuses to route an interaction whose operation count disagrees with that
+  split.
+- It demultiplexes child interactions by `operation.index` to the corresponding
+  executor.
+  Each operation's display state is keyed by `<tool call id>#<index>`, giving
+  each prompt, progress indicator, and result its own terminal line.
+- Each operation is tracked as a separate entry in the coordinator's batch:
+  announced, prompted for, and released in `ops` order like any standalone tool
+  call.
+- `Settled` completes an individual operation's executor, while the parent's
+  `Record` completes the overall tool call and produces the persisted
+  conversation event.
+  Once every operation has a response, the Host requests the parent's `Record`
+  and marks the batch settled only after `Record` arrives.
+- Every operation, regardless of whether its outcome was decided by the tool, a
+  permission prompt, a result review, or cancellation, is resolved through
+  `Executor::settle`, which answers whichever barrier the child is parked on.
+  Unlike a plain call, an operation cannot wait for the `Record` acknowledgement
+  because `Record` is sent only after all operations have resolved.
+  `Executor::settle` also waits until the underlying MCP request has been sent,
+  because an operation settled before its first `Prepare` arrived would
+  otherwise wait on a child invocation the server had not yet spawned.
+- An operation waiting behind a concurrency limit is simply an executor whose
+  `Release` has not yet started the tool, so the Host needs no scheduling queue
+  of its own.
 
-### Folding results
+### Result Folding
 
-The parent folds its children in the order the assistant wrote them, not the
-order they finished.
+The parent folds child results in the order the operations appear in `ops`, not
+the order they finished.
 
-A fan-out call carrying one operation is recorded bare, success or failure, so
-at N=1 the envelope leaves no trace in the result.
-Otherwise the folded body frames each operation and states what did not run:
+When a fan-out call contains a single operation, its result is recorded bare,
+whether it succeeded or failed, so at `N = 1` the envelope leaves no trace in
+the output.
+When `N > 1`, the folded body frames each operation with an `[i/N]` header and
+explicitly lists operations that did not run:
 
 ```text
 [1/5] ok
@@ -322,53 +338,55 @@ File has uncommitted changes. Please stage or discard first.
 [5/5] not run (stopped after operation 2 failed)
 ```
 
-Without the "not run" lines the assistant assumes all five were attempted and
-reasons from a false premise.
+Without the `not run` lines, the assistant would assume all five operations were
+attempted and reason from a false premise.
 
-The call is recorded as an error when no operation succeeded, such as one whose
-first operation failed and stopped the rest.
-One success is enough for it to count as a success; the framed sections name the
-operations that failed.
-The provider sees the same distinction it would for a bare call to the tool, and
-replay picks the error or the success style by it.
+The overall tool call is recorded as an error only when no operation succeeded
+(for example, when operation 1 fails under `on_error = "stop"`).
+If at least one operation succeeds, the call is recorded as a success and the
+framed sections identify which individual operations failed.
+Both the LLM provider and conversation replay use this top-level status to
+select error or success formatting.
 
 ### Interrupts
 
-The Host addresses a fan-out call through its parent and each operation through
-its child:
+The Host routes interrupt actions to the parent invocation and its unfinished
+children:
 
-- **Stop & respond** holds every unfinished child and completes each with the
-  cancellation response, running or waiting for a slot.
-  The parent folds those like any other result, so the call records one response
-  saying which operations were cancelled.
-- **Restart** pauses the unfinished children.
-  Settled children keep their results; the others re-prepare on resume, and the
-  Host re-renders and re-prompts only those.
-- **Escalating** past the menu cancels the Host's attempts; each unfinished
-  child ends as cancelled and nothing further starts.
+- **Stop & respond** holds every unfinished child (whether running or waiting
+  for a concurrency slot) and completes each with a cancellation response.
+  The parent folds those cancellation responses with any completed operations,
+  recording a single response that shows which operations were cancelled.
+- **Restart** pauses unfinished children while preserving the results of
+  children that have already settled.
+  On resume, only the unfinished children re-enter `Prepare`, so the Host
+  re-renders and re-prompts only those operations.
+- **Escalating** past the interrupt menu cancels the Host's in-flight attempts;
+  every unfinished child settles as cancelled and no further operations start.
 
-### Rendering and replay
+### Rendering and Replay
 
-Replay re-expands a recorded envelope for a tool whose turn configuration has
-`fan_out`, using the same `expand` the server does, so `jp conversation print`
-shows what was shown live.
-A recorded call without an `ops` key renders as one call.
-Replay has the configuration but not the tool's schema, so a bare call to a tool
-that declares its own `ops` parameter replays as operations.
+During conversation replay (`jp conversation print`), any recorded envelope call
+for a tool with `fan_out` enabled in its turn configuration is re-expanded using
+the server's `expand` helper, reproducing the live terminal output.
+A recorded call without an `ops` key renders as a single call.
+Because replay has the turn configuration but not the tool's JSON Schema, a bare
+call to a tool that declares its own top-level `ops` parameter is also expanded
+as operations during replay.
 
-Custom-formatter output is stored on the `ToolCallRequest` event, which carries
-the whole call.
-Each operation's rendered chunk is joined with a newline into one string, in the
-order the assistant wrote the operations, which keeps the stored value a string
-for conversations recorded before fan-out existed.
-An operation announced again after a restart replaces its chunk.
-Replay therefore shows every operation's header and then every description,
-where the live output put each description under its own header.
+Custom argument formatter output is stored as a single string on the
+`ToolCallRequest` event, preserving compatibility with conversations recorded
+without fan-out.
+Each operation's formatted chunk is joined with a newline in `ops` order, and an
+operation re-announced after a restart replaces its chunk.
+Because the chunks are stored as one combined string, replay prints all
+operation headers followed by all descriptions, whereas live output prints each
+description directly beneath its header.
 
 ### Configuration
 
-`fan_out` accepts a bool or a table, following the precedent `enable` already
-sets in the same config tree:
+`fan_out` accepts either a boolean or a table, matching the pattern used by
+`enable` in the same configuration tree:
 
 ```toml
 # reads: unbounded concurrency, report every failure
@@ -390,26 +408,26 @@ concurrency = 4
 | `concurrency` | unbounded  | Maximum operations in flight. `1` runs them in order.        |
 | `on_error`    | `continue` | `stop` starts no further operations after the first failure. |
 
-`concurrency` is one integer rather than a `mode = "parallel" | "sequential"`
-enum plus a later `max_concurrency`.
-Two knobs that can contradict each other (`mode = "sequential", max_concurrency
-= 4`) are one axis wearing two names.
-A future `delay` key for rate-limited endpoints slots in beside these without
-disturbing either.
+`concurrency` is a single integer rather than a `mode = "parallel" |
+"sequential"` enum paired with `max_concurrency`, avoiding contradictory states
+such as `mode = "sequential", max_concurrency = 4`.
+A future `delay` setting for rate-limited endpoints can be added alongside these
+keys without changing either.
 
-`on_error` is genuinely independent of `concurrency`: independent reads want
-unbounded concurrency and `continue`, ordered writes want `concurrency = 1` and
-`stop`, and both other combinations are reachable.
+`on_error` is orthogonal to `concurrency`: independent reads use unbounded
+concurrency with `continue`, ordered writes use `concurrency = 1` with `stop`,
+and the remaining two combinations are also valid.
 
-With `concurrency` above 1, `stop` means no further operations are *started*.
-In-flight operations finish; nothing is aborted.
+When `concurrency` is greater than `1`, `on_error = "stop"` prevents new
+operations from *starting* after a failure; in-flight operations run to
+completion rather than being aborted.
 
-The table form turns fan-out on without naming `enabled`; `enabled = false`
-turns it off.
-A `concurrency` of `0` reads as unbounded rather than "never run anything".
-`fan_out` is a per-tool key with no counterpart on the `conversation.tools.*`
-defaults block, so no tool inherits it: whether a tool's calls may be batched
-depends on what the tool does.
+Specifying the table form enables fan-out without requiring `enabled = true`,
+while `enabled = false` disables it.
+Setting `concurrency = 0` means unbounded concurrency.
+`fan_out` is a per-tool setting with no counterpart on the
+`conversation.tools.*` wildcard block, so no tool inherits it by default:
+whether a tool's calls can be safely batched depends on the tool's semantics.
 
 > [!TIP]
 > [RFD 129] replaces `fan_out.concurrency` with a tool-level `concurrency`,
@@ -417,112 +435,116 @@ depends on what the tool does.
 > across tools by key.
 > `fan_out` keeps `enabled` and `on_error`.
 
-### Where the safety boundary sits
+### Interactive Tools and Ordering
 
-An earlier version of this design gated fan-out on tools that never return
-`NeedsInput`, on the grounds that a question arriving mid-batch leaves earlier
-side effects committed.
+An earlier draft of this design restricted fan-out to tools that never return
+`NeedsInput`, because a question raised mid-batch leaves earlier side effects
+committed.
 
-That gate is unnecessary, and the property it was reaching for is better
-expressed by the config above.
-A tool configured with `concurrency = 1` and `on_error = "stop"` behaves exactly
-as separate calls would: when operation 2 asks a question, operation 1 has
-committed and operations 3 through 5 have not started.
-That is the same state the assistant would have reached by issuing two calls.
+That restriction is unnecessary because `concurrency` and `on_error` express the
+required safety property directly.
+A tool configured with `concurrency = 1` and `on_error = "stop"` behaves
+identically to separate sequential calls: if operation 2 asks a question,
+operation 1 has committed and operations 3 through 5 have not started.
+That is the exact state the assistant would reach by issuing individual calls.
 
-The question is not "can this tool ask?" but "is this tool's fan-out ordered?",
-and the tool's configuration answers it.
+Safety for stateful tools depends on whether execution is ordered, not on
+whether the tool can ask questions, and the tool's configuration controls that
+ordering.
 
 ## Drawbacks
 
-**A second way to do the same thing.** `fs_modify_file` already accepts many
-targets in one call, and `bash` accepts many commands.
-Fan-out does not replace those and does not subsume them (see Non-Goals), so the
-project carries two mechanisms that both mean "more than one thing per call".
+**Two batching mechanisms.** `fs_modify_file` already accepts multiple targets
+in one call, and `bash` accepts multiple commands.
+Because fan-out neither replaces nor subsumes tool-native batching (see
+Non-Goals), JP carries two mechanisms for executing multiple actions in a single
+call.
 
-**The advertised schema is not the tool's schema.** `jp_tool::schema` states
-that a tool's parameters are held exactly as the source declared them.
-That stays true of `ToolDefinition`, but what the server advertises for a
-fan-out tool is its own construction.
+**The advertised schema differs from `ToolDefinition`.** `jp_tool::schema`
+states that a tool's parameters are stored exactly as declared by the source.
+That remains true of `ToolDefinition`, but the MCP server advertises a synthetic
+wrapper schema for fan-out tools.
 
-**The Host protocol grows.** `CallInfo::operation` and `Interaction::Settled`
-are new, and the Host has to demultiplex one MCP call into several executors.
-Every Host implementation carries that, not only JP's terminal one.
+**More complex Host protocol.** `CallInfo::operation` and `Interaction::Settled`
+expand the Host interaction protocol, and every Host implementation (not just
+JP's terminal UI) must demultiplex one MCP call across multiple executors.
 
-**Replay loses operation boundaries in custom-formatter output.** The chunks are
-joined into one string, so replay reproduces the printed text but cannot tell
-which chunk belonged to which operation.
+**Replay loses per-operation boundaries in custom-formatter output.** Because
+per-operation formatter chunks are joined into a single string on
+`ToolCallRequest`, replay reproduces the formatted text but cannot associate
+each chunk with its individual operation header.
 
 ## Alternatives
 
-**Per-tool multi-argument schemas.** Give `fs_read_file` a `reads[]` parameter,
-`fs_create_file` a `files[]` parameter, and so on.
-Rejected: it does not reach MCP tools, and it re-decides the same question in
-every tool.
-It also requires each tool to grow its own result-framing and partial-failure
-handling, which fan-out provides once.
+**Per-tool multi-argument schemas.** Add array parameters such as `reads[]` on
+`fs_read_file` or `files[]` on `fs_create_file`.
+Rejected because it cannot wrap external MCP tools and forces each tool to
+implement its own batching schema, result framing, and partial-failure handling.
 
-**Expansion in the Host.** Show the provider the envelope, and have the Host
-expand a call into one MCP call per operation before submitting anything.
-This was the first implementation.
-Rejected: it depends on who submits calls.
-When an agent submits its own calls, the Host never sees them before the server
-does, so the agent can only be shown the tool's plain schema and fan-out is
-silently off on that route.
-It also records a folded body no MCP call delivered, and needs per-operation
-acknowledgement to reconcile the two.
+**Expand envelopes in the Host.** Advertise the envelope to the provider and
+have the Host split each call into separate MCP calls before submission.
+This was the initial implementation, and was rejected because it depends on who
+submits calls.
+When an external agent submits calls directly to the MCP server ([RFD 110]), the
+Host never sees them before the server does, so the agent can only be shown the
+tool's plain schema and fan-out is unavailable on that route.
+Host-side expansion also records a folded response that no MCP call actually
+returned, requiring per-operation acknowledgements to reconcile the two.
 
-**One loop over operations inside a single invocation.** Rejected: the server
-re-executes a tool after an answered question, so a loop inside one invocation
-re-runs committed side effects, and one invocation carries one Host approval,
-where fan-out needs one per operation.
-Child invocations keep both per operation.
+**Loop over operations inside a single invocation.** Rejected because the server
+re-executes a tool from the beginning after a `NeedsInput` question is answered,
+which would re-run committed side effects from earlier operations, and because a
+single invocation carries only one Host approval whereas fan-out requires one
+approval per operation.
+Separate child invocations isolate both retries and approvals per operation.
 
-**Gate fan-out on tools that cannot ask questions.** Rejected in favour of the
-`concurrency` and `on_error` configuration, which expresses the same safety
-property without excluding every write tool from the feature.
+**Restrict fan-out to tools that cannot ask questions.** Rejected in favor of
+the `concurrency` and `on_error` settings, which preserve sequential safety
+guarantees without excluding interactive write tools.
 
 ## Non-Goals
 
-**Replacing batch operations.** `fs_modify_file` is one operation over a set of
-targets, not N independent operations: its patterns apply in order across files
-and each sees the previous one's output, it shows a single diff for one
-approval, and it validates the whole set before writing anything.
-Tools shaped that way opt out by never setting `fan_out`.
+**Replacing atomic batch operations.** `fs_modify_file` performs one coordinated
+operation across a set of targets rather than `N` independent operations: its
+patterns apply in sequence across files so each sees the previous pattern's
+output, it presents a single combined diff for one approval, and it validates
+the entire set before writing to disk.
+Tools with cross-target semantics opt out by leaving `fan_out` unset.
 
-**Shared parameters across operations.** Every operation carries its own
+**Shared parameters across operations.** Every element of `ops` carries a
 complete argument object.
-Hoisting a common value to the call level (the way `fs_modify_file` has a
-call-level `path` default) is a possible later extension and is not designed
-here.
+Hoisting shared default values to the call root (similar to the call-level
+`path` default on `fs_modify_file`) is left to a future extension.
 
-**A delay knob.** Rate-limited endpoints will want one.
-The config shape above leaves room for it; this RFD does not build it.
+**A rate-limit delay setting.** Rate-limited endpoints may eventually need a
+delay between operations.
+The table configuration leaves room for a `delay` key, but this RFD does not
+implement it.
 
-**Changing what any tool does.** No tool implementation changes.
-A tool that gains fan-out behaves identically per operation.
+**Changing tool implementations.** Enabling `fan_out` requires no changes to a
+tool's implementation, and each operation executes identically to a standalone
+call.
 
 ## Risks and Open Questions
 
-**Does the assistant use it?** A wrapped schema is a more complex schema.
-Some models may keep issuing one operation per call, which costs an extra
-envelope of tokens per call and delivers nothing.
-Enabling it on `fs_read_file` first and measuring the operation-count
-distribution answers this before the feature spreads; T-0yavtsr tracks that.
+**Model adoption of the envelope schema.** Wrapping a tool's schema adds
+nesting, and some models may continue issuing one operation per call, paying the
+extra wrapper tokens without batching.
+Enabling `fan_out` on `fs_read_file` first and measuring the operation-count
+distribution (tracked in T-0yavtsr) will test model behavior before enabling the
+setting on additional tools.
 
-**Permission fatigue on write tools.** Fan-out plus a write tool that asks
-before running means N prompts.
-That is the honest behaviour, but it may make fan-out unattractive on exactly
-the tools where ordering matters most.
-The mitigation is the permission decision a user can remember for the rest of
-the turn, which approves the remaining operations without prompting.
-Whether that is enough is an observation to make in use.
+**Permission fatigue on write tools.** Combining fan-out with a write tool that
+prompts before execution produces `N` prompts for `N` operations.
+Users can mitigate this by remembering their approval decision for the rest of
+the turn, which approves the remaining operations without prompting, though
+real-world usage will determine whether that is ergonomic enough on write tools.
 
-**Do clients validate against the advertised schema?** An MCP client that checks
-arguments against `inputSchema` before sending would refuse a bare call the
-server accepts.
-That costs nothing a client following the schema would miss, but it means bare
-calls are a leniency of the server, not a promise to every caller.
+**Client-side schema validation.** An MCP client that validates arguments
+against `inputSchema` before sending a request will reject a bare call that JP's
+server would accept.
+Clients that follow the advertised schema are unaffected, so bare-call support
+is a server-side leniency rather than a promise to every caller.
 
 ## Implementation Plan
 
@@ -530,7 +552,7 @@ calls are a leniency of the server, not a promise to every caller.
 
 Add `FanOutConfig` to `jp_config::conversation::tool` with bool-or-table
 parsing, `concurrency`, and `on_error`.
-No behaviour yet.
+No runtime behavior yet.
 
 **Depends on:** nothing.
 **Mergeable:** yes.
@@ -538,21 +560,23 @@ No behaviour yet.
 ### Phase 2: Advertisement
 
 Add `jp_mcp::server::fan_out` with `envelope`, `split`, and `fold`, where
-`split` tells an envelope from a bare call as described under Bare calls.
-Have `Service::definitions()` advertise the envelope and the batching sentence,
-and have JP's provider request take its tool definitions from the same place.
+`split` distinguishes an envelope from a bare call as described under Bare
+Calls.
+Update `Service::definitions()` to advertise the envelope schema and batching
+instruction, and source JP's provider tool definitions from
+`Service::definitions()`.
 `jp_tool` and `jp_llm` carry no fan-out code.
 
 **Depends on:** Phase 1.
 **Mergeable:** no; a tool advertised with the envelope needs Phase 3 to run.
 
-### Phase 3: Child invocations
+### Phase 3: Child Invocations
 
 Add `CallInfo::operation` and `Interaction::Settled`.
-Expand an envelope into child invocations under a parent, apply `concurrency`
-and `on_error` between release and execution, and fold into the parent's
-`Record`.
-Accept bare calls as plain calls.
+Expand envelope calls into child invocations under a parent invocation, enforce
+`concurrency` and `on_error` between release and execution, and fold child
+results into the parent's `Record`.
+Execute bare calls as plain calls.
 
 **Depends on:** Phase 2.
 **Mergeable:** with Phase 4.
@@ -562,20 +586,21 @@ Accept bare calls as plain calls.
 Demultiplex child interactions into one executor per operation, key display
 state by operation, complete operations on `Settled` and the tool call on the
 parent's `Record`, and resolve every operation with `Executor::settle`.
-Route pause, resume, and cancel to the right invocation.
+Route pause, resume, and cancel signals to the appropriate parent or child
+invocation.
 
 **Depends on:** Phase 3.
 **Mergeable:** with Phase 3.
 
 ## References
 
-- [RFD 082] records every tool question round-trip as an inquiry pair, which is
-  what keeps N per-operation questions individually auditable under one tool
-  call id.
-- [RFD 109] runs every tool call through JP's in-process MCP server, which is
-  where fan-out lives.
-- [RFD 110] lets an external agent submit tool calls itself; those calls reach
-  the same server and fan out the same way.
+- [RFD 082] records each tool question round-trip as an inquiry pair, keeping
+  `N` per-operation questions individually auditable under a single tool call
+  ID.
+- [RFD 109] runs every tool call through JP's in-process MCP server, where
+  fan-out is implemented.
+- [RFD 110] lets external agents submit tool calls over ACP; those calls reach
+  the same MCP server and fan out the same way.
 
 [RFD 082]: 082-unified-inquiry-event-recording.md
 [RFD 109]: 109-in-process-jp-mcp-server.md
