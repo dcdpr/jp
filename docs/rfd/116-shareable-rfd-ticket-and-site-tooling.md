@@ -629,8 +629,14 @@ rfd` and `jp wiki`, `jp rfd init` for its templates, and `jp vite init` and
   tracked, with no changes since the last commit.
 - A file with changes since the last commit, staged or not, or one git doesn't
   track or ignores, is refused.
+- A file marked assume-unchanged or skip-worktree is refused: `git status`
+  doesn't look at it, so an edit to it is reported nowhere.
+- A file reached through a symlink, its own or a directory's, is refused: git
+  records where a link points, not what its target holds, and a write follows
+  the link.
 - Outside a git work tree, nothing can restore a file, so every one is refused.
-- `--force` overwrites a refused file anyway.
+- `--force` overwrites a refused file anyway, writing through a symlink to its
+  target.
 
 A file that doesn't exist, or already holds what the command writes, loses
 nothing and is never refused.

@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 
 use camino_tempfile::Utf8TempDir;
 
@@ -166,6 +168,126 @@ fn every_file_outside_a_work_tree_is_unrecorded() {
         (Utf8PathBuf::from("a.toml"), Unrecorded::NoWorkTree),
         (Utf8PathBuf::from("b.toml"), Unrecorded::NoWorkTree),
     ]);
+}
+
+/// `git status` checks only where a committed symlink points, so an unchanged
+/// link reports nothing even though writing through it overwrites a target git
+/// has no copy of.
+#[cfg(unix)]
+#[test]
+fn a_committed_symlink_is_unrecorded() {
+    let top = repository();
+    let shared = Utf8TempDir::new().unwrap();
+    fs::write(shared.path().join("create.toml"), "# shared\n").unwrap();
+    let dir = top.path().join("sub/docs/rfd");
+    symlink(shared.path().join("create.toml"), dir.join("create.toml")).unwrap();
+    git(top.path(), &["add", "."]);
+    git(top.path(), &["commit", "--quiet", "-m", "Link"]);
+    let paths = [Utf8PathBuf::from("create.toml")];
+    assert_eq!(status(&dir, "sub/docs/rfd/", &paths), Ok(vec![]));
+
+    assert_eq!(
+        unrecorded(&dir, &paths),
+        Ok(vec![(
+            Utf8PathBuf::from("create.toml"),
+            Unrecorded::Symlink
+        )])
+    );
+}
+
+/// A file below a symlinked directory is reached through the link just the
+/// same, and git refuses to look past one.
+#[cfg(unix)]
+#[test]
+fn a_file_below_a_symlinked_directory_is_unrecorded() {
+    let top = repository();
+    let shared = Utf8TempDir::new().unwrap();
+    fs::write(shared.path().join("config.mjs"), "Shared").unwrap();
+    symlink(shared.path(), top.path().join("sub/site")).unwrap();
+    git(top.path(), &["add", "."]);
+    git(top.path(), &["commit", "--quiet", "-m", "Link"]);
+
+    let found = unrecorded(top.path(), &[
+        Utf8PathBuf::from("sub/site/config.mjs"),
+        Utf8PathBuf::from("sub/docs/rfd/index.md"),
+    ])
+    .unwrap();
+
+    assert_eq!(found, [(
+        Utf8PathBuf::from("sub/site/config.mjs"),
+        Unrecorded::Symlink
+    )]);
+}
+
+/// A link outside a work tree is refused for being a link: that is what
+/// `--force` writes through.
+#[cfg(unix)]
+#[test]
+fn a_symlink_outside_a_work_tree_is_named_as_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join("target.toml"), "T").unwrap();
+    symlink(dir.path().join("target.toml"), dir.path().join("link.toml")).unwrap();
+
+    assert_eq!(
+        unrecorded(dir.path(), &[Utf8PathBuf::from("link.toml")]),
+        Ok(vec![(Utf8PathBuf::from("link.toml"), Unrecorded::Symlink)])
+    );
+}
+
+/// `git status` doesn't look at a file marked assume-unchanged or
+/// skip-worktree, so an edit to one is reported nowhere, and git has no copy of
+/// it.
+#[test]
+fn an_edit_hidden_from_status_is_unrecorded() {
+    for flag in ["--assume-unchanged", "--skip-worktree"] {
+        let top = repository();
+        let dir = top.path().join("sub");
+        git(top.path(), &["update-index", flag, "sub/docs/rfd/index.md"]);
+        fs::write(dir.join("docs/rfd/index.md"), "Customized").unwrap();
+        let paths = [
+            Utf8PathBuf::from("docs/rfd/index.md"),
+            Utf8PathBuf::from("docs/rfd/priority.md"),
+        ];
+        assert_eq!(status(&dir, "sub/", &paths), Ok(vec![]), "{flag}");
+
+        assert_eq!(
+            unrecorded(&dir, &paths),
+            Ok(vec![(
+                Utf8PathBuf::from("docs/rfd/index.md"),
+                Unrecorded::Hidden
+            )]),
+            "{flag}"
+        );
+    }
+}
+
+#[test]
+fn hidden_entries_are_read_below_the_prefix() {
+    let output = "H sub/a.toml\0h sub/b.toml\0S sub/c.toml\0s sub/d.toml\0h other/e.toml\0";
+
+    assert_eq!(parse_hidden(output, "sub/"), [
+        (Utf8PathBuf::from("b.toml"), Unrecorded::Hidden),
+        (Utf8PathBuf::from("c.toml"), Unrecorded::Hidden),
+        (Utf8PathBuf::from("d.toml"), Unrecorded::Hidden),
+    ]);
+}
+
+/// Committing doesn't make a link or a hidden edit restorable, so only
+/// `--force` is offered.
+#[test]
+fn a_refusal_of_links_and_hidden_edits_offers_only_force() {
+    let message = refusal("jp ticket tools init tools", &[
+        (Utf8PathBuf::from("tools/create.toml"), Unrecorded::Symlink),
+        (Utf8PathBuf::from("tools/list.toml"), Unrecorded::Hidden),
+    ]);
+
+    assert_eq!(
+        message,
+        "Git couldn't restore these files, so `jp ticket tools init tools` leaves them:\n  \
+         tools/create.toml (reached through a symlink)\n  tools/list.toml (marked \
+         assume-unchanged or skip-worktree)\nRun `jp ticket tools init tools --force` to \
+         overwrite them anyway."
+    );
 }
 
 /// Nothing to overwrite asks git nothing, so a directory that doesn't exist yet

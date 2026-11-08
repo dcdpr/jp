@@ -8,8 +8,14 @@
 //!   tracked and unchanged since the last commit.
 //!   A file with changes since the last commit, staged or not, or one git
 //!   doesn't track or ignores, is refused.
+//! - A file marked assume-unchanged or skip-worktree is refused: `git status`
+//!   doesn't look at it, so an edit to it is reported nowhere.
+//! - A file reached through a symlink, its own or a directory's, is refused:
+//!   git records where a link points, not what the target holds, and writing
+//!   follows the link.
 //! - Outside a git work tree, nothing can restore the file, so it is refused.
-//! - `--force` overwrites a refused file anyway.
+//! - `--force` overwrites a refused file anyway, writing through a symlink to
+//!   its target.
 //!
 //! A file that doesn't exist, or already holds what the command would write,
 //! loses nothing and is never refused.
@@ -58,6 +64,14 @@ pub enum Unrecorded {
     /// Git doesn't track it, or ignores it.
     Untracked,
 
+    /// It is marked assume-unchanged or skip-worktree, so `git status` doesn't
+    /// report an edit to it.
+    Hidden,
+
+    /// It, or a directory above it, is a symlink: git can restore the link, not
+    /// the target a write would overwrite.
+    Symlink,
+
     /// It isn't in a git work tree.
     NoWorkTree,
 }
@@ -69,6 +83,8 @@ impl Unrecorded {
         match self {
             Self::Modified => "changed since the last commit",
             Self::Untracked => "not tracked",
+            Self::Hidden => "marked assume-unchanged or skip-worktree",
+            Self::Symlink => "reached through a symlink",
             Self::NoWorkTree => "not in a git work tree",
         }
     }
@@ -103,25 +119,55 @@ pub fn prefix(dir: &Utf8Path) -> Result<Option<String>, String> {
 /// why, ordered by path.
 ///
 /// `paths` are relative to `dir`, and name files that exist.
-/// Outside a git work tree every one of them is unrecorded.
+/// A path reached through a symlink is unrecorded wherever it is, and outside a
+/// git work tree every one of them is.
+/// `dir` itself may be a symlink: git reads the directory it resolves to.
 pub fn unrecorded(
     dir: &Utf8Path,
     paths: &[Utf8PathBuf],
 ) -> Result<Vec<(Utf8PathBuf, Unrecorded)>, String> {
-    if paths.is_empty() {
-        return Ok(vec![]);
+    let mut found = vec![];
+    let mut rest = vec![];
+    for path in paths {
+        if through_symlink(dir, path)? {
+            found.push((path.clone(), Unrecorded::Symlink));
+        } else {
+            rest.push(path.clone());
+        }
     }
-
-    let mut found = match prefix(dir)? {
-        Some(prefix) => status(dir, &prefix, paths)?,
-        None => paths
-            .iter()
-            .map(|path| (path.clone(), Unrecorded::NoWorkTree))
-            .collect(),
-    };
+    if !rest.is_empty() {
+        match prefix(dir)? {
+            Some(prefix) => {
+                found.extend(status(dir, &prefix, &rest)?);
+                for entry in hidden(dir, &prefix, &rest)? {
+                    if !found.iter().any(|(path, _)| *path == entry.0) {
+                        found.push(entry);
+                    }
+                }
+            }
+            None => found.extend(rest.into_iter().map(|path| (path, Unrecorded::NoWorkTree))),
+        }
+    }
     found.sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(found)
+}
+
+/// Whether `path`, relative to `dir`, or a directory between `dir` and it, is a
+/// symlink.
+fn through_symlink(dir: &Utf8Path, path: &Utf8Path) -> Result<bool, String> {
+    let mut current = dir.to_path_buf();
+    for component in path.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(format!("failed to read {current}: {error}")),
+        }
+    }
+
+    Ok(false)
 }
 
 /// What `git status` says about `paths`, relative to `dir`, which sits at
@@ -181,6 +227,53 @@ fn parse_status(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
             };
 
             Some((Utf8PathBuf::from(path), why))
+        })
+        .collect()
+}
+
+/// The tracked files among `paths`, relative to `dir`, which sits at `prefix`
+/// in its work tree, that are marked assume-unchanged or skip-worktree.
+fn hidden(
+    dir: &Utf8Path,
+    prefix: &str,
+    paths: &[Utf8PathBuf],
+) -> Result<Vec<(Utf8PathBuf, Unrecorded)>, String> {
+    let output = Command::new("git")
+        .args(["ls-files", "-v", "-z", "--full-name", "--"])
+        .args(paths.iter().map(|path| path.as_str()))
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("git couldn't be run in {dir}: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "`git ls-files` failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(parse_hidden(
+        &String::from_utf8_lossy(&output.stdout),
+        prefix,
+    ))
+}
+
+/// Read `git ls-files -v -z --full-name` output, keeping the entries below
+/// `prefix` that are assume-unchanged (a lowercase tag) or skip-worktree (`S`),
+/// as paths relative to it.
+fn parse_hidden(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
+    output
+        .split('\0')
+        .filter_map(|entry| {
+            let (tag, path) = entry.split_once(' ')?;
+            let hidden = tag.chars().all(|c| c.is_ascii_lowercase()) || tag == "S";
+            if tag.is_empty() || !hidden {
+                return None;
+            }
+            let path = path.strip_prefix(prefix)?;
+
+            Some((Utf8PathBuf::from(path), Unrecorded::Hidden))
         })
         .collect()
 }

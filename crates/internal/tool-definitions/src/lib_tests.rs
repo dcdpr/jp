@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::process::Command;
 
 use camino_tempfile::Utf8TempDir;
@@ -197,6 +199,67 @@ fn init_refuses_an_edit_git_has_not_recorded() {
         )
     );
     assert_eq!(fs::read_to_string(&list).unwrap(), "# mine, edited\n");
+    assert!(!dir.path().join("create.toml").exists());
+}
+
+/// A committed symlink to a definition shared outside the repository is
+/// unchanged as far as git knows, but writing through it would overwrite the
+/// shared target, which git has no copy of.
+#[cfg(unix)]
+#[test]
+fn init_refuses_to_write_through_a_committed_symlink() {
+    let dir = repository();
+    let shared = Utf8TempDir::new().unwrap();
+    let target = shared.path().join("list.toml");
+    fs::write(&target, "# shared\n").unwrap();
+    let list = dir.path().join("list.toml");
+    symlink(&target, &list).unwrap();
+    commit(dir.path());
+
+    let error = NOTES.init(dir.path(), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "Git couldn't restore these files, so `jp notes tools init {}` leaves them:\n  {list} \
+             (reached through a symlink)\nRun `jp notes tools init {} --force` to overwrite them \
+             anyway.",
+            dir.path(),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&target).unwrap(), "# shared\n");
+    assert!(!dir.path().join("create.toml").exists());
+}
+
+/// An edit to a definition marked assume-unchanged is one `git status` doesn't
+/// report and git has no copy of.
+#[test]
+fn init_refuses_an_edit_hidden_by_assume_unchanged() {
+    let dir = repository();
+    let list = dir.path().join("list.toml");
+    fs::write(&list, "# mine\n").unwrap();
+    commit(dir.path());
+    git(dir.path(), &[
+        "update-index",
+        "--assume-unchanged",
+        "list.toml",
+    ]);
+    fs::write(&list, "# mine, customized\n").unwrap();
+
+    let error = NOTES.init(dir.path(), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "Git couldn't restore these files, so `jp notes tools init {}` leaves them:\n  {list} \
+             (marked assume-unchanged or skip-worktree)\nRun `jp notes tools init {} --force` to \
+             overwrite them anyway.",
+            dir.path(),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&list).unwrap(), "# mine, customized\n");
     assert!(!dir.path().join("create.toml").exists());
 }
 
