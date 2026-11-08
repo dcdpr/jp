@@ -10,95 +10,89 @@
 
 ## Summary
 
-This RFD defines the `runtime = "vfs"` tool execution mode, in which an
+This RFD defines the `runtime = "vfs"` tool execution mode, where an
 OS-sandboxed subprocess performs all filesystem, network, and process operations
-through a JSON-RPC protocol over stdin and stdout.
+over a stdin/stdout JSON-RPC protocol.
 The protocol mirrors the `jp:host/filesystem`, `jp:host/http`, and
-`jp:host/process` interfaces from [RFD 016] over stdio instead of Wasm imports.
-The host resolves every request through `ProjectFiles` ([RFD D09]) and
-`AccessPolicy` ([RFD 075]), leaving the IPC channel as the subprocess's only
-path to host resources.
+`jp:host/process` interfaces from [RFD 016] over stdio instead of WASM imports,
+and the host resolves every request through `ProjectFiles` ([RFD D09]) and
+`AccessPolicy` ([RFD 075]).
 
 ## Motivation
 
-JP's `runtime = "stdio"` tools (the current default) run as subprocesses with
-direct access to the filesystem and whatever else the OS allows.
-[RFD 075] introduces OS-level sandboxing to restrict what these subprocesses can
-reach, but OS-level enforcement is coarse-grained and platform-dependent:
-`sandbox-exec` on macOS is deprecated, Landlock on Linux requires kernel 5.13+,
-and Windows restricted tokens cannot easily express path-prefix allowlists.
+JP's default `runtime = "stdio"` tools run as subprocesses with direct access to
+the host filesystem, network, and process table.
+[RFD 075] restricts these subprocesses with OS-level sandboxing, but OS
+enforcement is coarse-grained and platform-dependent: `sandbox-exec` on macOS is
+deprecated, Landlock on Linux requires kernel 5.13+, and Windows restricted
+tokens cannot easily express path-prefix allowlists.
 
-[RFD 016] solves this for WASM plugins by design: WASM components have no
-ambient capabilities, and all host interaction goes through typed `jp:host/*`
-imports checked against a sandbox policy.
-But WASM requires compiling tools to a WASM component, which is a significant
-authoring burden for tools that are naturally written as native executables.
+[RFD 016] solves this for WASM plugins: WASM components have no ambient
+capabilities, and all host interaction goes through typed `jp:host/*` imports
+checked against a sandbox policy.
+Compiling a tool to a WASM component, however, imposes a significant authoring
+burden on tools that are otherwise simple native executables.
 
-There is a gap between these two extremes.
+`runtime = "vfs"` sits between these two models.
 We want tools that:
 
-1. Are written as normal native programs (not WASM components).
+1. Compile as native executables rather than WASM components.
 2. Have no ambient access to the filesystem, network, or process table.
-3. Access host resources through JP's mediated API, subject to the same access
-   policy as WASM plugins.
-4. Work identically against any `ProjectFiles` backend — real filesystem,
-   in-memory, browser storage, database.
+3. Access host resources through JP's mediated API under the same access policy
+   as WASM plugins.
+4. Run unchanged against any `ProjectFiles` backend (real filesystem, in-memory,
+   browser storage, or database).
 
-The `runtime = "vfs"` model fills this gap.
-The tool is still a subprocess, but it runs under a restrictive OS sandbox ([RFD
-075]) that blocks direct system access, forcing all I/O through a JSON-RPC
-protocol on stdin/stdout.
-JP mediates every request through `ProjectFiles` and the access policy, giving
-the same security and backend-agnosticism guarantees as WASM — without the WASM
-toolchain.
+Under `runtime = "vfs"`, the tool runs as a subprocess inside a restrictive OS
+sandbox ([RFD 075]) that blocks direct system access and forces all I/O through
+a JSON-RPC protocol over stdin and stdout.
+JP mediates every request through `ProjectFiles` and `AccessPolicy`, providing
+WASM's policy enforcement and backend independence without the WASM toolchain.
 
 ### Why not just use WASM?
 
-WASM is the ideal long-term solution for sandboxed tools, but it has practical
-barriers today:
+WASM is the ideal long-term model for sandboxed tools, but it has practical
+barriers:
 
 - **Toolchain friction.** Building a WASM component requires `cargo component`,
   `wit-bindgen`, and familiarity with the component model.
-  JP's current tools are shell commands or simple Rust binaries — the gap is
-  large.
-- **Ecosystem maturity.** Many Rust crates don't compile to `wasm32-wasip2` yet.
-  Tools that depend on `tokio`, `reqwest`, or OS-specific APIs cannot be WASM
-  components today.
-- **Binary size.** `wasmtime` adds ~15-20 MB to the JP binary.
-  Until `wasmi` gains component model support, this is a fixed cost.
-- **Debugging.** WASM stack traces and debugging tooling are less mature than
-  native debugging.
+  JP's existing tools are shell commands or small Rust binaries, so the jump in
+  complexity is steep.
+- **Ecosystem maturity.** Many Rust crates do not target `wasm32-wasip2`.
+  Tools that depend on `tokio`, `reqwest`, or OS-specific APIs cannot compile as
+  WASM components.
+- **Binary size.** `wasmtime` adds ~15-20 MB to the JP binary, a fixed cost
+  until `wasmi` supports the component model.
+- **Debugging.** WASM stack traces and debuggers are less mature than native
+  tooling.
 
-VFS tools avoid all of these: they are native executables, debugged with
-standard tools, using any crate they want.
-The cost is a less hermetic sandbox (OS-level enforcement vs. WASM's
-architectural isolation), but the access policy layer provides equivalent
-logical security for cooperative tools.
+VFS tools are native executables that can use any crate and standard debuggers.
+The trade-off is a less hermetic sandbox (OS-level enforcement rather than
+WASM's architectural isolation), though the access policy enforces the same
+logical permissions for cooperative tools.
 
 ### Why not just use `runtime = "stdio"` with OS sandboxing?
 
-Because OS sandboxing is an all-or-nothing enforcement layer.
-It can block filesystem access, but it cannot mediate it — there is no way for
-`sandbox-exec` to say "allow reads to `src/` but deny reads to `.env`" with
-path-level granularity.
-Landlock comes closer, but network restrictions require kernel 6.7+ and
-subprocess restrictions are limited.
+OS sandboxing is a coarse enforcement layer: it can block filesystem access, but
+it cannot mediate individual operations.
+For example, `sandbox-exec` cannot allow reads under `src/` while denying reads
+to `.env` with path-level granularity.
+Landlock comes closer on Linux, but network restrictions require kernel 6.7+ and
+subprocess controls remain limited.
 
-The VFS protocol provides fine-grained, per-request policy enforcement.
-Each `read`, `write`, `http_get`, or `run` request is checked against the tool's
-`SandboxConfig` before execution.
-The OS sandbox is the backstop that prevents the tool from bypassing the
-protocol; the protocol is the policy enforcement layer.
+The VFS protocol enforces policy per request: the host checks each `read`,
+`write`, `http_get`, or `run` call against the tool's `SandboxConfig` before
+executing it.
+The OS sandbox prevents the tool from bypassing the protocol, while the protocol
+enforces the fine-grained policy.
 
 ## Design
 
 ### Protocol overview
 
-The VFS protocol is a bidirectional JSON-RPC exchange over the tool process's
+The VFS protocol is a bidirectional JSON-RPC exchange over the tool subprocess's
 stdin (host → tool) and stdout (tool → host).
-The tool sends requests; the host sends responses.
-The tool's stderr is captured separately for diagnostics but is not part of the
-protocol.
+JP captures the tool's stderr separately for diagnostics.
 
 ```text
 ┌──────────┐         stdin          ┌──────────┐
@@ -110,46 +104,41 @@ protocol.
 └──────────┘                        └──────────┘
 ```
 
-The tool writes JSON requests to stdout.
-JP reads them, resolves through `ProjectFiles` and the access policy, and writes
-JSON responses to the tool's stdin.
-When the tool is finished, it writes a final result message and exits.
+The tool writes JSON-RPC requests to stdout.
+JP reads each request, checks the access policy, resolves the operation through
+`ProjectFiles`, and writes the JSON-RPC response to the tool's stdin.
+When finished, the tool writes a final result notification and exits.
 
-This is the inverse of the typical JSON-RPC server model (where the server reads
-from stdin and writes to stdout).
-The inversion is intentional: the tool is the *requester* of host capabilities,
-not the provider.
-JP is the host that fulfills those requests.
+This flow inverts the usual stdio JSON-RPC server model, where the subprocess
+reads requests from stdin and writes responses to stdout.
+Here, the tool is the client requesting host capabilities, and JP is the host
+fulfilling them.
 
 ### Message framing
 
-Messages are newline-delimited JSON (NDJSON).
-Each message is a single JSON object followed by a newline (`\n`).
-This is the simplest framing that avoids partial-read issues and is widely
-supported across languages.
+Messages use newline-delimited JSON (NDJSON): each message is a single-line JSON
+object terminated by `\n`.
 
 ```text
 {"jsonrpc":"2.0","id":1,"method":"read","params":{"path":"src/main.rs"}}\n
 ```
 
-NDJSON is chosen over Content-Length framing (used by LSP and MCP's stdio
-transport) because:
+Compared to Content-Length framing (used by LSP and MCP's stdio transport),
+NDJSON:
 
-- It is simpler to implement — `BufRead::read_line` on the host, `println!` on
-  the tool.
-- It does not require a parser for HTTP-style headers.
-- Binary content is base64-encoded in JSON, so newlines in content do not break
-  framing.
+- Uses a single `BufRead::read_line` call on the host and `println!` in the
+  tool.
+- Needs no HTTP-style header parser.
+- Handles binary payloads without framing issues because binary data is
+  base64-encoded inside JSON strings.
 
-The trade-off is that messages cannot contain raw newlines — all content must
-be JSON-escaped.
-This is a non-issue for JSON-RPC, where all payloads are valid JSON objects.
+NDJSON messages cannot contain unescaped newlines, which JSON serialization
+already guarantees.
 
 ### Request and response format
 
-The protocol follows JSON-RPC 2.0 conventions with one simplification: no batch
-requests.
-Each message is a single request or response.
+The protocol follows JSON-RPC 2.0 without batch requests: each message is a
+single request, response, or notification.
 
 **Request** (tool → host, via stdout):
 
@@ -192,10 +181,10 @@ Each message is a single request or response.
 }
 ```
 
-The `result` method is a JSON-RPC notification (no `id` field).
-It signals that the tool is done and the process will exit.
-The `params.content` array uses the typed content block format from [RFD 058].
-Tools that don't use typed content blocks can return a plain string:
+The `result` method is a JSON-RPC notification (no `id` field) that signals
+completion before the process exits.
+`params.content` uses the typed content block array from [RFD 058], or a plain
+string that JP wraps in a single `text` block:
 
 ```json
 {
@@ -204,9 +193,6 @@ Tools that don't use typed content blocks can return a plain string:
   "params": { "content": "Modified 2 files." }
 }
 ```
-
-JP accepts both forms: if `params.content` is a string, it is wrapped in a
-single `text` block.
 
 **Error result** (tool → host, via stdout):
 
@@ -218,20 +204,19 @@ single `text` block.
 }
 ```
 
-The `error` notification signals that the tool failed.
-The `params` fields match `ToolError` from [RFD 009].
+The `error` notification reports a tool failure; its `params` fields match
+`ToolError` from [RFD 009].
 
 ### Protocol methods
 
-The protocol exposes three capability groups, matching the `jp:host` interfaces
-from [RFD 016].
-The method names use the format `{capability}.{operation}`.
+The protocol exposes three capability groups matching the `jp:host` interfaces
+from [RFD 016], with method names of the form `{capability}.{operation}`.
 
 #### Filesystem methods
 
-These methods are backed by the `ProjectFiles` trait from [RFD D09].
-All paths are relative to the project root.
-Absolute paths and `..` traversal are rejected by the host.
+The `ProjectFiles` trait ([RFD D09]) backs all `fs.*` methods.
+All paths are relative to the project root; the host rejects absolute paths and
+`..` traversal.
 
 ##### `fs.read`
 
@@ -245,14 +230,13 @@ Read a file's contents.
 { "result": { "content": "fn main() {}", "size": 13 } }
 ```
 
-For binary files, content is base64-encoded:
+The host checks whether the file is valid UTF-8.
+Text files are returned as plain strings with no `encoding` field; non-UTF-8
+files are base64-encoded with `"encoding": "base64"`:
 
 ```json
 { "result": { "content": "iVBORw0KGgo=", "encoding": "base64", "size": 1234 } }
 ```
-
-The host determines encoding based on the file's content (UTF-8 validity check).
-The `encoding` field is absent for text content and `"base64"` for binary.
 
 ##### `fs.write`
 
@@ -284,8 +268,7 @@ Check whether a path exists.
 
 ##### `fs.list_dir`
 
-List entries in a directory.
-Non-recursive.
+List the immediate entries of a directory (non-recursive).
 
 ```json
 { "method": "fs.list_dir", "params": { "path": "src" } }
@@ -330,9 +313,10 @@ Rename or move a file.
 ##### `fs.grep`
 
 Search file contents for a pattern.
-This is a first-class method (not built from `list_dir` + `read`) because
-`ProjectFiles` implementations can optimize it significantly — ripgrep-style
-parallel search on a real filesystem, indexed search on a database backend.
+`fs.grep` is a dedicated method rather than a client-side composition of
+`fs.list_dir` and `fs.read` so `ProjectFiles` implementations can optimize it
+directly (for example, ripgrep-style parallel search on a local filesystem or
+indexed search on a database backend).
 
 ```json
 { "method": "fs.grep", "params": {
@@ -351,15 +335,15 @@ parallel search on a real filesystem, indexed search on a database backend.
 ] } }
 ```
 
-All `params` fields except `pattern` are optional.
-When omitted: `paths` defaults to the entire project, `extensions` defaults to
-all files, `context` defaults to `0`.
+Only `pattern` is required.
+When omitted, `paths` defaults to the entire project, `extensions` matches all
+files, and `context` defaults to `0`.
 
 #### HTTP methods
 
-These methods are backed by JP's HTTP client.
-The access policy checks the URL against the tool's `sandbox.network.allow`
-configuration.
+JP's HTTP client backs the `http.*` methods.
+Before sending a request, the access policy checks the target URL against the
+tool's `sandbox.network.allow` configuration.
 
 ##### `http.get`
 
@@ -374,14 +358,11 @@ configuration.
 { "result": { "status": 200, "body": "{\"id\": 123, ...}" } }
 ```
 
-Header values support `${VAR}` substitution: the host replaces `${VAR}` with the
-value from its own environment, if the variable is listed in the tool's
-`sandbox.network.envs` config.
-The tool never sees the resolved value.
-Unknown or disallowed variables produce an error response.
-
-For binary response bodies, the body is base64-encoded with `"encoding":
-"base64"`.
+Header values support `${VAR}` substitution: if `VAR` is listed in the tool's
+`sandbox.network.envs` config, the host substitutes the value from its own
+environment without exposing the resolved secret to the tool.
+Unknown or disallowed variables return an error response.
+Binary response bodies are base64-encoded with `"encoding": "base64"`.
 
 ##### `http.post`
 
@@ -397,9 +378,8 @@ For binary response bodies, the body is base64-encoded with `"encoding":
 
 #### Process methods
 
-These methods allow the tool to spawn subprocesses on the host.
-The access policy checks the program name and arguments against
-`sandbox.commands`.
+Process methods spawn subprocesses on the host after checking the program name
+and arguments against `sandbox.commands`.
 
 ##### `process.run`
 
@@ -419,21 +399,19 @@ Run a command and return its output.
 } }
 ```
 
-The subprocess runs with a clean environment.
-Only variables listed in `envs` (and allowed by the tool's
-`sandbox.commands.cargo.envs`) are forwarded from the host.
-The `cwd` is the project root (resolved through `ProjectFiles`).
-
-The host applies secret scrubbing to `stdout` and `stderr` before returning
-them, following the same approach as [RFD 016]: resolved env var values are
-replaced with `[REDACTED]`.
+The subprocess starts with a clean environment and `cwd` set to the project root
+(resolved through `ProjectFiles`).
+The host forwards only variables listed in `envs` and permitted by the command's
+allowlist (such as `sandbox.commands.cargo.envs`).
+Before returning the response, the host scrubs resolved environment variable
+values from `stdout` and `stderr`, replacing them with `[REDACTED]` ([RFD 016]).
 
 ### Initial context
 
-When the VFS runtime spawns the tool, it writes an initial context message to
-the tool's stdin before the request-response loop begins.
-This provides the tool with the same information currently passed via
-command-line arguments and template rendering in `StdioRuntime`:
+When the VFS runtime spawns the tool, it writes an `init` notification to the
+tool's stdin before the request-response loop begins.
+This supplies the context that `StdioRuntime` passes via command-line arguments
+and template rendering:
 
 ```json
 {
@@ -451,13 +429,11 @@ command-line arguments and template rendering in `StdioRuntime`:
 }
 ```
 
-The `init` message is a JSON-RPC notification (no `id`, no response expected).
-The tool reads it, performs its work by issuing requests, and eventually writes
-a `result` or `error` notification.
-
-The `protocol_version` field enables forward-compatible evolution.
-The tool can check it and degrade gracefully if the host supports a newer
-version with methods the tool doesn't know about.
+`init` is a JSON-RPC notification (no `id` and no response).
+The tool reads `init`, issues requests as needed, and finishes with a `result`
+or `error` notification.
+The `protocol_version` field lets the tool check the host's protocol version and
+degrade gracefully when versions differ.
 
 ### Tool lifecycle
 
@@ -476,51 +452,44 @@ A VFS tool invocation follows this sequence:
 10. JP reads the final notification, maps to ExecutionOutcome
 ```
 
-For one-shot tools (the common case), the lifecycle is short — a few requests,
-then a result.
-For tools that do extensive work (a large refactoring tool that reads and writes
-many files), the lifecycle may involve hundreds of requests.
+A typical one-shot tool issues a few requests before returning a result; a bulk
+refactoring tool may issue hundreds of requests within the same invocation.
 
 ### Cancellation
 
-When the user cancels a tool execution (Ctrl+C), JP sends a `cancel`
+When the user cancels a tool execution (Ctrl+C), JP writes a `cancel`
 notification to the tool's stdin:
 
 ```json
 { "jsonrpc": "2.0", "method": "cancel" }
 ```
 
-The tool should clean up and exit promptly.
-If the tool does not exit within a timeout (configurable, default 5 seconds), JP
-kills the process with SIGTERM, then SIGKILL after another timeout.
-
-The `cancel` notification is best-effort — the tool may not read it if it's
-blocked on a long-running computation.
-The process kill is the hard backstop.
+On receiving `cancel`, the tool should clean up and exit.
+Because the notification is best-effort (a tool blocked on computation may not
+read stdin), JP waits for a configurable grace period (default: 5 seconds)
+before sending SIGTERM, followed by SIGKILL after a second timeout.
 
 ### Integration with the stateful tool protocol
 
-[RFD 009] defines a stateful tool lifecycle: `spawn` → `fetch` → `apply` →
+[RFD 009] defines the stateful tool lifecycle: `spawn` → `fetch` → `apply` →
 `abort`.
-VFS tools integrate with this model naturally.
 
-For **one-shot VFS tools** (no `action` field in arguments), the lifecycle is:
-JP spawns the process, writes `init`, the tool issues requests and writes a
-`result`, and JP maps the result to `ExecutionOutcome::Completed`.
-This is identical to a `StdioRuntime` tool, just with mediated I/O.
+For **one-shot VFS tools** (no `action` field in arguments), JP spawns the
+process, writes `init`, fulfills requests until the tool writes `result`, and
+maps the outcome to `ExecutionOutcome::Completed`.
+This matches `StdioRuntime`, but with mediated I/O.
 
-For **stateful VFS tools** (tool declares stateful support per [RFD 009]), the
-process stays alive across `fetch`/`apply` cycles.
-The IPC channel remains open.
-Each `apply` from the assistant translates to an `apply` notification on the
-tool's stdin:
+For **stateful VFS tools** (tools that declare stateful support per [RFD 009]),
+the subprocess and its IPC channel remain open across `fetch`/`apply` cycles.
+Each `apply` from the assistant becomes an `apply` notification on the tool's
+stdin:
 
 ```json
 { "jsonrpc": "2.0", "method": "apply", "params": { "input": "y" } }
 ```
 
-The tool processes the input, issues any necessary requests (reads, writes), and
-writes a state update:
+The tool processes the input, issues any needed host requests, and writes a
+`state` notification:
 
 ```json
 { "jsonrpc": "2.0", "method": "state", "params": { "type": "running", "content": "Next hunk: ..." } }
@@ -532,9 +501,8 @@ Or, if the tool needs structured input:
 { "jsonrpc": "2.0", "method": "state", "params": { "type": "waiting", "content": "Confirm?", "question": { ... } } }
 ```
 
-The `state` notification uses the `ToolState` types from [RFD 009].
-JP maps these to the handle registry's state tracking.
-
+The `state` notification uses the `ToolState` types from [RFD 009], which JP
+maps to the handle registry.
 When the tool finishes:
 
 ```json
@@ -543,8 +511,8 @@ When the tool finishes:
 
 ### `VfsRuntime` implementation
 
-`VfsRuntime` implements the `ToolRuntime` trait from [RFD D10].
-It captures the dependencies needed to fulfill protocol requests:
+`VfsRuntime` implements `ToolRuntime` ([RFD D10]) and holds the dependencies
+required to serve protocol requests:
 
 ```rust
 pub struct VfsRuntime {
@@ -556,25 +524,24 @@ pub struct VfsRuntime {
 
 The `execute` method:
 
-1. Resolves `MaterializedView` from `project` (needed for `process.run` `cwd`).
+1. Resolves `MaterializedView` from `project` (for `process.run` `cwd`).
 2. Generates the OS sandbox profile from the tool's `SandboxConfig` ([RFD 075]).
-3. Spawns the subprocess under the sandbox with stdin/stdout piped.
+3. Spawns the subprocess under the sandbox with stdin and stdout piped.
 4. Writes the `init` notification.
-5. Enters the request-response loop, reading requests from stdout, fulfilling
+5. Runs the request-response loop, reading requests from stdout, fulfilling
    them, and writing responses to stdin.
-6. On `result` or `error` notification, maps to `ExecutionOutcome` and returns.
-7. On process exit without a final notification, returns
+6. Maps a `result` or `error` notification to `ExecutionOutcome` and returns.
+7. If the process exits without a final notification, returns
    `ExecutionOutcome::Completed` with the process's stderr as an error message.
 
-The request-response loop runs on a dedicated async task.
-JP uses `tokio::io::BufReader` for reading and `tokio::io::BufWriter` for
-writing, with the cancellation token wired to abort the loop.
+The request-response loop runs on a dedicated async task using
+`tokio::io::BufReader` and `tokio::io::BufWriter`, with the cancellation token
+wired to abort the loop.
 
 ### Access policy enforcement
 
-Every protocol request passes through the tool's `AccessPolicy` before
-execution.
-The policy is derived from the tool's `SandboxConfig` ([RFD 075]):
+Every protocol request passes through the tool's `AccessPolicy`, which is
+derived from `SandboxConfig` ([RFD 075]):
 
 ```rust
 pub struct AccessPolicy {
@@ -592,49 +559,42 @@ impl AccessPolicy {
 }
 ```
 
-Denied requests return a JSON-RPC error response with a clear message explaining
-what was denied and why.
-The tool receives the error and can surface it to the user via its result
-content.
+When a policy check fails, the host returns a JSON-RPC error response explaining
+what was denied and why, which the tool can include in its result.
 
-For requests that are not covered by the sandbox config (neither explicitly
-allowed nor denied), the host triggers an inquiry prompt to the user, following
-the inquiry model from [RFD 075].
-The tool's request blocks until the user responds.
-If the user approves, the request proceeds.
-If denied, the tool receives an error response.
+When a request is neither explicitly allowed nor denied by `SandboxConfig`, the
+host prompts the user following the inquiry model in [RFD 075].
+The request blocks until the user responds: approval executes the request, and
+denial returns an error response.
 
 ### Deadlock prevention
 
-The bidirectional stdin/stdout protocol has an inherent deadlock risk: the tool
-blocks writing a request to stdout while JP blocks writing a response to stdin,
-and neither side makes progress because OS pipe buffers are full.
+The bidirectional stdio protocol risks deadlock if both OS pipe buffers fill at
+once, blocking the tool on a stdout write while JP blocks on a stdin write.
+Four mechanisms prevent this:
 
-Mitigations:
+1. **Separate read and write tasks.** JP reads the tool's stdout and writes to
+   its stdin on independent async tasks, so host reads and writes never block
+   each other.
 
-1. **Async I/O on the host side.** JP reads from the tool's stdout and writes to
-   stdin on separate async tasks.
-   The read and write sides never block each other.
+2. **Payload size limit.** File content is the largest payload.
+   When a file exceeds a configurable threshold (default: 10 MB), the host
+   returns an error instead of serializing the file into JSON.
+   Tools that process larger files should read them in chunks or run a streaming
+   command via `process.run`.
 
-2. **Reasonable message sizes.** File content is the largest payload.
-   For files larger than a configurable threshold (default: 10 MB), the host
-   returns an error rather than attempting to serialize the entire file into a
-   JSON message.
-   Tools that need large files should process them in chunks or use
-   `process.run` with a streaming command.
-
-3. **Request timeout.** If the tool does not write a request or final result
-   within a configurable timeout (default: 60 seconds), JP assumes the tool is
+3. **Request timeout.** If the tool writes neither a request nor a final result
+   within a configurable timeout (default: 60 seconds), JP treats the process as
    hung and kills it.
-   This catches infinite loops and unexpected blocking.
 
-4. **Response timeout.** If JP does not write a response within 30 seconds (due
-   to a slow `ProjectFiles` backend or a long-running inquiry prompt), the tool
-   can write a `cancel` request to abandon the pending operation.
+4. **Response timeout.** If JP does not respond within 30 seconds (for example,
+   during a slow `ProjectFiles` operation or an unanswered inquiry prompt), the
+   tool can write a `cancel` request to abandon the pending operation.
 
 ### Error codes
 
-The protocol defines the following JSON-RPC error codes:
+The protocol uses standard JSON-RPC error codes (-32600 through -32603) for
+protocol errors and application-specific codes starting at -32001:
 
 | Code   | Name             | Meaning                                       |
 | ------ | ---------------- | --------------------------------------------- |
@@ -647,13 +607,9 @@ The protocol defines the following JSON-RPC error codes:
 | -32004 | Timeout          | Operation timed out                           |
 | -32005 | Cancelled        | Operation cancelled by host or user           |
 
-Standard JSON-RPC error codes (-32600 through -32603) are used for protocol
-errors.
-Application-specific codes start at -32001.
-
 ### Configuration
 
-VFS tools are configured with `runtime = "vfs"` in the tool config:
+Set `runtime = "vfs"` in the tool config to run a tool under the VFS runtime:
 
 ```toml
 [tools.smart_editor]
@@ -666,20 +622,19 @@ filesystem.allow = ["."]
 filesystem.writable = true
 ```
 
-The `sandbox` section from [RFD 075] controls what the tool can do through the
-protocol.
-The OS-level sandbox ([RFD 075] Phase 2-4) ensures the tool cannot bypass the
-protocol.
+The `sandbox` section ([RFD 075]) governs both the protocol's `AccessPolicy` and
+the OS-level sandbox ([RFD 075] Phase 2-4) that prevents the subprocess from
+bypassing the protocol.
 
-A VFS tool with no `sandbox` section gets the default policy: workspace
-read-only, no network, no subprocess spawning.
-This is sufficient for read-only tools like `grep_files`, `list_files`, and
+A VFS tool without a `sandbox` section gets the default policy: read-only
+workspace access, no network access, and no subprocess spawning.
+This policy suffices for read-only tools such as `grep_files`, `list_files`, and
 `read_file`.
 
 ### Tool SDK support
 
-JP's tool SDK (`jp_tool` crate) will provide a VFS client library that handles
-the protocol automatically:
+JP's tool SDK (`jp_tool` crate) provides a `VfsHost` client that wraps the
+JSON-RPC protocol:
 
 ```rust
 // Tool author's code
@@ -698,84 +653,73 @@ fn main() {
 }
 ```
 
-The `VfsHost` struct wraps the JSON-RPC protocol.
-`read`, `write`, `list_dir`, etc. send requests and block on responses.
-`result` writes the final notification and returns.
-
-For tools not written in Rust, the protocol is simple enough to implement
-directly: read NDJSON from stdin, write NDJSON to stdout, follow the method
-schemas.
+`VfsHost` methods (`read`, `write`, `list_dir`, and others) send a request on
+stdout and block until the response arrives on stdin; `result` writes the final
+notification and returns.
+Tools in other languages can implement the protocol directly by reading and
+writing NDJSON over stdio.
 
 ## Drawbacks
 
-- **Protocol overhead.** Every file read and write is a JSON-RPC round-trip
-  through stdin/stdout.
-  For tools that process many files, this adds latency compared to direct
-  filesystem access.
-  The `fs.grep` method mitigates this for the most common bulk operation, but
-  tools that read hundreds of individual files will be slower than their `stdio`
-  equivalents.
+- **Protocol overhead.** Every file read and write is a JSON-RPC round-trip over
+  stdin/stdout.
+  `fs.grep` avoids per-file round-trips for search, but tools that read hundreds
+  of individual files are slower than their `stdio` equivalents.
 
-- **Binary content encoding.** Binary files must be base64-encoded in JSON
-  messages, inflating their size by ~33%.
-  This is acceptable for the expected use case (source code, config files, text
-  documents) but inefficient for tools that process large binary files.
+- **Binary content encoding.** Base64 encoding inflates binary files by ~33%.
+  That overhead is fine for source code, configuration, and text documents, but
+  inefficient for large binary files.
 
-- **Complexity for tool authors.** Writing a VFS tool requires understanding the
-  JSON-RPC protocol and using the SDK (or implementing the protocol manually).
-  This is more work than writing a shell script that reads files directly.
-  The SDK reduces this burden, but there is still a gap compared to `runtime =
-  "stdio"` where `cat file.txt` just works.
+- **Complexity for tool authors.** Writing a VFS tool requires using the SDK or
+  implementing the JSON-RPC protocol directly, unlike `runtime = "stdio"` where
+  a shell script running `cat file.txt` works directly.
 
-- **Two runtime code paths.** `StdioRuntime` and `VfsRuntime` are separate
-  implementations of `ToolRuntime`.
-  Both must be maintained, tested, and kept in sync for shared behaviors
-  (argument validation, cancellation, result parsing).
-  The `ToolRuntime` trait from [RFD D10] provides the shared interface, but the
-  internal logic diverges.
+- **Two runtime code paths.** `StdioRuntime` and `VfsRuntime` implement the
+  shared `ToolRuntime` trait ([RFD D10]) separately, so shared behaviors such as
+  argument validation, cancellation, and result parsing must stay in sync across
+  both implementations.
 
-- **Inquiry latency.** When a protocol request triggers an inquiry prompt (an
-  action not covered by the sandbox config), the tool blocks until the user
-  responds.
-  For interactive use this is fine, but in `--no-interaction` mode the request
-  must be denied immediately, which may cause the tool to fail in ways it wasn't
-  designed for.
+- **Inquiry latency.** When a request triggers an inquiry prompt for an action
+  not covered by `SandboxConfig`, the tool blocks until the user responds.
+  In `--no-interaction` mode, the host denies those requests immediately, which
+  can cause tools that assume interactive approval to fail.
 
 ## Alternatives
 
 ### Content-Length framing (LSP/MCP style)
 
-Use `Content-Length: N\r\n\r\n` headers instead of NDJSON.
-This is what LSP and MCP's stdio transport use.
+Use `Content-Length: N\r\n\r\n` headers instead of NDJSON, as LSP and MCP's
+stdio transport do.
 
-Rejected because it adds parsing complexity for minimal benefit.
-The only advantage of Content-Length framing is supporting raw newlines in
-payloads, but JSON-RPC payloads are JSON objects where newlines are escaped.
-NDJSON is simpler to implement (one `read_line` call) and debug (messages are
-human-readable in terminal output).
+Rejected.
+Content-Length framing exists to allow raw newlines in payloads, which JSON-RPC
+objects already escape.
+NDJSON is simpler to implement (a single `read_line` call) and easier to inspect
+in terminal output.
 
 ### gRPC or Cap'n Proto
 
-Use a binary RPC protocol for lower overhead and schema enforcement.
+Use a binary RPC protocol for lower serialization overhead and schema
+enforcement.
 
-Rejected because the protocol is internal to JP and its tools.
-The message count per tool invocation is small (typically 1-50 requests).
-JSON-RPC's simplicity, debuggability, and cross-language support outweigh the
-performance benefits of binary protocols at this scale.
-If profiling shows JSON serialization as a bottleneck, a binary framing layer
+Rejected.
+The protocol is internal to JP and its tools, and a typical invocation exchanges
+only 1 to 50 requests.
+At that volume, JSON-RPC's simplicity, debuggability, and cross-language support
+outweigh the performance of binary protocols.
+If profiling shows JSON serialization to be a bottleneck, a binary framing layer
 can be added later without changing the logical protocol.
 
 ### FUSE-based virtual filesystem
 
-Mount a FUSE filesystem that mediates access.
-Tools see a real filesystem and use standard I/O, but all operations go through
-JP's VFS layer.
+Mount a FUSE filesystem so tools use standard filesystem I/O while JP mediates
+every operation.
 
-Rejected because FUSE is Linux/macOS only (no Windows support), requires
-elevated privileges on some configurations, adds significant complexity (kernel
-module interaction, mount lifecycle management), and has known performance
-issues for metadata-heavy workloads.
-The IPC protocol is simpler, portable, and does not require kernel support.
+Rejected.
+FUSE is Linux/macOS only (no Windows support), requires elevated privileges on
+some systems, adds kernel module and mount lifecycle complexity, and performs
+poorly on metadata-heavy workloads.
+The stdio IPC protocol is portable and requires no kernel support.
 
 ### Shared memory for large files
 
@@ -783,126 +727,107 @@ Use shared memory (`mmap`, `shm_open`) to transfer large file contents without
 JSON serialization overhead.
 
 Rejected as premature optimization.
-The expected payloads are source code files (kilobytes to low megabytes).
-The base64 overhead for text files is zero (text is transmitted as-is in JSON
-strings).
-Shared memory adds platform-specific complexity and security considerations (the
-tool could read beyond its allocated region).
-If large binary file transfer becomes a bottleneck, this can be added as an
-optional transport optimization in a future RFD.
+Expected payloads are source files of kilobytes to low megabytes, and text files
+pay zero base64 overhead in JSON strings.
+Shared memory adds platform-specific complexity and security risks (a tool
+reading past its allocated region).
+If large binary file transfers become a bottleneck, a future RFD can add shared
+memory as an optional transport optimization.
 
 ### Make `runtime = "vfs"` the default
 
-Default to VFS for all local tools, with `runtime = "stdio"` as the opt-out for
-tools that need direct filesystem access.
+Default local tools to VFS, with `runtime = "stdio"` as an opt-out for tools
+that need direct filesystem access.
 
-Rejected because it would break the "shell script just works" property.
-A tool that does `cat file.txt` would fail under VFS because the subprocess
-cannot access the filesystem directly.
-The default must remain `stdio` to preserve backward compatibility and
-simplicity.
-VFS is opt-in for tools that want (or need) mediated access.
+Rejected.
+Defaulting to VFS breaks plain shell scripts: a tool running `cat file.txt`
+fails when the subprocess cannot access the filesystem directly.
+`stdio` remains the default for backward compatibility and simplicity, while VFS
+is opt-in for tools that need mediated access.
 
 ## Non-Goals
 
-- **Streaming file content.** The protocol transfers file content as complete
-  JSON values.
-  Chunked or streaming file transfer is not supported.
-  Tools that need to process files larger than the message size limit should use
-  `process.run` with appropriate commands.
+- **Streaming file content.** The protocol transfers complete files in single
+  JSON messages rather than chunks or streams.
+  Tools that must process files larger than the message size limit should run a
+  streaming command via `process.run`.
 
-- **File watching.** The protocol does not support filesystem event
-  notifications.
-  Tools that need to react to file changes should poll or use `process.run` with
-  a file watcher command.
+- **File watching.** The protocol does not push filesystem event notifications.
+  Tools that react to file changes should poll or invoke a file watcher via
+  `process.run`.
 
-- **Inter-tool communication.** VFS tools cannot communicate with each other
-  through the protocol.
-  Each tool has an independent IPC channel to the host.
+- **Inter-tool communication.** Each VFS tool has an independent IPC channel to
+  the host and cannot communicate with other tools.
 
-- **Custom protocol extensions.** The protocol methods are fixed.
-  Tools cannot register custom host capabilities.
-  If a tool needs a capability not covered by the protocol, it should request it
-  through `process.run` or it should be proposed as a protocol extension in a
+- **Custom protocol extensions.** The method set is fixed, and tools cannot
+  register custom host capabilities.
+  Capabilities outside the protocol must use `process.run` or be proposed in a
   future RFD.
 
-- **WASM transport.** This RFD specifies the stdio transport only.
-  The WASM transport (host function imports) is defined by [RFD 016].
-  Both transports expose the same logical capabilities, but the wire format and
-  framing differ.
+- **WASM transport.** This RFD specifies only the stdio transport.
+  [RFD 016] defines the WASM host-import transport for the same logical
+  capabilities.
 
 ## Risks and Open Questions
 
 ### Protocol versioning and evolution
 
-The `protocol_version` field in the `init` message enables version negotiation,
-but the RFD does not define a formal versioning policy.
-Questions:
+The `protocol_version` field in `init` enables version negotiation, but this RFD
+does not define a formal versioning policy.
+Open questions:
 
-- Can the host add new methods in a minor version bump, or is that a major
-  change?
-- Should tools declare which protocol version they require, or should they
-  discover available methods dynamically?
-- How does the host handle requests for methods it doesn't recognize (forward
-  compatibility)?
+- Can the host add methods in a minor version bump, or is that a major change?
+- Should tools declare a required protocol version, or discover available
+  methods dynamically?
+- How does the host handle requests for unrecognized methods?
 
-The recommended starting point: the host ignores unknown methods from the tool
-(returns `Method Not Found` error) and the tool ignores unknown fields in
-responses.
-New methods are added in minor versions.
-Removing methods requires a major version bump.
-This is standard JSON-RPC forward-compatibility practice.
+Recommended starting policy: the host rejects unknown methods with `Method Not
+Found` (-32601), and tools ignore unknown fields in responses.
+Minor versions may add methods; removing or incompatibly changing a method
+requires a major version bump, following standard JSON-RPC practice.
 
 ### Large directory listings
 
-`fs.list_dir` returns all entries in a single response.
-For directories with thousands of entries, this could produce very large
-messages.
-A pagination mechanism (offset/limit) or streaming approach may be needed.
-For the initial implementation, no pagination is provided — the response
-includes all entries.
-If this proves problematic, pagination can be added as optional parameters in a
-backward-compatible way.
+`fs.list_dir` returns all entries in a single unpaginated response, which can
+produce large messages for directories with thousands of entries.
+If this becomes a problem, optional `offset`/`limit` pagination parameters or
+streaming can be added in a backward-compatible way.
 
 ### Concurrent requests
 
-The protocol as specified is strictly sequential: one request, one response, one
-request, one response.
-The tool cannot issue multiple requests in parallel.
-This simplifies the host implementation but may limit performance for tools that
-could benefit from concurrent file reads.
+The initial protocol is strictly sequential: a tool may have only one in-flight
+request at a time.
+This keeps the host implementation simple, at the cost of serializing
+independent operations such as concurrent file reads.
 
-A future protocol version could support concurrent requests by allowing multiple
-outstanding requests with different `id` values.
-The host would process them concurrently and respond in any order.
-This is a natural extension of JSON-RPC's `id`-based correlation, but it adds
-complexity to both sides and is deferred until a concrete performance need
-arises.
+Because JSON-RPC correlates requests and responses by `id`, a future protocol
+version can allow multiple outstanding requests and out-of-order responses
+without changing the message format.
+Concurrent request handling is deferred until sequential round-trips prove to be
+a bottleneck.
 
 ### Inquiry prompt blocking
 
-When a protocol request triggers an inquiry prompt, the tool blocks.
-If the tool has its own timeout logic, it may abort before the user responds.
-The protocol should define how the host signals that a request is being held for
-user input, so the tool can adjust its timeout.
-A possible mechanism: the host sends a `pending` notification before prompting:
+When a request triggers a user inquiry prompt, the tool blocks and may hit its
+own timeout before the user responds.
+To let the tool adjust its timeout, the host can send a `pending` notification
+before prompting:
 
 ```json
 { "jsonrpc": "2.0", "method": "pending", "params": { "request_id": 1, "reason": "awaiting user approval" } }
 ```
 
-The tool can then extend its timeout or display a message to its own stderr.
-This is not specified in the initial protocol version but noted as a likely
+On receiving `pending`, the tool can extend its timeout or log a status message
+to stderr.
+`pending` is omitted from the initial protocol version but noted as a likely
 addition.
 
 ### Migration path for existing tools
 
-JP's current local tools are `StdioRuntime` shell commands.
+JP's existing local tools are `StdioRuntime` shell commands.
 Migrating a tool to `runtime = "vfs"` requires rewriting it to use the IPC
-protocol instead of direct file access.
-The `jp_tool::vfs` SDK reduces the effort, but it is still a per-tool migration.
-The migration can be incremental — tools are migrated one at a time, and both
-runtimes coexist indefinitely.
+protocol (or the `jp_tool::vfs` SDK) instead of direct file access.
+Because both runtimes coexist indefinitely, tools can be migrated one at a time.
 
 ## Implementation Plan
 
@@ -911,7 +836,7 @@ runtimes coexist indefinitely.
 Define the JSON-RPC request, response, and notification types in a new
 `jp_vfs_protocol` crate (or module within `jp_tool`).
 Implement NDJSON reading and writing with `tokio::io::BufReader`/`BufWriter`.
-Unit tests for serialization round-trips and framing edge cases.
+Add unit tests for serialization round-trips and framing edge cases.
 
 **Depends on:** Nothing.
 **Mergeable:** Yes.
@@ -921,7 +846,7 @@ Unit tests for serialization round-trips and framing edge cases.
 Implement the host-side request dispatcher that reads requests from the tool's
 stdout, resolves them through `ProjectFiles` ([RFD D09]) and `AccessPolicy`
 ([RFD 075]), and writes responses to stdin.
-Cover all `fs.*` methods first, since those are the most commonly needed.
+Implement all `fs.*` methods first, since those are the most commonly needed.
 
 **Depends on:** Phase 1, [RFD D09] Phase 2 (`FsProjectFiles`), [RFD 075] Phase 1
 (`SandboxConfig`).
@@ -929,10 +854,10 @@ Cover all `fs.*` methods first, since those are the most commonly needed.
 
 ### Phase 3: `VfsRuntime` implementation
 
-Implement `VfsRuntime` as a `ToolRuntime` ([RFD D10]) implementation.
-Wire up subprocess spawning with OS sandbox, `init` notification, the
-request-response loop, and `result`/`error` notification handling.
-Map outcomes to `ExecutionOutcome`.
+Implement `ToolRuntime` ([RFD D10]) for `VfsRuntime`.
+Wire up subprocess spawning under the OS sandbox, the `init` notification, the
+request-response loop, and `result`/`error` notification handling, mapping
+outcomes to `ExecutionOutcome`.
 
 **Depends on:** Phase 2, [RFD D10] Phase 1 (`ToolRuntime` trait).
 **Mergeable:** Yes.
@@ -940,16 +865,15 @@ Map outcomes to `ExecutionOutcome`.
 ### Phase 4: HTTP and process methods
 
 Add `http.get`, `http.post`, and `process.run` to the host-side dispatcher.
-Wire through the access policy.
-Implement secret scrubbing for `process.run` output.
+Enforce `AccessPolicy` checks and scrub secrets from `process.run` output.
 
 **Depends on:** Phase 2.
 **Mergeable:** Yes (parallel with Phase 3).
 
 ### Phase 5: Tool SDK (`jp_tool::vfs`)
 
-Implement the `VfsHost` client library in `jp_tool`.
-Provide synchronous wrappers for all protocol methods.
+Implement the `VfsHost` client library in `jp_tool` with synchronous wrappers
+for all protocol methods.
 Add integration tests that exercise a real tool subprocess against the host.
 
 **Depends on:** Phase 3.
@@ -959,39 +883,38 @@ Add integration tests that exercise a real tool subprocess against the host.
 
 Migrate a single tool (candidate: `fs_read_file` or `fs_list_files`) from
 `runtime = "stdio"` to `runtime = "vfs"`.
-Validate that the tool produces identical results.
-Benchmark the performance difference.
+Validate that the tool produces identical results and benchmark the performance
+difference.
 
 **Depends on:** Phase 5.
 **Mergeable:** Yes.
 
 ### Phase 7: Stateful VFS tool support
 
-Add `apply`, `cancel`, and `state` notification handling to the host-side loop.
-Wire into the handle registry from [RFD 009].
-Integration test with a stateful VFS tool.
+Add `apply`, `cancel`, and `state` notification handling to the host-side loop
+and wire it into the handle registry from [RFD 009].
+Add an integration test with a stateful VFS tool.
 
 **Depends on:** Phase 3, [RFD 009] implementation.
 **Mergeable:** Yes.
 
 ## References
 
-- [RFD 009] — Stateful tool protocol.
+- [RFD 009]: Stateful tool protocol.
   Defines `ToolState`, the spawn/fetch/apply/abort lifecycle, and the handle
-  registry.
-  VFS tools integrate as a transport layer beneath this lifecycle.
-- [RFD 016] — WASM plugin architecture.
-  Defines `jp:host/filesystem`, `jp:host/http`, and `jp:host/process` — the
-  same logical capabilities exposed by this protocol over a stdio transport.
-- [RFD 058] — Typed content blocks for tool responses.
-  The `result` notification uses the content block format defined there.
-- [RFD 075] — Tool sandbox and access policy.
+  registry that VFS tools integrate beneath.
+- [RFD 016]: WASM plugin architecture.
+  Defines `jp:host/filesystem`, `jp:host/http`, and `jp:host/process`, the
+  logical capabilities this protocol exposes over stdio.
+- [RFD 058]: Typed content blocks for tool responses, used by the `result`
+  notification.
+- [RFD 075]: Tool sandbox and access policy.
   Provides the OS-level sandbox that prevents VFS tools from bypassing the
   protocol, and the `SandboxConfig` / `AccessPolicy` types that govern
   per-request policy enforcement.
-- [RFD D09] — Project filesystem abstraction.
+- [RFD D09]: Project filesystem abstraction.
   The `ProjectFiles` trait backs all `fs.*` protocol methods.
-- [RFD D10] — Unified tool execution model.
+- [RFD D10]: Unified tool execution model.
   `VfsRuntime` implements the `ToolRuntime` trait defined there.
 - [JSON-RPC 2.0 Specification][jsonrpc]
 
