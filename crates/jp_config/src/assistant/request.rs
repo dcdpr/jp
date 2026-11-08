@@ -75,11 +75,11 @@ pub struct RequestConfig {
     ///
     /// The timer resets every time the provider sends data, so it fires when a
     /// connection goes silent for the full duration.
-    /// Before the first token of a response, that silence is measured exactly.
-    /// After it, some providers send nothing while the model writes a tool
-    /// call, and that time counts as activity: for as long as the call is open
-    /// on most providers, and for up to five minutes of silence on Google.
-    /// A connection that dies at that point is detected only once that
+    /// Some providers send nothing while the model writes a tool call, and that
+    /// time counts as activity for as long as the call is open.
+    /// Google can be silent for the whole response, so it has its own allowance
+    /// before this timer starts: `providers.llm.google.silence_allowance_secs`.
+    /// A connection that dies during such a stretch is detected only once the
     /// allowance has passed.
     /// A timed-out stream is treated as a transient error and retried according
     /// to `max_retries` and the backoff settings.

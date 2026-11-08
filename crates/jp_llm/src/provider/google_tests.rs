@@ -1823,6 +1823,7 @@ mod service_tier_configuration {
             auth: vec![jp_config::providers::llm::AuthEntry::ApiKey(None)],
             api_key_env: api_key_env().into(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            silence_allowance_secs: 300,
         })
         .unwrap()
     }
@@ -1914,5 +1915,78 @@ mod service_tier_configuration {
 
         assert!(val.get("serviceTier").is_none());
         assert!(val.get("service_tier").is_none());
+    }
+}
+
+mod silence_allowance {
+    use std::time::Duration;
+
+    use futures::StreamExt as _;
+    use jp_config::providers::llm::{AuthEntry, google::GoogleConfig};
+    use jp_conversation::{ConversationStream, thread::Thread};
+    use tokio::net::TcpListener;
+
+    use crate::{
+        event::Event,
+        model::ModelDetails,
+        provider::{Google, Provider as _, ProviderId},
+        query::{ChatQuery, Truncation},
+    };
+
+    /// Start a request against a server that accepts the connection and never
+    /// answers, and return the first item seen within `wait`.
+    ///
+    /// The listener never calls `accept`: the kernel completes the handshake
+    /// from its backlog, so the request is sent and no byte comes back.
+    async fn first_item_from_silent_server(
+        silence_allowance_secs: u32,
+        wait: Duration,
+    ) -> Option<Event> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1beta", listener.local_addr().unwrap());
+        let google = Google::try_from(&GoogleConfig {
+            auth: vec![AuthEntry::ApiKey(None)],
+            api_key_env: if cfg!(windows) { "USERNAME" } else { "USER" }.into(),
+            base_url,
+            silence_allowance_secs,
+        })
+        .unwrap();
+        let model = ModelDetails::empty((ProviderId::Google, "gemini-4-argon").try_into().unwrap());
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events: ConversationStream::new_test().with_turn("test"),
+            },
+            tools: vec![],
+            tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+            truncation: Truncation::default(),
+        };
+
+        let mut stream = google.chat_completion_stream(&model, query).await.unwrap();
+        let item = tokio::time::timeout(wait, stream.next())
+            .await
+            .ok()
+            .flatten();
+        drop(listener);
+
+        item.map(Result::unwrap)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_request_gets_keepalives_within_the_allowance() {
+        let item = first_item_from_silent_server(300, Duration::from_secs(7)).await;
+
+        assert!(matches!(item, Some(Event::KeepAlive)), "{item:?}");
+    }
+
+    // `0` leaves the request to the caller's idle timeout alone, as for other
+    // providers: nothing at all arrives from a server that does not answer.
+    #[tokio::test(start_paused = true)]
+    async fn a_zero_allowance_sends_no_keepalives() {
+        let item = first_item_from_silent_server(0, Duration::from_secs(7)).await;
+
+        assert!(item.is_none(), "{item:?}");
     }
 }

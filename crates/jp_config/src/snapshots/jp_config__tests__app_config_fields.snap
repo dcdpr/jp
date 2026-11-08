@@ -78,6 +78,7 @@ expression: "AppConfig::fields()"
     "providers.llm.google.api_key_env",
     "providers.llm.google.auth",
     "providers.llm.google.base_url",
+    "providers.llm.google.silence_allowance_secs",
     "providers.llm.deepseek.api_key_env",
     "providers.llm.deepseek.auth",
     "providers.llm.deepseek.base_url",
