@@ -382,9 +382,10 @@ its schema does not depend on workspace configuration: `jp release tools init`
 writes the tool definition once, no `tools sync` command is needed, and (as in
 [RFD 116]) `tools init` will be removed once plugins can declare their own tool
 schemas directly.
-JP enables `changelog_add` in the personas that implement changes (`dev` and
-`rfd-implementor`), and the `pr-reviewer` persona checks that each fragment
-describes the change from the user's perspective.
+JP enables `changelog_add` in every conversation, the changelog skill tells the
+personas that write changes (`dev`, `prose`, and `rfd-implementor`) when to use
+it, and the `pr-reviewer` persona checks that each fragment describes the change
+from the user's perspective.
 
 ### CI validation
 
@@ -425,8 +426,8 @@ JP's CI enforces three rules:
 
    Pull requests limited to those edits must carry `no-changelog`.
    The rule checks only for a newly added top-level fragment or the label;
-   whether a change is user-facing is decided when applying the label (see the
-   auto-apply step below), not computed by the gate.
+   whether a change is user-facing is decided by whoever applies the label, not
+   computed by the gate.
 
 3. **Breaking change**: a pull request targeting `main` whose title marks a
    breaking change with `!` (for example, `feat(cli)!: ...`) fails unless at
@@ -501,43 +502,23 @@ label.").
 
 The gate applies only to pull requests targeting `main`; pushes to `main` and
 local `jp release check` runs perform format validation only.
-Pull requests opened by `jp release` to cut a release or backport a change ([RFD
-122]) move existing fragments rather than adding new ones, and pass the gate via
-the `no-changelog` label that `jp release` attaches to them.
+The pull request that files a release's notes ([RFD 122]) moves existing
+fragments rather than adding new ones, so it carries the `no-changelog` label.
 Release branches receive commits directly from `jp release`, never via pull
 requests, and have no `changelog.d/` directory, so neither check runs on them.
 Fork pull requests work the same way, since reading labels needs no write
 access.
-Only the auto-apply step below needs write access, and it skips pull requests
-from forks, where a maintainer applies the label manually.
-
-A best-effort step in the gate, run before the gate evaluates, sets
-`no-changelog` automatically as an overridable default:
-
-- When a pull request opens, the step applies `no-changelog` if the Conventional
-  Commit type in the title is non-user-facing (`build`, `ci`, `docs`,
-  `refactor`, `test`), or if the diff touches only non-shipping paths
-  (documentation, CI, internal tooling).
-  It never auto-applies the label for user-facing commit types (`feat`,
-  `enhance`, `fix`, `perf`).
-  If the title has no Conventional Commit prefix, or uses a type outside both
-  lists (such as `chore`, which is used in practice despite being absent from
-  the documented taxonomy), the step falls back to path classification alone.
-- Manual changes always take precedence: the step acts only when a pull request
-  opens, so once a human adds or removes `no-changelog`, that choice is final.
-
-The auto-apply logic is a step in the gate rather than a separate workflow
-because a label added with a workflow's token does not trigger other workflows:
-a separate workflow would label the pull request while the gate, which ran when
-the pull request opened, stayed red.
 
 The gate intentionally reads the `no-changelog` label rather than the pull
 request title because commit types are an imperfect predictor of user impact.
-Using the label keeps that judgment human-overridable, and the gate works
-without the auto-apply step.
+An internal `feat(tools)` is not user-facing, while a `refactor(cli)` might
+change observable behavior.
+The label captures that judgment, and a person makes it by adding the label.
+Applying the label automatically when a pull request opens, as a default a
+person can override, is tracked in T-1fets19.
 
-The gate, the `no-changelog` label, and the auto-apply step are specific to JP's
-GitHub repository and are not part of the plugin.
+The gate and the `no-changelog` label are specific to JP's GitHub repository and
+are not part of the plugin.
 Workspaces without CI or on other forges can use `jp release` without them.
 
 ## Drawbacks
@@ -547,12 +528,10 @@ Workspaces without CI or on other forges can use `jp release` without them.
   This is an intentional cost, but adds friction that did not exist before.
 - **A changelog decision on every pull request.** Because the gate is a required
   status check, even a one-line chore requires the `no-changelog` label before
-  merging, until the auto-apply step handles it automatically.
+  merging.
 - **Two formats to learn.** Mitigated because most pull requests only need a
   terse changelog fragment; highlight notes are rare and reserved for notable
   features.
-- **Auto-apply label management is GitHub-specific and fork-limited.** It is
-  best-effort polish, and the gate works without it.
 
 ## Alternatives
 
@@ -667,6 +646,7 @@ cannot be changed in a pull request):
   check on `main`, so a fragment that fails format validation cannot merge.
 
 Until then, both checks report status on pull requests without blocking merges.
+T-1fev06m tracks applying these settings.
 
 ### Phase 2: Highlight note format
 
@@ -679,31 +659,8 @@ Create `crates/plugins/command/release` with `init`, `check`, a command per
 type, and `highlight`, and allow it in `.jp/config.toml`.
 `init` writes the `README.md` template from Phase 1 into other workspaces.
 Expose writing a fragment as the `changelog_add` tool via `jp release tools
-init`, and enable it in the `dev` and `rfd-implementor` personas.
+init`, and enable it in JP's conversations.
 Depends on Phase 1.
-
-### Phase 4: Label auto-apply (optional)
-
-Add the gate's best-effort step that applies `no-changelog` by default when pull
-requests open.
-This phase is optional polish; the gate works with manually applied labels
-without it.
-
-The step uses a default path classification, documented in
-`changelog.d/README.md` and overridable by a human on any pull request:
-
-- **Shipping** (requires a fragment by default): `crates/jp_*/**`,
-  `crates/plugins/**`, and top-level runtime packaging files.
-- **Non-shipping** (`no-changelog` by default): `docs/**`, `.github/**`,
-  `.jp/**`, `.config/jp/tools/**`, `crates/internal/**`, `justfile`,
-  `apps/macos/**` (the app is not distributed), `changelog.d/**` (such as a pull
-  request that only corrects a released note), RFD drafts, and test fixtures.
-- **Ambiguous** (requires a fragment by default; a human decides): top-level
-  `Cargo.toml`, `Cargo.lock`, and `crates/contrib/**`.
-- Any path not listed requires a fragment by default.
-
-Because the gate reads only the label, any misclassification is fixed by
-toggling `no-changelog` on the pull request rather than editing CI.
 
 ## References
 
