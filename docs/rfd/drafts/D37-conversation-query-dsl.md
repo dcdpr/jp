@@ -9,51 +9,50 @@
 
 ## Summary
 
-This RFD introduces a small predicate language for querying conversations,
-evaluated by a new `jp_query` crate and exposed through a `--filter EXPR` flag
-on `jp c ls`, `jp c grep`, `jp c rm`, `jp c archive`, and `jp c fork`.
+This RFD introduces a predicate language for querying conversations, evaluated
+by a new `jp_query` crate and exposed through a `--filter EXPR` flag on `jp c
+ls`, `jp c grep`, `jp c rm`, `jp c archive`, and `jp c fork`.
 The language supports boolean predicates over conversation metadata, the
-configuration tree, and conversation events, with explicit `event(...)` and
-`turn(...)` scoping for binding predicates to a single record.
+configuration tree, and conversation events, with `event(...)` and `turn(...)`
+scopes to bind predicates to a single record.
 
 ## Motivation
 
-Locating a conversation today means combining several mechanisms:
+Locating a conversation requires combining three separate mechanisms:
 
 - `jp c ls` filters by metadata flags (`--archived`, `--local`, `--sort`).
 - `jp c grep` searches event content textually.
 - `ConversationTarget` keywords (`?`, `?p`, `last`, `+session`) resolve to
   specific IDs.
 
-None of them answer questions like "which conversation called `fs_modify_file`
-with `path = crates/jp_cli/src/lib.rs`?", "which archived conversations used a
-specific model?", or "which conversations contain a chat response mentioning X
-*and* are older than a week?".
-Composing those queries today requires post-processing JSON or chaining commands
-with brittle text matching, and even then no path gets at structured event
-fields (tool name, tool arguments) without exposing the on-disk JSON shape.
+None of these answer combined or structured queries: which conversation called
+`fs_modify_file` with `path = crates/jp_cli/src/lib.rs`, which archived
+conversations used a specific model, or which conversations contain a chat
+response mentioning X and are older than a week.
+Answering those requires post-processing JSON or chaining commands with brittle
+text matching, and neither approach reaches structured event fields (tool name,
+tool arguments) without coupling to the on-disk JSON shape.
 
-Tool call arguments are also base64-encoded on disk specifically to keep them
-out of editor and `rg` results, so any structured search must round-trip through
-the conversation runtime.
-That makes a JP-native query engine the natural — and effectively the only —
-place for this capability.
+Tool call arguments are also base64-encoded on disk to keep them out of editor
+and `rg` results, so any structured search must decode them through the
+conversation runtime.
+Only a JP-native query engine can inspect those fields directly.
 
-A single predicate language solves these cases with one mechanism, composes
-naturally across multiple commands, and gives plugins and scripting workflows a
-programmatic surface for finding conversations.
+A shared predicate language handles all of these queries, works across
+subcommands, and gives plugins and scripts a single query interface.
 
 ## Design
 
-### Surface
+### CLI Surface
 
-A new `--filter EXPR` flag is added to:
+Five subcommands gain a `--filter EXPR` flag:
 
-- `jp c ls` — show matching conversations.
-- `jp c grep` — search text within matching conversations.
-- `jp c rm` — remove matching conversations (with destructive-UX rules below).
-- `jp c archive` — archive matching conversations.
-- `jp c fork` — fork all matching conversations.
+- `jp c ls`: list matching conversations.
+- `jp c grep`: search text within matching conversations.
+- `jp c rm`: remove matching conversations (subject to the confirmation rules
+  below).
+- `jp c archive`: archive matching conversations.
+- `jp c fork`: fork matching conversations.
 
 <!-- end list -->
 
@@ -93,32 +92,30 @@ bool     := 'true' | 'false'
 escape   := '\n' | '\t' | '\r' | '\"' | '\\' | '\u{HEX}'
 ```
 
-Operator precedence: `not` > `and` > `or`.
-Parentheses override.
+Operator precedence is `not` > `and` > `or`, and parentheses override
+precedence.
 
-A predicate may omit the operator and value when the field is boolean-typed:
-`archived` is sugar for `archived == true`.
-`not pinned` reads as expected.
+Boolean fields can omit the operator and value: `archived` is shorthand for
+`archived == true`, and `not pinned` negates `pinned == true`.
 
 ### Quoting
 
-Both single and double quotes delimit strings:
+Strings use either double or single quotes:
 
-- `"..."` — escapes processed: `\n`, `\t`, `\r`, `\"`, `\\`, `\u{HEX}`
-  (Rust-style; 1–6 hex digits).
-- `'...'` — raw, no escapes.
+- `"..."` processes escape sequences: `\n`, `\t`, `\r`, `\"`, `\\`, and
+  `\u{HEX}` (Rust-style, 1 to 6 hex digits).
+- `'...'` is a raw string with no escape processing.
 
-Both produce semantically identical strings.
-The split exists for shell composition:
+Both forms produce the same string type, which simplifies shell quoting:
 
 ```sh
 jp c ls --filter "title contains '$FOO'"   # shell expands $FOO
 jp c ls --filter 'title contains "$FOO"'   # literal $FOO
 ```
 
-### Field paths
+### Field Paths
 
-Two equivalent forms:
+Field paths have two equivalent forms, bare and dot-prefixed:
 
 ```
 tool                         # canonical, bare
@@ -130,18 +127,17 @@ metadata."x-trace-id".value  # mixed
 "weird field"                # invalid — parses as string literal
 ```
 
-The dot prefix is only required when the *first* segment must be quoted; once
-past the first segment, a leading `.` already disambiguates a path continuation
-from a string literal.
+The leading dot is required only when the first segment is quoted or collides
+with a reserved keyword (`and`, `or`, `not`, `true`, `false`, `event`, `turn`),
+such as `.and`.
+After the first segment, the `.` separator already distinguishes a quoted path
+segment from a string literal.
+Documentation and error messages format field paths in the bare form unless the
+first segment requires a leading dot.
 
-Documentation and error messages use the bare form unless the first segment must
-be quoted.
-A field name that collides with a reserved keyword (`and`, `or`, `not`, `true`,
-`false`, `event`, `turn`) is escaped with a leading dot: `.and`.
+### Field Namespace
 
-### Field namespace
-
-Three top-level roots, declared in a static registry:
+A static registry defines three top-level field roots:
 
 | Root                  | Cost                  | Examples                                                                       |
 | --------------------- | --------------------- | ------------------------------------------------------------------------------ |
@@ -149,28 +145,25 @@ Three top-level roots, declared in a static registry:
 | Configuration tree    | cheap (no event load) | `assistant.model`, `assistant.reasoning.enabled`, `conversation.tool.style`, … |
 | Event fields          | event load required   | `event`, `tool`, `arg.*`, `content`                                            |
 
-Configuration-tree fields mirror the `AppConfig` schema exactly.
-Only primitive-typed config fields (string, number, bool) are queryable in v1;
-list and map types fall back to a parse-time error.
+Configuration-tree fields mirror the `AppConfig` schema.
+Only primitive config fields (`string`, `number`, `bool`) are queryable in v1;
+referencing a list or map field is a parse-time error.
 
-Unknown fields are a **parse-time error**, not a silent "no match."
-A typo of `archvied` returns a clear `unknown field 'archvied'` with position
-information.
+Unknown fields also fail at parse time rather than silently matching nothing.
+A typo such as `archvied` returns `unknown field 'archvied'` with source
+position.
 
 ### Types
 
-Four primitive types: `string`, `number`, `bool`, `date`.
+The language has four primitive types: `string`, `number`, `bool`, and `date`.
+Numbers are `i64` or `f64`, and mixed comparisons promote integers to floats.
 
-Numbers are `i64` and `f64`; mixed comparison promotes int to float.
-
-Dates parse from string literals on the right side of a comparison when the
-field is date-typed.
-Two forms accepted:
+When a date field is compared against a string literal, the right-hand side is
+parsed in one of two forms:
 
 - **Absolute** (RFC 3339 / ISO 8601): `"2026-01-01"`, `"2026-01-01T12:00:00Z"`.
-- **Relative**: `"N <unit> ago"` where `<unit>` is one of `second`, `minute`,
-  `hour`, `day`, `week`, `month`, `year` (plural accepted).
-  Also `"now"`.
+- **Relative**: `"now"`, or `"N <unit> ago"` where `<unit>` is `second`,
+  `minute`, `hour`, `day`, `week`, `month`, or `year` (singular or plural).
 
 <!-- end list -->
 
@@ -181,39 +174,38 @@ updated > "2 weeks ago"
 created < "now"
 ```
 
-Resolution order on the right side of a date comparison: RFC 3339 →
-relative-time → parse-time error.
+The parser tries RFC 3339 first, then relative time, and returns a parse error
+if neither matches.
 
-Type mismatches (`messages > "ten"`, `archived < 3`) are parse-time errors where
-statically detectable, runtime errors otherwise.
-No implicit string-to-number coercion.
+Type mismatches (`messages > "ten"`, `archived < 3`) produce a parse error when
+the field type is known statically, and a runtime evaluation error otherwise.
+Strings are never implicitly coerced to numbers.
 
 ### Semantics
 
 Each field has an **intrinsic record level**: conversation, turn, or event.
-Expressions evaluate against a conversation, with these rules:
+Expressions evaluate against a conversation under five rules:
 
-1. **Same-record-level binding is the default.** Predicates over fields at the
-   same record level are joined at that level.
-   `tool == "X" and arg.path == "Y"` — both event-level — bind to the *same
-   event*.
+1. **Same-level predicates bind to the same record.** Joining two predicates at
+   the same record level binds them to one record: `tool == "X" and arg.path ==
+   "Y"` requires both predicates to match the same event.
 
-2. **Cross-level mixing broadcasts the higher-level field.** `assistant.model ==
-   "X" and tool == "Y"` reads as "the conversation's model is X *and* there
-   exists an event with tool=Y."
-   Conversation-level fields act as constants when joined with event-level
-   predicates.
+2. **Higher-level fields broadcast across lower-level predicates.**
+   Conversation-level fields act as constants when joined with turn- or
+   event-level predicates.
+   `assistant.model == "X" and tool == "Y"` matches when the conversation's
+   model is `X` and at least one event has `tool == "Y"`.
 
-3. **Event-level predicates are existentially quantified at the top level.**
-   `tool == "X"` matches conversations that contain at least one event with
-   tool=X.
+3. **Unscoped event-level predicates are existential.** At the top level, `tool
+   == "X"` matches any conversation that contains at least one event with `tool
+   == "X"`.
 
-4. **`not` over event-level predicates is universal.** `not tool == "X"` means
-   "no event in this conversation has tool=X" — the natural reading, and the
-   one that makes negation reachable without de Morgan acrobatics.
+4. **Negating an event-level predicate is universal.** `not tool == "X"` means
+   no event in the conversation has `tool == "X"`, equivalent to `not event(tool
+   == "X")`.
 
-5. **Explicit scoping with `event(...)` and `turn(...)`.** Force a binding scope
-   when the default isn't enough:
+5. **Explicit scoping with `event(...)` and `turn(...)`.** Wrap predicates in
+   `event(...)` or `turn(...)` to bind them to an explicit scope:
 
 <!-- end list -->
 
@@ -228,234 +220,212 @@ event(tool == "X") and event(tool == "Y")
 turn(tool == "X" and tool == "Y")
 ```
 
-A *turn* is defined by `TurnStart` event boundaries in the conversation stream
-— the existing ubiquitous-language definition.
+`TurnStart` event boundaries in the conversation stream delimit turns, matching
+the [ubiquitous language][ubiquitous] definition.
+Inside `event(...)` or `turn(...)`, conversation-level fields still broadcast as
+constants.
+Nested scopes (`turn(event(P))`) are valid, and redundant nesting is allowed.
 
-Inside `event(...)` or `turn(...)`, conversation-level fields are broadcast as
-constants (same rule as at the top level).
-Nested scopes (`turn(event(P))`) are accepted; redundant nesting is not
-rejected.
+### Cost-Aware Execution
 
-### Cost-aware execution
+The evaluator determines from the AST alone whether an expression references any
+event-level fields.
+Expressions that reference only conversation metadata and configuration **must
+not load event streams**, so `jp c ls --filter 'archived'` performs the same I/O
+as `jp c ls --archived`.
 
-The evaluator computes, from the AST alone, whether an expression references any
-event-scoped fields.
-Expressions that touch only conversation metadata and configuration **must not
-load event streams**.
+### Destructive Command UX
 
-This is non-negotiable: it is cheap to enforce at design time and expensive to
-retrofit.
-`jp c ls --filter 'archived'` runs at the same cost as `jp c ls --archived`.
+On destructive commands (`jp c rm`, `jp c archive`), a mistyped `--filter`
+expression or unexpected operator precedence can match many conversations at
+once.
+To guard against accidental bulk changes:
 
-### Destructive command UX
-
-`jp c rm --filter`, `jp c archive --filter`, and similar destructive commands
-carry a real risk: a typo or an unexpected operator semantic can affect many
-conversations at once.
-
-The rule:
-
-- A destructive command with `--filter` prints a list of affected conversation
-  IDs and asks for confirmation, unless `--yes` is passed.
-- `-F json` output mode bypasses the prompt; scripts pass `--yes` explicitly to
-  suppress prompts.
-- A `--dry-run` flag shows what would be affected without doing it.
-
-This makes the safety behavior part of the command's contract from day one,
-before scripts accumulate.
+- A destructive command with `--filter` prints the matching conversation IDs and
+  prompts for confirmation unless `--yes` is passed.
+- `-F json` output mode bypasses the interactive prompt; scripts pass `--yes`
+  explicitly to suppress prompts.
+- `--dry-run` prints the matching conversations without modifying them.
 
 ### Architecture
 
-A new crate `jp_query` owns the parser, AST, type registry, and evaluator:
+A new `jp_query` crate owns the parser, AST, field registry, and evaluator:
 
-- `Expression` — typed AST.
-- `parse(s: &str) -> Result<Expression, ParseError>` — produces a
-  position-aware parse error on failure.
-- `Expression::touches_events(&self) -> bool` — for cost-aware dispatch.
-- `Expression::evaluate(&self, ctx: &EvaluationContext) -> bool` —
-  `EvaluationContext` carries the conversation metadata, merged config, and an
-  optional event stream.
+- `Expression`: the typed AST.
+- `parse(s: &str) -> Result<Expression, ParseError>`: parses an expression and
+  returns a position-aware error on failure.
+- `Expression::touches_events(&self) -> bool`: reports whether the expression
+  references event-level fields.
+- `Expression::evaluate(&self, ctx: &EvaluationContext) -> bool`: evaluates the
+  expression against `EvaluationContext`, which holds conversation metadata,
+  merged config, and an optional event stream.
 
-The crate depends on `jp_conversation` (for `ConversationStream`, `EventKind`)
-and `jp_config` (for the config schema).
-It does not depend on `jp_workspace`, `jp_cli`, or any storage backend.
-The evaluator is pure — no I/O.
+`jp_query` depends on `jp_conversation` (for `ConversationStream` and
+`EventKind`) and `jp_config` (for the config schema).
+It does not depend on `jp_workspace`, `jp_cli`, or any storage backend, and the
+evaluator performs no I/O.
 
-`jp_cli` adds a single `FilterArg` clap type, flattened into each subcommand
+`jp_cli` defines a `FilterArg` `clap` type and flattens it into each subcommand
 that supports `--filter`.
-The arg type accepts `EXPR`, `@FILE`, and `-` (stdin).
+`FilterArg` accepts `EXPR`, `@FILE`, and `-` (stdin).
 
 ## Drawbacks
 
-**A second small grammar in the codebase.** `ConversationTarget` already has a
-tiny grammar (`?`, `+session`, etc.).
-This adds another.
-They live at different layers (selector vs. predicate) and do not compose
-textually, but contributors now have two mini-languages to keep in mind.
+**A second small grammar in the codebase.** `ConversationTarget` already defines
+a compact selector syntax (`?`, `+session`).
+Adding a filter DSL introduces a second domain-specific syntax.
+Although the two live at different layers (selector versus predicate) and do not
+compose textually, contributors must maintain both.
 
-**Hyrum's Law on field names.** Every config key and every conversation metadata
-field becomes queryable, which means renaming any of them is a DSL-breaking
-change.
-The field registry is the load-bearing surface; rename moves require coordinated
-changes to the registry, the docs, and any external scripts.
+**Hyrum's Law on field names.** Every config key and conversation metadata field
+becomes queryable, so renaming any field is a breaking change for filter
+expressions.
+Renames require coordinated updates to the field registry, documentation, and
+external scripts.
 
-**Cost-model surprise from the same flag.** `--filter 'archived'` is cheap;
-`--filter 'tool == "X"'` is expensive.
-The same flag, two cost regimes.
-Cost-aware execution hides the regime from users — which is the right tradeoff
-for ergonomics, but means a user can't tell from the surface why one query is
-fast and another is slow.
+**Cost-model surprise from the same flag.** `--filter 'archived'` reads only
+metadata, whereas `--filter 'tool == "X"'` loads event streams.
+Cost-aware execution avoids unnecessary I/O automatically, but the CLI surface
+gives no indication of why one query is fast and another is slow.
 
 ## Alternatives
 
-### Flag-based predicates (no DSL)
+### Flag-Based Predicates
 
-Add `--tool NAME`, `--arg KEY=VALUE`, etc. to a new `jp c find` command.
+Add flags such as `--tool NAME` and `--arg KEY=VALUE` to a new `jp c find`
+command instead of introducing a DSL.
 
-Rejected.
-Composes poorly: AND/OR/NOT across predicates requires either flag explosion
-(`--tool`, `--not-tool`, `--any-tool`, `--all-tool`) or implicit-AND semantics
-that can't express the motivating query.
-Same-event binding via flags is unnatural.
-Path Independence: rebuilding JP today with current scripting ambitions would
-not land on flags.
+Rejected because CLI flags compose poorly for boolean logic.
+Expressing `and`, `or`, and `not` across predicates requires either a
+combinatorial set of flags (`--tool`, `--not-tool`, `--any-tool`, `--all-tool`)
+or fixed implicit-`and` semantics that cannot express `or` queries or bind
+multiple flags to the same event.
 
-### Reuse jq via `jaq-core`
+### Reuse `jq` via `jaq-core`
 
-Accept jq syntax for filter expressions, wrap user input in `select(...)`
-internally, feed jq a synthetic per-event JSON view.
+Accept `jq` syntax for filter expressions, wrap user input in `select(...)`
+internally, and feed `jq` a synthetic per-event JSON view.
 
-Rejected.
-The semantic model we want (record-level binding, conversation broadcast,
-`turn`/`event` scoping) is not native to jq — we would own the entire semantic
-layer anyway, with jq serving as a low-level boolean evaluator.
-Cost-aware execution becomes much harder: jq's AST is more permissive than our
-predicate AST, validation has to walk it twice.
-Two v1 requirements — `"1 day ago"` syntax and shell-friendly single quotes —
-are not natural in jq.
-Net dependency cost (~5kLoC of `jaq-core`) for a benefit that erodes once the
-semantics are layered on top.
+Rejected because `jq` does not share the query language's semantic model.
+Record-level binding, conversation-field broadcasting, and `turn(...)` /
+`event(...)` scoping would still require a custom semantic layer on top of `jq`.
+Inspecting `jq`'s permissive AST for cost-aware execution is also harder than
+inspecting a dedicated predicate AST, and neither relative date literals (`"1
+day ago"`) nor shell-friendly single-quoted strings fit `jq` syntax naturally.
+Adding `jaq-core` (~5 kLoC) would bring significant dependency weight for little
+gain once custom semantics are layered on top.
 
-### Predicates on metadata-only filters
+### Metadata-Only Filters
 
-Skip the event-content angle entirely; `--filter` operates only on conversation
-metadata and config.
+Restrict `--filter` to conversation metadata and configuration fields, omitting
+event predicates.
 
-Rejected.
-The motivating use case — "which conversation modified file X?" — needs event
-predicates.
-A metadata-only filter doesn't solve the problem this RFD exists for.
+Rejected because the primary motivating query ("which conversation modified file
+X?") requires inspecting tool call events.
 
-### Defer relative-time syntax to v2
+### Defer Relative-Time Syntax to v2
 
-Originally proposed during design.
-Reversed: relative times are a major ergonomic win on time-based queries, cost
-~100 lines of isolated parser code, and fit cleanly into the existing
-string-literal date rule with no grammar impact.
+Support only RFC 3339 timestamps in v1 and defer `"N <unit> ago"` literals to
+v2.
+
+Rejected because relative timestamps are much easier to write in interactive
+time-based queries, require roughly 100 lines of isolated parser code, and fit
+into the string-literal date rule without changing the grammar.
 
 ## Non-Goals
 
-- **Transformations.** Output reshaping (`jp c show -F json | jq ...`) is jq's
-  job.
-  The DSL is a predicate language, not a pipeline language.
-- **Aggregations.** No `count(...)`, `sum(...)`, `min(...)`, `max(...)` in v1.
-- **List / map config values.** `conversation.tool.allow` and similar
-  collection-typed config keys are not queryable in v1.
-  Adding support requires defining `in`, `subset`, `any(...)` operators.
-- **Cross-event temporal ordering.** "Called X and *then later* called Y" is not
-  expressible.
+- **Transformations.** The DSL is a boolean predicate language, not a pipeline
+  language.
+  Use `jq` for output reshaping (`jp c show -F json | jq ...`).
+- **Aggregations.** v1 does not support `count(...)`, `sum(...)`, `min(...)`, or
+  `max(...)`.
+- **List and map config values.** Collection-typed config keys such as
+  `conversation.tool.allow` are not queryable in v1; supporting them requires
+  defining `in`, `subset`, and `any(...)` operators.
+- **Cross-event temporal ordering.** Queries cannot express ordering across
+  events ("called X and then later called Y").
   Use `turn(...)` for same-turn binding; broader temporal queries are deferred.
-- **Custom functions.** No user-defined functions, no built-in scalar functions
-  (`upper`, `length`, etc.).
-- **Date arithmetic in function form.** `created > now() - "1 day"`-style
-  expressions are deferred.
-  The string-literal form (`"1 day ago"`) covers v1.
-- **`ConversationTarget` keyword integration.** Keywords (`?`, `last`,
-  `+session`) remain selectors, separate from `--filter`.
-  They compose externally: resolve targets, then filter the set.
-- **Saved queries and aliases.** Out of scope for v1.
+- **Custom functions.** v1 includes neither user-defined functions nor built-in
+  scalar functions (`upper`, `length`).
+- **Date arithmetic in function form.** Expressions such as `created > now() -
+  "1 day"` are deferred; relative string literals (`"1 day ago"`) cover v1.
+- **`ConversationTarget` keyword integration.** Target keywords (`?`, `last`,
+  `+session`) remain selectors separate from `--filter`.
+  They compose externally by resolving targets first and filtering the resulting
+  set.
+- **Saved queries and aliases.** Named query aliases are out of scope for v1.
 
 ## Risks and Open Questions
 
-### Final field inventory
+### Final Field Inventory
 
-The exact v1 list of conversation-metadata and event fields needs ratifying in
-the implementation.
-The categories are settled; the exact names and shapes are not.
+The field categories are settled, but the exact v1 list of conversation-metadata
+and event fields must be finalized during implementation.
 
-### Shape of the `event` field
+### Shape of the `event` Field
 
-Two candidate forms:
+The `event` field has two candidate shapes:
 
-- Flat: `event == "tool_call_request"` (string of the kind tag).
+- Flat: `event == "tool_call_request"` (string matching the event kind tag).
 - Nested: `event.kind == "tool_call_request"` (struct).
 
-The flat form is simpler and matches the predicate-language style.
-Pinned as default unless implementation surfaces a reason to nest.
+The flat form is simpler, matches the rest of the predicate language, and is the
+default unless implementation surfaces a reason to nest subfields under `event`.
 
-### Error reporting quality
+### Error Reporting Quality
 
-Position-aware parse errors are a hard requirement; type-mismatch errors should
-point at the offending field and surface its registered type.
-`ParseError("syntax error")` is not acceptable.
-The implementation commits to a clear error story up front.
+Parse errors must include source positions, and type-mismatch errors must point
+at the offending field and report its registered type rather than returning a
+generic `ParseError("syntax error")`.
 
-### Destructive command behavior contract
+### Destructive Command Behavior Contract
 
-The dry-run / confirmation / `--yes` rules in the Design section are part of the
-public contract once shipped.
-Worth one more pass during review to make sure the defaults match user
-expectations.
+The `--dry-run`, confirmation prompt, and `--yes` rules in the Design section
+become part of the public CLI contract once shipped and should be validated
+during review against both interactive and scripted workflows.
 
-### Long expressions
+### Long Expressions
 
-`--filter @file.qry` and `--filter -` (stdin) are part of v1, but the
-file-loading details (encoding, comment syntax, multi-line formatting) are not
-yet specified.
+`--filter @file.qry` and `--filter -` (stdin) are part of v1, but file-loading
+details (encoding, comment syntax, and multi-line formatting) still need to be
+specified.
 
 ## Implementation Plan
 
-### Phase 1: `jp_query` crate
+### Phase 1: `jp_query` Crate
 
-Create `jp_query` with AST types, parser, and evaluator.
-Define the static field registry covering conversation metadata, the config tree
-(primitives), and event fields.
-Implement `Expression::touches_events()` for cost-aware dispatch.
-Implement the evaluator over `&EvaluationContext`.
-Tests: parser round-trips, semantic correctness on representative streams,
-error-message coverage.
+Create `jp_query` with the AST types, parser, static field registry
+(conversation metadata, primitive config fields, and event fields),
+`Expression::touches_events()`, and evaluator over `&EvaluationContext`.
+Add tests for parser round-trips, evaluation semantics on representative event
+streams, and error messages.
+This phase is reviewable and mergeable on its own.
 
-Reviewable and mergeable independently.
+### Phase 2: `--filter` on Read-Only Commands
 
-### Phase 2: `--filter` on read-only commands
-
-Add `FilterArg` to `jp_cli` and integrate `--filter` on `jp c ls` and `jp c
-grep`.
-Cost-aware dispatch is exercised here; event-loading kicks in only when the
-expression references event fields.
-
+Add `FilterArg` to `jp_cli` and integrate `--filter` into `jp c ls` and `jp c
+grep`, loading event streams only when `Expression::touches_events()` returns
+`true`.
 Depends on Phase 1.
 
-### Phase 3: `--filter` on destructive commands
+### Phase 3: `--filter` on Destructive Commands
 
-Add `--filter` to `jp c rm`, `jp c archive`, and `jp c fork`.
-Implement the dry-run / confirmation / `--yes` UX.
-End-to-end tests for the safety paths.
-
-Depends on Phase 2 (to share the `FilterArg` type and dispatch wiring).
+Add `--filter` to `jp c rm`, `jp c archive`, and `jp c fork`, implement the
+`--dry-run`, confirmation prompt, and `--yes` behavior, and add end-to-end tests
+for the safety paths.
+Depends on Phase 2 to share `FilterArg` and dispatch wiring.
 
 ### Phase 4: Documentation
 
-User-facing documentation under `docs/features/`, with a concentrated examples
-section.
-Where possible, the field registry is generated from the config schema to avoid
+Add user-facing documentation and examples under `docs/features/`, and generate
+the config-field registry from the `AppConfig` schema where possible to prevent
 drift.
 
 ## References
 
-- [RFD 050]: Scripting Ergonomics for Conversation Management — the broader
-  scripting story this DSL plugs into.
-- [`docs/wiki/00dxybd-ubiquitous-language.md`][ubiquitous] — definitions of
+- [RFD 050]: Scripting Ergonomics for Conversation Management, which defines the
+  broader scripting workflow this DSL supports.
+- [`docs/wiki/00dxybd-ubiquitous-language.md`][ubiquitous]: definitions of
   Conversation, Turn, Event, and related terms used throughout this RFD.
 
 [RFD 050]: ../050-scripting-ergonomics-for-conversation-management.md
