@@ -11,20 +11,21 @@
 
 ## Summary
 
-This document establishes the **project wiki**: a third in-repo documentation
-workflow alongside RFDs and tickets, managed by a `jp-wiki` command plugin and
+This document introduces the **project wiki**, a third in-repo documentation
+workflow alongside RFDs and tickets, managed by the `jp-wiki` command plugin and
 rendered by `jp-vite`.
-Wiki pages live in `docs/wiki/<id>-<slug>.md` with collision-resistant `W-<id>`
+Wiki pages live at `docs/wiki/<id>-<slug>.md` with collision-resistant `W-<id>`
 identifiers, distinguish maintained system references (`Reference`) from
-point-in-time investigations (`Snapshot`), support section-level linking and
-transclusion, and validate links to pages, headings, and workspace source lines
-in `jp wiki check`.
+point-in-time investigations (`Snapshot`), and support section-level linking and
+transclusion.
+`jp wiki check` validates links to pages, heading anchors, and workspace source
+lines.
 
 ## Motivation
 
 [RFD 100] introduced in-repo tickets because RFDs had become the only place to
 write anything down.
-With `jp-ticket` and `jp-rfd` in place ([RFD 116]), a third kind of artifact now
+With `jp-ticket` and `jp-rfd` in place ([RFD 116]), a third kind of artifact
 falls into the gap between them: project knowledge that is neither a design
 proposal nor a unit of work.
 
@@ -33,16 +34,16 @@ In practice, contributors and assistants produce:
 - Literature and prior-art notes (such as paper evaluations or comparative
   studies of other systems)
 - Domain glossaries and ubiquitous language definitions
-- Subsystem architecture overviews that describe how the code works today
+- Subsystem architecture overviews
 - Operational and qualification procedures
 
-These keep landing in `jp-ticket` (often under a `type=note` or `type=task`
-label) because `jp-ticket` offers five ergonomics that plain markdown files in
+These artifacts end up in `jp-ticket` (often under a `type=note` or `type=task`
+label) because `jp-ticket` provides capabilities that plain markdown files in
 `docs/` lack:
 
 1. **Zero-friction capture** (`jp ticket add` / `ticket_create`) without
    choosing a directory path or editing `.vitepress/config.mts`.
-2. **A short handle** (`T-0n0nwz3`) that prose in other tickets and RFDs cites
+2. **Short identifiers** (`T-0n0nwz3`) that tickets and RFDs can cite in prose
    and `jp-vite` auto-links.
 3. **Structured metadata and validated labels** (`relevant-rfd=006`,
    `domain=conversation`) backed by [`jp_label`].
@@ -54,24 +55,21 @@ label) because `jp-ticket` offers five ergonomics that plain markdown files in
 Once filed as a ticket, however, a note sits on a kanban board whose columns are
 `Todo`, `In Progress`, and `Done`.
 Leaving a research note in `Todo` pollutes the prioritized work queue; marking
-it `Done` buries active reference material in the completed-work archive and
-misstates its nature.
+it `Done` buries active reference material in the completed-work archive.
 
-Meanwhile, the existing `docs/architecture/` files have the opposite problem:
-they sit outside the VitePress navbar and sidebar, have a manually maintained
-`index.md` that already omits newer files, carry no backlinks to the RFDs and
-tickets that cite them, and do not fail the build when `#section` anchors or
-relative links to source files break.
+Meanwhile, `docs/architecture/` has the opposite problem: its files sit outside
+the VitePress navbar and sidebar, rely on a manually maintained `index.md` that
+omits newer files, lack backlinks to citing RFDs and tickets, and do not fail
+the build when `#section` anchors or relative links to source files break.
 
 Traditional wikis solve capture but fail on maintenance: without ordering,
 freshness contracts, and link checking, a wiki degrades into orphan pages, stale
 claims, and broken links.
-A repo-native wiki integrated into `jp`'s toolchain can prevent those failure
-modes structurally.
+An in-repo wiki integrated into `jp`'s toolchain prevents those failure modes.
 
 ## Design
 
-### What a Wiki Page Is
+### Scope and Lifecycle
 
 The three workflows answer distinct questions and have distinct lifecycles:
 
@@ -96,17 +94,17 @@ Git forge without `jp` installed.
 
 The `<id>` is a 7-character collision-resistant identifier allocated from the
 wiki directory's `.epoch` file using the same algorithm as [RFD 102].
-The canonical reference form is `W-02wt0kx`; CLI commands and tools accept
-`W02wt0kx`, the bare 7-character body, and any case.
+The canonical reference form is `W-02wt0kx`; CLI commands and tools also accept
+`W02wt0kx` or the bare 7-character ID, case-insensitively.
 
 Keeping identity in a flat `<id>-<slug>.md` filename rather than a nested
 directory path gives two properties:
 
-1. **Zero filing friction.** Creating a page requires a title, and optionally
-   the page it sits under, not a decision about directory taxonomy.
-2. **Rename and reorganization safety.** Renaming a page renames its `<slug>`
-   and rewrites file links, while every `W-02wt0kx` citation in RFDs, tickets,
-   commits, and conversations continues to resolve.
+1. **Zero filing friction.** Creating a page requires only a title and an
+   optional parent page, not a directory path.
+2. **Rename and reorganization safety.** Renaming a page updates its `<slug>`
+   and rewrites relative file links, while every `W-02wt0kx` citation in RFDs,
+   tickets, commits, and conversations continues to resolve.
 
 <!-- end list -->
 
@@ -157,9 +155,9 @@ side by side without distinction.
   A `Snapshot` is dated evidence; it is not expected to change when the codebase
   evolves.
 - **`Archived`**: Retired material kept so historical links still resolve.
-  `Archived` pages are omitted from the site's sidebar, omitted from default `jp
-  wiki list` and `wiki_list` output unless `--archived` or `--all` is passed,
-  and may carry `- **Superseded by**: W-<id>` or `RFD NNN`.
+  `Archived` pages are omitted from the site sidebar and from default `jp wiki
+  list` and `wiki_list` output (unless `--archived` or `--all` is passed), and
+  may carry `- **Superseded by**: W-<id>` or `RFD NNN`.
 
 #### Parent Hierarchy and Ordering
 
@@ -168,15 +166,15 @@ Organization is decoupled from filenames through two mechanisms:
 1. **`Parent`**: A page may name another wiki page as its parent (`- **Parent**:
    W-0a1b2c3`), forming a tree of arbitrary depth without moving files into
    subdirectories.
-   A page without one is a top page, which introduces an area, such as the
-   architecture or the glossary, and leads to the pages under it.
-   Cycles in `Parent` links are rejected by `jp wiki check`.
+   A page without a `Parent` is a top page that introduces a topic area (such as
+   architecture or the glossary) and groups its child pages.
+   `jp wiki check` rejects cycles in `Parent` links.
 
 2. **Ordering (`.order.json`)**: As in `jp-ticket` (`.board.json`) and `jp-rfd`
    (`.priority.json`), relational ordering lives in `docs/wiki/.order.json`
    rather than inside individual files.
-   The file holds the order of the top pages, and maps each parent page ID to
-   the order of the pages under it:
+   The file lists the top pages in display order and maps each parent page ID to
+   its ordered child pages:
 
    ```json
    {
@@ -205,44 +203,45 @@ Organization is decoupled from filenames through two mechanisms:
 - Mentioning `W-02wt0kx` in prose or inline code in any RFD, ticket, or wiki
   page links to `/wiki/02wt0kx-slug` and records a bidirectional edge in
   `<DocReferences />` (`References` and `Referenced by`).
-- `redirects.mjs` emits short-link redirects so `/wiki/W-02wt0kx` and
-  `/wiki/02wt0kx` bounce to `/wiki/02wt0kx-slug`.
+- `redirects.mjs` emits short-link redirects from `/wiki/W-02wt0kx` and
+  `/wiki/02wt0kx` to `/wiki/02wt0kx-slug`.
 - Mention syntax supports an optional section fragment:
   `W-0a1b2c3#pinned-conversation`, `RFD 100#labels`, and `T-0n0nwz3#swot` link
   directly to that heading anchor on the target page.
 
 #### Heading Slugs and Section Addressing
 
-Every ATX heading (`#` through `######`) has an anchor slug computed the way the
-site computes it, so a `#fragment` that `jp wiki check` accepts is one the site
-renders.
+Every ATX heading (`#` through `######`) gets an anchor slug computed
+identically by `jp-vite` and the Rust CLI, so any `#fragment` accepted by `jp
+wiki check` matches the anchor rendered on the site.
 
-`jp-vite` owns the slug function: `withJpVite` sets `markdown.anchor.slugify` to
-its own copy of VitePress's default (`slugify` from `@mdit-vue/shared`), so no
-existing anchor changes and a VitePress upgrade can't change one underneath.
-The Rust side implements the same function, and a fixture of headings and their
-slugs, shared by the JavaScript and Rust tests, holds the two in step.
+`jp-vite` pins the slug algorithm by setting `markdown.anchor.slugify` in
+`withJpVite` to its own copy of VitePress's default (`slugify` from
+`@mdit-vue/shared`), preserving existing anchors across VitePress upgrades.
+The Rust crate implements the same algorithm, and a shared test fixture of
+headings and expected slugs keeps the JavaScript and Rust implementations in
+sync.
 
-The function normalizes Unicode (NFKD) and drops combining accents, replaces
-runs of whitespace and punctuation (`_` included) with `-`, keeps other letters,
-lowercases, and prefixes a leading digit with `_`:
+The slug function normalizes Unicode (NFKD), strips combining marks, replaces
+runs of whitespace and punctuation (including `_`) with `-`, lowercases letters,
+and prefixes leading digits with `_`:
 
 | Heading                                         | Slug                                |
 | ----------------------------------------------- | ----------------------------------- |
 | `## Pinned Conversation`                        | `pinned-conversation`               |
 | ``### 1. Query Command (`jp_cli::cmd::query`)`` | `_1-query-command-jp-cli-cmd-query` |
 
-Slugs are unique within a document: the second `## Examples` is `examples-1`,
-the third `examples-2`.
-Suffixes are counted over the whole source document, so reading or embedding one
-section never changes them.
-Custom heading anchors (`## Turn {#turn}`) are rejected by `jp wiki check`: Git
-forges and plain-text readers show them as literal text.
+Slugs are deduplicated across the entire source document (`examples`,
+`examples-1`, `examples-2`), so reading or embedding a single section never
+changes its suffix.
+`jp wiki check` rejects custom heading anchors (`## Turn {#turn}`) because Git
+forges and plain-text readers render them as literal text.
 
 Commands and tools address sections by anchor slug or heading title.
-An argument that matches a slug selects that section; otherwise it is matched
-against heading titles, and a title shared by several headings is refused with
-their slugs, so a section edit never guesses which section to replace:
+If the argument matches a slug, that section is selected; otherwise it is
+matched against heading titles.
+If multiple headings share that title, the command fails and lists the candidate
+slugs rather than guessing which section to target:
 
 - `jp wiki show W-0a1b2c3` prints the metadata header, linked RFDs/tickets/wiki
   pages, and the page's table of contents (indented headings with their `#slug`
@@ -275,38 +274,38 @@ Using `![Title](target)` preserves plain-text readability:
   A transclusion link pointing to a workspace file with `#L<start>-L<end>`
   expands into a fenced code block with the file's extension as its language tag
   and a header linking to the source file.
-- **In `jp wiki show --body`, and `wiki_show` with `expand_embeds`**: The Rust
-  reader expands transclusions inline so the reader receives the embedded text
+- **In `jp wiki show --body` and `wiki_show` (with `expand_embeds`)**: The CLI
+  and tool expand transclusions inline so callers receive the embedded content
   in a single read.
-  `wiki_show` returns the text as written unless asked, since that text is what
-  `wiki_edit` replaces, and writing expanded text back would turn each embed
-  into a copy.
+  `wiki_show` leaves embeds unexpanded by default because `wiki_edit` operates
+  on the raw markdown; saving expanded output back to the page would replace the
+  embed syntax with a static copy.
+  When `expand_embeds` is set, `wiki_show` wraps each expanded block in `<!--
+  embed W-0a1b2c3#pinned-conversation -->` and `<!-- /embed -->` markers so the
+  assistant can distinguish transcluded content from the page's own text.
 - **In `<DocReferences />`**: Transcluding a document counts as referencing it,
   so the source page lists every page that embeds it under `Referenced by`.
 
-An embedded section is parsed as part of its whole source document, so the site
-and the Rust reader give it the same meaning wherever it appears:
+An embedded section is parsed in the context of its full source document so
+`jp-vite` and the Rust reader resolve links identically:
 
-- Reference-style links resolve against the source document's definitions, which
-  `comfort` puts at the end of the file, outside any section.
-- Relative targets resolve against the source document's directory and are
-  rewritten to be valid from the embedding page.
-- A `#fragment` pointing into the embedded section keeps pointing at the source
-  page, not at a heading of the embedding page.
-- A nested embed resolves against the document that contains it.
+- Reference-style links resolve against definitions at the bottom of the source
+  document (where `comfort` places them, outside the transcluded section).
+- Relative link targets resolve against the source document's directory and are
+  rewritten relative to the embedding page.
+- Intra-document `#fragment` links continue to point to the source document
+  rather than to headings in the embedding page.
+- Nested embeds resolve relative to the document that contains them.
 
-`wiki_show` wraps each expanded embed in markers naming its source (`<!-- embed
-W-0a1b2c3#pinned-conversation -->` and `<!-- /embed -->`), so the assistant can
-tell embedded text from the page's own.
-On the site, a `![...](...)` pointing at a markdown document or a workspace file
-that isn't a standalone embed of a section or line range fails the build rather
-than rendering as a broken image.
+In `jp-vite`, any `![...](...)` link targeting a markdown document or workspace
+source file that is not a standalone section or line-range embed fails the build
+rather than rendering as a broken image.
 
-`Snapshot` pages don't embed.
-An embed shows the source's current text, so a page that must not change as the
-code evolves would change on every build.
-A `Snapshot` copies the excerpt it relies on and cites its source as described
-in [Snapshot Citations](#snapshot-citations).
+`Snapshot` pages cannot use transclusion.
+Because embeds always render the target's current content, transcluding into a
+`Snapshot` would mutate a point-in-time record as the source evolves.
+Instead, a `Snapshot` copies the relevant excerpt inline and cites it with a
+commit permalink (see [Snapshot Citations](#snapshot-citations)).
 
 #### Deep-Linking to Workspace Source Files
 
@@ -320,41 +319,45 @@ See [`Links::by_rfd`](../../crates/plugins/command/rfd/src/links.rs#L88-L125).
 Line fragments accept `#L12`, `#L12-L24`, `#L12-24`, and `#12-24`, normalizing
 to `#L12-L24` when rewritten by `jp-vite`.
 
-To catch silent line drift when a source file is edited above the linked range,
-when a link's label is an inline code span (such as ``[`Links::by_rfd`]`` or
-``[`by_rfd`]``), `jp wiki check` takes the trailing identifier (`by_rfd`) as an
-expected symbol guard and verifies that the substring still appears within the
-linked line range (or within the file when no line range is given).
+When a source link's label is an inline code span (such as ``[`Links::by_rfd`]``
+or ``[`by_rfd`]``), `jp wiki check` uses the trailing identifier (`by_rfd`) as a
+symbol guard and verifies that it appears within the linked line range (or
+anywhere in the file if no line range is given).
+This catches silent line drift when edits above the linked range shift the
+target code.
 
 #### Snapshot Citations
 
-A relative source link follows the working tree.
-That is what a `Reference` page wants and what a `Snapshot` must not do: once
-the code moves, the link breaks or points at code the snapshot never saw.
-`Snapshot` pages therefore cite source code with a permalink to a commit:
+Relative source links track the working tree.
+That fits `Reference` pages, but in a `Snapshot` page a relative link either
+breaks or silently points to newer code once the file changes.
+`Snapshot` pages therefore cite source code using commit permalinks:
 
 ```markdown
 [`Links::by_rfd`](https://github.com/dcdpr/jp/blob/9a43a5e2dc077909a9b8fca9e58abe541b3d8cda/crates/plugins/command/rfd/src/links.rs#L88-L125)
 ```
 
-A permalink is a link in every editor, on every forge, and on the site, and what
-it points at never changes.
-A link counts as a permalink when it names a full commit hash under the
-repository `jp vite` links to (`plugins.command.vite.options.repository`, or
-git's `origin` remote); any other URL is an ordinary external link.
+A permalink works as a standard URL in editors, on Git forges, and on the
+documentation site, and its target is immutable.
+`jp wiki` recognizes a URL as a permalink when it references a full commit SHA
+in the repository configured for `jp vite`
+(`plugins.command.vite.options.repository`, falling back to git's `origin`
+remote); any other URL is treated as an external link.
 
-The commit has to be reachable from the default branch (`origin/HEAD`).
-A branch commit stops being reachable once its pull request is squash-merged,
-and a fresh clone never fetches it.
-Code that exists only on the current branch can't be pinned yet, so the page
-names its path and lines as code text (`` `crates/foo/src/bar.rs` L12-24 ``)
-beside the copied excerpt, and is pinned once the code lands.
+The referenced commit must be reachable from the default branch (`origin/HEAD`),
+because branch commits become unreachable after a squash merge and are not
+fetched by fresh clones.
+Code that exists only on an unmerged branch cannot be linked with a permalink
+yet; the page cites the path and line range as inline code (``
+`crates/foo/src/bar.rs` L12-24 ``) alongside the copied excerpt until the branch
+lands and the link can be pinned.
 
 `jp wiki pin <ID>` rewrites a page's relative source links into permalinks.
-Each link is pinned to the newest default-branch commit whose copy of the file
-matches the working tree; a link with no such commit is left alone and reported.
-Creating a `Snapshot` page, or changing a page's status to `Snapshot`, pins it
-the same way, through the CLI or the tools.
+Each link resolves to the most recent default-branch commit where the file
+matches the working tree; links with no matching commit on the default branch
+are left unchanged and reported.
+Creating a `Snapshot` page or changing a page's status to `Snapshot` (via the
+CLI or assistant tools) runs the same pinning pass automatically.
 
 ### Validation (`jp wiki check`)
 
@@ -382,14 +385,14 @@ exits `1` on any error:
    If the link text is a code span, the identifier must appear within that line
    range; if it moved elsewhere in the file, the error reports the new line
    number.
-   In a `Snapshot` page, a relative link into the workspace outside `docs/` is
-   an error naming `jp wiki pin`.
-   A permalink's commit must exist locally and be reachable from the default
-   branch, and the path, line range, and symbol guard are checked against that
-   commit's copy of the file, which never changes: these checks fail on a
-   mistake, never on later code changes.
-6. **Transclusions**: Rejects any cycle of `![...](...#section)` embeds, and any
-   embed in a `Snapshot` page.
+   In a `Snapshot` page, any relative link into the workspace outside `docs/` is
+   rejected with an error directing the user to run `jp wiki pin`.
+   Permalinks must reference a commit that exists locally and is reachable from
+   the default branch; the file path, line range, and symbol guard are validated
+   against that commit's tree so later code changes never invalidate a
+   `Snapshot`.
+6. **Transclusions**: `![...](...#section)` embeds must not form cycles and are
+   rejected in `Snapshot` pages.
 7. **Advisory anti-rot warnings** (printed to stderr, promoted to errors with
    `--strict`):
    - **Orphan pages**: A non-archived page with no `Parent`, no incoming links
@@ -442,62 +445,68 @@ With no mutation flags, `jp wiki edit <ID>` opens the markdown file in the
 user's `$EDITOR` via protocol 13's `edit_files` and runs the page validator when
 the editor closes.
 
-`archive` refuses a page that still has non-archived children, naming them, so
-no active page is left under a parent the sidebar hides.
-Archiving removes the page's entries from `.order.json`.
-Both hold when `wiki_edit` sets the status to `Archived`.
+`archive` refuses to archive a page that still has non-archived child pages and
+lists the blocking children, preventing active pages from being hidden under an
+archived parent in the sidebar.
+Archiving also removes the page from `.order.json`.
+`wiki_edit` enforces the same rules when setting `status` to `Archived`.
 
-`jp wiki from-ticket <TICKET-ID>` moves a note ticket into the wiki the way `jp
-rfd draft --from-ticket` moves one into an RFD ([RFD 116]).
-It creates a page from the ticket's title and description, carrying over
-`Authors`, `Date`, and the labels the wiki vocabulary accepts (naming the rest),
-then closes the ticket as `Done` with `Promoted to` naming the page.
-The ticket stays, so every `T-` citation in tickets, RFDs, commits, and
-conversations still resolves and leads on to the page.
-Its comments stay with it, with their attribution; whoever migrates the ticket
-folds what matters into the page.
+`jp wiki from-ticket <TICKET-ID>` migrates a note ticket into the wiki, matching
+`jp rfd draft --from-ticket` ([RFD 116]).
+It creates a wiki page from the ticket's title and description, copies
+`Authors`, `Date`, and any labels permitted by the wiki label vocabulary
+(reporting any dropped labels), and closes the ticket as `Done` with `Promoted
+to` pointing to the new page.
+The ticket file remains in the repository so existing `T-` citations in tickets,
+RFDs, commits, and conversations still resolve and link to the new wiki page.
+Ticket comment threads stay on the ticket with their original attribution; the
+author migrating the ticket incorporates any relevant context from the comments
+into the wiki page.
 
-The page gets a new id rather than the ticket's.
-An id's first five characters count time from its own directory's `.epoch` ([RFD
-102]), so the same characters under the wiki's epoch would name a different time
-and break creation order.
-Like `draft --from-ticket`, the command is safe to repeat: a ticket whose
-`Promoted to` already names an existing page reports it.
+The wiki page receives a newly allocated `W-<id>` rather than reusing the
+ticket's ID body.
+Because the first five characters of an ID encode a timestamp relative to its
+directory's `.epoch` ([RFD 102]), reusing a ticket ID under the wiki's epoch
+would produce the wrong timestamp and break creation-time ordering.
+Like `draft --from-ticket`, `from-ticket` is idempotent: if the ticket's
+`Promoted to` field already references an existing wiki page, the command
+reports that page and exits without creating a duplicate.
 
-#### Token-Conscious Assistant Tools
+#### Assistant Tools
 
 To keep per-turn schema overhead small, `jp-wiki` exposes four tools:
 
-1. **`wiki_list`**: Lists non-archived wiki pages in `.order.json` order, each
-   top page above the pages under it, optionally filtered by `under` (the pages
-   below one page), `status`, `labels`, or `query`.
+1. **`wiki_list`**: Lists non-archived wiki pages in `.order.json` order, with
+   each top page followed by its descendants, optionally filtered by `under`
+   (descendants of a given page), `status`, `labels`, or `query`.
    With `full: true`, includes each page's one-line `Summary`.
 2. **`wiki_show`**: Returns a page's metadata, incoming/outgoing references, and
    its heading table of contents (`#slug` and title) by default.
    Passing `body: true` returns the full markdown body as written; passing
    `section: "<slug>"` returns only that section; `expand_embeds: true` expands
-   the transclusions in either.
+   transclusions in either mode.
 3. **`wiki_create`**: Creates a new wiki page with `title`, `summary`, and
-   optional `body` (a page without one is a hub), `status` (defaulting to
+   optional `body` (omitting `body` creates a hub page), `status` (defaulting to
    `Reference`), `parent`, and `labels`.
 4. **`wiki_edit`**: Single mutation tool accepting `id` and any combination of
    `title` (which also renames the file and rewrites relative links), `summary`,
-   `status`, `parent`, `before` or `after` (a sibling to place it directly above
-   or below, as `jp wiki rank` does), `superseded_by`, `body`, `section`
-   (scoping `body` replacement to one heading section), `add_labels`, and
+   `status`, `parent`, `before` or `after` (reordering the page relative to a
+   sibling, like `jp wiki rank`), `superseded_by`, `body`, `section` (scoping
+   `body` replacement to one heading section), `add_labels`, and
    `remove_labels`.
 
-Every tool holds to the call's access policy ([RFD 116]) file by file, not only
-at the wiki directory:
+Each tool enforces the invocation's file-access policy ([RFD 116]) on every file
+it touches, not just the wiki directory:
 
-- `wiki_show` checks the policy for every file an embed reads, nested embeds
-  included.
-  Being allowed to read a page grants nothing about what it embeds.
-  A denied embed is replaced by a marker naming the target and the refusal, and
-  the rest of the page is returned.
-- `wiki_edit` updates only files the policy lets it update.
-  A rename that leaves references in files it can't reach names them, and says
-  so when the policy doesn't let it search the workspace, as `rfd_rename` does.
+- `wiki_show` checks read permission for every transcluded target, including
+  nested embeds.
+  Read access to a wiki page does not grant read access to files it embeds.
+  If an embed is denied, `wiki_show` substitutes a marker naming the target and
+  the access denial and returns the rest of the page.
+- `wiki_edit` modifies only files permitted by the write policy.
+  When a rename cannot update links in files outside the allowed paths (or
+  cannot scan the workspace for references), it reports the skipped paths or
+  restricted search scope, matching `rfd_rename`.
 
 ### Site Integration (`jp-vite`)
 
@@ -506,53 +515,57 @@ configured wiki directory exists:
 
 - **Auto-generated hierarchical sidebar**: Unlike RFDs and tickets, which hide
   the VitePress sidebar, `withJpVite` generates `themeConfig.sidebar['/wiki/']`
-  from the wiki's `Parent` tree and `.order.json`, each top page above the pages
-  under it, using each page's `# Title` as the link text.
-  Prev/Next navigation at the bottom of each wiki page follows this reading
-  order.
-- **A front page and hub pages**: `/wiki/` is the wiki's own front page, which
-  `jp vite sync` creates once and never rewrites: an introduction, links to the
-  pages to read first, and embeds.
-  Each area opens with a top page introducing it, with the detailed pages under
-  it through `Parent`.
-  `<WikiChildren />` lists the pages one level down, with their summaries, in
-  reading order: under the page it is on, under `of="W-0a1b2c3"`, or with no
-  page around it, the top pages.
-  A page with no text of its own, only a title and metadata, shows this list.
-  A hub can be just that.
-  `jp wiki check` counts a link from the front page as reaching a page, so a hub
-  is no orphan.
-- **`<WikiIndex />` on `/wiki/all`**: Wraps `<DocIndex />` with a filter button
-  per top page, narrowing the table to the pages under it, status badges
+  from the `Parent` hierarchy and `.order.json`, placing each top page above its
+  children and using each page's `# Title` as the link label.
+  Previous/next links at the bottom of each page follow the same reading order.
+- **Front page and hub pages**: `jp vite sync` scaffolds `/wiki/`
+  (`docs/wiki/index.md`) once if missing and never overwrites it, so
+  contributors can customize it with an introduction, starting links, and
+  embeds.
+  The `<WikiChildren />` component renders a list of direct child pages and
+  their summaries in reading order: for the current page by default, for a
+  specific page when passed `of="W-0a1b2c3"`, or for the top pages when used on
+  `/wiki/`.
+  A hub page with only a title and metadata (no body text) renders
+  `<WikiChildren />` automatically.
+  `jp wiki check` counts links from `docs/wiki/index.md` as incoming links, so
+  top-level hub pages linked from the front page are not flagged as orphans.
+- **`<WikiIndex />` on `/wiki/all`**: Wraps `<DocIndex />` with per-top-page
+  filter buttons (narrowing the table to that subtree), status badges
   (`Reference`, `Snapshot`, `Archived`), label badges, search, summary toggles,
-  and dev-server `+ New page`, `Edit`, and `Archive` actions backed by `/__wiki`
-  middleware calling `jp wiki`.
-- **Editing in place**: On a dev server that accepts edits, each section heading
-  of a wiki page has an edit button, and the page an `Edit page` button.
-  Either opens the text as written, through `jp wiki show --raw`.
-  Saving runs `jp wiki edit --section`, which checks the page before keeping it.
-  On the published site, every page links to the forge's editor for its file on
-  the default branch, which `jp vite` reads from git's `origin/HEAD`.
-- **Compact metadata**: On RFD, ticket, and wiki pages, the metadata block
-  renders as one line of labels grouped by key (`domain: conversation, llm`),
-  and each other field on a short line.
-  A wiki page's status is a letter after its title (`R`, `S`, or `A`), its
-  summary, authors, and date sit at the end of the page in small print, above
-  the references, and its parent is a trail above the title (`Wiki › Glossary
-  › Ubiquitous Language`), on the line with the `Edit page` button.
-  An RFD or ticket keeps a line of status badge, category, date, and authors,
-  and leaves its summary to the index pages.
-  The file keeps the list.
-- **Cross-references**: `<DocReferences />` lists, below each RFD, ticket, and
-  wiki page, what it references and what references it, grouped by kind and
-  named by title, folded when long.
-  RFD and ticket pages show wiki pages that cite them or carry
-  `relevant-rfd=NNN`.
-- **Moved pages**: A `redirects` map in `plugins.command.vite.options` sends an
-  old route to a new one, and may name a wiki page by id
-  (`"architecture/ubiquitous-language" = "W-0a1b2c3"`), so a later rename
-  doesn't break the redirect.
-  `redirects.mjs` writes the stubs, which keep the `#fragment`.
+  and dev-server `+ New page`, `Edit`, and `Archive` actions backed by the
+  `/__wiki` middleware and `jp wiki`.
+- **Editing in place**: When the dev server is running with editing enabled,
+  every wiki page displays an `Edit page` button and per-heading section edit
+  buttons.
+  Opening the editor fetches the unexpanded markdown via `jp wiki show --raw`,
+  and saving invokes `jp wiki edit` (with `--section` for section edits),
+  validating the page before writing changes to disk.
+  On the static published site, edit links point to the file on the Git forge's
+  default branch (resolved from `origin/HEAD`).
+- **Compact metadata rendering**: While markdown files on disk keep the `-
+  **Key**: Value` metadata list, `jp-vite` renders metadata compactly across
+  RFDs, tickets, and wiki pages, grouping labels by key on a single line
+  (`domain: conversation, llm`).
+  On a wiki page, the `Parent` chain renders as a breadcrumb trail (`Wiki ›
+  Glossary › Ubiquitous Language`) above the title alongside the `Edit page`
+  button, `Status` renders as a letter badge (`R`, `S`, or `A`) next to the
+  title, and `Summary`, `Authors`, and `Date` render in a footer above
+  `<DocReferences />`.
+  On RFD and ticket pages, the header displays a compact line with the status
+  badge, category, date, and authors, while the `Summary` appears only on index
+  pages.
+- **Cross-references**: `<DocReferences />` renders outgoing `References` and
+  incoming `Referenced by` links at the bottom of each RFD, ticket, and wiki
+  page, grouped by document kind, labeled by title, and collapsed when long.
+  RFD and ticket pages include incoming links from wiki pages that cite them in
+  prose or carry `relevant-rfd=NNN`.
+- **Moved pages**: A `redirects` map in `plugins.command.vite.options` maps
+  legacy routes to new targets and accepts wiki page IDs (such as
+  `"architecture/ubiquitous-language" = "W-0a1b2c3"`), so renaming a target page
+  never breaks the redirect.
+  `redirects.mjs` generates HTML redirect stubs that preserve URL `#fragment`
+  anchors.
 
 ### Shared Workspace Substrate
 
@@ -568,8 +581,9 @@ primitives shared by `ticket`, `jp-rfd`, and `jp-wiki`:
 - Markdown ATX heading extraction and `#anchor` slug computation
 - Workspace relative-path, line-range, and code-span symbol verification
 
-`jp-wiki` links the `ticket` library for `from-ticket`, as `jp-rfd` does for
-`draft --from-ticket`, so the ticket format keeps one implementation.
+For `from-ticket`, `jp-wiki` depends on the `ticket` crate directly (as `jp-rfd`
+does for `draft --from-ticket`), keeping a single implementation of the ticket
+format.
 
 ## Drawbacks
 
@@ -582,13 +596,14 @@ primitives shared by `ticket`, `jp-rfd`, and `jp-wiki`:
   the 7-character ID at the front of every filename, so `ls docs/wiki/` orders
   by creation time rather than by topic.
   `jp wiki list` and the VitePress sidebar provide the topical hierarchy.
-- **Embeds look like images on Git forges.** A forge preview treats
-  `![...](...)` as an image, so where the site shows an embedded section, the
-  forge shows a broken image.
-  The source file stays readable and names the target.
-- **Snapshots cite longer links, and wait for merges.** A permalink is long, and
-  code that exists only on a branch is cited as text until it lands on the
-  default branch.
+- **Embeds look like images on Git forges.** Git forge markdown previews treat
+  `![...](...)` as an image tag and render a broken image icon instead of the
+  transcluded content, though the raw markdown remains readable and links to the
+  target path.
+- **Verbose permalinks and delayed pinning on branches.** Commit permalinks are
+  long in raw markdown, and source code that exists only on an unmerged branch
+  must be cited as plain code text until the branch merges into the default
+  branch.
 
 ## Alternatives
 
@@ -615,14 +630,14 @@ Storing wiki pages as `docs/wiki/<area>/<slug>.md` without IDs produces clean
 filenames on disk, but reintroduces taxonomy friction on creation and breaks
 prose citations whenever a page is moved to another area or renamed.
 
-### Configured categories beside the tree
+### Separate `Category` metadata field
 
-A `Category` field naming one of a configured list (`architecture`, `glossary`,
-`research`, `guide`) would group the sidebar and filter the index.
-It was rejected because the `Parent` tree already does both, and a page's
-category could disagree with its parent's, an error state nothing about the page
-could resolve.
-A top page is the category, and the pages under it are its members.
+A `Category` field drawn from a configured list (`architecture`, `glossary`,
+`research`, `guide`) could group pages in the sidebar and filter the index.
+However, the `Parent` hierarchy already serves both purposes: each top page acts
+as a category for its descendants.
+Adding a separate `Category` field duplicates the hierarchy and allows a child
+page's category to conflict with its parent's.
 
 ### VitePress `@include` for transclusion
 
@@ -648,24 +663,26 @@ participate in `jp-vite`'s `<DocReferences />` graph or `jp wiki show`.
   transcluded under a `## Context` heading in another page, shifting its
   headings so the outline stays valid requires care with fenced code blocks and
   nested subheadings.
-- **Symbol guard false positives on refactored code.** Checking that the
-  identifier in ``[`foo`](path.rs#L10-L20)`` appears in lines `10..=20` catches
-  line shifts, but a link whose label is prose (`[the parser](path.rs#L10-L20)`)
-  only gets bounds checking, not content checking.
-- **Slug drift between the site and Rust.** The two implementations of the slug
-  function agree as far as the shared fixture covers.
-  A heading shape it misses can yield an anchor `check` accepts and the site
-  renders differently.
-- **Shallow checkouts.** Checking a permalink needs its commit locally.
-  `docs.yml` and `rust.yml` check out full history (`fetch-depth: 0`), but
-  `plugins.yml` uses the default depth of 1, so whichever CI job runs `jp wiki
-  check` needs full history.
-  Without it, `check` reports the commit as missing rather than passing it.
-- **Source changes that skip the check.** `jp wiki check` validates links into
-  workspace source, so a pull request that changes, renames, or deletes a linked
-  file has to run it, though it touches nothing under `docs/`.
-  A job triggered only by documentation changes lets such a pull request pass
-  and fails the next one that does touch `docs/`.
+- **Unchecked drift on prose-labeled source links.** Checking that the
+  identifier in ``[`foo`](path.rs#L10-L20)`` appears within lines `10..=20`
+  catches line shifts for code-span labels, but links with prose labels (`[the
+  parser](path.rs#L10-L20)`) only receive line-count bounds checking.
+- **Slug drift between `jp-vite` and Rust.** The JavaScript and Rust slug
+  implementations are tested against a shared fixture.
+  Any heading pattern not covered by that fixture could produce a slug that `jp
+  wiki check` accepts but `jp-vite` renders differently.
+- **Shallow git checkouts in CI.** Validating a permalink requires the target
+  commit to be present in the local git object database.
+  `docs.yml` and `rust.yml` fetch full history (`fetch-depth: 0`), whereas
+  `plugins.yml` uses the default depth of `1`.
+  Any CI job that runs `jp wiki check` must fetch full history; otherwise
+  `check` fails because the referenced commit is missing locally.
+- **Source changes bypassing CI path filters.** Because `jp wiki check`
+  validates links to workspace source files, any pull request that edits,
+  renames, or deletes a linked source file can break wiki links without touching
+  `docs/`.
+  If `jp wiki check` only runs on `docs/` path changes, a source-only pull
+  request can merge broken links and fail the next documentation build.
 
 ## Implementation Plan
 
@@ -704,19 +721,16 @@ Depends on Phase 2.
 
 ### Phase 5: Migrating JP's documents
 
-Move each `docs/architecture/` file into `docs/wiki/` as one page, keeping its
-headings so anchors carry over; split pages afterwards, not during the move.
+Migrate each `docs/architecture/` file into `docs/wiki/` as a single page first,
+preserving existing headings so `#section` anchors remain valid; split large
+pages in follow-up changes rather than during the move.
 
-Rewrite references to the old paths across the whole workspace, not only
-`docs/`.
-Persona and knowledge configuration under `.jp/config/` and doc comments in
-`jp_cli` name `docs/architecture/` files, and a missed one points the assistant
-at a file that no longer exists.
-Report every reference left unrewritten.
-Redirect old `/architecture/*` routes to their pages through the `redirects`
-map.
+Rewrite references to `docs/architecture/` across the entire workspace,
+including persona and knowledge configs under `.jp/config/` and doc comments in
+`jp_cli`, and report any remaining unrewritten references.
+Map legacy `/architecture/*` routes to the new wiki pages in `redirects`.
 
-Move research-note tickets such as `T-0n0nwz3` with `jp wiki from-ticket`.
+Migrate research-note tickets such as `T-0n0nwz3` with `jp wiki from-ticket`.
 
 Depends on Phase 4.
 
