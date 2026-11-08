@@ -9,43 +9,42 @@
 
 ## Summary
 
-This RFD introduces a configurable size policy for attachments when total
-resolved content exceeds a configured byte threshold.
-Depending on the policy, JP prompts the user (to attach as-is, truncate, or
-cancel), truncates automatically, allows unconditionally, or rejects the
-attachment, falling back to the configured policy in non-interactive runs.
+This RFD introduces a size policy for attachments whose total resolved content
+exceeds a byte threshold.
+Depending on `conversation.attachment.size_policy`, JP prompts the user to
+attach as-is, truncate, or cancel (`ask`), truncates text attachments
+automatically (`truncate`), attaches without prompting (`allow`), or aborts with
+an error (`reject`).
+In non-interactive runs, `ask` attaches the content as-is.
 
 ## Motivation
 
-Attachments are resolved lazily.
-The `Handler::add()` method records a URI; the actual content is fetched later
-by `Handler::get()` at query time.
-For glob patterns, a single `file://src/**/*.rs` attachment can expand to
-hundreds of files.
-For HTTP attachments, the response body size is unknown until fetched.
+Attachments are resolved lazily: `Handler::add()` records a URI, and
+`Handler::get()` fetches the content at query time.
+A single `file://src/**/*.rs` glob can expand to hundreds of files, and an HTTP
+attachment's response size is unknown until fetched.
 
-Today, the only size guard is a 10 MiB hard limit on individual binary files in
-the `file` handler (`MAX_BINARY_SIZE`).
-Text files have no size check at all.
-A user can accidentally attach a large directory tree or a verbose command
-output and send hundreds of thousands of tokens to the LLM without any warning.
+The only existing size guard is `MAX_BINARY_SIZE`, a 10 MiB hard limit on
+individual binary files in the `file` handler.
+Text attachments have no size limit.
+A user can attach a large directory tree or verbose command output and send
+hundreds of thousands of tokens to the LLM without warning.
 
-This wastes tokens and money, can exceed provider context windows (causing
-cryptic API errors), and degrades response quality when the context is dominated
-by irrelevant content.
+Oversized attachments waste tokens and money, exceed provider context windows
+with opaque API errors, and dilute the prompt with irrelevant content.
 
 Users need a way to:
 
-- Get warned before sending unexpectedly large attachments.
-- Truncate oversized content without manually editing the attachment.
-- Configure the behavior for scripted/non-interactive use.
+- Catch unexpectedly large attachments before sending a query.
+- Truncate oversized text attachments in place.
+- Configure the behavior for scripted and non-interactive runs.
 
 ## Design
 
 ### User Experience
 
 When a user runs `jp query --attach src/` and the resolved content exceeds the
-configured threshold, they see:
+configured threshold, JP prompts before building the thread:
 
 ```
 ⚠ Attachments total 847 KB (threshold: 512 KB)
@@ -56,21 +55,20 @@ configured threshold, they see:
 Attach large content? [y,t,n,?]?
 ```
 
-- `y` — attach as-is, proceed with the query.
-- `t` — truncate each text attachment to `truncate_to` bytes (default: half the
+- `y`: Attach as-is and proceed with the query.
+- `t`: Truncate each text attachment to `truncate_to` bytes (default: half the
   threshold), then proceed.
-- `n` — cancel the query.
-- `?` — print help.
+- `n`: Cancel the query.
+- `?`: Print help.
 
-Binary attachments are not truncatable.
-If the total binary content alone exceeds the threshold and the user picks `t`,
-only text content is truncated; binary content is kept as-is.
-A future iteration could offer to drop specific binary attachments, but that is
-out of scope here.
+Binary attachments cannot be truncated.
+Selecting `t` truncates only text attachments and leaves binary attachments
+unchanged, even if binary content alone exceeds the threshold.
+Dropping individual binary attachments is out of scope.
 
 ### Configuration
 
-New fields under `conversation.attachment`:
+Three fields under `conversation.attachment` configure the policy:
 
 ```toml
 [conversation.attachment]
@@ -97,13 +95,13 @@ truncate_to = "256KB"
 | `truncate` | Auto-truncate silently | Auto-truncate silently      |
 | `reject`   | Error                  | Error                       |
 
-The `ask` policy auto-approves when no TTY is present, matching the existing
-convention for permission prompts (see [RFD 049]).
+When no TTY is present, `ask` attaches the content as-is, matching the detached
+prompt convention in [RFD 049].
 
-### Where the Check Happens
+### Policy Enforcement
 
-The check is a single function called in `Query::run()`, between attachment
-resolution and thread construction:
+`Query::run()` calls `apply_attachment_size_policy` after resolving attachment
+futures and before building the thread:
 
 ```rust
 // Resolve all attachment content (existing code).
@@ -125,13 +123,15 @@ let attachments = apply_attachment_size_policy(
 let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
 ```
 
-Content is already in memory at this point.
-This is deliberate — reliable size information is only available after fetch.
-The cost of fetching content that gets discarded is acceptable: file I/O is
-local and fast, HTTP attachments are uncommon and typically small, and command
-output is bounded by execution time.
+Running the check after resolution means all attachment content is already in
+memory.
+Reliable size information is only available after fetching, and the cost of
+fetching content that the user later discards is low: file I/O is local, HTTP
+attachments are uncommon and typically small, and command output is bounded by
+command execution time.
 
-### The `apply_attachment_size_policy` Function
+`apply_attachment_size_policy` compares the aggregate byte size against
+`config.size_threshold` and dispatches on `config.size_policy`:
 
 ```rust
 fn apply_attachment_size_policy(
@@ -157,7 +157,7 @@ fn apply_attachment_size_policy(
 
 ### Size Calculation
 
-A `byte_size()` method is added to `Attachment`:
+`Attachment::byte_size()` returns the raw byte length of the resolved content:
 
 ```rust
 impl Attachment {
@@ -170,36 +170,34 @@ impl Attachment {
 }
 ```
 
-Total size sums all attachments.
-The threshold comparison uses raw byte size, not token estimates.
-Byte size is deterministic, fast to compute, and handler-agnostic.
-Token estimation would require a tokenizer dependency and varies by model.
+`attachment_byte_size` sums `byte_size()` across all resolved attachments.
+The threshold compares raw byte counts rather than estimated token counts: byte
+size is deterministic, fast to compute, and handler-agnostic, whereas token
+estimation varies by model and requires a tokenizer dependency.
 
 ### Truncation
 
-Text attachments are truncated to `truncate_to` bytes, aligned to the nearest
-UTF-8 character boundary.
-A marker is appended:
+Each text attachment is truncated to `truncate_to` bytes at the nearest UTF-8
+character boundary, with a size marker appended:
 
 ```
 ... [truncated, 623 KB → 256 KB]
 ```
 
-Binary attachments are never truncated.
-Truncating an image or PDF produces corrupt data.
+Binary attachments are never truncated, since truncating an image or PDF
+corrupts the file.
 
-When multiple text attachments are present, each is truncated independently to
-`truncate_to` bytes.
-This is simpler than proportional allocation and avoids penalizing small
-attachments.
-The total post-truncation size may still exceed the threshold if there are many
-attachments; this is acceptable — the goal is a reasonable reduction, not a
-hard cap.
+Each text attachment is truncated independently to `truncate_to` bytes rather
+than proportionally across attachments.
+Independent truncation is simpler and avoids shrinking small attachments.
+When a query has many attachments, their combined size after truncation can
+still exceed `size_threshold`; `truncate_to` is a per-attachment cap, not a hard
+cap on total size.
 
 ### Prompt Rendering
 
-The warning message groups attachments by source with size annotations.
-This gives the user enough context to decide:
+The prompt uses the `InlineSelect` component from `jp_inquire` and groups
+attachments by their `Attachment.source` field with size annotations:
 
 ```
 ⚠ Attachments total 847 KB (threshold: 512 KB)
@@ -210,158 +208,133 @@ This gives the user enough context to decide:
 Attach large content? [y,t,n,?]?
 ```
 
-For glob-expanded attachments, the display groups by the original pattern (the
-`source` field on `Attachment`).
-Individual file names within a glob are not listed — the count and aggregate
-size are sufficient.
-
-The prompt uses the existing `InlineSelect` component from `jp_inquire`.
+Glob-expanded attachments are grouped under their original pattern showing only
+the file count and combined size, rather than listing every matched file.
 
 ## Drawbacks
 
-- **Post-fetch check**: Content is fully loaded into memory before the size
-  check runs.
-  For extremely large attachments (e.g. a multi-gigabyte directory tree), this
-  means the memory is allocated and then potentially discarded.
-  In practice this is unlikely — the `file` handler already skips binary files
-  over 10 MiB, and text files large enough to cause memory pressure are rare.
+- **Post-fetch check**: All attachment content is loaded into memory before the
+  size check runs, so attaching a multi-gigabyte directory tree allocates that
+  memory even if the user cancels.
+  In practice, the `file` handler already skips binary files over 10 MiB, and
+  text files large enough to cause memory pressure are rare.
 
-- **Byte size ≠ token cost**: The threshold is in bytes, not tokens.
-  A 512 KB file is roughly 128K–170K tokens depending on content and tokenizer.
-  Users who think in tokens need to mentally convert.
-  This is a deliberate trade-off: byte size is handler-agnostic and doesn't
-  require a tokenizer dependency.
+- **Byte size vs. token cost**: The threshold is measured in bytes rather than
+  tokens.
+  A 512 KB text file is roughly 128K to 170K tokens depending on the content and
+  tokenizer, so users who think in tokens must convert mentally.
 
-- **Per-attachment truncation**: Each text attachment is truncated independently
-  to the same limit.
-  If a query has 20 small files and one large file, all get the same
-  `truncate_to` budget.
-  Proportional allocation would be fairer but adds complexity for marginal
-  benefit.
+- **Per-attachment truncation**: Every text attachment is capped at the same
+  `truncate_to` limit.
+  In a query with twenty small files and one large file, each file gets the same
+  `truncate_to` budget; proportional allocation would distribute the budget more
+  evenly at the cost of extra complexity.
 
 ## Alternatives
 
-### Inline post-fetch check without configuration
+### Hardcoded threshold without configuration
 
-A hardcoded threshold and prompt in `Query::run()` with no config surface.
-This is the minimal version of the proposal.
+`Query::run()` could enforce a fixed byte threshold and prompt without exposing
+configuration fields.
+This is rejected because it cannot be customized for non-interactive runs or
+different workflows; a user attaching a codebase for review needs a different
+limit than one attaching a single file.
 
-Rejected because it doesn't compose with non-interactive mode and gives users no
-way to tune the threshold for their workflow.
-A user attaching large codebases for code review has different needs than one
-attaching a single file.
+### Two-phase handler protocol (`preflight` then `get`)
 
-### Two-phase handler protocol (preflight → get)
+The `Handler` trait could add a `preflight()` method that estimates content size
+before `get()` fetches it, allowing the CLI to prompt between the two phases.
 
-Add a `preflight()` method to the `Handler` trait that returns estimated content
-size before fetching.
-The CLI prompts between preflight and fetch.
+This is rejected because:
 
-Rejected because:
-
-- It requires a breaking change to the `Handler` trait (all five handler
-  implementations need updating).
-- Several handlers cannot estimate size (`cmd` output is unpredictable, MCP
-  resources have no size metadata).
-- Glob expansion in the `file` handler would need to run twice (once for
-  estimation, once for content).
-- The marginal benefit (avoiding fetch of discarded content) doesn't justify the
-  complexity.
-  File I/O is fast and HTTP attachments are uncommon.
+- It is a breaking change to `Handler` across all five handler implementations.
+- Several handlers cannot estimate size ahead of time (`cmd` output is unknown
+  until the command finishes, and MCP resources carry no size metadata).
+- The `file` handler would have to expand globs twice: once to estimate size and
+  once to read content.
+- Avoiding fetches for canceled attachments does not justify the added protocol
+  complexity, since local file I/O is fast and HTTP attachments are uncommon.
 
 ### Token-based threshold
 
-Use estimated token count instead of byte size.
-This would align the threshold with the resource that actually matters (context
-window tokens).
-
-Rejected because token estimation requires a tokenizer dependency, varies by
-model, and is slow for large content.
-Byte size is a reasonable proxy — the relationship between bytes and tokens is
-roughly linear for text content.
+Measuring the threshold in estimated tokens would match the model's context
+window directly.
+This is rejected because token estimation requires a tokenizer dependency,
+varies across models, and is slow on large inputs.
+Byte size is a sufficient proxy because byte and token counts scale roughly
+linearly for text.
 
 ## Non-Goals
 
-- **Per-attachment policies**: This RFD applies a single policy to the aggregate
-  size of all attachments.
-  Per-attachment thresholds or per-handler policies are future work.
+- **Per-attachment or per-handler policies**: A single policy applies to the
+  aggregate size of all resolved attachments.
 
-- **Smart truncation**: Truncation is a simple byte cut.
-  Content-aware truncation (e.g. keeping function signatures, removing method
-  bodies) is out of scope.
+- **Content-aware truncation**: Truncation takes a byte prefix aligned to a
+  UTF-8 boundary.
+  Syntax-aware reduction, such as keeping function signatures while stripping
+  method bodies, is out of scope.
 
-- **Token budget management**: Fitting attachments within a model's context
-  window is a broader problem that involves the system prompt, conversation
-  history, and tool definitions.
-  This RFD addresses only the "surprisingly large attachment" case.
+- **Token budget management**: Fitting a request into a model's context window
+  also depends on the system prompt, conversation history, and tool definitions.
+  This RFD only guards against unexpectedly large attachments.
 
-- **Binary attachment truncation or dropping**: This RFD does not offer to drop
-  or resize binary attachments.
-  The prompt only truncates text content.
+- **Dropping or resizing binary attachments**: The policy only truncates text
+  attachments; it does not resize or drop binary attachments.
 
 ## Risks and Open Questions
 
-- **Default threshold value**: 512 KB is a starting guess.
-  It should be validated against real usage.
-  Too low and users get prompted constantly; too high and the guard is
-  ineffective.
-  The value is configurable, so a wrong default is recoverable.
+- **Default threshold value**: The 512 KB default is an initial estimate that
+  needs validation against real usage.
+  A threshold that is too low prompts on routine queries; one that is too high
+  misses oversized attachments.
+  Users can override `size_threshold` in configuration if the default does not
+  fit their workflow.
 
-- **Glob grouping in the prompt**: The prompt groups files by `source`.
-  For glob patterns, all expanded files share the same source pattern.
-  This works for `file://src/**/*.rs` but may be confusing if multiple glob
-  patterns overlap.
-  Needs validation with real glob-heavy workflows.
+- **Glob grouping in the prompt**: Grouping attachments by `source` combines all
+  files expanded from a glob like `file://src/**/*.rs` under one line, which can
+  be confusing when multiple glob patterns overlap.
+  This grouping needs testing with glob-heavy workflows.
 
-- **Interaction with [RFD 065]**: The typed resource model may change how
-  attachment content is represented.
-  The size policy should work with whatever content type replaces
-  `AttachmentContent`.
-  The `byte_size()` method is simple enough to adapt.
+- **Interaction with [RFD 065]**: If the typed resource model replaces
+  `AttachmentContent`, `Attachment::byte_size()` will need to be updated to read
+  byte lengths from the new representation.
 
-- **Interaction with [RFD 015]**: The simplified handler trait removes stateful
-  `add`/`remove`/`list`.
-  The size policy is independent of handler state — it operates on resolved
-  `Attachment` values — so the two proposals are compatible.
+- **Interaction with [RFD 015]**: [RFD 015] removes stateful
+  `add`/`remove`/`list` methods from `Handler`.
+  Because the size policy operates on resolved `Attachment` values rather than
+  handler state, the two designs do not conflict.
 
 ## Implementation Plan
 
 ### Phase 1: `Attachment::byte_size()` and config types
 
-Add the `byte_size()` method to `Attachment` in `jp_attachment`.
-Add `AttachmentSizeConfig` (threshold, policy, truncate_to) and `SizePolicy`
-enum to `jp_config::conversation::attachment`.
-Wire the new config fields into `PartialConversationConfig`.
-
-Mergeable independently.
-No behavioral change.
+Add `Attachment::byte_size()` in `jp_attachment`.
+Add `AttachmentSizeConfig` (`size_threshold`, `size_policy`, `truncate_to`) and
+the `SizePolicy` enum to `jp_config::conversation::attachment`, and wire the
+fields into `PartialConversationConfig`.
+This phase can merge independently with no behavioral change.
 
 ### Phase 2: Size policy function and truncation
 
-Implement `apply_attachment_size_policy()` and `truncate_attachments()` in a new
-module `jp_cli::cmd::attachment::size_policy`.
-Unit tests for each policy mode and for truncation (UTF-8 boundary handling,
-binary passthrough, marker text).
-
-Mergeable independently.
-The function exists but is not called yet.
+Implement `apply_attachment_size_policy()` and `truncate_attachments()` in
+`jp_cli::cmd::attachment::size_policy`, with unit tests covering each policy
+mode, UTF-8 boundary alignment, binary passthrough, and the truncation marker.
+This phase can merge independently before the function is wired into the CLI.
 
 ### Phase 3: Wire into `Query::run()` and add prompt
 
 Call `apply_attachment_size_policy()` in `Query::run()` between attachment
-resolution and `build_thread()`.
-Add the `InlineSelect` prompt for the `ask` policy.
-Add integration-level tests with `MockPromptBackend`.
-
-Depends on phases 1 and 2.
+resolution and `build_thread()`, add the `InlineSelect` prompt for `ask`, and
+add integration tests using `MockPromptBackend`.
+This phase depends on Phases 1 and 2.
 
 ## References
 
 - [RFD 015: Simplified Attachment Handler Trait][RFD 015]
 - [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049]
 - [RFD 065: Typed Resource Model for Attachments][RFD 065]
-- `MAX_BINARY_SIZE` in `jp_attachment_file_content` — existing 10 MiB hard
-  limit on binary file attachments
+- `MAX_BINARY_SIZE` in `jp_attachment_file_content`: 10 MiB hard limit on binary
+  file attachments
 
 [RFD 015]: ../015-simplified-attachment-handler-trait.md
 [RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
