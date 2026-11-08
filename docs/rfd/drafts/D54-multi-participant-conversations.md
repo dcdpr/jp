@@ -10,50 +10,46 @@
 
 ## Summary
 
-This RFD generalizes JP conversations from one human and one assistant to many
-participants sharing one event stream: several named assistant participants and
-the human deliberating in one room.
+This RFD generalizes JP conversations from a single human-assistant pair to
+multiple named assistant participants and the human sharing one event stream.
 The detailed design is deferred until its prerequisites are accepted; this
-document records the goal, the motivation, and the dependency chain.
+document records the goal, motivation, and dependency chain.
 
 ## Motivation
 
-Several JP workflows need more than one assistant voice in one shared context.
+Several JP workflows need more than one assistant in a shared context.
 A pull-request panel is the motivating example: a reviewer assistant, a triager
-assistant, and the human deliberating in one room, rather than maintaining
-separate conversations and relaying context between them by hand.
+assistant, and the human can deliberate in a single conversation rather than
+maintaining separate conversations and relaying context between them by hand.
 
 An earlier end-to-end exploration of this design surfaced two conclusions.
-First, multi-participant conversations rest on several capabilities that are
-valuable on their own and should land first: assistant-scoped tool
-configuration, explicit request-to-response event linking, inline attachment URI
-parsing (which frees the `@` prefix this design needs for addressing), stable
-event identifiers ([RFD 097]), and negative config deltas (RFD 070).
-Each is independently useful to single-assistant JP and is being written as its
-own RFD.
-Second, once those exist — negative deltas in particular — a blank-sheet
-design is likely to be materially simpler than one layered onto today's
-config-delta model, which is why this RFD does not carry forward the earlier
-draft's design.
+First, multi-participant conversations depend on several capabilities that are
+independently useful in single-assistant JP and warrant their own RFDs:
+assistant-scoped tool configuration, explicit request-to-response event linking,
+inline attachment URI parsing (which frees the `@` prefix for participant
+addressing), stable event identifiers ([RFD 097]), and negative config deltas
+(RFD 070).
+Second, once these prerequisites exist (particularly negative config deltas), a
+blank-sheet design is simpler than one layered onto the current config-delta
+model, so this RFD does not carry forward the earlier draft's design.
 
-This RFD therefore defers its own design until its prerequisites are accepted.
-It exists now to record the goal and to hold the dependency edges in its
-metadata header, so the sequencing is explicit and the design begins from the
-right foundation.
+This RFD therefore defers its detailed design until those prerequisites are
+accepted.
+Recording the goal and the dependency edges in the metadata header keeps the
+sequencing explicit so the design begins from the right foundation.
 
 ## Design
 
-The core of the RFD.
 Describe the proposed solution in enough detail that someone familiar with the
-codebase could implement it.
+codebase can implement it.
 Use diagrams, code snippets, and examples where they help.
 
-Start with what the user or caller sees — the external behavior, API, or
-experience — before describing internals.
+Start with what the user or caller sees (the external behavior, API, or
+experience) before describing internals.
 
 Structure this section however makes sense for the topic.
-Common subsections include: Overview, Design Goals, Architecture, Data Flow, API
-Changes, Configuration Changes.
+Common subsections include Overview, Design Goals, Architecture, Data Flow, API
+Changes, and Configuration Changes.
 
 Every section can be brief.
 A one-sentence Alternatives section is better than no Alternatives section.
@@ -66,23 +62,23 @@ Argue honestly against your own proposal.
 
 ## Alternatives
 
-What other approaches were considered?
-Why were they rejected?
-This section is important — it shows the reader that the solution space was
-explored and gives future readers context for the decision.
+What other approaches were considered, and why were they rejected?
+Documenting rejected options shows that the solution space was explored and
+preserves context for future readers.
 
 ## Non-Goals
 
-What this RFD explicitly does not aim to achieve, even though a reader might
-expect it to.
-This keeps the discussion focused and signals awareness of the broader picture.
+State what this RFD explicitly does not aim to achieve, even where a reader
+might expect it to.
+Explicit non-goals keep the discussion focused and show how the proposal fits
+the broader system.
 
 ## Risks and Open Questions
 
 What could go wrong?
 What don't we know yet?
 What needs to be validated during implementation?
-It's better to surface uncertainty explicitly than to pretend it doesn't exist.
+Surface uncertainty explicitly rather than leaving it implicit.
 
 ## Implementation Plan
 
@@ -101,7 +97,7 @@ API calls), include a brief quantitative estimate.
 
 ## References
 
-Links to related RFDs, issues, documentation, or external resources.
+Link to related RFDs, issues, documentation, or external resources.
 
 [RFD 070]: ../070-negative-config-deltas.md
 [RFD 097]: ../097-stable-event-identifiers.md
