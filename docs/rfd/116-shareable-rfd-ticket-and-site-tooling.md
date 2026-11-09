@@ -30,16 +30,16 @@ The workflow lives in four places today:
 - The loaders, components, and styles under `docs/.vitepress/`.
 
 The recipes have no tests, and the site's tests cover only its metadata reader.
-Only the first two can be shared without copying.
+Only the `ticket` library and `jp-ticket` binary can be shared without copying
+files.
 
-This workflow is useful in other projects too, and right now the only solution
-is to copy all of the above files and recipes into each project, having to sync
-them again when the workflow changes.
-Not every project wants all of it either: one tracks tickets without writing
-RFDs, another has no documentation site.
+Other projects that want this workflow must copy these files and recipes and
+manually sync them whenever the workflow changes.
+Projects also adopt different subsets: one project may track tickets without
+writing RFDs, while another has no documentation site.
 
-The workflow keeps changing, since a new way of writing and reviewing RFDs is in
-development, so the copies would fall behind faster, not slower.
+Because RFD authoring and review tooling is under active development, copied
+files quickly fall out of sync.
 
 ## Design
 
@@ -49,43 +49,44 @@ development, so the copies would fall behind faster, not slower.
 | ----------- | ------------------------------- | ------------------------------------------------------ |
 | `jp ticket` | `crates/plugins/command/ticket` | Tickets: commands, the board, and the `ticket_*` tools |
 | `jp rfd`    | `crates/plugins/command/rfd`    | RFDs: lifecycle, board, and the `rfd_*` tools          |
-| `jp vite`   | `crates/plugins/command/vite`   | The site: `init`, `sync`, and its files                |
+| `jp vite`   | `crates/plugins/command/vite`   | Documentation site: `init`, `sync`, and site assets    |
 
-Each is a `jp-<name>` binary, built as a library with a thin `main` the way
-`jp-ticket` is today, and each runs only as a plugin: `jp` resolves the
-configuration and hands it over in the `init` message ([RFD 072]).
-`jp-ticket` exists; `jp-rfd` and `jp-vite` are new.
-The ticket format stays in `crates/internal/ticket`, and `jp_label` stays a
-separate crate, because conversations use it too.
+Each plugin is a `jp-<name>` binary built as a library with a thin `main`
+function, matching `jp-ticket`.
+All three run only as JP command plugins: `jp` resolves the configuration and
+passes it in the `init` message ([RFD 072]).
+`jp-ticket` already exists; `jp-rfd` and `jp-vite` are new.
+The ticket format remains in `crates/internal/ticket`, and `jp_label` remains a
+separate crate shared with conversations.
 
-Each declares in its manifest the lowest plugin protocol it needs: 12 for `jp
-ticket` and `jp rfd`, which serve tools, and 10 for `jp vite`, which reloads
-configuration.
-One thing is new in `jp`: protocol 13 adds `edit_files`, which opens files in
-the user's editor for `jp ticket edit`.
-`jp ticket` checks for it when it needs it, so a `jp` speaking 12 still runs
-every other command.
+Each plugin manifest declares its minimum protocol version: 12 for `jp ticket`
+and `jp rfd` (which serve tools), and 10 for `jp vite` (which reloads
+configuration).
+Protocol 13 adds `edit_files` to `jp` so `jp ticket edit` can open files in the
+user's editor.
+`jp ticket` checks for protocol 13 only when running `edit`, so a host on
+protocol 12 still runs every other command.
 
-The dependencies run one way:
+Dependencies between the plugins are unidirectional:
 
-- `jp ticket` knows nothing about RFDs.
-  An RFD appears in a ticket only as an opaque id: in `Promoted to`, and in the
-  labels `jp rfd` reads as links to an RFD (see [RFDs](#rfds)).
-- `jp rfd` links the `ticket` library for the two things that cross over:
-  tracking tickets, and seeding a draft from a ticket.
-  Both plugins write through that library, so the ticket format still has one
-  implementation.
-- `jp vite` links neither.
-  Its dev server makes every ticket write through `jp ticket`, including the
-  board moves it writes itself in JavaScript today, and every RFD write through
-  `jp rfd` except the priority board's (see [Site](#site)).
-  Running the site no longer needs `just`.
+- `jp ticket` has no dependency on RFDs.
+  An RFD appears in a ticket only as an opaque ID in the `Promoted to` field and
+  in the labels that `jp rfd` reads as RFD links (see [RFDs](#rfds)).
+- `jp rfd` links the `ticket` crate for the two operations that cross domains:
+  managing tracking tickets and seeding a draft from a ticket.
+  Both plugins write tickets through that crate, keeping a single implementation
+  of the ticket format.
+- `jp vite` links neither crate.
+  Its dev server delegates all ticket writes to `jp ticket` (replacing the
+  JavaScript board-move writer) and delegates all RFD writes to `jp rfd`, except
+  for priority-board layout updates (see [Site](#site)).
+  Running the site no longer requires `just`.
 
 | Entry point                                                 | Caller                              |
 | ----------------------------------------------------------- | ----------------------------------- |
 | `jp ticket …`, `jp rfd …`, `jp vite …`                      | A person at the terminal            |
 | `plugin.command.ticket.<tool>`, `plugin.command.rfd.<tool>` | The assistant, through plugin tools |
-| `jp ticket …`, `jp rfd …`                                   | The site's dev server, to write     |
+| `jp ticket …`, `jp rfd …`                                   | The site's dev server, for writes   |
 
 ### Configuration
 
@@ -129,107 +130,113 @@ dir = "docs"
 repository = "https://github.com/dcdpr/jp"
 ```
 
-Every option is optional, and the values shown are the defaults except four:
-`assistant` defaults to `assistant`, `labels` to no vocabulary,
-`tracking.labels` to none, and `repository` to git's `origin` remote.
-A board without a vocabulary takes any `key` or `key=value` label; one with a
-vocabulary takes only the labels it defines.
+All options are optional.
+The example above shows the default values, except for four settings:
+`assistant` defaults to `"assistant"`, `labels` defaults to an empty vocabulary,
+`tracking.labels` defaults to `[]`, and `repository` defaults to git's `origin`
+remote.
+Without a label vocabulary, the ticket board accepts any `key` or `key=value`
+label; with a vocabulary, it accepts only defined labels.
 
-Each setting has one owner.
-A plugin that needs another's setting reads it from the full configuration in
-`init`: `jp rfd` takes the ticket directory and vocabulary from
-`plugins.command.ticket.options`, and `jp vite` reads all three plugins'
-options.
+Each setting has a single owner.
+When a plugin needs another plugin's settings, it reads them from the full
+configuration in `init`: `jp rfd` reads the ticket directory and label
+vocabulary from `plugins.command.ticket.options`, and `jp vite` reads the
+options of all three plugins.
 
-The label vocabulary moves out of `.labels.json` into `options.labels`, in the
-same shape: a description per key, its values, and the values retired from it.
-A key can also bound how many of its values one ticket carries, with `min` and
-`max`, so `min = 1, max = 1` makes every ticket carry exactly one.
-`values = []` makes a key take any value, such as an RFD number, and `unique`
-holds a key (`"key"`) or each of its values (`"key-value"`) to one ticket on the
-board.
-Whether contributors may redefine it in their own config layers is the
-workspace's call, as for any other setting.
+The label vocabulary moves from `.labels.json` into `options.labels` with the
+same structure: a description, allowed values, and retired values for each key.
+A key can also constrain how many of its values a single ticket may carry using
+`min` and `max` (for example, `min = 1, max = 1` requires every ticket to carry
+the key exactly once).
+Setting `values = []` accepts any value, such as an RFD number, and `unique`
+restricts a key (`"key"`) or each key-value pair (`"key-value"`) to at most one
+ticket on the board.
+As with any other setting, the workspace controls whether contributors may
+override `options.labels` in their local configuration layers.
 
-`run = "allow"` admits a plugin without asking.
-Every plugin defaults to `ask`, and a run with no terminal to ask on, such as a
-dev-server write, refuses a plugin that is neither allowed nor approved with `jp
+`run = "allow"` runs a plugin without prompting.
+Plugins default to `ask`, and non-interactive runs (such as dev-server writes)
+reject any plugin that is neither set to `allow` nor pre-approved with `jp
 plugin approve`.
-An approval is pinned to the binary's contents, so a project that rebuilds the
-plugins often, as JP does, sets `allow` instead.
-A plugin's tools are admitted once when a turn starts, where a terminal usually
-is.
+Because `jp plugin approve` pins the binary hash, projects that rebuild plugins
+frequently, such as JP, set `run = "allow"` instead.
+Plugin tools are authorized once at the start of a turn, when a terminal is
+usually available.
 
-Both document directories must sit inside the VitePress source directory,
-because VitePress serves pages from nowhere else, and `jp vite` refuses a
-configuration that breaks this.
-A directory's route follows its path: with `dir = "docs"`, `docs/ticket` is
-served at `/ticket/`.
+The ticket and RFD directories must reside inside the VitePress source directory
+(`plugins.command.vite.options.dir`), because VitePress serves pages only from
+its source root; `jp vite` rejects configurations that violate this constraint.
+Each directory's URL route mirrors its relative path: with `dir = "docs"`,
+`docs/ticket` is served at `/ticket/`.
 
-Layered `options` merge key by key, so a contributor who overrides `assistant`
-keeps the workspace's `dir`.
+Layered `options` tables merge key by key, so a contributor who overrides
+`assistant` inherits the workspace's `dir`.
 
 ### Tickets
 
-The commands are the existing `jp ticket` commands, with these changes:
+The commands are the existing `jp ticket` commands, with the following changes:
 
-- `edit` takes `--title` and a repeatable `--label` beside `--body` and
-  `--status`, so a script changes several parts in one command.
-  With none of them, it opens the ticket's file in the user's editor, through
-  the host's `edit_files` (protocol 13), and checks the file when the editor
-  closes.
-  `rename` and `label` stay, as the commands to find for changing one part.
-- `label` adds and removes labels rather than replacing them, so a write never
-  drops a label it doesn't name: its `add` keeps what a ticket carries, `set`
-  replaces what the keys it names hold, `rm` takes a label or, for a bare key,
-  every label under it, and `ls` lists them.
-  The labels are bare arguments, so `--id` names the tickets, on either side of
-  the verb; repeat it, or separate ids with commas, to change several tickets at
-  once, all of them or none.
-  Without it, the user picks one.
-  A label written as a ticket id, `T-02wt0kx`, is refused, since it was meant as
-  a ticket.
-  `edit --label` stays the one write that sets the whole list, and names the
-  labels it removed.
-- `status ID STATUS` moves a ticket to any column; `close` stays as the
-  shorthand for Done.
-  With `--before` or `--after` naming a ticket already in that column, it lands
-  next to that ticket; the neighbour is checked before anything is written.
-- The `Blocked by` field is dropped, with nothing in its place: a project that
-  marks blocked tickets does it with a label.
-  Nothing read the field beyond displaying it.
-- The `Kind` field is dropped too, with `add`'s kind argument and picker,
-  `--kind` on `edit`, `list`, and `import`, the kind column of `list` and
-  `board`, and the tools' `kind` parameters.
-  What kind of work a ticket is becomes a label, so each board defines its own
-  kinds; JP's is `type`, which every ticket carries once (`min = 1, max = 1`).
-  `import` takes `--label` for the tickets it creates.
-- `board` prints the board: Todo, In Progress, and Done in turn, each in board
-  order, with Done capped at `board.done_limit`.
-  The columns are stacked rather than side by side, which would wrap below about
-  120 terminal columns.
-- `rank ID (--before | --after) OTHER` moves a ticket next to another in the
-  same column.
-- `import` takes the repository on every call, as `--repo OWNER/NAME`.
-  It is rarely used, and a project that wants a default writes a wrapper.
+- `edit` accepts `--title` and a repeatable `--label` alongside `--body` and
+  `--status`, so scripts can update multiple fields in one command.
+  Called with no flags, `edit` opens the ticket file in the user's editor via
+  the host's `edit_files` operation (protocol 13) and validates the file when
+  the editor closes.
+  `rename` and `label` remain as dedicated commands for single-field updates.
+- `label` adds and removes labels rather than replacing the full set, so an
+  update never drops unmentioned labels: `add` appends to existing labels, `set`
+  replaces all labels under the specified keys, `rm` removes a specific label
+  (or all labels under a bare key), and `ls` lists the ticket's labels.
+  Because labels are positional arguments, `--id` specifies the target tickets
+  on either side of the subcommand.
+  Repeat `--id` or pass comma-separated IDs to update multiple tickets
+  atomically; when `--id` is omitted, an interactive picker prompts the user to
+  select a ticket.
+  A label formatted like a ticket ID (such as `T-02wt0kx`) is rejected as a
+  mistyped ticket argument.
+  `edit --label` remains the only command that replaces the entire label list,
+  and it prints any labels it removed.
+- `status ID STATUS` moves a ticket to any column; `close` remains as a
+  shorthand for moving to Done.
+  Passing `--before` or `--after` with a ticket already in the target column
+  places the moved ticket adjacent to that neighbor, validating the neighbor
+  before writing.
+- The `Blocked by` field is removed without replacement; projects that track
+  blocked tickets can use a label instead.
+  Nothing in the tooling read `Blocked by` beyond displaying it.
+- The `Kind` field is also removed, along with `add`'s kind argument and picker,
+  `--kind` on `edit`, `list`, and `import`, the kind column in `list` and
+  `board`, and the `kind` parameter on tools.
+  Ticket kind becomes a label so each board can define its own taxonomy; JP uses
+  `type`, required once on every ticket (`min = 1, max = 1`).
+  `import` accepts `--label` to apply labels to imported tickets.
+- `board` prints the Todo, In Progress, and Done columns in board order, capping
+  Done at `board.done_limit`.
+  The columns render stacked vertically rather than side by side, which would
+  wrap on terminals narrower than roughly 120 columns.
+- `rank ID (--before | --after) OTHER` moves a ticket adjacent to `OTHER` within
+  the same column.
+- `import` requires `--repo OWNER/NAME` on every call.
+  Because `import` runs infrequently, projects that want a default repository
+  can wrap the command.
 - `init` creates the ticket directory.
-- `migrate` is dropped.
-  Every ticket in JP already uses the collision-resistant identifiers of [RFD
-  102], and no other project has tickets to migrate.
+- `migrate` is removed.
+  Every ticket in JP already uses the collision-resistant identifiers from [RFD
+  102], and no other project has legacy tickets to migrate.
 
-The board order stays in `.board.json` in the ticket directory.
-`board` and `ticket_list` read it; `rank`, `status --before|--after`, and the
-site's board write it.
-A ticket the file doesn't name sorts below the ranked ones, so the file needs no
-setup and `init` doesn't create it.
+Board ordering remains in `.board.json` inside the ticket directory.
+`board` and `ticket_list` read `.board.json`; `rank`, `status --before|--after`,
+and the site's ticket board write it.
+Tickets absent from `.board.json` sort below ranked tickets, so the file
+requires no initial setup and `init` does not create it.
 
-`promote ID --to RFD` keeps its meaning: it links an RFD that already exists and
-closes the ticket.
-Creating the RFD is `jp rfd`'s job.
+`promote ID --to RFD` retains its behavior: it links an existing RFD and closes
+the ticket.
+Creating the RFD belongs to `jp rfd`.
 
 ### RFDs
 
-The commands are the twelve lifecycle recipes this RFD ports, plus `show`,
+The plugin ports the twelve lifecycle recipes from the justfile and adds `show`,
 `rank`, and `init`:
 
 ```sh
@@ -250,113 +257,121 @@ jp rfd rank ID (--before OTHER | --after OTHER | --backlog)
 jp rfd init
 ```
 
-The recipes are the reference for what each command does to the repository,
-which files change and how, not for how it does it.
-They grew one at a time: ids are resolved in at least three places
+The justfile recipes define the expected repository changes for each command,
+not the implementation structure.
+Those recipes grew piecemeal: IDs are resolved in at least three places
 (`_rfd-resolve`, a helper inside `_rfd-link`, and inline in `rfd-extend`), and
-every recipe that touches the metadata header edits it with its own `sed` or
-`awk`.
-The port has one id resolver, one metadata-header editor, and one relationship
-writer behind `extend`, `require`, and `supersede`, and it simplifies an
-interface wherever the recipe's shape came from shell rather than from the
-workflow.
-An outcome that changes on purpose is listed in this RFD before it lands.
-The ones made here:
+every recipe that modifies the metadata header runs its own `sed` or `awk`
+script.
+`jp rfd` consolidates these into a single ID resolver, a single metadata-header
+editor, and a shared relationship writer for `extend`, `require`, and
+`supersede`, while simplifying command interfaces that were shaped by shell
+limitations.
+Intentional behavioral changes from the recipes are:
 
 - `draft --from-ticket` replaces `just ticket-promote`.
-- A tracking ticket names its RFD in a label, `tracking-rfd=116`, and any other
-  ticket whose work belongs to an RFD in another, `relevant-rfd=116`, where the
-  recipes used an `Implements` field and a `type=tracking` label.
-  Both keys are settings, `tracking.key` and `relevant.key`, as are the labels a
-  tracking ticket is filed with besides, `tracking.labels`.
-  `renumber` rewrites both labels along with the RFD's id, which the recipe
-  never did for `Implements`.
-- `extend` takes its arguments in the same order as `require`, source first.
-  `jp rfd extend 116 100` records that 116 extends 100, and `jp rfd require 116
-  072` that 116 requires 072.
-  `just rfd-extend NNN MMM` reads the other way round, meaning MMM extends NNN.
-  A relationship written backwards still parses and silently changes the
-  promotion gates, so the two commands share one order.
-- `promote` to Implemented removes the `Requires` entries that name the promoted
-  RFD from every dependent, drafts included.
-  The recipe finds dependents through the promoted RFD's `Required by` line,
-  which never lists a draft, so a draft's `Requires` survives and fails the docs
-  build.
-  The port finds dependents by reading every RFD's `Requires`.
-- `abandon` writes the notice block [RFD 001] specifies, where the recipe added
-  a one-line `> **Abandoned**:` note.
-- A field a command adds goes above `Summary`, which [RFD 001] keeps last.
-  The recipes put `Superseded by` and `Supersedes` after `Date`.
-- An RFD added to a relationship field that wraps goes after its last line; the
-  recipe appended it to the first, inside the wrapped value.
-- `supersede` adds to an RFD's `Supersedes` rather than replacing it, so an RFD
-  that supersedes two keeps both.
-- A title is written as given.
-  The recipe built the heading with `sed`, so a `/` or `&` in a title broke it,
-  and `AUTHOR` or `DATE` in one was replaced.
-- A rewritten reference matches the whole slug: a longer slug that starts with
-  the old one is left alone, where the recipes rewrote its start.
-  `rename` rewrites a link written without `.md` too, as `renumber` and
-  `promote` do.
-- `jp -F json rfd list` gives each RFD's `file`, relative to the workspace,
-  where the recipe gave its site `path`: `jp rfd` doesn't know where a site
-  serves it.
-  Neither plugin has a `--json` flag: `jp -F json` makes `list` and `show` print
-  JSON.
-- Ids are read leniently, so `42`, `RFD 042`, `d5`, and `D5` each name an RFD.
-  The recipe found no draft by `D5`.
-- A missing `drafts/` directory holds no drafts, and an unreadable
-  `.priority.json` is reported, with every RFD listed as unranked.
-  `just rfd-list` failed on the first and read the second as empty.
-- Accepting an RFD with nobody to ask files no tracking ticket, where the recipe
-  filed one: the host answers a prompt nobody saw the same way as one cancelled.
-- `track` uses the first of two tracking tickets by id and warns, naming both,
-  where the recipe took the first silently.
+- Tracking tickets reference their RFD with a `tracking-rfd=116` label, and
+  other related tickets use `relevant-rfd=116`, replacing the `Implements`
+  metadata field and hardcoded `type=tracking` label used by the recipes.
+  Both label keys (`tracking.key` and `relevant.key`) and the extra labels
+  applied to new tracking tickets (`tracking.labels`) are configurable.
+  `renumber` updates both labels when an RFD's ID changes, whereas the recipe
+  never updated `Implements`.
+- `extend` takes its arguments in the same order as `require`, with the source
+  RFD first: `jp rfd extend 116 100` records that 116 extends 100, and `jp rfd
+  require 116 072` records that 116 requires 072.
+  `just rfd-extend NNN MMM` used the reverse order (MMM extends NNN).
+  Because a reversed relationship still parses and silently alters promotion
+  gates, both commands now use the same argument order.
+- Promoting an RFD to Implemented removes `Requires` entries pointing to it from
+  all dependent RFDs, including drafts.
+  The recipe located dependents via the promoted RFD's `Required by` field,
+  which omits drafts, leaving stale `Requires` entries in drafts that then
+  failed the docs build.
+  `jp rfd` scans the `Requires` field of every RFD directly.
+- `abandon` writes the multi-line notice block specified by [RFD 001], whereas
+  the recipe wrote a single-line `> **Abandoned**:` note.
+- Commands insert new metadata fields above `Summary`, preserving [RFD 001]'s
+  requirement that `Summary` come last.
+  The recipes inserted `Superseded by` and `Supersedes` immediately after
+  `Date`.
+- Appending an RFD to a line-wrapped relationship field places it after the
+  final wrapped line; the recipe appended it to the first line, mid-value.
+- `supersede` appends to an RFD's `Supersedes` field rather than overwriting it,
+  so an RFD that supersedes multiple RFDs retains all of them.
+- Titles are written verbatim.
+  Because the recipe constructed headings with `sed`, `/` or `&` characters
+  broke the substitution and literal `AUTHOR` or `DATE` substrings were
+  expanded.
+- Reference rewriting matches complete slugs: a longer slug that shares the old
+  slug as a prefix is left untouched, whereas the recipes rewrote the prefix.
+  `rename` also updates links that omit the `.md` extension, matching `renumber`
+  and `promote`.
+- `jp -F json rfd list` outputs each RFD's workspace-relative `file` path
+  instead of the recipe's site `path`, because `jp rfd` does not know the site's
+  URL layout.
+  Neither `jp rfd` nor `jp ticket` defines a `--json` flag; passing global `jp
+  -F json` formats `list` and `show` output as JSON.
+- ID parsing is case-insensitive and flexible: `42`, `RFD 042`, `d5`, and `D5`
+  all resolve, whereas the recipe rejected `D5`.
+- A missing `drafts/` directory is treated as having no drafts, and an
+  unreadable `.priority.json` produces a warning and lists all RFDs as unranked.
+  `just rfd-list` failed when `drafts/` was missing and silently treated an
+  unreadable `.priority.json` as empty.
+- Promoting an RFD to Accepted in a non-interactive session skips creating a
+  tracking ticket, whereas the recipe created one unconditionally; the host
+  treats an unprompted confirmation the same as a declined one.
+- When multiple tracking tickets match an RFD, `track` selects the first by ID
+  and emits a warning naming both, whereas the recipe took the first silently.
 
-Three delegations carry over:
+Three integrations replace shell subprocesses:
 
-- `promote` reflows the promoted file with `comfort` and offers to file a
-  tracking ticket at Accepted.
-  `comfort` becomes a library call rather than a subprocess.
-- `track` reads the Implementation Plan by asking the host for a structured
-  `query` in a conversation that expires (`schema` and `expires_in`, protocol
-  11), and writes the `<!-- rfd-plan: pending -->` marker when that fails.
-  The recipe's `jp query` subprocess goes.
-- `list` needs the board: RFD metadata, `.priority.json`, and which tracking
-  tickets are In Progress.
-  Today `assembleBoard` in `rfd-shared.mjs` builds it.
-  `jp rfd` ports the reading side of that function and none of its validation.
+- `promote` formats the promoted file with `comfort` as a Rust library call
+  rather than a subprocess, and offers to create a tracking ticket when
+  promoting to Accepted.
+- `track` extracts the Implementation Plan by requesting a structured `query`
+  from the host in an expiring conversation (`schema` and `expires_in`, protocol
+  11), writing the `<!-- rfd-plan: pending -->` marker if the query fails.
+  This replaces the recipe's `jp query` subprocess.
+- `list` assembles the priority board from RFD metadata, `.priority.json`, and
+  In Progress tracking tickets, porting the read path of `assembleBoard` from
+  `rfd-shared.mjs` without its validation checks.
 
-`draft --from-ticket ID` seeds the draft from the ticket's title and
-description, then records `Promoted to` on the ticket and closes it.
-It is safe to repeat: a ticket that already names an existing RFD reports it,
-and a draft seeded by an interrupted run is found by its `Promoted from ticket`
-line and linked rather than seeded twice.
+`draft --from-ticket ID` seeds a draft from the ticket's title and description,
+sets `Promoted to` on the ticket, and closes the ticket.
+The command is idempotent: if the ticket already references an existing RFD,
+`draft --from-ticket` reports that RFD, and if an earlier run was interrupted
+after creating the draft, it locates the draft by its `Promoted from ticket`
+field and links it instead of creating a duplicate.
 
-`rank ID --before OTHER` and `--after OTHER` put ID next to OTHER on the
-priority board, in OTHER's milestone group, so a backlog RFD ranked this way
-becomes planned; `rank ID --backlog` moves it back.
-It refuses an RFD at a terminal status, which the board does not place.
-Milestones are created, renamed, and removed on the site.
+`rank ID --before OTHER` and `--after OTHER` position `ID` adjacent to `OTHER`
+on the priority board within `OTHER`'s milestone group, promoting a backlog RFD
+to planned; `rank ID --backlog` moves it back to the backlog.
+`rank` rejects RFDs in terminal statuses, which do not appear on the priority
+board.
+Milestones are created, renamed, and deleted in the web UI.
 
-`init` creates the RFD directory with the templates, an empty `.priority.json`,
-and a `drafts/` directory.
-It does not write an RFD 001: the process document is each project's own.
+`init` creates the RFD directory, category templates, an empty `.priority.json`,
+and the `drafts/` subdirectory.
+It does not generate an RFD 001, because each project defines its own RFD
+process.
 
-Tracking needs tickets.
-In a project without a ticket directory, `promote` skips the tracking offer,
-`list` shows no RFD in development, and `track`, `start`, `stop`, and `draft
---from-ticket` fail with a message saying so.
-A board that defines labels has to define the tracking key, open to any value
-(`values = []`), for a ticket to carry it: `track` and `start` refuse until it
-does, printing the entry to add, and `promote` skips the offer and says why.
-`show` lists the tickets naming an RFD, the tracking one first, and names the
-labels a missing tracking ticket takes.
+RFD tracking requires the ticket workflow.
+In a repository without a ticket directory, `promote` skips the tracking-ticket
+prompt, `list` reports no RFDs in development, and `track`, `start`, `stop`, and
+`draft --from-ticket` fail with an error explaining that tickets are not
+configured.
+When the ticket board defines a label vocabulary, that vocabulary must include
+the tracking key with `values = []`; until it does, `track` and `start` fail and
+print the required configuration snippet, and `promote` skips the tracking
+prompt with an explanation.
+`show` lists all tickets linked to the RFD (tracking ticket first) and, when no
+tracking ticket exists, prints the labels required to create one.
 
 ### Parity
 
-Every verb that applies to both document kinds exists for both, and every
-command that makes sense for the assistant exists as a tool.
+Every operation that applies to both document types is available on both
+plugins, and every command useful to the assistant is exposed as a tool.
 Bold entries are new.
 
 | Verb             | `jp rfd` CLI / tool                                       | `jp ticket` CLI / tool                        |
@@ -378,46 +393,50 @@ Bold entries are new.
 | Ticket to RFD    | **`draft --from-ticket`** / `rfd_draft` with **`ticket`** | `promote --to` / not a tool                   |
 | Tool definitions | **`tools init`**, **`tools sync`**                        | **`tools init`**, **`tools sync`**            |
 
-Tracking an RFD is ticket work, so the assistant does it with the ticket tools:
-`rfd_show` names the labels a missing tracking ticket takes, `ticket_create`
-files it, and `ticket_edit` moves it to start or stop the work.
-Tools of its own would cost three definitions on every turn for that.
+Because RFD tracking operates on tickets, the assistant manages tracking tickets
+through the ticket tools: `rfd_show` reports the labels required for a missing
+tracking ticket, `ticket_create` creates it, and `ticket_edit` updates its
+status to start or stop development.
+Dedicated RFD tracking tools would add three extra tool definitions to every
+turn.
 
-One tool, `ticket_edit`, makes every change to a ticket: it takes any of
-`title`, `description`, `status`, `add_labels`, and `remove_labels`, and changes
-only what it is given.
-Labels are added and removed rather than replaced, so a call can't drop one it
-doesn't name, and a key a ticket carries one of changes in one call: the bare
-key in `remove_labels`, the new label in `add_labels`.
-Each tool a model is offered costs context on every turn, and providers cap how
-many it can be offered; a command costs nothing until it runs, so the CLI keeps
-its separate commands.
+A single tool, `ticket_edit`, handles all ticket modifications: it accepts
+`title`, `description`, `status`, `add_labels`, and `remove_labels`, updating
+only the specified fields.
+Labels are added and removed incrementally so a call never drops unmentioned
+labels, and a single-valued label key can be replaced in one call by passing the
+bare key in `remove_labels` and the new `key=value` pair in `add_labels`.
+Because every tool definition consumes context on every turn and providers cap
+total tool counts, consolidating mutations into `ticket_edit` saves context; CLI
+subcommands incur no per-turn cost and remain separate.
 
-For the same reason, `ticket_show` returns a ticket's metadata unless the call
-asks for its `description` or `comments`, and ends by naming what it left out.
-There is no tool listing the label vocabulary: the label parameters of
-`ticket_create`, `ticket_edit`, and `ticket_list` already offer every value.
-`ticket_list` returns tickets in board order, so its first Todo line is the next
-ticket to work on.
-It pages a long listing, and its `query` finds the tickets whose title,
-description, or comments mention a piece of text.
+For the same reason, `ticket_show` returns only a ticket's metadata unless
+`description` or `comments` are requested, and notes any omitted sections at the
+end of its output.
+No separate tool lists the label vocabulary, because the label parameter schemas
+on `ticket_create`, `ticket_edit`, and `ticket_list` already enumerate the
+allowed values.
+`ticket_list` returns tickets in board order (making the first Todo entry the
+highest-priority item), paginates long results, and supports a `query` parameter
+that searches ticket titles, descriptions, and comments.
 
-`import`, `refresh`, `delete`, `board`, and `rank` stay CLI-only.
-`import` reaches GitHub over the network, `refresh` rewrites what the current
-branch introduced, and deleting and prioritizing are the user's calls.
-`board` would tell the assistant nothing `ticket_list` doesn't.
+`import`, `refresh`, `delete`, `board`, and `rank` remain CLI-only.
+`import` fetches from GitHub over the network, `refresh` rewrites tickets
+introduced on the current branch, and deleting or reprioritizing tickets is left
+to the user.
+`board` provides no information beyond what `ticket_list` already returns.
 
-A tool never opens the host's composer or picker.
-A missing argument is an error naming the argument.
+Tools never open the host's interactive composer or picker; a missing required
+argument returns an error naming that argument.
 
 ### Tools
 
-`jp ticket` and `jp rfd` serve their tools as plugin tools ([RFD 072][RFD
-072-2]).
-JP starts the plugin for each call and hands it the call in `init`, together
-with the plugin's options as the query resolved them: nested `.jp.toml` files,
-conversation configuration, and `--cfg` all reach it.
-`ticket.rs` leaves `jp-tools`.
+`jp ticket` and `jp rfd` serve their tools as command-plugin tools ([RFD
+072][RFD 072-2]).
+For each tool call, JP spawns the plugin and passes the tool invocation and
+resolved plugin options in `init`, including overrides from nested `.jp.toml`
+files, conversation configuration, and `--cfg`.
+`ticket.rs` is removed from `jp-tools`.
 
 ```toml
 [conversation.tools.ticket_create]
@@ -425,198 +444,218 @@ source = "plugin.command.ticket.create"
 style.parameters = "tool"
 ```
 
-The plugin names its tools without a prefix (`create`, `show`, `list`), since
-the source already names the plugin.
-`style.parameters = "tool"` has the plugin describe a call before it runs, which
-is how `ticket_create` previews the ticket it will write today.
-A question a tool asks ends the call, and JP runs the plugin again with the
-answer, so the plugin keeps no state between calls.
-The tools keep their current behavior, including `ticket_create` asking for a
-shorter title when the title would not fit the filename, and
+Within the plugin, tool names omit the domain prefix (`create`, `show`, `list`),
+because the `source` path already identifies the plugin.
+Setting `style.parameters = "tool"` delegates call-preview formatting to the
+plugin, preserving `ticket_create`'s existing ticket preview.
+When a tool prompts the user with a question, the plugin process exits and JP
+re-invokes it with the user's answer, so plugins maintain no state across calls.
+The tools preserve their existing behavior, including `ticket_create`'s prompt
+for a shorter title when the generated filename would exceed
 `options.max_title_length`.
-Every tool holds to the call's access policy, refusing to read or write a
-document directory the policy doesn't grant, which the `jp-tools` handlers never
-checked.
+Every tool enforces the call's filesystem access policy, refusing to read or
+write a document directory that the policy does not grant (a check the
+`jp-tools` handlers omitted).
 
-The plugin owns what each tool does; each project owns its tool configuration.
-A project can expose `create` as `track`, choose its own `summary` text, and set
-its own `options.max_body_words`.
-The `source` name is the contract between the two: `[conversation.tools.track]`
-with `source = "plugin.command.ticket.create"` reaches the plugin as `create`.
+The plugin defines tool behavior, while each project controls its tool
+configuration.
+A project can expose `create` under the name `track`, customize its `summary`
+text, and set `options.max_body_words`.
+The `source` field connects the two: `[conversation.tools.track]` with `source =
+"plugin.command.ticket.create"` invokes the plugin's `create` handler.
 
-`tools init PATH` writes a starting set of definitions into the directory PATH
-names, one file per tool.
-It refuses to overwrite a file that exists.
-PATH has no default, because where a project keeps its tool configuration is its
-own layout; the workspace configuration has to load that directory for the tools
-to appear.
+`tools init PATH` writes default tool definitions into the directory at `PATH`,
+one file per tool, and refuses to overwrite existing files.
+`PATH` has no default because each project chooses where to store its tool
+configurations; the workspace configuration must load `PATH` for the tools to
+take effect.
 
-`tools sync PATH` regenerates what the definitions mirror from configuration:
-the label tokens offered by the `ticket_*` tools, and the categories offered by
-`rfd_draft` and `rfd_list`.
-It finds the tools by their source, not their key: a tool keyed `ticket_create`
-and one keyed `track`, both with `source = "plugin.command.ticket.create"`, get
-the tokens, each under its own key.
-It writes only into a tool whose definition declares the parameter, and names
-the ones it leaves out: values alone would make a parameter without a type,
-which drops the tool from every conversation.
-When the board bounds a key, it describes the bounds beside the labels of
-`ticket_create` and `ticket_edit`, and marks `ticket_create`'s labels required
-when a key needs one, so the assistant knows before its first call.
-It rewrites only the file it generated, and rewrites it whole, so edits to the
-definitions survive and a tool removed from the configuration drops out of it.
+`tools sync PATH` updates the generated parameter schemas to match the project's
+configuration: the allowed label tokens on `ticket_*` tools, and the allowed
+categories on `rfd_draft` and `rfd_list`.
+It matches tools by `source` rather than by their table key, so both
+`[conversation.tools.ticket_create]` and `[conversation.tools.track]` with
+`source = "plugin.command.ticket.create"` receive updated label tokens under
+their respective keys.
+`tools sync` writes only to tools whose base definition already declares the
+parameter, warning about any skipped tools (writing enum values without a base
+parameter type would produce an untyped parameter and cause JP to drop the tool
+from conversations).
+When a label key defines `min` or `max` bounds, `tools sync` documents those
+bounds in the `ticket_create` and `ticket_edit` parameter descriptions and marks
+`labels` as required on `ticket_create` whenever a key sets `min >= 1`, so the
+model sees the constraint before its first call.
+`tools sync` overwrites only its own generated file in full, preserving
+hand-edited tool definitions while removing entries for deleted tools.
 It replaces `just ticket-labels-sync`.
 
-Both commands go once a plugin can describe the tools it serves (T-0vmm72y).
+Both `tools init` and `tools sync` will be retired once plugins can provide
+their own tool definitions directly (T-0vmm72y).
 
 ### Site
 
-`jp vite init` creates a VitePress setup in the source directory of an empty or
-existing repository: `package.json`, `.vitepress/config.mts`, the theme entry,
-and a homepage.
-It asks for the site's title and description through the host's composer, and
-writes them into `config.mts` and the homepage, so a new site does not start out
-as JP's.
-Like the other `init` commands, it refuses to overwrite a file that exists.
+`jp vite init` initializes a VitePress setup in the source directory of an empty
+or existing repository, creating `package.json`, `.vitepress/config.mts`, the
+theme entry point, and a homepage.
+It prompts for the site's title and description via the host's composer and
+writes them into `config.mts` and the homepage, so a new site does not start
+with JP's branding.
+Like the other `init` commands, `jp vite init` refuses to overwrite existing
+files.
 
-The site files split into two groups:
+Site files divide into two categories:
 
-- **Owned by `jp vite`.** Everything under `.vitepress/jp-vite/`: the loaders
-  for both document kinds, components, styles, the dev-server middleware, a
-  config fragment, and the settings snapshot.
-- **Owned by the project.** `config.mts`, the theme entry, the homepage, and
-  every page, the RFD and ticket pages included.
-  `config.mts` imports the fragment and merges it; the theme entry registers the
-  components from `jp-vite/theme`.
-  `init` writes both once and never touches them again.
+- **Owned by `jp vite`.** Everything under `.vitepress/jp-vite/`: the RFD and
+  ticket data loaders, Vue components, styles, dev-server middleware, a config
+  fragment, and the settings snapshot (`jp-vite/settings.json`).
+- **Owned by the project.** `config.mts`, the theme entry point, the homepage,
+  and all content pages (including the RFD and ticket landing pages).
+  `config.mts` imports and merges the `jp-vite` config fragment, and the theme
+  entry point registers the components from `jp-vite/theme`.
+  `init` creates both files once and never modifies them again.
 
-`sync` creates the pages for each workflow the project has when they are
-missing: the index, priority, and drafts index pages in the RFD directory, and
-the index and board pages in the ticket directory.
-A page that exists is never changed, so a project writes its own around the
-list.
-Each page renders its list with one tag the theme entry registers, so it reads
-the same wherever the page sits:
+`sync` creates any missing workflow landing pages: the index, priority board,
+and drafts index pages in the RFD directory, and the index and board pages in
+the ticket directory.
+Existing pages are never modified, so projects can add custom prose around the
+embedded component.
+Each page renders its view using a globally registered Vue component, regardless
+of where the page sits in the directory tree:
 
-- `<RfdIndex />` and `<RfdDraftIndex />`, the published and the draft RFDs.
-- `<RfdBoard />`, the priority board.
-- `<TicketIndex />` and `<TicketBoard />`, the tickets and their board.
+- `<RfdIndex />` and `<RfdDraftIndex />` for published and draft RFDs.
+- `<RfdBoard />` for the RFD priority board.
+- `<TicketIndex />` and `<TicketBoard />` for the ticket list and kanban board.
 
-Both loaders ship together, because the RFD board reads tracking tickets.
-Without a ticket directory the ticket loader reads no tickets, as it does today.
+The RFD and ticket data loaders always ship together because the RFD priority
+board reads tracking tickets.
+When no ticket directory exists, the ticket loader returns an empty list,
+matching its existing behavior.
 
-The owned files live in the crate, under `crates/plugins/command/vite/site/`,
-and are built into the binary.
-JP syncs from them like any other project, so a change to a component is made in
-the crate, not in `docs/.vitepress/jp-vite/`.
+The `jp-vite`-owned files live under `crates/plugins/command/vite/site/` and are
+embedded into the `jp-vite` binary at compile time.
+JP syncs its own site from the binary like any external project, so component
+edits happen in the crate source rather than under `docs/.vitepress/jp-vite/`.
 
-The loaders also run without `jp`: `vitepress build` in CI reads the documents,
-filters them by category, and validates their labels, with no configuration to
-resolve.
-`sync` therefore writes what they need into the owned `jp-vite/settings.json`:
-both directories, the categories, the label vocabulary, the Done limit, the
-repository, and the revision `jp-vite` was built from.
-A link to a repository file points at the default branch (`/blob/HEAD/`), since
-`repository` names no branch; JP's site links to `main` today.
+Because static site builds (`vitepress build` in CI) run without `jp`, the data
+loaders must read documents, filter by category, and validate labels without
+querying JP's configuration at build time.
+`sync` therefore writes the resolved configuration into `jp-vite/settings.json`:
+the RFD and ticket directory paths, RFD categories, label vocabulary,
+`board.done_limit`, repository URL, and the git revision from which `jp-vite`
+was built.
+Repository file links point to `/blob/HEAD/` because `repository` does not
+specify a branch (replacing the hardcoded `main` branch in JP's existing site).
 
-`jp vite sync` rewrites the owned files from the binary, the snapshot among
-them, and creates the pages a workflow is missing, including one added since the
-last sync.
-It lists the files it will write and asks once before writing any of them.
-It requires the project to be in git, and refuses when an owned file is modified
-or untracked, since git cannot restore an edit it never recorded.
-`--force` overwrites them anyway.
-On a clean tree, `git diff` shows what the sync changed and `git checkout`
-restores the last committed version.
-`--yes` skips the question for scripts; it does not imply `--force`.
+`jp vite sync` writes all `jp-vite`-owned files (including `settings.json`) from
+the binary and creates any missing workflow pages, including pages for workflows
+enabled since the previous sync.
+Before writing, `sync` lists the target files and prompts once for confirmation.
+`sync` requires a git repository and aborts if any owned file has unstaged
+modifications or is untracked, because git cannot restore uncommitted edits.
+Passing `--force` overwrites modified or untracked files anyway.
+On a clean working tree, `git diff` shows the synced changes and `git checkout`
+restores the previous version.
+Passing `--yes` skips the confirmation prompt for scripts without implying
+`--force`.
 
-`sync --check` writes nothing, and fails when any owned file differs from what
-`sync` would write, or a page is missing.
-A CI job with `jp` installed runs it to catch a configuration change committed
-without its sync.
+`sync --check` performs no writes and exits non-zero if any owned file differs
+from what `sync` would write or if any workflow page is missing.
+CI jobs with `jp` installed can run `jp vite sync --check` to catch
+configuration changes committed without a corresponding `sync`.
 
-`jp vite serve` runs the dev server.
-It runs the checks in [Version Skew](#version-skew), starts `vitepress dev` as
-its child, and stops it before it exits.
-While it runs, it asks the host for the configuration again every two seconds
-(`read_config` with `reload`, protocol 10) and rewrites the snapshot when the
-settings in it change, so a changed directory or vocabulary reaches the site
-without a restart.
-The loaders watch the snapshot, and the middleware reads it on every request.
-The snapshot holds nothing written by hand, so this rewrite skips the refusal
-`sync` makes for a modified owned file.
+`jp vite serve` runs the development server.
+It executes the [Version Skew](#version-skew) checks, spawns `vitepress dev` as
+a child process, and terminates the child process on exit.
+While running, `jp vite serve` polls the host for configuration changes every
+two seconds (`read_config` with `reload`, protocol 10) and updates
+`jp-vite/settings.json` whenever the relevant settings change, propagating
+directory or label-vocabulary edits to the live site without a restart.
+The VitePress loaders watch `settings.json`, and the dev-server middleware reads
+it on every request.
+Because `settings.json` is never edited by hand, live updates overwrite it
+without triggering `sync`'s dirty-file check.
 
-The middleware accepts writes only under `jp vite serve`, which marks the
-child's environment; a dev server started another way is read-only.
-Every write passes the snapshot's directories as `--cfg` overrides, so a
-configuration changed between two polls cannot move a write away from the
-directory the site displays.
-The RFD priority board writes `.priority.json` itself, into the RFD directory
-the snapshot names: it posts the whole layout, milestones included, which no `jp
-rfd` command takes.
+The dev-server middleware accepts write requests only when started by `jp vite
+serve`, which sets an environment variable on the child process; a `vitepress
+dev` server started directly is read-only.
+Every write command receives the directory paths from `settings.json` as `--cfg`
+overrides, ensuring that a configuration change between polls cannot redirect
+writes away from the directory currently displayed in the browser.
+The RFD priority board writes `.priority.json` directly to the RFD directory
+specified in `settings.json`, because it posts the complete board layout
+(including milestones), which no `jp rfd` CLI subcommand accepts.
 
-A drag on the ticket board is one command: `jp ticket status`, with `--before`
-or `--after` naming the card it landed next to, so the column and the place in
-it change together or not at all.
-Only the moved card gets a rank, where the board writes every column's whole
-order today.
+Dragging a card on the ticket board runs a single command: `jp ticket status`
+with `--before` or `--after` naming the adjacent card, updating the ticket's
+column and rank atomically.
+Only the moved card's rank is updated, whereas the existing JavaScript handler
+rewrites the entire ordering of every column.
 
-The priority board writes no ticket.
-It shows which RFDs are in development, and links each RFD with tickets to the
-ticket board narrowed to them, `?any-label=tracking-rfd=116` and
-`&any-label=relevant-rfd=116` with the configured keys.
-The ticket board filters by labels and knows nothing about RFDs: `?label=` keeps
-the tickets carrying every term, `?any-label=` those carrying any.
-Work starts by dragging the tracking ticket to In Progress there.
-A dev-server request runs `jp` without a terminal, and one still running after
-15 seconds is stopped.
+The RFD priority board never writes to tickets.
+It displays which RFDs are in development and links each RFD that has associated
+tickets to a filtered view of the ticket board (`?any-label=tracking-rfd=116`
+and `&any-label=relevant-rfd=116`, using the configured label keys).
+The ticket board filters by label without any RFD-specific logic: `?label=`
+matches tickets carrying all specified labels, and `?any-label=` matches tickets
+carrying at least one.
+Contributors start work on an RFD by dragging its tracking ticket into the In
+Progress column on the ticket board.
+Dev-server write requests invoke `jp` without a terminal and kill any subprocess
+that runs longer than 15 seconds.
 
-Styling and component changes therefore land in `jp vite`, and every project
-receives them on its next sync.
+All styling and component updates land in `jp vite` and reach adopting projects
+on their next `jp vite sync`.
 
 ### Version Skew
 
-The synced loaders read what `jp ticket` and `jp rfd` write, so plugins
-installed at different revisions can disagree about a format.
-Installing them in one command at one revision avoids this (see
+Because the synced VitePress loaders parse files written by `jp ticket` and `jp
+rfd`, running plugins built from different git revisions can cause format
+mismatches.
+Installing all plugins in a single command at the same revision avoids skew (see
 [Installation](#installation)).
 
-When they still differ, the site says so rather than misreading.
-Before it starts `vitepress dev`, `jp vite serve` runs two checks:
+When a mismatch occurs, `jp vite serve` surfaces the error instead of misreading
+files.
+Before spawning `vitepress dev`, `jp vite serve` runs two checks:
 
-- It compares its own revision with the one `jp ticket` and `jp rfd` report, for
-  each workflow whose directory exists.
-  A plugin missing for an existing directory fails the check, naming the command
-  that installs it; a tickets-only project never needs `jp rfd`.
-- It compares every owned file but the snapshot with what `sync` would write, so
-  loaders left behind by an upgraded `jp-vite` are caught.
+- For each workflow whose document directory exists, it compares its own build
+  revision against the revision reported by `jp ticket` or `jp rfd`.
+  If the corresponding plugin binary is missing for an existing directory, the
+  check fails and prints the installation command; a tickets-only repository
+  does not require `jp rfd`.
+- It compares every `jp-vite`-owned file (except `settings.json`) against the
+  embedded version in the binary, catching stale loaders left behind after
+  upgrading `jp-vite`.
 
-On a failure, the site still starts: the RFD and ticket pages show the error and
-the command that fixes it in place of their content, and the dev server refuses
-writes.
+If either check fails, `vitepress dev` still starts, but the RFD and ticket
+pages render the error message and remediation command in place of their normal
+content, and the dev-server middleware rejects all write requests.
 
 ### Validation
 
-The site's validation stays in JavaScript for now: duplicate ids, the
-relationship graph and its status gate, board consistency, summaries, unknown
-labels, checked against the vocabulary in the snapshot, and link labels that
-name no RFD, or name one by an id spelled another way.
-The link check runs with the RFD loaders, which read the tickets anyway, so the
-ticket loaders stay free of RFDs.
-The loaders that run it are owned files, so `jp vite sync` distributes them
-unchanged.
+Site validation remains in JavaScript for now: duplicate IDs, relationship-graph
+integrity and status gates, board consistency, required `Summary` fields,
+unknown labels (checked against the vocabulary in `settings.json`), and RFD link
+labels on tickets that reference a nonexistent RFD or use a non-canonical ID
+format.
+The ticket-to-RFD link check runs inside the RFD loaders, which already read
+tickets, keeping the ticket loaders independent of RFDs.
+Because the loaders are `jp-vite`-owned files, `jp vite sync` distributes the
+validation logic unchanged.
 
-A new way of writing and reviewing RFDs is in development and brings its own
-checker.
-Porting validation to Rust waits until that has settled, and gets its own RFD.
+New RFD authoring and review tooling is under development and includes its own
+validator.
+Porting RFD validation to Rust is deferred until that tooling settles and will
+be covered in a separate RFD.
 
-The ticket rules are the exception, because they already live in Rust: every
-label write is held to the vocabulary, its bounds, and `unique`.
-`jp ticket check` holds every ticket to them with the same code, so a project
-catches a ticket edited by hand, or filed before a rule existed, without
-building its site.
-The ticket loaders keep their JavaScript copy, which `vitepress build` runs
-without `jp`.
+Ticket validation is the exception because its rules already live in Rust: every
+label mutation validates against the configured vocabulary, `min`/`max` bounds,
+and `unique` constraints.
+`jp ticket check` runs the same validation across all existing tickets, allowing
+projects to catch invalid hand-edits or tickets created before a constraint was
+added without running a full site build.
+The ticket loaders retain their JavaScript validation for static `vitepress
+build` runs that execute without `jp`.
 
 ### Installation
 
@@ -624,192 +663,208 @@ without `jp`.
 cargo install --git https://github.com/dcdpr/jp --rev <sha> jp-ticket jp-rfd jp-vite
 ```
 
-A project installs the plugins it uses alongside `jp`, in one command so they
-share a revision.
-JP installs them from the workspace, as it installs `jp-ticket` today.
-Pinning a revision makes an upgrade a deliberate change, reviewed alongside the
-`jp vite sync` it triggers.
+Adopting projects install the plugins they need alongside `jp` in a single
+command so all binaries share the same git revision.
+JP installs them from the local workspace, matching how it installs `jp-ticket`.
+Pinning `--rev <sha>` makes plugin upgrades deliberate changes reviewed in the
+same commit as the `jp vite sync` output they produce.
 
 ## Drawbacks
 
 - **The port is large.** The twelve recipes and their helpers span roughly 1,500
-  lines of shell whose outcomes have to be reproduced, edge cases included:
-  `renumber` alone handles shared ids after a branch merge, draft-only tokens,
-  and references outside `docs/`.
-- **JP or nothing.** A project uses these through `jp` or not at all.
-  Every dev-server write starts a `jp` process, and every tool call starts the
-  plugin.
-- **Three versions to keep in step.** A project that upgrades one plugin and not
-  the others can hit a format the older one misreads.
-  The dev server's check reports it, but only after the fact.
-- **Settings in two places.** The site reads a snapshot of the configuration.
-  `jp vite serve` keeps it current while it runs; a configuration committed
-  without its sync stays stale until `sync --check` in CI catches it.
-- **Two languages remain.** Until validation moves to Rust, a rule about RFDs
-  can live in a plugin or in the synced JavaScript, and both ship from here.
-- **Projects follow JP's repository.** A project pins a JP revision to get a
-  tooling fix, and JP's pace of change on `main` becomes theirs.
+  lines of shell whose behavior and edge cases must be reproduced: `renumber`
+  alone handles duplicate IDs after a branch merge, draft-only tokens, and
+  references outside `docs/`.
+- **Requires JP.** Projects must run these workflows through `jp`.
+  Every dev-server write spawns a `jp` subprocess, and every tool call spawns
+  the plugin binary.
+- **Three binaries to keep in sync.** Upgrading one plugin without the others
+  can introduce format mismatches.
+  `jp vite serve` detects version skew, but only when starting the dev server.
+- **Configuration is duplicated in `settings.json`.** The site reads a committed
+  snapshot of the configuration.
+  `jp vite serve` updates the snapshot while running, but a configuration change
+  committed without running `jp vite sync` remains stale until `sync --check`
+  catches it in CI.
+- **Validation spans two languages.** Until RFD validation moves to Rust, RFD
+  rules live across both the Rust plugin and the synced JavaScript loaders.
+- **Adopting projects track JP's repository.** Projects pin a JP commit to pick
+  up tooling fixes, coupling their upgrades to JP's `main` branch.
 
 ## Alternatives
 
-**One binary.** A single `jp-todo` absorbing the ticket crate and plugin, with
-`rfd`, `ticket`, and `docs` subcommands.
-It has one version, so nothing can skew.
-But every project installs all of it, `jp ticket` becomes `jp todo ticket`, and
-one binary owns three concerns that change for different reasons.
-This flips if skew causes more trouble in practice than the split saves.
+**Single binary.** A single `jp-todo` binary combining the ticket, RFD, and site
+workflows under `rfd`, `ticket`, and `docs` subcommands.
+A single binary eliminates version skew across plugins, but forces every project
+to install all three workflows, changes `jp ticket` to `jp todo ticket`, and
+couples three distinct concerns into one binary.
+We can revisit this if version skew proves burdensome in practice.
 
-**Standalone binaries.** `jp-ticket`, `jp-rfd`, and `jp-vite` running without
-`jp`, configured by their own `.jp-todo.toml`.
-That is a second configuration file for all three plugins and the site to find
-and agree on, and without a host there is no composer or picker to prompt with.
-This flips when a project wants the workflow without JP.
+**Standalone binaries.** Running `jp-ticket`, `jp-rfd`, and `jp-vite` without
+`jp`, configured via a dedicated `.jp-todo.toml` file.
+That approach introduces a second configuration file that all three binaries and
+the site must locate and parse, and loses access to the host's interactive
+composer and picker.
+We can revisit this if a project needs the workflows without JP.
 
-**The vocabulary stays in `.labels.json`.** One file the static build reads
-directly.
-But it is a second home for configuration, and the snapshot carries the
-vocabulary to the build anyway.
+**Keep the label vocabulary in `.labels.json`.** A standalone file that the
+static site build can read directly, but it splits configuration across two
+files when `jp-vite/settings.json` already passes the resolved vocabulary to the
+static build.
 
-**Keep copying.** The status quo, and the drift described in the Motivation is
-its result.
+**Continue copying files.** The status quo, which causes the maintenance drift
+described in [Motivation](#motivation).
 
-**A shared justfile module.** `just` imports local files only, so the module
-would still be copied into each project, still be shell, and still be untested.
+**A shared justfile module.** `just` only imports local files, so each project
+would still have to copy and sync an untested shell file.
 
 **A separate repository.** The plugins depend on `jp_plugin`, `jp_tool`,
 `jp_label`, and `comfort`.
-A separate repository needs all four published and versioned, for one consumer
-outside JP.
-This can change once a second consumer needs these plugins outside JP's
-repository.
+Hosting the plugins in a separate repository would require publishing and
+versioning all four internal crates for a single external consumer.
+We can revisit this once a second external consumer needs the plugins.
 
-**An npm package for the site.** It would ship the components and styles the way
-a VitePress project expects, but versioned apart from the plugins, outside the
-one `cargo install` that keeps all three on one revision.
+**An npm package for site assets.** Packaging the Vue components and styles on
+npm matches standard VitePress conventions, but versions the site assets
+separately from the Rust plugins, outside the single `cargo install` command
+that keeps all three in sync.
 
-**A three-way merge on sync.** Recording the hash of each written file lets `jp
-vite sync` tell a local edit from an upstream change.
-Refusing to overwrite modified files, and git for everything committed, cover
-the same cases without a manifest to keep, so v1 does not add one.
+**Three-way merge during `sync`.** Recording a manifest of file hashes would let
+`jp vite sync` distinguish local edits from upstream changes.
+Refusing to overwrite dirty files and relying on git for committed files covers
+the same safety guarantees without maintaining a hash manifest, so v1 omits it.
 
 ## Non-Goals
 
-- **Porting validation.** See [Validation](#validation).
-- **The remaining recipes.** `rfd-board-prune` and the rest stay in JP's
-  justfile until a later change moves them.
-- **A standalone mode.** See [Alternatives](#alternatives).
-- **Editing milestones from the terminal.** See [RFDs](#rfds).
-- **Migrating tickets.** No project has tickets left to migrate.
-- **Publishing to crates.io.**
+- **Porting RFD validation to Rust.** See [Validation](#validation).
+- **Porting the remaining justfile recipes.** `rfd-board-prune` and other
+  maintenance recipes stay in JP's justfile for a future change.
+- **Standalone execution without `jp`.** See [Alternatives](#alternatives).
+- **Managing milestones from the CLI.** See [RFDs](#rfds).
+- **Ticket ID migration.** No project has legacy tickets left to migrate.
+- **Publishing crates to crates.io.**
 
 ## Risks and Open Questions
 
-- **Builds without `jp`.** A CI build of the site that has no `jp` runs neither
-  the revision check nor `sync --check`.
-  There, a skewed or stale loader fails the build or misreads a document with no
-  hint at the cause.
-- **Moving a directory.** Changing `dir` moves nothing: the documents, and every
-  link to them, are the project's to move.
-- **Polling.** `jp vite serve` reloads the configuration on a timer, because the
-  host cannot yet say when it changed (T-0vmm72x).
-  A configuration file saved halfway fails to load; the host keeps the last one
-  that loaded, and so does the snapshot.
-- **VitePress versions.** Synced files assume a VitePress version.
-  `jp vite init` writes `package.json`, but `sync` leaves it alone, so a project
-  can fall behind what the synced files need.
+- **CI builds without `jp`.** A static site build in CI that does not install
+  `jp` runs neither the version-skew check nor `sync --check`.
+  A stale or mismatched loader can fail the build or misparse documents without
+  an actionable error message.
+- **Changing document directories.** Changing `dir` in configuration does not
+  move existing files or update links; the project must move the files and
+  update links manually.
+- **Configuration polling.** `jp vite serve` polls for configuration changes on
+  a timer because the host protocol cannot yet push configuration change events
+  (T-0vmm72x).
+  If a configuration file is read mid-save and fails to parse, both the host and
+  `settings.json` retain the last valid configuration.
+- **VitePress version drift.** The synced site files target a specific VitePress
+  version.
+  `jp vite init` writes `package.json` once, and `sync` never updates it, so a
+  project's installed VitePress version can fall behind what the synced files
+  expect.
 
 ## Implementation Plan
 
 ### Phase 1: `jp ticket` configuration and commands
 
-Read `dir`, `assistant`, and `board.done_limit` from the plugin's options.
-Add `rename`, `status`, `block`, `board`, `rank`, and `init`; drop `migrate`;
-make `import` require `--repo`, and pass it from the `ticket-import` recipe.
-Serve the `ticket_*` tools as plugin tools, with `ticket_create`'s title
-question and preview, add `tools init` and `tools sync`, and remove `ticket.rs`
-from `jp-tools` and `just ticket-labels-sync`.
+Read `dir`, `assistant`, and `board.done_limit` from
+`plugins.command.ticket.options`.
+Add `rename`, `status`, `block`, `board`, `rank`, and `init`; remove `migrate`;
+require `--repo` on `import` and pass it from the `ticket-import` recipe.
+Serve the `ticket_*` tools as plugin tools (preserving `ticket_create`'s title
+prompt and preview), add `tools init` and `tools sync`, and remove `ticket.rs`
+from `jp-tools` along with `just ticket-labels-sync`.
 Point JP's ticket tool configuration at `plugin.command.ticket`.
 
-The vocabulary stays in `.labels.json` until Phase 5, which gives the site a way
-to read it from configuration.
-JP keeps the default ticket directory, so the site's fixed paths hold until then
-too.
+The label vocabulary remains in `.labels.json` until Phase 5 provides
+`settings.json` for the site.
+JP keeps the default ticket directory path so the site's hardcoded paths
+continue to work until Phase 5.
 
-Mergeable on its own.
+This phase can merge independently.
 
 ### Phase 2: Reading RFDs
 
-Create `jp-rfd`, reading `dir` and `categories` from its options.
-Port the board's reading side from `rfd-shared.mjs`.
-Add `list`, `show`, `tools init`, and `tools sync`, and the tools for `list` and
-`show`.
+Create `jp-rfd`, reading `dir` and `categories` from
+`plugins.command.rfd.options`.
+Port the read path of `assembleBoard` from `rfd-shared.mjs`.
+Add the `list`, `show`, `tools init`, and `tools sync` subcommands, along with
+the `rfd_list` and `rfd_show` tools.
 
 Depends on Phase 1.
 
 ### Phase 3: RFD lifecycle
 
-Write the shared id resolver, metadata-header editor, and relationship writer.
+Implement the shared ID resolver, metadata-header editor, and relationship
+writer.
 Port `draft`, `rename`, `renumber`, `extend`, `require`, `supersede`, `abandon`,
-and `promote`, and their tools, and add `rank` and `init`.
+and `promote` (along with their corresponding tools), and add `rank` and `init`.
 Port `just ticket-promote` into `draft --from-ticket`.
-JP's recipes become one-line calls into `jp rfd`, so both paths stay usable
-while the port is checked against real use; `just rfd-extend NNN MMM` calls `jp
-rfd extend MMM NNN`.
-The `rfd_extend` tool's parameters are renamed to match the new order.
+Replace JP's justfile recipes with one-line wrappers around `jp rfd` so both
+entry points work while the port is validated (`just rfd-extend NNN MMM` calls
+`jp rfd extend MMM NNN`).
+Rename the `rfd_extend` tool parameters to match the new argument order.
 
 Depends on Phase 2.
 
 ### Phase 4: Tracking
 
-Port `track`, `start`, and `stop`, and their tools, with `track` reading the
-plan through the host's `query`.
-Point the dev server's `/__rfd-development` endpoint at `jp rfd`.
+Port `track`, `start`, and `stop` (and their tools), with `track` extracting the
+Implementation Plan via the host's structured `query` request.
+Update the dev server's `/__rfd-development` endpoint to call `jp rfd`.
 
 Depends on Phase 3.
 
 ### Phase 5: Site
 
 Create `jp-vite`.
-Move JP's site files into `crates/plugins/command/vite/site/`, embed them, and
-add `init`, `sync`, `sync --check`, the settings snapshot, and `serve` with its
-checks, and point JP's docs dev recipe at `jp vite serve`.
-Point the ticket board writer at `jp ticket status` and `jp ticket rank`, and
-the priority writer at the snapshot's RFD directory.
-The `/__rfd-development` endpoint stays on the recipes until Phase 4 moves it.
+Move JP's VitePress files into `crates/plugins/command/vite/site/`, embed them
+in the binary, implement `init`, `sync`, `sync --check`, `settings.json`, and
+`serve` (including version-skew checks), and point JP's docs dev recipe at `jp
+vite serve`.
+Update the ticket board middleware to call `jp ticket status` and `jp ticket
+rank`, and point the priority board writer at the RFD directory from
+`settings.json`.
+The `/__rfd-development` endpoint continues using the justfile recipes until
+Phase 4 lands.
 Move the label vocabulary from `.labels.json` into
 `plugins.command.ticket.options.labels`.
-JP checks its synced copy with a `jp-vite` test, `jp_site_is_synced`, which CI
-runs whenever the site files, the synced copy, or `.jp/config.toml` change;
-`sync --check` in the site workflow would build `jp` on every docs change.
-JP's own site becomes the first project synced from the binary.
+Verify JP's synced site files with a `jp-vite` integration test,
+`jp_site_is_synced`, triggered in CI whenever the embedded site files, the
+synced copy under `docs/`, or `.jp/config.toml` change (running `sync --check`
+in the docs CI workflow would require compiling `jp` on every documentation
+edit).
+JP's own documentation site becomes the first consumer synced from `jp-vite`.
 
-Depends on Phase 2, so the revision check finds a `jp rfd` for JP's RFD
+Depends on Phase 2 so the version-skew check finds `jp rfd` for JP's RFD
 directory.
 Independent of Phases 3 and 4.
 
 ### Phase 6: Retire the recipes
 
-Remove the ported recipes, `ticket-promote` among them, and point JP's RFD tool
-configuration at `plugin.command.rfd`.
-JP keeps `just rfd-promote` as a wrapper around `jp rfd promote`, because
-publishing a draft also archives the review and triage conversations JP's own
-workflow titles after the draft id, and its `rfd_promote` tool keeps calling the
-recipe for the same reason.
-The remaining `ticket-*` recipes keep calling `jp ticket`, which still works.
-Update the references in [RFD 001] and [RFD 100] to `just rfd-*`, `just
+Remove the ported justfile recipes (including `ticket-promote`) and point JP's
+RFD tool definitions at `plugin.command.rfd`.
+Keep `just rfd-promote` as a wrapper around `jp rfd promote`, because promoting
+a draft in JP also archives the review and triage conversations named after the
+draft ID; JP's `rfd_promote` tool continues calling `just rfd-promote` for the
+same reason.
+The remaining `ticket-*` recipes continue calling `jp ticket`.
+Update [RFD 001] and [RFD 100] to replace references to `just rfd-*`, `just
 ticket-promote`, `just ticket-labels-sync`, and `.labels.json`.
 
-Depends on Phases 1 to 5.
+Depends on Phases 1 through 5.
 
 ## References
 
-- [RFD 001: The JP RFD Process][RFD 001], the lifecycle `jp rfd` implements.
-- [RFD 072: Command Plugin System][RFD 072], the protocol the plugins run under,
-  the `init` message that carries their configuration, and the tool calls they
-  serve.
-- [RFD 077: Plugin Configuration and Trust Policy][RFD 077], which describes the
-  `options` and `run` settings the plugins are configured through.
-- [RFD 100: In-Repo Ticket Tracking][RFD 100], the ticket format and labels.
+- [RFD 001: The JP RFD Process][RFD 001], the RFD lifecycle implemented by `jp
+  rfd`.
+- [RFD 072: Command Plugin System][RFD 072], the plugin protocol, the `init`
+  message that delivers resolved configuration, and plugin tool execution.
+- [RFD 077: Plugin Configuration and Trust Policy][RFD 077], the `options` and
+  `run` settings used to configure and authorize command plugins.
+- [RFD 100: In-Repo Ticket Tracking][RFD 100], the ticket file format and label
+  system.
 - [RFD 102: Collision-Resistant Ticket Identifiers][RFD 102].
 
 [RFD 001]: 001-jp-rfd-process.md
