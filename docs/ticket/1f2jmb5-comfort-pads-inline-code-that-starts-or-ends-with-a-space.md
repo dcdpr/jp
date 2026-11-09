@@ -7,9 +7,9 @@
 - **Label**: package=comfort
 - **Label**: type=bug
 
-With `format_markdown = true`, comfort lays Markdown out through comrak's
-`format_commonmark`, which pads an inline code span whose text starts or ends
-with a space with one more space on each side:
+With `format_markdown = true`, comfort formats Markdown through comrak's
+`format_commonmark`, which adds a space inside each backtick delimiter whenever
+an inline code span starts or ends with a space:
 
 ```text
 `# `    becomes    ` #  `
@@ -17,22 +17,24 @@ with a space with one more space on each side:
 ` a`    becomes    `  a `
 ```
 
-CommonMark strips one space from each side of a code span that both starts and
-ends with one, so each pair renders the same HTML.
-The source doesn't read the same, though: the padded span looks like a different
-string to anyone reading the file or its diff, and trimming the "extra" space by
-hand changes what renders.
+CommonMark strips one leading and one trailing space from a code span that has a
+space at both ends, so each pair renders the same HTML.
+In the Markdown source, however, the padded span looks like a different literal
+in the file and in diffs, and deleting the apparent extra space by hand changes
+the rendered output.
 
-Found while amending RFD 121, where a code span holding `#` and one trailing
-space came out padded and had to be reworded.
-The same thing happened to this ticket's first draft when it was written.
-With default options comfort leaves the spans alone; only `format_markdown` goes
-through comrak's writer.
+Found while amending RFD 121, where a code span containing `#` and a trailing
+space was padded and had to be reworded.
+The same padding appeared in this ticket's first draft.
+With default options comfort leaves code spans untouched; only `format_markdown`
+runs comrak's writer.
 
 ## Fix
 
-Write a code span with padding only where CommonMark needs it: when its text
-starts or ends with a backtick, or both starts and ends with a space.
-Comfort already post-processes comrak's output, restoring reference links, so
-this can happen in the same place.
-Cover the three cases above, and that each still renders as its input does.
+Pad code-span delimiters with a space only when CommonMark requires it: when the
+literal starts or ends with a backtick, or starts and ends with a space around
+non-space content.
+Comfort already post-processes comrak's output to restore reference links, so
+code-span rewriting can run in the same pipeline.
+Add tests covering the three cases above and verifying that the rendered HTML is
+unchanged.

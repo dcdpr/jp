@@ -133,9 +133,8 @@ fn canonical_preserves_marker_only_line_inside_code_block() {
 
 #[test]
 fn canonical_does_not_pad_code_span_with_one_edge_space() {
-    // Comrak's writer pads a code span whose text starts or ends with a space,
-    // turning `# ` into ` #  `. Both render the same, but the source no longer
-    // reads as the string it holds.
+    // Comrak pads any code span with a leading or trailing space (`# ` -> ` #  `),
+    // even when only one edge has a space and CommonMark would not strip it.
     let body = "Type `# `, `a ` or ` a` here.\n";
     let out = format_markdown_canonical(body, 0);
     assert_eq!(out, body);
@@ -156,8 +155,6 @@ fn canonical_does_not_pad_code_span_in_table_cell() {
 
 #[test]
 fn canonical_keeps_runs_of_spaces_in_code_span() {
-    // Comrak's writer collapses each run of spaces in a code span to one
-    // space, which changes the code span's text.
     let body = "Use `a  b`, `` `x   y `` or `#  ` here.\n";
     let out = format_markdown_canonical(body, 0);
     assert_eq!(out, body);
@@ -178,8 +175,9 @@ fn canonical_keeps_runs_of_spaces_in_code_span_in_table_cell() {
 
 #[test]
 fn canonical_keeps_runs_of_spaces_in_code_span_in_footnote() {
-    // Comrak moves a footnote definition after the paragraph citing it in the
-    // AST, and writes it there. Code spans pair up only if both parses agree.
+    // Comrak places a footnote definition after the paragraph that cites it in
+    // the AST regardless of source order; pairing works because both parses
+    // visit the spans in that same AST order.
     let body = indoc! {"
         [^1]: Note `x  y`.
 
@@ -198,17 +196,19 @@ fn canonical_keeps_runs_of_spaces_in_code_span_in_footnote() {
 
 #[test]
 fn rewrite_code_spans_keeps_comrak_text_when_spans_do_not_pair() {
-    // `a  b` can't be what comrak wrote as `z`, so each code span keeps
-    // comrak's text, and still loses the padding it doesn't need.
+    // When input and canonical spans do not match (`a  b` vs `z`),
+    // `rewrite_code_spans` keeps the canonical literals and only strips
+    // unnecessary padding (` z ` -> `z`).
     let out = rewrite_code_spans("Use `a  b` and `c`.\n", "Use ` z ` and `c`.\n");
     assert_eq!(out, "Use `z` and `c`.\n");
 }
 
 #[test]
 fn canonical_keeps_code_span_padding_commonmark_needs() {
-    // Padding stays where removing it would change the code span: an edge
-    // backtick would merge into the delimiter, and a space at both edges would
-    // be stripped. A span of only spaces is never stripped, so it has none.
+    // Preserve padding when CommonMark requires it: a leading or trailing
+    // backtick would merge into the delimiter, and leading + trailing spaces
+    // around non-space text would be stripped. A space-only span (` `) is
+    // not stripped by CommonMark and needs no padding.
     let body = "Write `` `a ``, `` a` ``, `  a  ` and ` ` here.\n";
     let out = format_markdown_canonical(body, 0);
     assert_eq!(out, body);

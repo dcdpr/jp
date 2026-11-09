@@ -271,20 +271,20 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     Some(canonical)
 }
 
-/// Rewrite each code span in `canonical`, comrak's rendering of `input`, with
-/// the text the code span holds in `input`.
+/// Restore original inline-code literals from `input` and strip unnecessary
+/// backtick padding in `canonical` (comrak's rendering of `input`).
 ///
-/// Comrak's writer changes code spans in two ways.
-/// It collapses each run of spaces to one space, which changes the code span's
-/// text.
-/// It also adds a space inside each delimiter when the text starts or ends with
-/// a space, which renders the same but reads as a different string.
-/// Each code span is written with a space inside its delimiters only where
-/// [`code_span_needs_padding`] says CommonMark requires one.
+/// Comrak's CommonMark writer alters code spans in two ways.
+/// It collapses consecutive spaces inside the literal to a single space,
+/// changing the span's content.
+/// It also pads both backtick delimiters with a space whenever the literal
+/// starts or ends with a space, even when CommonMark does not require padding
+/// (see [`code_span_needs_padding`]).
 ///
-/// Code spans are paired with those of `input` in document order.
-/// When `input` has a different number of code spans, or a pair's texts differ
-/// by more than collapsed spaces, each code span keeps the text comrak wrote.
+/// Code spans in `canonical` are paired with those in `input` in AST order.
+/// If the span counts differ or any pair's literals differ by more than
+/// collapsed spaces, all spans keep their literals from `canonical` and only
+/// unneeded delimiter padding is removed.
 fn rewrite_code_spans(input: &str, canonical: &str) -> String {
     if !canonical.contains('`') {
         return canonical.to_owned();
@@ -357,12 +357,12 @@ fn rewrite_code_spans(input: &str, canonical: &str) -> String {
     out
 }
 
-/// Byte offset just past the code span that opens at `start` in `text` with a
-/// run of `num_backticks` backticks.
+/// Find the byte offset just past the code span starting at `start` in `text`
+/// and delimited by `num_backticks` backticks.
 ///
-/// The end is found by scanning for the closing run, because comrak's end
-/// position for a code span holding an escaped `|` in a table cell falls short
-/// of the closing backticks.
+/// Scans for the matching closing backtick run rather than using
+/// `sourcepos.end`, which comrak reports short of the closing delimiter when a
+/// code span in a table cell contains an escaped `\|`.
 fn code_span_end(text: &str, start: usize, num_backticks: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut i = start.checked_add(num_backticks)?;
@@ -385,9 +385,9 @@ fn code_span_end(text: &str, start: usize, num_backticks: usize) -> Option<usize
     None
 }
 
-/// Write a code span holding `literal`, delimited by `num_backticks` backticks.
+/// Format `literal` as a code span delimited by `num_backticks` backticks.
 ///
-/// Inside a table cell, `|` is escaped so it doesn't end the cell.
+/// Inside a table cell, `|` is escaped as `\|` so it does not end the cell.
 fn write_code_span(literal: &str, num_backticks: usize, in_table: bool) -> String {
     let ticks = "`".repeat(num_backticks);
     let pad = if code_span_needs_padding(literal) {
@@ -403,13 +403,13 @@ fn write_code_span(literal: &str, num_backticks: usize, in_table: bool) -> Strin
     format!("{ticks}{pad}{text}{pad}{ticks}")
 }
 
-/// Whether a code span holding `literal` must be written with a space inside
-/// each delimiter to parse back to `literal`.
+/// Return `true` if `literal` requires a space inside each backtick delimiter
+/// to round-trip through CommonMark parsing.
 ///
-/// That is when `literal` starts or ends with a backtick, which would otherwise
-/// merge into the delimiter, or both starts and ends with a space, which
-/// CommonMark would otherwise strip.
-/// CommonMark never strips a literal of only spaces, so that needs none.
+/// Padding is required when `literal` starts or ends with a backtick (which
+/// would otherwise merge into the delimiter), or starts and ends with a space
+/// around at least one non-space byte (CommonMark strips one space from each
+/// end in that case, but leaves space-only spans intact).
 fn code_span_needs_padding(literal: &str) -> bool {
     let edge_spaces = literal.starts_with(' ') && literal.ends_with(' ');
     literal.starts_with('`')
@@ -417,7 +417,7 @@ fn code_span_needs_padding(literal: &str) -> bool {
         || (edge_spaces && literal.bytes().any(|b| b != b' '))
 }
 
-/// Replace each run of spaces in `text` with one space.
+/// Collapse consecutive ASCII spaces in `text` to a single space.
 fn collapse_space_runs(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
