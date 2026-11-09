@@ -282,6 +282,54 @@ fn a_draft_mentioning_another_draft_is_not_published() {
     );
 }
 
+/// A formatter that writes links by reference leaves the back-link's target in
+/// a definition at the bottom; it goes with the back-link, so neither blocks
+/// the promotion nor reaches the published file.
+#[test]
+fn a_back_link_written_by_reference_goes_with_its_definition() {
+    let workspace = Workspace::new();
+    workspace.rfd(
+        "D03-first.md",
+        &[
+            ("Status", "Draft"),
+            ("Extended by", "[RFD D09]"),
+            ("Required by", "[RFD D08][later]"),
+        ],
+        "Builds on [RFD 001].\n\n[RFD 001]: ../001-x.md\n[RFD D09]: D09-x.md\n[later]: D08-y.md",
+    );
+
+    promote(&workspace.paths, id("D03"), None).unwrap();
+
+    let text = workspace.read("docs/rfd/001-first.md");
+    assert!(
+        text.ends_with("Builds on [RFD 001].\n\n[RFD 001]: 001-x.md\n"),
+        "{text}"
+    );
+    assert!(!text.contains("Extended by"), "{text}");
+    assert!(!text.contains("Required by"), "{text}");
+}
+
+/// A definition the body still uses is a body reference, back-link or not.
+#[test]
+fn a_back_link_definition_the_body_uses_still_blocks_the_promotion() {
+    let workspace = Workspace::new();
+    workspace.rfd(
+        "D03-first.md",
+        &[("Status", "Draft"), ("Extended by", "[RFD D09]")],
+        "See [RFD D09].\n\n[RFD D09]: D09-x.md",
+    );
+
+    let error = promote(&workspace.paths, id("D03"), None).unwrap_err();
+
+    assert_eq!(
+        error,
+        "Cannot promote: D03-first.md references other drafts in its body:\n  RFD D09\nPublished \
+         RFDs must not reference drafts (the docs build rejects DNN tokens).\nPromote those \
+         drafts first, or reword the references."
+    );
+    assert!(workspace.exists("docs/rfd/drafts/D03-first.md"));
+}
+
 #[test]
 fn a_broken_board_file_stops_the_promotion_before_it_writes() {
     let workspace = publishing();

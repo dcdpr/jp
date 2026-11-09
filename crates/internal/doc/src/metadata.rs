@@ -304,6 +304,12 @@ impl Document {
         &mut self.lines
     }
 
+    /// Keep only the lines `keep` accepts, such as to drop a reference
+    /// definition outside the block.
+    pub fn retain_lines(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.lines.retain(|line| keep(line));
+    }
+
     /// The metadata block, read.
     #[must_use]
     pub fn header(&self) -> Header<'_, String> {

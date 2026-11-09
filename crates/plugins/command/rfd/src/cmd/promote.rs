@@ -20,7 +20,7 @@ use regex::Regex;
 use super::{is_draft, parse, stem};
 use crate::{
     Output,
-    document::{Document, NoMetadata},
+    document::{Document, NoMetadata, cited, reference_label},
     id::{self, ResolveError, RfdId},
     paths::{self, Paths},
     priority,
@@ -41,6 +41,10 @@ static DRAFT_TOKEN: LazyLock<Regex> =
 /// The relationship fields a promotion reads, each with the field the other RFD
 /// carries back.
 const LINKS: [(&str, &str); 2] = [("Requires", "Required by"), ("Extends", "Extended by")];
+
+/// The back-link fields a draft carries for other drafts, which a published RFD
+/// can't.
+const BACK_LINKS: [&str; 2] = ["Required by", "Extended by"];
 
 /// Advance the RFD `id` one status.
 ///
@@ -111,9 +115,7 @@ fn to_discussion(
     // Back-links from drafts were bookkeeping for the draft-to-draft policy; a
     // published RFD can't carry them.
     let mut promoted = Document::parse(&paths::read(&new_file)?);
-    let required = promoted.uncite("Required by", is_draft);
-    let extended = promoted.uncite("Extended by", is_draft);
-    if required || extended {
+    if drop_draft_back_links(&mut promoted) {
         paths.write(&new_file, &promoted.render())?;
     }
 
@@ -159,11 +161,14 @@ fn check_number(paths: &Paths, draft: RfdId, number: RfdId) -> Result<RfdId, Str
 /// build rejects draft ids anywhere in a published RFD.
 ///
 /// The draft's own id doesn't count, since the promotion rewrites it, and
-/// neither do its `Required by` and `Extended by` back-links, which it drops.
+/// neither do its `Required by` and `Extended by` back-links to drafts, which
+/// it drops along with the reference definitions only they use.
 fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<(), String> {
-    let header = document.header();
+    let mut published = document.clone();
+    drop_draft_back_links(&mut published);
+    let header = published.header();
     for (field, _) in LINKS {
-        if header.citations(field).iter().any(|cited| is_draft(cited)) {
+        if header.citations(field).iter().any(|id| is_draft(id)) {
             return Err(format!(
                 "Cannot promote: '{field}' on {name} contains draft references.\n  {}\nPromote \
                  those drafts first, or remove the entries.",
@@ -173,15 +178,10 @@ fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<()
     }
 
     let own = draft.to_string();
-    let strays: BTreeSet<String> = document
+    let strays: BTreeSet<String> = published
         .lines()
         .iter()
-        .enumerate()
-        .filter(|(index, _)| {
-            !header.is_field_line("Required by", *index)
-                && !header.is_field_line("Extended by", *index)
-        })
-        .flat_map(|(_, line)| draft_tokens(line))
+        .flat_map(|line| draft_tokens(line))
         .filter(|token| *token != own)
         .collect();
 
@@ -196,6 +196,37 @@ fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<()
          reword the references.",
         listed.join("\n")
     ))
+}
+
+/// Drop the back-links to drafts, and the reference definitions that only they
+/// used.
+///
+/// A formatter that writes links by reference turns `[RFD D07](D07-x.md)` into
+/// `[RFD D07]` and a `[RFD D07]: D07-x.md` line at the bottom, which would
+/// otherwise outlive the entry and publish the draft's id.
+/// `false` when nothing was dropped.
+fn drop_draft_back_links(document: &mut Document) -> bool {
+    let labels: Vec<String> = BACK_LINKS
+        .iter()
+        .filter_map(|field| document.header().wrapped(field))
+        .flat_map(|value| {
+            value
+                .split(", ")
+                .filter(|entry| cited(entry).is_some_and(|id| is_draft(&id)))
+                .filter_map(reference_label)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let mut dropped = false;
+    for field in BACK_LINKS {
+        dropped |= document.uncite(field, is_draft);
+    }
+    for label in labels {
+        dropped |= document.remove_unused_definition(&label);
+    }
+
+    dropped
 }
 
 /// The draft ids `line` mentions standing alone.
