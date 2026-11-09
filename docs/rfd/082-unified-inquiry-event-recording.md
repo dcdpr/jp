@@ -10,192 +10,176 @@
 
 ## Summary
 
-This RFD extends [RFD 005] so `InquiryRequest` and `InquiryResponse` events are
-recorded in the persisted conversation stream for every `Outcome::NeedsInput`
+This RFD extends [RFD 005] to record `InquiryRequest` and `InquiryResponse`
+events in the persisted conversation stream for every `Outcome::NeedsInput`
 round-trip, including user-prompted, cached, and static answers.
 It adds `InquiryResponse::Cancelled` for user cancellations and backend errors,
-adds `InquiryResponse::Redacted` so secret answers never land on disk, and
-derives `InquirySource` from non-overridable tool metadata.
+adds `InquiryResponse::Redacted` so secret answers are never written to disk,
+and derives `InquirySource` from non-overridable tool metadata.
 
 ## Motivation
 
 [RFD 005] explicitly excludes prompter-answered questions: *"Questions answered
 via interactive user prompts ... are not recorded as inquiry events."* That
-carve-out was implementation-driven (the prompter path didn't carry a write
-handle to the conversation stream), not principled.
-The archival value of a question/answer exchange is the same regardless of
-routing path.
-Leaving the prompter path off the stream freezes an implementation gap into the
-data model and forces every future feature that wants Q&A visibility — replay,
-debugging, sub-agent reasoning trails, conversation viewers — to re-derive the
-workaround.
+exception was driven by an implementation detail (the prompter path did not
+carry a write handle to the conversation stream), not by design.
+A question/answer exchange has the same archival value regardless of how it is
+routed.
+Omitting the prompter path from the stream bakes an implementation gap into the
+data model and forces future features that need Q&A visibility (replay,
+debugging, sub-agent reasoning trails, conversation viewers) to work around it.
 
-The `InquiryResponse` enum currently encodes only "answered."
-Non-answer outcomes — user Ctrl-C and routing-backend errors — have no on-disk
-representation, so the persisted stream is incomplete for any tool question that
-didn't complete normally.
-The inquiry-backend-failure case in particular leaves an `InquiryRequest`
-without a matching response today, which 082 cannot ship without addressing once
-it starts recording requests for every routing path.
+The `InquiryResponse` enum encodes only "answered."
+Non-answer outcomes, such as user Ctrl-C and routing-backend errors, have no
+on-disk representation, leaving the persisted stream incomplete whenever a tool
+question does not complete normally.
+In particular, an inquiry-backend failure leaves an `InquiryRequest` without a
+matching response.
+RFD 082 must close that gap before recording requests across every routing path.
 
-`InquirySource` is set today from the tool name at the recording site:
+`InquirySource` is constructed from the tool name at the recording site:
 
 ```rust
 InquirySource::tool(tool_name.clone())
 ```
 
 This hard-codes provenance to the tool name.
-Future tools whose questions are semantically the assistant's, not the tool's —
-[RFD 083]'s `ask_user` is the motivating consumer — need to record those
-inquiries as `Assistant`-sourced.
-Doing this through a user-configurable field would make persisted provenance
-overridable, which defeats the audit purpose: a local config bundle could
-relabel any tool's question as assistant-sourced in the persisted record.
-Doing it as a static tool-author declaration keeps the value compile-time-set
-without name-branching in coordinator code. 082 adds the hook; consumers like
-[RFD 083] use it.
+Future tools whose questions come semantically from the assistant rather than
+the tool ([RFD 083]'s `ask_user` is the motivating consumer) need to record
+those inquiries with `InquirySource::Assistant`.
+Making this user-configurable would let a local config bundle relabel any tool's
+question as assistant-sourced in the persisted record, defeating the audit
+purpose.
+Declaring it statically on the tool keeps provenance fixed at compile time
+without branching on tool names in coordinator code.
+RFD 082 adds the hook; consumers such as [RFD 083] implement it.
 
 ## Design
 
-### What changes for stream readers
+### Stream events across routing paths
 
-Every tool-question round-trip produces an `InquiryRequest`/`InquiryResponse`
-pair in the persisted stream, sitting between the `ToolCallRequest` and
-`ToolCallResponse` for the tool.
-Today the same shape already appears for inquiry-backend-resolved questions.
-After this RFD, it appears uniformly for:
+Every tool-question round-trip produces an `InquiryRequest` and
+`InquiryResponse` pair in the persisted stream between the tool's
+`ToolCallRequest` and `ToolCallResponse`.
+This pair is recorded uniformly for:
 
-- Questions resolved by the interactive prompter (user typed an answer).
+- Questions resolved by the interactive prompter (the user typed an answer), as
+  well as questions resolved by the inquiry backend.
 - Questions resolved by a cached "remember for turn" answer from earlier in the
   same turn.
-- Questions resolved by a `QuestionConfig.answer` static value from user config.
-- Questions whose answer type is `AnswerType::Secret` — the request is
-  recorded; the response is recorded as `Redacted { id }` without the answer
-  payload (see [Secret questions](#secret-questions)).
+- Questions resolved by a static `QuestionConfig.answer` value from user config.
+- Questions with `AnswerType::Secret`: the request is recorded, and the response
+  is recorded as `Redacted { id }` without the answer payload (see [Secret
+  questions](#secret-questions)).
 - Questions cancelled by the user (Ctrl-C at the prompt).
-- Questions that failed because the chosen routing backend (the prompter or the
-  inquiry backend) returned an error.
+- Questions that failed because the routing backend (prompter or inquiry
+  backend) returned an error.
 
-The matched pair carries the same `id`.
-The ID is unique per request/response pair within the turn that contains it; see
-[Inquiry ID format](#inquiry-id-format) below for the shape, the per-attempt
-counter, and the turn-local scope of uniqueness.
+Both events in a pair carry the same `id`, which is unique within the turn (see
+[Inquiry ID format](#inquiry-id-format)).
 
 ### Inquiry ID format
 
-`InquiryRequest.id` is the correlation key for the matching `InquiryResponse`
-and MUST be unique **within the turn** that contains it.
-IDs are NOT required to be unique across turns — `TurnMut` permits
-`tool_call_id` reuse across turns (and across cycles within a turn — see
+`InquiryRequest.id` correlates an `InquiryRequest` with its matching
+`InquiryResponse` and MUST be unique **within the turn**.
+IDs do not need to be unique across turns: `TurnMut` permits `tool_call_id`
+reuse across turns and across cycles within a turn (see
 `same_tool_call_id_across_turns_is_allowed` and
 `same_tool_call_id_reused_within_turn_across_cycles` in
-`crates/jp_conversation/src/stream/turn_mut_tests.rs`), and the inquiry ID
-inherits that across turns but not within them.
+`crates/jp_conversation/src/stream/turn_mut_tests.rs`), and `InquiryId` inherits
+that cross-turn reuse while remaining unique within a turn.
 The format is:
 
 ```
 <tool_call_id>.<question_id>.<attempt>
 ```
 
-where `attempt` is a 1-indexed counter scoped to the `(tool_call_id,
-question_id)` pair within the turn.
-The first time a given `(tool_call_id, question_id)` is recorded in a turn,
-attempt is `1`; the next recording for the same key (the LLM gave an invalid
-answer and the tool re-asks; or a provider like Google Gemini reused the same
-`tool_call_id` in a later cycle and the same question came up again) gets
-attempt `2`; and so on.
+`attempt` is a 1-indexed counter scoped to `(tool_call_id, question_id)` within
+the turn.
+The first recording for a `(tool_call_id, question_id)` key in a turn gets
+attempt `1`.
+Subsequent recordings for the same key within that turn (when the LLM gives an
+invalid answer and the tool re-asks, or when a provider like Google Gemini
+reuses `tool_call_id` in a later cycle and the same question recurs) increment
+the counter to `2`, and so on.
 
 `question_id` MUST NOT contain `.`.
-This is enforced with a `QuestionId` newtype (in `jp_tool`, wrapping the `id`
-field of `Question`) whose `FromStr`/`TryFrom` validation rejects any string
-containing a dot.
-Validation happens once, at the tool→JP boundary where a `Question` is
-ingested: local-tool stdout is parsed into `QuestionId`, and built-in tools
-construct their questions through the same validated constructor, so past that
-boundary an invalid id is unrepresentable and no downstream code re-checks.
-`QuestionId` is distinct from the composite stream-correlation `InquiryId`
-(`<tool_call_id>.<question_id>.<attempt>`): it validates only the
-tool-author-set segment, and `attempt` is always numeric and therefore dot-free.
+A `QuestionId` newtype in `jp_tool` (wrapping `Question.id`) enforces this in
+its `FromStr` and `TryFrom` implementations by rejecting any string containing a
+dot.
+Validation runs once at the tool-to-JP ingestion boundary: local-tool stdout is
+parsed into `QuestionId`, and built-in tools construct questions through the
+same validated constructor, making an invalid ID unrepresentable downstream.
+`QuestionId` validates only the tool-authored segment, whereas `InquiryId`
+(`<tool_call_id>.<question_id>.<attempt>`) is the composite stream-correlation
+ID (`attempt` is numeric and therefore dot-free).
 
-When a tool emits a `NeedsInput` whose `question.id` is invalid, JP rejects it
-at the boundary.
-It logs an `error!` trace with the offending tool and id, and fails the tool
-with a tool-level error response (`tool produced an invalid inquiry: question id
-must not contain '.'`).
-No separate chrome line is emitted: the tool-level error is rendered to the
-terminal through the existing `ErrorStyleConfig` path like any other tool
-failure, so a bespoke notice would double-print.
-Because the malformed outcome is dropped before any inquiry event is
-constructed, it never enters the recording pipeline, and the "every `NeedsInput`
-is recorded" invariant holds without a carve-out (there is a `ToolCallRequest`/
-`ToolCallResponse` pair for the failed call, but no `InquiryRequest`).
-One implementation caveat: local-tool stdout is parsed by
-`serde_json::from_str::<Outcome>` (`crates/jp_llm/src/tool.rs`), which today
-falls back to `RawOutput` on any parse error.
-The ingestion path MUST distinguish a well-formed `NeedsInput` carrying an
-invalid `question.id` (which becomes an `error!` plus a tool-level error) from
-output that is not an `Outcome` at all (which becomes `RawOutput`), so the
-invalid-inquiry diagnostic is not silently swallowed by the fallback.
+When a tool emits a `NeedsInput` with an invalid `question.id`, JP rejects it at
+the boundary, logs an `error!` trace with the offending tool and ID, and fails
+the tool with a tool-level error response (`tool produced an invalid inquiry:
+question id must not contain '.'`).
+No separate terminal notice is printed because the tool-level error already
+renders through `ErrorStyleConfig`.
+Dropping the malformed outcome before constructing any inquiry event preserves
+the invariant that every valid `NeedsInput` is recorded: the stream contains the
+`ToolCallRequest` and `ToolCallResponse` for the failed call, with no
+`InquiryRequest`.
+Local-tool stdout is parsed by `serde_json::from_str::<Outcome>`
+(`crates/jp_llm/src/tool.rs`), which falls back to `RawOutput` on parse errors.
+The ingestion path MUST distinguish a `NeedsInput` carrying an invalid
+`question.id` (which logs `error!` and returns a tool-level error) from stdout
+that is not an `Outcome` (which falls back to `RawOutput`), so the fallback does
+not swallow the invalid-inquiry diagnostic.
 
-Given that constraint, the join is injective and IDs are **unique by
-construction within the turn**, even when `tool_call_id` contains dots (which JP
-cannot control, since providers generate it): for any joined string the last two
-dot-separated tokens are unambiguously `question_id` and `attempt`, and
-everything before them is `tool_call_id`.
+Because `question_id` and `attempt` cannot contain dots, the three-segment join
+is injective and IDs are **unique by construction within the turn**, even when a
+provider-generated `tool_call_id` contains dots: the last two dot-separated
+tokens are always `question_id` and `attempt`, and everything before them is
+`tool_call_id`.
 
-The counter is tracked per-turn (in `TurnState`) keyed by `(tool_call_id,
-question_id)`.
-It increments at the `InquiryRequest`-recording site, so the ID is finalized
-before the request lands on disk.
-The counter resets only at turn boundaries — a fresh `TurnState` is built per
-turn.
-The counter is in-memory only; nothing on disk encodes it beyond the IDs it
-produces.
+`TurnState` tracks the counter in memory per `(tool_call_id, question_id)` key.
+The counter increments when `InquiryRequest` is recorded, finalizing the ID
+before the request is persisted, and resets at turn boundaries when a fresh
+`TurnState` is created.
+Nothing on disk encodes the counter beyond the IDs it produces.
 
-**Readers MUST treat `InquiryId` as opaque.** The segment shape is a writer-side
-construction.
-Do not parse segments to extract `tool_call_id`, `question_id`, or `attempt`.
-The writer side has these fields available on `TurnState` and `ExecutingTool`;
-the reader side has them on `InquiryRequest.question` and on the surrounding
-`ToolCallRequest`.
-No reader needs to recover them from the ID.
+**Readers MUST treat `InquiryId` as opaque.** Do not parse segments to extract
+`tool_call_id`, `question_id`, or `attempt`.
+Writers have these fields on `TurnState` and `ExecutingTool`; readers have them
+on `InquiryRequest.question` and the surrounding `ToolCallRequest`.
 
-Pre-082 streams use the legacy two-segment form
-(`<tool_call_id>.<question_id>`).
-Two-segment IDs can collide within a turn if a tool re-emitted the same
-`question_id` after an invalid answer — pre-082 `handle_tool_result` did record
-this case via the inquiry backend path, so legacy streams may contain duplicate
-IDs.
-To read both formats without a migration step, the pairing logic on read accepts
-both shapes and falls back to request/response order within the turn when IDs
-collide (the same strategy used for tool-call IDs today).
-Only new writes use the three-segment form, and new writes do not collide: the
-counter is turn-scoped and the no-dot rule on `question_id` keeps the join
-injective.
-(Legacy streams predate the no-dot rule, which is why the read-side order
-fallback remains.)
+Pre-082 streams use the two-segment form `<tool_call_id>.<question_id>`.
+Two-segment IDs can collide within a turn when a tool re-emits the same
+`question_id` after an invalid answer, because pre-082 `handle_tool_result`
+recorded that case on the inquiry-backend path.
+To read both formats without a migration step, read-side pairing accepts both
+shapes and falls back to request/response order within the turn when IDs collide
+(matching the strategy used for tool-call IDs).
+New writes use the three-segment form and cannot collide.
+Legacy streams also predate the no-dot rule on `question_id`, which is why the
+order fallback remains on read.
 
-This ID is the **stream-correlation** identifier for the persisted audit trail.
-It is distinct from two other identifiers that share some of the same parts:
+`InquiryId` is the **stream-correlation** identifier for the persisted audit
+trail and is distinct from two other identifiers that share parts of its shape:
 
-- The in-memory `TurnState` cache key (`<tool_name>.<question_id>` — see
-  [Splitting the turn-cache state](#splitting-the-turn-cache-state)) dedupes
-  "remember for turn" answers across tool calls within the same turn.
-- The tool-facing `ExecutingTool::accumulated_answers` map remains keyed by the
-  bare `question.id`, with latest-answer-wins semantics.
-  Tools have no access to `tool_call_id` or `attempt`; if a tool re-asks the
-  same `question.id`, the new answer overwrites the previous one in this map.
-  Tools that need to distinguish multiple instances of a logical question use
-  distinct `question.id`s.
-  The inquiry stream preserves every attempt; this map preserves only the most
-  recent answer per question.
+- The in-memory `TurnState` cache key (`<tool_name>.<question_id>`, see
+  [Splitting the turn-cache state](#splitting-the-turn-cache-state))
+  deduplicates "remember for turn" answers across tool calls within the same
+  turn.
+- The tool-facing `ExecutingTool::accumulated_answers` map is keyed by the bare
+  `question.id` with latest-answer-wins semantics.
+  Tools do not see `tool_call_id` or `attempt`; if a tool re-asks the same
+  `question.id`, the new answer overwrites the previous entry in this map, while
+  the inquiry stream preserves every attempt.
+  Tools that need to distinguish multiple instances of a question must use
+  distinct `question.id` values.
 
 ### Source attribution
 
-`InquirySource` is derived from **which code path constructs the inquiry event
-in JP**, not from the tool's content and not from user config.
+`InquirySource` is derived from **the JP code path that constructs the inquiry
+event**, not from tool output or user config.
 
-For built-in tools, a new `BuiltinTool` trait hook:
+Built-in tools use a `BuiltinTool` trait hook:
 
 ```rust
 pub trait BuiltinTool {
@@ -212,22 +196,20 @@ pub trait BuiltinTool {
 }
 ```
 
-[RFD 083]'s `ask_user` will override this to return `InquirySource::Assistant`.
-082 itself ships no production overrides; tests exercise the assistant-source
-path with a synthetic built-in.
+[RFD 083]'s `ask_user` overrides this method to return
+`InquirySource::Assistant`.
+RFD 082 ships no production overrides; tests exercise the `Assistant` path with
+a synthetic built-in tool.
 
-For MCP tools and local tools, the wrapping code path always constructs
+For MCP and local (shell-command-backed) tools, the wrapper always constructs
 `InquirySource::Tool { name }`.
-There is no API for these tool types to influence the persisted source — an MCP
-server cannot claim to be the assistant, because the MCP protocol exposes no
-such field and JP's MCP integration does not honor one.
-Same for local (shell-command-backed) tools: their commands and arguments cannot
-affect provenance.
+Neither tool type can override the persisted source: the MCP protocol exposes no
+such field, JP's MCP integration does not accept one, and local tool commands
+and arguments cannot alter provenance.
 
 User config has no input into `InquirySource`.
-The display-side "who's asking" label is a separate concern handled by [RFD
-083]'s `QuestionConfig.prompt_label` field.
-Two independent properties:
+The display-side "who's asking" label is configured separately through [RFD
+083]'s `QuestionConfig.prompt_label` field:
 
 | Concern                     | Source                                  |
 | --------------------------- | --------------------------------------- |
@@ -239,89 +221,75 @@ Two independent properties:
 
 #### Crossing the executor boundary
 
-The `BuiltinTool` trait lives in `jp_llm` and is invoked deep inside
+`BuiltinTool` lives in `jp_llm` and runs inside
 `ToolDefinition::execute_builtin()`.
-The `ToolCoordinator` (in `jp_cli`) sits above the `Executor` trait and has no
-direct view of the underlying tool's source kind.
+`ToolCoordinator` (in `jp_cli`) sits above the `Executor` trait and cannot
+inspect the underlying tool's source kind directly.
 To keep the coordinator free of tool-type branching, the `Executor` layer
-resolves `InquirySource` before the coordinator ever sees a question.
+resolves `InquirySource` before the coordinator receives a question.
 
-`ExecutorResult::NeedsInput` is extended with a `source: InquirySource` field.
-`ToolExecutor` (in `jp_cli`, which already holds the `BuiltinExecutors` registry
-via `TerminalExecutorSource`) populates it when it converts
+`ExecutorResult::NeedsInput` gains a `source: InquirySource` field.
+`ToolExecutor` (in `jp_cli`, which holds the `BuiltinExecutors` registry via
+`TerminalExecutorSource`) populates `source` when converting
 `ExecutionOutcome::NeedsInput` into `ExecutorResult`:
 
-- For `ToolSource::Builtin { .. }`: look up the `BuiltinTool` in the registry
-  and call `inquiry_source(name)`.
-- For `ToolSource::Local { .. }` and `ToolSource::Mcp { .. }`: default to
+- `ToolSource::Builtin { .. }`: look up the `BuiltinTool` in the registry and
+  call `inquiry_source(name)`.
+- `ToolSource::Local { .. }` and `ToolSource::Mcp { .. }`: use
   `InquirySource::Tool { name }`.
 
-The coordinator records the already-resolved value verbatim.
-There is no path from the coordinator to a per-tool source decision; the
-resolution rule lives in exactly one place, and adding a new source kind is a
-change to `ToolExecutor`, not to every recording site.
+The coordinator records the resolved value verbatim.
+Source resolution lives in `ToolExecutor` alone, so adding a new tool source
+kind requires no changes at recording sites.
 
-Mock executors and `TestExecutorSource` populate the field directly, so test
-fixtures can exercise the `Assistant`-attribution path without wiring a real
-built-in.
+Mock executors and `TestExecutorSource` populate `source` directly, letting test
+fixtures exercise `Assistant` attribution without registering a real built-in
+tool.
 
 ### Recording lifecycle
 
-For every `Outcome::NeedsInput { question }` that passed ingestion validation (a
-valid `QuestionId` — see [Inquiry ID format](#inquiry-id-format)):
+For every `Outcome::NeedsInput { question }` that passes `QuestionId` validation
+(see [Inquiry ID format](#inquiry-id-format)):
 
-1. The coordinator reads the `InquirySource` carried on
-   `ExecutorResult::NeedsInput`.
-   Resolution happened at the executor boundary (see [Crossing the executor
-   boundary](#crossing-the-executor-boundary)); the coordinator does not branch
-   on tool type.
+1. Read `InquirySource` from `ExecutorResult::NeedsInput` (see [Crossing the
+   executor boundary](#crossing-the-executor-boundary)).
 
-2. The coordinator records `InquiryRequest { id, source, question }` **before
-   any routing decision** — including the cached-answer and static-answer
-   short-circuits below.
-   The recording uses the format defined in [Inquiry ID
-   format](#inquiry-id-format), and the persisted `InquiryQuestion` carries the
-   same `answer_type` as the source `Question` — including `AnswerType::Secret`
-   when applicable.
+2. Record `InquiryRequest { id, source, question }` **before any routing
+   decision**, including cached-answer and static-answer short-circuits.
+   The ID uses the three-segment format from [Inquiry ID
+   format](#inquiry-id-format), and the persisted `InquiryQuestion` preserves
+   the source `Question`'s `answer_type`, including `AnswerType::Secret`.
 
-3. The coordinator checks for an automatic answer:
+3. Check for an automatic answer (without showing a prompt):
 
-   - **Cached answer** (`remembered_tool_answers` — a previous `Y`/`N` in this
-     turn).
-     Skipped for `AnswerType::Secret` questions; secret answers do not enter the
-     cache (see [Secret questions](#secret-questions)).
-     For non-`Secret` answer types: if found, record `InquiryResponse::Answered
-     { id, answer }` with the cached value and resume tool execution.
-     No prompt is shown.
-   - **Static answer** (configured via `QuestionConfig.answer`).
-     If present, apply the configured value and resume tool execution.
-     For non-`Secret` answer types, record `InquiryResponse::Answered { id,
-     answer }`; for `AnswerType::Secret`, record `InquiryResponse::Redacted { id
-     }` even though the configured value is what the tool received.
-     No prompt is shown.
+   - **Cached answer** (`remembered_tool_answers`, from a previous `Y`/`N` in
+     the same turn).
+     Skipped for `AnswerType::Secret` questions, which are never cached (see
+     [Secret questions](#secret-questions)).
+     For other answer types, if a cached value exists, record
+     `InquiryResponse::Answered { id, answer }` and resume tool execution.
+   - **Static answer** (`QuestionConfig.answer`).
+     If configured, pass the value to the tool and resume execution.
+     Record `InquiryResponse::Answered { id, answer }` for non-`Secret` answer
+     types, or `InquiryResponse::Redacted { id }` for `AnswerType::Secret`.
 
-4. Otherwise, route the question (interactive prompter or inquiry backend).
-   For `AnswerType::Secret` questions on the prompter path, the prompter uses a
-   no-echo input mode (see [Secret questions](#secret-questions) for the
-   routing-scope caveat).
+4. Otherwise, route the question to the interactive prompter or the inquiry
+   backend.
+   For `AnswerType::Secret` questions, the prompter disables input echo (see
+   [Secret questions](#secret-questions) for routing restrictions).
 
 5. On a successful answer:
 
    - Non-`Secret` answer type (from prompter or inquiry backend): record
      `InquiryResponse::Answered { id, answer }`.
-   - `AnswerType::Secret` (from prompter only — the inquiry backend is
-     unreachable per the routing guard in [Secret
-     questions](#secret-questions)): record `InquiryResponse::Redacted { id }`.
-     The answer is delivered to the tool in-memory; only the persisted shape is
-     redacted.
+   - `AnswerType::Secret` (from prompter only; the routing guard in [Secret
+     questions](#secret-questions) blocks the inquiry backend): deliver the
+     answer to the tool in memory and record `InquiryResponse::Redacted { id }`.
 
-6. On a non-answer outcome, record `InquiryResponse::Cancelled { id, reason }`.
-   The `ToolCallResponse` returned to the LLM is unchanged (existing wording);
-   this only closes the `InquiryRequest`/`InquiryResponse` pairing on the
-   persisted side.
-   Without this, every recorded `InquiryRequest` whose backend errored or whose
-   user cancelled would land unpaired on disk.
-   The `reason` is determined by the originating event:
+6. On a non-answer outcome, record `InquiryResponse::Cancelled { id, reason }`
+   to close the persisted `InquiryRequest`/`InquiryResponse` pair.
+   The `ToolCallResponse` returned to the LLM keeps its existing wording.
+   The originating event determines `reason`:
 
    | Originating event                                                                          | `reason`                 |
    | ------------------------------------------------------------------------------------------ | ------------------------ |
@@ -335,36 +303,35 @@ valid `QuestionId` — see [Inquiry ID format](#inquiry-id-format)):
    | `AnswerType::Secret` and no TTY available                                                  | `NoPromptBackend`        |
    | `AnswerType::Secret` and `target = "assistant"`                                            | `AssistantRoutingDenied` |
 
-   `InquiryError::Cancelled` returns `Err` from the inquiry backend today (see
-   `crates/jp_cli/src/cmd/query/tool/inquiry.rs` around
-   `cancellation_token.cancelled()`), but it is semantically a user-initiated
-   cancellation — the token is cancelled by `interrupt/signals.rs` in response
-   to user actions (`InterruptAction::RestartTool`, `ToolCancelled`, hard quit).
-   Mapping it to `User` (not `BackendError`) keeps the audit trail honest.
-   `ExecutionEvent::PromptCancelled` carries a reason mapped at the prompt site:
-   `inquire`'s cancel/interrupt errors are user actions, and every other
-   prompter error (I/O, no TTY, writer failure) is a backend failure recorded as
-   `BackendError`.
+   Although `InquiryError::Cancelled` returns `Err` from the inquiry backend
+   (`crates/jp_cli/src/cmd/query/tool/inquiry.rs` around
+   `cancellation_token.cancelled()`), it represents a user-initiated
+   cancellation: `interrupt/signals.rs` cancels the token on user actions
+   (`InterruptAction::RestartTool`, `ToolCancelled`, hard quit).
+   Mapping it to `User` rather than `BackendError` keeps the audit trail
+   accurate.
+   Similarly, `ExecutionEvent::PromptCancelled` maps `inquire` cancel and
+   interrupt errors to `User`, and maps all other prompter errors (I/O, missing
+   TTY, writer failure) to `BackendError`.
 
-`Cancelled` records that the inquiry was closed without an answer — for the
-audit trail only.
-It does not encode retry policy.
-The model-facing `ToolCallResponse` text (existing wording, unchanged by 082) is
-the sole channel for "may retry" / "do not retry" guidance to the model.
-`Outcome::Error { transient }` exists in `jp_tool` and is dropped at the
-executor boundary today (`crates/jp_llm/src/tool.rs` around `execute_builtin`);
-if a future RFD wants persisted retryability, it adds a separate field or
-variant rather than overloading `CancellationReason`.
+`Cancelled` records in the audit trail that the inquiry closed without an
+answer; it does not encode retry policy.
+The model-facing `ToolCallResponse` text remains the sole channel for retry
+guidance to the model.
+`Outcome::Error { transient }` in `jp_tool` is dropped at the executor boundary
+(`crates/jp_llm/src/tool.rs` around `execute_builtin`); a future RFD that wants
+persisted retryability should add a dedicated field or variant rather than
+overloading `CancellationReason`.
 
 ### Secret questions
 
-Some tool questions ask for values the user does not want written into the
-conversation stream: SSH passphrases, API keys, one-time tokens.
-Recording the question text without the answer keeps the audit trail honest
-while keeping the answer out of the persisted inquiry event.
+Some tool questions ask for values that should not be written to the
+conversation stream, such as SSH passphrases, API keys, and one-time tokens.
+Recording the question text while omitting the answer preserves the audit trail
+without persisting the secret.
 
-`jp_tool::AnswerType` gains a new variant, `Secret`, for free-form text input
-whose answer must not be persisted:
+`jp_tool::AnswerType` gains a `Secret` variant for free-form text input whose
+answer must not be persisted:
 
 ```rust
 pub enum AnswerType {
@@ -379,95 +346,85 @@ pub enum AnswerType {
 }
 ```
 
-Encoding secret-ness as an answer type, rather than as a `secret: bool` flag on
-`Question`, makes the no-echo + `Redacted` behavior a type-level property:
-`Secret` is by construction free-form text with no echo and no persistence, so
-the ambiguous "secret boolean" or "secret select" shapes are unrepresentable.
+Encoding secrecy as an `AnswerType` variant rather than a `secret: bool` flag on
+`Question` makes no-echo input and `Redacted` persistence type-level properties:
+`Secret` is always free-form text, making ambiguous "secret boolean" or "secret
+select" combinations unrepresentable.
 `jp_conversation::event::inquiry::InquiryAnswerType` gains a matching `Secret`
-variant; the existing serde tagging (`tag = "type"`, `rename_all =
-"snake_case"`) serializes it as `{"type": "secret"}`.
+variant, which serializes as `{"type": "secret"}` under the existing `tag =
+"type"`, `rename_all = "snake_case"` serde attributes.
 
-The answer type is a **tool-author declaration**: it is set by the code that
-constructs the `Question` (or, for local tools, by the JSON emitted on stdout).
-User config has no input — secret-ness is a property of *what* is being asked,
-not of who is answering or how.
-Concretely:
+The answer type is a **tool-author declaration**, set by the code that
+constructs `Question` (or by the JSON emitted on stdout for local tools).
+User config cannot override it because secrecy is a property of *what* is asked,
+not who answers or how:
 
-- **Built-in tools** declare `AnswerType::Secret` in the `Question` literal they
-  construct.
-- **Local tools** declare it by returning `"answer_type": {"type": "secret"}` in
-  the `needs_input` JSON outcome on stdout.
-  The existing `serde_json::from_str::<Outcome>` path in
-  `crates/jp_llm/src/tool.rs` deserializes the new variant with no further
-  plumbing.
-- **MCP tools** cannot declare it today.
-  The MCP protocol exposes no field that maps to `AnswerType::Secret`, and JP's
-  MCP integration does not surface one.
-  A future RFD may add an MCP-side annotation if needed.
+- **Built-in tools** set `AnswerType::Secret` when constructing `Question`.
+- **Local tools** return `"answer_type": {"type": "secret"}` in the
+  `needs_input` JSON outcome on stdout, which `serde_json::from_str::<Outcome>`
+  in `crates/jp_llm/src/tool.rs` deserializes directly.
+- **MCP tools** cannot declare `Secret` because the MCP protocol and JP's MCP
+  integration expose no corresponding field.
+  A future RFD can add an MCP annotation if needed.
 
-`Question.default` is a tool-author-set display hint (a pre-selected option or
-suggested value).
-It is propagated to `InquiryQuestion.default` verbatim regardless of the answer
-type.
-Tool authors MUST NOT set `default` to a sensitive literal on an
+`Question.default` is a display hint (a pre-selected option or suggested value)
+and propagates to `InquiryQuestion.default` verbatim regardless of answer type.
+Tool authors MUST NOT put a sensitive literal in `default` on an
 `AnswerType::Secret` question; JP does not redact it.
 
-**Scope.** 082 gives the `Secret` variant three effects:
+**Scope.** `AnswerType::Secret` has three effects:
 
 1. **Prompter no-echo input.** `PromptBackend` gains a no-echo input method
-   (e.g. `password`), implemented on `TerminalPromptBackend` via
+   (such as `password`), implemented on `TerminalPromptBackend` via
    `inquire::Password` and on `MockPromptBackend` as a regular queued response.
    `ToolPrompter::prompt_question` dispatches to it when `question.answer_type
    == AnswerType::Secret`.
-2. **`Redacted` persistence.** Every code path that would record
-   `InquiryResponse::Answered` for a non-`Secret` answer type records
-   `InquiryResponse::Redacted { id }` when the question's answer type is
-   `Secret`.
-3. **Routing guard.** `AnswerType::Secret` cannot be routed to the inquiry
-   backend, full stop.
-   The coordinator enforces this with two fail-fast checks before routing:
-   - No TTY available — fail the tool with a tool-level error and record
+2. **`Redacted` persistence.** Every path that records
+   `InquiryResponse::Answered` for non-`Secret` questions instead records
+   `InquiryResponse::Redacted { id }` when `question.answer_type ==
+   AnswerType::Secret`.
+3. **Routing guard.** `AnswerType::Secret` questions cannot be routed to the
+   inquiry backend.
+   The coordinator enforces two fail-fast checks before routing:
+   - No TTY available: fail the tool with a tool-level error and record
      `InquiryResponse::Cancelled { reason: NoPromptBackend }`.
-   - Explicit `target = "assistant"` — fail the tool with a tool-level error
-     and record `InquiryResponse::Cancelled { reason: AssistantRoutingDenied }`.
-     Both checks are generic on `question.answer_type == Secret`.
-     The same machinery serves [RFD 083]'s `exclusive: true` flag (083 reuses
-     these variants for its routing fail-fast paths).
+   - Explicit `target = "assistant"`: fail the tool with a tool-level error and
+     record `InquiryResponse::Cancelled { reason: AssistantRoutingDenied }`.
+     Both checks match on `question.answer_type == Secret`, sharing the guard
+     machinery that [RFD 083] reuses for `exclusive: true`.
 
-**What `Secret` does and does not cover.** The guarantee is scoped to JP's own
-handling of the inquiry: JP does not echo the prompt input, does not write the
-answer into the `InquiryResponse` (it records `Redacted { id }`), and does not
-store the answer in the `TurnState` turn-answer cache.
-It does **not** redact the value from anywhere else it might reach disk:
+**What `Secret` does and does not cover.** The guarantee is scoped to JP's
+handling of the inquiry: JP disables prompt echo, records `Redacted { id }`
+instead of the answer in `InquiryResponse`, and skips the `TurnState`
+turn-answer cache.
+It does **not** redact the value from other places where it might reach disk:
 
-- **Tool output.** If a tool echoes the secret back in its success or error
-  text, that text is persisted verbatim in `ToolCallResponse`.
-  JP does not scan tool output for the answer.
-- **Config values.** A secret supplied through `QuestionConfig.answer` lives in
-  the config file the user wrote it into, and can be persisted into the
-  conversation stream as a config delta, independent of the `Redacted` response.
-- **`Question.default`** is propagated verbatim (see above) and is not redacted.
-- **Logs** and any external tool behavior are out of scope.
+- **Tool output.** If a tool echoes the secret in its success or error text,
+  `ToolCallResponse` persists that text verbatim.
+- **Config values.** A secret set in `QuestionConfig.answer` lives in the user's
+  config file and can be persisted in the conversation stream as a config delta,
+  independent of the `Redacted` response.
+- **`Question.default`** propagates verbatim and is not redacted.
+- **Logs** and external tool behavior are out of scope.
 
-A "tainted value" model that tracks a secret across `ToolCallResponse`, config
-deltas, and logs is a larger redaction design and belongs in its own RFD.
+Tracking a secret as a tainted value across `ToolCallResponse`, config deltas,
+and logs belongs in a separate RFD.
 
-**Static-answer shape is not validated.** `QuestionConfig.answer` is an
-arbitrary JSON value, and 082 does not validate that a static answer for a
-`Secret` question is a string (the same looseness already applies to `Boolean`,
-`Select`, and `Text`).
-Whatever is configured is delivered to the tool in memory and the response is
-recorded as `Redacted` regardless of shape, so no secret leaks through a
-malformed static answer.
-Answer-shape validation (`CancellationReason::InvalidStaticAnswer`) arrives with
-[RFD 083]; 082 does not pull it forward.
+**Static-answer shape is not validated.** `QuestionConfig.answer` accepts any
+JSON value, and RFD 082 does not check that a static answer for a `Secret`
+question is a string (matching the existing behavior for `Boolean`, `Select`,
+and `Text`).
+The configured value is passed to the tool in memory and the response is
+recorded as `Redacted` regardless of shape, so a malformed static answer never
+leaks a secret.
+Answer-shape validation (`CancellationReason::InvalidStaticAnswer`) is
+introduced in [RFD 083].
 
 ### `InquiryResponse` serialization
 
-The widened `InquiryResponse` is a Rust enum that makes invalid
-(both-or-neither) states unrepresentable at the type level, and carries an
-explicit reason on the cancellation variant so replay and debugging can
-distinguish each non-answer outcome:
+The widened `InquiryResponse` enum makes invalid states (both answered and
+cancelled, or neither) unrepresentable and carries an explicit reason on
+`Cancelled` so replay and debugging can distinguish non-answer outcomes:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -501,32 +458,26 @@ pub enum CancellationReason {
 }
 ```
 
-`CancellationReason` carries a custom `Serialize`/`Deserialize` pair.
-The on-disk shape is always `{"reason": "<tag>"}`: `User` round-trips as
-`"user"`, `BackendError` as `"backend_error"`, and `Unknown(s)` round-trips `s`
-verbatim.
-On deserialization, any tag the build does not recognize lands as `Unknown(tag)`
-instead of erroring.
-This keeps audit-trail integrity across version boundaries — an older JP
-reading a stream written by a newer JP loads the event, marked opaque, rather
-than failing the load.
+`CancellationReason` uses custom `Serialize` and `Deserialize` implementations.
+On disk it serializes as `"reason": "<tag>"`: `User` as `"user"`, `BackendError`
+as `"backend_error"`, and `Unknown(s)` as `s` verbatim.
+Deserialization maps any unrecognized tag to `Unknown(tag)` instead of failing,
+so an older JP build can load streams written by a newer build without losing
+the tag.
 
-JP itself **never writes `Unknown(_)`**: every variant produced by JP is one
-this build knows by name.
-`Unknown` is a read-only landing pad for future variants.
-Future RFDs that extend the enum add their variants in the same module as
-siblings of the existing ones — [RFD 083] contributes `InvalidStaticAnswer` for
-a `QuestionConfig.answer` that does not match the in-flight question's
-`answer_type` or `options`, and reuses 082's `NoPromptBackend` and
-`AssistantRoutingDenied` for its `exclusive: true` routing guards.
+JP **never writes `Unknown(_)`** for its own events; `Unknown` is a read-only
+fallback for unrecognized tags.
+Future RFDs add sibling variants in the same module: [RFD 083] adds
+`InvalidStaticAnswer` when `QuestionConfig.answer` does not match the question's
+`answer_type` or `options`, and reuses `NoPromptBackend` and
+`AssistantRoutingDenied` for `exclusive: true` routing guards.
 
-`Redacted` carries only `id`: no answer field, no reason field.
-It is the canonical shape for "the question was answered and the tool received
-the answer, but JP deliberately did not persist it" (see [Secret
-questions](#secret-questions)).
+`Redacted` carries only `id` (no `answer` or `reason` field), representing a
+question whose answer was delivered to the tool in memory but omitted from disk
+(see [Secret questions](#secret-questions)).
 
-Default `Serialize` writes the internally-tagged form, consistent with
-`InquirySource` in the same module:
+`Serialize` writes the internally-tagged form, matching `InquirySource` in the
+same module:
 
 ```json
 {
@@ -565,8 +516,8 @@ Default `Serialize` writes the internally-tagged form, consistent with
 }
 ```
 
-A custom `Deserialize` for `InquiryResponse` accepts both the new tagged form
-*and* the legacy flat form written by pre-082 code:
+A custom `Deserialize` implementation for `InquiryResponse` accepts both the
+tagged form and the pre-082 untagged form:
 
 ```json
 {
@@ -577,69 +528,58 @@ A custom `Deserialize` for `InquiryResponse` accepts both the new tagged form
 
 Legacy events without an `outcome` field deserialize as
 `InquiryResponse::Answered`.
-The absence of `outcome`, `answer`, and a `Redacted`-shaped payload is a
-deserialization error — no legacy cancellations or redactions exist because
-neither variant existed before this RFD.
-When `outcome == "cancelled"` is present but the `reason` field is missing, the
-custom `Deserialize` defaults the reason to `CancellationReason::User` — the
-conservative choice, since the other known variants (`BackendError`, `Unknown`)
-require JP itself to have produced the event.
+An event missing `outcome`, `answer`, and a `Redacted`-shaped payload fails
+deserialization, since pre-082 streams contain neither cancellations nor
+redactions.
+When `outcome == "cancelled"` is present without a `reason` field, `Deserialize`
+defaults `reason` to `CancellationReason::User`, the conservative choice given
+that `BackendError` and `Unknown` require JP itself to have written a reason.
 
-This is the standard "write new, read both" backward-compat pattern.
-Old conversation streams continue to read correctly; every new write produces
-the tagged form.
-No migration step is required — the on-disk shape heals one event at a time as
-new responses are recorded.
+Under this write-new, read-both scheme, existing conversation streams continue
+to load without a migration step, and new writes use the tagged form.
 
 ### Reader behavior
 
-The widened `InquiryResponse` enum changes what existing readers of the
-persisted stream see.
-Defined behavior:
+Existing readers of the persisted stream handle the widened `InquiryResponse` as
+follows:
 
 - **Markdown export** (`crates/jp_cli/src/editor.rs`):
   - `Answered { answer }`: `Answer: <value>` (unchanged).
   - `Redacted { id }`: `Answer: <redacted>`.
-  - `Cancelled { reason }`: `Cancelled (<reason>)` where `<reason>` is the
-    serde-encoded tag of the variant (`user`, `backend_error`,
-    `no_prompt_backend`, `assistant_routing_denied`, or — for `Unknown(tag)` —
-    the unparsed `tag` preserved verbatim from the source stream).
-    The implementation should derive this from the variant's serde
-    representation so new `CancellationReason` variants render correctly without
-    code changes; if that requires a small helper (e.g.
-    `CancellationReason::as_str`), add it alongside the enum.
+  - `Cancelled { reason }`: `Cancelled (<reason>)`, where `<reason>` is the
+    variant's serde tag (`user`, `backend_error`, `no_prompt_backend`,
+    `assistant_routing_denied`, or the verbatim `tag` from `Unknown(tag)`).
+    Derive this string from the variant's serde representation (for example via
+    `CancellationReason::as_str`) so new `CancellationReason` variants render
+    without changes to the exporter.
 - **`jp conversation grep`** (`crates/jp_cli/src/cmd/conversation/grep.rs`):
-  continues to ignore `InquiryResponse` entirely.
-  The response side has no greppable text; changing this is out of scope.
+  continues to ignore `InquiryResponse`, which carries no greppable text.
 - **Turn renderer** (`crates/jp_cli/src/render/turn.rs`): continues to skip
-  inquiry events entirely.
-  Pretty rendering for `jp conversation show` is a non-goal here (see
+  inquiry events.
+  Formatting inquiry events in `jp conversation show` is out of scope (see
   [Non-Goals](#non-goals)).
 
-Any other reader that pattern-matches on `InquiryResponse` MUST handle all
-variants.
-The default `serde` deserializer can now produce values across the full enum,
-not just `Answered`.
+All other readers that match on `InquiryResponse` MUST handle `Answered`,
+`Cancelled`, and `Redacted`.
 
 ### Splitting the turn-cache state
 
-Today's `TurnState.persisted_inquiry_responses: IndexMap<InquiryId,
-InquiryResponse>` serves two unrelated callers under one name:
+`TurnState.persisted_inquiry_responses: IndexMap<InquiryId, InquiryResponse>`
+serves two unrelated callers under one map:
 
 - Tool-question answers, keyed `"<tool_name>.<question_id>"`, written and read
-  by `handle_tool_result` / `handle_prompt_answer`.
+  by `handle_tool_result` and `handle_prompt_answer`.
 - Tool-permission decisions, keyed `"<tool_name>.__permission__"`, written and
-  read by `decide_permission` / `apply_permission_result`.
-  Reuse is governed by the permission prompt's `persist` flag.
+  read by `decide_permission` and `apply_permission_result`, gated by the
+  permission prompt's `persist` flag.
 
-With the widened `InquiryResponse` (which now also encodes `Cancelled`), storing
-`InquiryResponse` values directly conflates audit-log records with
-reusable-answer cache entries: a `Cancelled` is never a valid remembered answer
-for either caller.
-The name `persisted_inquiry_responses` also becomes a misnomer once the values
-are no longer `InquiryResponse`s.
+Once `InquiryResponse` includes `Cancelled`, storing `InquiryResponse` values in
+`TurnState` conflates audit-log events with reusable cached answers: a
+`Cancelled` event is never a valid remembered answer for either caller, and
+`persisted_inquiry_responses` is a misnomer once the values are no longer
+`InquiryResponse` entries.
 
-Split `TurnState` into two narrowly-named maps:
+`TurnState` splits this map into two separate maps:
 
 ```rust
 pub struct TurnState {
@@ -657,85 +597,73 @@ pub struct TurnState {
 }
 ```
 
-The cache-key shapes (`<tool_name>.<question_id>` and
-`<tool_name>.__permission__`) are deliberately distinct from the
-stream-correlation `InquiryId` format defined in [Inquiry ID
-format](#inquiry-id-format) — today's `TurnState` uses `InquiryId` for both,
-which blurs the two roles.
-Implementation may introduce dedicated newtypes per map to lift this distinction
-into the type system; 082 does not require it.
+The cache keys (`<tool_name>.<question_id>` and `<tool_name>.__permission__`)
+are distinct from the stream-correlation `InquiryId` format (see [Inquiry ID
+format](#inquiry-id-format)), whereas `TurnState` previously used `InquiryId`
+for both.
+The implementation may introduce dedicated newtypes per map, though RFD 082 does
+not require them.
 
-Each caller owns one map; neither needs to know the other exists.
-Permission reads use the prompt's `persist` flag, unchanged from today.
-Tool-answer reads follow today's behavior; [RFD 083] later adds a persistence
-predicate on top of this split when it introduces the `Question.persistence`
-field.
-
-Migrating off `InquiryResponse` values lets us write `Cancelled` to the
-persisted stream without ever risking a `Cancelled` being read back as a
-remembered answer.
+Each caller owns one map.
+Permission reads check the prompt's `persist` flag as before, and tool-answer
+reads preserve their existing behavior ([RFD 083] adds a persistence predicate
+when it introduces `Question.persistence`).
+Storing `Value` rather than `InquiryResponse` ensures a `Cancelled` or
+`Redacted` response in the stream can never be read back as a remembered answer.
 
 ### Pre-seed removal
 
-Today the coordinator pre-seeds `accumulated_answers` from
-`static_answers_for_all_questions` before tool execution (currently around
-`crates/jp_cli/src/cmd/query/tool/coordinator.rs:805`).
-For static-answered questions, this means the tool never emits
-`Outcome::NeedsInput` — so the coordinator has no question metadata to record
-an `InquiryRequest` from.
+Before tool execution, the coordinator pre-seeds `accumulated_answers` from
+`static_answers_for_all_questions`
+(`crates/jp_cli/src/cmd/query/tool/coordinator.rs:805`).
+Because the tool receives those answers on its first invocation, it never emits
+`Outcome::NeedsInput`, leaving the coordinator with no question metadata to
+record in an `InquiryRequest`.
 
-The pre-seed is removed.
-Static answers flow through the existing late-path `static_answer` lookup in
-`handle_tool_result` (currently around `coordinator.rs:1323`), which already
-handles applying the configured answer once `NeedsInput` fires.
-Per-question cost: one extra tool invocation per configured static answer (the
-tool's first call returns `NeedsInput`; the coordinator immediately respawns it
-with the answer injected).
-No prompt is shown, no LLM round-trip happens.
-The tradeoff buys uniform recording: every question/answer exchange produces an
+RFD 082 removes this pre-seed.
+Static answers instead flow through the `static_answer` lookup in
+`handle_tool_result` (`coordinator.rs:1323`), which applies the configured
+answer after `NeedsInput` fires.
+Each configured static answer adds one extra local tool invocation: the first
+call returns `NeedsInput`, and the coordinator immediately respawns the tool
+with the answer injected, without showing a prompt or making an LLM round-trip.
+In exchange, every question/answer exchange records an
 `InquiryRequest`/`InquiryResponse` pair regardless of how the answer is
 resolved.
 
-**This is a behavior change for user-supplied local tools.** MCP tools are
-structurally unaffected: `execute_mcp` never receives the `answers` map.
-Built-in tools *do* receive the pre-seeded `answers` map today, through
-`BuiltinTool::execute(&self, arguments, answers)`, so removing the pre-seed
-changes what a built-in sees on its first call.
-Current in-tree built-ins use the two-call `NeedsInput → Success` pattern and
-do not read `answers` on first call, but that is a property to verify, not a
-structural guarantee (see the built-in audit bullet in Phase 3).
-Local tools receive the accumulated answers in the JSON context under `"tool": {
+**This changes the contract for user-supplied local tools.** MCP tools are
+unaffected because `execute_mcp` never receives the `answers` map.
+Built-in tools receive `answers` through `BuiltinTool::execute(&self, arguments,
+answers)`, so removing the pre-seed changes what a built-in sees on its first
+call; in-tree built-ins already use the two-call `NeedsInput → Success` pattern
+and do not read `answers` on the first call, which Phase 3 verifies.
+Local tools receive accumulated answers in their JSON context under `"tool": {
 "answers": answers, ... }` (`crates/jp_llm/src/tool.rs` around line 719).
-Today, `QuestionConfig.answer` is documented as "the question will not be
-presented to the target, but will always be answered with the given value"
-(`crates/jp_config/src/conversation/tool.rs:1240-1241`), and a local tool can
-rely on that answer being present on the first invocation.
-After 082, a static answer is delivered on the second invocation — the local
-tool must emit `NeedsInput` for that question before the static answer flows in.
+`QuestionConfig.answer` is documented as "the question will not be presented to
+the target, but will always be answered with the given value"
+(`crates/jp_config/src/conversation/tool.rs:1240-1241`), allowing a local tool
+to expect the answer on its first invocation.
+With pre-seeding removed, static answers arrive on the second invocation after
+the tool emits `NeedsInput`.
 
-Local tools that already use the standard `NeedsInput → Success` pattern see no
-behavior change.
-Local tools that today inspect `tool.answers` on first call and proceed without
-emitting `NeedsInput` need to switch to the two-call pattern.
-Tools with side effects between argument validation and the first `NeedsInput`
-will run those side effects once more than before per configured static answer;
-for side-effecting tools this is a real cost, not a transparent refactor.
-`QuestionConfig.answer`'s documentation will be updated to reflect the new
-contract when this RFD lands.
+Local tools that already follow the `NeedsInput → Success` pattern are
+unaffected.
+Local tools that inspect `tool.answers` on the first call without emitting
+`NeedsInput` must switch to the two-call pattern.
+Tools that perform side effects between argument validation and the first
+`NeedsInput` will run those side effects once more per configured static answer.
+The `QuestionConfig.answer` documentation is updated alongside this change.
 
 ### Coordinator plumbing
 
-The prompter-answered path currently does not hold a write handle to the
-conversation stream.
-`handle_prompt_answer` and `handle_prompt_cancelled` gain a `conv:
-&ConversationMut` parameter (mirroring `handle_tool_result`, which already
-receives it).
+To record inquiry events on the prompter path, `handle_prompt_answer` and
+`handle_prompt_cancelled` gain a `conv: &ConversationMut` parameter (matching
+`handle_tool_result`).
 
-The `InquiryId` for each prompt is **allocated once** at the recording site
-(when the coordinator records `InquiryRequest`, where the turn-scoped counter is
-incremented) and threaded through the prompt-event types so the answer and
-cancellation handlers can write the matching `InquiryResponse` without
-reconstructing the ID:
+The coordinator allocates the `InquiryId` once when recording `InquiryRequest`
+(incrementing the turn-scoped counter) and threads it through the prompt-event
+types so the answer and cancellation handlers can write the matching
+`InquiryResponse` without reconstructing the ID:
 
 ```rust
 enum PendingPrompt {
@@ -763,290 +691,232 @@ enum ExecutionEvent {
 }
 ```
 
-Today `PromptAnswer` carries `{ index, question_id, answer, persist_level }` and
-`PromptCancelled` carries only `{ index }`.
-Both gain `inquiry_id` for the recording write.
-`PromptAnswer` retains `question_id` because the coordinator continues to key
-`ExecutingTool::accumulated_answers` by `question.id`, independent of the
-inquiry ID.
-`PromptCancelled` needs no extra fields beyond `inquiry_id` — the turn-scoped
-counter is incremented at request time, so cancellation does not have to update
-it.
-
-Rebuilding the inquiry ID from its constituent parts in the answer/cancellation
-handler would require the handler to know the ID format, which conflicts with
-the "treat `InquiryId` as opaque" rule in [Inquiry ID
+`PromptAnswer` and `PromptCancelled` both gain `inquiry_id`.
+`PromptAnswer` retains `question_id` because
+`ExecutingTool::accumulated_answers` is still keyed by `question.id`.
+`PromptCancelled` needs only `inquiry_id` because the turn-scoped counter is
+already incremented when the request is recorded.
+Threading `inquiry_id` avoids reconstructing the ID from its segments in the
+answer and cancellation handlers, preserving the opacity rule in [Inquiry ID
 format](#inquiry-id-format).
 
-The cancellation-reason mapping in [Recording lifecycle](#recording-lifecycle)
-requires the typed `InquiryError` at the recording site.
-`ExecutionEvent::InquiryResult.result` is `Result<Value, String>` today, and
-`spawn_inquiry` stringifies the error (`.map_err(|e| e.to_string())`) before the
-coordinator sees it, so the variant-to-`CancellationReason` mapping is
-impossible without parsing rendered text.
-Widen the event to carry `Result<Value, InquiryError>` (or a
-`CancellationReason` mapped at the `spawn_inquiry` site); the reason is derived
-from the error variant, never from the message.
-The model-facing `ToolCallResponse` text is rendered separately and is
-unchanged.
+Mapping inquiry errors to `CancellationReason` (see [Recording
+lifecycle](#recording-lifecycle)) requires the typed `InquiryError` at the
+recording site.
+Because `spawn_inquiry` converts errors to strings (`.map_err(|e|
+e.to_string())`) for `ExecutionEvent::InquiryResult.result: Result<Value,
+String>`, the coordinator cannot distinguish error variants without parsing
+error text.
+Widening `InquiryResult.result` to `Result<Value, InquiryError>` (or mapping to
+`CancellationReason` in `spawn_inquiry`) derives the reason from the error
+variant while keeping the model-facing `ToolCallResponse` text unchanged.
 
 ## Drawbacks
 
-- **Stream-size growth.** Adds two `InquiryRequest`/`InquiryResponse` events per
-  tool-question round-trip on the prompter path (which today produces zero).
-  Each event is small (the question text plus a JSON answer value), but tools
-  with many interactive prompts over many turns accumulate them.
-  Bounded by the number of questions a tool actually asks; no growth for tools
-  that don't ask questions.
-- **Static-answer contract change for user-supplied local tools.** Removing the
-  pre-seed optimization means tools with a configured static answer execute
-  twice (emit `NeedsInput`, then receive the injected answer) instead of once.
-  JP's own built-ins and MCP tools are affected differently: MCP is structurally
-  immune (`execute_mcp` receives no `answers` map), while built-ins receive the
-  map today and are unaffected only because current in-tree built-ins do not
-  read it on first call (a property to audit, not a guarantee).
-  Local tools that today read `tool.answers` on first invocation and proceed
-  without emitting `NeedsInput` will no longer see the static answer on that
-  first call — a real contract change for that authoring pattern.
-  Tools with side effects before their first `NeedsInput` will run those side
-  effects one extra time per configured static answer.
-  See the [Pre-seed removal](#pre-seed-removal) subsection for migration
-  guidance.
-- **Touches existing tool-question call sites.** The unified recording affects
-  any tool that emits `Outcome::NeedsInput`, not just `ask_user`.
-  Each existing caller needs a regression pass.
-- **Widening `InquiryResponse` touches every reader of the persisted stream.**
-  The custom `Deserialize` for `InquiryResponse` preserves backward compat with
-  pre-082 events, but readers that pattern-match on the enum need updating to
-  handle the `Cancelled` and `Redacted` variants.
-- **`InquirySource` plumbed through `ExecutorResult::NeedsInput`.** Widening the
-  executor-result type to carry resolved source metadata touches every
-  `Executor` implementation, including `MockExecutor` and any test fixtures that
-  construct `ExecutorResult` directly.
-  The benefit is that source resolution lives in one place rather than at every
-  recording site.
-- **`AnswerType` gains a `Secret` variant and a serde representation change.**
+- **Stream-size growth.** Recording prompter-answered questions adds two events
+  (`InquiryRequest` and `InquiryResponse`) per tool-question round-trip where
+  none were written before.
+  Each event is small (the question text and a JSON answer value), and growth is
+  bounded by the number of questions tools ask.
+- **Static-answer contract change for user-supplied local tools.** Without
+  pre-seeding, tools with a configured static answer execute twice (emit
+  `NeedsInput`, then receive the injected answer) instead of once.
+  MCP tools are unaffected because `execute_mcp` receives no `answers` map, and
+  in-tree built-in tools do not read `answers` on their first call.
+  Local tools that read `tool.answers` on the first invocation without emitting
+  `NeedsInput` must switch to the two-call pattern, and tools with side effects
+  before their first `NeedsInput` run those side effects one extra time per
+  configured static answer (see [Pre-seed removal](#pre-seed-removal)).
+- **Touches existing tool-question call sites.** Unified recording applies to
+  every tool that emits `Outcome::NeedsInput`, not only `ask_user`, so existing
+  callers need regression testing.
+- **Widening `InquiryResponse` affects every stream reader.** Although custom
+  `Deserialize` preserves backward compatibility with pre-082 events, readers
+  that match on `InquiryResponse` must handle `Cancelled` and `Redacted`.
+- **`InquirySource` plumbed through `ExecutorResult::NeedsInput`.** Adding
+  `source` to `ExecutorResult::NeedsInput` touches every `Executor`
+  implementation, including `MockExecutor` and test fixtures that construct
+  `ExecutorResult` directly, in exchange for keeping source resolution in one
+  place.
+- **`AnswerType` gains `Secret` and an internally-tagged serde representation.**
   Both `jp_tool::AnswerType` and
-  `jp_conversation::event::inquiry::InquiryAnswerType` need the new variant.
-  Downstream `match`es on the enum (the prompter, the editor renderer, any code
-  that branches on answer types) need a new arm.
-  `jp_tool::AnswerType` also gains `#[serde(tag = "type", rename_all =
-  "snake_case")]` so its wire shape matches `InquiryAnswerType` and this RFD's
-  local-tool wire examples.
-  This **changes the local-tool stdout protocol**: `answer_type` shifts from the
-  externally-tagged shape (`"Text"`, `{"Select": {"options": [...]}}`) to the
-  internally-tagged shape (`{"type": "text"}`, `{"type": "select", "options":
-  [...]}`).
-  It ships as a clean cutover with no read-both compatibility shim, which is
-  acceptable because JP has no external local-tool authors today; the only
-  consumer is the in-tree `.config/jp/tools` crate, whose tools serialize
-  `Question` values *through* `jp_tool` rather than hand-encoding JSON, so their
-  emitted shape updates with the type and stays self-consistent.
-  Persisted conversation streams are unaffected: the stream stores
-  `InquiryAnswerType` (already internally tagged), produced by converting
-  `AnswerType` in `tool_question_to_inquiry_question`, so `jp_tool::AnswerType`
-  never crosses the on-disk boundary and reading pre-082 streams does not
-  change.
-  At implementation time, grep for any persisted local-tool stdout fixtures (raw
-  JSON, not constructed via `Outcome`) before flipping the tag; the cutover must
-  update those.
-  Old streams cannot contain `Secret` answers, so backward compat on read is
-  trivial.
-- **`PromptBackend` gains a no-echo input method.** A new method on the trait
-  (e.g. `password`) requires updates to `TerminalPromptBackend` (via
-  `inquire::Password`) and `MockPromptBackend`, plus any other in-tree
-  implementors.
-  Small surface but a real trait change.
+  `jp_conversation::event::inquiry::InquiryAnswerType` add `Secret`, requiring a
+  new match arm in the prompter, editor renderer, and other answer-type
+  consumers.
+  `jp_tool::AnswerType` also adds `#[serde(tag = "type", rename_all =
+  "snake_case")]` to match `InquiryAnswerType` and the local-tool JSON examples.
+  This **changes the local-tool stdout protocol** from externally tagged
+  (`"Text"`, `{"Select": {"options": [...]}}`) to internally tagged (`{"type":
+  "text"}`, `{"type": "select", "options": [...]}`), without a compatibility
+  shim.
+  The only in-tree consumer is `.config/jp/tools`, which serializes `Question`
+  values through `jp_tool`; any raw JSON local-tool stdout fixtures in tests
+  must be updated at implementation time.
+  Persisted conversation streams are unaffected because they store
+  `InquiryAnswerType` (already internally tagged via
+  `tool_question_to_inquiry_question`), and pre-082 streams contain no `Secret`
+  answers.
+- **`PromptBackend` gains a no-echo input method.** Adding a method such as
+  `password` requires implementations on `TerminalPromptBackend` (via
+  `inquire::Password`), `MockPromptBackend`, and any other in-tree implementors.
 
 ## Alternatives
 
-### Skip recording, keep [RFD 005]'s exception
+### Keep [RFD 005]'s prompter exception
 
-Keep [RFD 005]'s carve-out for prompter-answered questions and record only the
+Keep [RFD 005]'s exception for prompter-answered questions and record only the
 `ToolCallRequest`/`ToolCallResponse` pair.
-Rejected: the archival value of question/answer exchanges is the same regardless
-of whether the user or the inquiry backend answered.
-Leaving the prompter path off the stream freezes an implementation gap into the
-data model and forces every future feature that wants Q&A visibility to
-re-derive the gap.
+Rejected: question/answer exchanges have the same archival value whether the
+user or the inquiry backend answered.
+Omitting the prompter path bakes an implementation gap into the data model and
+forces future features that need Q&A visibility to work around it.
 
 ### Record only when source is `Assistant`
 
-Closer to a status quo path: record for the inquiry backend (current [RFD 005])
-and additionally when the source is `Assistant` (i.e. for `ask_user`), but leave
-ordinary user-prompter-answered tool questions off the stream.
-Rejected: gates a generic recording mechanism on a discriminator that has
-nothing to do with whether the event has archival value.
-Keeps the three-path table ([RFD 005]'s) that this RFD is trying to collapse,
-and burdens every future RFD that wants stream-level Q&A visibility with the
-same conditional.
+Record inquiries for the inquiry backend (as in [RFD 005]) and when the source
+is `Assistant` (for `ask_user`), while leaving user-prompted tool questions off
+the stream.
+Rejected: archival value does not depend on `InquirySource`.
+This would preserve [RFD 005]'s three-path split and force future features that
+need stream-level Q&A visibility to handle the same special case.
 
 ### Derive `InquirySource` from `QuestionConfig`
 
-Earlier versions of [RFD 083] proposed `QuestionConfig.attribution`, a
-user-overridable enum whose value drove both the prompt label and the persisted
-source.
-Rejected: provenance becomes a styling option.
-A local config bundle could make any tool's questions persist as
-assistant-sourced, which defeats the audit-trail purpose [RFD 005] motivates
-inquiry events with.
-The `BuiltinTool` trait hook keeps the value compile-time-set with no user
-override path.
+Earlier drafts of [RFD 083] proposed `QuestionConfig.attribution`, a
+user-overridable enum that controlled both the prompt label and the persisted
+`InquirySource`.
+Rejected: a local config bundle could make any tool's questions persist as
+assistant-sourced, undermining the audit trail that [RFD 005] establishes.
+The `BuiltinTool` trait hook keeps `InquirySource` fixed at compile time with no
+user override.
 
 ### Defer request/response uniqueness to a stream-entry-level ID
 
-Drop pair-correlation responsibility from `InquiryRequest.id` and rely on a
-separate stream-entry-level identifier (a per-event UUID/ULID or similar
-primitive) for uniqueness.
-`InquiryRequest.id` would carry only the tool-question shape
-(`<tool_call_id>.<question_id>`) and the matching response would be paired by
-stream order.
-Rejected: pair correlation and stream-entry uniqueness are different contracts.
-A reader keying by `InquiryRequest.id` should not need to reconstruct pair
-semantics from order — that's brittle under manual edits, parallel tool calls,
-and any future repair pass.
-Encoding the attempt into the ID itself (see [Inquiry ID
-format](#inquiry-id-format)) keeps the correlation contract self-contained and
-removes the cross-RFD dependency that an external primitive would introduce.
+Keep the two-segment `InquiryRequest.id` (`<tool_call_id>.<question_id>`), rely
+on a separate per-event UUID or ULID for stream-entry uniqueness, and pair
+requests with responses by stream order.
+Rejected: pair correlation and stream-entry uniqueness are separate contracts.
+Pairing by stream order is fragile under manual edits, parallel tool calls, and
+stream repair passes.
+Encoding `attempt` in `InquiryId` (see [Inquiry ID format](#inquiry-id-format))
+keeps pair correlation self-contained without depending on another RFD.
 
-### Use unique per-event `InquiryRequest.id` with backend-supplied uniqueness
+### Generate `InquiryRequest.id` from a UUID or ULID
 
-Generate IDs from a UUID/ULID source instead of the
-`<tool_call_id>.<question_id>.<attempt>` shape.
-Rejected: structured IDs make manual reading, hand-edits, and grep useful;
-opaque IDs lose that.
-The attempt-counter approach gives uniqueness *and* readability, with the
-counter bounded per-turn rather than universally.
+Generate opaque UUID or ULID values instead of
+`<tool_call_id>.<question_id>.<attempt>`.
+Rejected: structured IDs are readable in raw stream files, manual edits, and
+`grep` output, while a turn-scoped attempt counter provides uniqueness within
+each turn.
 
 ## Non-Goals
 
-- **Rendering inquiry events in `jp conversation show`.** Display formatting for
-  inquiry events in the CLI is deferred, consistent with [RFD 005]'s own
-  Non-Goals.
-- **Inquiry events for permission and result-delivery prompts.** This RFD
-  unifies recording only for the existing inquiry shape (tool questions).
-  `RunTool` and `DeliverToolResult` prompts are not inquiry events today and
-  remain outside the scope of this RFD.
-- **Stream replay and event-driven UI.** Several future features (sub-agent
-  reasoning trails, replay tooling, conversation viewers) benefit from this
-  RFD's completeness guarantee, but their implementations are their own
-  concerns.
-- **Migration tooling for legacy streams.** The custom `Deserialize` heals
-  legacy events one at a time as new responses are written; no separate
-  migration step is provided.
+- **Rendering inquiry events in `jp conversation show`.** CLI display formatting
+  for inquiry events remains deferred, matching [RFD 005].
+- **Inquiry events for permission and result-delivery prompts.** This RFD covers
+  tool questions (`Outcome::NeedsInput`); `RunTool` and `DeliverToolResult`
+  prompts are not inquiry events and remain out of scope.
+- **Stream replay and event-driven UI.** Sub-agent reasoning trails, replay
+  tooling, and conversation viewers benefit from complete inquiry recording, but
+  are separate features.
+- **Migration tooling for legacy streams.** Custom `Deserialize` reads legacy
+  events in place while new writes use the tagged format, so no standalone
+  migration step is needed.
 
 ## Risks and Open Questions
 
-- **Substantive amendment to [RFD 005].** 082 changes the "Recording Inquiry
-  Events" subsection of RFD 005 — specifically, removes the "prompter-answered
-  questions are not recorded" exception, updates the table, and adds a paragraph
-  on cancellation.
-  This amendment lands bundled with 082 implementation.
-- **083 is a downstream consumer, not a dependency.** 082 ships against current
-  types without waiting on [RFD 083]. 083 in turn requires 082 — it adds the
-  `exclusive: bool` and `persistence: AnswerReusePolicy` fields on
-  `jp_tool::Question` (along with the cache-persistence gate and the `exclusive`
-  fail-fast routing checks in the coordinator), widens `InquiryQuestion` with
-  `context`/`exclusive`/`persistence`, registers `ask_user`'s
-  `InquirySource::Assistant` override on `BuiltinTool::inquiry_source()`, and
-  adds one new `CancellationReason` variant: `InvalidStaticAnswer` (a configured
-  `QuestionConfig.answer` that does not match the in-flight question's
-  `answer_type` or `options`). 082's enum ships with `User`, `BackendError`,
-  `NoPromptBackend`, `AssistantRoutingDenied`, and the `Unknown(String)`
-  read-only landing pad. 083 reuses 082's `NoPromptBackend` and
-  `AssistantRoutingDenied` for its `exclusive: true` routing fail-fast paths —
-  the guard machinery is shared.
-  If 083's field names or defaults change before its own merge, that evolution
-  is internal to 083 and does not affect 082.
-- **Sensitive data exposure.** 082's `AnswerType::Secret` variant covers the
-  common no-persistence case (passwords, passphrases, API keys); tool authors
-  opt in by declaring the question's answer type as `Secret`.
-  The persisted response is `Redacted` rather than `Answered`, the prompter does
-  not echo input, and routing to the inquiry backend (no-TTY fallback or `target
-  = "assistant"`) is refused with a tool-level error.
-  The guarantee is scoped to JP's own handling of the inquiry; it does not
-  redact the value from tool output (`ToolCallResponse`), config values or
-  deltas (a secret set via `QuestionConfig.answer`), `Question.default`, or logs
-  (see [What `Secret` does and does not cover](#secret-questions)). 082 also
-  does not cover sensitive content that was never declared `Secret` (e.g. a text
-  answer that happens to contain a token, or partial sensitivity inside an
-  otherwise-archival answer).
-  A future RFD may add richer redaction policies (e.g. tainted-value tracking)
-  if real-world use surfaces them.
-- **Stream-size growth for noisy tools.** Tools that prompt frequently produce
-  more persisted bytes after this RFD.
-  The events are small and the growth is bounded, but conversations dominated by
-  interactive workflows pay the cost.
+- **Substantive amendment to [RFD 005].** RFD 082 updates the "Recording Inquiry
+  Events" section of [RFD 005] to remove the prompter exception, update the
+  routing table, and document cancellation recording.
+  This amendment lands with the RFD 082 implementation.
+- **[RFD 083] is a downstream consumer, not a dependency.** RFD 082 ships
+  against existing types without waiting on [RFD 083].
+  [RFD 083] depends on RFD 082: it adds `exclusive: bool` and `persistence:
+  AnswerReusePolicy` to `jp_tool::Question` (with cache-persistence gating and
+  `exclusive` routing checks in the coordinator), adds `context`, `exclusive`,
+  and `persistence` to `InquiryQuestion`, overrides
+  `BuiltinTool::inquiry_source()` to return `InquirySource::Assistant` for
+  `ask_user`, and adds `CancellationReason::InvalidStaticAnswer` for static
+  answers that do not match the question's `answer_type` or `options`.
+  RFD 082 ships `CancellationReason` with `User`, `BackendError`,
+  `NoPromptBackend`, `AssistantRoutingDenied`, and `Unknown(String)`; [RFD 083]
+  reuses `NoPromptBackend` and `AssistantRoutingDenied` for its `exclusive:
+  true` routing guards.
+- **Sensitive data exposure.** `AnswerType::Secret` covers passwords,
+  passphrases, and API keys when tool authors declare a question as `Secret`: JP
+  records `Redacted` instead of `Answered`, disables prompt echo, and refuses
+  routing to the inquiry backend (on missing TTY or `target = "assistant"`).
+  As noted in [Secret questions](#secret-questions), JP does not redact secrets
+  from `ToolCallResponse` output, config files or config deltas
+  (`QuestionConfig.answer`), `Question.default`, or logs, nor does it redact
+  sensitive values entered into non-`Secret` questions.
+  Richer redaction policies such as tainted-value tracking belong in a future
+  RFD.
+- **Stream-size growth for prompt-heavy tools.** Tools that prompt frequently
+  write two additional small events per question.
 
 ## Implementation Plan
 
 ### Phase 1: `BuiltinTool::inquiry_source()` hook and executor-boundary plumbing
 
-Add the `BuiltinTool::inquiry_source(&self, name: &str) -> InquirySource` trait
-method with the default `Tool { name }` implementation.
-No overrides yet — every built-in inherits the default.
+Add `BuiltinTool::inquiry_source(&self, name: &str) -> InquirySource` with the
+default `InquirySource::Tool { name }` implementation.
 
-Widen `ExecutorResult::NeedsInput` with a `source: InquirySource` field.
-Update `ToolExecutor::execute` to populate it from
+Add `source: InquirySource` to `ExecutorResult::NeedsInput`.
+Update `ToolExecutor::execute` to populate `source` from
 `BuiltinTool::inquiry_source()` for `ToolSource::Builtin { .. }` and from
-`InquirySource::Tool { name }` for the other two source kinds.
-Update `MockExecutor` and `TestExecutorSource` fixtures to set the field.
-The coordinator's recording site reads from `ExecutorResult::NeedsInput.source`
-instead of the hardcoded `InquirySource::tool(name)` construction.
+`InquirySource::Tool { name }` for local and MCP tools.
+Update `MockExecutor` and `TestExecutorSource` fixtures to set `source`, and
+update the coordinator to read `ExecutorResult::NeedsInput.source` instead of
+constructing `InquirySource::tool(name)`.
 
-No behavioral change at this phase (the resolved source returns the same value
-the hardcoded call did for every existing tool).
-
-Can be merged independently.
+This phase introduces no behavior change and can merge independently.
 
 ### Phase 2: Widen `InquiryResponse` and split `TurnState`
 
-Add the `Cancelled` variant with `CancellationReason::{User, BackendError,
-NoPromptBackend, AssistantRoutingDenied, Unknown(String)}` and the `Redacted`
-variant.
-Implement the custom `Serialize`/`Deserialize` for `CancellationReason` so
-unrecognized tags round-trip as `Unknown(s)` preserving `s` verbatim.
-Implement the custom `Deserialize` for `InquiryResponse` that accepts the legacy
+Add `InquiryResponse::Cancelled` with `CancellationReason::{User, BackendError,
+NoPromptBackend, AssistantRoutingDenied, Unknown(String)}` and
+`InquiryResponse::Redacted`.
+Implement custom `Serialize` and `Deserialize` for `CancellationReason` so
+unrecognized tags round-trip as `Unknown(s)` verbatim.
+Implement custom `Deserialize` for `InquiryResponse` that accepts the legacy
 untagged form as `Answered` and maps a missing (or non-string) `reason` on a
-tagged `Cancelled` event to `Unknown` with the sentinel tag `unspecified` —
-such a record carries no reason, and fabricating a specific one (e.g. `User`)
-would put a false claim in the audit trail.
+tagged `Cancelled` event to `Unknown` with the sentinel tag `unspecified` (or
+`User` per the deserialization rules in [`InquiryResponse`
+serialization](#inquiryresponse-serialization)).
 
 Split `TurnState.persisted_inquiry_responses` into `remembered_tool_answers:
-IndexMap<String, Value>` and `remembered_permission_decisions: IndexMap<String,
-Value>`.
-Update `handle_tool_result` / `handle_prompt_answer` to consume the tool-answer
-map, and `decide_permission` / `apply_permission_result` to consume the
-permission-decision map.
-Neither caller touches the other map.
-The key type is intentionally not `InquiryId` — the cache-key shapes
+IndexMap<String, Value>` (used by `handle_tool_result` and
+`handle_prompt_answer`) and `remembered_permission_decisions: IndexMap<String,
+Value>` (used by `decide_permission` and `apply_permission_result`).
+Use `String` keys rather than `InquiryId`, since the cache-key formats
 (`<tool_name>.<question_id>` and `<tool_name>.__permission__`) differ from the
 stream-correlation `InquiryId` format (see [Splitting the turn-cache
 state](#splitting-the-turn-cache-state)).
 
 Tests:
 
-- **Backward-compat round-trip.** Deserialize a pre-082 answered-response JSON
-  and assert it lands as `Answered`.
-- **Tagged serialization.** Serialize an `Answered`, a `Cancelled { reason: User
-  }`, a `Cancelled { reason: BackendError }`, and a `Redacted`, and assert each
-  produces its distinct tagged shape.
-- **Missing `reason` defaults to `User`.** Deserialize a tagged-cancelled event
-  with no `reason` field and assert it lands as `Cancelled { reason: User }`.
+- **Backward-compat round-trip.** Deserialize pre-082 answered-response JSON and
+  assert it produces `Answered`.
+- **Tagged serialization.** Serialize `Answered`, `Cancelled { reason: User }`,
+  `Cancelled { reason: BackendError }`, and `Redacted`, and assert each produces
+  its expected tagged JSON shape.
+- **Missing `reason` defaults to `User`.** Deserialize a tagged `cancelled`
+  event without a `reason` field and assert it produces `Cancelled { reason:
+  User }`.
 - **Unknown `reason` round-trips through `Unknown(String)`.** Deserialize a
-  cancelled event with `"reason": "some_future_variant"` and assert it lands as
-  `Cancelled { reason: Unknown("some_future_variant".into()) }`; re-serialize
-  and assert the on-disk shape is identical to the input.
-- **`Redacted` carries no answer.** Serialize a `Redacted` and assert the JSON
-  has no `answer` field; deserialize a `Redacted` and assert no answer is
+  cancelled event with `"reason": "some_future_variant"`, assert it produces
+  `Cancelled { reason: Unknown("some_future_variant".into()) }`, and
+  re-serialize to verify the JSON is identical.
+- **`Redacted` carries no answer.** Serialize `Redacted` and assert the JSON has
+  no `answer` field; deserialize `Redacted` and assert no answer is
   materialized.
 - **Invalid shape.** Assert that deserializing an event with no `outcome`, no
-  `answer`, and no `Redacted`-shape payload is a deserialization error.
+  `answer`, and no `Redacted` payload fails.
 - **Turn-cache split.** Round-trip a permission decision through
   `remembered_permission_decisions` and a tool answer through
-  `remembered_tool_answers`; assert that neither caller sees the other map's
-  entries and that `Cancelled` and `Redacted` inquiry responses never land in
-  either map.
+  `remembered_tool_answers`; assert neither caller sees the other map's entries
+  and that `Cancelled` and `Redacted` responses are never stored in either map.
 
 Depends on Phase 1.
 
@@ -1054,228 +924,170 @@ Depends on Phase 1.
 
 Recording-lifecycle plumbing:
 
-- Remove the pre-execution seeding of `accumulated_answers` from
+- Audit every `BuiltinTool` implementation for first-call reads of `answers`,
+  then remove the pre-execution seeding of `accumulated_answers` from
   `static_answers_for_all_questions`.
-- Audit every `BuiltinTool` implementation for first-call reads of the `answers`
-  map before removing the pre-seed.
-  Built-ins receive `answers` structurally (unlike MCP tools), so a built-in
-  that reads it on first call would silently break; current in-tree built-ins
-  (e.g. `DescribeTools`) ignore it, but new built-ins, including [RFD 083]'s
-  `ask_user`, must follow the two-call `NeedsInput → Success` pattern.
-- Thread `&ConversationMut` into `handle_prompt_answer` and
+  In-tree built-ins (such as `DescribeTools`) ignore `answers` on the first
+  call, and new built-ins (including [RFD 083]'s `ask_user`) must follow the
+  two-call `NeedsInput → Success` pattern.
+- Pass `&ConversationMut` to `handle_prompt_answer` and
   `handle_prompt_cancelled`.
-- Allocate the `InquiryId` at the request-recording site and thread it through
+- Allocate `InquiryId` when recording `InquiryRequest` and thread it through
   `PendingPrompt::Question`, `ExecutionEvent::PromptAnswer`, and
-  `ExecutionEvent::PromptCancelled` so the answer and cancellation handlers can
-  write the matching response without reconstructing the ID (see [Coordinator
+  `ExecutionEvent::PromptCancelled` (see [Coordinator
   plumbing](#coordinator-plumbing)).
-- Record `InquiryRequest` before any routing decision (including cached and
-  static answer short-circuits).
+- Record `InquiryRequest` before any routing decision, including cached-answer
+  and static-answer short-circuits.
 - Record `InquiryResponse::Answered` on cached, static, prompter, and
-  inquiry-backend success paths (non-`Secret` answer types).
-- Record `InquiryResponse::Cancelled` with the appropriate reason per the
-  mapping table in [Recording lifecycle](#recording-lifecycle) (`User` for user
-  cancellation including `InquiryError::Cancelled`; `BackendError` for genuine
-  backend failures; `NoPromptBackend`/`AssistantRoutingDenied` for the
-  secret-routing guard paths).
+  inquiry-backend success paths for non-`Secret` questions.
+- Record `InquiryResponse::Cancelled` with the mapped reason from [Recording
+  lifecycle](#recording-lifecycle) (`User` for user cancellations including
+  `InquiryError::Cancelled`, `BackendError` for backend failures, and
+  `NoPromptBackend` or `AssistantRoutingDenied` for secret routing guards).
 - Widen `ExecutionEvent::InquiryResult.result` from `Result<Value, String>` to
-  carry the typed `InquiryError` (or a `CancellationReason` mapped at the
-  `spawn_inquiry` site) so the cancellation reason is derived from the error
-  variant rather than from stringified error text (see [Coordinator
-  plumbing](#coordinator-plumbing)).
+  carry `InquiryError` (or a `CancellationReason` mapped in `spawn_inquiry`) so
+  the cancellation reason is derived from the error variant rather than parsed
+  from error text (see [Coordinator plumbing](#coordinator-plumbing)).
 
 Inquiry ID format:
 
-- Add a per-`(tool_call_id, question_id)` attempt counter to `TurnState`.
-  Increment at the `InquiryRequest`-recording site whenever a question is
-  recorded under that key; first recording is attempt `1`.
-  The counter resets only at turn boundaries (i.e. when a fresh `TurnState` is
-  built).
-- Introduce a `QuestionId` newtype in `jp_tool` (wrapping `Question.id`) whose
-  `FromStr`/`TryFrom` validation rejects a dot, and route local-tool stdout and
-  built-in question construction through it so an invalid id cannot exist past
-  the boundary.
-  On a `NeedsInput` whose `question.id` is invalid, log an `error!` trace and
-  fail the tool with a tool-level error response (no chrome line; the error
-  renders via `ErrorStyleConfig`), then drop the outcome before constructing any
-  inquiry event.
-  Ensure the `serde_json::from_str::<Outcome>` ingestion path distinguishes an
-  invalid `question.id` from non-`Outcome` output so the diagnostic is not
-  swallowed by the `RawOutput` fallback.
-  This is what makes the three-segment join injective (see [Inquiry ID
-  format](#inquiry-id-format)).
-- Construct `InquiryRequest.id` as `<tool_call_id>.<question_id>.<attempt>` at
-  the recording site.
-  The matching `InquiryResponse.id` uses the same value.
-- Update the pairing logic in any reader that keys by `InquiryId` to accept both
-  legacy two-segment and new three-segment IDs (legacy duplicates fall back to
-  request/response order; new writes are unique by construction).
-- Make inquiry-orphan repair in `ConversationStream::sanitize()` turn-scoped.
-  Today both `remove_orphaned_inquiry_responses` and
-  `remove_orphaned_inquiry_requests` build flat ID sets across the whole stream
-  (`crates/jp_conversation/src/stream.rs` around
-  `remove_orphaned_inquiry_responses`), which can cross-satisfy pairs across
-  turns once `tool_call_id` (and therefore `InquiryId`) reuse becomes possible.
-  082 keeps the existing behavior — an orphaned `InquiryRequest` or
-  `InquiryResponse` is *removed* — and only narrows the ID-set scope to the
-  containing turn's event window. 082 does not inject synthetic inquiry
-  responses: an orphan left by a crash, truncation, or manual edit is not a
-  cancellation, so writing a synthetic `Cancelled` (which would have to claim
-  some `reason`) would put a false record on disk.
-  The same change applies to any other code that builds an `InquiryId` index
-  over the full stream.
+- Add a per-`(tool_call_id, question_id)` attempt counter to `TurnState`,
+  incremented when `InquiryRequest` is recorded (starting at `1`) and reset at
+  turn boundaries when a fresh `TurnState` is created.
+- Add the `QuestionId` newtype in `jp_tool` (wrapping `Question.id`) that
+  rejects `.` in `FromStr` and `TryFrom`, and route local-tool stdout and
+  built-in question construction through it.
+  When a `NeedsInput` has an invalid `question.id`, log `error!`, fail the tool
+  with a tool-level error response (rendered via `ErrorStyleConfig`), and drop
+  the outcome before constructing any inquiry event.
+  Ensure `serde_json::from_str::<Outcome>` distinguishes an invalid
+  `question.id` from non-`Outcome` stdout so the `RawOutput` fallback does not
+  swallow the error (see [Inquiry ID format](#inquiry-id-format)).
+- Format `InquiryRequest.id` and its matching `InquiryResponse.id` as
+  `<tool_call_id>.<question_id>.<attempt>`.
+- Update readers that pair events by `InquiryId` to accept both two-segment and
+  three-segment IDs, falling back to request/response order on duplicate legacy
+  IDs.
+- Scope orphan repair in `ConversationStream::sanitize()` to individual turns.
+  `remove_orphaned_inquiry_responses` and `remove_orphaned_inquiry_requests`
+  (`crates/jp_conversation/src/stream.rs`) previously built flat ID sets across
+  the entire stream, which could match pairs across turns when `tool_call_id`
+  values are reused.
+  Keep the removal behavior (do not synthesize `Cancelled` events for orphans
+  left by crashes, truncation, or manual edits) while restricting each ID set to
+  a single turn, and apply the same turn scoping to any other full-stream
+  `InquiryId` index.
   If [RFD 023] lands, incomplete-tail extraction runs before `sanitize()`, so
-  this per-turn orphan removal only ever applies to complete turns; the
-  incomplete turn's unpaired inquiry events are carried into the
-  `IncompleteTurn` rather than removed. (023 is Discussion; this is
-  forward-compatible, not a dependency.)
+  per-turn orphan removal runs only on complete turns while unpaired events in
+  an incomplete turn move into `IncompleteTurn`.
 
 Secret-question handling:
 
-- Add a `Secret` variant to `jp_tool::AnswerType` (the existing
-  `Boolean`/`Select`/`Text` enum) and add `#[serde(tag = "type", rename_all =
-  "snake_case")]` to the enum so its wire shape (`{"type": "boolean"}`,
-  `{"type": "select", "options": [...]}`, `{"type": "text"}`, `{"type":
-  "secret"}`) matches `InquiryAnswerType`.
-  Existing in-tree tools build `Question` values through `jp_tool`'s
-  constructors, so the wire-shape change is transparent to them; for external
-  local tools this is a breaking change to the stdout protocol, shipped without
-  a compat shim (see Drawbacks).
-  Add a matching `Question::secret(id, text) -> Result<Self, InvalidQuestionId>`
-  constructor in `jp_tool` alongside `Question::text`/`boolean`/`select` (all
-  four validate the id through `QuestionId`).
-  No `secret: bool` field is added to `Question`.
-- Add the matching `Secret` variant to
-  `jp_conversation::event::inquiry::InquiryAnswerType` (which is already
-  serialized via `tag = "type"`, `rename_all = "snake_case"`, so the on-disk
-  shape is `{"type": "secret"}`).
-  Propagate the variant at the recording boundary
-  (`tool_question_to_inquiry_question` or equivalent).
-- Add a no-echo input method on `PromptBackend` (e.g. `password`).
-  Implement it on `TerminalPromptBackend` via `inquire::Password` and on
-  `MockPromptBackend` as a regular queued response source.
-  Update any other in-tree implementors.
-- In `ToolPrompter::prompt_question`, dispatch to the no-echo path when
-  `question.answer_type == AnswerType::Secret`.
-  The variant is text-shaped by construction; no special handling is needed for
-  booleans/selects.
-- In the cached-answer short-circuit, skip the lookup and the write for `Secret`
-  questions.
-  In the static-answer short-circuit, apply the configured value to the
-  in-memory `accumulated_answers` but record `InquiryResponse::Redacted { id }`
-  instead of `Answered`.
-  On a successful prompter answer for a `Secret` question, record
-  `InquiryResponse::Redacted { id }` in place of `Answered`.
-  The inquiry-backend path is guarded before routing (below) and must never
-  receive a `Secret` question; treat its arrival there as an internal invariant
-  violation.
-- Enforce the routing guard before routing a `Secret` question:
-  - **No TTY available**: synthesize a tool-level error response and record
+- Add `Secret` to `jp_tool::AnswerType` and annotate the enum with `#[serde(tag
+  = "type", rename_all = "snake_case")]` so its JSON representation (`{"type":
+  "boolean"}`, `{"type": "select", "options": [...]}`, `{"type": "text"}`,
+  `{"type": "secret"}`) matches `InquiryAnswerType`.
+  Add `Question::secret(id, text) -> Result<Self, InvalidQuestionId>` alongside
+  `Question::text`, `Question::boolean`, and `Question::select`, all validating
+  `id` via `QuestionId`.
+- Add `Secret` to `jp_conversation::event::inquiry::InquiryAnswerType`
+  (serialized as `{"type": "secret"}`) and map it in
+  `tool_question_to_inquiry_question`.
+- Add a no-echo input method (such as `password`) to `PromptBackend`,
+  implemented on `TerminalPromptBackend` via `inquire::Password` and on
+  `MockPromptBackend` as a queued response, and dispatch to it in
+  `ToolPrompter::prompt_question` when `question.answer_type ==
+  AnswerType::Secret`.
+- Skip `remembered_tool_answers` reads and writes for `Secret` questions.
+  Record `InquiryResponse::Redacted { id }` instead of `Answered` on both the
+  static-answer and prompter paths for `Secret` questions.
+- Enforce the routing guards before routing a `Secret` question:
+  - **No TTY available**: return a tool-level error response and record
     `InquiryResponse::Cancelled { reason: NoPromptBackend }`.
-  - **Explicit `target = "assistant"`**: synthesize a tool-level error response
-    and record `InquiryResponse::Cancelled { reason: AssistantRoutingDenied }`.
-    Both checks are generic on `question.answer_type == Secret`.
-    The same machinery serves [RFD 083]'s `exclusive: true` flag.
+  - **Explicit `target = "assistant"`**: return a tool-level error response and
+    record `InquiryResponse::Cancelled { reason: AssistantRoutingDenied }`.
 
 Tests:
 
-- **Attempt counter.** A tool that emits the same `question_id` twice within a
-  single tool call produces two distinct `InquiryRequest.id` values (`.1`, `.2`)
-  and two correctly-paired `InquiryResponse` events.
-- **Cross-cycle uniqueness within a turn.** A turn where the same `tool_call_id`
-  is reused across cycles (Gemini-style) and the same `question_id` is emitted
-  in each produces two distinct `InquiryRequest.id` values (`.1`, `.2`) — the
-  counter continues rather than restarting.
-- **Per-turn reset.** Two separate turns both start the counter at `1` for any
-  `(tool_call_id, question_id)` key; counters do not persist across turns.
-- **Legacy ID pairing.** A pre-082 stream with two-segment IDs reads back with
-  its request/response pairs intact, including the case where two legacy events
-  share an ID and pair by order.
-- **Secret prompter answer.** A built-in tool that emits a `Question {
-  answer_type: AnswerType::Secret, .. }` answered at the prompter produces an
-  `InquiryResponse::Redacted` event; the answer is delivered to the tool
-  in-memory; no answer value appears in the persisted stream.
+- **Attempt counter.** Emitting the same `question_id` twice within a single
+  tool call produces `.1` and `.2` `InquiryRequest.id` values and two paired
+  `InquiryResponse` events.
+- **Cross-cycle uniqueness within a turn.** Reusing `tool_call_id` across cycles
+  in the same turn (Gemini-style) with the same `question_id` produces `.1` and
+  `.2` rather than resetting the counter.
+- **Per-turn reset.** Two separate turns both start the counter at `1` for the
+  same `(tool_call_id, question_id)` key.
+- **Legacy ID pairing.** A pre-082 stream with two-segment IDs pairs requests
+  and responses, falling back to stream order when two legacy events share an
+  ID.
+- **Secret prompter answer.** Answering a `Question { answer_type:
+  AnswerType::Secret, .. }` at the prompter delivers the answer to the tool in
+  memory and records `InquiryResponse::Redacted` with no answer value on disk.
 - **Secret static answer.** A `Secret` question with a configured
-  `QuestionConfig.answer` is delivered to the tool in-memory and records as
-  `InquiryResponse::Redacted` (not `Answered`).
-- **Local-tool secret.** A local tool that emits `{"type": "needs_input",
-  "question": {"answer_type": {"type": "secret"}, ...}}` on stdout produces an
-  `InquiryResponse::Redacted` event; the answer is delivered to the tool's next
-  invocation in the `tool.answers` JSON context; no answer value appears in the
-  persisted stream.
-- **Cache bypass.** A `Secret` question is not stored in
-  `remembered_tool_answers` (write side), and a pre-existing entry in the cache
-  whose question is now `Secret` is bypassed (read side).
-- **Non-secret regression.** A non-secret question (any of `Boolean`, `Select`,
-  or `Text`) is recorded as `Answered` and continues to flow through the cache
-  as it does today.
-- **Inquiry ID round-trip via prompt events.** An `InquiryId` allocated at the
-  request-recording site survives an `ExecutionEvent::PromptAnswer` round-trip
-  verbatim; the response written by `handle_prompt_answer` carries the same ID
-  as the request.
-- **Cancellation reason mapping.** `InquiryError::Cancelled` (cancellation token
-  fired) lands as `Cancelled { reason: User }`; `InquiryError::Provider`,
-  `MissingStructuredData`, `AnswerExtraction`, and `Other` each land as
-  `Cancelled { reason: BackendError }`.
-- **Cross-turn ID collision under sanitize.** Build a stream where an orphaned
-  `InquiryRequest` in turn 1 shares its ID with a valid request/response pair in
-  turn 2 (`tool_call_id` reuse across turns with the turn-scoped attempt counter
-  restarting at `1`); assert `ConversationStream::sanitize()` repairs the turn-1
-  orphan within its own turn rather than cross-satisfying it from turn 2.
-- **Legacy duplicate IDs within a turn under sanitize.** Build a turn with two
-  `InquiryRequest`s sharing a legacy two-segment ID and one matching response;
-  assert `sanitize()` preserves the by-order matched pair and repairs the
-  remaining orphan within the turn.
-- **Secret routing guard, no TTY.** A `Secret` question encountered without a
-  TTY fails the tool with a tool-level error response and records `Cancelled {
-  reason: NoPromptBackend }`.
+  `QuestionConfig.answer` delivers the answer to the tool in memory and records
+  `InquiryResponse::Redacted`.
+- **Local-tool secret.** A local tool emitting `{"type": "needs_input",
+  "question": {"answer_type": {"type": "secret"}, ...}}` on stdout receives the
+  answer in `tool.answers` on its next invocation and records
+  `InquiryResponse::Redacted` with no answer on disk.
+- **Cache bypass.** A `Secret` question is neither written to nor read from
+  `remembered_tool_answers`.
+- **Non-secret regression.** `Boolean`, `Select`, and `Text` questions record
+  `Answered` and use the turn cache as before.
+- **Inquiry ID round-trip via prompt events.** An `InquiryId` allocated when
+  recording `InquiryRequest` passes through `ExecutionEvent::PromptAnswer` so
+  `handle_prompt_answer` writes the same ID on the response.
+- **Cancellation reason mapping.** `InquiryError::Cancelled` maps to `Cancelled
+  { reason: User }`; `InquiryError::Provider`, `MissingStructuredData`,
+  `AnswerExtraction`, and `Other` map to `Cancelled { reason: BackendError }`.
+- **Cross-turn ID collision under sanitize.** When an orphaned `InquiryRequest`
+  in turn 1 shares its ID with a valid pair in turn 2,
+  `ConversationStream::sanitize()` removes the turn-1 orphan instead of matching
+  it against turn 2.
+- **Legacy duplicate IDs within a turn under sanitize.** In a turn with two
+  `InquiryRequest` events sharing a legacy two-segment ID and one matching
+  response, `sanitize()` keeps the first pair by order and removes the remaining
+  orphan.
+- **Secret routing guard, no TTY.** A `Secret` question without a TTY fails the
+  tool with a tool-level error response and records `Cancelled { reason:
+  NoPromptBackend }`.
 - **Secret routing guard, assistant target.** A `Secret` question with `target =
   "assistant"` fails the tool with a tool-level error response and records
   `Cancelled { reason: AssistantRoutingDenied }`.
 
-The `Assistant`-attribution code path is exercised with a synthetic test tool
-that overrides `BuiltinTool::inquiry_source()`.
-The real consumer (`ask_user`) arrives in [RFD 083], which builds on 082 to
-register its override and to widen `InquiryQuestion` with its source-side
-fields.
+A synthetic test tool overrides `BuiltinTool::inquiry_source()` to test
+`Assistant` attribution; the production consumer (`ask_user`) lands in [RFD
+083].
 
 Depends on Phases 1 and 2.
 
 ### Phase 4: Amend [RFD 005]
 
-Remove the "prompter-answered questions are not recorded" exception in RFD 005's
-"Recording Inquiry Events" subsection.
-Update the routing table.
-Add a paragraph on cancellation.
-
-Independent of the others, lands alongside Phase 3 in the same PR.
+Update the "Recording Inquiry Events" section of [RFD 005] to remove the
+prompter exception, update the routing table, and document cancellation
+recording.
+Lands alongside Phase 3 in the same PR.
 
 ## References
 
-- [RFD 005] — first-class inquiry events; substantively amended by this RFD to
-  extend recording to prompter-answered questions and to add the `Cancelled`
-  variant.
-- [RFD 023] — resumable conversation turns; downstream consumer of 082.
-  RFD 023 assumes user-targeted `InquiryRequest`/`InquiryResponse` pairs are on
-  disk so incomplete turns blocked on inquiries can be detected and resumed.
-  RFD 005's prompter carve-out leaves that assumption unmet; 082 closes the gap.
-  If 023 is confirmed to depend on 082, `just rfd-require` records the link on
-  both sides at promotion time (082's `Required by` and 023's `Requires`); it is
-  deliberately not hand-written into the metadata while both RFDs are in
-  Discussion.
-- [RFD 028] — the structured inquiry system this RFD's recording layer builds
-  on.
-- [RFD 034] — defines the current `QuestionTarget` shape.
-- [RFD 083] — the `ask_user` tool that motivated this RFD; consumes 082's
-  recording infrastructure to register an `InquirySource::Assistant` override on
-  `BuiltinTool::inquiry_source()`, widens `InquiryQuestion` with
-  `context`/`exclusive`/`persistence`, and contributes
-  `CancellationReason::InvalidStaticAnswer` for the static-answer validation it
-  introduces. 083 reuses 082's `NoPromptBackend` and `AssistantRoutingDenied`
-  for its `exclusive: true` routing fail-fast paths. 083 ships on top of 082
-  (083 `Requires` 082); 082 does not depend on 083.
-- [RFD 049] — defines the full `exclusive` flag and detached-policy cascade;
-  consumed downstream by [RFD 083].
+- [RFD 005]: first-class inquiry events; amended by this RFD to record
+  prompter-answered questions and add `Cancelled`.
+- [RFD 023]: resumable conversation turns; consumes RFD 082.
+  RFD 023 relies on persisted user-targeted `InquiryRequest`/`InquiryResponse`
+  pairs to detect and resume incomplete turns blocked on inquiries, which RFD
+  005's prompter exception left unrecorded.
+  If RFD 023 is confirmed to depend on RFD 082, `just rfd-require` records the
+  link on both sides (`Required by` on 082 and `Requires` on 023) at promotion
+  time.
+- [RFD 028]: the structured inquiry system that this recording layer builds on.
+- [RFD 034]: defines `QuestionTarget`.
+- [RFD 083]: introduces the `ask_user` tool (`Requires` RFD 082); overrides
+  `BuiltinTool::inquiry_source()` to return `InquirySource::Assistant`, adds
+  `context`, `exclusive`, and `persistence` to `InquiryQuestion`, adds
+  `CancellationReason::InvalidStaticAnswer`, and reuses `NoPromptBackend` and
+  `AssistantRoutingDenied` for `exclusive: true` routing guards.
+- [RFD 049]: defines the `exclusive` flag and detached-policy cascade consumed
+  by [RFD 083].
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 005-2]: ./005-first-class-inquiry-events.md
