@@ -517,6 +517,12 @@ compaction is appropriate.
 Dedicated event types and fields let a compaction pass strip notifications
 without parsing message content.
 
+> [!TIP]
+> [RFD 134] gives entries recorded between turns a pending turn of their own,
+> outside every compaction range.
+> A notification queued there is never summarised into the turn before it, and
+> moves into the next turn when that turn starts.
+
 ### System-initiated turn semantics
 
 Forced delivery for `Critical` notifications introduces system-initiated turns
@@ -615,3 +621,4 @@ Each producer is independent and can be added incrementally.
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 036]: 036-conversation-compaction.md
 [RFD 037]: 037-await-tool-for-stateful-handle-synchronization.md
+[RFD 134]: 134-pending-turn.md

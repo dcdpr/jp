@@ -450,6 +450,13 @@ The `text_attachments_to_xml` helper may remain for providers that render text
 resources as XML, operating on `&[Resource]` from `ChatRequest` rather than a
 separate `Vec<Attachment>`.
 
+> [!TIP]
+> [RFD 135] adds resources that are never stored: `Thread::into_parts` renders
+> each recorded decision as a `Resource` on its turn's first `ChatRequest`, in
+> the request it builds.
+> A provider that reads resources from `ChatRequest` events renders them with no
+> code of its own.
+
 ## Drawbacks
 
 - **Breaking change to the handler trait.** All handlers must be updated to
