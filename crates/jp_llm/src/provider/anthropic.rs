@@ -2710,8 +2710,9 @@ fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
 
     // Handle Recursive Dictionaries
     //
-    // Before the `$ref` early return: a root `$ref` pointing into definitions
-    // beside it (what pydantic's `RootModel` emits) needs them kept.
+    // Extract `$defs` and `definitions` before returning early on `$ref`, so a
+    // root `$ref` schema (such as Pydantic's `RootModel`) retains its sibling
+    // definitions.
     for key in ["$defs", "definitions"] {
         if let Some(Value::Object(defs)) = src.remove(key) {
             out.insert(key.into(), Value::Object(transform_map(defs)));
@@ -2736,10 +2737,16 @@ fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
     move_field!("title");
     move_field!("description");
 
-    // A non-list `enum` is invalid JSON Schema, so it falls through to the
-    // description rather than being sent as a constraint.
+    // Anthropic accepts only string, number, boolean, and null enum members,
+    // and rejects a request with any other. Leave any other `enum` in `src` to
+    // be appended to `description` rather than sent as a constraint. The whole
+    // list moves, so a mixed enum doesn't lose its complex members.
     if let Some(values) = src.remove("enum") {
-        if values.is_array() {
+        let primitive = values
+            .as_array()
+            .is_some_and(|members| members.iter().all(|m| !m.is_array() && !m.is_object()));
+
+        if primitive {
             out.insert("enum".into(), values);
         } else {
             src.insert("enum".into(), values);

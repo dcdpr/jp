@@ -3379,8 +3379,6 @@ mod transform_schema {
         assert_eq!(out.len(), 1);
     }
 
-    /// The shape pydantic's `RootModel` emits: the root is a `$ref` into the
-    /// definitions sitting beside it.
     #[test]
     fn root_ref_keeps_transformed_defs() {
         let input = schema(json!({
@@ -3486,8 +3484,42 @@ mod transform_schema {
         );
     }
 
-    /// A non-list `enum` is not valid JSON Schema; it is passed to the model as
-    /// a hint rather than sent as a constraint the API would reject.
+    #[test]
+    fn array_member_enum_moves_to_description() {
+        let input = schema(json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "enum": [["one"], ["two", "three"]]
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "{enum: [[\"one\"],[\"two\",\"three\"]]}"
+            })
+        );
+    }
+
+    #[test]
+    fn mixed_enum_moves_whole_list_to_description() {
+        let input = schema(json!({
+            "enum": [1, "two", null, ["three"], { "four": 4 }]
+        }));
+
+        let out = transform_schema(input);
+
+        assert_eq!(
+            Value::Object(out),
+            json!({
+                "description": "{enum: [1,\"two\",null,[\"three\"],{\"four\":4}]}"
+            })
+        );
+    }
+
     #[test]
     fn non_list_enum_moves_to_description() {
         let input = schema(json!({
