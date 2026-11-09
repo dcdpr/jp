@@ -62,6 +62,7 @@ git diff --cached | jp decide 'Does this change alter the public API?'
 question.
 `--choice` takes `name` or `name: description`; `--score` takes levels from
 lowest to highest.
+Each is given at least twice, as [RFD 133]'s types require.
 
 ```sh
 jp decide 'Which crate owns this bug?' -a issue.md \
@@ -115,7 +116,10 @@ judge.
 More often, a missing state is a mistake: nothing was piped, or `git diff
 --cached` had nothing staged.
 `jp decide` refuses to run without state, empty stdin included, unless
-`--no-state` says it is meant, and then sends an empty string.
+`--no-state` says it is meant.
+State is never empty on the wire, which [RFD 133]'s types require because Ollama
+rejects it, so `--no-state` sends the fixed text `(none)`, and the recorded
+decision holds what was sent.
 
 #### Output and exit status
 
@@ -218,8 +222,9 @@ pub struct Decision {
   `encode_event` encodes `state` as it encodes `ToolCallResponse` content.
 - `Question` and `Answer` are [RFD 133]'s types, so a stored decision has one
   shape whichever server answered it.
-- `model` is what the server reported, not the alias requested: `jev-latest`
-  resolves to a version, and the version is what answered.
+- `model` is the name the server reported, which is as specific as the server
+  makes it: TypeSafe reports the version an alias such as `jev-latest` resolved
+  to, and Ollama echoes the name requested.
 - The event is turn-scoped.
   `jp decide` opens the pending turn ([RFD 134]) and appends the decision to it,
   so the decision becomes part of the next turn, before its request.
@@ -464,9 +469,10 @@ text is untested.
 The text is built per request and never stored, so it can change at the cost of
 one uncached request per conversation.
 
-**An empty state on the wire.** System One requires `state`, and `--no-state`
-sends an empty string.
-Whether every server accepts one is untested.
+**The placeholder state.** `--no-state` sends `(none)` as the state, and a model
+reads it like any other text.
+Whether it shifts answers compared with a question asked about nothing is
+untested.
 
 ## Implementation Plan
 
