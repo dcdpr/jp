@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
 
 use super::{
     comrak_options, format_markdown_canonical, format_source, reflow_markdown, reflow_paragraph,
-    rewrite_code_spans,
+    rewrite_code_spans, unescaped_to_raw_offset,
 };
 
 fn render_html(markdown: &str) -> String {
@@ -192,6 +192,44 @@ fn canonical_keeps_runs_of_spaces_in_code_span_in_footnote() {
     let out = format_markdown_canonical(body, 0);
     assert_eq!(out, expected);
     assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_runs_of_spaces_in_code_spans_after_heading_code_span() {
+    // Comrak doesn't wrap headings, so it keeps the spaces in a heading's code
+    // span while collapsing them in every other code span.
+    let body = "# `a  b`\n\nUse `c  d`.\n";
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_code_spans_after_escaped_pipes_in_table_cell() {
+    // Comrak removes the `\` of each `\|` in a cell before parsing the cell's
+    // inlines, so it reports every later code span in that cell one byte early
+    // per escape. Escapes in an earlier cell of the row don't shift it.
+    let body = indoc! {"
+        | Example                  | Other  |
+        | ------------------------ | ------ |
+        | `a\\|` and `b  c`         | `g  h` |
+        | `a\\|\\|` and `b\\|` `c  d` | `i  j` |
+        | x \\| `e  f`              | `k  l` |
+    "};
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn unescaped_to_raw_offset_skips_only_pipe_escapes() {
+    // `\|` loses its `\`, so the backtick at raw offset 4 is unescaped offset 3.
+    assert_eq!(unescaped_to_raw_offset(r"a\|b`", 3), Some(4));
+    // In `\\|` the second `\` is escaped by the first, so nothing is removed.
+    assert_eq!(unescaped_to_raw_offset(r"\\|`", 3), Some(3));
+    // In `\\\|` the third `\` escapes the pipe and is removed.
+    assert_eq!(unescaped_to_raw_offset(r"\\\|`", 3), Some(4));
+    assert_eq!(unescaped_to_raw_offset("ab", 2), None);
 }
 
 #[test]

@@ -285,6 +285,8 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
 /// If the span counts differ or any pair's literals differ by more than
 /// collapsed spaces, all spans keep their literals from `canonical` and only
 /// unneeded delimiter padding is removed.
+/// Both sides of a pair are collapsed before comparing, because comrak doesn't
+/// collapse spaces where it doesn't wrap, such as in headings.
 fn rewrite_code_spans(input: &str, canonical: &str) -> String {
     if !canonical.contains('`') {
         return canonical.to_owned();
@@ -312,7 +314,7 @@ fn rewrite_code_spans(input: &str, canonical: &str) -> String {
     let paired = originals.len() == spans.len()
         && spans.iter().zip(&originals).all(|(node, original)| {
             matches!(&node.data().value, NodeValue::Code(code)
-                if collapse_space_runs(original) == code.literal)
+                if collapse_space_runs(original) == collapse_space_runs(&code.literal))
         });
 
     let line_starts = line_start_offsets(canonical);
@@ -322,11 +324,16 @@ fn rewrite_code_spans(input: &str, canonical: &str) -> String {
         let NodeValue::Code(code) = &data.value else {
             continue;
         };
-        let Some(range) = sourcepos_to_byte_range(&line_starts, canonical.len(), &data.sourcepos)
-            .and_then(|r| Some(r.start..code_span_end(canonical, r.start, code.num_backticks)?))
-        else {
+        let Some(range) = code_span_range(node, canonical, &line_starts) else {
             continue;
         };
+        let ticks = "`".repeat(code.num_backticks);
+        let delimited = canonical.get(range.clone()).is_some_and(|span| {
+            span.len() >= 2 * ticks.len() && span.starts_with(&ticks) && span.ends_with(&ticks)
+        });
+        if !delimited {
+            continue;
+        }
         let literal = if paired {
             &originals[index]
         } else {
@@ -357,30 +364,56 @@ fn rewrite_code_spans(input: &str, canonical: &str) -> String {
     out
 }
 
-/// Find the byte offset just past the code span starting at `start` in `text`
-/// and delimited by `num_backticks` backticks.
+/// Byte range of the code span `node` in `text`, delimiters included.
 ///
-/// Scans for the matching closing backtick run rather than using
-/// `sourcepos.end`, which comrak reports short of the closing delimiter when a
-/// code span in a table cell contains an escaped `\|`.
-fn code_span_end(text: &str, start: usize, num_backticks: usize) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let mut i = start.checked_add(num_backticks)?;
-    if bytes.get(start..i)?.iter().any(|&b| b != b'`') {
+/// Inside a table cell, comrak removes the `\` of each escaped `\|` before
+/// parsing the cell's inlines, and reports inline positions in that unescaped
+/// text.
+/// Those positions are mapped back to `text` through the cell's own position,
+/// which comrak takes from the row as written.
+fn code_span_range<'a>(
+    node: &'a AstNode<'a>,
+    text: &str,
+    line_starts: &[usize],
+) -> Option<Range<usize>> {
+    let range = sourcepos_to_byte_range(line_starts, text.len(), &node.data().sourcepos)?;
+    let Some(cell) = node
+        .ancestors()
+        .find(|n| matches!(n.data().value, NodeValue::TableCell))
+    else {
+        return Some(range);
+    };
+    let cell = sourcepos_to_byte_range(line_starts, text.len(), &cell.data().sourcepos)?;
+    if range.start < cell.start || range.end <= range.start {
         return None;
     }
-    while i < bytes.len() {
-        if bytes[i] != b'`' {
-            i += 1;
-            continue;
+    let cell_text = &text[cell.start..];
+    let start = unescaped_to_raw_offset(cell_text, range.start - cell.start)?;
+    let last = unescaped_to_raw_offset(cell_text, range.end - 1 - cell.start)?;
+    Some(cell.start + start..cell.start + last + 1)
+}
+
+/// Map `offset`, a byte offset into `raw` with each pipe escape removed, to the
+/// matching byte offset in `raw`.
+///
+/// Matches comrak's unescaping of table cells: a `\` directly before `|` is
+/// removed, unless it is itself escaped by a preceding `\`.
+fn unescaped_to_raw_offset(raw: &str, offset: usize) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    let mut raw_index = 0;
+    let mut unescaped_index = 0;
+    let mut escaped = false;
+    while raw_index < bytes.len() {
+        let byte = bytes[raw_index];
+        let removed = !escaped && byte == b'\\' && bytes.get(raw_index + 1) == Some(&b'|');
+        escaped = !escaped && byte == b'\\';
+        if !removed {
+            if unescaped_index == offset {
+                return Some(raw_index);
+            }
+            unescaped_index += 1;
         }
-        let run_start = i;
-        while bytes.get(i) == Some(&b'`') {
-            i += 1;
-        }
-        if i - run_start == num_backticks {
-            return Some(i);
-        }
+        raw_index += 1;
     }
     None
 }
