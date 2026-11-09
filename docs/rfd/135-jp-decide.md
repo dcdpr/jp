@@ -1,17 +1,17 @@
-# RFD D74: jp decide
+# RFD 135: jp decide
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-08
-- **Extends**: [RFD D72]
-- **Requires**: [RFD D73], [RFD 065]
+- **Extends**: [RFD 133]
+- **Requires**: [RFD 134], [RFD 065]
 - **Summary**: Adds `jp decide`, which asks a decision model from the shell and
   records the answer for the next `jp query`.
 
 ## Summary
 
-`jp decide` asks a decision model ([RFD D72]) one or more questions from the
+`jp decide` asks a decision model ([RFD 133]) one or more questions from the
 shell and prints the answers as JSON.
 It runs under the active conversation's config and records the decision there,
 where the next `jp query` sends it to the model with its request; with no active
@@ -27,7 +27,7 @@ reproduce it.
 Today each one is a `jp query --schema` turn: the full agent loop for one
 structured value, seconds of latency, and an answer with no probability
 attached.
-[RFD D72] gives JP decision models and gives plugins a way to ask them; the
+[RFD 133] gives JP decision models and gives plugins a way to ask them; the
 shell has none.
 
 Many decisions are about the work a conversation is doing: whether the diff the
@@ -216,12 +216,12 @@ pub struct Decision {
   for `sanitize` to repair.
 - `EventKind::Decision`, stored as `{"type": "decision", …}`.
   `encode_event` encodes `state` as it encodes `ToolCallResponse` content.
-- `Question` and `Answer` are [RFD D72]'s types, so a stored decision has one
+- `Question` and `Answer` are [RFD 133]'s types, so a stored decision has one
   shape whichever server answered it.
 - `model` is what the server reported, not the alias requested: `jev-latest`
   resolves to a version, and the version is what answered.
 - The event is turn-scoped.
-  `jp decide` opens the pending turn ([RFD D73]) and appends the decision to it,
+  `jp decide` opens the pending turn ([RFD 134]) and appends the decision to it,
   so the decision becomes part of the next turn, before its request.
 
 ### What the model sees
@@ -308,7 +308,7 @@ and answers without its state.
 The `decide` request gains an optional `conversation`.
 With it, the host applies that conversation's config, records the decision
 there, and records `cfg` as a config delta, as `query` does.
-Without it, the request touches no conversation, as [RFD D72] describes: a
+Without it, the request touches no conversation, as [RFD 133] describes: a
 plugin names its conversation or does without, whatever `decision.conversation`
 says.
 
@@ -351,7 +351,7 @@ It and the plugin `decide` request call the same runner.
 - A decision's state is resent with every later request until a compaction
   strips it.
   A large diff costs tokens on each of those turns, and `strip` is opt-in.
-- The command cannot ship before [RFD D73] and [RFD 065]'s provider migration,
+- The command cannot ship before [RFD 134] and [RFD 065]'s provider migration,
   the largest phase on that RFD's plan, because it records from its first
   release.
 
@@ -420,7 +420,7 @@ The `sanitize` change goes away, but on disk a decision becomes a blob of text:
 pending decisions behind the request it appends, so none ever leads a stream and
 `sanitize` needs no change.
 Stream order would then contradict the decisions' timestamps.
-[RFD D73]'s `start_turn` would have to know which pending entries to move, since
+[RFD 134]'s `start_turn` would have to know which pending entries to move, since
 config deltas have to stay ahead of the request they configure.
 And `jp query --no-edit` re-sends a failed request only when it is the last
 event of its turn (`query.rs:929-937`); with a decision after it, `jp` sends
@@ -483,7 +483,7 @@ Whether every server accepts one is untested.
    `--no-state`, JSON on stdout, and the conversation it records into: the
    default target, running without one, `-i`, the pending turn, the `--cfg`
    delta, and locking.
-   Depends on 2, on [RFD D72] phase 3, which builds the runner, and on [RFD D73]
+   Depends on 2, on [RFD 133] phase 3, which builds the runner, and on [RFD 134]
    phase 3.
    The command records from its first merge, so its default never changes.
 5. **The rest of the command.** `--choice`, `--score`, `-s`, attachments, and
@@ -502,11 +502,11 @@ Whether every server accepts one is untested.
   `llm-typesafe`
 - [RFD 030]: Schema DSL
 - [RFD 065]: Typed Resource Model for Attachments
-- [RFD D72]: Decision Models
-- [RFD D73]: Pending Turn
+- [RFD 133]: Decision Models
+- [RFD 134]: Pending Turn
 
-[RFD 030]: ../030-schema-dsl.md
-[RFD 065]: ../065-typed-resource-model-for-attachments.md
-[RFD D72]: D72-decision-models.md
-[RFD D73]: D73-pending-turn.md
+[RFD 030]: 030-schema-dsl.md
+[RFD 065]: 065-typed-resource-model-for-attachments.md
+[RFD 133]: 133-decision-models.md
+[RFD 134]: 134-pending-turn.md
 [willison-jev]: https://simonwillison.net/2026/Sep/21/jev/

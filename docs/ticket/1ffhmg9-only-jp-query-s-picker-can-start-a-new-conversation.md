@@ -18,8 +18,7 @@ Other commands write into the conversation they pick, and a new conversation is
 a valid target for them too:
 
 - `jp config set -i '?'` records a config delta in the chosen conversation.
-- `jp decide -i '?'`, proposed in the draft RFD *jp decide* (currently D74),
-  records a decision in it.
+- `jp decide -i '?'`, proposed in RFD 135, records a decision in it.
 
 Open questions:
 

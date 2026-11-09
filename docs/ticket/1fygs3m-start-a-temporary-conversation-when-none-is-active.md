@@ -12,8 +12,8 @@ When the session has no active conversation, `jp query` falls back to
 `conversation.default_id`, then to the picker, and fails when nobody can answer
 the picker (`resolve_from_session_or_picker`,
 `crates/jp_cli/src/cmd/target.rs:735`).
-The draft RFD *jp decide* (currently D74) finds its conversation in the same
-order, but runs without one where `jp query` would open the picker.
+`jp decide`, proposed in RFD 135, finds its conversation in the same order, but
+runs without one where `jp query` would open the picker.
 
 Proposed for both commands: where the picker would open, start a temporary
 conversation, as `jp query --new --tmp` creates one, and make it the session's

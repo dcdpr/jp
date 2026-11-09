@@ -13,11 +13,11 @@ Nothing runs a single command without the session's active conversation while
 the session keeps it.
 
 This matters more once commands can run without a conversation.
-`jp decide`, proposed in the draft RFD *jp decide* (currently D74), targets the
-active conversation by default, and runs without one when none is active.
+`jp decide`, proposed in RFD 135, targets the active conversation by default,
+and runs without one when none is active.
 `-!` stops it writing, but it still applies the conversation's config, including
 its decision model.
-The per-run way out in that draft is `-c decision.conversation=none`, which only
+The per-run way out in that RFD is `-c decision.conversation=none`, which only
 `jp decide` has.
 
 Proposed: a `none` target, meaning no conversation.

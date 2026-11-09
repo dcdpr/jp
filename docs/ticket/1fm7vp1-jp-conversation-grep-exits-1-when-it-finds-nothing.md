@@ -19,9 +19,8 @@ In JP, exit status 1 means an error and nothing else.
   (`crates/jp_cli/src/cmd/plugin/dispatch.rs:3038-3041`), use for usage errors,
   but a pattern failing part-way through is a runtime error.
 
-Proposed: "no matches" exits 3, the code the draft RFD *jp decide* (currently
-D74) gives a below-threshold answer, so both commands report a negative result
-the same way.
+Proposed: "no matches" exits 3, the code RFD 135 gives a below-threshold answer,
+so both commands report a negative result the same way.
 The pattern failure exits 1.
 
 Scripts that branch on grep's exit 1 break, so the change goes in the changelog.

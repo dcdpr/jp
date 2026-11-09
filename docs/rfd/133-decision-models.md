@@ -1,10 +1,10 @@
-# RFD D72: Decision Models
+# RFD 133: Decision Models
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-08
-- **Extended by**: [RFD D74]
+- **Extended by**: [RFD 135]
 - **Summary**: Adds decision models through a `providers.decision` namespace,
   typed questions and answers, and a `decide` plugin request.
 
@@ -239,8 +239,8 @@ JP passes answers through and claims nothing about comparing them across models.
 - [RFD 028]: Structured Inquiry System for Tool Questions
 - [RFD 072]: Command Plugin System
 
-[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 072]: ../072-command-plugin-system.md
-[RFD D74]: D74-jp-decide.md
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 072]: 072-command-plugin-system.md
+[RFD 135]: 135-jp-decide.md
 [jev-intro]: https://typesafe.ai/blog/introducing-system-one-models-and-jev
 [systemone-api]: https://docs.typesafe.ai/api/system-one

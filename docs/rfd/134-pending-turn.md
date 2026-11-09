@@ -1,10 +1,10 @@
-# RFD D73: Pending Turn
+# RFD 134: Pending Turn
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-08
-- **Required by**: [RFD D74]
+- **Required by**: [RFD 135]
 - **Summary**: Adds a pending turn marker that gathers entries recorded between
   turns, so they belong to the turn they precede.
 
@@ -241,8 +241,8 @@ A new command that records between turns has to know to open the marker.
 - [RFD 078]: Tool Config Mutation
 - [RFD 097]: Stable Event Identifiers
 
-[RFD 011]: ../011-system-notification-queue.md
-[RFD 064]: ../064-non-destructive-conversation-compaction.md
-[RFD 078]: ../078-tool-config-mutation.md
-[RFD 097]: ../097-stable-event-identifiers.md
-[RFD D74]: D74-jp-decide.md
+[RFD 011]: 011-system-notification-queue.md
+[RFD 064]: 064-non-destructive-conversation-compaction.md
+[RFD 078]: 078-tool-config-mutation.md
+[RFD 097]: 097-stable-event-identifiers.md
+[RFD 135]: 135-jp-decide.md
