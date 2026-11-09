@@ -256,6 +256,7 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     // trailing whitespace such as `> ` or `   `. Strip it before handing the
     // text downstream.
     let canonical = trim_blank_prefix_lines(&canonical);
+    let canonical = rewrite_code_spans(body, &canonical);
 
     // Comrak's formatter appends a trailing newline unconditionally;
     // normalise to match the input's convention so the caller (block
@@ -268,6 +269,164 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     };
 
     Some(canonical)
+}
+
+/// Rewrite each code span in `canonical`, comrak's rendering of `input`, with
+/// the text the code span holds in `input`.
+///
+/// Comrak's writer changes code spans in two ways.
+/// It collapses each run of spaces to one space, which changes the code span's
+/// text.
+/// It also adds a space inside each delimiter when the text starts or ends with
+/// a space, which renders the same but reads as a different string.
+/// Each code span is written with a space inside its delimiters only where
+/// [`code_span_needs_padding`] says CommonMark requires one.
+///
+/// Code spans are paired with those of `input` in document order.
+/// When `input` has a different number of code spans, or a pair's texts differ
+/// by more than collapsed spaces, each code span keeps the text comrak wrote.
+fn rewrite_code_spans(input: &str, canonical: &str) -> String {
+    if !canonical.contains('`') {
+        return canonical.to_owned();
+    }
+
+    let arena = Arena::new();
+    let options = comrak_options();
+    let root = comrak::parse_document(&arena, canonical, &options);
+    let spans: Vec<_> = root
+        .descendants()
+        .filter(|n| matches!(n.data().value, NodeValue::Code(_)))
+        .collect();
+    if spans.is_empty() {
+        return canonical.to_owned();
+    }
+
+    let input_root = comrak::parse_document(&arena, input, &options);
+    let originals: Vec<String> = input_root
+        .descendants()
+        .filter_map(|n| match &n.data().value {
+            NodeValue::Code(code) => Some(code.literal.clone()),
+            _ => None,
+        })
+        .collect();
+    let paired = originals.len() == spans.len()
+        && spans.iter().zip(&originals).all(|(node, original)| {
+            matches!(&node.data().value, NodeValue::Code(code)
+                if collapse_space_runs(original) == code.literal)
+        });
+
+    let line_starts = line_start_offsets(canonical);
+    let mut replacements: Vec<Replacement> = Vec::new();
+    for (index, node) in spans.iter().enumerate() {
+        let data = node.data();
+        let NodeValue::Code(code) = &data.value else {
+            continue;
+        };
+        let Some(range) = sourcepos_to_byte_range(&line_starts, canonical.len(), &data.sourcepos)
+            .and_then(|r| Some(r.start..code_span_end(canonical, r.start, code.num_backticks)?))
+        else {
+            continue;
+        };
+        let literal = if paired {
+            &originals[index]
+        } else {
+            &code.literal
+        };
+        let in_table = node
+            .ancestors()
+            .any(|n| matches!(n.data().value, NodeValue::TableCell));
+        let text = write_code_span(literal, code.num_backticks, in_table);
+        if canonical.get(range.clone()) != Some(text.as_str()) {
+            replacements.push(Replacement { range, text });
+        }
+    }
+
+    if replacements.is_empty() {
+        return canonical.to_owned();
+    }
+    replacements.sort_by_key(|r| r.range.start);
+
+    let mut out = String::with_capacity(canonical.len());
+    let mut cursor = 0;
+    for r in replacements {
+        out.push_str(&canonical[cursor..r.range.start]);
+        out.push_str(&r.text);
+        cursor = r.range.end;
+    }
+    out.push_str(&canonical[cursor..]);
+    out
+}
+
+/// Byte offset just past the code span that opens at `start` in `text` with a
+/// run of `num_backticks` backticks.
+///
+/// The end is found by scanning for the closing run, because comrak's end
+/// position for a code span holding an escaped `|` in a table cell falls short
+/// of the closing backticks.
+fn code_span_end(text: &str, start: usize, num_backticks: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut i = start.checked_add(num_backticks)?;
+    if bytes.get(start..i)?.iter().any(|&b| b != b'`') {
+        return None;
+    }
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let run_start = i;
+        while bytes.get(i) == Some(&b'`') {
+            i += 1;
+        }
+        if i - run_start == num_backticks {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Write a code span holding `literal`, delimited by `num_backticks` backticks.
+///
+/// Inside a table cell, `|` is escaped so it doesn't end the cell.
+fn write_code_span(literal: &str, num_backticks: usize, in_table: bool) -> String {
+    let ticks = "`".repeat(num_backticks);
+    let pad = if code_span_needs_padding(literal) {
+        " "
+    } else {
+        ""
+    };
+    let text = if in_table {
+        literal.replace('|', "\\|")
+    } else {
+        literal.to_owned()
+    };
+    format!("{ticks}{pad}{text}{pad}{ticks}")
+}
+
+/// Whether a code span holding `literal` must be written with a space inside
+/// each delimiter to parse back to `literal`.
+///
+/// That is when `literal` starts or ends with a backtick, which would otherwise
+/// merge into the delimiter, or both starts and ends with a space, which
+/// CommonMark would otherwise strip.
+/// CommonMark never strips a literal of only spaces, so that needs none.
+fn code_span_needs_padding(literal: &str) -> bool {
+    let edge_spaces = literal.starts_with(' ') && literal.ends_with(' ');
+    literal.starts_with('`')
+        || literal.ends_with('`')
+        || (edge_spaces && literal.bytes().any(|b| b != b' '))
+}
+
+/// Replace each run of spaces in `text` with one space.
+fn collapse_space_runs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c == ' ' && out.ends_with(' ') {
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Trim trailing whitespace from blank lines that carry only block-quote (`>`)
