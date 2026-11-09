@@ -54,8 +54,8 @@ impl Block {
 
     /// Reassemble the block as Rust source from a freshly formatted markdown
     /// body.
-    /// Lines are split on `\n`; non-empty lines get ` {indent}{marker}  `,
-    /// empty lines get `{indent}{marker}` with no trailing space.
+    /// Lines are split on `\n`; non-empty lines get `{indent}{marker} `, empty
+    /// lines get `{indent}{marker}` with no trailing space.
     #[must_use]
     pub fn reassemble(&self, formatted_body: &str) -> String {
         let marker = self.marker();

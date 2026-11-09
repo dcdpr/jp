@@ -31,8 +31,7 @@ Two cases want exactly that:
   range straight back into the line-addressed tools (`fs_read_file`,
   `git_blame`, `git_diff_file`).
   But the terminal renderer keys syntax highlighting off a leading ` ```lang `
-  fence, and a ` 1:  ` gutter defeats that detection, degrading the human's
-  view.
+  fence, and a `1: ` gutter defeats that detection, degrading the human's view.
   The tool wants numbered output for the assistant and clean, fenced output for
   the terminal.
 - **Summary vs. full dump.** A tool may want to show the human a terse one-line

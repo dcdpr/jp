@@ -7,7 +7,14 @@
 use indoc::indoc;
 use pretty_assertions::assert_eq;
 
-use super::{format_markdown_canonical, format_source, reflow_markdown, reflow_paragraph};
+use super::{
+    comrak_options, format_markdown_canonical, format_source, reflow_markdown, reflow_paragraph,
+    rewrite_code_spans, unescaped_to_raw_offset,
+};
+
+fn render_html(markdown: &str) -> String {
+    comrak::markdown_to_html(markdown, &comrak_options())
+}
 
 // ---------------------------------------------------------------------------
 // reflow_paragraph: sentence splitting + width wrapping
@@ -122,6 +129,128 @@ fn canonical_preserves_marker_only_line_inside_code_block() {
     // generated block-quote prefix, so its trailing space must survive.
     let body = concat!("```\n", "> \n", "```\n");
     assert_eq!(format_markdown_canonical(body, 0), body);
+}
+
+#[test]
+fn canonical_does_not_pad_code_span_with_one_edge_space() {
+    // Comrak pads any code span with a leading or trailing space (`# ` -> ` #  `),
+    // even when only one edge has a space and CommonMark would not strip it.
+    let body = "Type `# `, `a ` or ` a` here.\n";
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_does_not_pad_code_span_in_table_cell() {
+    let body = indoc! {"
+        | Key   | Prefix |
+        | ----- | ------ |
+        | `a\\|` | `# `   |
+    "};
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_runs_of_spaces_in_code_span() {
+    let body = "Use `a  b`, `` `x   y `` or `#  ` here.\n";
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_runs_of_spaces_in_code_span_in_table_cell() {
+    let body = indoc! {"
+        | Key      | Value |
+        | -------- | ----- |
+        | `a\\|  b` | `c  ` |
+    "};
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_runs_of_spaces_in_code_span_in_footnote() {
+    // Comrak places a footnote definition after the paragraph that cites it in
+    // the AST regardless of source order; pairing works because both parses
+    // visit the spans in that same AST order.
+    let body = indoc! {"
+        [^1]: Note `x  y`.
+
+        Text `a  b`[^1].
+    "};
+    let expected = indoc! {"
+        Text `a  b`[^1].
+
+        [^1]:
+            Note `x  y`.
+    "};
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, expected);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_runs_of_spaces_in_code_spans_after_heading_code_span() {
+    // Comrak doesn't wrap headings, so it keeps the spaces in a heading's code
+    // span while collapsing them in every other code span.
+    let body = "# `a  b`\n\nUse `c  d`.\n";
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_keeps_code_spans_after_escaped_pipes_in_table_cell() {
+    // Comrak removes the `\` of each `\|` in a cell before parsing the cell's
+    // inlines, so it reports every later code span in that cell one byte early
+    // per escape. Escapes in an earlier cell of the row don't shift it.
+    let body = indoc! {"
+        | Example                  | Other  |
+        | ------------------------ | ------ |
+        | `a\\|` and `b  c`         | `g  h` |
+        | `a\\|\\|` and `b\\|` `c  d` | `i  j` |
+        | x \\| `e  f`              | `k  l` |
+    "};
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn unescaped_to_raw_offset_skips_only_pipe_escapes() {
+    // `\|` loses its `\`, so the backtick at raw offset 4 is unescaped offset 3.
+    assert_eq!(unescaped_to_raw_offset(r"a\|b`", 3), Some(4));
+    // In `\\|` the second `\` is escaped by the first, so nothing is removed.
+    assert_eq!(unescaped_to_raw_offset(r"\\|`", 3), Some(3));
+    // In `\\\|` the third `\` escapes the pipe and is removed.
+    assert_eq!(unescaped_to_raw_offset(r"\\\|`", 3), Some(4));
+    assert_eq!(unescaped_to_raw_offset("ab", 2), None);
+}
+
+#[test]
+fn rewrite_code_spans_keeps_comrak_text_when_spans_do_not_pair() {
+    // When input and canonical spans do not match (`a  b` vs `z`),
+    // `rewrite_code_spans` keeps the canonical literals and only strips
+    // unnecessary padding (` z ` -> `z`).
+    let out = rewrite_code_spans("Use `a  b` and `c`.\n", "Use ` z ` and `c`.\n");
+    assert_eq!(out, "Use `z` and `c`.\n");
+}
+
+#[test]
+fn canonical_keeps_code_span_padding_commonmark_needs() {
+    // Preserve padding when CommonMark requires it: a leading or trailing
+    // backtick would merge into the delimiter, and leading + trailing spaces
+    // around non-space text would be stripped. A space-only span (` `) is
+    // not stripped by CommonMark and needs no padding.
+    let body = "Write `` `a ``, `` a` ``, `  a  ` and ` ` here.\n";
+    let out = format_markdown_canonical(body, 0);
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
 }
 
 #[test]

@@ -1769,8 +1769,8 @@ fn board_row(id: TicketId, ticket: &Ticket) -> String {
     format!("{id:<9} {}{labels}{}\n", ticket.title, progress(ticket))
 }
 
-/// A ticket's checklist progress as a listing appends it, `  (2 of 5 checked)
-/// `, or nothing when its description holds no checklist.
+/// A ticket's checklist progress as a listing appends it, ` (2 of 5 checked)`,
+/// or nothing when its description holds no checklist.
 fn progress(ticket: &Ticket) -> String {
     ticket
         .checklist()

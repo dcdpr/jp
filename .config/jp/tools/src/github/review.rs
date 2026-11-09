@@ -419,8 +419,8 @@ impl DiffRanges {
     /// Parse the hunk headers (`@@ -old,count +new,count @@`) out of a REST
     /// `patch` blob.
     ///
-    /// Content lines always start with ` `, `+`, or `-`, so scanning for the `
-    /// @@  ` prefix cannot match inside hunk bodies.
+    /// Content lines always start with ` `, `+`, or `-`, so scanning for the
+    /// `@@ ` prefix cannot match inside hunk bodies.
     fn from_patch(patch: &str) -> Self {
         let mut ranges = Self::default();
 

@@ -201,8 +201,8 @@ pub fn split_sentences(text: &str, atomic_ranges: &[Range<usize>]) -> Vec<String
 ///
 /// Used to fold the contents of atomic spans (emphasis, inline code, links)
 /// that happen to cross a source-line boundary before they're stored as
-/// placeholders; without this, textwrap would later treat the embedded ` \n  `
-/// as a forced break and the container-prefix step would double up the
+/// placeholders; without this, textwrap would later treat the embedded `\n ` as
+/// a forced break and the container-prefix step would double up the
 /// continuation indent.
 fn fold_line_breaks(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

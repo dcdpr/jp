@@ -177,7 +177,7 @@ string:
                                                    inline template.
 ```
 
-The inline template mode (current ` -%  ` behavior) keeps its current behavior.
+The inline template mode (current `-% ` behavior) keeps its current behavior.
 The query input comes from the usual sources: positional args, `--` args, or
 stdin.
 For example:

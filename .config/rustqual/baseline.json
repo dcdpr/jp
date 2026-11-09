@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "quality_score": 0.7279744445410776,
-  "iosp_score": 0.9204309656823624,
-  "violations": 997,
-  "total": 17151,
-  "complexity_warnings": 198,
+  "quality_score": 0.7280331666192694,
+  "iosp_score": 0.9204174300963913,
+  "violations": 999,
+  "total": 17177,
+  "complexity_warnings": 199,
   "magic_number_warnings": 267,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 493,
+  "function_length_warnings": 494,
   "unsafe_warnings": 74,
   "error_handling_warnings": 203,
   "duplicate_groups": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3181,
+  "total_findings": 3185,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -2236,124 +2236,134 @@
       "line": 243
     },
     {
+      "name": "rewrite_code_spans",
+      "file": "crates/contrib/comfort/src/format.rs",
+      "line": 290
+    },
+    {
+      "name": "collapse_space_runs",
+      "file": "crates/contrib/comfort/src/format.rs",
+      "line": 454
+    },
+    {
       "name": "trim_blank_prefix_lines",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 280
+      "line": 472
     },
     {
       "name": "collect_verbatim_block_ranges",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 327
+      "line": 519
     },
     {
       "name": "align_tables",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 355
+      "line": 547
     },
     {
       "name": "collect_table_replacements",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 395
+      "line": 587
     },
     {
       "name": "render_aligned_table",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 475
+      "line": 667
     },
     {
       "name": "extract_reference_links",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 613
+      "line": 805
     },
     {
       "name": "prune_unused_reference_definitions",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 703
+      "line": 895
     },
     {
       "name": "collect_referenced_labels",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 746
+      "line": 938
     },
     {
       "name": "collect_inline_link_replacements",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 925
+      "line": 1117
     },
     {
       "name": "extract_existing_reference_definitions",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1014
+      "line": 1206
     },
     {
       "name": "collect_reference_definition_spans",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1068
+      "line": 1260
     },
     {
       "name": "collect_excluded_ranges_for_refdefs",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1132
+      "line": 1324
     },
     {
       "name": "parse_reference_definition",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1167
+      "line": 1359
     },
     {
       "name": "parse_quoted_title",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1302
+      "line": 1494
     },
     {
       "name": "protect_reference_form_links",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1366
+      "line": 1558
     },
     {
       "name": "collect_reference_form_link_ranges",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1466
+      "line": 1658
     },
     {
       "name": "reflow_markdown",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1573
+      "line": 1765
     },
     {
       "name": "ResolveIntraDocLinks::resolve",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1637
+      "line": 1829
     },
     {
       "name": "collect_paragraphs",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1717
+      "line": 1909
     },
     {
       "name": "continuation_prefix_from_ancestors",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1799
+      "line": 1991
     },
     {
       "name": "strip_block_quote_markers",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1869
+      "line": 2061
     },
     {
       "name": "walk_paragraphs_for_atomic_ranges",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1946
+      "line": 2138
     },
     {
       "name": "walk_inline_for_atomic_ranges",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 1964
+      "line": 2156
     },
     {
       "name": "reflow_paragraph",
       "file": "crates/contrib/comfort/src/format.rs",
-      "line": 2009
+      "line": 2201
     },
     {
       "name": "Config::read_in",
@@ -4368,22 +4378,22 @@
     {
       "name": "render_list_segment",
       "file": "crates/jp_md/src/buffer.rs",
-      "line": 1463
+      "line": 1462
     },
     {
       "name": "strip_lines_indent",
       "file": "crates/jp_md/src/buffer.rs",
-      "line": 1502
+      "line": 1501
     },
     {
       "name": "renumber_first_marker",
       "file": "crates/jp_md/src/buffer.rs",
-      "line": 1525
+      "line": 1524
     },
     {
       "name": "last_inline_ground_state",
       "file": "crates/jp_md/src/buffer.rs",
-      "line": 1728
+      "line": 1727
     },
     {
       "name": "TerminalWriter<'w>::new",

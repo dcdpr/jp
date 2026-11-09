@@ -10,7 +10,7 @@
 //!    [`reflow_paragraph`].
 //!    Leaf blocks that aren't paragraphs — reference link definitions, code
 //!    blocks, headings, tables, HTML blocks, thematic breaks — are preserved
-//!    verbatim, as are paragraphs that contain a hard line break (`  \n ` or
+//!    verbatim, as are paragraphs that contain a hard line break (` \n` or
 //!    `\\\n`).
 //! 3. [`reflow_paragraph`] splits the paragraph into sentences with the
 //!    [`sentence`] module and width-wraps each sentence via `textwrap`, keeping
@@ -256,6 +256,7 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     // trailing whitespace such as `> ` or `   `. Strip it before handing the
     // text downstream.
     let canonical = trim_blank_prefix_lines(&canonical);
+    let canonical = rewrite_code_spans(body, &canonical);
 
     // Comrak's formatter appends a trailing newline unconditionally;
     // normalise to match the input's convention so the caller (block
@@ -268,6 +269,197 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     };
 
     Some(canonical)
+}
+
+/// Restore original inline-code literals from `input` and strip unnecessary
+/// backtick padding in `canonical` (comrak's rendering of `input`).
+///
+/// Comrak's CommonMark writer alters code spans in two ways.
+/// It collapses consecutive spaces inside the literal to a single space,
+/// changing the span's content.
+/// It also pads both backtick delimiters with a space whenever the literal
+/// starts or ends with a space, even when CommonMark does not require padding
+/// (see [`code_span_needs_padding`]).
+///
+/// Code spans in `canonical` are paired with those in `input` in AST order.
+/// If the span counts differ or any pair's literals differ by more than
+/// collapsed spaces, all spans keep their literals from `canonical` and only
+/// unneeded delimiter padding is removed.
+/// Both sides of a pair are collapsed before comparing, because comrak doesn't
+/// collapse spaces where it doesn't wrap, such as in headings.
+fn rewrite_code_spans(input: &str, canonical: &str) -> String {
+    if !canonical.contains('`') {
+        return canonical.to_owned();
+    }
+
+    let arena = Arena::new();
+    let options = comrak_options();
+    let root = comrak::parse_document(&arena, canonical, &options);
+    let spans: Vec<_> = root
+        .descendants()
+        .filter(|n| matches!(n.data().value, NodeValue::Code(_)))
+        .collect();
+    if spans.is_empty() {
+        return canonical.to_owned();
+    }
+
+    let input_root = comrak::parse_document(&arena, input, &options);
+    let originals: Vec<String> = input_root
+        .descendants()
+        .filter_map(|n| match &n.data().value {
+            NodeValue::Code(code) => Some(code.literal.clone()),
+            _ => None,
+        })
+        .collect();
+    let paired = originals.len() == spans.len()
+        && spans.iter().zip(&originals).all(|(node, original)| {
+            matches!(&node.data().value, NodeValue::Code(code)
+                if collapse_space_runs(original) == collapse_space_runs(&code.literal))
+        });
+
+    let line_starts = line_start_offsets(canonical);
+    let mut replacements: Vec<Replacement> = Vec::new();
+    for (index, node) in spans.iter().enumerate() {
+        let data = node.data();
+        let NodeValue::Code(code) = &data.value else {
+            continue;
+        };
+        let Some(range) = code_span_range(node, canonical, &line_starts) else {
+            continue;
+        };
+        let ticks = "`".repeat(code.num_backticks);
+        let delimited = canonical.get(range.clone()).is_some_and(|span| {
+            span.len() >= 2 * ticks.len() && span.starts_with(&ticks) && span.ends_with(&ticks)
+        });
+        if !delimited {
+            continue;
+        }
+        let literal = if paired {
+            &originals[index]
+        } else {
+            &code.literal
+        };
+        let in_table = node
+            .ancestors()
+            .any(|n| matches!(n.data().value, NodeValue::TableCell));
+        let text = write_code_span(literal, code.num_backticks, in_table);
+        if canonical.get(range.clone()) != Some(text.as_str()) {
+            replacements.push(Replacement { range, text });
+        }
+    }
+
+    if replacements.is_empty() {
+        return canonical.to_owned();
+    }
+    replacements.sort_by_key(|r| r.range.start);
+
+    let mut out = String::with_capacity(canonical.len());
+    let mut cursor = 0;
+    for r in replacements {
+        out.push_str(&canonical[cursor..r.range.start]);
+        out.push_str(&r.text);
+        cursor = r.range.end;
+    }
+    out.push_str(&canonical[cursor..]);
+    out
+}
+
+/// Byte range of the code span `node` in `text`, delimiters included.
+///
+/// Inside a table cell, comrak removes the `\` of each escaped `\|` before
+/// parsing the cell's inlines, and reports inline positions in that unescaped
+/// text.
+/// Those positions are mapped back to `text` through the cell's own position,
+/// which comrak takes from the row as written.
+fn code_span_range<'a>(
+    node: &'a AstNode<'a>,
+    text: &str,
+    line_starts: &[usize],
+) -> Option<Range<usize>> {
+    let range = sourcepos_to_byte_range(line_starts, text.len(), &node.data().sourcepos)?;
+    let Some(cell) = node
+        .ancestors()
+        .find(|n| matches!(n.data().value, NodeValue::TableCell))
+    else {
+        return Some(range);
+    };
+    let cell = sourcepos_to_byte_range(line_starts, text.len(), &cell.data().sourcepos)?;
+    if range.start < cell.start || range.end <= range.start {
+        return None;
+    }
+    let cell_text = &text[cell.start..];
+    let start = unescaped_to_raw_offset(cell_text, range.start - cell.start)?;
+    let last = unescaped_to_raw_offset(cell_text, range.end - 1 - cell.start)?;
+    Some(cell.start + start..cell.start + last + 1)
+}
+
+/// Map `offset`, a byte offset into `raw` with each pipe escape removed, to the
+/// matching byte offset in `raw`.
+///
+/// Matches comrak's unescaping of table cells: a `\` directly before `|` is
+/// removed, unless it is itself escaped by a preceding `\`.
+fn unescaped_to_raw_offset(raw: &str, offset: usize) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    let mut raw_index = 0;
+    let mut unescaped_index = 0;
+    let mut escaped = false;
+    while raw_index < bytes.len() {
+        let byte = bytes[raw_index];
+        let removed = !escaped && byte == b'\\' && bytes.get(raw_index + 1) == Some(&b'|');
+        escaped = !escaped && byte == b'\\';
+        if !removed {
+            if unescaped_index == offset {
+                return Some(raw_index);
+            }
+            unescaped_index += 1;
+        }
+        raw_index += 1;
+    }
+    None
+}
+
+/// Format `literal` as a code span delimited by `num_backticks` backticks.
+///
+/// Inside a table cell, `|` is escaped as `\|` so it does not end the cell.
+fn write_code_span(literal: &str, num_backticks: usize, in_table: bool) -> String {
+    let ticks = "`".repeat(num_backticks);
+    let pad = if code_span_needs_padding(literal) {
+        " "
+    } else {
+        ""
+    };
+    let text = if in_table {
+        literal.replace('|', "\\|")
+    } else {
+        literal.to_owned()
+    };
+    format!("{ticks}{pad}{text}{pad}{ticks}")
+}
+
+/// Return `true` if `literal` requires a space inside each backtick delimiter
+/// to round-trip through CommonMark parsing.
+///
+/// Padding is required when `literal` starts or ends with a backtick (which
+/// would otherwise merge into the delimiter), or starts and ends with a space
+/// around at least one non-space byte (CommonMark strips one space from each
+/// end in that case, but leaves space-only spans intact).
+fn code_span_needs_padding(literal: &str) -> bool {
+    let edge_spaces = literal.starts_with(' ') && literal.ends_with(' ');
+    literal.starts_with('`')
+        || literal.ends_with('`')
+        || (edge_spaces && literal.bytes().any(|b| b != b' '))
+}
+
+/// Collapse consecutive ASCII spaces in `text` to a single space.
+fn collapse_space_runs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c == ' ' && out.ends_with(' ') {
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Trim trailing whitespace from blank lines that carry only block-quote (`>`)
@@ -1864,8 +2056,8 @@ fn block_quote_depth(ancestors: &[&AstNode<'_>]) -> usize {
 /// Leaves line 0 alone (its prefix is outside the paragraph's sourcepos range
 /// already).
 ///
-/// Tolerant of both ` >  ` and bare `>` markers, and of leading whitespace
-/// before each marker (CommonMark allows up to 3 spaces of indent).
+/// Tolerant of both `> ` and bare `>` markers, and of leading whitespace before
+/// each marker (CommonMark allows up to 3 spaces of indent).
 fn strip_block_quote_markers(text: &str, depth: usize) -> String {
     if depth == 0 {
         return text.to_owned();
