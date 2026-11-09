@@ -186,9 +186,9 @@ fn claim_region(printer: &Printer, config: &McpStartupConfig) -> StatusRegion {
 /// Render the MCP startup status row for `secs` elapsed and `status`, bounding
 /// the visible text to `width` columns when known.
 ///
-/// Truncation falls on the server-list fragment only: the ` ⏱ Starting  `
-/// prefix and the `  {secs:.1}s ` timer suffix are always preserved, so the
-/// elapsed time keeps moving even when a long list overflows.
+/// Truncation falls on the server-list fragment only: the `⏱ Starting ` prefix
+/// and the ` {secs:.1}s` timer suffix are always preserved, so the elapsed time
+/// keeps moving even when a long list overflows.
 /// A terminal too narrow for even the prefix and suffix falls back to a bounded
 /// `⏱ {secs:.1}s`.
 fn line(secs: f64, status: Option<&str>, width: Option<u16>) -> String {

@@ -656,8 +656,8 @@ impl OptionalValue for Quote {
     const ID: &'static str = "quote";
 
     type Context = ();
-    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
-    /// seeds it verbatim, `None` means `--quote` was not given.
+    /// `Some(true)` prefixes the quoted message with `> `, `Some(false)` seeds
+    /// it verbatim, `None` means `--quote` was not given.
     type Output = Option<bool>;
     type Value = bool;
 

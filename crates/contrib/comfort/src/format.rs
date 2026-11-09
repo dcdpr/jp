@@ -10,7 +10,7 @@
 //!    [`reflow_paragraph`].
 //!    Leaf blocks that aren't paragraphs — reference link definitions, code
 //!    blocks, headings, tables, HTML blocks, thematic breaks — are preserved
-//!    verbatim, as are paragraphs that contain a hard line break (`  \n ` or
+//!    verbatim, as are paragraphs that contain a hard line break (` \n` or
 //!    `\\\n`).
 //! 3. [`reflow_paragraph`] splits the paragraph into sentences with the
 //!    [`sentence`] module and width-wraps each sentence via `textwrap`, keeping
@@ -2023,8 +2023,8 @@ fn block_quote_depth(ancestors: &[&AstNode<'_>]) -> usize {
 /// Leaves line 0 alone (its prefix is outside the paragraph's sourcepos range
 /// already).
 ///
-/// Tolerant of both ` >  ` and bare `>` markers, and of leading whitespace
-/// before each marker (CommonMark allows up to 3 spaces of indent).
+/// Tolerant of both `> ` and bare `>` markers, and of leading whitespace before
+/// each marker (CommonMark allows up to 3 spaces of indent).
 fn strip_block_quote_markers(text: &str, depth: usize) -> String {
     if depth == 0 {
         return text.to_owned();
