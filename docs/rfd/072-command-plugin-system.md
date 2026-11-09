@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
-- **Extended by**: [RFD 114]
+- **Extended by**: [RFD 114], [RFD 133]
 - **Summary**: Extends JP with standalone `jp-<name>` command plugin binaries
   that communicate with the host over a JSON-lines protocol.
 
@@ -1440,5 +1440,6 @@ control (TUI dashboards).
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
 [RFD 114]: 114-plugin-workspace-scope-and-addressing.md
+[RFD 133]: 133-decision-models.md
 [cargo-external]: https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands
 [git-remote-helpers]: https://git-scm.com/docs/gitremote-helpers

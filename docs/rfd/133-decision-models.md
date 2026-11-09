@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-08
 - **Extended by**: [RFD 135]
+- **Extends**: [RFD 072]
 - **Summary**: Adds decision models through a `providers.decision` namespace,
   typed questions and answers, and a `decide` plugin request.
 
@@ -54,11 +55,11 @@ assistant ([RFD 028]).
 
 Question types follow the System One API:
 
-| Type     | Asks                                        | Answer                                                    |
-| -------- | ------------------------------------------- | --------------------------------------------------------- |
-| `noul`   | Is this statement true?                     | probability of yes, 0 to 1                                |
-| `choice` | Which of these options applies? (up to 255) | the option, a probability per option, a confidence        |
-| `score`  | Where does this sit on a rubric? (up to 10) | the expected level, a probability per level, a confidence |
+| Type     | Asks                                       | Answer                                                    |
+| -------- | ------------------------------------------ | --------------------------------------------------------- |
+| `noul`   | Is this statement true?                    | probability of yes, 0 to 1                                |
+| `choice` | Which of these options applies? (2 to 255) | the option, a probability per option, a confidence        |
+| `score`  | Where does this sit on a rubric? (2 to 10) | the expected level, a probability per level, a confidence |
 
 Questions and answers are JP's own types, in `jp_conversation::event::decision`.
 Each decision source converts its server's format into them, so an answer has
@@ -67,6 +68,12 @@ This follows `jp_llm`, whose providers convert their wire formats into
 `jp_conversation`'s `ChatResponse` and `ToolCallRequest`.
 Their JSON matches the System One shapes, so a plugin author reads one set of
 documentation.
+
+Where servers accept different requests, JP's types require what every server
+requires.
+Every question carries non-empty `instructions`, which TypeSafe makes optional
+and Ollama requires; `choice` and `score` take at least two options, where
+TypeSafe accepts one; and the state is never empty, which Ollama rejects.
 
 ### Configuration
 
@@ -97,15 +104,21 @@ id = "typesafe/jev-latest"
   A layer that patches a declared provider may leave it out.
   With one source there is one settings struct, so a patch that leaves out
   `source` still merges into the right fields.
+- `decision.model` is optional, and nothing is declared under
+  `providers.decision` by default.
+  A config without either loads as it does today, so commands that never ask a
+  decision model need neither.
 - `decision.model.id` is `<provider>/<model>`.
-  A provider not declared under `providers.decision` is a config error that
-  lists the declared ones.
+  When it is set, a provider not declared under `providers.decision` is a config
+  error that lists the declared ones.
 - `decision` is a new top-level section, next to `assistant`, layered and
   overridden like any other.
 
 Decision and LLM providers are separate namespaces with separate model ID types.
-Setting a decision model as `assistant.model.id`, or an LLM as
-`decision.model.id`, is a config error rather than a failed request.
+Each model ID resolves its provider in its own namespace, and a provider not
+declared there is a config error.
+A model the provider's server cannot serve, such as a chat model named as
+`decision.model.id`, is reported by the server when a request runs.
 
 ### Command plugins
 
@@ -115,7 +128,9 @@ request fails:
 ```json
 {"type": "decide", "id": "7",
  "state": {"ticket": "…"},
- "questions": {"area": {"type": "choice", "criteria": {"cli": null, "llm": null}}},
+ "questions": {"area": {"type": "choice",
+                       "instructions": "Which crate owns this ticket?",
+                       "criteria": {"cli": null, "llm": null}}},
  "cfg": ["decision.model.id=local/kev-4b"]}
 ```
 
@@ -128,11 +143,18 @@ request fails:
 - `questions` and `answers` are the types above.
 - `cfg` layers over the plugin's config for this request only, as `--cfg` does
   for one run of a command.
+  A request with no `decision.model.id` once `cfg` is applied gets an `error`
+  naming the setting.
 - A `decide` request touches no conversation.
 - The host holds the credentials, as it does for `query`.
 - The host answers requests as they complete, not in the order they arrived.
   A plugin classifying a backlog keeps many in flight, and that only pays off if
   the host runs them concurrently.
+- A request still outstanding when the plugin invocation ends is cancelled, with
+  no reply: when the plugin exits, closes its output, or the host shuts down.
+  Delegated turns are awaited past the plugin's exit because they persist the
+  user's work; a decision writes nothing, so once the plugin is gone, nothing
+  would read its answer.
 - The messages raise `PROTOCOL_VERSION`, 13 today.
   A plugin that sends `decide` declares the new version in `ready`.
 
@@ -170,8 +192,9 @@ of `jp_llm::Provider`'s methods.
 ## Alternatives
 
 **A `systemone` source under `providers.llm`.** One namespace instead of two,
-but `assistant.model.id = "typesafe/jev-latest"` would be accepted and fail only
-when a query runs.
+but chat and decision models would share one model ID type and one provider
+lookup, and every caller of `jp_llm::Provider` would have to tell the two apart
+at runtime.
 
 **Decisions through an LLM with structured output.** Works with every provider
 JP has.
@@ -209,8 +232,13 @@ A decision over untrusted input (an issue body, a web page, tool output) that
 gates an action can be steered.
 The documentation for the `decide` request says so.
 
-**Servers differ.** Servers implementing System One differ in option limits and
-in how they compute confidence.
+**Servers differ.** Servers implementing System One differ in which requests
+they accept, not only in option limits and how they compute confidence.
+Ollama requires `instructions` and a non-empty `state`, caps cloud requests at
+64 questions, and echoes the requested model name where TypeSafe reports the
+version that answered.
+JP's types require what every server requires; anything else a server rejects
+comes back as an error from the source.
 JP passes answers through and claims nothing about comparing them across models.
 
 ## Implementation Plan
@@ -236,6 +264,7 @@ JP passes answers through and claims nothing about comparing them across models.
 
 - [System One API reference][systemone-api]
 - [Introducing System One Models & Jev][jev-intro], TypeSafe
+- [Ollama's System One API reference][ollama-systemone]
 - [RFD 028]: Structured Inquiry System for Tool Questions
 - [RFD 072]: Command Plugin System
 
@@ -243,4 +272,5 @@ JP passes answers through and claims nothing about comparing them across models.
 [RFD 072]: 072-command-plugin-system.md
 [RFD 135]: 135-jp-decide.md
 [jev-intro]: https://typesafe.ai/blog/introducing-system-one-models-and-jev
+[ollama-systemone]: https://docs.ollama.com/api/systemone
 [systemone-api]: https://docs.typesafe.ai/api/system-one
