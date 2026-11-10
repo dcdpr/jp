@@ -135,7 +135,7 @@ reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
 rmcp = { version = "1.8", default-features = false }
 rowan = { version = "0.16", default-features = false }
-rusqlite = { version = "0.38", default-features = false }
+rusqlite = { version = "0.41", default-features = false }
 rustc-demangle = { version = "0.1", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1", default-features = false }
