@@ -187,15 +187,13 @@ impl Storage {
         }
     }
 
-    /// Remove `.tmp` files left by interrupted writes from the conversation
-    /// directories in one `conversations/` directory.
+    /// Remove orphaned `.tmp` files from conversation directories under
+    /// `conversations_dir`.
     ///
-    /// A `.tmp` file is also the in-flight half of an atomic write by whoever
-    /// holds the conversation's lock, possibly another process, and removing it
-    /// makes that write's rename fail.
-    /// Each removal is therefore made while holding the conversation's lock,
-    /// and a conversation whose lock is held is skipped until the next run.
-    /// The lock is only taken for directories that hold a `.tmp` file.
+    /// Acquires each conversation's lock before deleting its `.tmp` files so
+    /// the sweep does not delete the staging file of an in-flight atomic write
+    /// in another process.
+    /// Conversations that are currently locked are skipped.
     fn cleanup_orphaned_tmp_files(&self, conversations_dir: &Utf8Path) {
         for entry in dir_entries(conversations_dir) {
             if !entry.file_type().is_ok_and(|ft| ft.is_dir())
@@ -205,8 +203,8 @@ impl Storage {
                 continue;
             }
 
-            // An unparseable name cannot be tied to a lock. Validation trashes
-            // such a directory along with whatever it holds.
+            // Unparseable directory names cannot be locked and will be trashed
+            // by `validate_root`.
             let Ok(id) = ConversationId::try_from_dirname(entry.file_name()) else {
                 continue;
             };

@@ -33,11 +33,10 @@
 //! └── Drop: if dirty → read data → persist → lock released when Arc drops
 //! ```
 //!
-//! Every scope derived from one lock shares a write gate, so persists of the
-//! conversation run one at a time even when scopes on different threads write
-//! together.
-//! The flock orders writers across processes; the gate orders them within this
-//! one.
+//! Every [`ConversationMut`] derived from a [`ConversationLock`] shares an
+//! in-process write mutex, serializing concurrent persists across threads.
+//! The `flock` serializes writers across processes; the write gate serializes
+//! them within a process.
 //!
 //! # Callback-Based Mutation
 //!
@@ -132,13 +131,11 @@ impl PersistState {
 /// failure recorded while a future unwinds outlives the scope that recorded it.
 pub(crate) type PersistFailures = Arc<Mutex<PersistState>>;
 
-/// Serializes the persists of one conversation within this process.
+/// Per-conversation mutex that serializes persists within a process.
 ///
-/// A persist rewrites the conversation's files through fixed `<file>.tmp`
-/// paths, so two persists of one conversation in flight together can delete or
-/// interleave each other's temp files.
-/// Per conversation rather than per workspace, so writes of unrelated
-/// conversations do not wait on each other.
+/// Persisting rewrites the conversation's files via fixed `<file>.tmp` paths,
+/// so concurrent persists of the same conversation would overwrite or delete
+/// each other's temp files.
 type WriteGate = Arc<Mutex<()>>;
 
 /// Result of attempting to acquire a conversation lock.
@@ -169,8 +166,6 @@ pub struct ConversationLock {
     lock_guard: Arc<Box<dyn ConversationLockGuard>>,
     projection: Projection,
     persist: PersistFailures,
-
-    /// Held for the duration of every persist through a scope of this lock.
     write_gate: WriteGate,
 
     /// Set once this conversation has been written, and shared with the
@@ -344,8 +339,6 @@ pub struct ConversationMut {
     // Shared with the workspace, the originating lock, and every other scope
     // derived from it, so a failure recorded here survives this scope's drop.
     persist: PersistFailures,
-
-    // Shared with the originating lock and every scope derived from it.
     write_gate: WriteGate,
 
     /// Set once a write succeeds; read by the workspace that handed out the

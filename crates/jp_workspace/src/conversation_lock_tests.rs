@@ -106,10 +106,8 @@ impl PersistBackend for FailingPersistBackend {
     }
 }
 
-/// Persistence backend that counts the writes entered while the lock's write
-/// gate is held, and those entered without it.
-///
-/// The gate is installed after the lock is built, because the lock creates it.
+/// Persistence backend that counts writes invoked with and without `gate`
+/// locked.
 #[derive(Debug, Default)]
 struct GateCheckingBackend {
     gate: OnceLock<WriteGate>,
@@ -696,11 +694,8 @@ fn multiple_as_mut_each_persist_independently() {
 
 #[test]
 fn every_persist_path_holds_the_write_gate() {
-    // A persist rewrites the conversation through fixed `<file>.tmp` paths, so
-    // two persists of one conversation in flight together delete or interleave
-    // each other's temp files. Checking that the gate is held on entry to the
-    // backend proves the serialization without racing threads against a
-    // timer. Nothing else holds the gate here, so a held gate is this persist.
+    // Single-threaded, so `gate.is_locked()` inside `PersistBackend::write` can
+    // only be true if the persist path itself acquired the gate.
     let backend = Arc::new(GateCheckingBackend::default());
     let lock = ConversationLock::new(
         test_handle(),

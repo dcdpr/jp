@@ -85,8 +85,6 @@ fn write_json_rename_failure_names_both_paths() {
 
     let error = write_json(&path, &json!({"v": 1})).expect_err("rename should fail");
 
-    // Naming only the target reads as "the target is missing" when the rename
-    // source vanished, which sends the user to look at a file that is fine.
     let tmp_path = Utf8PathBuf::from(format!("{path}{TMP_SUFFIX}"));
     match error {
         Error::RenameFailed { from, to, .. } => {

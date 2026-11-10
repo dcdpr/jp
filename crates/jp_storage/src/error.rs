@@ -30,11 +30,11 @@ pub enum Error {
         source: io::Error,
     },
 
-    /// Moving `from` into place at `to` failed.
+    /// Renaming `from` to `to` failed.
     ///
-    /// Both paths are named because the failure can lie with either: a missing
-    /// `from` reports "No such file or directory", which against `to` alone
-    /// points at a file that is fine.
+    /// Carries both paths because `source` can refer to either: for example,
+    /// `NotFound` when the temporary `from` file was removed before the rename,
+    /// even though `to` still exists.
     #[error("failed to rename {from} to {to}")]
     RenameFailed {
         from: Utf8PathBuf,
@@ -80,9 +80,9 @@ impl Error {
         }
     }
 
-    /// Classify a failed rename of `from` onto `to`.
+    /// Classify a failed rename of `from` to `to`.
     ///
-    /// Yields [`Error::OutOfSpace`] for `to` when the operating system reported
+    /// Yields [`Error::OutOfSpace`] for `to` when the operating system reports
     /// a full filesystem, and [`Error::RenameFailed`] otherwise.
     #[must_use]
     pub fn rename_failed(

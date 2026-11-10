@@ -62,8 +62,8 @@ pub fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
 /// the temp file is cleaned up on a best-effort basis.
 /// The temp file lives on the same filesystem as `path`, so the write needs
 /// room for a full second copy of the content.
-/// Its name is fixed, so concurrent writes to one `path` must be serialized by
-/// the caller.
+/// Because the temp file path (`{path}.tmp`) is fixed, callers must serialize
+/// concurrent writes to the same `path`.
 ///
 /// The write is skipped when `path` already holds the exact same bytes, so an
 /// unchanged file keeps its modification time.
@@ -136,7 +136,7 @@ fn tmp_path_for(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(s)
 }
 
-/// Whether `dir` holds any `.tmp` file.
+/// Whether `dir` contains any `.tmp` files.
 ///
 /// Returns `false` for a directory that cannot be read.
 pub(crate) fn has_tmp_files(dir: &Utf8Path) -> bool {
@@ -153,8 +153,8 @@ pub(crate) fn has_tmp_files(dir: &Utf8Path) -> bool {
 /// but before the rename completes.
 /// Non-`.tmp` entries are ignored.
 ///
-/// A `.tmp` file is also the in-flight half of a write in progress, so the
-/// caller must hold whatever lock serializes writes to `dir`.
+/// Because an active [`write_json`] call also stages its data in a `.tmp` file,
+/// the caller must hold the lock that serializes writes to `dir`.
 pub fn cleanup_tmp_files(dir: &Utf8Path) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
