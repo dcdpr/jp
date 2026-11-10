@@ -14,6 +14,10 @@ the findings that are new.
 Closes T-0yb2pgw: a baseline produced in the same run can't go stale, and it
 always shares a base with the measured tree.
 
+`qual` is temporary: T-1dhk659's follow-up folds it into a vendored rustqual.
+Keep the recipe a thin call to the gate binary, so swapping `qual diff` for
+rustqual's own command later touches only that call.
+
 ## Base revision
 
 - `pull_request`: the checkout is `refs/pull/N/merge`, so the base is `HEAD^1`,
@@ -37,7 +41,8 @@ always shares a base with the measured tree.
 - `.config/rustqual/baseline.json`, `baseline-dry.json` and `regressions.jq`.
 - The `qual-baseline` recipe.
 - The canary in `qual-ci`.
-  The fail-closed behaviour is covered by unit tests in the `qual` crate.
+  The fail-closed behaviour is covered by unit tests in the `qual` crate, which
+  move with it into rustqual.
 - Check the `justfile`, the configs and `docs/` for any other references to the
   baselines.
   Keep `just qual` as the exploratory entry point.
