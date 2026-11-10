@@ -40,8 +40,8 @@ struct Options<'a> {
     env: &'a BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_format: Option<&'a JsonOutputFormat>,
-    /// Names a new session; a resumed session keeps the title its transcript
-    /// holds.
+    /// Session title for `session/new` requests.
+    /// Resumed sessions read the title from their transcript instead.
     title: &'static str,
 }
 

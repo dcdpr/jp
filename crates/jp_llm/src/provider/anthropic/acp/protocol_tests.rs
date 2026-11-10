@@ -18,8 +18,8 @@ use tracing_subscriber::{
 use super::*;
 use crate::error::StreamErrorKind;
 
-/// An Ultra login is a subscription, in the spelling a session account reports
-/// it and in the short spelling the CLI probe uses for the other plans.
+/// Accepts both the display name reported in session updates (`"Claude Ultra"`)
+/// and the short name used by the CLI auth probe (`"ultra"`).
 #[test]
 fn ultra_is_a_subscription_plan() {
     for plan in ["Claude Ultra", "ultra"] {

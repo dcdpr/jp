@@ -645,9 +645,9 @@ impl NativeArtifact {
             serde_json::to_writer(&mut file, &record).map_err(Error::NativeJson)?;
             file.write_all(b"\n").map_err(Error::NativeIo)?;
         }
-        // The adapter asks a small model for a title, billed to the
-        // subscription, unless the session file already holds one. Last in the
-        // file, where Claude Code appends its own title records.
+        // Append a `custom-title` record at the end of the transcript (where
+        // Claude Code writes its own title records) so the adapter does not
+        // make a background Haiku request to generate a session title.
         serde_json::to_writer(&mut file, &TitleRecord::new(session)).map_err(Error::NativeJson)?;
         file.write_all(b"\n").map_err(Error::NativeIo)?;
         file.flush().map_err(Error::NativeIo)?;

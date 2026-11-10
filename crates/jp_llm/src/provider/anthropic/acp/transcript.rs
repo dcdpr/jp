@@ -229,16 +229,18 @@ pub(super) struct NativeRecord<'a> {
     pub message: NativeMessage<'a>,
 }
 
-/// The title JP gives every Claude Code session it opens.
+/// Placeholder title written to every Claude Code session JP opens.
 ///
-/// A session without a title gets one from a background Haiku request, billed
-/// to the subscription.
-/// JP titles conversations itself and never reads this one.
+/// If a session has no title, the adapter generates one with a background Haiku
+/// request billed to the subscription.
+/// JP manages conversation titles itself and never reads the Claude Code
+/// session title.
 pub(super) const SESSION_TITLE: &str = "JP";
 
-/// A session title in the qualified Claude Code JSONL format.
+/// A `custom-title` record in the Claude Code JSONL transcript format.
 ///
-/// Metadata only: the record carries no message and never reaches the model.
+/// This record is session metadata only; it carries no message and is not sent
+/// to the model.
 #[derive(Serialize)]
 #[serde(tag = "type", rename = "custom-title", rename_all = "camelCase")]
 pub(super) struct TitleRecord {

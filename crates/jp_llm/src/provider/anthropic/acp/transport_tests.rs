@@ -276,10 +276,8 @@ fn the_transcript_is_removed_after_the_request() {
     assert!(!path.exists());
 }
 
-/// The adapter generates a session title with a background Haiku request,
-/// billed to the subscription, unless the session file already names the
-/// session.
-/// JP titles conversations itself and never reads that title.
+/// The derived transcript ends with a `custom-title` record so the adapter does
+/// not generate a title with a background Haiku request.
 #[test]
 fn the_transcript_names_its_session() {
     let directory = camino_tempfile::tempdir().unwrap();

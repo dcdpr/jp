@@ -108,8 +108,8 @@ impl Drop for Child {
 /// adapter initiates.
 /// The connection ends when `foreground` returns, when the adapter exits, or
 /// when either side fails.
-/// Once `foreground` succeeds, the adapter's exit status is ignored: closing
-/// its pipes can make it fail on a late write.
+/// Once `foreground` returns `Ok(())`, the adapter's exit status is ignored;
+/// closing its pipes can cause a late write in the adapter to fail.
 ///
 /// A failure carries the tail of the adapter's stderr, which is usually the
 /// only account of why a Node process died.
@@ -146,9 +146,10 @@ where
     let completion = async {
         let result = tokio::select! {
             result = &mut protocol => {
-                // The protocol closed both pipes on its way out, so an adapter
-                // that writes one more line dies with EPIPE. After a complete
-                // answer, that exit is self-inflicted.
+                // `rpc::drive` drops the stdio handles before returning, so any
+                // subsequent write by the adapter fails with EPIPE and causes a
+                // non-zero exit. Ignore the exit status once `foreground` has
+                // succeeded.
                 if answered.load(Ordering::Relaxed) {
                     result
                 } else {

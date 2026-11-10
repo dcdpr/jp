@@ -6,7 +6,6 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 
 use super::*;
 
-/// A request the fixture adapters read but never interpret.
 #[derive(Serialize)]
 struct Ping {}
 
@@ -102,8 +101,8 @@ async fn process_failure_retains_stderr() {
         "/C",
         "set /P request= & echo fixture-error >&2 & exit /B 7",
     ]);
-    // The adapter reads the request and dies without answering it, so the exit
-    // status is what ends the connection.
+    // The adapter exits without answering the request, so `run` reports the
+    // non-zero exit status.
     let error = tokio::time::timeout(
         Duration::from_secs(5),
         run(
@@ -122,12 +121,9 @@ async fn process_failure_retains_stderr() {
     assert_eq!(detail["stderr"].as_str().unwrap().trim(), "fixture-error");
 }
 
-/// Closing the adapter's pipes once the request sequence is answered can make
-/// it fail on a late write and exit non-zero; that exit is not the request's
-/// outcome.
-///
-/// The fixture exits only after its stdin closes, so the failure happens
-/// strictly after JP has its answer and has ended the connection.
+/// `cat >/dev/null` blocks until JP closes the adapter's stdin after
+/// `foreground` completes, so the non-zero exit happens after the request has
+/// already succeeded.
 #[cfg(unix)]
 #[tokio::test]
 async fn an_exit_after_the_answered_sequence_is_not_a_failure() {

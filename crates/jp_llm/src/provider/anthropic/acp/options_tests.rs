@@ -29,8 +29,8 @@ fn thinking_with_reasoning_off(model: &str) -> Option<Value> {
     metadata["claudeCode"]["options"].get("thinking").cloned()
 }
 
-/// The first request of a conversation opens a new session, which the runtime
-/// titles with a background Haiku request unless the session already has one.
+/// New sessions set `options.title` so the adapter does not generate a title
+/// with a background Haiku request.
 #[test]
 fn a_new_session_is_titled_up_front() {
     let timestamp = datetime!(2026-09-30 12:00:00 Z);
@@ -61,7 +61,7 @@ fn reasoning_off_on_sonnet_5_5_sends_between_tools() {
 }
 
 /// Opus 5.5 and Fable reject `thinking: disabled` and have no lower setting, so
-/// the option is left out and the model thinks adaptively.
+/// the option is omitted and the model thinks adaptively.
 #[test]
 fn reasoning_off_on_an_always_on_model_sends_no_thinking() {
     assert_eq!(thinking_with_reasoning_off("claude-opus-5-5"), None);
