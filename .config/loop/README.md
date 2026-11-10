@@ -108,10 +108,10 @@ Before resetting, the harness records the discarded work, its commits plus any
 uncommitted and untracked files, as a commit under
 `refs/loop/discarded/<mission>/<run id>/<iteration>`, so a paid attempt is never
 lost to garbage collection.
-List them with `git for-each-ref refs/loop/discarded`, inspect one with
-`git show <ref>`, and bring one back with `git cherry-pick <ref>`.
-Delete them all with
-`git for-each-ref --format='delete %(refname)' refs/loop/discarded | git update-ref --stdin`.
+List them with `git for-each-ref refs/loop/discarded`, inspect one with `git
+show <ref>`, and bring one back with `git cherry-pick <ref>`.
+Delete them all with `git for-each-ref --format='delete %(refname)'
+refs/loop/discarded | git update-ref --stdin`.
 
 When `DISCARD_ON_GATE_FAILURE=1` is set, the harness refuses to start if the
 working tree has unstaged changes, because a reset would overwrite them.
