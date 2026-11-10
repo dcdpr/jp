@@ -194,6 +194,7 @@ luna = "openai/gpt-6-luna"
 openai = "sol"
 gpt = "sol"
 # Google aliases
+carbon = "google/gemini-4-carbon"
 argon = "google/gemini-4-argon"
 flash = "google/gemini-3.8-flash"
 google = "flash"
