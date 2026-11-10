@@ -17,11 +17,11 @@ with `Invalid 'signature' in 'thinking' block`.
 For accounts created on or after 2026-08-31 the first of these is the default
 rather than an opt-in.
 
-JP handles both, in `anthropic.rs`: `classify_thinking_rejection` names the
-rejection, `build_thinking_patches` strips the signatures from the whole
-assistant turn holding the offending block, so later requests leave that turn's
-reasoning out, and the stream yields `FinishReason::Retry` so `turn_loop`
-reissues the request.
+JP handles both in `anthropic.rs`: `classify_thinking_rejection` classifies the
+error, `build_thinking_patches` strips the signatures from the assistant turn
+containing the offending block so subsequent requests omit that turn's
+reasoning, and the stream yields `FinishReason::Retry` so `turn_loop` reissues
+the request.
 It is tested and it converges.
 
 It is also entirely reactive.
@@ -59,9 +59,9 @@ assistant turn carries blocks, and its blocks are read only by Opus 5.5, Fable
 ## To settle first
 
 Whether a cross-model replay is a 400 or a silent drop.
-The migration guide's wording — "runs those turns without them" — reads like
-the blocks are ignored rather than rejected, which would make the model-switch
-half of this a silent context loss rather than a failed request.
+The migration guide's wording ("runs those turns without them") reads like the
+blocks are ignored rather than rejected, which would make the model-switch half
+of this a silent context loss rather than a failed request.
 If so it still deserves a notice, but it is a different fix from the
 tools-and-system half, and possibly a different ticket.
 

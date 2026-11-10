@@ -1225,10 +1225,12 @@ fn soft_force_retry(
 
 /// Why the API refused a thinking block.
 ///
-/// Both kinds are repaired the same way, by removing the signature so later
-/// requests leave the reasoning out instead of sending a native thinking block.
-/// They differ in where the offending block can be, which is what decides where
-/// to look when the error carries no usable position.
+/// Both kinds are repaired the same way: removing the block's metadata so
+/// subsequent requests omit the reasoning instead of sending a native thinking
+/// block.
+/// They differ in where the offending block can appear, which determines where
+/// [`fallback_thinking_block`] searches when the error carries no usable
+/// position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThinkingRejection {
     /// An invalid `signature` on a thinking block.
@@ -1381,29 +1383,29 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 }
 
 /// Build [`EventPatch`] instructions for the thinking blocks the API refused.
-/// The caller yields these as [`Event::Patch`] so the CLI can remove the
-/// provider metadata from the persisted conversation stream.
-/// On the next request rebuild, [`convert_event`] leaves out the reasoning of
-/// events that no longer carry a signature.
 ///
-/// A rejected block downgrades every thinking and redacted-thinking block in
-/// the whole assistant turn holding it.
+/// The caller yields these as [`Event::Patch`] to strip the provider metadata
+/// from the conversation stream.
+/// On the next request rebuild, [`convert_event`] omits reasoning events that
+/// carry no signature or redacted payload.
+///
+/// A rejected block strips every `thinking` and `redacted_thinking` block in
+/// the assistant turn containing it.
 /// Anthropic treats that turn as one assistant message and requires its
-/// thinking blocks back exactly as generated, so rewriting a subset is rejected
-/// with `thinking blocks ... cannot be modified`; rewriting all of them leaves
-/// text and tool use, which the API accepts.
+/// thinking blocks back intact, so dropping a subset is rejected with `thinking
+/// blocks ... cannot be modified`; dropping all of them leaves only text and
+/// tool use, which the API accepts.
 ///
 /// This applies to any turn, not only the newest.
 /// Models that retain prior turns' thinking validate those turns too, so a
-/// partial rewrite anywhere is refused.
-/// The cost is the rest of that turn's reasoning, which buys a repair that
-/// converges in one round per broken turn instead of one round per message.
+/// partial strip anywhere is refused.
+/// Dropping the rest of the turn's reasoning lets the repair converge in one
+/// round per broken turn instead of one round per message.
 ///
-/// When the error carries no usable position — unparseable, unresolvable, or
-/// resolving into a turn with no native thinking — [`fallback_thinking_block`]
-/// picks where to look based on `rejection`.
-/// Both paths yield a turn, and the patch set is always that whole turn, so no
-/// route through this function can emit the partial rewrite the API refuses.
+/// When the error carries no usable position (unparseable, unresolvable, or
+/// resolving to a turn with no native thinking), [`fallback_thinking_block`]
+/// selects a target based on `rejection`.
+/// Both paths resolve to a turn and patch every thinking block in it.
 ///
 /// Returns `None` if no thinking block can be located.
 fn build_thinking_patches(
@@ -1470,9 +1472,9 @@ fn last_turn_thinking_block(request: &types::CreateMessagesRequest) -> Option<(u
     })
 }
 
-/// Build the patch that strips a thinking block's provider metadata, so later
-/// requests leave the event's reasoning out rather than send a native thinking
-/// block.
+/// Build a patch that strips a thinking block's provider metadata, so
+/// subsequent requests omit the event's reasoning instead of sending a native
+/// thinking block.
 fn thinking_patch(key: &'static str, value: String) -> EventPatch {
     EventPatch {
         matcher: EventMatcher::MetadataValue {
@@ -1522,7 +1524,7 @@ fn last_assistant_turn(messages: &[types::Message]) -> Option<RangeInclusive<usi
 /// that is not purely tool results, and ends just before the next such message
 /// (or at the end of the request).
 /// This is the span Anthropic reports as a single logical message in error
-/// positions, so it is also the unit a repair has to rewrite whole.
+/// positions, so a repair must patch the entire span together.
 fn assistant_turn_containing(messages: &[types::Message], msg_idx: usize) -> RangeInclusive<usize> {
     let starts_turn =
         |msg: &types::Message| msg.role == types::MessageRole::User && !is_tool_result_message(msg);
@@ -2927,11 +2929,13 @@ fn convert_tools(
 /// Events from the same role are combined into a single message with multiple
 /// content blocks.
 ///
-/// Reasoning that [`convert_event`] leaves out is counted and logged.
-/// When the user's next message follows such reasoning with no assistant
-/// content in between, the user interrupted the assistant mid-reasoning, and
-/// that message is prefixed with [`INTERRUPTED_REASONING_NOTE`].
-/// The note exists only in the request; the stored conversation is unchanged.
+/// Reasoning omitted by [`convert_event`] is counted and logged.
+/// When a user text block immediately follows omitted reasoning with no
+/// assistant content in between, the user interrupted the assistant
+/// mid-reasoning, and that block is prefixed with
+/// [`INTERRUPTED_REASONING_NOTE`].
+/// The note is added only to the outgoing request; the stored conversation is
+/// unchanged.
 fn convert_events(
     events: ConversationStream,
     cache: Option<types::CacheControl>,
@@ -3007,11 +3011,11 @@ fn convert_events(
     messages
 }
 
-/// Prefixed to a user message that replies to reasoning the user interrupted.
+/// Note prepended to a user message that follows interrupted reasoning.
 ///
-/// The interrupted reasoning has no signature, so the request leaves it out
-/// (see [`convert_event`]).
-/// Without the note, the model sees a reply to something it never said.
+/// Interrupted reasoning has no signature, so [`convert_event`] omits it from
+/// the request.
+/// Without this note, the model receives a reply to reasoning it cannot see.
 const INTERRUPTED_REASONING_NOTE: &str =
     "Your previous turn was interrupted while you were still reasoning, before you replied.";
 
@@ -3031,7 +3035,7 @@ fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheC
 }
 
 /// Drop thinking blocks from the trailing assistant message, and remove the
-/// message if nothing else remains.
+/// message if no content blocks remain.
 ///
 /// When the conversation ends with an assistant message, that turn is being
 /// continued rather than answered with a tool result.
@@ -3105,11 +3109,12 @@ fn convert_event(
                 types::MessageContent::RedactedThinking { data }
             } else {
                 match response {
-                    // Reasoning that cannot go back as a native block is left
-                    // out: other providers' reasoning, partial reasoning from
-                    // an interrupted stream, and thinking whose signature a
-                    // repair patch removed. Anthropic refuses requests that
-                    // carry reasoning as message text (`reasoning_extraction`).
+                    // Omit reasoning that cannot be sent as a native block:
+                    // reasoning from other providers, partial reasoning from
+                    // an interrupted stream, and thinking whose signature was
+                    // stripped by a repair patch. Anthropic refuses requests
+                    // that carry reasoning in message text
+                    // (`reasoning_extraction`).
                     ChatResponse::Reasoning { .. } => return None,
                     ChatResponse::Message { message } => {
                         types::MessageContent::Text(message.into())

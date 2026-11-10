@@ -2835,8 +2835,8 @@ fn test_create_request_resends_redacted_thinking_as_native_block() {
     ));
 }
 
-/// Reasoning without an Anthropic signature is never sent as text: Anthropic
-/// refuses requests that carry reasoning in message content
+/// Reasoning without an Anthropic signature is omitted rather than sent as
+/// text: Anthropic refuses requests that carry reasoning in message content
 /// (`reasoning_extraction`).
 #[test]
 fn test_create_request_drops_reasoning_without_signature() {
@@ -2887,7 +2887,8 @@ fn test_create_request_drops_reasoning_without_signature() {
     );
 }
 
-/// A reasoning event with neither text nor a signature contributes nothing.
+/// A textless thinking block whose signature was stripped by a repair patch
+/// leaves an empty unsigned reasoning event, which is omitted from the request.
 #[test]
 fn test_create_request_drops_empty_reasoning() {
     let model = ModelDetails {
@@ -2907,7 +2908,6 @@ fn test_create_request_drops_empty_reasoning() {
     let mut events = ConversationStream::new_test();
     events.start_turn("First question");
     events.extend([
-        // A signed-but-textless block whose signature a patch removed.
         ConversationEvent::now(ChatResponse::reasoning("")),
         ConversationEvent::now(ChatResponse::message("Visible answer")),
     ]);
@@ -2942,8 +2942,8 @@ fn test_create_request_drops_empty_reasoning() {
 }
 
 /// When the conversation ends with an assistant turn carrying signed thinking
-/// (a resumed/continued turn), Anthropic rejects that thinking as a native
-/// block, and refuses it as text, so it is dropped.
+/// (a resumed or continued turn), Anthropic rejects that thinking as a native
+/// block and refuses it as text, so it is dropped.
 #[test]
 fn test_create_request_drops_trailing_assistant_thinking() {
     let model = ModelDetails {
@@ -2955,8 +2955,8 @@ fn test_create_request_drops_trailing_assistant_thinking() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        // Prefill unsupported, so a synthetic continue is appended after the
-        // (downgraded) assistant turn.
+        // Prefill is unsupported, so a synthetic continue message is appended
+        // after the assistant turn.
         prefill: None,
         subscription: None,
         features: vec!["adaptive-thinking"],
@@ -3045,10 +3045,10 @@ fn test_create_request_removes_trailing_assistant_left_empty() {
     );
 }
 
-/// The user interrupted the assistant mid-reasoning and replied.
-/// The partial reasoning has no signature and is dropped, so the reply is
-/// prefixed with a note saying the previous turn ended while still reasoning.
-/// The note is added once, however many reasoning events were dropped.
+/// When the user interrupts the assistant mid-reasoning and replies, the
+/// unsigned partial reasoning is omitted and the reply is prefixed with
+/// [`INTERRUPTED_REASONING_NOTE`] once, regardless of how many reasoning events
+/// were omitted.
 #[test]
 fn test_create_request_notes_reasoning_interrupted_by_user() {
     let model = ModelDetails {
@@ -3099,9 +3099,9 @@ fn test_create_request_notes_reasoning_interrupted_by_user() {
     );
 }
 
-/// Reasoning from another provider is dropped like any other unsigned
-/// reasoning; the text that followed it stays, and no interruption note is
-/// added because the assistant did reply.
+/// Reasoning from another provider is omitted like any other unsigned
+/// reasoning; the assistant text that followed it is kept, and no interruption
+/// note is added because the assistant replied.
 #[test]
 fn test_create_request_drops_reasoning_from_other_providers() {
     let model = ModelDetails {
@@ -3157,8 +3157,8 @@ fn test_create_request_drops_reasoning_from_other_providers() {
     );
 }
 
-/// Redacted (encrypted) thinking in the continuation target has no readable
-/// form, so it is dropped rather than rewritten.
+/// Redacted thinking in the trailing assistant message is dropped alongside
+/// signed thinking when continuing a turn.
 #[test]
 fn test_create_request_drops_trailing_redacted_thinking() {
     let model = ModelDetails {
@@ -3691,11 +3691,7 @@ mod thinking_signature_recovery {
         },
     };
 
-    /// Build patches the way the provider does: classify the error, then
-    /// repair.
-    ///
-    /// Going through the classifier keeps these expectations honest about which
-    /// rejection kind each error text produces.
+    /// Classify `error` and build repair patches for `request`.
     fn patches_for(
         request: &types::CreateMessagesRequest,
         error: &StreamError,
@@ -3704,7 +3700,6 @@ mod thinking_signature_recovery {
         build_thinking_patches(request, error, rejection)
     }
 
-    /// The `(metadata_key, metadata_value)` each patch targets, in order.
     fn patch_targets(patches: &[EventPatch]) -> Vec<(&str, &str)> {
         patches
             .iter()
@@ -4101,13 +4096,13 @@ mod thinking_signature_recovery {
         ]
     }
 
-    /// Anthropic requires a turn to carry its thinking blocks back exactly as
-    /// generated, so downgrading only the block named in the error is rejected
-    /// on the next request with `cannot be modified`.
+    /// Anthropic requires a turn to carry its thinking blocks back intact, so
+    /// stripping only the block named in the error is rejected on the next
+    /// request with `cannot be modified`.
     ///
-    /// The turn spans several of our messages, and every thinking block in all
-    /// of them has to go — including `sig_early`, which sits in the turn's
-    /// first message, two messages before the one the error names.
+    /// The turn spans several messages, and every thinking block across all of
+    /// them is stripped, including `sig_early` in the turn's first message (two
+    /// messages before the one the error names).
     #[test]
     fn rejected_block_downgrades_every_thinking_block_in_its_turn() {
         let request = request(interleaved_thinking_conversation());
@@ -4237,11 +4232,10 @@ mod thinking_signature_recovery {
     }
 
     /// A position can parse and resolve, yet land in a turn carrying no native
-    /// thinking — our turn model disagreeing with the one the API reports
-    /// against.
-    /// The repair falls back to a turn that does carry thinking, and still
-    /// downgrades the whole of it: emitting a single patch there would be the
-    /// partial rewrite the API refuses, costing another round.
+    /// thinking when our turn model disagrees with the API's.
+    /// The repair falls back to a turn that carries thinking and strips every
+    /// thinking block in it, avoiding a partial strip that the API would
+    /// reject.
     #[test]
     fn position_resolving_into_a_thinkingless_turn_still_downgrades_a_whole_turn() {
         let request = request(vec![
