@@ -95,7 +95,7 @@ pub enum Error {
     },
     /// The adapter could not be started or its output could not be read.
     #[error(
-        "Claude ACP {check} failed; install @agentclientprotocol/claude-agent-acp@0.81.0 with \
+        "Claude ACP {check} failed; install @agentclientprotocol/claude-agent-acp@0.102.0 with \
          Node.js 22+ and optional dependencies enabled"
     )]
     Io {
@@ -138,10 +138,11 @@ pub enum Error {
         remedy(login, reason)
     )]
     LoginRejected { login: Login, reason: Rejection },
-    /// Claude Code did not report a Pro or Max plan for a running session.
+    /// Claude Code did not report a Pro, Max, or Ultra plan for a running
+    /// session.
     #[error(
-        "Claude Code did not confirm a Pro or Max plan for this session; check the login with `jp \
-         provider llm auth list`"
+        "Claude Code did not confirm a Pro, Max, or Ultra plan for this session; check the login \
+         with `jp provider llm auth list`"
     )]
     SubscriptionRequired,
     /// Claude Code could not select the requested model.
@@ -203,8 +204,8 @@ pub enum Rejection {
     /// The account is not a Claude.ai account.
     #[error("it is not signed in with a Claude account")]
     NotClaudeAccount,
-    /// The account has no Pro or Max plan.
-    #[error("its account has no Pro or Max plan")]
+    /// The account has no Pro, Max, or Ultra plan.
+    #[error("its account has no Pro, Max, or Ultra plan")]
     NoPlan,
     /// Requests go to a cloud provider rather than Anthropic.
     #[error("it does not send requests to Anthropic directly")]
@@ -313,6 +314,8 @@ enum Plan {
     Pro,
     #[serde(rename = "max", alias = "Claude Max")]
     Max,
+    #[serde(rename = "ultra", alias = "Claude Ultra")]
+    Ultra,
     #[serde(other)]
     Other,
 }
@@ -385,8 +388,8 @@ pub(super) async fn logout(directory: &Utf8Path) -> Result<(), Error> {
 
 fn qualify_versions(adapter: &[u8], claude: &[u8]) -> Result<(), Error> {
     for (check, output, expected) in [
-        (Check::AdapterVersion, adapter, "0.81.0"),
-        (Check::ClaudeVersion, claude, "2.1.280"),
+        (Check::AdapterVersion, adapter, "0.102.0"),
+        (Check::ClaudeVersion, claude, "2.1.321"),
     ] {
         let actual = str::from_utf8(output)
             .map_err(|source| Error::Encoding { check, source })?
@@ -432,7 +435,10 @@ impl AuthStatus {
         if !matches!(self.auth_method, Some(AuthMethod::ClaudeAccount)) {
             return Err(Rejection::NotClaudeAccount);
         }
-        if !matches!(self.subscription_type, Some(Plan::Pro | Plan::Max)) {
+        if !matches!(
+            self.subscription_type,
+            Some(Plan::Pro | Plan::Max | Plan::Ultra)
+        ) {
             return Err(Rejection::NoPlan);
         }
         if !matches!(self.api_provider, Some(ApiProvider::FirstParty)) {

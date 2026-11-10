@@ -29,7 +29,7 @@ use super::{
         ProtocolVersion, RequestPermissionRequest, SessionConfigKind, SessionNotification,
         SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, agent_method, client_method,
     },
-    transcript::PreparedRequest,
+    transcript::{PreparedRequest, TitleRecord},
 };
 use crate::{
     error::StreamError,
@@ -645,6 +645,11 @@ impl NativeArtifact {
             serde_json::to_writer(&mut file, &record).map_err(Error::NativeJson)?;
             file.write_all(b"\n").map_err(Error::NativeIo)?;
         }
+        // Append a `custom-title` record at the end of the transcript (where
+        // Claude Code writes its own title records) so the adapter does not
+        // make a background Haiku request to generate a session title.
+        serde_json::to_writer(&mut file, &TitleRecord::new(session)).map_err(Error::NativeJson)?;
+        file.write_all(b"\n").map_err(Error::NativeIo)?;
         file.flush().map_err(Error::NativeIo)?;
         if keep {
             artifact.path = None;

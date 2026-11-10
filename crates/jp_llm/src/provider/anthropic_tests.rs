@@ -1245,6 +1245,40 @@ fn test_sampling_parameters_sent_to_models_that_accept_them() {
     assert_eq!(request.top_k, Some(10));
 }
 
+/// Verify the `map_model` arm for Claude Fable 5.2.
+///
+/// Fable 5.2 always thinks, so JP must not send `thinking: disabled` and must
+/// not hard-force a `tool_choice`; both are rejected with a 400.
+#[test]
+fn test_map_model_fable_5_2() {
+    let model = adaptive_api_model("claude-fable-5-2", "Claude Fable 5.2", true, true);
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "claude-fable-5-2").try_into().unwrap()
+    );
+    assert_eq!(details.display_name.as_deref(), Some("Claude Fable 5.2"));
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2026, 6, 1)
+    );
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true).always_on())
+    );
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert!(details.features.contains(&"adaptive-thinking"));
+    assert!(details.features.contains(&"interleaved-thinking"));
+    assert!(details.features.contains(&"context-editing"));
+    assert!(!details.supports_disabling_thinking());
+    assert!(!details.supports_prefill());
+}
+
 /// Verify the `map_model` arm for Claude Fable 5.1 produces the expected
 /// `ModelDetails`, including the `thinking-always-on` capability that stops JP
 /// from sending `thinking: disabled` and from hard-forcing a `tool_choice`,

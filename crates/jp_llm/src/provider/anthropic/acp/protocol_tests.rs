@@ -18,6 +18,21 @@ use tracing_subscriber::{
 use super::*;
 use crate::error::StreamErrorKind;
 
+/// Accepts both the display name reported in session updates (`"Claude Ultra"`)
+/// and the short name used by the CLI auth probe (`"ultra"`).
+#[test]
+fn ultra_is_a_subscription_plan() {
+    for plan in ["Claude Ultra", "ultra"] {
+        let auth: AgentAuth = serde_json::from_value(json!({
+            "kind": "account",
+            "label": "Claude Ultra",
+            "account": {"plan": plan},
+        }))
+        .unwrap();
+        assert!(auth.is_subscription(), "{plan}");
+    }
+}
+
 /// Test-only observer of the SDK-message diagnostic this module emits.
 #[derive(Clone, Default)]
 struct FrameCapture(Arc<Mutex<Vec<String>>>);

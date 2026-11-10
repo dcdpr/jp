@@ -5,6 +5,10 @@ use std::{
     env, io,
     ops::{Deref, DerefMut},
     process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -104,6 +108,8 @@ impl Drop for Child {
 /// adapter initiates.
 /// The connection ends when `foreground` returns, when the adapter exits, or
 /// when either side fails.
+/// Once `foreground` returns `Ok(())`, the adapter's exit status is ignored;
+/// closing its pipes can cause a late write in the adapter to fail.
 ///
 /// A failure carries the tail of the adapter's stderr, which is usually the
 /// only account of why a Node process died.
@@ -126,14 +132,31 @@ where
     let stdin = child.stdin().take().expect("stdin is piped");
     let stdout = child.stdout().take().expect("stdout is piped");
     let stderr = child.stderr().take().expect("stderr is piped");
+    let answered = Arc::new(AtomicBool::new(false));
+    let foreground = {
+        let answered = answered.clone();
+        move |peer| async move {
+            let result = foreground(peer).await;
+            answered.store(result.is_ok(), Ordering::Relaxed);
+            result
+        }
+    };
     let protocol = rpc::drive(stdin, stdout, tap, handler, foreground);
     tokio::pin!(protocol);
     let completion = async {
         let result = tokio::select! {
             result = &mut protocol => {
-                match tokio::time::timeout(Duration::from_secs(1), child.wait()).await {
-                    Ok(Ok(status)) if result.is_ok() && !status.success() => Err(RpcError::internal_error().data(json!({"exit_code":status.code(),"status":status.to_string()}))),
-                    _ => result,
+                // `rpc::drive` drops the stdio handles before returning, so any
+                // subsequent write by the adapter fails with EPIPE and causes a
+                // non-zero exit. Ignore the exit status once `foreground` has
+                // succeeded.
+                if answered.load(Ordering::Relaxed) {
+                    result
+                } else {
+                    match tokio::time::timeout(Duration::from_secs(1), child.wait()).await {
+                        Ok(Ok(status)) if result.is_ok() && !status.success() => Err(RpcError::internal_error().data(json!({"exit_code":status.code(),"status":status.to_string()}))),
+                        _ => result,
+                    }
                 }
             },
             status = child.wait() => match status {
