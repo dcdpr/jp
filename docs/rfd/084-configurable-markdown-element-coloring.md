@@ -337,20 +337,20 @@ For example:
 Some elements split styling across multiple slots that layer over each other or
 the surrounding context:
 
-| Slot                    | Applies to                                                           | Overlays                                                                                     |
-| ----------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `inline_code.body`      | code-span literal and span background                                | surrounding context                                                                          |
-| `inline_code.delim`     | opening / closing backticks                                          | `inline_code.body`                                                                           |
-| `task_checkbox.base`    | `[ ]` / `[x]` marker (both states)                                   | surrounding context                                                                          |
-| `task_checkbox.checked` | the marker when checked                                              | `task_checkbox.base`                                                                         |
-| `blockquote.marker`     | `>` glyph (including on wrapped continuation lines)                  | surrounding context                                                                          |
-| `blockquote.body`       | quote text                                                           | surrounding context (inline element styles overlay on top)                                   |
-| `link.text`             | the visible label                                                    | surrounding context                                                                          |
-| `link.url`              | URL and title text                                                   | surrounding context                                                                          |
-| `link.delimiters`       | `[`, `](`, `  " `, `"`, `)` for inline links; `<`, `>` for autolinks | surrounding context                                                                          |
-| `table.border`          | grid characters, padding, separator rows                             | surrounding context                                                                          |
-| `table.header`          | header cell content only                                             | surrounding context (does not affect padding or separators, which stay under `table.border`) |
-| `code_fence`            | ` ` \`\`` glyphs and info string                                     | surrounding context                                                                          |
+| Slot                    | Applies to                                                         | Overlays                                                                                     |
+| ----------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `inline_code.body`      | code-span literal and span background                              | surrounding context                                                                          |
+| `inline_code.delim`     | opening / closing backticks                                        | `inline_code.body`                                                                           |
+| `task_checkbox.base`    | `[ ]` / `[x]` marker (both states)                                 | surrounding context                                                                          |
+| `task_checkbox.checked` | the marker when checked                                            | `task_checkbox.base`                                                                         |
+| `blockquote.marker`     | `>` glyph (including on wrapped continuation lines)                | surrounding context                                                                          |
+| `blockquote.body`       | quote text                                                         | surrounding context (inline element styles overlay on top)                                   |
+| `link.text`             | the visible label                                                  | surrounding context                                                                          |
+| `link.url`              | URL and title text                                                 | surrounding context                                                                          |
+| `link.delimiters`       | `[`, `](`, ` "`, `"`, `)` for inline links; `<`, `>` for autolinks | surrounding context                                                                          |
+| `table.border`          | grid characters, padding, separator rows                           | surrounding context                                                                          |
+| `table.header`          | header cell content only                                           | surrounding context (does not affect padding or separators, which stay under `table.border`) |
+| `code_fence`            | ` ` \`\`` glyphs and info string                                   | surrounding context                                                                          |
 
 ### Renderer changes
 
@@ -408,7 +408,7 @@ each continuation line, which would render wrapped blockquote `>` glyphs with
 To preserve the marker/body split across wraps, `prefix` becomes a
 `Vec<PrefixSpan>` where each span carries an optional `Style`, and
 `write_prefix` wraps each span in `push_style` / `pop_style`.
-`format_block_quote` pushes a ` >  ` span styled with `blockquote.marker`, while
+`format_block_quote` pushes a `> ` span styled with `blockquote.marker`, while
 list items push unstyled indentation spans.
 
 ### Renderer data flow
