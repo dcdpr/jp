@@ -45,7 +45,7 @@ Tracking ticket for [RFD 122].
       without a publishable build.
       `--remote` and `builders` land with a project's first remote builder.
       Depends on Phase 2.
-- [ ] **Links and drafts**: Adds the `repository` option wherever notes are
+- [x] **Links and drafts**: Adds the `repository` option wherever notes are
       rendered and in `jp vite`'s snapshot, and draft pages for releases in
       preparation under `jp vite serve`.
       Depends on Phase 4.
