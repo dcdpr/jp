@@ -31,8 +31,8 @@ use super::{
         SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
         agent_method, client_method, offered_models,
     },
-    transcript::{PreparedRequest, TitleRecord},
     subscription_model,
+    transcript::{PreparedRequest, TitleRecord},
 };
 use crate::{
     error::{StreamError, StreamErrorKind},

@@ -15,12 +15,13 @@ When a provider changes a response, such as a renamed field, a new SSE event
 type, or a reworded error, nothing fails until someone happens to re-record that
 provider.
 Some classification depends on exact wording.
-PR #1298 recognizes unknown-model refusals by message text for Anthropic (`model:`),
-OpenRouter (`is not a valid model ID`), Ollama (`model '…' not found`), and Claude
-Code over ACP (`Model '…' not found`); when that wording changes, the error
-falls back to `StreamErrorKind::Other` and nothing reports it.
-Gemini's wording already drifted once, from `Call ListModels` to
-`Call ModelService.ListModels`, and was only noticed by re-recording.
+PR #1298 recognizes unknown-model refusals by message text for Anthropic
+(`model:`), OpenRouter (`is not a valid model ID`), Ollama (`model '…' not
+found`), and Claude Code over ACP (`Model '…' not found`); when that wording
+changes, the error falls back to `StreamErrorKind::Other` and nothing reports
+it.
+Gemini's wording already drifted once, from `Call ListModels` to `Call
+ModelService.ListModels`, and was only noticed by re-recording.
 The ACP recordings (`tests/fixtures/acp/`) belong in the same run: the models
 Claude Code offers and the names it gives them change with Claude Code releases.
 
@@ -44,9 +45,9 @@ Open questions:
 
 - Where it runs.
   Cloud providers need API keys as CI secrets, and the subscription routes need
-  a signed-in login (Claude Code for ACP). llama.cpp, Ollama, and vLLM need a server
-  (`JP_TEST_UPSTREAM`): a small model on the runner, a self-hosted machine, or
-  skipping them in the scheduled run.
+  a signed-in login (Claude Code for ACP). llama.cpp, Ollama, and vLLM need a
+  server (`JP_TEST_UPSTREAM`): a small model on the runner, a self-hosted
+  machine, or skipping them in the scheduled run.
 - What a detected change produces: a draft PR with the re-recorded fixtures, an
   issue or ticket with the normalized diff, or both.
   Nothing should be committed to `main` automatically.
