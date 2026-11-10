@@ -154,10 +154,10 @@ pub enum TestEvent {
     Finished(FinishReason),
 }
 
-/// How a provider answered a chat request expected to be refused.
+/// Outcome of a chat request expected to be refused by the provider.
 ///
-/// Error text has the mock server's address replaced with `[base_url]`, since
-/// the port differs on every run.
+/// The mock server's address is redacted to `[base_url]` in error messages so
+/// snapshots stay deterministic across runs.
 #[derive(Debug, Clone)]
 #[expect(dead_code, reason = "fields read via Debug formatting in snapshots")]
 pub enum TestRefusal {
@@ -432,11 +432,11 @@ impl TestRequest {
         self
     }
 
-    /// Expect the provider to refuse this chat request.
+    /// Convert this [`Self::Chat`] request into [`Self::Refused`] and run
+    /// `assert` on the outcome.
     ///
-    /// `assert` receives how the provider answered.
-    /// Call last: the builder methods for chat requests leave a refused request
-    /// unchanged.
+    /// Call this after all other [`Self::Chat`] builder methods, which are
+    /// no-ops on [`Self::Refused`].
     pub fn expect_refusal(self, assert: impl Fn(&TestRefusal) + 'static) -> Self {
         match self {
             Self::Chat { model, query, .. } => Self::Refused {

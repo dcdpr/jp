@@ -195,22 +195,17 @@ async fn models(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -
     run_test_mode(provider, test_name, Some(request), mode).await
 }
 
-/// A model name no provider serves.
 const UNKNOWN_MODEL: &str = "foobarbaz";
 
-/// Providers that answer a request naming any model.
-///
-/// A llama.cpp server serves the model it was started with and ignores the
-/// `model` field, so it has nothing to refuse.
+/// Providers that ignore the requested `model` field and serve whichever model
+/// the server was started with.
 const SERVES_ANY_MODEL: &[ProviderId] = &[ProviderId::Llamacpp];
 
-/// A chat request naming a model the provider does not serve is refused with
-/// [`StreamErrorKind::UnknownModel`] from the stream.
+/// Verify that a chat request for an unknown model fails with
+/// [`StreamErrorKind::UnknownModel`].
 ///
-/// That classification is what lets `jp query` offer the models the provider
-/// does serve instead of failing the turn with a generic error.
-/// The request is otherwise the route's recorded model, so the name is the only
-/// thing the provider can object to.
+/// Clones the route's valid [`ModelDetails`] and replaces only the model name
+/// so the request is not rejected for unrelated parameter mismatches.
 async fn unknown_model(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -> Result {
     // Anthropic's subscription route records with a direct subscription token,
     // which is not an authorized use of the subscription, so no new recordings
@@ -253,14 +248,11 @@ async fn unknown_model(provider: ProviderId, test_name: &str, mode: ProviderTest
     run_test_mode(provider, test_name, Some(request), mode).await
 }
 
-/// Looking up a model the provider does not serve.
+/// Verify [`Provider::model_details`] behavior for an unknown model.
 ///
-/// Anthropic and OpenAI ask the API about the named model, and the lookup
-/// fails.
-/// The other providers search their model list and fall back to empty details,
-/// leaving the refusal to the chat request.
-/// `jp query` looks the model up before the turn starts, so for Anthropic and
-/// OpenAI an unknown model ends there.
+/// Anthropic and OpenAI query a per-model endpoint and return an error; other
+/// providers search their model list and fall back to empty [`ModelDetails`],
+/// deferring the refusal to the chat request.
 async fn unknown_model_details(
     provider: ProviderId,
     test_name: &str,

@@ -483,13 +483,10 @@ pub(super) fn model_details(name: &Name) -> ModelDetails {
     model
 }
 
-/// The model families Claude Code serves.
-///
-/// A model belongs to the first family its name contains.
-/// A family Anthropic adds later needs an entry here.
+/// Model families served by Claude Code, matched by substring against the model
+/// name.
 const FAMILIES: &[&str] = &["opus", "fable", "sonnet", "haiku"];
 
-/// The family `name` belongs to.
 fn family_of(name: &str) -> Option<&'static str> {
     let name = name.to_ascii_lowercase();
     FAMILIES
@@ -498,13 +495,13 @@ fn family_of(name: &str) -> Option<&'static str> {
         .copied()
 }
 
-/// The version numbers following `family` in `text`.
+/// Parse the version components following `family` in `text`.
 ///
-/// `claude-fable-5-2`, `claude-fable-5.2` and the label `Fable 5.2` are all
-/// `[5, 2]`.
-/// A date suffix (`claude-haiku-4-5-20251001`) and a context-window suffix
-/// (`opus[1m]`) are not part of the version, and a bare alias (`opus`) has
-/// none.
+/// For example, `claude-fable-5-2`, `claude-fable-5.2`, and `Fable 5.2` all
+/// parse as `[5, 2]`.
+/// Ignores date suffixes (`claude-haiku-4-5-20251001`) and context-window
+/// suffixes (`opus[1m]`).
+/// Returns an empty vector for bare aliases (`opus`).
 fn version(text: &str, family: &str) -> Vec<u32> {
     let text = text.to_ascii_lowercase();
     let Some((_, rest)) = text.split_once(family) else {
@@ -518,8 +515,9 @@ fn version(text: &str, family: &str) -> Vec<u32> {
         .collect()
 }
 
-/// The version of the model an offered value stands for: from the value when it
-/// names one, otherwise from its label (`opus` labelled `Opus 5.5`).
+/// Extract the model version for a select `option`, parsing `option.value`
+/// first and falling back to its display label `option.name` (e.g. `opus`
+/// labeled `Opus 5.5`).
 fn offered_version(option: &SessionConfigSelectOption, family: &str) -> Vec<u32> {
     let from_value = version(&option.value.0, family);
     if !from_value.is_empty() {
@@ -533,28 +531,28 @@ fn offered_version(option: &SessionConfigSelectOption, family: &str) -> Vec<u32>
         .unwrap_or_default()
 }
 
-/// The most specific of `values`: the 1M-context variant first, then the
-/// shortest (a bare alias, which Claude Code points at its current model, over
-/// a pinned version), then the alphabetically first.
+/// Pick the preferred model value from `values`: prefers `[1m]` context
+/// variants first, then shorter names (bare aliases like `opus` over pinned
+/// versions), then lexicographical order.
 fn preferred(mut values: Vec<&str>) -> Option<&str> {
     values.sort_by_key(|value| (!value.ends_with("[1m]"), value.len(), *value));
     values.first().copied()
 }
 
-/// The name Claude Code is given for the API model `name`, chosen from the
-/// values its `model` setting `offers`.
+/// Resolve an Anthropic API model `name` to the `model` option value sent to
+/// Claude Code, chosen from `offers`.
 ///
-/// Conversations and config name models by their API ID on both flows; only the
-/// ACP transport speaks Claude Code's names.
-/// The offered value whose version matches is sent: `claude-fable-5-2` is
-/// whichever `fable` value names or is labelled `5.2`, and `claude-opus-5` is
-/// `claude-opus-5` itself when Claude Code lists it.
-/// Without a version match, any value in the family is sent, with a warning, so
-/// a conversation keeps working when Claude Code drops the version it was on.
+/// Conversations and config always store API model IDs; only the ACP transport
+/// uses Claude Code's model option values.
 ///
-/// A model in no known family, one whose family the list does not offer, or one
-/// sent before the list is known, goes by its API name, which Claude Code
-/// refuses if it does not serve it.
+/// - If `offers` contains an option in the same family whose version matches
+///   `name` (e.g. `claude-fable-5-2` matches `fable` labeled `Fable 5.2`, and
+///   `claude-opus-5` matches `claude-opus-5`), returns the [`preferred`] match.
+/// - If no offered option matches the version, logs a warning and falls back to
+///   the [`preferred`] option in the same family so existing conversations keep
+///   working when Claude Code retires an older version.
+/// - If `offers` is empty, `name` belongs to no known family, or `offers` has
+///   no option in that family, returns `name` unchanged.
 fn subscription_model(name: &str, offers: &[SessionConfigSelectOption]) -> String {
     let Some(family) = family_of(name) else {
         return name.to_owned();
@@ -601,17 +599,20 @@ fn subscription_model(name: &str, offers: &[SessionConfigSelectOption]) -> Strin
     value.to_owned()
 }
 
-/// The API model JP records for a value Claude Code offers, labelled
-/// `display_name`.
+/// Map a Claude Code model option (`value` and optional `display_name`) to a JP
+/// API model ID.
 ///
-/// Tried in order:
+/// Resolves in order:
 ///
-/// - The value names a cataloged API model (`claude-haiku-4-5-20251001`).
-/// - The value or its label names a version: `fable` labelled `Fable 5.2` is
-///   `claude-fable-5-2`, cataloged or not.
-/// - The newest cataloged model in the value's family.
+/// 1. An exact match in `MODEL_OVERRIDES` after stripping any `[...]` suffix
+///    (e.g. `claude-haiku-4-5-20251001`).
+/// 2. `claude-<family>-<version>` when `value` or `display_name` carries a
+///    version (e.g. `fable` with display name `Fable 5.2` becomes
+///    `claude-fable-5-2`), whether or not that version is in `MODEL_OVERRIDES`.
+/// 3. The first entry in `MODEL_OVERRIDES` matching the family.
 ///
-/// `None` for a value in no known family, such as `default`.
+/// Returns `None` if `value` does not belong to a known family in [`FAMILIES`]
+/// (such as `default`).
 fn api_name(value: &str, display_name: Option<&str>) -> Option<String> {
     let family = family_of(value)?;
     let base = value.split_once('[').map_or(value, |(base, _)| base);
@@ -639,20 +640,22 @@ fn api_name(value: &str, display_name: Option<&str>) -> Option<String> {
         .map(|model| model.id.to_owned())
 }
 
-/// The models Claude Code offers the selected login, by API model ID.
+/// List the models Claude Code offers for the login at `directory`, mapped to
+/// API model IDs.
 ///
-/// Read from the adapter's `model` session setting.
+/// Reads the options from the adapter's `model` session config setting.
 pub(super) async fn models(directory: Option<&Utf8Path>) -> Result<Vec<ModelDetails>, Error> {
     let options = transport::list_models(directory).await?;
     Ok(served_models(&options))
 }
 
-/// The listed models JP can name, once each.
+/// Convert Claude Code `model` select options into deduplicated
+/// [`ModelDetails`] entries keyed by API model ID.
 ///
-/// A value in no known family is left out: picking it would record a name that
-/// only the ACP flow understands.
-/// That includes `default`, which stands for whichever model Claude Code
-/// recommends and is listed again under its own name.
+/// Options outside [`FAMILIES`] are omitted so picking a model never records a
+/// name that only the ACP transport understands.
+/// This also skips `default`, which aliases a model that appears separately
+/// under its own family name.
 fn served_models(options: &[SessionConfigSelectOption]) -> Vec<ModelDetails> {
     let mut models: Vec<ModelDetails> = vec![];
     for option in options {

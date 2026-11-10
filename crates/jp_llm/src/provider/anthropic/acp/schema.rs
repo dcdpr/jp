@@ -293,7 +293,7 @@ pub(super) struct SessionConfigSelectOption {
     pub name: Option<String>,
 }
 
-/// The values the `model` setting among `options` accepts.
+/// Return the select options for the `model` setting in `options`.
 pub(super) fn offered_models(options: &[SessionConfigOption]) -> Vec<SessionConfigSelectOption> {
     options
         .iter()
@@ -304,9 +304,10 @@ pub(super) fn offered_models(options: &[SessionConfigOption]) -> Vec<SessionConf
 }
 
 impl SessionConfigKind {
-    /// The values a select setting accepts, with groups flattened in order.
+    /// Return the options of a `Select` setting, flattening any groups in
+    /// order.
     ///
-    /// Empty for any other kind of setting.
+    /// Returns an empty vector for non-`Select` settings.
     pub(super) fn select_options(&self) -> Vec<&SessionConfigSelectOption> {
         let Self::Select { options, .. } = self else {
             return vec![];

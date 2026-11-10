@@ -83,9 +83,9 @@ impl Provider for Ollama {
 
         let response = match self.client.send_chat_messages_stream(request).await {
             Ok(response) => response,
-            // Ollama refuses an unknown model before any stream exists. The
-            // refusal goes out through the stream, where every other provider
-            // reports it, so the turn loop can offer a model the server has.
+            // Ollama rejects unknown models before returning a stream. Wrap the
+            // error in a single-item stream so it follows the same `StreamError`
+            // path as other providers.
             Err(OllamaError::Other(body)) if let Some(message) = unknown_model_message(&body) => {
                 return Ok(stream::iter([Err(StreamError::unknown_model(message))]).boxed());
             }
@@ -109,8 +109,8 @@ impl Provider for Ollama {
     }
 }
 
-/// The message of an Ollama error body refusing an unknown model, such as
-/// `{"error":"model 'foobarbaz' not found"}`.
+/// Extract the error message from an Ollama unknown-model response body (e.g.
+/// `{"error":"model 'foobarbaz' not found"}`).
 fn unknown_model_message(body: &str) -> Option<String> {
     let parsed: Value = serde_json::from_str(body).ok()?;
     let message = parsed.get("error")?.as_str()?;

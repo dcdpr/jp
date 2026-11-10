@@ -152,8 +152,6 @@ const RECORDED: &[(&str, &str)] = &[
     ("claude-sonnet-4-6", "Sonnet 4.6"),
 ];
 
-/// The version is read from the offered value, or from the label of a bare
-/// alias.
 #[test]
 fn an_api_model_is_sent_as_the_offer_with_its_version() {
     let offers = offered(RECORDED);
@@ -173,7 +171,8 @@ fn an_api_model_is_sent_as_the_offer_with_its_version() {
         subscription_model("claude-sonnet-5", &offers),
         "claude-sonnet-5"
     );
-    // A dated value is the version before its date, in either position.
+    // Date suffixes are ignored on both the offered option and the requested
+    // model name.
     assert_eq!(
         subscription_model("claude-haiku-4-5", &offers),
         "claude-haiku-4-5-20251001"
@@ -195,8 +194,6 @@ fn a_dotted_version_matches_a_dashed_one() {
     );
 }
 
-/// A conversation keeps working when Claude Code no longer offers its version,
-/// on whichever model Claude Code's bare alias points at.
 #[test]
 fn without_its_version_a_model_is_sent_as_its_family() {
     let offers = offered(RECORDED);
@@ -224,9 +221,6 @@ fn several_offers_of_a_version_prefer_the_1m_variant_then_the_bare_alias() {
     );
 }
 
-/// Before the adapter lists anything, and outside the offered families, the API
-/// name goes as is: Claude Code serves it or refuses it, and a refusal is what
-/// offers the models it does serve.
 #[test]
 fn without_a_matching_offer_the_api_name_is_sent() {
     assert_eq!(subscription_model("claude-opus-5", &[]), "claude-opus-5");
@@ -260,13 +254,14 @@ fn listed_models_are_named_by_their_api_id() {
             .map(|model| model.id.to_string())
             .collect::<Vec<_>>(),
         [
-            // A bare alias is the version its label names, cataloged or not.
+            // Bare aliases resolve to the version in their display label, even
+            // if uncataloged.
             "anthropic/claude-opus-5-5",
             "anthropic/claude-fable-5-2",
             "anthropic/claude-sonnet-5-5",
             "anthropic/claude-haiku-5-5",
             "anthropic/claude-fable-5-1",
-            // A dated value is its cataloged model.
+            // Dated values resolve to their cataloged model ID.
             "anthropic/claude-haiku-4-5",
             "anthropic/claude-sonnet-5",
             "anthropic/claude-opus-5",
@@ -280,7 +275,6 @@ fn listed_models_are_named_by_their_api_id() {
     assert!(models.iter().all(ModelDetails::served_by_subscription));
 }
 
-/// Every listed model is sent back as the offer it was listed from.
 #[test]
 fn a_listed_model_round_trips_to_its_offer() {
     let offers = offered(RECORDED);
@@ -300,8 +294,6 @@ fn a_listed_model_round_trips_to_its_offer() {
     }
 }
 
-/// A bare alias without a label has no version, so it is the newest model JP
-/// catalogs in its family.
 #[test]
 fn an_unlabelled_alias_is_the_newest_model_in_its_family() {
     let models = served_models(&[SessionConfigSelectOption {
@@ -318,8 +310,6 @@ fn an_unlabelled_alias_is_the_newest_model_in_its_family() {
     );
 }
 
-/// A listed model keeps the overrides of the API model it maps to: Fable cannot
-/// have its thinking turned off.
 #[test]
 fn a_listed_model_keeps_its_api_models_overrides() {
     let [fable] = served_models(&offered(&[("claude-fable-5-1[1m]", "Fable 5.1")]))

@@ -373,7 +373,6 @@ async fn cache_reconstruction() {
     assert_eq!(tokens(&off, "cache_creation_input_tokens"), 0);
 }
 
-/// The single connection a recording holds.
 fn only_connection(name: &str) -> Vec<Framed> {
     let read = cassette::read(name).unwrap_or_else(|error| panic!("{error}"));
     let mut scripts = cassette::connections(read);
@@ -381,10 +380,8 @@ fn only_connection(name: &str) -> Vec<Framed> {
     scripts.remove(0)
 }
 
-/// The models the adapter's `model` setting offers, as JP names them.
-///
-/// Under `RECORD=1` this opens a session against the installed adapter and
-/// sends no prompt, so recording it spends no allowance.
+/// Under `RECORD=1`, opens a session against the installed adapter without
+/// sending a prompt, so recording consumes no subscription quota.
 #[tokio::test]
 async fn listed_models() {
     let listed = if cassette::recording() {
@@ -413,8 +410,6 @@ async fn listed_models() {
     );
 }
 
-/// A one-line request, so a model that answers instead of refusing costs
-/// little.
 fn short_query(model: &str) -> ChatQuery {
     let mut config = AppConfig::new_test();
     config.assistant.model.id = format!("anthropic/{model}").parse().unwrap();
@@ -434,9 +429,6 @@ fn short_query(model: &str) -> ChatQuery {
         .into()
 }
 
-/// Claude Code refuses a model it does not serve, and the refusal reaches the
-/// turn loop as [`StreamErrorKind::UnknownModel`], which is what offers the
-/// models it does serve.
 #[tokio::test]
 async fn unknown_model_is_refused_as_unknown() {
     let recording = cassette::recording();

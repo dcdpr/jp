@@ -154,7 +154,6 @@ async fn an_archived_cerebras_model_is_an_unknown_model() {
     assert_eq!(err.kind, StreamErrorKind::UnknownModel);
 }
 
-/// OpenAI's subscription host refuses a model with a `400`, not a `404`.
 #[tokio::test]
 async fn a_subscription_400_model_not_found_is_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(

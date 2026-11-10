@@ -781,16 +781,15 @@ pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
         || lower.contains("too many tokens")
 }
 
-/// Check whether an error response says the requested model is unknown or
-/// unavailable.
+/// Check whether an error response indicates an unknown or unavailable model.
 ///
-/// The status alone is ambiguous: a misconfigured `base_url` path also returns
-/// `404` (e.g. `{"detail":"Not Found"}` from the HTTP server), and a `400` can
-/// object to the model for other reasons, such as not supporting tools.
+/// The status code alone is ambiguous: a misconfigured `base_url` path also
+/// returns `404` (e.g. `{"detail":"Not Found"}` from the HTTP server), and a
+/// `400` can reject a model for other reasons (e.g. unsupported tool calls).
 /// Matches both nested (`{"error": {...}}`) and flat JSON error envelopes for:
 ///
-/// - OpenAI: `"code": "model_not_found"`, as a `404` from the API and as a
-///   `400` from the subscription host
+/// - OpenAI: `"code": "model_not_found"`, returned with `404` by the API and
+///   with `400` by the subscription endpoint
 /// - Cerebras: `"code": "model_archived"`
 /// - vLLM (`404` only): `"param": "model"`, or `"type": "NotFoundError"` with a
 ///   `"does not exist"` message on older servers

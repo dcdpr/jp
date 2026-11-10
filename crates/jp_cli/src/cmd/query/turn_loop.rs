@@ -684,10 +684,10 @@ async fn drive_turn(
                                         .await);
                                     }
 
-                                    // `UnknownModel` is non-retryable. In
-                                    // interactive mode, a turn the model has
-                                    // not answered yet restarts on a model the
-                                    // user picks from the provider's list.
+                                    // `UnknownModel` is non-retryable; in
+                                    // interactive mode, prompt the user to pick
+                                    // an available model and restart the turn if
+                                    // no response content has been emitted yet.
                                     if interactive
                                         && e.kind == StreamErrorKind::UnknownModel
                                         && turn_coordinator.can_restart_turn(&conv.events())

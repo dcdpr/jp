@@ -614,7 +614,7 @@ async fn runtime_model_rejection_preserves_its_classification() {
         panic!("expected classified failure")
     };
     assert!(!error.is_retryable());
-    // The data names no missing model, so this is not an unknown model.
+    // The error data does not match the missing-model pattern.
     assert_eq!(error.kind, StreamErrorKind::Other);
     let Some(Error::ModelSelection { model, source }) =
         error.source().unwrap().downcast_ref::<Error>()
@@ -629,8 +629,6 @@ async fn runtime_model_rejection_preserves_its_classification() {
     assert!(receiver.recv().await.is_none());
 }
 
-/// The refusal Claude Code sent for `foobarbaz` when `unknown_model.jsonl` was
-/// recorded.
 #[test]
 fn a_missing_model_in_the_error_data_is_an_unknown_model() {
     let refused =

@@ -534,11 +534,10 @@ pub(super) async fn drive(
     }
 }
 
-/// Whether a failed `model` selection is Claude Code refusing a model it does
-/// not serve.
+/// Check whether a `model` config-option RPC error indicates an unknown model.
 ///
-/// The refusal arrives as a generic internal error, so the only signal is its
-/// data: `{"details": "Model 'foobarbaz' not found"}`.
+/// Claude Code reports unknown models as a generic internal error whose
+/// `data.details` field matches `"Model '<name>' not found"`.
 pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
     error
         .data
@@ -548,11 +547,13 @@ pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
         .is_some_and(|details| details.starts_with("Model '") && details.ends_with("' not found"))
 }
 
-/// The values the adapter's `model` setting accepts for `login_directory`.
+/// Fetch the `model` select options offered by the adapter for
+/// `login_directory`.
 ///
-/// Opens a session and sends no prompt, so it spends no subscription allowance.
-/// The session is stored under a project directory of its own, apart from any
-/// conversation's.
+/// Opens a session without sending a prompt, so it consumes no subscription
+/// quota.
+/// The session is stored under a dedicated `jp-models` project directory
+/// separate from conversation sessions.
 pub(super) async fn list_models(
     login_directory: Option<&Utf8Path>,
 ) -> Result<Vec<SessionConfigSelectOption>, Error> {
@@ -577,10 +578,11 @@ pub(super) async fn list_models(
     .await
 }
 
-/// Open a session over `transport` and read the values its `model` setting
-/// accepts.
+/// Open a session over `transport` and return the options for its `model`
+/// setting.
 ///
-/// Everything the adapter initiates is acknowledged and otherwise ignored.
+/// Any requests initiated by the adapter are acknowledged with `null` and
+/// otherwise ignored.
 pub(super) async fn models(
     transport: Box<dyn Transport>,
     cwd: &Utf8Path,

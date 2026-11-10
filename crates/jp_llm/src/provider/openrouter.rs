@@ -1281,8 +1281,9 @@ impl From<jp_openrouter::Error> for StreamError {
                 ..
             }
             | E::Stream(_) => StreamError::transient(err.to_string()).with_source(err),
-            // The only signal is the message: the body carries no error code
-            // beyond the status, and a 400 also rejects malformed requests.
+            // OpenRouter returns HTTP 400 with no distinct error code for
+            // unknown models, so match the message text to distinguish it from
+            // other 400 Bad Request errors.
             E::Api {
                 code: 400,
                 ref message,

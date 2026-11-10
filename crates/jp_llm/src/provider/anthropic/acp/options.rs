@@ -132,9 +132,10 @@ pub(super) fn metadata(
                     prompt: &prepared.system_prompt,
                     snapshot: false,
                 },
-                // Sent before the adapter has listed what it offers, so this is
-                // the API name; the session's `model` setting is matched
-                // against that list once the session opens.
+                // Session metadata is sent before the adapter returns its
+                // offered model list, so pass the API model name here; once the
+                // session opens, `drive` resolves the `model` config option
+                // against the offered list.
                 model: subscription_model(&prepared.model, &[]),
                 effort: prepared.effort.as_ref(),
                 thinking,

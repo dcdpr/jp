@@ -542,11 +542,11 @@ impl TurnCoordinator {
         self.view.enter_tool_call_region(chrome_visible)
     }
 
-    /// Whether the current turn can be restarted on another model.
+    /// Return `true` if the current turn can be restarted on another model.
     ///
-    /// True when the turn holds nothing past the request that opened it: no
-    /// committed response, no tool call, no follow-up request, and no partial
-    /// content waiting to be committed.
+    /// Holds when the turn contains nothing past its opening request: no
+    /// committed response, tool call, follow-up request, or uncommitted partial
+    /// content.
     pub fn can_restart_turn(&self, stream: &ConversationStream) -> bool {
         if !self.peek_partial_events().is_empty() {
             return false;
@@ -561,13 +561,12 @@ impl TurnCoordinator {
 
     /// Restart the current turn on `model`.
     ///
-    /// The turn is removed, a config delta setting `assistant.model.id` to
-    /// `model` is recorded, and the turn starts again with the same request.
-    /// The turn's config therefore names `model` from its first event on, the
-    /// same as a turn run with `jp query -m`.
+    /// Trims the current turn, appends a config delta setting
+    /// `assistant.model.id` to `model`, and starts a new turn with the original
+    /// request so the turn's config reflects `model` from its first event.
     ///
-    /// Only valid when [`can_restart_turn`] is true; otherwise the removed turn
-    /// would take committed content with it.
+    /// Requires [`can_restart_turn`] to be `true` so trimming the turn does not
+    /// discard committed events.
     ///
     /// [`can_restart_turn`]: Self::can_restart_turn
     pub fn restart_turn_on(&mut self, stream: &mut ConversationStream, model: &ModelIdConfig) {
@@ -581,8 +580,9 @@ impl TurnCoordinator {
         delta.assistant.model.id = PartialModelIdOrAliasConfig::Id(model.to_partial());
         stream.add_config_delta(delta);
 
-        // Appended directly rather than through `start_turn`: the request was
-        // already emitted as JSON and the turn's header state is unchanged.
+        // Append to `stream` directly instead of calling `self.start_turn`: the
+        // request was already emitted in JSON mode and the view's header state
+        // is unchanged.
         stream.start_turn(request);
 
         self.view.set_model_id(Some(model.to_string()));

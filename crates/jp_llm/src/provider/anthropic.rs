@@ -3353,8 +3353,8 @@ impl From<AnthropicError> for StreamError {
                 .with_source(error)
             }
 
-            // A wrong endpoint is `not_found_error` too, so the message has to
-            // name the model: `model: claude-nonexistent`.
+            // A wrong endpoint also returns `not_found_error`, so require the
+            // `model:` prefix in the message (e.g. `model: claude-nonexistent`).
             E::Api(ref api_error)
                 if api_error.error_type == "not_found_error"
                     && api_error
