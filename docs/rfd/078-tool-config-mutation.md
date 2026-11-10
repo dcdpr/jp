@@ -229,7 +229,8 @@ pub enum Outcome {
 
 `config` and `unset` are only valid on `Success`.
 `Error` and `NeedsInput` cannot carry config mutations (see [Output:
-`outcome.config` and `outcome.unset`](#output-outcome-config-and-outcome-unset)).
+`outcome.config` and
+`outcome.unset`](#output-outcome-config-and-outcome-unset)).
 
 **`jp_llm::CommandResult::Success` and `ExecutionOutcome::Completed` carry the
 structured payload.**
