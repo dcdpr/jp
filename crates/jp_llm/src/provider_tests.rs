@@ -178,7 +178,15 @@ async fn tool_call_reasoning(
     run_test_mode(provider, test_name, requests, mode).await
 }
 
+/// Providers that resolve `model_details` locally from a built-in table without
+/// sending an HTTP request.
+const LOCAL_MODEL_DETAILS: &[ProviderId] = &[ProviderId::Openai];
+
 async fn model_details(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -> Result {
+    if LOCAL_MODEL_DETAILS.contains(&provider) {
+        return Ok(());
+    }
+
     let request = TestRequest::ModelDetails {
         name: test_model_details(provider).id.name.to_string(),
         assert: Arc::new(|_| {}),
@@ -248,23 +256,24 @@ async fn unknown_model(provider: ProviderId, test_name: &str, mode: ProviderTest
     run_test_mode(provider, test_name, Some(request), mode).await
 }
 
-/// Verify [`Provider::model_details`] behavior for an unknown model.
-///
-/// Anthropic and OpenAI query a per-model endpoint and return an error; other
-/// providers search their model list and fall back to empty [`ModelDetails`],
-/// deferring the refusal to the chat request.
+/// Verify that [`Provider::model_details`] returns empty [`ModelDetails`] for
+/// an unknown model, deferring unknown-model refusal to the chat request.
 async fn unknown_model_details(
     provider: ProviderId,
     test_name: &str,
     mode: ProviderTestMode,
 ) -> Result {
+    if LOCAL_MODEL_DETAILS.contains(&provider) {
+        return Ok(());
+    }
+
+    let expected = ModelDetails::empty((provider, UNKNOWN_MODEL).try_into()?);
     let request = TestRequest::ModelLookup {
         name: UNKNOWN_MODEL.to_owned(),
         assert: Arc::new(move |result| {
-            let lookup_fails = matches!(provider, ProviderId::Anthropic | ProviderId::Openai);
             assert_eq!(
-                result.is_err(),
-                lookup_fails,
+                result,
+                &Ok(expected.clone()),
                 "unexpected lookup result for `{UNKNOWN_MODEL}`: {result:?}"
             );
         }),

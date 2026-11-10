@@ -22,6 +22,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails,
+    lookup::find_listed,
     openai_compat::{assemble_event_stream, convert_events, convert_tool_choice, convert_tools},
     trace_to_tmpfile,
 };
@@ -50,12 +51,9 @@ impl Provider for Vllm {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, Error> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| ModelDetails::empty(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>, Error> {

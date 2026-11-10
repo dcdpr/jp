@@ -582,37 +582,25 @@ impl Provider for Openai {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let attempt = self.resolve(name.as_ref()).await?;
 
-        // The subscription host serves no model endpoint, so the capability
-        // table is the only source. It is authoritative on the API path too, so
-        // this costs nothing but the round-trip it skips.
-        if attempt.is_subscription() {
-            let details = map_model(ModelResponse::named(name.to_string()))?;
+        // Neither route needs a network lookup: the subscription host has no
+        // models endpoint, and the API's `GET /v1/models/{id}` returns only the
+        // model ID, so all capability metadata comes from `CAPABILITIES`.
+        let details = map_model(ModelResponse::named(name.to_string()))?;
 
-            // Refused here rather than at the host, which answers a model it
-            // does not serve with the same 404 it gives a typo. A model the
-            // table has never heard of is let through: the catalog ships with
-            // the binary and the plan's model set does not.
-            if details.subscription == Some(false) {
-                return Err(Error::UnsupportedForCredential(format!(
-                    "{name} is not served by a ChatGPT subscription; pick one of {}, or add \
-                     `api_key` to providers.llm.openai.auth",
-                    subscription_models().collect::<Vec<_>>().join(", ")
-                )));
-            }
-
-            return Ok(details);
+        // Reject known API-only models up front with credential guidance; the
+        // subscription host rejects them with the same `model_not_found` error
+        // it returns for a typo. Unknown models (`subscription: None`) are
+        // allowed through so newly added subscription models work without a
+        // binary update.
+        if attempt.is_subscription() && details.subscription == Some(false) {
+            return Err(Error::UnsupportedForCredential(format!(
+                "{name} is not served by a ChatGPT subscription; pick one of {}, or add `api_key` \
+                 to providers.llm.openai.auth",
+                subscription_models().collect::<Vec<_>>().join(", ")
+            )));
         }
 
-        let (_, http) = self.clients(&attempt, &session_id(None))?;
-
-        http.get(format!("{}/v1/models/{}", self.base_url, name))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<ModelResponse>()
-            .await
-            .map_err(Into::into)
-            .and_then(map_model)
+        Ok(details)
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {

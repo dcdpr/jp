@@ -3,7 +3,24 @@ source: crates/jp_test/src/mock.rs
 expression: v
 ---
 [
-    Err(
-        "Anthropic error: api error: not_found_error: model: foobarbaz",
+    Ok(
+        ModelDetails {
+            id: ModelIdConfig {
+                provider: Anthropic,
+                name: Name(
+                    "foobarbaz",
+                ),
+            },
+            display_name: None,
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+            deprecated: None,
+            structured_output: None,
+            prefill: None,
+            subscription: None,
+            features: [],
+        },
     ),
 ]

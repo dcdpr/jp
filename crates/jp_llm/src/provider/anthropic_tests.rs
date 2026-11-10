@@ -10,7 +10,7 @@ use jp_config::model::{
 use jp_conversation::{event::ChatRequest, thread::Thread};
 use jp_test::{
     Result, function_name,
-    mock::{MockServer, POST},
+    mock::{GET, MockServer, POST},
 };
 use serde_json::Map;
 use test_log::test;
@@ -34,6 +34,122 @@ async fn test_redacted_thinking() -> Result {
     ];
 
     run_test(PROVIDER, function_name!(), requests).await
+}
+
+fn provider_at(server: &MockServer) -> Anthropic {
+    let mut config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
+    config.base_url = server.base_url();
+    Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()))
+}
+
+#[test(tokio::test)]
+async fn a_failed_model_lookup_falls_back_to_the_table() {
+    let server = MockServer::start_async().await;
+    let provider = provider_at(&server);
+
+    let details = provider
+        .model_details(&"claude-opus-4-5".parse().unwrap())
+        .await
+        .expect("a failed lookup does not fail the request");
+
+    assert_eq!(details.id.name.as_ref(), "claude-opus-4-5");
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2025, 8, 1)
+    );
+    assert_eq!(details.prefill, Some(true));
+    assert_eq!(details.features, vec![SAMPLING_PARAMETERS]);
+}
+
+#[test(tokio::test)]
+async fn a_failed_lookup_of_a_model_the_table_does_not_know_gives_empty_details() {
+    let server = MockServer::start_async().await;
+    let provider = provider_at(&server);
+    let name: Name = "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017".parse().unwrap();
+
+    let details = provider.model_details(&name).await.unwrap();
+
+    assert_eq!(
+        details,
+        ModelDetails::empty((PROVIDER, name.as_ref()).try_into().unwrap())
+    );
+}
+
+#[test(tokio::test)]
+async fn a_failed_lookup_with_reasoning_unset_requests_summarized_thinking() {
+    let server = MockServer::start_async().await;
+    let provider = provider_at(&server);
+
+    let details = provider
+        .model_details(&"claude-opus-9-9".parse().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(details.reasoning, None);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+    let body = provider.request_value(&details, query).unwrap();
+
+    assert_eq!(
+        body["thinking"],
+        serde_json::json!({ "type": "adaptive", "display": "summarized" })
+    );
+}
+
+#[test]
+fn the_claude_code_route_sends_no_thinking_when_reasoning_is_unset() {
+    let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
+    let provider = Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()));
+    let details = acp::model_details(&"claude-haiku-4-5".parse().unwrap());
+    assert_eq!(details.reasoning, None);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+    let body = provider.request_value(&details, query).unwrap();
+
+    assert!(body.get("thinking").is_none(), "{body}");
+}
+
+#[test(tokio::test)]
+async fn a_refused_credential_still_fails_the_lookup() {
+    let server = MockServer::start_async().await;
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/v1/models/claude-opus-4-5");
+            then.status(401).json_body(serde_json::json!({
+                "type": "error",
+                "error": { "type": "authentication_error", "message": "invalid x-api-key" },
+            }));
+        })
+        .await;
+    let provider = provider_at(&server);
+
+    let result = provider
+        .model_details(&"claude-opus-4-5".parse().unwrap())
+        .await;
+
+    assert!(
+        result.is_err(),
+        "expected the refusal to fail, got {result:?}"
+    );
 }
 
 /// An SSE response that always truncates on `max_tokens`, which is the

@@ -37,7 +37,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::{debug, error, info, trace, warn};
 
-use super::{EventStream, ModelDetails};
+use super::{EventStream, ModelDetails, lookup::find_listed};
 use crate::{
     Error, StreamError,
     decoding::ArgumentDecoders,
@@ -125,12 +125,9 @@ impl Provider for Openrouter {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| ModelDetails::empty(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {

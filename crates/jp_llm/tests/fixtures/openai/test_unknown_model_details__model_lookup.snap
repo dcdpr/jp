@@ -1,9 +1,0 @@
----
-source: crates/jp_test/src/mock.rs
-expression: v
----
-[
-    Err(
-        "Request error: HTTP status client error (404 Not Found) for url ([base_url]/v1/models/foobarbaz)",
-    ),
-]

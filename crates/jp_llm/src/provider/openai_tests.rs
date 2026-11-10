@@ -3368,3 +3368,73 @@ mod classify_stream_error {
         assert!(classified.is_retryable());
     }
 }
+
+mod model_details {
+    use jp_config::providers::llm::LlmProviderConfig;
+
+    use super::super::{Openai, PROVIDER};
+    use crate::{
+        credential::Credential, error::Error, model::ModelDetails, provider::Provider as _,
+    };
+
+    fn api_provider() -> Openai {
+        let mut config = LlmProviderConfig::default().openai;
+        config.base_url = "http://127.0.0.1:1".to_owned();
+        config.codex_base_url = "http://127.0.0.1:1".to_owned();
+        Openai::with_credential(&config, Credential::ApiKey("sk-test".to_owned()))
+    }
+
+    fn subscription_provider() -> Openai {
+        let mut config = LlmProviderConfig::default().openai;
+        config.base_url = "http://127.0.0.1:1".to_owned();
+        config.codex_base_url = "http://127.0.0.1:1".to_owned();
+        Openai::with_subscription_credential(&config, "tok-test".to_owned(), "acct-test".to_owned())
+    }
+
+    #[tokio::test]
+    async fn cataloged_model_resolves_without_network_lookup() {
+        let details = api_provider()
+            .model_details(&"gpt-5.6-luna".parse().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Luna"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.subscription, Some(true));
+    }
+
+    #[tokio::test]
+    async fn unknown_model_returns_empty_details_on_both_routes() {
+        let expected = ModelDetails::empty((PROVIDER, "foobarbaz").try_into().unwrap());
+
+        let api = api_provider()
+            .model_details(&"foobarbaz".parse().unwrap())
+            .await
+            .unwrap();
+        let sub = subscription_provider()
+            .model_details(&"foobarbaz".parse().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(api, expected);
+        assert_eq!(sub, expected);
+    }
+
+    #[tokio::test]
+    async fn api_only_model_is_rejected_on_subscription_only() {
+        let api = api_provider()
+            .model_details(&"gpt-5.5-pro".parse().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(api.subscription, Some(false));
+
+        let err = subscription_provider()
+            .model_details(&"gpt-5.5-pro".parse().unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::UnsupportedForCredential(_)),
+            "expected UnsupportedForCredential, got {err:?}"
+        );
+    }
+}
