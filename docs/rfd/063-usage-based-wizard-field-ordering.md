@@ -173,7 +173,7 @@ The field selector uses a distinct prefix for each tier:
 | Configured (non-default)   | `●`       | `● assistant.model.id`      |
 | Wizard-edited this session | `◆`       | `◆ style.reasoning.display` |
 | Frecent                    | `◦`       | `◦ assistant.tool_choice`   |
-| Remaining                  | (none)    | `  assistant.name `         |
+| Remaining                  | (none)    | ` assistant.name`           |
 
 ## Drawbacks
 
