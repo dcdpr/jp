@@ -29,7 +29,7 @@ Two use cases need separate views:
   line ranges directly to line-addressed tools (`fs_read_file`, `git_blame`,
   `git_diff_file`).
   However, terminal syntax highlighting relies on a leading ` ```lang ` fence,
-  which a `1: ` gutter breaks.
+  which a ` 1:  ` gutter breaks.
   The tool needs numbered lines for the assistant and clean, fenced code for the
   terminal.
 - **Summary vs. full output.** A tool may want to show the user a one-line
