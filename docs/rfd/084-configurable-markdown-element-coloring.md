@@ -408,7 +408,7 @@ each continuation line, which would render wrapped blockquote `>` glyphs with
 To preserve the marker/body split across wraps, `prefix` becomes a
 `Vec<PrefixSpan>` where each span carries an optional `Style`, and
 `write_prefix` wraps each span in `push_style` / `pop_style`.
-`format_block_quote` pushes a `> ` span styled with `blockquote.marker`, while
+`format_block_quote` pushes a ` >  ` span styled with `blockquote.marker`, while
 list items push unstyled indentation spans.
 
 ### Renderer data flow
