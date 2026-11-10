@@ -10,9 +10,8 @@
 
 ## Summary
 
-This RFD introduces `-C` / `--no-cfg` as the negative counterpart of `-c` /
-`--cfg` to revert a previously applied configuration source's influence on a
-conversation.
+This RFD introduces `-C` / `--no-cfg`, the negative counterpart to `-c` /
+`--cfg`, to revert a configuration source's changes in a conversation.
 Each `ConfigDelta` records a per-field claims map tracking which source last set
 each field.
 Reverting a file, `key=value` assignment, JSON object, or shortcut flag clears
@@ -20,18 +19,16 @@ only the fields still claimed by that source and leaves later overrides intact.
 
 ## Motivation
 
-Today a user can layer config files onto a conversation:
+Users can layer config files onto a conversation across invocations:
 
 ```sh
 jp query -n -c dev       # new conversation with dev overrides
 jp query -c architect    # add architect overrides on top
 ```
 
-There is no way to *remove* a previously applied config's influence.
-If the user wants to stop using `dev` without starting a fresh conversation,
-they must manually identify every field `dev` set and override each one with
-`--cfg key=value`.
-This is tedious and error-prone.
+However, there is no way to remove a previously applied config's influence.
+To stop using `dev` without starting a new conversation, the user must manually
+identify every field `dev` set and override each one with `--cfg key=value`.
 
 The expected workflow is:
 
@@ -39,22 +36,20 @@ The expected workflow is:
 jp query -C dev          # "undo" dev's overrides
 ```
 
-This should revert fields that `dev` introduced, but leave untouched any field
-that was subsequently claimed by another config source (e.g. `architect`).
-If both `dev` and `architect` set `tools = [read_file]`, reverting `dev` should
-not disable the tool — `architect` still wants it.
+This command reverts fields that `dev` introduced while leaving intact any field
+subsequently claimed by another config source, such as `architect`.
+If both `dev` and `architect` set `tools = [read_file]`, reverting `dev` must
+not disable the tool because `architect` still enables it.
 
-If we do nothing, users must either track config state manually or start new
-conversations when they want to change config profiles.
-Neither is good UX, and the latter is destructive.
+Without `-C`, users must either track config state manually or start a new
+conversation whenever they change config profiles.
 
 ## Design
 
 ### CLI surface
 
-Add `-C` / `--no-cfg` as a global flag.
-It accepts the same input syntax as `-c` / `--cfg` — config file paths,
-`key=value` assignments, and JSON object literals:
+`-C` / `--no-cfg` is a global flag that accepts the same input syntax as `-c` /
+`--cfg`: config file paths, `key=value` assignments, and JSON object literals:
 
 ```sh
 jp query -C dev                                    # revert a file
@@ -68,50 +63,45 @@ jp query -C dev -C assistant.model.id=anthropic    # mix file and key-value
 Anything that `-c` can convert into a `PartialAppConfig`, `-C` can use as a
 revert target.
 
-All forms of `-C` are claim-history driven, but they pick their revert scope
-differently depending on the form:
+All forms of `-C` use the conversation's claim history, but they scope the
+revert differently by form:
 
-- **File-based** (`-C dev`): **scopes by source identity**.
-  The source identity is the file's [`id`](#stable-identity-via-id) hash (or
-  resolved-path hash if `id` is absent).
-  Multi-root resolution ([RFD 035]) produces a set of hashes, one per resolved
-  file.
-  Only each file's top-level `id` field is read from disk to determine identity;
-  the full partial is never loaded for revert scope.
-- **Key-value** (`-C foo=BAR`): **scopes by current value**.
-  `-C` reverts `foo` only when the field's current resolved value equals `BAR`,
-  and walks back past all claims on `foo` (regardless of source) to find the
-  prior different state.
-  This matches the user intent "undo `foo` being `BAR`."
+- **File-based** (`-C dev`) scopes by **source identity**: the hash of the
+  file's [`id`](#stable-identity-via-id), or the hash of its resolved path when
+  `id` is absent.
+  Multi-root resolution ([RFD 035]) produces one hash per resolved file.
+  Only each file's top-level `id` field is read from disk; the full partial is
+  not loaded to compute revert scope.
+- **Key-value** (`-C foo=BAR`) scopes by **current value**: `-C` reverts `foo`
+  only when its current resolved value equals `BAR`, walking back past all
+  claims on `foo` (regardless of source) to the prior different value.
   See [Revert algorithm](#revert-algorithm).
-- **JSON object** (`-C '{...}'`): pre-expanded via `try_merge_object` (the same
-  path used by `-c` for JSON input) into per-leaf kv reverts.
-  Each leaf runs the value-based kv revert independently.
-- **Shortcut flags** don't have a `-C` form of their own.
-  To revert a shortcut flag's effect, use the equivalent key-value form (`-C
-  assistant.model.id=foo` to undo `--model foo`).
+- **JSON object** (`-C '{...}'`) expands via `try_merge_object` (the same path
+  `-c` uses for JSON input) into per-leaf key-value reverts, running each leaf
+  independently.
+- **Shortcut flags** have no dedicated `-C` flag; revert them with the
+  equivalent key-value form (for example, `-C assistant.model.id=foo` to undo
+  `--model foo`).
 
-**File-based scope comes from claim history, not from the current file.** `-C
-dev` reverts fields that `dev` claimed in this conversation's history, even if
-`dev.toml` has since been edited to remove those fields.
+File-based revert scope comes from claim history, not from the file's current
+contents.
+`-C dev` reverts every field `dev` claimed in the conversation's history, even
+if `dev.toml` has since been edited to remove those fields.
 
-A claim carries one or more identity hashes per source.
-A workspace file's claim always includes the workspace-relative path hash, and
-additionally includes `hash(id)` if the file declares one — either is enough to
-match a target at revert time.
-This means workspace files are always targetable by `-C` even after deletion,
-with or without `id`.
-User-local and user-workspace files use scan-based resolution at revert time;
-they become unreachable post-deletion.
-See the [Source identity](#source-identity) section for the full per-base
-breakdown.
+Each claim stores one or more identity hashes for its source.
+A workspace file's claim always includes the workspace-relative path hash, plus
+`hash(id)` when the file declares `id`; matching either hash is sufficient at
+revert time, so workspace files remain targetable after deletion.
+User-local and user-workspace files use scan-based resolution at revert time and
+cannot be targeted by path after deletion.
+See [Source identity](#source-identity) for the per-root rules.
 
 ### Processing model
 
-Negative args are processed left-to-right together with positive args, following
-the ordered-directive model from [RFD 008].
-A `-C` / `--no-cfg` at any position in the `--cfg`/`--no-cfg` sequence operates
-on whatever the accumulated state is at that point.
+Negative and positive args are processed together from left to right, following
+the ordered-directive model in [RFD 008].
+Each `-C` / `--no-cfg` operates on the state accumulated up to its position in
+the argument list:
 
 ```sh
 # Left-to-right: apply dev, then revert dev (net effect: no dev)
@@ -123,28 +113,25 @@ jp query -C dev -c architect
 
 #### Phase boundaries
 
-JP's config pipeline runs in two phases (see [RFD 079]):
+JP's config pipeline runs in two phases ([RFD 079]):
 
-- **Phase 1** resolves `conversation.default_id` without a conversation loaded.
-  `partial_without_conversation()` processes `-c` directives to extract the
-  default conversation ID, before a conversation stream is available.
-- **Phase 2** runs after the conversation is loaded.
-  The full pipeline, including the per-conversation layer, is applied.
+- **Phase 1** (`partial_without_conversation()`) runs before a conversation is
+  loaded and processes `-c` directives to resolve `conversation.default_id`.
+- **Phase 2** runs after the conversation is loaded and applies the full
+  pipeline, including the per-conversation layer.
 
-`-C` requires a conversation's claim history to compute its scope, so it is
-**phase 2 only**: phase 1 skips every `CfgDirective::Revert` entry and only
-processes `Apply` directives to resolve `conversation.default_id`.
-This means `-C` cannot influence which conversation is loaded.
-
-In practice, `conversation.default_id` is set via workspace config or session
-state, not via mid-sequence `-C`, so this limitation is not user-facing.
+Because `-C` needs the conversation's claim history to compute its scope, phase
+1 skips `CfgDirective::Revert` entries and processes only `Apply` directives.
+As a result, `-C` cannot affect which conversation is loaded.
+In practice, `conversation.default_id` is set in workspace config or session
+state rather than reverted mid-sequence with `-C`.
 
 ### Data model changes
 
 #### `CfgDirective` wrapper
 
 `KeyValueOrPath` is unchanged.
-A new wrapper enum captures whether a config arg is additive or subtractive:
+A wrapper enum records whether an argument applies or reverts a config layer:
 
 ```rust
 /// A config layer directive: apply or revert.
@@ -156,14 +143,12 @@ enum CfgDirective {
 }
 ```
 
-`-c` args produce `CfgDirective::Apply`, `-C` args produce
-`CfgDirective::Revert`.
-Both share the same `KeyValueOrPath` resolution logic.
-The interleaved sequence preserves left-to-right ordering.
+`-c` produces `CfgDirective::Apply` and `-C` produces `CfgDirective::Revert`.
+Both share `KeyValueOrPath` resolution, and the interleaved list preserves
+left-to-right order.
 
-`ResolvedCfgArg` changes its `Partials` variant to carry source metadata
-alongside each partial, so the claims pipeline knows which file contributed each
-field:
+`ResolvedCfgArg::Partials` carries a `SourceId` alongside each
+`PartialAppConfig` so the claims pipeline knows which file set each field:
 
 ```rust
 enum ResolvedCfgArg {
@@ -172,7 +157,7 @@ enum ResolvedCfgArg {
 }
 ```
 
-A new wrapper carries the polarity through resolution:
+`ResolvedCfgDirective` preserves the polarity through resolution:
 
 ```rust
 enum ResolvedCfgDirective {
@@ -181,23 +166,22 @@ enum ResolvedCfgDirective {
 }
 ```
 
-The polarity (apply vs. revert) is orthogonal to the resolution type (key-value
-vs. file partials).
-`apply_cfg_args` matches the outer enum for polarity and the inner for
-resolution type:
+Polarity (apply vs. revert) is orthogonal to the resolved payload (key-value vs.
+file partials).
+`apply_cfg_args` dispatches on both:
 
-- `Apply(*)` — merge as today, plus record claims (file identity for
-  `Partials`, kv identity for `KeyValue`).
-- `Revert(Partials(...))` — file-based, **identity-scoped**: revert fields
-  whose current claim is in the target file identity set.
-- `Revert(KeyValue(...))` — key-value, **value-scoped**: revert the named field
-  if its current resolved value matches the specified value, walking back past
-  all claims on that field.
+- `Apply(*)` merges the config and records claims (file identity for `Partials`,
+  key-value identity for `KeyValue`).
+- `Revert(Partials(...))` is **identity-scoped**: it reverts fields whose
+  current claim matches the target file identity set.
+- `Revert(KeyValue(...))` is **value-scoped**: it reverts the field if its
+  current resolved value matches the target value, walking back past all claims
+  on that field.
 
 #### Claims on `ConfigDelta`
 
-`ConfigDelta` (today a struct in `crates/jp_conversation/src/stream.rs`) gains
-two new fields recording per-field provenance and explicit field clearing:
+`ConfigDelta` (`crates/jp_conversation/src/stream.rs`) gains two fields for
+field clearing and per-field provenance:
 
 ```rust
 pub struct ConfigDelta {
@@ -212,53 +196,48 @@ pub struct ConfigDelta {
 }
 ```
 
-- **`delta`**: the config diff, same as today.
+- **`delta`**: the config diff.
 
 - **`unsets`**: dotted field paths to reset to `None`.
-  Populated by revert deltas (always — for every field in the revert's scope)
-  and optionally by normal deltas that want to clear a field.
-  Applied in `apply_config_delta` **before merging the delta's partial**: each
-  field in `unsets` is reset to `None`, then the delta's partial is merged on
-  top.
-  This ordering gives revert deltas Replace-equivalent semantics for custom
-  merge types without needing per-type handling (see [Revert semantics for
-  custom merge types](#revert-semantics-for-custom-merge-types)).
+  Revert deltas populate `unsets` for every field in their revert scope, and
+  normal deltas can also use it to clear fields.
+  `apply_config_delta` applies `unsets` **before merging `delta`**: each path in
+  `unsets` is reset to `None`, and `delta` is then merged on top.
+  Resetting before merging gives revert deltas replace semantics on custom merge
+  types without per-type handling (see [Revert semantics for custom merge
+  types](#revert-semantics-for-custom-merge-types)).
 
-  Implementation: add an `unset(path: &str)` method to `PartialAppConfig` (and
-  nested partial types) that mirrors the existing `AssignKeyValue` dispatch but
-  sets the target field to `None` instead of assigning a value.
-  For vec-element unsets on set-like and identity-bearing vec fields (see [Claim
-  granularity](#claim-granularity)), a `remove_element(path: &str, identity:
-  &str)` method filters the target array by matching each element's
-  `ClaimIdentity` against the stored identity.
-  Duplicate-capable vec fields do not use `remove_element`; they use whole-field
-  revert via `unset(path)` plus a direct assignment of the prior value.
-  All methods operate at the Rust type level, avoiding JSON serialization
-  round-trips that would be fragile across custom serde implementations (e.g.
-  `MergeableVec`, `MergedString`).
+  `PartialAppConfig` and its nested partial types gain an `unset(path: &str)`
+  method that mirrors `AssignKeyValue` dispatch, setting the target field to
+  `None`.
+  For set-like and identity-bearing vec fields (see [Claim
+  granularity](#claim-granularity)), `remove_element(path: &str, identity:
+  &str)` filters the array by matching each element's `ClaimIdentity`.
+  Duplicate-capable vec fields use whole-field revert via `unset(path)` followed
+  by assigning the prior vector.
+  All operations run directly on the Rust partial types, avoiding JSON
+  round-trips across custom serde implementations such as `MergeableVec` and
+  `MergedString`.
 
-- **`claims`**: field path → list of `"HASH:LABEL"` entries.
-  Three states distinguish:
+- **`claims`**: maps each field path to a list of `"HASH:LABEL"` entries, with
+  three states:
 
-  - **Field absent from the map** — no provenance (this delta didn't claim the
-    field).
-  - **Field present with an empty `Vec`** — explicitly unclaimed, reserved for
-    environment variable overrides (see [Key-value and shortcut flag
+  - **Absent from the map**: this delta did not claim the field.
+  - **Empty `Vec`**: explicitly unclaimed, used for environment variable
+    overrides (see [Key-value and shortcut flag
     claims](#key-value-and-shortcut-flag-claims)).
-  - **Field present with one or more entries** — claimed.
-    A file may carry multiple identity hashes (e.g. `hash(id)` *and*
-    `hash(path)` for a workspace file that declares `id`), letting revert match
-    on any one of them.
-    Matching uses the `HASH` prefix of each entry; the `LABEL` is for display
-    only.
+  - **One or more entries**: claimed by the listed identities.
+    A file can record multiple identity hashes (for example, both `hash(id)` and
+    `hash(path)` for a workspace file with `id`), and a revert matches if any
+    stored `HASH` prefix matches.
+    `LABEL` is for display only.
 
 #### Source identity
 
-Each claim source is stored as a `HASH:LABEL` string.
-The hash (e.g. SHA-256) is always present for identity matching.
-The label provides human-readable context for provenance display (e.g. [RFD
-060]) but varies by source location to avoid leaking user-specific paths into
-shared workspace storage:
+Each claim entry is formatted as `HASH:LABEL`.
+The hash (for example, SHA-256) is used for identity matching.
+The label provides human-readable context for provenance display ([RFD 060]) and
+redacts user-specific paths so they are not written to shared workspace storage:
 
 | Source type                     | Label                      | Example                            |
 | ------------------------------- | -------------------------- | ---------------------------------- |
@@ -270,38 +249,32 @@ shared workspace storage:
 | Conversation ID                 | The conversation ID        | `c0d1e2:jp-c17528832001`           |
 | Key-value assignment            | The canonical field path   | `11a2b3:assistant.model.id`        |
 | Shortcut flag (`--model`, etc.) | Same as kv (maps to field) | `11a2b3:assistant.model.id`        |
-| Environment variable            | —                          | Explicit unclaim (empty `Vec`)     |
+| Environment variable            | None                       | Explicit unclaim (empty `Vec`)     |
 
-A single source can contribute **multiple identity hashes** to a claim, and a
-claim matches a revert target if any of its stored hashes appears in the target
-set.
-Per-base hashing rules:
+A source can record multiple identity hashes on a claim, and a revert matches if
+any stored hash is in the target set:
 
-- **Workspace file**: always hash the workspace-relative path (e.g.
-  `.jp/config/skill/dev.toml`).
-  If the file declares an `id`, additionally hash the `id` value.
-  The path hash is edit-stable and derivable without the file, so workspace
-  files remain targetable by `-C` after deletion.
-- **User-workspace / user-local file**: hash the absolute resolved path.
-  If the file declares an `id`, additionally hash the `id` value.
-  Revert relies on scanning the base directory to discover candidate files; a
-  deleted file isn't found by scan and can't contribute a candidate hash.
+- **Workspace file**: always hashes the workspace-relative path (such as
+  `.jp/config/skill/dev.toml`), plus `id` when declared.
+  Because the workspace-relative path can be derived without reading the file,
+  deleted workspace files remain targetable by `-C`.
+- **User-workspace and user-local files**: hash the absolute resolved path, plus
+  `id` when declared.
+  Revert scans the config directory to discover candidate files, so a deleted
+  file cannot be discovered by scan.
 
-Renaming a file without `id` changes its path-based identity — the `id` hash
-provides stable cross-rename identity, which is why sources that expect to be
-renamed should declare `id`.
+Renaming a file without `id` changes its path hash; files that may be renamed
+should declare `id`.
 
-Conversation streams are part of the workspace and typically shared via VCS.
-Workspace-relative paths are safe to store verbatim.
-User-workspace and user-local paths are redacted to placeholders since they may
-reveal personal directory structure.
-The hash is always available as a fallback — `config explain` ([RFD 060]) can
-attempt to resolve a placeholder by hashing all known config files and matching
-against the stored hash.
+Because conversation streams live in the workspace and are often committed to
+version control, workspace-relative paths are stored verbatim while
+user-workspace and user-local paths use placeholder labels.
+`config explain` ([RFD 060]) can still resolve a placeholder label on the local
+machine by hashing known config files and matching the stored hash.
 
 #### Stable identity via `id`
 
-Config files can declare an optional `id` field for stable identity:
+Config files can declare an optional top-level `id` field:
 
 ```toml
 # .jp/config/skill/dev.toml
@@ -311,28 +284,26 @@ id = "dev-persona"
 name = "DevBot"
 ```
 
-When present, the `id` is used instead of the file path for claim matching.
-This survives file renames: if `dev.toml` is renamed to `developer.toml` but
-keeps `id = "dev-cfg"`, `-C developer` still matches claims from the old file.
+When `id` is set, claims include `hash(id)` so identity survives file renames:
+renaming `dev.toml` to `developer.toml` while keeping `id = "dev-cfg"` lets `-C
+developer` match claims recorded under the old filename.
 
-Two files with the same `id` are treated as the same config identity.
-This is intentional — a team-shared config and a personal override with the
-same `id` can replace each other without breaking claims.
+Files with the same `id` share a config identity, allowing a personal override
+and a team config with the same `id` to replace each other cleanly.
 
-The `id` field is added to `AppConfig` as an optional field, similar to the
-existing `inherit` field.
-The `schematic` `#[derive(Config)]` macro auto-generates the corresponding
-`Option<String>` slot on `PartialAppConfig`.
-It is read during `--cfg` resolution to compute source identity, and stripped
-(set to `None`) during merging so it does not appear in the resolved `AppConfig`
-or in persisted config deltas.
+`AppConfig` gains an optional `id` field (like the existing `inherit` field),
+and `#[derive(Config)]` generates the corresponding `Option<String>` on
+`PartialAppConfig`.
+`--cfg` resolution reads `id` to compute the source identity, and merging resets
+it to `None` so it does not appear in the resolved `AppConfig` or persisted
+config deltas.
 
 ### Claims lifecycle
 
 #### Building claims during `-c`
 
 When the pipeline processes a `-c` arg, it merges the partial into the
-accumulated config AND records claims for each field the partial sets:
+accumulated config and records claims for each field the partial sets:
 
 ```txt
 claims = {}
@@ -351,63 +322,55 @@ for arg in cfg_args:
         claims[kv.field_path] = vec![identity]
 ```
 
-Key-value assignments record their own claim under a distinct kv-style source
+Key-value assignments record their own claim under a distinct key-value source
 identity.
-Kv `-C` does **not** use this identity for matching (see [Key-value
-revert](#key-value-revert-c-foobar)); the identity's sole purpose is to let a
-subsequent file-based `-C <source>` recognize that the field is owned by an
-explicit user override and skip it.
+Key-value `-C` does not use this identity for matching (see [Key-value
+revert](#key-value-revert-c-foo-bar)); instead, the claim lets a later
+file-based `-C <source>` see that the field was overridden by the user and skip
+it.
 See [Key-value and shortcut flag claims](#key-value-and-shortcut-flag-claims)
-below for the identity computation.
+for the identity format.
 
 A single `-c dev` can resolve to multiple files across config roots ([RFD 035]):
 user-global, workspace, and user-workspace.
-Each file gets its own source identity and claims.
-Files are merged in precedence order (user-global < workspace < user-workspace),
-so if two files set the same field, the higher-precedence file's claim
-overwrites the lower one.
-
-If multiple files share the same `id` value, they hash to the same source
-identity.
-Claims from all of them are attributed to that single identity.
-This is intentional — all instances represent "the same config source"
-regardless of which root they came from.
+Each resolved file records its own source identity and claims.
+Files merge in precedence order (user-global < workspace < user-workspace), so
+when two files set the same field, the higher-precedence file's claim overwrites
+the lower one.
+Files that declare the same `id` hash to the same identity regardless of root.
 
 Within a single invocation, later `-c` args overwrite earlier claims for the
-same field.
-This matches left-to-right merge semantics.
+same field, matching left-to-right merge order.
 
 #### Key-value and shortcut flag claims
 
 Both `-c key=value` and CLI shortcut flags (`--model`, `--reasoning`, etc.)
-record claims with a uniform kv-style source identity:
+record claims with a uniform key-value identity:
 
 ```txt
 kv_identity(field_path, canonical_value) =
     hash("kv:" + field_path + "=" + canonical_value)
 ```
 
-The canonical value is the field's typed value re-serialized via its standard
-serde form, with any transformations (e.g. model alias resolution) already
-applied.
-So `--model opus` (where `opus` resolves to `anthropic/claude-opus-4-6`) and `-c
-assistant.model.id=anthropic/claude-opus-4-6` produce the same identity
+`canonical_value` is the field's typed value serialized in its standard serde
+form after transformations such as model alias resolution.
+For example, `--model opus` (where `opus` resolves to
+`anthropic/claude-opus-4-6`) and `-c
+assistant.model.id=anthropic/claude-opus-4-6` both produce
 `hash("kv:assistant.model.id=anthropic/claude-opus-4-6")`.
 
-This identity is used **only for apply-side claim recording**, not for `-C`
-matching.
-Kv `-C foo=BAR` is value-based (see [Key-value
-revert](#key-value-revert-c-foobar)).
-The kv identity still matters because it appears in the claims state, where it
-tells a subsequent `-C <source>` that the field is owned by an explicit user
-override rather than by the named source — so `-C dev` won't silently revert a
-field that was later pinned by `-c assistant.model.id=something`.
+This identity is used only when recording `Apply` claims, not when matching
+`-C`.
+Key-value `-C foo=BAR` is value-based (see [Key-value
+revert](#key-value-revert-c-foo-bar)), while the recorded claim prevents a later
+`-C <source>` from reverting a field that was pinned by `-c
+assistant.model.id=something`.
 
-Shortcut flags record claims by threading a `claims: &mut BTreeMap<String,
+Shortcut flags record claims by threading `claims: &mut BTreeMap<String,
 Vec<String>>` through `IntoPartialAppConfig::apply_cli_config` and each
 `apply_*` helper.
-Each helper registers the `(field_path, canonical_value)` pair alongside its
-partial mutation:
+Each helper registers `(field_path, canonical_value)` alongside its partial
+mutation:
 
 ```rust
 fn apply_model(
@@ -426,163 +389,134 @@ fn apply_model(
 }
 ```
 
-The `&'static str` field path lives next to the assignment — the only place
-that can stay correct as the code evolves.
-A static flag-to-field mapping table was rejected because several helpers do
-non-trivial work (`apply_editor` branches on variants; `apply_reasoning` touches
-multiple fields), which a table would not capture.
+Keeping the `&'static str` field path next to the assignment avoids a separate
+flag-to-field mapping table, which would not capture helpers that branch on
+variants (`apply_editor`) or set multiple fields (`apply_reasoning`).
 
-Environment variable overrides (`JP_CFG_*`) are the one principled exception:
-they record `claims[path] = vec![]` (empty vec = explicit unclaim).
-The rationale is lifecycle, not technical — env vars are ambient session state,
-not per-invocation intent.
-A user who wants to undo an env override removes it from the environment; there
-is no `-C env:...` syntax to invent.
-The empty entry also prevents a later file-based `-C source` from silently
-reverting an env-set field.
+Environment variable overrides (`JP_CFG_*`) record `claims[path] = vec![]` (an
+explicit unclaim).
+Environment variables are ambient session state rather than per-invocation
+directives: users undo an environment override by unsetting the variable in
+their shell, and the empty claim entry prevents a later file-based `-C source`
+from reverting an environment-set field.
 
 #### Persisting claims: per-directive deltas
 
-This RFD changes the persistence model from **one `ConfigDelta` per invocation**
-to **one per apply step**:
+Instead of persisting one `ConfigDelta` per invocation, JP persists one
+`ConfigDelta` per apply or revert step:
 
-- Each `-c` directive (file or key-value) emits its own delta carrying just that
-  directive's contribution and claims.
-- Each `-C` directive emits its own delta carrying the revert (which fields were
-  unclaimed, what the reverted values are, plus any `unsets`).
-- All CLI shortcut flags (`--model`, `--reasoning`, etc.) batch into a **single
-  trailing delta** after all `-c`/`-C` directives.
-  Their kv identities are distinct (one per touched field), so batching is safe
-  — no two flags claim the same field under different identities within one
-  batch.
+- Each `-c` directive (file or key-value) emits a delta with that directive's
+  diff and claims.
+- Each `-C` directive emits a delta with the reverted values, updated claims,
+  and any `unsets`.
+- All CLI shortcut flags (`--model`, `--reasoning`, etc.) batch into a single
+  trailing delta after all `-c` and `-C` directives.
+  Because each shortcut flag touches a distinct set of fields, batching them
+  does not lose intermediate claims.
 
-A `ConfigDelta` is emitted whenever the diff OR the claims map OR `unsets` is
-non-empty.
-This is a change from the current behavior, which skips empty diffs — a
-claims-only delta (e.g. when `-c architect` sets a field to the same value `dev`
-already set) must still be stored to update provenance.
+A `ConfigDelta` is emitted whenever `delta`, `claims`, or `unsets` is non-empty.
+Even when the value diff is empty (for example, when `-c architect` sets a field
+to the same value `dev` already set), the claims-only delta is persisted so
+provenance stays up to date.
 
-**Why per-directive.** Consider a common workflow:
+**Why per-directive.** Consider layering two configs in one invocation and
+reverting one in the next:
 
 ```sh
 jp query -c dev -c architect       # invocation 1: layer dev then architect
 jp query -C architect              # invocation 2: drop architect
 ```
 
-Under one-delta-per-invocation (today's model), the invocation 1 delta's claims
-map would reflect only the final state — architect wins every field it and dev
-both touched.
-The intermediate dev claim is lost.
-In invocation 2, `-C architect` walking back past architect's claim reaches only
-the base config for shared fields, not dev's values.
-Dev's influence on shared fields is silently erased.
+With one delta per invocation, invocation 1's claims map would record only the
+final state (`architect` on every shared field), losing `dev`'s intermediate
+claim.
+In invocation 2, `-C architect` would walk back past `architect`'s claim
+straight to the base config, erasing `dev`'s values on shared fields.
 
-With per-directive deltas, invocation 1 persists two deltas: delta A (dev's
-contributions and claims) then delta B (architect's contributions and claims).
-In invocation 2, walking back past architect's claim lands on dev's, and dev's
-values re-emerge.
-The user's "drop architect, keep dev" intent holds regardless of whether dev and
-architect were applied in the same or separate invocations.
+With per-directive deltas, invocation 1 persists delta A (`dev`'s values and
+claims) followed by delta B (`architect`'s values and claims).
+In invocation 2, walking back past `architect`'s claim lands on delta A,
+restoring `dev`'s values whether `dev` and `architect` were applied in one
+invocation or across two.
 
-The cost is one persisted event per directive instead of per invocation — see
-[Drawbacks](#drawbacks).
+The trade-off is one persisted event per directive instead of one per invocation
+(see [Drawbacks](#drawbacks)).
 
-**Legacy backward-compat.** Old conversation streams without claims deserialize
-with an empty map (`#[serde(default)]`).
-For fields with no claim entry, `-C` skips — there is no provenance to match
-against, and guessing from diff values would produce unpredictable results.
-`-C` therefore only works precisely on conversations created after the claims
-feature lands; legacy conversations are unaffected.
+**Legacy backward compatibility.** Existing conversation streams without claims
+deserialize with an empty map (`#[serde(default)]`).
+When a field has no claim entry, file-based `-C` skips it rather than guessing
+from value diffs, so `-C` is a no-op on pre-existing conversations.
 
 #### Delta plumbing changes
 
-`ConfigDelta` is currently handled by hand-rolled serde and helper functions
-that drop unknown fields.
-Adding `claims` and `unsets` to the struct with `#[serde(default)]` is **not**
-sufficient on its own.
-Three concrete changes are required:
+`ConfigDelta` uses custom serde and helper functions that ignore unknown fields,
+so adding `#[serde(default)]` to `claims` and `unsets` on the struct is not
+enough.
+Three changes are required in `crates/jp_conversation/src/stream.rs`:
 
-- **`deserialize_config_delta`** (`crates/jp_conversation/src/stream.rs`, line
-  ~158) currently reads only `delta` and `timestamp` from a raw
-  `serde_json::Value`.
-  It must be extended to read `claims` and `unsets` explicitly.
-  The hand-rolled function bypasses derived deserialization, so struct-level
-  `#[serde(default)]` never runs.
-- **`add_config_delta`** (line ~302) currently destructures `{ delta, timestamp
-  }` and skips emitting when the recomputed diff is empty.
-  It must:
-  - destructure and preserve `claims` and `unsets` through the
-    diff-recomputation step,
-  - emit the delta when `claims` or `unsets` is non-empty, even if the value
-    diff is empty (claims-only deltas carry provenance that cross-invocation
-    `-C` depends on).
-- **Single `apply_config_delta` helper.** Delta replay happens in six places
-  today: `config()`, `IntoIter::next` and `next_back`, `Iter::next` and
-  `next_back`, `IterMut::next`.
-  Each site currently calls `partial.merge(&(), delta.into())` directly.
-  Introduce a single `apply_config_delta(partial: &mut PartialAppConfig, delta:
-  &ConfigDelta)` helper that **applies `delta.unsets` first, then merges
-  `delta.delta`**, and replace all six call sites with it.
-  The unset-before-merge order is load-bearing for revert semantics (see [Revert
-  semantics for custom merge types](#revert-semantics-for-custom-merge-types))
-  and ensures `config()` and the per-event iterators produce identical views.
+- **`deserialize_config_delta`** (around line 158) reads only `delta` and
+  `timestamp` from a raw `serde_json::Value`, bypassing derived deserialization.
+  Extend it to read `claims` and `unsets` explicitly.
+- **`add_config_delta`** (around line 302) destructures `{ delta, timestamp }`
+  and skips emission when the recomputed diff is empty.
+  Update it to preserve `claims` and `unsets` across diff recomputation, and to
+  emit the delta whenever `delta`, `claims`, or `unsets` is non-empty.
+- **Single `apply_config_delta` helper.** Six call sites replay deltas by
+  calling `partial.merge(&(), delta.into())` directly: `config()`,
+  `IntoIter::next` and `next_back`, `Iter::next` and `next_back`, and
+  `IterMut::next`.
+  Replace all six with `apply_config_delta(partial: &mut PartialAppConfig,
+  delta: &ConfigDelta)`, which applies `delta.unsets` first and then merges
+  `delta.delta`.
+  Applying `unsets` before `delta` is required for revert semantics on custom
+  merge types (see [Revert semantics for custom merge
+  types](#revert-semantics-for-custom-merge-types)) and keeps `config()` aligned
+  with the per-event iterators.
 
 #### Current claims state
 
 Before running an invocation's directive loop, the pipeline builds the **current
-claims state**: a `BTreeMap<String, Vec<String>>` recording the identities that
-claim each field (absent = no claim, empty vec = explicitly unclaimed, non-empty
-= claimed on any listed identity).
-This state is what the `-C` revert algorithm consults to compute scope.
-It is built in order:
+claims state**, a `BTreeMap<String, Vec<String>>` mapping each field to its
+current claiming identities (absent = unclaimed, empty `Vec` = explicitly
+unclaimed, non-empty = claimed by the listed identities):
 
-1. **Persisted claim history fold.** Walk the `base` partial's empty claims →
-   each `init` `ConfigDelta` entry in `base_config.json` (the creation-time
-   per-directive deltas) → each event-stream `ConfigDelta` in `events.json`.
-   Take the most recent claim per field.
-2. **Current-invocation env unclaims.** For each field set in the **env-only
-   partial** — the result of `PartialAppConfig::from_envs()` in
-   `crates/jp_config/src/lib.rs` — overwrite the claims state with `vec![]`
-   (empty vec = explicit unclaim).
-   Note that `load_envs()` (same file, `util.rs`) returns the base **merged
-   with** env, which is unsuitable here: we need the env-only set of touched
-   fields to know which entries to unclaim.
-   This step protects env-set fields from a subsequent `CfgDirective::Revert`
-   that might otherwise walk back to a pre-env persisted claim and emit a delta
-   that overrides the live env value.
+1. **Fold persisted claim history.** Start from empty claims on `base`, then
+   fold each `ConfigDelta` in `base_config.json`'s `init` list followed by each
+   `ConfigDelta` in `events.json`, keeping the most recent claim entry per
+   field.
+2. **Apply current-invocation environment unclaims.** For each field set in the
+   env-only partial returned by `PartialAppConfig::from_envs()`
+   (`crates/jp_config/src/lib.rs`), set `claims_state[field] = vec![]`.
+   Use `from_envs()` rather than `load_envs()` (`util.rs`), which returns the
+   base config merged with environment variables rather than only the
+   environment-set fields.
 
-The env-seeding step matters because env vars are applied before the
-`ConfigPipeline` runs (`load_base_partial` in `crates/jp_cli/src/lib.rs` calls
-`load_envs` to merge env into the base partial before the pipeline sees any
-directive), but their unclaim effect must be present in the claims state when
-phase 2 processes `-C`.
-Without this step, a user with `JP_CFG_ASSISTANT_MODEL_ID=...` set could run `jp
-query -C dev` and have the env-set model overwritten by a revert to dev's prior
-value.
+Seeding environment unclaims is necessary because `load_base_partial`
+(`crates/jp_cli/src/lib.rs`) merges environment variables into the base partial
+before `ConfigPipeline` runs.
+Without this step, running `jp query -C dev` with `JP_CFG_ASSISTANT_MODEL_ID`
+set would walk back to a persisted claim and emit a revert delta that overwrites
+the active environment variable.
 
-During left-to-right `-c`/`-C` processing:
+As the pipeline processes `-c` and `-C` directives from left to right:
 
-- Each `Apply` updates the claims state with its contributed claims.
-- Each `Revert` updates each in-scope field to its **post-revert claim**: the
-  prior non-target claim found during walk-back, or no claim (absent from the
-  map) if the walk reached the base config.
-  This matches the emitted delta's `claims` map exactly, so later directives in
-  the same invocation see the correct current owner.
-  For example, after `-c dev -c architect -C architect` processes left-to-right,
-  `-C dev` following in the same invocation sees fields owned by dev (restored
-  by the architect revert) and can undo them.
+- Each `Apply` updates `claims_state` with the claims it records.
+- Each `Revert` sets each reverted field in `claims_state` to its post-revert
+  owner: the prior non-target claim found during walk-back, or absent if the
+  walk reached `base`.
+  Because `claims_state` matches the emitted revert delta's `claims` map, later
+  directives in the same invocation see the restored owner (for example, in `-c
+  dev -c architect -C architect -C dev`, the second `-C` sees `dev` as the
+  restored owner of shared fields and reverts them).
 
-Each directive's claims delta is persisted (see [Persisting
-claims](#persisting-claims-per-directive-deltas)) rather than being squashed
-into an invocation-level map.
+Each directive's claims delta is persisted individually (see [Persisting
+claims](#persisting-claims-per-directive-deltas)).
 
 ### Revert algorithm
 
-`-C` has two scoping modes depending on the flag's form: **file-based reverts
-scope by source identity**, **key-value reverts scope by current value**.
-Both are driven by the conversation's claim history but answer different
-questions.
-JSON-object `-C` is just a fan-out into multiple kv reverts.
+`-C` has two scoping modes: **file-based reverts scope by source identity**, and
+**key-value reverts scope by current value**.
+JSON-object `-C` expands into per-leaf key-value reverts.
 
 #### File-based revert: `-C <source>`
 
@@ -590,152 +524,120 @@ JSON-object `-C` is just a fan-out into multiple kv reverts.
 
    - Resolve `<source>` via `config_load_paths` across roots ([RFD 035]) to one
      or more candidate paths (existing or not).
-   - For each candidate, compute every applicable identity hash:
-     - If the file exists and declares a top-level `id`: include `hash(id)`.
-     - Workspace files: include `hash(workspace-relative path)` — derivable
-       without the file (path is edit-stable), so this works even when the file
-       is deleted.
-     - User-local / user-workspace files: include `hash(absolute resolved path)`
-       — requires the file to exist because resolution is scan-based, not
-       path-derivable.
-       Each candidate contributes 1 or 2 hashes; files with `id` and known path
-       contribute both.
-   - The target set is the union of all computed hashes.
-     Files sharing the same `id` collapse on that hash; path-based identities
-     stay distinct per resolved path.
+   - For each candidate, collect its applicable identity hashes:
+     - If the file exists and declares a top-level `id`, include `hash(id)`.
+     - For a workspace file, include `hash(workspace-relative path)`, which can
+       be derived even after the file is deleted.
+     - For a user-local or user-workspace file, include `hash(absolute resolved
+       path)`, which requires the file to exist on disk because resolution is
+       scan-based.
+   - The target set is the union of all collected hashes.
+     Files sharing an `id` collapse onto `hash(id)`, while path hashes remain
+     distinct per path.
 
-2. **Determine field scope from the current claims state** (built per [Current
-   claims state](#current-claims-state), including env unclaims).
+2. **Determine field scope from `claims_state`** (including environment
+   unclaims):
 
-   Scope is `{field | claims_state[field] has any identity in target_set}`.
-   Purely claim-history driven — the source's current file contents are never
-   consulted for scope.
-
-   Claims state entries:
-
-   - **Non-empty `Vec`** with any entry whose hash is in the target set →
-     **target owns it**, include in scope.
-   - **Non-empty `Vec`** with no entry in the target set → **another source
-     owns it**, skip.
-   - **Empty `Vec`** → **explicitly unclaimed** (env var override), skip.
-   - Field not in `claims_state` → **no provenance data**, skip.
+   - **Non-empty `Vec` with a hash in `target_set`**: owned by the target;
+     include in scope.
+   - **Non-empty `Vec` with no hash in `target_set`**: owned by another source;
+     skip.
+   - **Empty `Vec`**: explicitly unclaimed (environment variable override);
+     skip.
+   - **Absent from `claims_state`**: no provenance recorded; skip.
 
 3. **Compute revert values.** For each field in scope, walk `ConfigDelta` events
-   backwards past all claims that match the target set (any stored identity in
-   the target set), until a claim with no target-matching identity or the base
-   config is reached.
-   Use the config value at that point.
-   If the target value is `None`, add the field path to the revert delta's
-   `unsets` list instead of its partial (schematic's merge cannot express `Some
-   → None` transitions).
+   backward past all claims matching `target_set` until reaching either a claim
+   with no target hash or `base`.
+   Take the field's value at that point.
+   If the target value is `None`, add the field path to `unsets` (schematic's
+   merge cannot represent a `Some -> None` transition).
 
-4. **Emit** a new `ConfigDelta` representing the revert itself: its `delta`
-   carries the reverted values, `unsets` carries any unset paths, and its
-   `claims` map records each reverted field's new owner (the prior non-target
-   claim, or absent if revert reached base).
+4. **Emit a revert `ConfigDelta`** carrying the reverted values in `delta`, any
+   cleared field paths in `unsets`, and each reverted field's restored owner in
+   `claims` (or omitting fields whose revert reached `base`).
 
 #### Key-value revert: `-C foo=BAR`
 
-1. **Read the current resolved value** of `foo` from the pipeline's current
-   state (after persisted deltas and env have been folded).
-2. **Compare.** If the current value does not equal `canonical(BAR)`, skip with
-   a diagnostic — the user asked to undo a value that isn't currently set.
-3. **Walk back.** Starting from the most recent `ConfigDelta` in the stream,
-   walk backward through events, looking for the first delta whose application
-   yielded a `foo` value different from `BAR`.
-   All claims on `foo` between that point and the present are considered part of
-   the "assignment to be undone," regardless of which source owns each.
-4. **Emit** a `ConfigDelta` that reverts `foo` to that earlier different value
-   (or `unsets[foo]` if it was unset), with `claims` reflecting the new owner of
-   `foo` (the claim at the earlier point, or absent if reached base).
+1. **Read the current resolved value** of `foo` from the pipeline state (after
+   folding persisted deltas and environment variables).
+2. **Compare with `canonical(BAR)`.** If the current value differs, skip with a
+   diagnostic because the target value is not active.
+3. **Walk back** from the most recent `ConfigDelta` to the first state where
+   `foo`'s resolved value differed from `BAR` (or to `base`), traversing all
+   intervening claims on `foo` regardless of source.
+4. **Emit a `ConfigDelta`** setting `foo` to that earlier value (or adding `foo`
+   to `unsets` if it was unset) and updating `claims` to the owner at that
+   earlier point.
 
-Consequence: `-C foo=BAR` undoes `foo=BAR` regardless of who set it.
-The last `-c dev` that set `foo=BAR`, the kv assignment `-c foo=BAR`, a shortcut
-flag batch, or any combination — all are undone if the current value is `BAR`.
-The user's "undo this value" intent matches behavior.
+Because key-value `-C` checks only the current value, `-C foo=BAR` undoes `foo =
+BAR` whether it came from `-c dev`, `-c foo=BAR`, or a shortcut flag.
 
 #### JSON-object revert: `-C '{...}'`
 
-Pre-expand the JSON via `try_merge_object` into per-leaf assignments, then run
-the key-value revert algorithm independently for each leaf.
-Mismatched values on some leaves produce per-leaf diagnostics; matches revert
-normally.
-The overall command succeeds even if only some leaves match.
+Expand the JSON object via `try_merge_object` into per-leaf assignments and run
+the key-value revert algorithm on each leaf independently.
+Leaves whose current value does not match emit a diagnostic, while matching
+leaves revert normally.
 
 #### Why claim-history, not current-file-contents
 
-Deriving file-revert scope from the current contents of the target file would
-miss fields that the file no longer sets after being edited — leaving stale
-values behind.
-Claim-history scope reflects historical intent ("undo this source's influence on
-this conversation") rather than current-file intent ("undo whatever this file
-says now").
+Computing file-revert scope from the target file's current contents on disk
+would miss fields that were removed from the file after it was applied, leaving
+stale values in the conversation.
+Using claim history instead undoes everything the source contributed to the
+conversation.
 
-The approach handles file edits cleanly.
-Deletion support depends on base:
+How file deletion behaves depends on the config root:
 
-- **Workspace files**: always targetable post-deletion.
-  The workspace-relative path is edit-stable and always hashed into the claim,
-  so the target identity set can be reconstructed without the file.
-  This holds whether or not the file declared `id`.
-- **User-local / user-workspace files**: not targetable post-deletion.
-  Their identities are absolute paths derived via scan-based resolution at
-  revert time; a deleted file isn't found by scan, so no candidate hash is
-  produced.
-  If stable revert is needed across deletion, declare `id` on the file early and
-  keep it present, OR move it into the workspace so the path-derived identity
-  survives deletion.
+- **Workspace files** remain targetable after deletion because the
+  workspace-relative path is always hashed into the claim and can be derived
+  without reading the file.
+- **User-local and user-workspace files** cannot be targeted after deletion
+  because their candidate paths come from scanning the directory at revert time.
+  To keep a file revertable if moved or replaced, declare `id` on it or store it
+  in the workspace.
 
-See also [RFD 060] for the provenance-display angle.
+See [RFD 060] for provenance display.
 
 #### Revert semantics for custom merge types
 
-The config has several fields backed by custom merge types whose strategies can
-be Append, Prepend, or Replace:
+Several config fields use custom merge wrappers whose strategies can be Append,
+Prepend, or Replace:
 
-- `MergeableString` (e.g. `assistant.system_prompt`, see
+- `MergeableString` (for example, `assistant.system_prompt` in
   `crates/jp_config/src/types/string.rs` and `internal/merge/string.rs`).
-- `MergeableVec` (e.g. `assistant.instructions`, `conversation.attachments`, see
-  `crates/jp_config/src/types/vec.rs` and `internal/merge/vec.rs`).
-- `MergeableMap` (e.g. `plugins.command`, `providers.mcp`,
-  `conversation.labels`, see `crates/jp_config/src/types/map.rs` and
+- `MergeableVec` (for example, `assistant.instructions` and
+  `conversation.attachments` in `crates/jp_config/src/types/vec.rs` and
+  `internal/merge/vec.rs`).
+- `MergeableMap` (for example, `plugins.command`, `providers.mcp`, and
+  `conversation.labels` in `crates/jp_config/src/types/map.rs` and
   `internal/merge/map.rs`).
 
-The same limitation shows up in the *forward* direction for these types, and
-`conversation.labels` is the case that surfaced it: `PartialConversationConfig::
-delta` collects changed entries into a plain `MergeableMap::Map`, so the
-wrapper's `strategy` is dropped and a key present in the previous state but
-absent from the next produces no entry rather than a removal.
-A layer that replaced the map wholesale (`strategy = "replace"`) therefore
-records a delta that deep-merges on the next fold, and a rule the replacement
-dropped comes back.
-`attachments` (a `MergeableVec`) and `conversation.tools` (a plain `IndexMap`)
-behave the same way.
+The same issue occurs on forward deltas for these types, as seen with
+`conversation.labels`: `PartialConversationConfig::delta` collects changed
+entries into a plain `MergeableMap::Map`, dropping the wrapper's `strategy` and
+omitting keys that were removed.
+When a layer replaces the map (`strategy = "replace"`), the recorded delta
+deep-merges on the next fold and removed entries reappear.
+`attachments` (`MergeableVec`) and `conversation.tools` (`IndexMap`) have the
+same problem.
 
-Two fields have since been fixed in place, each by detecting the removal and
-emitting the whole container with `strategy = "replace"` instead of a minimal
-append: `conversation.labels`, and `access.fs` / `access.env` on a tool (via
-`rule_delta` in `jp_config::conversation::tool::access`).
-Both carry security-relevant grants, which is why they were worth closing ahead
-of the general mechanism.
-They are point fixes, not a pattern to copy blindly — each one hard-codes
-"absent means removed" for its own container, which is precisely the judgement
-`unsets` makes explicit.
+Two security-sensitive fields (`conversation.labels`, and `access.fs` /
+`access.env` via `rule_delta` in `jp_config::conversation::tool::access`) work
+around this by emitting the entire container with `strategy = "replace"`
+whenever an entry is removed.
+`unsets` replaces those point fixes with a general mechanism for explicit
+removal.
 
-This RFD's `unsets` mechanism is what closes the rest, and what lets the two
-point fixes be deleted.
-
-A revert delta that encoded its target value with, say, Append strategy would
-concatenate the target onto the current resolved state rather than replacing it.
-The RFD's design avoids this class of bug entirely by leaning on `schematic`'s
-Option-handling at the partial-merge layer.
-
-**The mechanism**: every revert delta writes the field path in `unsets` **and**
+Without `unsets`, a revert delta whose target value carried an Append strategy
+would append the prior value onto the current state instead of replacing it.
+To force replacement, every revert delta records the field path in `unsets` and
 the target value in `delta.delta`.
-The `apply_config_delta` helper applies unsets first (field → `None`), then
-merges `delta.delta` on top.
-Schematic's `merge_setting(prev: Option<T>, next: Option<T>, ...)` in
-`crates/schematic/src/internal.rs` gates on both sides being `Some`:
+`apply_config_delta` runs `unsets` first (setting the field to `None`) and then
+merges `delta.delta`.
+In `crates/schematic/src/internal.rs`, `merge_setting(prev: Option<T>, next:
+Option<T>, ...)` only calls the custom merger when both sides are `Some`:
 
 ```rust
 if prev.is_some() && next.is_some() {
@@ -747,74 +649,53 @@ if prev.is_some() && next.is_some() {
 }
 ```
 
-When `prev = None` and `next = Some(target)`, the custom `merger` (e.g.
-`string_with_strategy`, `vec_with_strategy`, `map_with_strategy`) is **never
-called**.
-The field is set to the target value verbatim.
-Any Append/Prepend/DeepMerge metadata carried on the target's partial is inert
-within the revert delta's application.
+When `prev` is `None` and `next` is `Some(target)`, the custom merger
+(`string_with_strategy`, `vec_with_strategy`, `map_with_strategy`) is bypassed
+and the field is set directly to `target`.
+`merge_nested_setting` uses the same `Option` check for nested configs:
 
-This means:
-
-- The revert-delta builder does **not** need per-type helpers to force Replace
-  semantics.
-- The `ToPartial` conversion for the target value is fine as-is, regardless of
-  which strategy the field normally uses.
-- `schematic`'s `merge_nested_setting` (used for nested configs) has identical
-  Option-gating, so nested fields work the same way.
-
-**Caveat**: the stored target value may carry a strategy marker (e.g.
-`PartialMergeableString::Merged { strategy: Append, ... }`) because it was
-computed from a field whose default encoding uses that strategy.
-This is harmless at revert-apply time (the strategy does not fire against a
-`None` prev) and at subsequent-delta time (subsequent deltas use their own
-`next.strategy` to drive merging; the stored `prev.strategy` is not consulted by
-`string_with_strategy`, `vec_with_strategy`, or `map_with_strategy`).
-The marker is inert metadata on a value that was produced by the revert
-mechanism, not by the strategy it names.
+- The revert-delta builder needs no per-type helpers to force Replace semantics.
+- `ToPartial` can be used as-is for the target value regardless of the field's
+  merge strategy.
+- Any strategy marker on the stored target value (such as
+  `PartialMergeableString::Merged { strategy: Append, ... }`) has no effect:
+  revert application sees `prev = None`, and later deltas use their own
+  `next.strategy` rather than consulting `prev.strategy`.
 
 ### Conversation creation change
 
-Currently, new conversations set `base_config` to the fully resolved `AppConfig`
-(including environment variables, `-c` args, and CLI flags from the creation
-invocation).
-This bakes all override values into the base with no `ConfigDelta` stored and no
-claims recorded.
-A later `-C` has no claims to match against.
+Previously, creating a conversation set `base_config` to the fully resolved
+`AppConfig`, including environment variables, `-c` args, and CLI flags from the
+creation invocation.
+Baking those overrides into `base_config` without a `ConfigDelta` or claims map
+left a later `-C` with no claims to match.
 
-This RFD reshapes `base_config.json` to carry both the workspace snapshot and
-the first invocation's per-directive deltas, preserving the `events.json`
-cleanliness guarantee from [RFD 054] while giving first-invocation `-c`/`-C`
-directives the same per-directive persistence as subsequent ones.
+To preserve the `events.json` layout from [RFD 054] while recording
+per-directive provenance on the creating invocation, `base_config.json` is
+reshaped to store both the workspace config snapshot and the creating
+invocation's per-directive deltas.
 
 #### Pinning is a constraint on the reshaping
 
-A conversation carries its own configuration, and its behavior does not change
-underneath it.
-Upgrading JP or editing the workspace config leaves every existing conversation
-resolving exactly as it did before; `-c WORKSPACE` is how a user opts a
-conversation forward.
-That rule predates this RFD and is not up for revision here.
+A conversation pins its configuration at creation time: upgrading JP or editing
+the workspace config does not change how an existing conversation resolves, and
+users opt a conversation into the current workspace config explicitly with `-c
+WORKSPACE`.
 
-A resolved `AppConfig` delivers the rule by construction.
-Resolving bakes program defaults into concrete values, so a
-`#[setting(default)]` that changes in a later release cannot reach a
-conversation created before it, and the stored type is total: every field has a
-value, and the value is valid.
+Storing a resolved `AppConfig` enforces pinning by construction.
+Resolution materializes `#[setting(default)]` values into concrete fields, so a
+default that changes in a later release cannot alter an existing conversation,
+and the stored config is guaranteed to be complete and valid.
 
-Storing a `PartialAppConfig` instead gives up both.
-A partial holds only what its source stated, so every unstated field would take
-its default from whichever binary happens to resolve it, and a conversation
-would start behaving differently after an upgrade.
-It is also not total: nothing about the type says the stored config is complete,
-and a partial holding almost nothing is a valid value of it.
-
-The fix is to keep the resolved type and narrow *what* is resolved into it,
-rather than adding a layer that reconstructs what resolution already provides.
+Storing a `PartialAppConfig` instead would lose both guarantees: unset fields
+would take their defaults from whichever binary loads the conversation, and the
+type system would no longer guarantee that the stored config is complete.
+For that reason, `base` remains a resolved `AppConfig`, but it is resolved from
+the workspace files alone rather than from the entire creating invocation.
 
 #### File format
 
-`base_config.json` becomes a structured object with two fields:
+`base_config.json` becomes a JSON object with two keys:
 
 ```json
 {
@@ -826,67 +707,59 @@ rather than adding a layer that reconstructs what resolution already provides.
 }
 ```
 
-- **`base`** is an `AppConfig`, as today: total, valid, and with program
-  defaults baked into concrete values.
-  What changes is its input — the workspace's own config files merged via
-  inheritance (`.jp/config.toml` and the `.jp.toml` chain), resolved on their
-  own.
-  User-global config, user-workspace config, environment variables, `-c` args
-  and CLI flags are all excluded.
-- **`init`** is an ordered list of `ConfigDelta` entries, one per source the
-  creating invocation layered on top of the workspace files: user-global config,
-  user-workspace config, the environment, each `-c` directive (file,
+- **`base`** is a resolved `AppConfig` built from the workspace's own config
+  files merged via inheritance (`.jp/config.toml` and the `.jp.toml` chain),
+  with program defaults materialized into concrete values.
+  User-global config, user-workspace config, environment variables, `-c` args,
+  and CLI flags are excluded.
+- **`init`** is an ordered list of `ConfigDelta` entries, one per source layered
+  on top of the workspace files during creation: user-global config,
+  user-workspace config, environment variables, each `-c` directive (file,
   `key=value`, or JSON object), each `-C` directive, and the trailing
   shortcut-flags batch.
-  Each entry carries its diff, claims map, and any `unsets`.
+  Each entry carries its diff, claims map, and `unsets`.
 
-The stored type is `AppConfig`; the stored *encoding* is what it is today.
-`to_parts()` writes `base_config.to_partial()` and `from_parts()` reads through
-`compat::deserialize_partial_config` followed by `finalize_recovered_config`, so
-`base` appears on disk as a partial-shaped object and is finalized on load.
-That path is retained as-is, including the schema-aware stripping of unknown
-fields and the fallback for a stored config that has lost a required field.
-Nothing about this RFD changes how `base` is encoded, only what is resolved into
-it.
+How `base` is serialized on disk does not change: `to_parts()` writes
+`base_config.to_partial()`, and `from_parts()` reads it back through
+`compat::deserialize_partial_config` followed by `finalize_recovered_config`,
+retaining schema-aware stripping of unknown fields and fallback handling for
+missing required fields.
 
 ##### What an `init` entry holds
 
-An entry is the difference between resolving the sources up to and including it
-and resolving the sources before it, in the existing load order — not the
-partial that source declared.
+Each `init` entry records the diff between resolving the sources up to and
+including that source and resolving the sources before it, in normal load order,
+rather than the raw partial the source declared.
 
-Two things follow.
+Recording the post-resolution diff has two consequences:
 
-A source can change a value it never mentions.
-A workspace naming `assistant.model.id = "coder"` with
-`providers.llm.aliases.coder = "openai/gpt-4o"`, plus a user-workspace override
-setting only that alias to `anthropic/claude-opus-4-6`, resolves to the
-Anthropic model — but `base` already holds the flattened `openai/gpt-4o`, and
-`ModelIdOrAliasConfig::resolve_in_place` is a no-op once the field is a concrete
-`Id`.
-Replaying the alias map alone would leave the conversation on the wrong model.
-A difference between resolutions carries the resolved `assistant.model.id` too,
-so the replay lands where ordinary resolution lands.
-Alias flattening is the clearest case; inquiry inheritance and instruction
-ordering are computed during resolution the same way.
+1. **Indirectly affected fields are captured.** If the workspace sets
+   `assistant.model.id = "coder"` with `providers.llm.aliases.coder =
+   "openai/gpt-4o"`, and a user-workspace override changes that alias to
+   `anthropic/claude-opus-4-6`, `base` already holds the resolved model ID
+   `openai/gpt-4o`, where `ModelIdOrAliasConfig::resolve_in_place` is a no-op.
+   Replaying only the alias map change would leave `assistant.model.id` on
+   `openai/gpt-4o`.
+   Diffing the resolved configs includes the updated `assistant.model.id` (as
+   well as inquiry inheritance and instruction ordering computed during
+   resolution).
+2. **Source precedence is preserved.** `load_partial_configs_from_files` loads
+   user-global config before workspace config, so `conversation.tools.'*'.run =
+   "ask"` in the workspace overrides `"unattended"` in user-global config.
+   Replaying user-global's raw partial after `base` would invert that precedence
+   and overwrite `"ask"` with `"unattended"`.
+   Diffing the resolutions omits any user-global field that the workspace
+   overrode.
 
-A source also keeps its precedence.
-`load_partial_configs_from_files` loads user-global config *before* the
-workspace, so the workspace overrides it: a `conversation.tools.'*'.run = "ask"`
-in the workspace wins over `"unattended"` in user-global config.
-Recording what user-global *declared* and replaying it after `base` would invert
-that and silently change tool execution policy.
-Recording what it *contributed* carries nothing for a field the workspace
-overrides, so the order in which `init` replays cannot change the outcome.
+This preserves the key invariant tested in Phase 3: folding `base` followed by
+every `init` entry produces the same `AppConfig` as resolving the entire
+creation invocation at once.
 
-The invariant, and what Phase 3 tests directly: folding `base` and then every
-`init` entry produces the same `AppConfig` as resolving the whole invocation at
-once.
-
-Both parts are written once at conversation creation and immutable afterward.
-Subsequent `-c`/`-C` deltas continue to land in `events.json` as under the
-per-directive model described earlier — `events.json` stays free of leading
-config blobs.
+Both `base` and `init` are written once at conversation creation and never
+modified afterward.
+Subsequent `-c` and `-C` invocations append their per-directive deltas to
+`events.json`, keeping creation-time config blobs out of `events.json` ([RFD
+054]):
 
 ```txt
 Before:  base_config.json = AppConfig resolved from every source at once
@@ -897,196 +770,128 @@ After:   base_config.json = { base: AppConfig resolved from workspace files,
 
 #### The workspace has to be self-contained
 
-A workspace is committed to a repository and cloned by other people.
-Anything machine-local baked into `base` breaks for them: a model named only in
-*my* user-global config resolves on my machine and resolves to nothing on my
-colleague's.
+Because workspaces are committed to version control and shared across machines,
+`base` must not depend on machine-local config: a model defined only in one
+user's global config would fail to resolve when a colleague clones the
+repository.
 
-So `base` draws from workspace files alone, and conversation creation requires
-those files to produce a valid `AppConfig` by themselves, failing loudly when
-they do not.
-The end state is that a colleague clones the repository and `jp query --new
-hello` works, given the external state JP cannot carry — provider credentials
-in the environment, a running `ollama`, a `command` on `PATH`.
+Accordingly, `base` is resolved from workspace config files alone, and
+conversation creation fails if those files do not form a valid `AppConfig` on
+their own.
+With a self-contained workspace config, any contributor who clones the
+repository can run `jp query --new hello` (assuming external runtime
+dependencies such as API keys, a running `ollama` instance, or tools on `PATH`).
 
-That draws the line in the same place this RFD already draws it for environment
-variables.
-User-global and user-workspace config are user intent, not workspace properties,
-so they join env vars, `-c` args and flags in `init`, where they carry a claim
-identity and can be reverted.
-The [source identity](#source-identity) table already labels them `<user-local>`
-and `<user-workspace>`, redacted for exactly this reason: the stream travels
-with the repository.
+User-global and user-workspace configs represent user-specific overrides rather
+than workspace properties, so they are recorded in `init` alongside environment
+variables, `-c` args, and CLI flags, with redacted `<user-local>` and
+`<user-workspace>` labels (see [Source identity](#source-identity)).
+Recording them in `init` still preserves the exact configuration the
+conversation's turns ran under when the conversation is shared.
 
-Those contributions still travel with the conversation.
-A conversation records the configuration its turns actually ran under, so a
-colleague reading it sees what produced the answers rather than what their own
-machine would have produced.
-
-The check runs at creation, where `base` is written.
-`base` is never re-resolved afterward, so existing conversations are unaffected
-and only `jp query --new` begins to fail, in a workspace that was not portable
-to begin with.
-
-This rejects an invocation that succeeds today, so it ships as its own change
-ahead of Phase 3 rather than inside it: the error a user meets should arrive
-with a release note explaining it, not alongside a storage format change that
-makes it ambiguous which one broke them.
+This check runs only when creating a conversation (`jp query --new`); existing
+conversations never re-resolve `base` and continue to load unchanged.
+Because this check rejects `jp query --new` in workspaces that previously relied
+on user-global config or CLI flags to supply required fields, it ships as a
+separate change (Phase 2b) before the storage format change in Phase 3.
 
 #### Creation-time resets, and `NONE`
 
-Two invocation shapes cannot put the creating invocation's contributions in
-`init`, and both resolve the same way: creation absorbs them into `base`, as it
-does today, and `init` stays empty.
+Two invocation shapes cannot separate the creating invocation's overrides into
+`init`; in both cases, creation folds the entire invocation into `base` and
+writes `init: []`:
 
-`--cfg=NONE` opts out of implicit config entirely.
-`ConfigPipeline::new` decides the gate before any config file I/O and starts
-from the empty partial when the keyword is present ([RFD 038]), which is what
-keeps `NONE` usable as an escape hatch when workspace config is broken or
-absent.
-There are then no workspace files for `base` to resolve from, and a
-defaults-only resolution is not a valid `AppConfig`: `assistant.model.id`
-carries `#[setting(required)]` on both `provider` and `name`, so it fails to
-finalize.
-So `jp query --new --cfg=NONE --cfg=./mre.toml hello` resolves `base` from the
-whole invocation, and the self-contained check does not apply — the user has
-said, in the invocation itself, that this conversation is not built on workspace
-config.
+1. **`--cfg=NONE` opts out of implicit config.** `ConfigPipeline::new` checks
+   for `NONE` before reading any config files and starts from an empty partial
+   ([RFD 038]), allowing `NONE` to work even when workspace config is missing or
+   broken.
+   Without workspace files, an empty partial cannot finalize into a valid
+   `AppConfig` because `assistant.model.id` requires `provider` and `name`.
+   Therefore, `jp query --new --cfg=NONE --cfg=./mre.toml hello` resolves `base`
+   from the whole invocation and skips the self-contained workspace check.
+2. **A reset keyword appears in `--cfg`.** [RFD 038] persists `--cfg=WORKSPACE`
+   as a `Reset` followed by an `Apply` of the workspace state, and
+   `fold_config_delta` implements `Reset` by resetting the accumulated state to
+   an empty partial.
+   Placing a `Reset` inside `init` would discard `base` during replay, causing
+   any field not restored by the reset's `Apply` (including
+   `#[setting(default)]` fields such as `assistant.request.max_retries`) to fall
+   back to the current binary's defaults instead of the pinned values.
+   To preserve pinning, creation folds everything up to and including the last
+   reset into `base`, and records only directives after the last reset in
+   `init`.
 
-A reset keyword anywhere in the `--cfg` list has the same problem for a
-different reason.
-RFD 038 persists `--cfg=WORKSPACE` as a `Reset` followed by an `Apply` of the
-workspace state, and `fold_config_delta` implements `Reset` by returning the
-accumulated state to the empty partial.
-A `Reset` inside `init` would therefore discard `base` during replay, and every
-field the reset's own `Apply` does not restore —
-`assistant.request.max_retries` and every other `#[setting(default)]` — would
-come from whichever binary reads the conversation next.
-So creation keeps absorbing reset directives into `base`, and `init` holds only
-the sources that follow the last reset in the list.
-
-The cost in both cases is provenance, not pinning: `-C` cannot reach a
-creation-time reset, or anything the reset discarded, or any contribution to a
-`NONE` invocation's `base`.
-Those fields behave exactly like a legacy conversation's — pinned, and `-C` is
-a no-op on them.
-A reset's floor is `base` in any case, and under both shapes `base` is what the
-reset resolved to.
-
-Separating user and machine state from the workspace base is deliberate.
-An env var like `JP_CFG_ASSISTANT_MODEL_PARAMETERS_REASONING=high` is user
-intent for this session, not a workspace property, and neither is a value from
-user-global or user-workspace config.
-Storing each as a creation-time delta in `init` (alongside `-c` and flag
-contributions) keeps the boundary clean: `base` is workspace state, `init`
-captures everything layered on at invocation time with full provenance.
-
-This preserves [RFD 054]'s readability win: the workspace snapshot remains one
-plain, inspectable, hand-editable object under `base`; `events.json` contains no
-creation-time config blob.
-A creation-time `-c dev` (which may be hundreds of lines) lives inside `init`,
-not in `events.json`.
+In both cases, pinning is preserved at the cost of creation-time provenance:
+fields folded into `base` have no claims in `init`, so `-C` is a no-op on them,
+matching legacy conversations.
 
 #### API changes
 
-- **`ConversationStream`**: the `base_config: Arc<AppConfig>` field keeps its
-  type and is joined by an `init: Vec<ConfigDelta>` field holding the
-  creation-time deltas in order.
-  Only its *content* changes: it is resolved from workspace config files alone
-  rather than from every source at once.
-  `config()`'s fold becomes `base_config.to_partial()` → each `init` delta →
-  each event-stream delta, using the `apply_config_delta` helper from Phase 1
-  for deltas — the same shape as today, with `init` inserted ahead of the
-  events.
-- **`from_parts()` / `to_parts()`**: the `base_config` JSON component now has
-  the `{ base, init }` shape.
-  The signatures keep two JSON components on the outside (base_config JSON
-  value, events JSON vec) — the inner structure of `base_config.json` changes.
-  How `base` itself is encoded does not: `to_parts()` still writes
-  `base_config.to_partial()`, and `from_parts()` still reads it back through
-  `compat::deserialize_partial_config` and `finalize_recovered_config`, now
-  reaching for the `base` key first.
-- **Per-event iterators** (`Iter`, `IterMut`, `IntoIter`) fold `base` and each
-  `init` delta before walking events, so per-event config views stay consistent
-  with `config()`.
-- **`Workspace::create_and_lock_conversation`**: gain an `init_deltas:
-  Vec<ConfigDelta>` parameter.
-  Query-new passes the invocation's per-directive deltas in order.
-- **Storage layer** (`jp_storage`): `Storage::persist_conversation` writes
-  `base_config.json` as the `{ base, init }` object at creation.
-  `load_conversation_stream` reads the new shape; see [Backward
-  compat](#backward-compat-for-base_configjson) below.
-- **Fork** (`crates/jp_cli/src/cmd/conversation/fork.rs`): clone the source's
-  `base` and `init` together when seeding the new conversation.
-  A source's initial overrides flow into the fork's `init` list unchanged, and
-  the fork inherits the source's resolved base rather than re-resolving from
-  current files, so forking does not quietly move a conversation forward.
+- **`ConversationStream`**: keeps `base_config: Arc<AppConfig>` (resolved from
+  workspace files alone) and adds `init: Vec<ConfigDelta>` for the creation-time
+  deltas.
+  `config()` folds `base_config.to_partial()`, then each `init` delta, then each
+  event-stream delta via `apply_config_delta`.
+- **`from_parts()` / `to_parts()`**: keep their two-parameter signatures
+  (`base_config` JSON value and `events` JSON array), while changing the
+  `base_config` JSON value to `{ base, init }`.
+  `base` itself still serializes via `base_config.to_partial()` and deserializes
+  through `compat::deserialize_partial_config` and `finalize_recovered_config`.
+- **Per-event iterators** (`Iter`, `IterMut`, `IntoIter`): fold `base` and
+  `init` before iterating over `events` so per-event config views match
+  `config()`.
+- **`Workspace::create_and_lock_conversation`**: gains an `init_deltas:
+  Vec<ConfigDelta>` parameter, populated by `query --new`.
+- **Storage layer** (`jp_storage`): `Storage::persist_conversation` writes `{
+  base, init }` on creation, and `load_conversation_stream` reads both the new
+  and legacy formats (see [Backward
+  compat](#backward-compat-for-base-config-json)).
+- **Fork** (`crates/jp_cli/src/cmd/conversation/fork.rs`): clones both `base`
+  and `init` from the source conversation without re-resolving from disk,
+  preserving the source conversation's pinned base and initial claims.
 
 #### Backward compat for `base_config.json`
 
-The loader tries the new shape first and falls back to the legacy shape
-transparently:
+`load_conversation_stream` supports both the new and legacy formats:
 
 1. Parse `base_config.json` as JSON.
-2. If the root is a JSON object with a `base` key → new format; read `base` as
-   the stored config and `init` (defaulting to `[]` if absent) as the
-   creation-time delta list.
-3. Otherwise the root object *is* the stored config; wrap it as `{ base: <that>,
-   init: [] }`.
-   Legacy conversations therefore have an empty `init` list, matching their
-   historical "no claims" behavior.
-   `-C` is a no-op on their fields.
+2. If the root object has a `base` key, deserialize `base` as the stored config
+   and `init` (defaulting to `[]`) as the creation-time delta list.
+3. Otherwise, treat the root object itself as `base` with `init: []`.
 
-A legacy file needs no conversion beyond the wrapping, because the encoding of
-`base` is unchanged: both shapes hold the same partial-encoded snapshot, read
-through the same `deserialize_partial_config` and `finalize_recovered_config`
-path.
-The only difference from a new file is that the creating invocation's
-contributions are baked into the snapshot rather than sitting in `init`, which
-is exactly why `-C` cannot reach them.
-The conversation stays pinned as it is today.
+Because `base` uses the same partial-encoded format in both versions, legacy
+files require no field conversion: their creation-time overrides remain baked
+into `base`, and `-C` is a no-op on those fields.
 
-**Writers always emit the new shape, and explicitly migrate legacy files on
-persist.** On every persist, `Storage::persist_conversation` inspects the
-existing `base_config.json`:
+On persist, `Storage::persist_conversation` inspects the existing
+`base_config.json`:
 
-- If the file is absent (new conversation), write the new shape.
-- If the file is already in the new shape (`base` key present), copy it verbatim
-  into the staging directory — preserves any user hand-edits, same as today's
-  behavior.
-- If the file is in the legacy flat shape, **rewrite** it as `{ base: <legacy
-  content>, init: [] }` during the staging write.
-  This is a one-time per-conversation migration; once rewritten, the file
-  follows the "copy verbatim" path on subsequent persists.
+- **File absent** (new conversation): write `{ base, init }`.
+- **New shape** (`base` key present): copy the file verbatim into the staging
+  directory, preserving any manual edits.
+- **Legacy flat shape**: rewrite the file once as `{ base: <legacy content>,
+  init: [] }` in the staging directory; subsequent persists take the verbatim
+  copy path.
 
-This means legacy files are incrementally upgraded the next time the
-conversation is touched.
-Once all active conversations in a workspace have been persisted at least once
-after this RFD lands, no legacy files remain and the legacy parser in
-`load_conversation_stream` can be retired in a future release.
+Once all active conversations have been persisted under the new shape, the
+legacy fallback in `load_conversation_stream` can be removed.
 
 #### User-facing commands
 
 `conversation edit` (`-b` / `--base-config`) and `conversation path`
-(`--base-config`) (`crates/jp_cli/src/cmd/conversation/edit.rs`,
-`crates/jp_cli/src/cmd/conversation/path.rs`) continue to point at
-`base_config.json`.
-Since the file now holds both the workspace snapshot and the creation-time
-deltas in a single object, these flags surface the full initial state — no new
-`--init-config` flag needed.
+(`--base-config`) (`crates/jp_cli/src/cmd/conversation/edit.rs` and
+`crates/jp_cli/src/cmd/conversation/path.rs`) continue to target
+`base_config.json`, which holds both `base` and `init` without needing a
+separate `--init-config` flag.
 
-Users who hand-edit the file now see an object with `base` and `init` instead of
-a flat partial.
-The `base` subtree holds exactly what the flat file used to, in the same
-encoding; `init` is a JSON array of deltas that can be edited if needed, though
-the expected workflow is `jp config set` or a fresh `-c`/`-C` directive rather
-than direct edits.
+Users who open `base_config.json` in an editor see `{ "base": ..., "init": [...]
+}`, where `base` has the same structure as the prior flat file and `init` lists
+the creation-time deltas.
 
 ### Parsing
 
-`-C` reuses the same `KeyValueOrPath::from_str` parser as `-c`.
-The clap definition wraps parsed values in `CfgDirective::Revert` and allows the
-flag to appear with or without a value:
+`-C` uses the same `KeyValueOrPath::from_str` parser as `-c` and wraps parsed
+values in `CfgDirective::Revert`:
 
 ```rust
 #[arg(
@@ -1101,25 +906,19 @@ flag to appear with or without a value:
 no_config: Vec<CfgDirective>,
 ```
 
-Bare `--no-cfg` (no value) has no defined meaning in this RFD and is rejected at
-parse time — `-C` / `--no-cfg` always requires a value.
-A later RFD may define a meaning for the bare form.
+A bare `--no-cfg` without a value is rejected at parse time.
 
-Positive (`-c`) and negative (`-C`) args are merged into a single
-`Vec<CfgDirective>` preserving command-line order.
-Since clap does not preserve cross-field ordering between two separate `Vec`
-args, this requires a manual `clap::FromArgMatches` implementation that recovers
-positions via `ArgMatches::indices_of(..)` and sorts the merged list by index.
-`ToolDirectives` in `crates/jp_cli/src/cmd/query.rs` implements the same pattern
-for `--tool`/`--no-tools` (see [RFD 008]); the `-c`/`-C` merge reuses the same
-approach.
+Positive (`-c`) and negative (`-C`) arguments are merged into a single
+`Vec<CfgDirective>` in command-line order.
+Because clap does not preserve relative order across separate `Vec` fields, a
+manual `clap::FromArgMatches` implementation recovers argument positions via
+`ArgMatches::indices_of(..)` and sorts the combined list by index, following the
+`ToolDirectives` pattern for `--tool` and `--no-tools` in
+`crates/jp_cli/src/cmd/query.rs` ([RFD 008]).
 
-Users who want to undo post-creation changes to a conversation — i.e., revert
-to the `base + init` state captured at creation time — can use targeted `-C
-<source>` for specific sources.
-A dedicated keyword that expands to `base + init` is out of scope; the `init`
-list introduced here preserves the infrastructure needed to add such a keyword
-later.
+To undo post-creation changes in a conversation, users pass `-C <source>` for
+each source to revert; a dedicated reset keyword targeting `base + init` is left
+to future work.
 
 ### Examples
 
@@ -1130,19 +929,15 @@ jp query -n -c dev            # invocation 1
 jp query -C dev -c committer  # invocation 2
 ```
 
-**Invocation 1**: `base_config.json` is written with `base` = workspace files
-and `init` = one `ConfigDelta` per directive (dev's contribution plus any
-env-var overrides).
-Claims (`assistant.name → hash(dev)`, `conversation.tools.read_file.enable →
-hash(dev)`, etc.) land on dev's entry in `init`.
+- **Invocation 1** writes `base_config.json` with `base` resolved from workspace
+  files and `init` holding one `ConfigDelta` per creation-time source.
+  `dev`'s entry in `init` claims `assistant.name` and
+  `conversation.tools.read_file.enable` under `hash(dev)`.
+- **Invocation 2** resolves `-C dev` to `hash(dev)`, reverts the fields still
+  claimed by `dev` (`assistant.name` and `conversation.tools.read_file.enable`),
+  and then applies `-c committer` on top.
 
-**Invocation 2**: `-C dev` resolves dev, computes hash, walks claims.
-Dev owns `assistant.name` → revert.
-Dev owns `tools` → revert.
-Then `-c committer` layers on top.
-Final delta captures both the revert and committer's additions.
-
-#### Overlapping sources — same field, same value
+#### Overlapping sources: same field, same value
 
 ```sh
 jp query -n -c dev      # invocation 1: tools=[read_file]
@@ -1150,20 +945,14 @@ jp query -c architect   # invocation 2: tools=[read_file]
 jp query -C dev         # invocation 3: revert dev
 ```
 
-**Invocation 1**: delta claims `conversation.tools.read_file.enable →
-hash(dev)`.
-
-**Invocation 2**: architect also sets `tools.read_file.enable = true`.
-The config value doesn't change, so the field is NOT in the delta's diff.
-But architect's partial DOES set it, so the claims map records
-`conversation.tools.read_file.enable → hash(architect)`, overwriting dev's
-claim.
-
-**Invocation 3**: `-C dev` checks: who owns
-`conversation.tools.read_file.enable`?
-Most recent claim is `hash(architect)` (from invocation 2).
-Dev is not the owner.
-**Skip.** Tools remain enabled.
+- **Invocation 1** claims `conversation.tools.read_file.enable -> hash(dev)`.
+- **Invocation 2** also sets `tools.read_file.enable = true`.
+  The field's value does not change, so `delta` is empty for that field, but
+  `architect`'s partial sets it and overwrites the claim with
+  `conversation.tools.read_file.enable -> hash(architect)`.
+- **Invocation 3** runs `-C dev`.
+  Because `conversation.tools.read_file.enable` is now claimed by
+  `hash(architect)`, `-C dev` skips it and `read_file` stays enabled.
 
 #### Shortcut flag override
 
@@ -1173,17 +962,13 @@ jp query --model gpt-4o   # invocation 2: model overridden
 jp query -C dev           # invocation 3: revert dev
 ```
 
-**Invocation 1**: delta claims `assistant.model.id → hash(dev)`.
-
-**Invocation 2**: `--model gpt-4o` is a shortcut flag.
-Delta diff has the new model value.
-Claims map records `assistant.model.id → hash("kv:assistant.model.id=gpt-4o")`,
-overwriting dev's claim.
-
-**Invocation 3**: `-C dev` checks: who owns `assistant.model.id`?
-Most recent claim is the kv identity from invocation 2 — not in dev's target
-set.
-**Skip.** The explicit `--model` override is preserved.
+- **Invocation 1** claims `assistant.model.id -> hash(dev)`.
+- **Invocation 2** sets `--model gpt-4o`, recording a delta with the new model
+  and overwriting the claim with `assistant.model.id ->
+  hash("kv:assistant.model.id=gpt-4o")`.
+- **Invocation 3** runs `-C dev`.
+  Because `assistant.model.id` is claimed by the key-value override from
+  invocation 2 rather than `dev`, `-C dev` skips it and preserves `gpt-4o`.
 
 #### Key-value revert (value-based)
 
@@ -1192,22 +977,18 @@ jp query -c assistant.name=DevBot   # invocation 1
 jp query -C assistant.name=DevBot   # invocation 2
 ```
 
-**Invocation 1**: kv records a delta with `claims["assistant.name"] =
-vec![hash("kv:assistant.name=DevBot")]`.
-The resolved value of `assistant.name` is `DevBot`.
+- **Invocation 1** records a delta with `claims["assistant.name"] =
+  vec![hash("kv:assistant.name=DevBot")]` and resolves `assistant.name` to
+  `DevBot`.
+- **Invocation 2** compares the current resolved value (`DevBot`) against the
+  target (`DevBot`).
+  Because they match, it walks backward through `ConfigDelta` events until
+  finding the first earlier state where `assistant.name` was not `DevBot` (or
+  reaching `base`) and emits a revert delta restoring that value.
 
-**Invocation 2**: `-C assistant.name=DevBot` reads the current resolved value
-(`DevBot`), compares to the target (`DevBot`).
-Match.
-Walk back through `ConfigDelta` events; for each delta, check whether
-`assistant.name`'s resolved value at that point was still `DevBot`.
-Stop at the first earlier state where it was different (or at base).
-Emit a revert delta setting `assistant.name` to that earlier value.
-
-If invocation 2 were `-C assistant.name=Different`, the current value (`DevBot`)
-does not equal the target (`Different`).
-**Skip** with diagnostic — the user asked to undo a value that isn't currently
-set.
+If invocation 2 instead ran `-C assistant.name=Different`, the current value
+(`DevBot`) would not match `Different`, and `-C` would skip the field with a
+diagnostic.
 
 #### Key-value undo of a file-set value
 
@@ -1216,22 +997,12 @@ jp query -c dev                      # dev.toml sets assistant.name=DevBot
 jp query -C assistant.name=DevBot    # undo the DevBot assignment
 ```
 
-**Invocation 1**: delta claims `assistant.name → hash(dev)` (dev's file
-identity, not kv identity).
-Current value: `DevBot`.
-
-**Invocation 2**: `-C assistant.name=DevBot` is value-based.
-Current value = `DevBot`, target = `DevBot`.
-Match.
-Walk back through deltas, skipping each one where `assistant.name` was still
-`DevBot`, and stop at the first earlier state where it differed.
-For this scenario, the walk reaches base (dev's delta was the only claim on
-`assistant.name`), so the revert emits the base value.
-
-This works because kv `-C` doesn't care about source identity — only about the
-field's current value.
-The `dev` delta is still responsible for the claim on other fields, but
-`assistant.name` is now back to base.
+- **Invocation 1** claims `assistant.name -> hash(dev)` and sets
+  `assistant.name` to `DevBot`.
+- **Invocation 2** runs the value-based revert `-C assistant.name=DevBot`.
+  Because the current value matches `DevBot`, it walks back past `dev`'s delta
+  to `base` and restores the base value of `assistant.name`, while leaving
+  `dev`'s other claimed fields intact.
 
 #### Within-invocation layering then revert
 
@@ -1240,30 +1011,18 @@ jp query -n -c dev -c architect    # invocation 1: layer both
 jp query -C architect              # invocation 2: drop architect
 ```
 
-**Invocation 1**: with per-directive deltas, two deltas are persisted:
+- **Invocation 1** persists two per-directive deltas:
+  - Delta A records `dev`'s fields and claims under `hash(dev)`.
+  - Delta B records `architect`'s fields and claims under `hash(architect)`,
+    overwriting `dev`'s claims on shared fields.
+- **Invocation 2** runs `-C architect` with target set `{hash(architect)}` over
+  all fields currently claimed by `architect`:
+  - On fields set by both `dev` and `architect`, walking back past delta B stops
+    at delta A (`hash(dev)`), restoring `dev`'s value and claim.
+  - On fields set only by `architect`, walking back past delta B reaches `base`,
+    restoring the base config value.
 
-- Delta A: dev's fields, claims under `hash(dev)`.
-- Delta B: architect's fields (including any shared with dev), claims under
-  `hash(architect)` (overwriting dev's claim in the current claims state for
-  shared fields).
-
-**Invocation 2**: `-C architect` target = `{hash(architect)}`. Scope = fields
-currently claimed by architect.
-Walk back for each scope field:
-
-- Shared field (both dev and architect set it): delta B's claim is architect →
-  walk past.
-  Delta A's claim is dev → stop.
-  Revert value = delta A's value (dev's value).
-- Architect-only field: delta B's claim is architect → walk past.
-  No prior delta claims it → reach base.
-  Revert value = base config value.
-
-Net effect: architect's contributions are removed, dev's values re-emerge for
-shared fields, dev-only fields are untouched.
-The user's "drop architect, keep dev" intent holds.
-
-#### Repeated claimant across invocations (A → B → A)
+#### Repeated claimant across invocations (A -> B -> A)
 
 ```sh
 jp query -n -c dev        # invocation 1: dev sets assistant.name
@@ -1272,32 +1031,19 @@ jp query -c dev           # invocation 3: dev overwrites again
 jp query -C dev           # invocation 4: revert dev
 ```
 
-**Invocation 1**: delta #1 claims `assistant.name → hash(dev)`.
+- **Invocation 1** (delta 1) claims `assistant.name -> hash(dev)`.
+- **Invocation 2** (delta 2) claims `assistant.name -> hash(architect)`.
+- **Invocation 3** (delta 3) claims `assistant.name -> hash(dev)`.
+- **Invocation 4** runs `-C dev`:
+  1. Delta 3's claim on `assistant.name` is `hash(dev)`, so the field is in
+     scope.
+  2. Walking backward past `hash(dev)` claims stops at delta 2, whose claim is
+     `hash(architect)`.
+  3. `assistant.name` reverts to delta 2's value (`architect`'s value) rather
+     than `base`.
 
-**Invocation 2**: delta #2 claims `assistant.name → hash(architect)`.
-
-**Invocation 3**: delta #3 claims `assistant.name → hash(dev)` (overwriting
-architect's claim).
-
-**Invocation 4**: `-C dev`.
-Walk back:
-
-1. Delta #3: claim on `assistant.name` is `hash(dev)` — in the target set.
-   Mark for revert.
-2. Walk past claims whose hash is in dev's target set.
-   Delta #2: claim is `hash(architect)` — not in target set.
-   Stop.
-3. Revert value = `assistant.name` as it stood after delta #2 (architect's
-   value).
-
-Architect's value re-emerges, not the base-config value.
-This preserves the intuition "undo dev, leave everything else alone" —
-architect's earlier claim is still valid.
-
-Under per-directive delta persistence, the A→B→A pattern works identically
-whether invocations 1–3 were separate or collapsed into within-invocation
-sequences like `jp query -c dev -c architect -c dev`.
-Each directive persists its own delta, so intermediate claims aren't squashed.
+Because each directive persists its own delta, `jp query -c dev -c architect -c
+dev` in a single invocation produces the same history as invocations 1-3 above.
 
 #### Source file edited between invocations
 
@@ -1307,167 +1053,116 @@ jp query -n -c dev           # invocation 1: dev.toml sets assistant.name and mo
 jp query -C dev              # invocation 2: revert dev
 ```
 
-**Invocation 1**: delta claims `assistant.name → hash(dev)` and
-`assistant.model.id → hash(dev)`.
-
-**Invocation 2**: `-C dev` computes `hash(dev)` (still the same, since either
-`id` or path-hash is edit-stable for content edits).
-Walk the current claims state: both `assistant.name` and `assistant.model.id`
-are still claimed by dev.
-Scope = {`assistant.name`, `assistant.model.id`}.
-Revert both.
-
-Critically, `dev.toml`'s current contents are irrelevant to scope computation.
-Even though the file no longer sets `assistant.name`, the original claim is
-honored.
-This is the claim-history guarantee — the fundamental reason scope comes from
-claim history, not from loading the file and re-deriving its fields.
+- **Invocation 1** claims `assistant.name -> hash(dev)` and `assistant.model.id
+  -> hash(dev)`.
+- **Invocation 2** computes `hash(dev)` (which is unchanged by content edits),
+  finds both `assistant.name` and `assistant.model.id` still claimed by `dev` in
+  `claims_state`, and reverts both, even though `dev.toml` no longer sets
+  `assistant.name`.
 
 ## Drawbacks
 
-**Claims add storage overhead.** Each `ConfigDelta` gains a `BTreeMap` of field
-paths to source hashes.
-For a typical persona file setting 10-20 fields, this is a few hundred bytes per
-delta.
-Negligible in practice.
-
-**Per-directive delta granularity inflates event count.** Persisting one
-`ConfigDelta` per `-c`/`-C` directive (instead of per invocation) means a
-typical invocation with 2–3 config args plus shortcut flags now writes 3–4
-events per invocation rather than 1.
-The cumulative effect on `events.json` is small in bytes (each delta is a diff
-plus claims, not a full config snapshot), but `events_count`, which counts all
-events in the file (see RFD 054 §Non-Goals), becomes more inflated.
-UIs that surface "N events" will see higher numbers for conversations that made
-heavy use of layered config.
-A future turn-based counting mechanism (deferred) would fix this.
-
-**Conversation creation change.** `base_config.json` changes shape: the config
-that used to be the whole file moves under a `base` key, joined by `init`.
-Code that reads `base_config.json` expecting the flat shape needs to handle the
-new form (the loader falls back transparently on legacy files).
-Neither the stored type nor its encoding changes; what changes is that `base` is
-resolved from the workspace's own config files alone, with user-global config,
-user-workspace config, environment variables, `-c` args and flags moved into
-`init` where they carry claims.
-The steady-state persist cost is unchanged: `base_config.json` is written once
-at creation, subsequent persists write only `events.json` and `metadata.json`.
-
-**Implementation cost.** The claims system touches many parts of the config
-pipeline:
-
-- **Delta plumbing rewrite** in `jp_conversation`: the hand-rolled
-  `deserialize_config_delta` and `add_config_delta` helpers need explicit
-  updates; a new `apply_config_delta` helper replaces six direct
-  `partial.merge(..)` call sites.
-- **`apply_cli_config` signature change**: the `IntoPartialAppConfig` trait and
-  each `apply_*` helper gain a `claims: &mut BTreeMap<...>` parameter to record
-  per-flag identities.
-- **`ClaimIdentity` impls** for the 7 set-like and identity-bearing vec fields
-  (~6 unique element types; see [Claim granularity](#claim-granularity) for the
-  full classification).
-  Duplicate-capable vec fields do not need `ClaimIdentity` — they use
-  whole-field claims.
-  Most impls are one-liners (strings, paths), but each requires a deliberate
-  identity choice.
-- **Conversation API changes**: `ConversationStream` gains an `init:
-  Vec<ConfigDelta>` field; `from_parts()` / `to_parts()`, the three iterator
-  types, `Workspace::create_and_lock_conversation`, storage layer, and fork path
-  are updated to carry it through.
-  `base_config.json`'s file shape changes to `{ base, init }` with a
-  legacy-shape fallback in the loader.
-- **CLI surface**: manual `clap::FromArgMatches` to merge `-c` and `-C` with
-  preserved ordering, mirroring `ToolDirectives`.
-
-Each piece is small but the surface area is broad.
-Phase 1 alone adds fields, a trait, a helper, and ~6 per-type impls.
+- **Storage overhead per delta.** Each `ConfigDelta` stores a `BTreeMap` of
+  field paths to source hashes (a few hundred bytes for a typical persona file
+  setting 10-20 fields).
+- **More events per invocation.** Persisting one `ConfigDelta` per `-c` or `-C`
+  directive (plus one for shortcut flags) writes 3-4 events for an invocation
+  with 2-3 config args instead of 1.
+  Each delta is small, but `events_count` (which counts all entries in
+  `events.json`; see [RFD 054]) grows faster until UIs switch to turn-based
+  counts.
+- **`base_config.json` format change.** The top-level config in
+  `base_config.json` moves under a `base` key alongside `init`.
+  Readers must handle both the new `{ base, init }` object and the legacy flat
+  format.
+  Steady-state persistence cost is unchanged: `base_config.json` is written once
+  at creation, and later persists write only `events.json` and `metadata.json`.
+- **Broad implementation surface.** Supporting claims touches several layers of
+  the config and conversation pipelines:
+  - `jp_conversation` delta plumbing (`deserialize_config_delta`,
+    `add_config_delta`, and replacing six `partial.merge(..)` sites with
+    `apply_config_delta`).
+  - `IntoPartialAppConfig::apply_cli_config` and its `apply_*` helpers, which
+    gain a `claims: &mut BTreeMap<...>` parameter.
+  - `ClaimIdentity` implementations for the 7 set-like and identity-bearing vec
+    fields (6 unique element types; see [Claim
+    granularity](#claim-granularity)).
+  - `ConversationStream` (`init: Vec<ConfigDelta>`), `from_parts()` /
+    `to_parts()`, the three stream iterators,
+    `Workspace::create_and_lock_conversation`, `jp_storage`, and `conversation
+    fork`.
+  - Manual `clap::FromArgMatches` ordering for `-c` and `-C`.
 
 ## Alternatives
 
 ### Snapshot stack (no provenance)
 
-Replace the single-accumulator merge with a stack of intermediate snapshots.
-`-C` walks the stack backwards comparing values to find the revert target.
-Simpler to implement (no claims, no serialization changes), but fundamentally
-limited: when two sources set the same field to the same value, value comparison
-cannot distinguish them.
-The tools example (both `dev` and `architect` enabling `read_file`) would
-incorrectly disable the tool when reverting dev.
-Rejected because the common case of overlapping tool configurations makes this a
-real problem, not a theoretical edge case.
+Replacing the single accumulator with a stack of intermediate snapshots and
+walking the stack backward by comparing values avoids storing claims, but fails
+whenever two sources set the same field to the same value.
+If both `dev` and `architect` enable `read_file`, value comparison cannot tell
+that `architect` also enabled it, so `-C dev` would disable `read_file`.
 
-### Per-flag ConfigDelta storage
+### Per-flag ConfigDelta storage without claims
 
-Store one `ConfigDelta` per `-c` flag instead of one per invocation.
-Provides finer-grained history but does not solve the core problem: if two `-c`
-flags in the same invocation set the same field to the same value, the delta
-diffs are identical.
-Only provenance tracking distinguishes them.
-Rejected as insufficient on its own, though it could complement claims for
-within- invocation revert precision.
+Storing one `ConfigDelta` per `-c` flag without a claims map records finer
+history, but when two `-c` flags set the same field to the same value, the
+second diff is empty unless provenance is tracked separately.
+Per-directive deltas therefore pair with claims rather than replacing them.
 
 ### Full provenance tracking (tagged values)
 
-Replace `Option<T>` fields in `PartialAppConfig` with `Tagged<T>` that carries a
-source identifier.
-The most architecturally complete solution, but requires changing the
-representation of every config field.
-Over-engineered for the immediate use case.
-The claims map achieves the same result for revert purposes without touching the
-config type system.
+Wrapping every `Option<T>` field in `PartialAppConfig` in a `Tagged<T>` carrying
+source metadata would track provenance in the type system, but would require
+changing the representation of every config field across `jp_config`.
+A sideband claims map on `ConfigDelta` provides the provenance needed for revert
+without changing the config types.
 
 ## Non-Goals
 
-- **Direct stream editing.** `-C` does not remove or modify existing
-  `ConfigDelta` events in the conversation stream.
-  It influences the *next* delta by changing what the pipeline produces.
-  The stream remains append-only.
-- **Provenance display.** Showing which source contributed which field is useful
-  but orthogonal.
-  See [RFD 060].
+- **Direct stream editing.** `-C` never removes or mutates prior `ConfigDelta`
+  events; the stream stays append-only, and `-C` appends a new revert delta.
+- **Provenance display.** Surfacing which source set each field is covered by
+  [RFD 060].
 
 ## Risks and Open Questions
 
 ### File-based and key-value `-C` have different scoping rules
 
-File-based `-C <source>` scopes by **source identity**: fields whose current
-claim is in the target's identity set.
-Key-value `-C foo=value` scopes by **current value**: revert `foo` if its
-resolved value equals `value`, walking back past all claims on the field
-regardless of owner.
+File-based `-C <source>` scopes by **source identity** (fields whose current
+claim matches the target's identity set), whereas key-value `-C foo=value`
+scopes by **current value** (reverting `foo` if its resolved value equals
+`value`, walking back past all claims on `foo` regardless of owner).
 
-The asymmetry is intentional:
+This split reflects how each form is used:
 
-- `-C <source>` answers "undo this source's influence."
-  Identity matching is the natural scope.
-- `-C foo=value` answers "undo this specific assignment."
-  Value matching is the natural scope.
-  Users typing an explicit value are asserting both the field and the expected
-  current state; if the value doesn't match, the command skips with a
-  diagnostic.
+- `-C <source>` undoes a config source's influence, so identity matching is the
+  right scope.
+- `-C foo=value` undoes a specific value assignment, so value matching is the
+  right scope; if the current value does not match, the command skips the field
+  with a diagnostic.
 
-Consequences worth noting:
+Notable consequences:
 
-- `-C foo=A` after `-c foo=A -c foo=B` does nothing (current value is `B`, not
-  `A`).
-  The user should use `-C foo=B` to undo the current value, or use `-C <source>`
-  to revert by source identity.
-- `-C foo=EnvVal` when `JP_CFG_FOO=EnvVal` is set **does** revert the env-set
-  field, because the user typed the value explicitly.
-  This bypasses the env-unclaim protection that applies to file-based `-C`.
-  File-based `-C` still respects env unclaims.
-- `-C assistant.name=DevBot` after `-c dev` (where dev set
-  `assistant.name=DevBot`) **does** revert — kv `-C` is value-based, so the
-  originating source doesn't matter.
+- `-C foo=A` after `-c foo=A -c foo=B` is a no-op because the current value is
+  `B`, not `A`.
+  Use `-C foo=B` to undo the active value, or `-C <source>` to revert by source
+  identity.
+- `-C foo=EnvVal` when `JP_CFG_FOO=EnvVal` is set reverts the environment-set
+  field because the user named the value explicitly; file-based `-C` still
+  respects environment unclaims.
+- `-C assistant.name=DevBot` after `-c dev` (where `dev` set
+  `assistant.name=DevBot`) reverts `assistant.name` regardless of which source
+  set it.
 
-File-based and kv `-C` compose predictably within one invocation.
-A mix like `-C dev -C assistant.name=DevBot` runs each independently against the
-current claims state at its position in the left-to-right directive loop.
+File-based and key-value `-C` compose in left-to-right order within a single
+invocation: each directive runs against the `claims_state` accumulated at its
+position.
 
 ### Claim granularity
 
-Claims are recorded at **leaf level** — the finest granularity available.
-When dev sets `tools.read_file.enable = true` and architect sets
+Claims are recorded at the **leaf level**.
+When `dev` sets `tools.read_file.enable = true` and `architect` sets
 `tools.read_file.run = "ask"`, the claims are:
 
 ```txt
@@ -1475,29 +1170,22 @@ conversation.tools.read_file.enable → hash(dev)
 conversation.tools.read_file.run    → hash(architect)
 ```
 
-`-C dev` reverts `enable` only, leaving architect's `run` setting untouched.
-This is more precise than entry-level claims (`conversation.tools.read_file`),
-which would revert the entire tool config including fields dev never set.
+`-C dev` reverts only `enable`, leaving `architect`'s `run` setting intact.
+Entry-level claims (`conversation.tools.read_file`) would revert the entire tool
+config, and map-level claims (`conversation.tools`) would let `architect`
+enabling `write_file` overwrite `dev`'s claim on the entire map.
 
-Map-level claims (`conversation.tools → hash(dev)`) would be broken entirely:
-architect enabling `write_file` would overwrite dev's claim on the whole map,
-and `-C dev` would skip reverting `read_file` because architect "owns" tools.
-
-Leaf-level paths are computed by a **typed walker** over `PartialAppConfig` and
-its nested partial types — not a generic serde-JSON walk — so that vec
-elements can be dispatched to their type's `ClaimIdentity` implementation (see
-below).
-Each partial type contributes a `field_paths_into(&self, prefix: &str, out: &mut
-Vec<String>)` method that collects the leaf paths for its own fields.
-This mirrors the existing `AssignKeyValue` dispatch shape — a per-type walk
-that knows how to treat each field's type.
+Leaf paths are collected by a typed walker over `PartialAppConfig` and its
+nested partial types rather than a generic serde-JSON walk, so vec elements can
+dispatch to their `ClaimIdentity` implementation.
+Each partial type implements `field_paths_into(&self, prefix: &str, out: &mut
+Vec<String>)`, mirroring `AssignKeyValue` dispatch.
 
 #### Vec claim granularity: set-like, identity-bearing, duplicate-capable
 
-Vec fields cannot use positional indices for claims — if a later delta removes
-an element, all subsequent indices shift and a revert would corrupt the array.
-The RFD classifies each vec field into one of three categories with different
-claim granularity:
+Vec fields cannot use positional indices for claims because removing an element
+shifts subsequent indices.
+Each vec field falls into one of three categories:
 
 | Category              | Claim granularity                                                                                   | Revert mechanic                                            |
 | --------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
@@ -1505,19 +1193,17 @@ claim granularity:
 | **Identity-bearing**  | Per-element via `ClaimIdentity` with `json_identity` fallback when the natural identifier is absent | Same as set-like                                           |
 | **Duplicate-capable** | Whole-field claim (path only, no element suffix)                                                    | Revert emits the entire prior value of the field           |
 
-The distinction matters because `Vec<String>` fields like
-`ToolCommandConfig.args` permit repeated identical entries (e.g. `args = ["-I",
-"path1", "-I", "path2"]`).
-A per-element identity of `self.clone()` would make both `-I` entries
-indistinguishable, and `remove_element(path, "-I")` would wipe both when the
-user meant to revert only one source's contribution.
-Whole-field claims dodge the ambiguity: dev owns `command.args` as a unit,
-architect overwrites that claim as a unit, and `-C architect` restores dev's
-complete value for the field.
+`Vec<String>` fields such as `ToolCommandConfig.args` allow duplicate elements
+(for example, `args = ["-I", "path1", "-I", "path2"]`).
+A per-element identity would make both `"-I"` entries indistinguishable, so
+`remove_element(path, "-I")` would remove both.
+Using a whole-field claim avoids that ambiguity: `dev` claims `command.args` as
+a unit, `architect` overwrites that claim as a unit, and `-C architect` restores
+`dev`'s complete vector.
 
 ##### `ClaimIdentity` trait
 
-For set-like and identity-bearing fields, each element type implements:
+Set-like and identity-bearing element types implement `ClaimIdentity`:
 
 ```rust
 /// Produce a stable identity string for an element in a claimed vec field.
@@ -1532,8 +1218,7 @@ pub trait ClaimIdentity {
 }
 ```
 
-A `json_identity` helper is available as explicit opt-in for types with no
-natural identifier:
+Types without a natural identifier can fall back to `json_identity`:
 
 ```rust
 pub fn json_identity<T: Serialize>(value: &T) -> String {
@@ -1543,19 +1228,19 @@ pub fn json_identity<T: Serialize>(value: &T) -> String {
 
 ##### Per-field classification
 
-The config has 15 Vec-typed fields today:
+`AppConfig` has 15 `Vec`-typed fields:
 
 | Field path                                              | Element type            | Category          | Identity strategy                                                 |
 | ------------------------------------------------------- | ----------------------- | ----------------- | ----------------------------------------------------------------- |
 | `config_load_paths`                                     | `RelativePathBuf`       | Set-like          | `as_str()`                                                        |
 | `extends`                                               | `ExtendingRelativePath` | Set-like          | `AsRef::<RelativePath>::as_ref().as_str()`                        |
 | `conversation.attachments`                              | `AttachmentConfig`      | Set-like          | `to_url().map(\|u\| u.to_string()).unwrap_or_else(json_identity)` |
-| `providers.llm.anthropic.beta_headers`                  | `String`                | Set-like          | identity (self) — deduped by `vec_dedup`                          |
+| `providers.llm.anthropic.beta_headers`                  | `String`                | Set-like          | identity (self), deduplicated by `vec_dedup`                      |
 | `assistant.system_prompt_sections`                      | `SectionConfig`         | Identity-bearing  | `tag.clone().or(title.clone()).unwrap_or_else(json_identity)`     |
 | `conversation.inquiry.assistant.system_prompt_sections` | `SectionConfig`         | Identity-bearing  | same as above                                                     |
 | `assistant.instructions`                                | `InstructionsConfig`    | Identity-bearing  | `title.clone().unwrap_or_else(json_identity)`                     |
-| `assistant.instructions.*.items`                        | `String`                | Duplicate-capable | whole-field claim                                                 |
 | `assistant.instructions.*.examples`                     | `ExampleConfig`         | Duplicate-capable | whole-field claim                                                 |
+| `assistant.instructions.*.items`                        | `String`                | Duplicate-capable | whole-field claim                                                 |
 | `assistant.model.parameters.stop_words`                 | `String`                | Duplicate-capable | whole-field claim                                                 |
 | `conversation.tools.*.command.args`                     | `String`                | Duplicate-capable | whole-field claim                                                 |
 | `conversation.tools.*.enumeration`                      | `serde_json::Value`     | Duplicate-capable | whole-field claim                                                 |
@@ -1563,8 +1248,8 @@ The config has 15 Vec-typed fields today:
 | `providers.mcp.arguments`                               | `String`                | Duplicate-capable | whole-field claim                                                 |
 | `providers.mcp.variables`                               | `String`                | Duplicate-capable | whole-field claim                                                 |
 
-Additionally, `IndexMap<String, T>` fields use their keys as natural identities
-— no `ClaimIdentity` impl needed because the string key IS the identity.
+`IndexMap<String, T>` fields use their map keys as natural identities and need
+no `ClaimIdentity` implementation.
 The typed walker descends into them to record per-entry claims:
 
 - `conversation.attachment.params: IndexMap<String, Value>`
@@ -1580,8 +1265,7 @@ The typed walker descends into them to record per-entry claims:
 
 ##### Representative implementations
 
-Set-like and identity-bearing types implement `ClaimIdentity` explicitly.
-Field accessors match the actual types in `crates/jp_config/src`:
+Set-like and identity-bearing types implement `ClaimIdentity` directly:
 
 ```rust
 impl ClaimIdentity for AttachmentConfig {
@@ -1631,7 +1315,7 @@ impl ClaimIdentity for String {
 }
 ```
 
-Resulting claim paths for set-like and identity-bearing fields:
+Set-like and identity-bearing fields record per-element claim paths:
 
 ```txt
 conversation.attachments[foo.rs]            → hash(dev)
@@ -1640,7 +1324,7 @@ config_load_paths[.jp/agents]               → hash(architect)
 assistant.instructions[Rust]                → hash(dev)
 ```
 
-Duplicate-capable fields use a path-only claim:
+Duplicate-capable fields record path-only claims:
 
 ```txt
 conversation.tools.fs_read.command.args     → hash(dev)
@@ -1650,109 +1334,69 @@ editor.envs                                 → hash(user-global)
 
 ##### Revert mechanics by category
 
-- **Set-like and identity-bearing**: revert puts each element to be removed into
-  the revert delta's `unsets`, keyed by `path[identity]`.
-  The stream fold applies these by calling `remove_element(path, identity)` on
-  the typed vec, which filters out elements whose `claim_identity()` equals the
-  stored identity.
-  Before marking an element for removal, the revert algorithm checks whether the
-  element existed in the config state *before* the source first claimed it (same
-  walk-back as scalar fields).
-  If it did, the source redundantly declared it and reverting does not remove
-  it.
-- **Duplicate-capable**: revert treats the field as an atomic value.
-  The walk-back locates the field's state at the prior non-target claim (or
-  base) and the revert delta carries the entire vec value for the field.
-  If the field must be reset to empty/missing, the path goes into `unsets`
-  (without an element suffix), and `stream.config()` applies `unset(path)`
-  during replay.
-
-The asymmetry means duplicate-capable fields lose element-level precision: `-C
-architect` when both dev and architect contributed restores the whole field to
-dev's state, discarding architect's additions entirely.
-That is the honest semantics — element-level revert on a duplicate-tolerant
-list requires occurrence counting, which is out of scope for this RFD.
-
-An explicit opt-in keeps the classification visible in code.
-A future `#[derive(ClaimIdentity)]` macro or a `#[claim_granularity =
-"whole_field"]` attribute can be added later if the set of duplicate-capable
-fields grows significantly.
+- **Set-like and identity-bearing**: revert adds each removed element to
+  `unsets` as `path[identity]`, and stream replay calls `remove_element(path,
+  identity)` to filter out elements matching `claim_identity()`.
+  Before removing an element, the walk-back checks whether the element was
+  already present before the target source first claimed it; if so, the element
+  is kept.
+- **Duplicate-capable**: revert treats the vector as an atomic value.
+  Walk-back finds the vector's state at the prior non-target claim (or `base`),
+  and the revert delta replaces the entire field (adding `path` to `unsets` and
+  writing the prior vector in `delta`, or leaving `delta` empty if the field was
+  unset).
+  Because duplicate-capable fields are claimed as a unit, reverting `architect`
+  when both `dev` and `architect` modified the field restores `dev`'s full
+  vector.
 
 ### Conversation-ID inheritance
 
 Conversation-ID inheritance (`--cfg jp-c<id>`, defined in a future RFD) expands
-another conversation's resolved config into a fully-populated partial.
-Like any `Apply` source, an inheriting partial generates claims under its source
-identity (`hash(conversation_id)`) and persists as a `ConfigDelta` event.
-The claims pipeline is uniform — no special-case logic for inheritance.
-
-**Inheritance collapses claim granularity.** A single source identity
-(`hash(conversation_id)`) claims every field in the inherited partial.
-The inner provenance from the source conversation — which `dev` or `architect`
-originally claimed each field — is lost in the target conversation.
-This is acceptable: inheritance is a wholesale "adopt this state" operation, and
-`-C jp-c<id>` undoes it wholesale.
-Users who need finer-grained control over inherited influence should layer
-sources explicitly (`-c jp-c<id> -c overrides.toml`) rather than relying on
-preserved provenance from the source.
+another conversation's resolved config into a partial, claims every field it
+sets under `hash(conversation_id)`, and persists as a `ConfigDelta` event.
+Because the single `hash(conversation_id)` claims every inherited field, the
+source conversation's per-source provenance (such as which fields came from
+`dev` or `architect`) is collapsed in the target conversation, and `-C jp-c<id>`
+reverts the inherited config as a unit.
 
 ### Extends sub-files
 
-Config files can use `extends` to pull in other files.
-When `-c dev` resolves to `dev.toml`, its `extends` directives are folded into a
-single `PartialAppConfig` before the file is returned from
-`load_partial_at_path`.
-By the time the claims pipeline sees the partial, all extends content is already
-merged in.
-
-The natural consequence: **fields contributed by extended files are credited to
-the parent file's claim identity**, not to each extended file individually.
-If `dev.toml` extends `config.d/tools.toml`, a field set in `tools.toml` is
-claimed by dev's hash.
-`-C dev` reverts it along with the rest of dev's influence.
-
-This is the correct behavior: the user typed `-c dev`, not `-c dev.d/tools`.
-Finer-grained provenance for extends sub-files is orthogonal (see [RFD 060]) and
-belongs in the provenance-display layer, not the claims layer.
+When `-c dev` loads `dev.toml`, `load_partial_at_path` folds its `extends`
+targets into a single `PartialAppConfig` before returning.
+Consequently, fields from extended files are claimed under the parent file's
+identity (`hash(dev)`), and `-C dev` reverts them together with the rest of
+`dev.toml`.
+Sub-file provenance for display belongs in `config explain` ([RFD 060]) rather
+than in the claims map.
 
 ### Claims map size for large config files
 
-A config file that sets many fields produces a large claims map.
-In practice, persona files set 10-30 fields.
-If a config file sets hundreds of fields (e.g. a full config dump), the claims
-map grows accordingly.
-This is bounded by the total number of config fields in `AppConfig` and unlikely
-to be a performance concern.
+The claims map scales with the number of leaf fields a config source sets (10-30
+fields for a typical persona file, and bounded at the upper end by the number of
+fields in `AppConfig`).
 
 ### Renamed or removed config fields
 
-If a config field is renamed or removed across JP versions, old claims keyed on
-the previous path become orphaned.
-These are harmlessly ignored — `-C` queries against current field paths and
-skips entries it does not recognize.
+When a config field is renamed or removed in a newer JP version, older claims on
+the obsolete field path remain in history as inert entries; `-C` queries only
+current field paths and ignores unknown keys.
 
 ### Missing claims: UX and diagnostics
 
-`-C <target>` is a silent no-op in several cases.
-`-C` emits an internal diagnostic (not an error; the command still succeeds):
+When `-C <target>` matches no fields, the command still succeeds and emits a
+diagnostic:
 
-- **Legacy conversation, file-based `-C <source>`**: no `ConfigDelta` has
-  `claims` populated, so `claims_state` is empty.
-  File-based `-C` is a no-op — there's no provenance to scope against.
-  Key-value and JSON-object `-C` forms are value-based and can still work on
-  legacy conversations when a post-creation delta mutated the target field.
-- **Unapplied source**: `-C dev` where `dev` was never applied to this
+- **Legacy conversation with file-based `-C <source>`**: pre-existing
+  `ConfigDelta` events have no `claims`, so `claims_state` is empty and
+  file-based `-C` is a no-op.
+  Key-value and JSON-object `-C` still work on legacy conversations when a
+  post-creation delta modified the target field.
+- **Unapplied source**: `-C dev` when `dev` was never applied to the
   conversation.
-  Scope is empty.
-- **Mismatched kv value**: `-C foo=A` where the field's current resolved value
-  is not `A` (a later assignment set it to something else, or nothing set it at
-  all).
-- **Deleted non-workspace source**: `-C dev` where a user-local or
-  user-workspace `dev.toml` is missing.
-  These bases use scan-based resolution, so a missing file produces no candidate
-  hash.
-  Workspace files remain targetable after deletion because the claim stores a
-  path-derived identity alongside any `id` hash.
+- **Mismatched key-value target**: `-C foo=A` when `foo`'s current resolved
+  value is not `A`.
+- **Deleted non-workspace source**: `-C dev` when a user-local or user-workspace
+  `dev.toml` has been deleted and cannot be found by directory scan.
 
 Diagnostic examples:
 
@@ -1762,432 +1406,261 @@ assistant.name is currently 'Other', not 'DevBot'.
 Cannot resolve 'dev' for revert: dev.toml is missing and its identity requires reading the file.
 ```
 
-Users can inspect current claims via `jp conversation show --claims` (future
-work) or read `events.json` directly.
+Users can inspect current claims in `events.json` or via a future `jp
+conversation show --claims` flag.
 
 ### Backward compatibility
 
-Old conversation streams have `ConfigDelta` events without claims.
-The `#[serde(default)]` attribute initializes an empty map for these.
-For fields without claims, `-C` skips rather than guessing — silently falling
-back to value-diff guessing would produce unpredictable results.
-Legacy conversations therefore keep working as before; `-C` is simply a no-op on
-their fields.
-Precise revert is available on any new conversation created after this feature
-lands.
-
-Old `base_config.json` files already contain the fully-resolved config (env +
-`-c` + CLI flags) from their creation invocation.
-On first persist after this RFD lands, the file is migrated in place to the new
-`{ base: <legacy content>, init: [] }` shape (see [Phase
-3](#phase-3-conversation-creation-change)).
-The migration is content-preserving; the fully-resolved config moves under
-`base` with an empty `init` list, and `-C` remains a no-op on these fields (no
-claims to match).
-Precise revert is only available for conversations created after this feature
-lands — the legacy file's embedded overrides cannot be separated from workspace
-config without provenance data that was never recorded.
+Older conversation streams have `ConfigDelta` events without `claims`
+(`#[serde(default)]` deserializes an empty map), and `base_config.json` files
+containing the entire creation-time resolved config (including environment
+variables, `-c` args, and CLI flags).
+On the first persist after this change lands, legacy `base_config.json` files
+are rewritten in place to `{ base: <legacy content>, init: [] }` (see [Phase
+3](#phase-3-conversation-creation-and-base-config-json-shape-change)).
+Because those legacy files lack recorded claims, `-C` is a no-op on their
+creation-time fields, while conversations created after this change support full
+revert.
 
 ## Implementation Plan
 
 ### Phase 1: Delta plumbing, `ClaimIdentity`, and typed walker
 
-This phase lays the data-model foundation without wiring `-C` itself.
+This phase adds the data-model and partial-manipulation primitives before wiring
+`-C`:
 
 **`ConfigDelta` changes** in `crates/jp_conversation/src/stream.rs`:
 
-- Add `claims: BTreeMap<String, Vec<String>>` and `unsets: Vec<String>` fields
-  to `ConfigDelta`.
-  The claims-map value is a list: empty means explicit unclaim, non-empty means
-  the field is claimed by any of the listed identities.
+- Add `claims: BTreeMap<String, Vec<String>>` and `unsets: Vec<String>` to
+  `ConfigDelta` (empty `Vec` = explicit unclaim; non-empty `Vec` = claimed by
+  the listed identities).
 - Extend `deserialize_config_delta` to read `claims` and `unsets` from the raw
   `Value`.
-  Struct-level `#[serde(default)]` is not enough because this is a hand-rolled
-  deserializer.
-- Rework `add_config_delta` to preserve `claims` and `unsets` through the
-  diff-recomputation step, and to emit a delta when any of them (not just
-  `delta`) is non-empty.
-- Introduce `apply_config_delta(partial: &mut PartialAppConfig, delta:
-  &ConfigDelta)` that both merges `delta.delta` and applies `delta.unsets`.
-  Replace all six direct `partial.merge(..)` call sites (`config()`,
-  `IntoIter::next`/`next_back`, `Iter::next`/`next_back`, `IterMut::next`) with
-  this helper.
+- Update `add_config_delta` to preserve `claims` and `unsets` across diff
+  recomputation, and to emit a delta whenever `delta`, `claims`, or `unsets` is
+  non-empty.
+- Add `apply_config_delta(partial: &mut PartialAppConfig, delta: &ConfigDelta)`
+  to apply `delta.unsets` and then merge `delta.delta`, replacing all six direct
+  `partial.merge(..)` call sites (`config()`, `IntoIter::next`/`next_back`,
+  `Iter::next`/`next_back`, and `IterMut::next`).
 
 **Config-layer changes** in `jp_config`:
 
-- Add the `id` field to `AppConfig` as an optional field.
-  The `schematic` `#[derive(Config)]` macro auto-generates the corresponding
-  `Option<String>` on `PartialAppConfig`.
-  Strip it during config resolution — it feeds source identity, not merged
-  state.
-- Implement source hash computation (hash `id` if present, resolved or would-be
-  path otherwise; would-be path enables `-C` against deleted path-hashed files).
-- Add the `ClaimIdentity` trait with implementations for the 7 set-like and
-  identity-bearing vec fields listed in [Claim granularity](#claim-granularity)
-  — approximately 6 unique element types (`RelativePathBuf`,
-  `ExtendingRelativePath`, `AttachmentConfig`, `SectionConfig`,
-  `InstructionsConfig`, `String`).
-  Most impls are trivial (string identity, path accessor); a few opt into
-  `json_identity` as a fallback.
-  Duplicate-capable vec fields do not get `ClaimIdentity` — they use
-  whole-field claims instead.
-- Add the typed `field_paths_into(&self, prefix, out)` walker on each partial
-  type, mirroring the `AssignKeyValue` dispatch shape.
-  The walker descends into both `Vec<T: ClaimIdentity>` and `IndexMap<String,
-  T>` fields.
-- Add `unset(path)` and `remove_element(path, identity)` methods on
-  `PartialAppConfig` and nested partial types.
-
-Ensure backward-compatible deserialization: legacy deltas without `claims` or
-`unsets` load with empty defaults.
+- Add the optional `id` field to `AppConfig` (and the generated `Option<String>`
+  on `PartialAppConfig`), stripping it during config resolution so it feeds only
+  source identity.
+- Implement source hash computation (`hash(id)` when present, plus the resolved
+  or workspace-relative path hash).
+- Add the `ClaimIdentity` trait and implement it for the 7 set-like and
+  identity-bearing vec fields in [Claim granularity](#claim-granularity) (6
+  unique element types: `RelativePathBuf`, `ExtendingRelativePath`,
+  `AttachmentConfig`, `SectionConfig`, `InstructionsConfig`, and `String`).
+  Duplicate-capable vec fields use whole-field claims instead.
+- Add `field_paths_into(&self, prefix, out)` on each partial type, descending
+  into `Vec<T: ClaimIdentity>` and `IndexMap<String, T>` fields.
+- Add `unset(path)` and `remove_element(path, identity)` on `PartialAppConfig`
+  and nested partial types.
 
 Tests:
 
-- Claims and unsets serialization round-trip via `deserialize_config_delta`
-  (stable key ordering via `BTreeMap`).
-- Backward compatibility with old `ConfigDelta` events (no claims field).
-- `unset` and `remove_element` for representative field types (scalar optional,
-  nested struct, vec element removal).
-- `claim_identity()` stability for each of the 6 vec element types implementing
-  the trait.
-- `apply_config_delta` produces identical results in `config()` and the three
-  iterator types when `unsets` is in play.
+- `claims` and `unsets` round-trip through `deserialize_config_delta` with
+  stable `BTreeMap` key ordering.
+- Backward-compatible deserialization of legacy `ConfigDelta` events without
+  `claims` or `unsets`.
+- `unset` and `remove_element` on scalar optionals, nested structs, and vec
+  elements.
+- `claim_identity()` stability for all 6 element types.
+- `apply_config_delta` consistency across `config()` and the three stream
+  iterators when `unsets` is populated.
 
-Can be merged independently — claims fields exist but nothing populates them
-yet.
+This phase can be merged independently.
 
 ### Phase 2: Claims recording and per-directive delta emission
 
-Update `apply_cfg_args` and `apply_cli_config` to build claims maps and emit
+Update `apply_cfg_args` and `apply_cli_config` to record claims and emit
 per-directive deltas.
 
 **Claim recording rules:**
 
-- `-c` file args record claims keyed on the file's source identity (`id` or
-  resolved-path hash).
-  File partials run through `field_paths_into` to enumerate which leaves the
-  file sets.
-- `-c` key-value args record claims keyed on the kv identity `hash("kv:" +
-  field_path + "=" + canonical_value)` (still used for apply-side provenance
-  even though kv `-C` is value-based).
-- `-c` JSON-object args (e.g. `-c '{"assistant":{"name":"x"}}'`) are
-  pre-expanded via `try_merge_object` into per-leaf kv assignments, each
-  recording its own kv identity.
-- Shortcut flags go through their `apply_*` helper, which records the
-  `(field_path, canonical_value)` claim alongside the partial mutation.
-  Each helper gains a `claims: &mut BTreeMap<String, Vec<String>>` parameter.
-- Environment variable overrides (`JP_CFG_*`) record `claims[path] = vec![]`.
-  In-invocation env unclaims seed the starting claims state for phase 2 (see
-  [Current claims state](#current-claims-state)).
+- `-c` file args enumerate set leaf paths via `field_paths_into` and record
+  claims under the file's source identities (`id` and path hashes).
+- `-c` key-value args record claims under `hash("kv:" + field_path + "=" +
+  canonical_value)` after type parsing and alias resolution.
+- `-c` JSON-object args (such as `-c '{"assistant":{"name":"x"}}'`) expand via
+  `try_merge_object` into per-leaf key-value assignments, each recording its own
+  key-value identity.
+- Shortcut flags pass `claims: &mut BTreeMap<String, Vec<String>>` through each
+  `apply_*` helper to record `(field_path, canonical_value)` alongside the
+  partial mutation.
+- Environment variable overrides (`JP_CFG_*`) record `claims[path] = vec![]` to
+  seed the starting claims state for phase 2 (see [Current claims
+  state](#current-claims-state)).
 
 **Per-directive delta emission:**
 
-- `apply_cfg_args` tracks the partial state before each `-c`/`-C` directive and
-  emits a separate `ConfigDelta` after applying it.
-  Each delta carries that directive's incremental partial diff, its claims
-  contribution, and any `unsets` for revert directives.
+- `apply_cfg_args` snapshots the partial before each `-c` or `-C` directive and
+  emits a `ConfigDelta` with that directive's incremental diff, claims, and
+  `unsets`, replacing the single-shot `get_config_delta_from_cli`.
 - Shortcut flags batch into a single trailing `ConfigDelta` emitted after all
-  `-c`/`-C` directives.
-  The claims map covers all fields that any flag touched.
-- `get_config_delta_from_cli` (today a one-shot "compute the final diff") is
-  replaced by per-directive emission inside the apply loop.
-  Each emitted delta is persisted via `add_config_delta`.
-
-**Value canonicalization:** parse to the field's typed value, then serialize
-back via the field's canonical serde form.
-Model aliases are resolved before hashing — `--model opus` and `-c
-assistant.model.id=anthropic/claude-opus-4-6` must produce the same identity.
+  `-c` and `-C` directives.
+- Each emitted delta is persisted via `add_config_delta`.
 
 Tests:
 
-- Claims are recorded correctly for each source type (file, kv, JSON-object,
-  shortcut flag, env).
-- Per-directive deltas: `-c dev -c architect` produces two `ConfigDelta` events,
-  not one.
-- Within-invocation A→B→A persists three deltas with the correct intermediate
-  claims.
-- Shortcut flags batch into a single trailing delta.
-- kv and shortcut flag produce matching identities when they target the same
-  field with the same resolved value.
-- JSON-object `-c` expands to per-leaf kv claims identical to the equivalent
-  repeated `-c key=value` invocation.
-- Env vars produce `vec![]` entries in the starting claims state.
-- `-C` walks back through per-directive deltas correctly for the `-c dev -c
-  architect → -C architect` case.
+- Claims are recorded for files, key-value assignments, JSON objects, shortcut
+  flags, and environment variables.
+- `-c dev -c architect` emits two `ConfigDelta` events rather than one.
+- Within-invocation `A -> B -> A` persists three deltas with intermediate claims
+  preserved.
+- Shortcut flags batch into a single trailing delta, and `--model opus` produces
+  the same claim identity as `-c assistant.model.id=anthropic/claude-opus-4-6`.
+- JSON-object `-c` produces the same leaf claims as equivalent `-c key=value`
+  args.
+- Environment variables populate `vec![]` in the starting claims state.
 
-Depends on Phase 1.
-Can be merged independently.
+Depends on Phase 1 and can be merged independently.
 
 ### Phase 2b: Require a workspace to be self-contained
 
-A prerequisite for Phase 3, shipped separately because it rejects an invocation
-that succeeds today (see [The workspace has to be
-self-contained](#the-workspace-has-to-be-self-contained)).
+Ships separately before Phase 3 because it rejects `jp query --new` in
+workspaces whose config files are incomplete on their own (see [The workspace
+has to be self-contained](#the-workspace-has-to-be-self-contained)).
 
-Conversation creation resolves the workspace's own config files —
-`.jp/config.toml` and the `.jp.toml` chain, merged via inheritance — and fails
-when they do not produce a valid `AppConfig`.
-User-global config, user-workspace config, environment variables, `-c` arguments
-and CLI flags are all excluded from that resolution, since none of them travel
-with the repository.
-
-An invocation carrying `--cfg=NONE` is exempt: it has opted out of implicit
-config, so there are no workspace files to check (see [Creation-time resets, and
+Conversation creation resolves the workspace's own config files
+(`.jp/config.toml` and the `.jp.toml` chain) without user-global config,
+user-workspace config, environment variables, `-c` arguments, or CLI flags, and
+fails if they do not form a valid `AppConfig`.
+Invocations with `--cfg=NONE` skip this check (see [Creation-time resets, and
 `NONE`](#creation-time-resets-and-none)).
 
-The error names the field that is missing and says that a value from user-global
-config, user-workspace config, an environment variable or a flag does not count.
-That matters because the user's own machine will still be supplying the value
-while they read the message, so "no model configured" alone reads as a lie.
-The message's job is to explain that the workspace is not portable, not that the
-field is unset.
-
-The check is worth having ahead of anything it unblocks: it is what lets a team
-rely on "clone the repository and run `jp query --new`", instead of finding out
-per machine whether the workspace carries what it needs.
+When validation fails, the error names the missing field and states that
+user-global config, user-workspace config, environment variables, and CLI flags
+do not satisfy workspace config requirements, so the user understands why the
+error occurs even when a flag or environment variable supplies the value.
 
 Tests:
 
-- A workspace whose own files name a model creates a conversation.
-- A workspace whose own files name no model fails, even when user-global config,
-  an env var, or `--model` supplies one.
-- The failure names the missing field and says where it may not come from.
-- `jp query` on an existing conversation is unaffected, including in a workspace
-  that would now fail to create one.
-- `jp query --new --cfg=NONE --cfg=./mre.toml hello` still creates a
-  conversation in a workspace whose own files are broken or name no model.
-
-Depends on nothing else in this RFD.
-Ships ahead of Phase 3 with its own change-log entry.
+- A workspace whose own config files configure a model creates a conversation.
+- A workspace whose own config files omit a model fails `jp query --new`, even
+  when user-global config, an environment variable, or `--model` supplies one.
+- The error message names the missing field and states which sources are
+  excluded.
+- `jp query` on an existing conversation still succeeds in a workspace that
+  would fail `jp query --new`.
+- `jp query --new --cfg=NONE --cfg=./mre.toml hello` succeeds even when
+  workspace config is missing or incomplete.
 
 ### Phase 3: Conversation creation and `base_config.json` shape change
 
-This phase is the one that can break the pinning rule (see [Pinning is a
-constraint on the reshaping](#pinning-is-a-constraint-on-the-reshaping)), so its
-tests carry cases that fail loudly if it does: resolve a conversation, change a
-`#[setting(default)]` value, resolve it again, and assert the result is
-unchanged — once for an ordinary conversation, and once for one created with a
-reset directive, which is the shape that would put a `Reset` in the replay path
-and discard `base` along with the defaults it carries.
-Those tests are why `base` stays a resolved `AppConfig`, and they belong in the
-same commit as the shape change rather than after it.
+Reshapes `base_config.json` into `{ base, init }` and resolves `base` from
+workspace config files alone (see [Pinning is a constraint on the
+reshaping](#pinning-is-a-constraint-on-the-reshaping) and [What an `init` entry
+holds](#what-an-init-entry-holds)).
 
-This phase reshapes `base_config.json` to carry creation-time per-directive
-deltas alongside the workspace snapshot, and narrows what that snapshot resolves
-from.
-
-**`ConversationStream`** (`crates/jp_conversation/src/stream.rs`):
-
-- Add `init: Vec<ConfigDelta>` as a first-class field, between `base_config` and
-  `events`.
-  `base_config: Arc<AppConfig>` keeps its type.
-- Update `config()` to fold `base_config.to_partial()` → each `init` delta →
-  each event delta, using the `apply_config_delta` helper from Phase 1 for
-  deltas.
-- Update `Iter`, `IterMut`, and `IntoIter` to fold `base` and each `init` delta
-  before walking events, so per-event views match `config()`.
-- `from_parts()` / `to_parts()` keep their two-component signatures (base_config
-  JSON value, events JSON vec); the JSON shape of the base_config component
-  changes to `{ base, init }`.
-
-**Conversation creation** resolves `base` from the workspace's own config files
-and records user-global config, user-workspace config, environment variables,
-`-c` args and flags as `init` deltas, rather than resolving all of them together
-into one snapshot.
-Each `init` entry is the difference between resolving the sources up to and
-including it and resolving the sources before it, in load order — see [What an
-`init` entry holds](#what-an-init-entry-holds).
-Phase 2b already rejects a workspace whose files do not resolve on their own, so
-this phase can rely on `base` being valid.
-
-An invocation carrying a reset keyword, or `NONE`, keeps today's behavior:
-creation absorbs those contributions into `base` and writes an empty `init` (see
-[Creation-time resets, and `NONE`](#creation-time-resets-and-none)).
-
-**Storage layer** (`jp_storage`):
-
-- `Storage::persist_conversation` (`crates/jp_storage/src/lib.rs`, reached via
-  the `PersistBackend::write` trait method on the concrete backend) writes
-  `base_config.json` in the new `{ base, init: [ConfigDelta, …] }` shape, with
-  `base` encoded exactly as the flat file encoded it.
-  The existing copy-if-exists path gets a third branch:
-  - File absent → write new shape from the in-memory value (new conversations).
-  - File present in new shape → copy verbatim (preserves user hand-edits;
-    matches today's behavior).
-  - File present in legacy flat shape → **rewrite in place** during the staging
-    write, wrapping the legacy content as `{ base: <legacy>, init: [] }`.
-    One-time per-conversation migration.
-    Detection is a cheap JSON shape check (is the root an object with a `base`
-    key?).
-    The legacy parse only runs when the shape check fails.
-- `load_conversation_stream` also handles the legacy shape transparently (wrap
-  on read), so a conversation loaded between the migration landing and its next
-  persist still behaves correctly.
-- `MANAGED_FILES` is unchanged — `base_config.json` is still managed as today;
-  only its contents change.
-- The legacy parser and rewrite logic can be retired in a future release once
-  all active conversations have been persisted at least once since the migration
-  landed.
-
-**Workspace API** (`jp_workspace`):
-
-- `Workspace::create_and_lock_conversation` gains an `init: Vec<ConfigDelta>`
-  parameter.
-- `create_and_lock_conversation_with_id` same change.
-- Downstream callers (query-new in `query.rs`, `fork_conversation`) pass the
-  appropriate list.
-
-**Fork path** (`crates/jp_cli/src/cmd/conversation/fork.rs`):
-
-- `fork_conversation` forwards both the source's `base` partial and its `init`
-  delta list to the new conversation.
-  Event-replay is unchanged — only the initial-state seeding changes to carry
-  `init`.
-
-**Query-new path** (`crates/jp_cli/src/cmd/query.rs`):
-
-- New conversations pass the invocation's per-source `ConfigDelta` list (one
-  entry per file source, the environment, each `-c`/`-C` directive, plus the
-  trailing shortcut-flag delta if any) as `init` to
-  `create_and_lock_conversation`.
-  The `base` partial is the pure workspace config, except under a reset keyword
-  or `NONE`, where it absorbs the invocation and `init` is empty.
-
-**User-facing commands**: no new flags.
-`conversation edit -b` and `conversation path --base-config` continue to point
-at `base_config.json`, which now holds the full initial state in one file.
-
-Existing conversations are migrated in place: their `base_config.json` is
-rewritten to `{ base: <legacy content>, init: [] }` on the next persist after
-this RFD lands (see the Storage layer bullets above).
-`-C` is a no-op on their fields because the legacy content has no claims to
-match — the migration is content-preserving but does not recover provenance
-that was never recorded.
-Precise revert only works on conversations created after this feature lands.
+- **`ConversationStream`** (`crates/jp_conversation/src/stream.rs`): add `init:
+  Vec<ConfigDelta>` between `base_config: Arc<AppConfig>` and `events`.
+  Update `config()`, `Iter`, `IterMut`, and `IntoIter` to fold
+  `base_config.to_partial()`, then each `init` delta, then each event delta via
+  `apply_config_delta`.
+  Update `from_parts()` and `to_parts()` to serialize and deserialize the
+  `base_config` JSON value as `{ base, init }`.
+- **Conversation creation** (`jp_workspace` and
+  `crates/jp_cli/src/cmd/query.rs`): `Workspace::create_and_lock_conversation`
+  and `create_and_lock_conversation_with_id` take `init: Vec<ConfigDelta>`.
+  For normal invocations, `base` is resolved from workspace config files and
+  `init` holds the per-source diffs (user-global, user-workspace, environment,
+  `-c` and `-C` directives, and shortcut flags).
+  When `--cfg=NONE` or a reset keyword is present, `base` absorbs the reset and
+  `init` holds only directives after the last reset (or is empty for `NONE`).
+- **Storage layer** (`jp_storage`): `Storage::persist_conversation` writes `{
+  base, init }` for new conversations, copies `base_config.json` verbatim when
+  it already has a `base` key, and rewrites legacy flat files once as `{ base:
+  <legacy>, init: [] }`.
+  `load_conversation_stream` also wraps legacy flat files in memory on read.
+- **Fork path** (`crates/jp_cli/src/cmd/conversation/fork.rs`):
+  `fork_conversation` clones both `base` and `init` from the source
+  conversation.
+- **User-facing commands**: `conversation edit -b` and `conversation path
+  --base-config` continue to point at `base_config.json`.
 
 Tests:
 
-- New conversations produce `base_config.json` in the new shape.
-- `from_parts()` / `to_parts()` round-trip a stream with a non-empty `init`
-  list.
-- `config()` produces the correct resolved result for the base + init + events
-  fold.
-- **`base` + `init` equals the whole invocation resolved at once**, which is the
-  invariant the split has to preserve.
-  Includes a user-workspace override that sets only `providers.llm.aliases`,
-  where the workspace names its model through that alias: replaying the alias
-  map alone leaves `assistant.model.id` on the workspace's target, and the
-  assertion catches it.
-- **A field a lower-precedence source loses stays lost**:
-  `conversation.tools.'*'.run = "unattended"` in user-global config and `"ask"`
-  in the workspace resolves to `ask`, both through ordinary resolution and
-  through the `base` + `init` replay.
-- Legacy flat `base_config.json` loads as `{ base, init: [] }` and the stream
-  behaves as today.
-- Legacy file is rewritten to the new shape on first persist: create a
-  conversation directory with a flat `AppConfig` `base_config.json`, persist the
-  loaded stream unchanged, assert the on-disk file now has the `{ base, init }`
-  shape with the legacy content verbatim under `base`.
-- Once rewritten, subsequent persists copy the new-shape file verbatim (the
-  user-hand-edit preservation path still works).
-- **A changed program default does not reach an existing conversation**: resolve
-  a conversation, change a `#[setting(default)]` value, resolve again, assert
-  the result is unchanged.
-- Fork propagates `base` and `init` from source: a forked conversation carries
-  the same creation-time deltas and the same resolved base.
-- `conversation path --base-config` still returns the `base_config.json` path.
+- New conversations write `base_config.json` in the `{ base, init }` format, and
+  `from_parts()` / `to_parts()` round-trip a non-empty `init` list.
+- Folding `base` + `init` produces the exact same `AppConfig` as resolving the
+  entire creation invocation at once, including when a user-workspace override
+  changes a model alias referenced by the workspace's `assistant.model.id`.
+- Lower-precedence sources do not override workspace values during `init` replay
+  (for example, `conversation.tools.'*'.run = "unattended"` in user-global
+  config remains `"ask"` when set to `"ask"` in workspace config).
+- Legacy flat `base_config.json` files load with `init: []`, are rewritten to `{
+  base, init: [] }` on first persist, and are copied verbatim on subsequent
+  persists.
+- Changing a `#[setting(default)]` value does not change how an existing
+  conversation resolves, both for normal conversations and for conversations
+  created with a reset directive.
+- Forking a conversation preserves both `base` and `init`.
+- `conversation path --base-config` returns the `base_config.json` path.
 
-Depends on Phase 2 and Phase 2b.
-Can be merged independently.
+Depends on Phase 2 and Phase 2b, and can be merged independently.
 
 ### Phase 4: `-C` flag and claim-history-driven revert
 
-Add `CfgDirective` wrapper enum with `Apply` and `Revert` variants wrapping
-`KeyValueOrPath`.
+Wire `-C` / `--no-cfg` and the revert algorithms:
 
-**CLI wiring**:
+- **CLI wiring**: add `CfgDirective` (`Apply` and `Revert` around
+  `KeyValueOrPath`), wire `-C` / `--no-cfg` in clap (rejecting bare `--no-cfg`),
+  and merge `-c` and `-C` in command-line order via `ArgMatches::indices_of(..)`
+  in `clap::FromArgMatches`.
+- **Pipeline integration**: skip `CfgDirective::Revert` in phase 1
+  (`partial_without_conversation`), and process both `Apply` and `Revert` in
+  phase 2 starting from the folded `init` + `events` claims state seeded with
+  environment unclaims.
+- **Revert algorithms**:
+  - **File-based `-C`** (identity-scoped): resolve candidate paths across roots,
+    collect `hash(id)` and path hashes into `target_set`, select fields in
+    `claims_state` whose claims intersect `target_set`, and walk backward to the
+    first non-target claim or `base`.
+  - **Key-value `-C`** (value-scoped): compare the field's current resolved
+    value with the target value, skip with a diagnostic on mismatch, and walk
+    backward to the first state with a different value or `base`.
+  - **JSON-object `-C`**: expand via `try_merge_object` into per-leaf key-value
+    reverts.
+  - Emit diagnostics when a `-C` target matches nothing (see [Missing
+    claims](#missing-claims-ux-and-diagnostics)).
 
-- Wire `-C` / `--no-cfg` in clap as the negative counterpart of `-c` / `--cfg`.
-  The flag requires a value (file path, `key=value`, or JSON object); bare
-  `--no-cfg` has no defined meaning in this RFD and is rejected at parse time.
-- Add a manual `clap::FromArgMatches` impl that merges the `-c` and `-C` vectors
-  into a single `Vec<CfgDirective>` preserving command-line order via
-  `ArgMatches::indices_of(..)`.
-  Same pattern as `ToolDirectives` in `query.rs`.
-
-**Pipeline integration**:
-
-- Phase 1 of the config pipeline (`partial_without_conversation`) skips every
-  `CfgDirective::Revert` entry — no claim history is available before
-  conversation resolution.
-  `conversation.default_id` is derived from `Apply` directives only.
-- Phase 2 of the config pipeline runs the full directive loop with both `Apply`
-  and `Revert` directives, using the folded current claims state from `init` +
-  event-stream deltas as the starting point.
-
-**Revert implementation**:
-
-- **File-based `-C` (identity-scoped)**: compute the target identity set from
-  every applicable hash per candidate file — workspace files always contribute
-  their workspace-relative path hash (and `hash(id)` if declared),
-  user-local/user-workspace files contribute the absolute resolved path (and
-  `hash(id)` if declared and the file is present).
-  Workspace files remain targetable post-deletion because the path hash is
-  derivable without the file; non-workspace deleted files yield an empty
-  identity set and are a no-op.
-  Scope = `{field | claims_state[field] has any identity in target_set}`.
-  Walk deltas backward past all claims whose identity list intersects the target
-  set, stopping at the first claim with no target-matching identity (or `base`,
-  which carries no claims and is the floor of any walk-back).
-- **Key-value `-C` (value-scoped)**: read the current resolved value of the
-  field, compare to the specified value, skip on mismatch.
-  Walk deltas backward past all claims on the field where the resolved value was
-  still the target, stop at the first different state (or `base`).
-- **JSON-object `-C`**: pre-expand via `try_merge_object` into per-leaf kv
-  reverts, run the kv-revert algorithm for each leaf independently.
-- Emit diagnostics for unmatched `-C` invocations (see [Missing
-  claims](#missing-claims-ux-and-diagnostics)).
-- The starting claims state for phase 2 includes env unclaims (see [Current
-  claims state](#current-claims-state)) so env-set fields are protected from
-  file-based `-C`.
-
-**Integration tests** covering all worked examples from this RFD:
+Integration tests covering the worked examples:
 
 - Basic cross-invocation revert
 - Overlapping sources with identical values
 - Shortcut flag override
-- Key-value revert (matching and non-matching values)
-- JSON-object revert (expansion equivalence with kv form)
-- Repeated claimant across invocations (A → B → A)
-- Source file edited between invocations (claim-history guarantee)
-- Missing-claims diagnostic emission
+- Key-value revert (matching and non-matching values, and undoing a file-set
+  value)
+- JSON-object revert equivalence with key-value revert
+- Repeated claimant across invocations (`A -> B -> A`) and within one invocation
+- Source file edited between invocations
+- Diagnostics for unmatched `-C` targets
 
 Depends on Phase 3.
 
 ## References
 
-- [RFD 008]: Ordered Tool Directives — establishes left-to-right processing for
+- [RFD 008]: Ordered Tool Directives, defining left-to-right processing for
   interleaved CLI flags.
-- [RFD 035]: Multi-Root Config Load Path Resolution — defines the three-root
-  search for `--cfg` paths, which `-C` reuses.
+- [RFD 035]: Multi-Root Config Load Path Resolution, defining the three-root
+  search for `--cfg` paths reused by `-C`.
 - **Conversation-ID inheritance** (`--cfg=jp-c<id>` and `--fork` implicit
-  config) is defined in a future RFD.
-  This RFD assumes inherited conversation partials claim every field they set
-  under `hash(conversation_id)`, collapsing inner provenance.
-- [RFD 038]: Config Reset Keywords — defines `--cfg=WORKSPACE`, which is how a
-  user opts a conversation forward onto current workspace config, and so the
-  reason a conversation may otherwise stay pinned.
-- [RFD 054]: Split Conversation Config and Events — separates `base_config`
-  into its own file.
-  This RFD reshapes that file to carry both the workspace snapshot and
-  creation-time per-directive deltas, preserving the cleanliness of
-  `events.json`.
-- [RFD 060]: Config Explain — future RFD that may benefit from provenance data.
-- `crates/jp_conversation/src/stream.rs` — `ConfigDelta` struct and
-  conversation stream.
-- `crates/jp_cli/src/config_pipeline.rs` — `ConfigPipeline` and
-  `apply_cfg_args`.
-- `crates/jp_cli/src/lib.rs` — `KeyValueOrPath` enum and `-c`/`--cfg` parsing.
+  config), defined in a future RFD; inherited conversation partials claim every
+  field they set under `hash(conversation_id)`.
+- [RFD 038]: Config Reset Keywords, defining `--cfg=WORKSPACE` to opt a pinned
+  conversation into current workspace config.
+- [RFD 054]: Split Conversation Config and Events, separating `base_config.json`
+  from `events.json`.
+- [RFD 060]: Config Explain, which displays per-field provenance.
+- `crates/jp_conversation/src/stream.rs`: `ConfigDelta` and
+  `ConversationStream`.
+- `crates/jp_cli/src/config_pipeline.rs`: `ConfigPipeline` and `apply_cfg_args`.
+- `crates/jp_cli/src/lib.rs`: `KeyValueOrPath` and `-c` / `--cfg` parsing.
 
 [RFD 008]: 008-ordered-tool-directives.md
 [RFD 035]: 035-multi-root-config-load-path-resolution.md
