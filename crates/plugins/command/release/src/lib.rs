@@ -19,13 +19,15 @@
 //!
 //! `cut`, `pick`, and `finalize` make releases on release branches and their
 //! notes on notes branches, in this repository, and print the push that
-//! publishes them; `due` says when the next release should be cut.
+//! publishes them; `abandon` takes back a release nobody has published, and
+//! `due` says when the next release should be cut.
 //! `releases` decides what they may do, and `repository` runs the git they need
 //! in worktrees of their own, reading what this repository and `origin` hold.
 //!
 //! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`
 
+mod abandon;
 mod cut;
 mod definitions;
 mod due;
@@ -199,6 +201,23 @@ enum Command {
     /// Pushes nothing: it prints the push that publishes the tag, which makes
     /// the release.
     Finalize {
+        /// The release, such as `0.3.0`.
+        #[arg(value_parser = parse_version)]
+        version: Version,
+    },
+
+    /// Take back a release nobody has published, so it can be cut again.
+    ///
+    /// Refuses a release origin has tagged, and one older than another release:
+    /// releases are abandoned newest first.
+    /// Deletes its tag and notes branch here, and its release branch, or for a
+    /// patch release the commits from the one that started it.
+    /// Moves the fragments and highlights its notes filed back to the top of
+    /// the fragments directory on `release-notes/abandon-v<version>`, with
+    /// their wording as edited, for merging into `main`.
+    /// Pushes nothing: it prints the pushes that take the release back on
+    /// origin.
+    Abandon {
         /// The release, such as `0.3.0`.
         #[arg(value_parser = parse_version)]
         version: Version,
@@ -469,6 +488,9 @@ fn handle_command(
         Command::Pick { .. } => make_release(root, &options, pick::resume),
         Command::Finalize { version } => make_release(root, &options, |pipeline| {
             finalize::finalize(pipeline, &version)
+        }),
+        Command::Abandon { version } => make_release(root, &options, |pipeline| {
+            abandon::abandon(pipeline, &version)
         }),
         Command::Due => due_release(root, &options, ctx.format),
         Command::Status => {

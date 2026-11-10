@@ -21,6 +21,7 @@ fn line(branch: &str, started: &[&str]) -> Line {
             .zip(0..)
             .map(|(text, day)| Started {
                 version: version(text),
+                hash: format!("{day:040}"),
                 at: OCTOBER_1 + day * DAY,
             })
             .collect(),
@@ -45,6 +46,11 @@ fn releases(tagged: &[&str], lines: Vec<Line>) -> Releases {
 #[test]
 fn a_release_branch_is_named_after_its_major_and_minor_version() {
     assert_eq!(branch(&version("0.3.1")), "release/0.3");
+    assert_eq!(notes_branch(&version("0.3.1")), "release-notes/v0.3.1");
+    assert_eq!(
+        abandon_branch(&version("0.3.1")),
+        "release-notes/abandon-v0.3.1"
+    );
     assert_eq!(line_of("release/0.3"), Some((0, 3)));
     assert_eq!(line_of("release/12.0"), Some((12, 0)));
 
@@ -119,10 +125,12 @@ fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
     assert_eq!(started, [
         Started {
             version: version("0.3.0"),
+            hash: "0000".to_owned(),
             at: 1_792_584_000,
         },
         Started {
             version: version("0.3.1"),
+            hash: "2222".to_owned(),
             at: 1_792_756_800,
         },
     ]);
@@ -164,6 +172,7 @@ fn the_start_message_carries_the_trailer_it_is_read_back_by() {
             .0,
         [Started {
             version: version("0.3.0"),
+            hash: "0000".to_owned(),
             at: OCTOBER_1,
         }]
     );

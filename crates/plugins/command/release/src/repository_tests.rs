@@ -105,6 +105,7 @@ fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
         tip,
         started: vec![Started {
             version: version("0.3.0"),
+            hash: fixture.hash("release/0.3~1"),
             at: started_at,
         }],
         picked: BTreeSet::from([main.clone()]),

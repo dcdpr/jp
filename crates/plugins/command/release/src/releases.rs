@@ -70,6 +70,9 @@ pub(crate) struct Line {
 pub(crate) struct Started {
     pub version: Version,
 
+    /// The hash of the commit that starts it.
+    pub hash: String,
+
     /// When the commit that starts it was made, in seconds since the Unix
     /// epoch.
     pub at: i64,
@@ -123,6 +126,12 @@ pub(crate) fn branch(version: &Version) -> String {
 /// The name of the branch that files the notes of release `version` on `main`.
 pub(crate) fn notes_branch(version: &Version) -> String {
     format!("{NOTES_BRANCH}v{version}")
+}
+
+/// The name of the branch that moves the notes of the abandoned release
+/// `version` back to the top of the fragments directory on `main`.
+pub(crate) fn abandon_branch(version: &Version) -> String {
+    format!("{NOTES_BRANCH}abandon-v{version}")
 }
 
 /// The name of the tag that finalizes release `version`.
@@ -207,7 +216,11 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
                 .and_then(|rest| rest.strip_prefix(':'))
                 .and_then(|version| Version::parse(version.trim()).ok());
             if let Some(version) = version {
-                started.push(Started { version, at });
+                started.push(Started {
+                    version,
+                    hash: commit.to_owned(),
+                    at,
+                });
             }
 
             let hash = line

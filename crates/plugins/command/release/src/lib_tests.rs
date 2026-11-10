@@ -753,6 +753,7 @@ fn making_a_release_needs_a_git_repository() {
         &["cut", "--at", "HEAD"],
         &["finalize", "0.1.0"],
         &["pick", "--continue"],
+        &["abandon", "0.1.0"],
         &["due"],
         &["status"],
     ] {

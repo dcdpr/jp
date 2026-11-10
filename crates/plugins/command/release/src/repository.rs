@@ -487,6 +487,25 @@ impl<'a> Repository<'a> {
         self.git(&["log", "--first-parent", "-z", "--format=%H%n%B", hash])
     }
 
+    /// The best common ancestor of the commits `one` and `other`.
+    pub(crate) fn merge_base(&self, one: &str, other: &str) -> Result<String, String> {
+        Ok(self.git(&["merge-base", one, other])?.trim().to_owned())
+    }
+
+    /// Whether the commits `one` and `other` hold the same files below `path`,
+    /// a path relative to the workspace root.
+    pub(crate) fn same_below(&self, one: &str, other: &str, path: &str) -> Result<bool, String> {
+        let ran = self
+            .shell
+            .try_git(&self.root, &["diff", "--quiet", one, other, "--", path])?;
+        // It exits 1, saying nothing, when they differ.
+        if ran.success || ran.stderr.trim().is_empty() {
+            return Ok(ran.success);
+        }
+
+        Err(format!("`git diff` failed: {}", ran.said()))
+    }
+
     /// The release branches, here or on `origin`, whose history holds the
     /// commit `hash`, by name.
     pub(crate) fn containing(&self, hash: &str) -> Result<Vec<String>, String> {
@@ -548,6 +567,37 @@ impl<'a> Repository<'a> {
         }
 
         Ok(())
+    }
+
+    /// Delete this repository's branch `name`, which has to be at the commit
+    /// `local` still.
+    ///
+    /// Refuses a branch checked out in a worktree.
+    pub(crate) fn delete_branch(&self, name: &str, local: &str) -> Result<(), String> {
+        self.refuse_checked_out(name)?;
+
+        let reference = format!("{LOCAL_REFS}{name}");
+        let ran = self.shell.try_git(&self.root, &[
+            "update-ref",
+            "-m",
+            "jp release",
+            "-d",
+            &reference,
+            local,
+        ])?;
+        if !ran.success {
+            return Err(format!(
+                "{name} moved while the command ran, so it wasn't deleted: {}",
+                ran.said()
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Delete this repository's tag `tag`.
+    pub(crate) fn delete_tag(&self, tag: &str) -> Result<(), String> {
+        self.git(&["tag", "--delete", tag]).map(drop)
     }
 
     /// Refuse when the branch `name` is checked out in one of the repository's
