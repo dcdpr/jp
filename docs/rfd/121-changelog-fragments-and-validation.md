@@ -208,20 +208,25 @@ Each names a change request on the workspace's forge, written `#1207` (or
 A turn that stalls while idle is retried instead of failing.
 ```
 
-Every user-visible change adds a new fragment, including follow-up pull requests
-that extend an earlier change, whether or not the earlier change has been
-released.
-Existing fragments are edited only to fix wording.
-Because cutting a release moves top-level fragments into a version directory
-([Released fragments](#released-fragments)), git's rename tracking carries any
-in-flight edit from an open pull request into the released file when that pull
-request merges.
-That behavior is appropriate for wording fixes, but would attribute unreleased
-work to an already-cut release if a follow-up appended new functionality to an
-existing fragment.
-A feature built across multiple pull requests instead adds a separate fragment
-in each pull request with user-visible changes and updates a single shared
-highlight note, which credits all of them.
+`Credits` also say which changes a fragment describes, and so which release it
+belongs to: the first release that ships every change they name files it ([RFD
+122]).
+A fragment without them describes the commit that added it.
+That lets a fragment written after the fact, for a release cut at an earlier
+commit, find its release.
+
+Each user-visible change adds its own fragment, follow-ups included: a pull
+request that extends an earlier change describes what it adds in a new fragment,
+whether or not the earlier one has been released.
+An existing fragment is edited only to correct its wording.
+The rule makes a fragment's text describe the code that added it, which matters
+because a fragment can move into a release while a pull request that edits it is
+open ([Released fragments](#released-fragments)): git carries the edit to the
+moved file when the pull request merges, which is right for a correction and
+would be wrong for a description of new work.
+A feature built across several pull requests adds a fragment for each
+user-visible change they make, and each of them edits the shared highlight,
+which credits all of them.
 
 ### Highlight note
 
@@ -269,11 +274,10 @@ currently exists, which later pull requests expand as more pieces land.
 
 ### Released fragments
 
-Cutting a release ([RFD 122]) opens a pull request against `main` that moves the
-unreleased fragments and highlight notes from the top level of `changelog.d/`
-into a subdirectory named after the release version.
-Backporting a later change into a release moves that change's fragment into the
-version directory in the same way:
+Cutting a release ([RFD 122]) moves the unreleased fragments and highlights from
+the top level into a directory named after its version, on a notes branch merged
+into `main`, and picking a later change into a release moves that change's
+fragment the same way:
 
 ```
 changelog.d/
@@ -597,28 +601,22 @@ Workspaces without CI or on other forges can use `jp release` without them.
   release pipeline commands to `jp release`: release branches, release note and
   upgrade guide rendering, and retiring `jilu`.
   This RFD stops at the input formats, the code that writes and validates them,
-  and JP's CI checks.
-- **Backfilling changelog entries for already-merged history.** The gate applies
-  prospectively from when it lands; earlier commits are not retroactively
-  converted into fragments.
-- **CI integration outside GitHub.** The gate and label workflows target JP's
-  GitHub repository; the `jp release` plugin works without any CI.
+  and JP's CI.
+- **CI outside GitHub.** The gate and the label are JP's workflows; the plugin
+  works without any CI.
 
 ## Risks and Open Questions
 
-- **Fragment quality varies.** A fragment can be factually accurate and still
-  read like a developer-focused commit message.
-  Human reviewers and the `pr-reviewer` persona serve as the backstop.
-- **Highlight selection is subjective.** There is no strict rule for what
-  warrants a highlight note.
-  Contributors should start conservatively; notable features without a dedicated
-  highlight note can still be covered in the release's `overview.md`
-  introduction.
-- **First-release cutover.** Because fragments exist only after the gate lands,
-  the first release's categorized changelog will cover only post-cutover
-  changes.
-  This is an accepted trade-off of sourcing release notes from pull requests
-  rather than git history.
+- **Fragment quality varies.** An entry can be accurate and still read like a
+  commit message.
+  The reviewer, and the `pr-reviewer` persona, are the backstop.
+- **Highlight judgment is subjective.** "Worth a highlight" has no bright line.
+  Start conservative; a release's introduction can carry a feature that does not
+  get its own note.
+- **History before the gate.** Pull requests merged before the gate landed have
+  no fragments.
+  [RFD 123] drafts them from git history when it releases JP's past, and their
+  `Credits` file them into the releases that shipped their changes.
 
 ## Implementation Plan
 
@@ -685,6 +683,7 @@ Depends on Phase 1.
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
 [RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
 [RFD 122]: 122-release-pipeline.md
+[RFD 123]: 123-distributing-the-jp-binary.md
 [VRL]: https://github.com/vectordotdev/vrl/tree/main/release
 [bevy-generate-release]: https://github.com/bevyengine/bevy-website/tree/main/generate-release
 [bevy-release]: https://github.com/bevyengine/bevy/tree/main/_release-content

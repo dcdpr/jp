@@ -1,6 +1,6 @@
 # Release Pipeline
 
-- **Status**: Done
+- **Status**: In Progress
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-03
 - **Label**: tracking-rfd=122
@@ -35,6 +35,20 @@ Tracking ticket for [RFD 122].
       `main` alone and again when a release's tag is pushed, switches the
       navigation to "Releases", and retires `jilu`.
       Depends on Phase 1 and RFD 116's site phase.
+- [ ] **Cut the past, and abandon**: Adds `cut --at`, files fragments by the
+      changes their `Credits` name, starts release branches from trees without
+      `changelog.d/`, and adds `abandon`.
+      `cut` tells the person releasing to merge the notes branch into `main`.
+      Depends on Phase 2.
+- [ ] **Build releases**: Adds `build` with the `build` option and `--quick`,
+      the build directory and its checks, and `status` naming finalized releases
+      without a publishable build.
+      `--remote` and `builders` land with a project's first remote builder.
+      Depends on Phase 2.
+- [ ] **Links and drafts**: Adds the `repository` option wherever notes are
+      rendered and in `jp vite`'s snapshot, and draft pages for releases in
+      preparation under `jp vite serve`.
+      Depends on Phase 4.
 
 The repository settings the plan names, protecting `release/*` branches and `v*`
 tags, are [T-1f2jmb7].
@@ -60,5 +74,24 @@ implementation, not the one this ticket was filed from:
 - `jp release status` joined the reminder's phase, and a release gets its pages
   on the site once it is tagged.
 
+-----
+
+- **From**: jp
+- **Date**: 2026-11-10T09:54:12Z
+
+Reopened: RFD 122 is back to Accepted for three new phases, which come from
+releasing JP's history with the same commands ([RFD 123]).
+
+- **Cut the past, and abandon**: `cut --at` cuts at an earlier commit of `main`,
+  with fragments filed by the changes their `Credits` name, and `abandon` undoes
+  a release nobody has published, so a trial can back out and try again.
+- **Build releases**: `build` runs the project's build command and checks its
+  archives, checksums, and manifest, so a release ends with binaries built on
+  the releasing machine; publishing them is a separate plugin.
+- **Links and drafts**: the `repository` option, because a rehearsal clone's
+  `origin` is not the forge, and draft pages for releases in preparation under
+  `jp vite serve`.
+
 [RFD 122]: ../rfd/122-release-pipeline.md
+[RFD 123]: ../rfd/123-distributing-the-jp-binary.md
 [T-1f2jmb7]: 1f2jmb7-protect-release-branches-and-release-tags-on-github.md
