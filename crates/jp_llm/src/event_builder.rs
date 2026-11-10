@@ -112,8 +112,7 @@ impl EventBuilder {
     /// partial buffer is committed as its own event, so reasoning stays
     /// reasoning and message text stays message text.
     /// The provider's request builder decides how to serialize partial
-    /// reasoning back to the model (Anthropic sends unsigned reasoning as
-    /// `<think>` text, never a native thinking block).
+    /// reasoning back to the model (Anthropic leaves unsigned reasoning out).
     ///
     /// Empty buffers are skipped.
     /// Tool-call and structured buffers are excluded: a partial tool call would

@@ -1225,8 +1225,8 @@ fn soft_force_retry(
 
 /// Why the API refused a thinking block.
 ///
-/// Both kinds are repaired the same way, by replaying the reasoning as
-/// `<think>` text instead of a native thinking block.
+/// Both kinds are repaired the same way, by removing the signature so later
+/// requests leave the reasoning out instead of sending a native thinking block.
 /// They differ in where the offending block can be, which is what decides where
 /// to look when the error carries no usable position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1383,8 +1383,8 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 /// Build [`EventPatch`] instructions for the thinking blocks the API refused.
 /// The caller yields these as [`Event::Patch`] so the CLI can remove the
 /// provider metadata from the persisted conversation stream.
-/// On the next request rebuild, [`convert_event`] will fall through to the
-/// `<think>` tag path for events that no longer carry a signature.
+/// On the next request rebuild, [`convert_event`] leaves out the reasoning of
+/// events that no longer carry a signature.
 ///
 /// A rejected block downgrades every thinking and redacted-thinking block in
 /// the whole assistant turn holding it.
@@ -1470,8 +1470,9 @@ fn last_turn_thinking_block(request: &types::CreateMessagesRequest) -> Option<(u
     })
 }
 
-/// Build the patch that strips a thinking block's provider metadata, so the
-/// event is replayed as `<think>` text rather than a native thinking block.
+/// Build the patch that strips a thinking block's provider metadata, so later
+/// requests leave the event's reasoning out rather than send a native thinking
+/// block.
 fn thinking_patch(key: &'static str, value: String) -> EventPatch {
     EventPatch {
         matcher: EventMatcher::MetadataValue {
@@ -1890,9 +1891,14 @@ fn create_request(
 
     // The trailing assistant message, if any, is the continuation target.
     // Anthropic rejects native thinking blocks there once the turn has been
-    // resumed, so rewrite them as `<think>` text before deciding how to
-    // continue.
-    downgrade_trailing_thinking(&mut messages);
+    // resumed, so drop them before deciding how to continue.
+    let dropped = drop_trailing_thinking(&mut messages);
+    if dropped > 0 {
+        debug!(
+            dropped,
+            "Dropped thinking from the continued assistant message."
+        );
+    }
 
     // Models that don't support assistant prefill require the conversation to
     // end with a user message. When the last message is from the assistant
@@ -2920,52 +2926,94 @@ fn convert_tools(
 ///
 /// Events from the same role are combined into a single message with multiple
 /// content blocks.
+///
+/// Reasoning that [`convert_event`] leaves out is counted and logged.
+/// When the user's next message follows such reasoning with no assistant
+/// content in between, the user interrupted the assistant mid-reasoning, and
+/// that message is prefixed with [`INTERRUPTED_REASONING_NOTE`].
+/// The note exists only in the request; the stored conversation is unchanged.
 fn convert_events(
     events: ConversationStream,
     cache: Option<types::CacheControl>,
 ) -> Vec<types::Message> {
-    events
-        .into_iter()
-        .filter_map(|event| {
-            let aliases = &event.config.providers.llm.aliases;
+    let mut messages: Vec<types::Message> = vec![];
+    let mut dropped = 0_usize;
+    let mut interrupted = false;
 
-            let is_anthropic = event
-                .config
-                .assistant
-                .model
-                .id
-                .finalize(aliases)
-                .is_ok_and(|id| id.provider == Some(PROVIDER));
+    for event in events {
+        let aliases = &event.config.providers.llm.aliases;
 
-            let has_cache_breakpoint = event
-                .event
-                .metadata
-                .get(jp_conversation::event::CACHE_BREAKPOINT_KEY)
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
+        let is_anthropic = event
+            .config
+            .assistant
+            .model
+            .id
+            .finalize(aliases)
+            .is_ok_and(|id| id.provider == Some(PROVIDER));
 
-            convert_event(event.event, is_anthropic).map(|(role, mut content)| {
-                if has_cache_breakpoint && let Some(cache) = cache {
-                    apply_cache_control(&mut content, cache);
-                }
+        let has_cache_breakpoint = event
+            .event
+            .metadata
+            .get(jp_conversation::event::CACHE_BREAKPOINT_KEY)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
 
-                (role, content)
-            })
-        })
-        .fold(vec![], |mut messages, (role, content)| {
-            match messages.last_mut() {
-                // If the last message has the same role, append content to it.
-                Some(last) if last.role == role => last.content.0.push(content),
-                // Different role or no messages yet, start a new message.
-                _ => messages.push(types::Message {
-                    role,
-                    content: types::MessageContentList(vec![content]),
-                }),
+        let has_reasoning = matches!(
+            &event.event.kind,
+            EventKind::ChatResponse(ChatResponse::Reasoning { reasoning })
+                if !reasoning.trim().is_empty()
+        );
+
+        let Some((role, mut content)) = convert_event(event.event, is_anthropic) else {
+            if has_reasoning {
+                dropped += 1;
+                interrupted = true;
             }
+            continue;
+        };
 
-            messages
-        })
+        match (&role, &mut content) {
+            (types::MessageRole::Assistant, _) => interrupted = false,
+            (types::MessageRole::User, types::MessageContent::Text(text)) if interrupted => {
+                debug!("Noting reasoning the user interrupted.");
+                text.text = format!("{INTERRUPTED_REASONING_NOTE}\n\n{}", text.text);
+                interrupted = false;
+            }
+            _ => {}
+        }
+
+        if has_cache_breakpoint && let Some(cache) = cache {
+            apply_cache_control(&mut content, cache);
+        }
+
+        match messages.last_mut() {
+            // If the last message has the same role, append content to it.
+            Some(last) if last.role == role => last.content.0.push(content),
+            // Different role or no messages yet, start a new message.
+            _ => messages.push(types::Message {
+                role,
+                content: types::MessageContentList(vec![content]),
+            }),
+        }
+    }
+
+    if dropped > 0 {
+        debug!(
+            dropped,
+            "Left reasoning without an Anthropic signature out of the request."
+        );
+    }
+
+    messages
 }
+
+/// Prefixed to a user message that replies to reasoning the user interrupted.
+///
+/// The interrupted reasoning has no signature, so the request leaves it out
+/// (see [`convert_event`]).
+/// Without the note, the model sees a reply to something it never said.
+const INTERRUPTED_REASONING_NOTE: &str =
+    "Your previous turn was interrupted while you were still reasoning, before you replied.";
 
 fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheControl) {
     match content {
@@ -2982,7 +3030,8 @@ fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheC
     }
 }
 
-/// Rewrite thinking blocks in the trailing assistant message as `<think>` text.
+/// Drop thinking blocks from the trailing assistant message, and remove the
+/// message if nothing else remains.
 ///
 /// When the conversation ends with an assistant message, that turn is being
 /// continued rather than answered with a tool result.
@@ -2990,43 +3039,32 @@ fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheC
 /// turn has been resumed or replayed, the block sequence no longer matches a
 /// single original generation and the API fails with `thinking blocks ...
 /// cannot be modified`.
-/// Rewriting readable thinking as ordinary `<think>` text preserves the
-/// reasoning as context while sidestepping that validation; redacted
-/// (encrypted) thinking has no readable form, so it is dropped.
+/// The reasoning cannot be sent as text either (see [`convert_event`]), so the
+/// model continues from its visible output alone.
 ///
-/// Only the final assistant message is rewritten.
-/// Thinking that precedes a tool result in an earlier turn is left native, as
-/// the API requires for tool-use reasoning continuity.
-fn downgrade_trailing_thinking(messages: &mut [types::Message]) {
+/// Only the final assistant message is affected.
+/// Thinking that precedes a tool result in an earlier turn stays native, as the
+/// API requires for tool-use reasoning continuity.
+///
+/// Returns the number of blocks dropped.
+fn drop_trailing_thinking(messages: &mut Vec<types::Message>) -> usize {
     let Some(last) = messages.last_mut() else {
-        return;
+        return 0;
     };
 
     if last.role != types::MessageRole::Assistant {
-        return;
+        return 0;
     }
 
-    let blocks = mem::take(&mut last.content.0);
-    last.content.0 = blocks
-        .into_iter()
-        .filter_map(|content| match content {
-            types::MessageContent::Thinking(types::Thinking { thinking, .. }) => {
-                Some(think_tag_text(&thinking))
-            }
-            types::MessageContent::RedactedThinking { .. } => None,
-            other => Some(other),
-        })
-        .collect();
-}
+    let count = last.content.0.len();
+    last.content.0.retain(|content| !is_thinking_block(content));
+    let dropped = count - last.content.0.len();
 
-/// Wrap reasoning text in `<think>` tags as a plain text content block.
-///
-/// Used wherever reasoning must be sent to Anthropic as ordinary text rather
-/// than a native thinking block: reasoning from other providers replayed
-/// through this provider, and signed thinking in a continuation target that
-/// would otherwise be rejected.
-fn think_tag_text(reasoning: &str) -> types::MessageContent {
-    types::MessageContent::Text(format!("<think>\n{reasoning}\n</think>\n\n").into())
+    if last.content.0.is_empty() {
+        messages.pop();
+    }
+
+    dropped
 }
 
 fn convert_event(
@@ -3067,14 +3105,12 @@ fn convert_event(
                 types::MessageContent::RedactedThinking { data }
             } else {
                 match response {
-                    // A signed-but-textless thinking block whose signature a
-                    // repair patch removed has nothing left to send. Drop it
-                    // rather than emit an empty `<think></think>` pair.
-                    ChatResponse::Reasoning { reasoning } if reasoning.trim().is_empty() => {
-                        return None;
-                    }
-                    // Reasoning from other providers - wrap in <think> tags.
-                    ChatResponse::Reasoning { reasoning } => think_tag_text(&reasoning),
+                    // Reasoning that cannot go back as a native block is left
+                    // out: other providers' reasoning, partial reasoning from
+                    // an interrupted stream, and thinking whose signature a
+                    // repair patch removed. Anthropic refuses requests that
+                    // carry reasoning as message text (`reasoning_extraction`).
+                    ChatResponse::Reasoning { .. } => return None,
                     ChatResponse::Message { message } => {
                         types::MessageContent::Text(message.into())
                     }
