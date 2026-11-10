@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+#
+# Check the iteration's work on the target RFD and settle it into one commit.
+#
+# The work passes when, compared with the iteration's base, it changes only the
+# target RFD, keeps the title line, metadata header, fenced code blocks, and
+# link reference definitions byte-identical, and leaves no `#` link naming a
+# missing heading. On a pass the gate formats the RFD with `comfort`, commits
+# whatever the turn left uncommitted, and folds the iteration into a single
+# `docs(rfd): Improve prose of RFD <id>` commit.
+#
+# Exit status, as the harness reads it:
+#
+# - 0: passed, or the RFD needed no changes;
+# - 2: the work is kept and the next turn repairs it in place, because the turn
+#   stopped before finishing or left broken `#` links;
+# - 1: the work is discarded, because it touched other files, changed what must
+#   stay byte-identical, or used up its attempts.
+#
+# Records the outcome in `state/progress.tsv`, and the reason for a failure in
+# `state/gate-reason`.
+
+set -euo pipefail
+
+MAX_ATTEMPTS=3
+
+cd "$LOOP_ROOT"
+state_rel=${LOOP_STATE#"$LOOP_ROOT"/}
+progress=$LOOP_STATE/progress.tsv
+reason_file=$LOOP_STATE/gate-reason
+base=$LOOP_ITERATION_BASE
+target=$(cat "$LOOP_STATE/current")
+name=$(basename "$target")
+id=${name%%-*}
+subject="docs(rfd): Improve prose of RFD $id"
+gate_subject="rfd-prose: changes the turn left uncommitted"
+
+record() {
+    printf '%s\t%s\t%s\n' "$id" "$1" "$2" >> "$progress"
+}
+
+# Fail with `$1` and exit with `$2`, or with 1 once the RFD has used up its
+# attempts. A turn cut short by a usage limit or a network stall has not
+# attempted the RFD; a turn that ran into the per-turn timeout (124) has.
+reject() {
+    local message=$1 status=$2 label=FAIL attempts
+    if [[ $status -eq 2 ]]; then
+        label=REPAIR
+    fi
+    {
+        printf '%s\n' "$id"
+        printf '%s\n' "$message" | head -n 40
+    } > "$reason_file"
+
+    if [[ $LOOP_TURN_STATUS -eq 0 || $LOOP_TURN_STATUS -eq 124 ]]; then
+        record attempt "$(printf '%s' "$message" | head -n 1)"
+        attempts=$(awk -F'\t' -v id="$id" '$1 == id && $2 == "attempt"' "$progress" | wc -l | tr -d ' ')
+        if [[ $attempts -ge $MAX_ATTEMPTS ]]; then
+            record gave-up "$attempts failed attempts"
+            echo "FAIL: $message"
+            echo "giving up on $id after $attempts attempts"
+            exit 1
+        fi
+    fi
+    echo "$label: $message"
+    exit "$status"
+}
+
+discard() { reject "$1" 1; }
+repair() { reject "$1" 2; }
+
+# The parts of an RFD a prose pass must leave alone: the title and metadata
+# header, and the fenced code blocks.
+skeleton() {
+    awk '
+        !body && /^- \*\*/ { meta = 1 }
+        !body && (/^## / || (meta && /^$/)) { body = 1 }
+        !body { print "header: " $0; next }
+        /^ *(```|~~~)/ { fence = !fence; print "fence: " $0; next }
+        fence { print "code: " $0; next }
+    '
+}
+
+link_definitions() {
+    awk '
+        /^ *(```|~~~)/ { fence = !fence; next }
+        !fence && /^\[[^]]+\]:[ \t]/ { print }
+    ' | sort -u
+}
+
+commits=$(git rev-list --count "$base..HEAD")
+dirty=$(git status --porcelain -- . ":(exclude)$state_rel")
+
+# Every file the iteration changed, committed or not.
+changed=$(
+    {
+        git diff --name-only "$base" -- . ":(exclude)$state_rel"
+        git ls-files --others --exclude-standard -- . ":(exclude)$state_rel"
+    } | sort -u
+)
+
+# `jp` exits 0 when a response stops at the output token limit, so the turn's
+# exit status alone reads like a turn that finished. Only the tail is searched:
+# earlier output can quote the message from JP's sources.
+turn_log=$LOOP_RUN_DIR/iter-$LOOP_ITERATION.log
+truncated=0
+if [[ -f $turn_log && $(tail -n 40 "$turn_log") == *"reached the model's max output tokens"* ]]; then
+    truncated=1
+fi
+
+if [[ -z $changed ]]; then
+    # Commits that cancel each other out leave nothing worth keeping.
+    if [[ $commits -gt 0 ]]; then
+        git reset --quiet "$base"
+    fi
+    if [[ $truncated -eq 1 ]]; then
+        repair "the turn ran out of output tokens before it changed the RFD; reasoning counts toward the limit. Apply each section's changes with \`fs_modify_file\` before reasoning about the next, instead of planning the whole RFD first."
+    fi
+    if [[ $LOOP_TURN_STATUS -eq 0 ]]; then
+        record unchanged "-"
+        rm -f "$reason_file"
+        echo "PASS: $id needed no changes"
+    else
+        echo "SKIP: the turn exited $LOOP_TURN_STATUS without changing anything; $id is retried"
+    fi
+    exit 0
+fi
+
+if [[ $changed != "$target" ]]; then
+    discard "the work must change only $target, but it changed:
+$changed"
+fi
+
+# Edits left uncommitted by a turn that stopped early are an unfinished pass.
+if [[ -n $dirty && ( $truncated -eq 1 || $LOOP_TURN_STATUS -ne 0 ) ]]; then
+    repair "the turn stopped before it finished; the edits it made are kept, uncommitted. Continue the prose pass from the file as it stands, a section or two at a time with \`fs_modify_file\`, then commit."
+fi
+
+# Formatting and committing are mechanical, so the gate does them rather than
+# spend a turn on them. Hooks guard code; this commit only touches the RFD.
+if ! format=$(comfort --language markdown "$target" 2>&1); then
+    repair "\`comfort\` could not format $target:
+$format"
+fi
+if [[ -n $(git status --porcelain -- "$target") ]]; then
+    git add -- "$target"
+    git commit --quiet --no-verify -m "$gate_subject"
+fi
+
+skeleton_diff=$(diff <(git show "$base:$target" | skeleton) <(git show "HEAD:$target" | skeleton) || true)
+if [[ -n $skeleton_diff ]]; then
+    discard "the title, metadata, or code blocks changed:
+$skeleton_diff"
+fi
+
+new_links=$(comm -13 <(git show "$base:$target" | link_definitions) <(git show "HEAD:$target" | link_definitions))
+if [[ -n $new_links ]]; then
+    discard "link reference definitions were added or changed:
+$new_links"
+fi
+
+set +e
+anchor_report=$(node "$LOOP_MISSION_DIR/check-anchors.mjs" "$base" HEAD "$target" 2>&1)
+anchor_rc=$?
+set -e
+if [[ $anchor_rc -eq 1 ]]; then
+    repair "the change left \`#\` links that name no heading. Point each at the anchor shown; the site lowercases a heading and turns punctuation, including \`_\`, \`.\`, and backticks, into \`-\`. Don't change a link's anchor unless you renamed its heading:
+$anchor_report"
+elif [[ $anchor_rc -ne 0 ]]; then
+    discard "the anchor check could not run (exit $anchor_rc):
+$anchor_report"
+fi
+
+# One commit per RFD, whatever the turns made: a repair commit, the gate's own,
+# or a subject that drifted. The body comes from the first commit the model
+# wrote, which names the patterns it corrected.
+if [[ $(git rev-list --count "$base..HEAD") -ne 1 || $(git log -1 --format=%s) != "$subject" ]]; then
+    body=""
+    for commit in $(git rev-list --reverse "$base..HEAD"); do
+        if [[ $(git log -1 --format=%s "$commit") != "$gate_subject" ]]; then
+            body=$(git log -1 --format=%b "$commit" | grep -v '^Signed-off-by:' || true)
+            break
+        fi
+    done
+    git reset --quiet --soft "$base"
+    printf '%s\n\n%s\n' "$subject" "$body" | git commit --quiet --no-verify --signoff -F -
+fi
+
+record done "$(git log -1 --format='%h %s')"
+rm -f "$reason_file"
+echo "PASS: $id"

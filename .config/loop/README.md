@@ -37,7 +37,11 @@ A mission directory contains:
   It configures the variables below and defines the prompt functions.
 - **`gate`** (optional, executable), run from the worktree root after every
   turn.
-  Exit status 0 passes; any non-zero status fails.
+  Exit status 0 passes.
+  Exit status 2 keeps the work and has the next turn repair it in place, even
+  with `DISCARD_ON_GATE_FAILURE=1`; the repair continues the same iteration and
+  target, up to `MAX_REPAIRS` times in a row.
+  Any other non-zero status fails.
   Combined stdout and stderr is saved in the run directory as
   `iter-NNN.gate.log` and passed to `repair_prompt` on failure.
   If `gate` is omitted, the gate result is recorded as `skipped`.
@@ -58,9 +62,11 @@ A mission directory contains:
 | `ROTATE_COMMITS`          | `10`    | Start a new conversation after this many commits.                         |
 | `ROTATE_EVENTS`           | `40`    | Start a new conversation after this many conversation events.             |
 | `ROTATE_FAILURES`         | `2`     | Start a new conversation after this many consecutive failed turns.        |
+| `ROTATE_ON_TARGET`        | `0`     | Set to `1` to start a new conversation whenever `next-target` changes.    |
 | `SNAPSHOT_FILES`          | `()`    | Files under `state/` copied into the run's `snapshots/` before each turn. |
 | `GATE_LABEL`              | `gate`  | Label for the gate result in the post-turn summary.                       |
 | `DISCARD_ON_GATE_FAILURE` | `0`     | Set to `1` to reset the branch and working tree when the gate fails.      |
+| `MAX_REPAIRS`             | `3`     | In-place repairs in a row before gate status 2 counts as a failure.       |
 
 `mission.sh` may also override any other harness default (`HOURS`,
 `TURN_TIMEOUT`, `MAX_FAILURES`, and so on).
@@ -74,6 +80,9 @@ summary as `$1`; `repair_prompt` receives the gate output as `$1`.
 `target_prompt` is optional and receives the `next-target` output as `$1`.
 `init_state` is optional and runs once per run after the state directory is
 created, to initialize files such as `LEDGER.md`.
+`conversation_args` is optional, receives the current target as `$1`, and prints
+extra `jp query` arguments, one per line, for the first turn of each new
+conversation, such as `--attach=<path>`.
 
 The harness provides `fill`, which reads a template from stdin and replaces
 `@RUN_ID@`, `@BASELINE@`, and `@STATE@` with the current run's values.
@@ -83,7 +92,9 @@ The harness provides `fill`, which reads a template from stdin and replaces
 `gate` and `next-target` receive `LOOP_MISSION`, `LOOP_MISSION_DIR`,
 `LOOP_ROOT`, `LOOP_STATE`, `LOOP_RUN_ID`, `LOOP_RUN_DIR`, `LOOP_BASELINE`, and
 the per-iteration variables `LOOP_ITERATION` and `LOOP_ITERATION_BASE` (the
-`HEAD` commit at the start of the iteration).
+`HEAD` commit at the start of the iteration; a repair turn keeps the base of the
+iteration it repairs).
+`gate` also receives `LOOP_TURN_STATUS`, the exit status of the turn it checks.
 
 ## Discarding an iteration
 
@@ -92,6 +103,16 @@ the gate: it resets the branch and working tree to `LOOP_ITERATION_BASE` and
 removes any untracked files created during that iteration.
 The mission's `state/` directory and any untracked files that existed before the
 iteration are preserved.
+
+Before resetting, the harness records the discarded work, its commits plus any
+uncommitted and untracked files, as a commit under
+`refs/loop/discarded/<mission>/<run id>/<iteration>`, so a paid attempt is never
+lost to garbage collection.
+List them with `git for-each-ref refs/loop/discarded`, inspect one with `git
+show <ref>`, and bring one back with `git cherry-pick <ref>`.
+Delete them all with `git for-each-ref --format='delete %(refname)'
+refs/loop/discarded | git update-ref --stdin`.
+
 When `DISCARD_ON_GATE_FAILURE=1` is set, the harness refuses to start if the
 working tree has unstaged changes, because a reset would overwrite them.
 Only the harness resets the branch; the assistant is never instructed to rewrite

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# Print the path of the next RFD to edit: published RFDs by number, then drafts
+# by number. Skips every RFD that `state/progress.tsv` records as done,
+# unchanged, or given up. Prints nothing once every RFD is finished, which ends
+# the run; exits 1 instead when an RFD was given up on, so the run reports that
+# it did not finish.
+#
+# Also writes the path to `state/current`, where the gate reads it.
+
+set -euo pipefail
+
+cd "$LOOP_ROOT"
+progress=$LOOP_STATE/progress.tsv
+
+finished() {
+    [[ -f $progress ]] || return 1
+    awk -F'\t' -v id="$1" '
+        $1 == id && ($2 == "done" || $2 == "unchanged" || $2 == "gave-up") { found = 1 }
+        END { exit !found }
+    ' "$progress"
+}
+
+for path in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9]*-*.md; do
+    [[ -f $path ]] || continue
+    name=$(basename "$path")
+    id=${name%%-*}
+    # The `000-*` files are templates, not RFDs.
+    if [[ $id == 000 ]] || finished "$id"; then
+        continue
+    fi
+    printf '%s\n' "$path" > "$LOOP_STATE/current"
+    printf '%s\n' "$path"
+    exit 0
+done
+
+rm -f "$LOOP_STATE/current"
+
+# The last of done, unchanged, and gave-up wins, so an RFD reopened and then
+# finished is not reported.
+gave_up=""
+if [[ -f $progress ]]; then
+    gave_up=$(awk -F'\t' '
+        $2 == "done" || $2 == "unchanged" || $2 == "gave-up" { last[$1] = $2 }
+        END { for (id in last) if (last[id] == "gave-up") print id }
+    ' "$progress" | sort | tr '\n' ' ')
+fi
+if [[ -n $gave_up ]]; then
+    echo "$LOOP_MISSION: gave up on ${gave_up% }; their discarded attempts are under refs/loop/discarded/" >&2
+    exit 1
+fi
