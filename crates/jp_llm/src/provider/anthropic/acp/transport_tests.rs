@@ -818,8 +818,8 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             }
             m if m == agent_method::SESSION_SET_CONFIG_OPTION => {
                 let current = if params["configId"] == "model" {
-                    // Claude Code's alias for the conversation's `claude-opus-5`.
-                    assert_eq!(params["value"], "opus[1m]");
+                    // The fixture lists no models, so the API name is sent.
+                    assert_eq!(params["value"], "claude-opus-5");
                     json!("resolved-fixture-model")
                 } else {
                     params["value"].clone()

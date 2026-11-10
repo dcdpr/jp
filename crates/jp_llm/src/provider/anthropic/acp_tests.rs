@@ -123,115 +123,132 @@ fn rejected_api_key_login_names_the_key_source() {
     );
 }
 
-fn offered(values: &[&str]) -> Vec<SessionConfigSelectOption> {
+fn offered(values: &[(&str, &str)]) -> Vec<SessionConfigSelectOption> {
     values
         .iter()
-        .map(|value| SessionConfigSelectOption {
+        .map(|(value, name)| SessionConfigSelectOption {
             value: (*value).into(),
-            name: None,
+            name: Some((*name).to_owned()),
         })
         .collect()
 }
 
-/// The values Claude Code's `model` setting offered when `live.jsonl` was
-/// recorded.
-const RECORDED: &[&str] = &[
-    "default",
-    "opus[1m]",
-    "claude-fable-5-1[1m]",
-    "sonnet",
-    "haiku",
+/// The values and labels Claude Code's `model` setting offered when
+/// `live.jsonl` was recorded.
+const RECORDED: &[(&str, &str)] = &[
+    ("default", "Default (recommended)"),
+    ("opus", "Opus 5.5"),
+    ("fable", "Fable 5.2"),
+    ("sonnet", "Sonnet 5.5"),
+    ("haiku", "Haiku 5.5"),
+    ("claude-fable-5-1", "Fable 5.1"),
+    ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+    ("claude-sonnet-5", "Sonnet 5"),
+    ("claude-opus-5", "Opus 5"),
+    ("claude-fable-5", "Fable 5"),
+    ("claude-opus-4-8", "Opus 4.8"),
+    ("claude-opus-4-7", "Opus 4.7"),
+    ("claude-opus-4-6", "Opus 4.6"),
+    ("claude-sonnet-4-6", "Sonnet 4.6"),
 ];
 
+/// The version is read from the offered value, or from the label of a bare
+/// alias.
 #[test]
-fn an_api_model_is_sent_as_the_offered_model_of_its_family() {
+fn an_api_model_is_sent_as_the_offer_with_its_version() {
     let offers = offered(RECORDED);
 
-    assert_eq!(subscription_model("claude-opus-5", &offers), "opus[1m]");
+    assert_eq!(subscription_model("claude-opus-5-5", &offers), "opus");
+    assert_eq!(
+        subscription_model("claude-opus-5", &offers),
+        "claude-opus-5"
+    );
+    assert_eq!(subscription_model("claude-fable-5-2", &offers), "fable");
     assert_eq!(
         subscription_model("claude-fable-5-1", &offers),
-        "claude-fable-5-1[1m]"
+        "claude-fable-5-1"
     );
-    assert_eq!(subscription_model("claude-sonnet-5", &offers), "sonnet");
-    assert_eq!(subscription_model("claude-haiku-4-5", &offers), "haiku");
+    assert_eq!(subscription_model("claude-sonnet-5-5", &offers), "sonnet");
+    assert_eq!(
+        subscription_model("claude-sonnet-5", &offers),
+        "claude-sonnet-5"
+    );
+    // A dated value is the version before its date, in either position.
+    assert_eq!(
+        subscription_model("claude-haiku-4-5", &offers),
+        "claude-haiku-4-5-20251001"
+    );
+    assert_eq!(
+        subscription_model("claude-opus-4-7-20260416", &offers),
+        "claude-opus-4-7"
+    );
 }
 
-/// A conversation keeps its family across versions, in either direction.
 #[test]
-fn the_family_is_matched_whatever_the_version() {
+fn a_dotted_version_matches_a_dashed_one() {
     let offers = offered(RECORDED);
 
-    assert_eq!(subscription_model("claude-opus-9", &offers), "opus[1m]");
-    assert_eq!(subscription_model("claude-opus-4-1", &offers), "opus[1m]");
+    assert_eq!(subscription_model("claude-fable-5.2", &offers), "fable");
     assert_eq!(
-        subscription_model("claude-fable-6", &offers),
-        "claude-fable-5-1[1m]"
+        subscription_model("claude-opus-4.8", &offers),
+        "claude-opus-4-8"
     );
 }
 
+/// A conversation keeps working when Claude Code no longer offers its version,
+/// on whichever model Claude Code's bare alias points at.
 #[test]
-fn several_offers_in_a_family_prefer_the_1m_variant_then_the_bare_alias() {
+fn without_its_version_a_model_is_sent_as_its_family() {
+    let offers = offered(RECORDED);
+
+    assert_eq!(subscription_model("claude-opus-9", &offers), "opus");
+    assert_eq!(subscription_model("claude-opus-4-1", &offers), "opus");
+    assert_eq!(subscription_model("claude-fable-6", &offers), "fable");
+}
+
+#[test]
+fn several_offers_of_a_version_prefer_the_1m_variant_then_the_bare_alias() {
     assert_eq!(
         subscription_model(
-            "claude-opus-5",
-            &offered(&["claude-opus-4-8", "opus", "opus[1m]"])
+            "claude-opus-5-5",
+            &offered(&[("opus", "Opus 5.5"), ("opus[1m]", "Opus 5.5")])
         ),
         "opus[1m]"
     );
     assert_eq!(
-        subscription_model("claude-opus-5", &offered(&["claude-opus-4-8", "opus"])),
+        subscription_model(
+            "claude-opus-9",
+            &offered(&[("claude-opus-4-8", "Opus 4.8"), ("opus", "Opus 5.5")])
+        ),
         "opus"
     );
 }
 
+/// Before the adapter lists anything, and outside the offered families, the API
+/// name goes as is: Claude Code serves it or refuses it, and a refusal is what
+/// offers the models it does serve.
 #[test]
-fn without_an_offer_the_family_fallback_is_sent() {
-    assert_eq!(subscription_model("claude-opus-5", &[]), "opus[1m]");
-    assert_eq!(subscription_model("claude-sonnet-5-5", &[]), "sonnet");
-}
+fn without_a_matching_offer_the_api_name_is_sent() {
+    assert_eq!(subscription_model("claude-opus-5", &[]), "claude-opus-5");
 
-/// Sent as is, Claude Code refuses a model it does not serve, which is what
-/// offers the models it does.
-#[test]
-fn a_model_outside_the_offered_families_is_sent_by_its_api_name() {
-    let offers = offered(&["opus[1m]", "sonnet"]);
-
+    let offers = offered(&[("opus", "Opus 5.5"), ("sonnet", "Sonnet 5.5")]);
     assert_eq!(
         subscription_model("claude-haiku-4-5", &offers),
         "claude-haiku-4-5"
     );
     assert_eq!(subscription_model("foobarbaz", &offers), "foobarbaz");
-    assert_eq!(subscription_model("foobarbaz", &[]), "foobarbaz");
-}
-
-/// The values and labels Claude Code's `model` setting offered when
-/// `models.jsonl` was recorded.
-fn recorded_listing() -> Vec<SessionConfigSelectOption> {
-    [
-        ("default", "Default (recommended)"),
-        ("opus[1m]", "Opus 5.5"),
-        ("claude-fable-5-1[1m]", "Fable 5.1"),
-        ("sonnet", "Sonnet 5"),
-        ("haiku", "Haiku 4.5"),
-    ]
-    .into_iter()
-    .map(|(value, name)| SessionConfigSelectOption {
-        value: value.into(),
-        name: Some(name.to_owned()),
-    })
-    .collect()
 }
 
 #[test]
 fn listed_models_are_named_by_their_api_id() {
-    let mut offers = recorded_listing();
+    let mut offers = offered(RECORDED);
     offers.push(SessionConfigSelectOption {
         value: "some-future-family".into(),
         name: None,
     });
-    // A second Opus maps to the same API model, so it is listed once.
+    // A second Opus 5.5 maps to the same API model, so it is listed once.
     offers.push(SessionConfigSelectOption {
-        value: "opus".into(),
+        value: "opus[1m]".into(),
         name: Some("Opus 5.5".to_owned()),
     });
 
@@ -243,37 +260,61 @@ fn listed_models_are_named_by_their_api_id() {
             .map(|model| model.id.to_string())
             .collect::<Vec<_>>(),
         [
+            // A bare alias is the version its label names, cataloged or not.
             "anthropic/claude-opus-5-5",
+            "anthropic/claude-fable-5-2",
+            "anthropic/claude-sonnet-5-5",
+            "anthropic/claude-haiku-5-5",
             "anthropic/claude-fable-5-1",
-            // The label names the version a bare alias points at.
-            "anthropic/claude-sonnet-5",
+            // A dated value is its cataloged model.
             "anthropic/claude-haiku-4-5",
+            "anthropic/claude-sonnet-5",
+            "anthropic/claude-opus-5",
+            "anthropic/claude-fable-5",
+            "anthropic/claude-opus-4-8",
+            "anthropic/claude-opus-4-7",
+            "anthropic/claude-opus-4-6",
+            "anthropic/claude-sonnet-4-6",
         ]
     );
     assert!(models.iter().all(ModelDetails::served_by_subscription));
 }
 
-/// A bare alias whose label names no cataloged model is the newest model JP
+/// Every listed model is sent back as the offer it was listed from.
+#[test]
+fn a_listed_model_round_trips_to_its_offer() {
+    let offers = offered(RECORDED);
+
+    for model in served_models(&offers) {
+        let sent = subscription_model(&model.id.name, &offers);
+        let label = offers
+            .iter()
+            .find(|option| option.value.0 == sent)
+            .and_then(|option| option.name.as_deref());
+        assert_eq!(
+            label,
+            model.display_name.as_deref(),
+            "{} was sent as {sent}",
+            model.id
+        );
+    }
+}
+
+/// A bare alias without a label has no version, so it is the newest model JP
 /// catalogs in its family.
 #[test]
 fn an_unlabelled_alias_is_the_newest_model_in_its_family() {
-    let models = served_models(&[
-        SessionConfigSelectOption {
-            value: "sonnet".into(),
-            name: None,
-        },
-        SessionConfigSelectOption {
-            value: "opus".into(),
-            name: Some("Opus 9".to_owned()),
-        },
-    ]);
+    let models = served_models(&[SessionConfigSelectOption {
+        value: "sonnet".into(),
+        name: None,
+    }]);
 
     assert_eq!(
         models
             .iter()
             .map(|model| model.id.to_string())
             .collect::<Vec<_>>(),
-        ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"]
+        ["anthropic/claude-sonnet-5-5"]
     );
 }
 
@@ -281,7 +322,7 @@ fn an_unlabelled_alias_is_the_newest_model_in_its_family() {
 /// have its thinking turned off.
 #[test]
 fn a_listed_model_keeps_its_api_models_overrides() {
-    let [fable] = served_models(&offered(&["claude-fable-5-1[1m]"]))
+    let [fable] = served_models(&offered(&[("claude-fable-5-1[1m]", "Fable 5.1")]))
         .try_into()
         .unwrap();
 

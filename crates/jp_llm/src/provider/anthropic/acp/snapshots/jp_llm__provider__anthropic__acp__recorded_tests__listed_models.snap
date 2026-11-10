@@ -8,15 +8,51 @@ expression: "models.iter().map(|model|\njson!({\"id\": model.id.to_string(), \"d
     "display_name": "Opus 5.5"
   },
   {
+    "id": "anthropic/claude-fable-5-2",
+    "display_name": "Fable 5.2"
+  },
+  {
+    "id": "anthropic/claude-sonnet-5-5",
+    "display_name": "Sonnet 5.5"
+  },
+  {
+    "id": "anthropic/claude-haiku-5-5",
+    "display_name": "Haiku 5.5"
+  },
+  {
     "id": "anthropic/claude-fable-5-1",
     "display_name": "Fable 5.1"
+  },
+  {
+    "id": "anthropic/claude-haiku-4-5",
+    "display_name": "Haiku 4.5"
   },
   {
     "id": "anthropic/claude-sonnet-5",
     "display_name": "Sonnet 5"
   },
   {
-    "id": "anthropic/claude-haiku-4-5",
-    "display_name": "Haiku 4.5"
+    "id": "anthropic/claude-opus-5",
+    "display_name": "Opus 5"
+  },
+  {
+    "id": "anthropic/claude-fable-5",
+    "display_name": "Fable 5"
+  },
+  {
+    "id": "anthropic/claude-opus-4-8",
+    "display_name": "Opus 4.8"
+  },
+  {
+    "id": "anthropic/claude-opus-4-7",
+    "display_name": "Opus 4.7"
+  },
+  {
+    "id": "anthropic/claude-opus-4-6",
+    "display_name": "Opus 4.6"
+  },
+  {
+    "id": "anthropic/claude-sonnet-4-6",
+    "display_name": "Sonnet 4.6"
   }
 ]

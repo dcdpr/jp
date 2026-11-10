@@ -132,9 +132,9 @@ pub(super) fn metadata(
                     prompt: &prepared.system_prompt,
                     snapshot: false,
                 },
-                // The session's starting model, sent before the adapter has
-                // listed what it offers; the session's `model` setting is set
-                // from that list once the session opens.
+                // Sent before the adapter has listed what it offers, so this is
+                // the API name; the session's `model` setting is matched
+                // against that list once the session opens.
                 model: subscription_model(&prepared.model, &[]),
                 effort: prepared.effort.as_ref(),
                 thinking,
