@@ -12,7 +12,7 @@
 
 JP's releases ship prebuilt `jp` binaries for Linux, macOS, and Windows.
 [RFD 122]'s `jp release build` runs JP's build script, which builds all five
-targets on one Mac with a pinned toolchain and a profile tuned for small, fast
+targets on one Mac with a pinned toolchain and a profile tuned for small
 binaries, and writes their archives, their checksums, and a manifest.
 A new plugin, `jp release github`, publishes a built release to GitHub: its
 notes as the Release's description, its archives and checksums as assets, and
@@ -93,9 +93,13 @@ toolchain = "1.99.1"
 A commit without one, which is every commit from before this RFD's first phase,
 builds with the nightly its `rust-toolchain.toml` pins, the one its CI tested.
 
-The `release` profile makes the binaries as small and fast as the compiler can
-without changing how they behave: fat link-time optimization, one codegen unit,
-and symbols stripped, at the default optimization level.
+The `release` profile makes the binaries as small as the compiler can without
+changing how they behave: it optimizes for size (`opt-level = "s"`), with fat
+link-time optimization, one codegen unit, and symbols stripped.
+On macOS arm64 that makes `jp` 32 MB, against 49 MB at the default optimization
+level and 88 MB with Cargo's default release profile, and `jp config show`, `jp
+conversation ls`, and `jp conversation grep` ran at most 4% faster at the
+default level.
 Panics still unwind: a panic in a spawned task, such as a tool call's, reaches
 the turn as an error rather than ending `jp`.
 The `quick` profile is Cargo's default release profile, for testing the script
@@ -235,7 +239,7 @@ Anyone who fetched the old `v0.1.0` deletes it with `git tag -d v0.1.0`, since
   published, not how it was built, so trusting a release means trusting the
   releasing machine until a remote builder attests its builds.
 - **Release builds are slow.** Fat link-time optimization with one codegen unit
-  takes several times as long as a quick build, which is why testing uses
+  takes about twice as long as a quick build, which is why testing uses
   `--quick`.
 - **JP maintains its build and install scripts**, where a release tool would.
 - **Unsigned binaries.** Windows may warn about an unsigned binary downloaded
@@ -267,8 +271,11 @@ Anyone who fetched the old `v0.1.0` deletes it with `git tag -d v0.1.0`, since
   `rust-toolchain.toml` says releases build with stable.
 - **`panic = "abort"`**, which makes the binaries smaller but ends `jp` on a
   panic in any spawned task, instead of failing one tool call.
-- **Optimizing for size (`opt-level = "z"`)**, which makes the binaries smaller
-  and slower.
+- **The default optimization level** (`opt-level = 3`), which makes `jp` 53%
+  larger on macOS arm64 and takes twice as long to build, for at most 4% more
+  speed in the commands measured.
+- **`opt-level = "z"`**, which also turns off loop vectorization; its size and
+  speed are not measured.
 - **Publishing each of the history's releases as it is cut.** A published
   release can't be taken back, so the trial would end at its first mistake.
 
