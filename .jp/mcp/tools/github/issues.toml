@@ -4,6 +4,11 @@ run = "allow"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Independent reads against the GitHub API. Bounded so a large batch does not
+# trip its secondary rate limit; every failure is reported.
+fan_out = { concurrency = 4 }
+
 summary = "Find one or more issues in a GitHub repository. Defaults to dcdpr/jp."
 
 examples = """

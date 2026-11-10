@@ -2,6 +2,11 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# GitHub's code search has a far tighter rate limit than the rest of its API,
+# so searches run one at a time.
+fan_out = { concurrency = 1 }
+
 summary = "Find code matching a query in any GitHub repository."
 description = """
 This tool returns a list of matched files, to fetch the actual code of a

@@ -6,6 +6,11 @@ style.parameters = "function_call"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Each operation blames its own file and range; reads run unbounded and every
+# failure is reported.
+fan_out = true
+
 summary = "Show which commits last touched each line of a file in a given range."
 description = """
 Returns blame information for a contiguous range of lines in a file. Output \

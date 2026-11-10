@@ -133,13 +133,13 @@ const FAILURE_LOG: &str = "failures.txt";
 /// container path and is thrown away with the rest of the scratch directory.
 pub(super) const RESULT_BUNDLE: &str = "tmp/uitests/run.xcresult";
 
-/// Discard the result bundle an earlier run left behind.
+/// Discard the result bundle at `bundle`, relative to `root`, that an earlier
+/// run left behind.
 ///
 /// `xcodebuild` refuses to write over an existing bundle, so this is not
-/// tidying up: without it the second UI run in a checkout fails before it
-/// starts.
-pub(super) fn clear_result_bundle(root: &Utf8Path) {
-    let _removed = fs::remove_dir_all(root.join(RESULT_BUNDLE));
+/// tidying up: without it the second run in a checkout fails before it starts.
+pub(super) fn clear_result_bundle(root: &Utf8Path, bundle: &str) {
+    let _removed = fs::remove_dir_all(root.join(bundle));
 }
 
 /// The file the test runner's own output is staged into.
@@ -264,12 +264,18 @@ fn staged_runner_output(bundle: &Utf8Path) -> Vec<Utf8PathBuf> {
 ///
 /// Fetched once and read twice, for what failed and for what ran.
 ///
+/// `bundle` is the path `xcodebuild` was given, relative to the root.
+///
 /// Returns `None` when there is no readable bundle.
 /// A run stopped at its first failure is killed rather than asked to stop, so
 /// the bundle it was part-way through writing may not be finished — which is
 /// why the caller keeps a fallback rather than relying on this alone.
-pub(super) fn bundle_document<R: ProcessRunner>(ctx: &Context, runner: &R) -> Option<Value> {
-    let bundle = ctx.root.join(RESULT_BUNDLE);
+pub(super) fn bundle_document<R: ProcessRunner>(
+    ctx: &Context,
+    bundle: &str,
+    runner: &R,
+) -> Option<Value> {
+    let bundle = ctx.root.join(bundle);
     if !bundle.exists() {
         return None;
     }
@@ -311,6 +317,34 @@ pub(super) fn executed_tests(document: &Value) -> Vec<String> {
     found.sort();
     found.dedup();
     found
+}
+
+/// The requested names that nothing in `executed` answers to.
+///
+/// A name is either a whole test (`Suite/test()`) or a suite standing for
+/// everything beneath it, so a name is matched by an identifier that equals it
+/// or continues it after a `/`.
+///
+/// Empty when `executed` is, which is deliberate: an unreadable bundle means
+/// the question cannot be answered, and answering "none of them ran" would fail
+/// a suite that passed.
+pub(super) fn unmatched(requested: &[String], executed: &[String]) -> Vec<String> {
+    if executed.is_empty() {
+        return Vec::new();
+    }
+
+    requested
+        .iter()
+        .filter(|name| {
+            !executed.iter().any(|id| {
+                id == *name
+                    || id
+                        .strip_prefix(name.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 fn walk_executed(value: &Value, found: &mut Vec<String>) {

@@ -23,21 +23,21 @@ List files in a subdirectory of another repo:
 results_file_link = "off"
 parameters = "function_call"
 
-[conversation.tools.github_read_file.parameters.repository]
+[conversation.tools.github_list_files.parameters.repository]
 type = "string"
-summary = "Repository to search for code."
+summary = "Repository to list files from, in `owner/repo` form."
 description = """
 If unspecified, it defaults to the current project's GitHub repository.
 """
 
-[conversation.tools.github_read_file.parameters.ref]
+[conversation.tools.github_list_files.parameters.ref]
 type = "string"
 summary = "The name of the commit/branch/tag."
 description = '''
 If unspecified, it defaults to `HEAD`.
 '''
 
-[conversation.tools.github_read_file.parameters.path]
+[conversation.tools.github_list_files.parameters.path]
 type = "string"
 summary = "An optional path to filter the files by."
 description = '''

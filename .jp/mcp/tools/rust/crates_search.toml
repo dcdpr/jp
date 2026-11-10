@@ -3,6 +3,11 @@ enable = false
 run = "allow"
 
 source = "mcp.bookworm.crates_search"
+
+# Independent reads against crates.io and docs.rs, bounded to stay polite to
+# both; every failure is reported.
+fan_out = { concurrency = 4 }
+
 summary = "Search crates.io for crates matching a query."
 description = """\
 Returns a list of crates from crates.io that match the query, along with each \

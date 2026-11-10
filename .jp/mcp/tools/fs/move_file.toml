@@ -2,6 +2,12 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Moves run one at a time, in the order written, and stop at the first failure:
+# a later move often depends on an earlier one, such as moving a file into a
+# directory another move just vacated.
+fan_out = { concurrency = 1, on_error = "stop" }
+
 summary = "Move a file or directory in the project's local filesystem."
 description = """
 Tickets and RFDs cannot be moved here, in or out. Their filenames pair an
