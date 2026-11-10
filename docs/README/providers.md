@@ -27,11 +27,11 @@ API-key entries always use the existing HTTP implementation and require no
 external runtime.
 Model IDs and `--auth` syntax are unchanged.
 
-ACP compatibility checks require `claude-agent-acp` 0.81.0 with Claude Code
-2.1.280 and an active Pro or Max login:
+ACP compatibility checks require `claude-agent-acp` 0.102.0 with Claude Code
+2.1.321 and an active Pro, Max, or Ultra login:
 
 ```sh
-npm install --global --prefix "$HOME/.local" --include=optional @agentclientprotocol/claude-agent-acp@0.81.0
+npm install --global --prefix "$HOME/.local" --include=optional @agentclientprotocol/claude-agent-acp@0.102.0
 export PATH="$HOME/.local/bin:$PATH"
 claude-agent-acp --version
 claude-agent-acp --cli --version
@@ -42,8 +42,8 @@ jp provider llm auth list
 Use Node.js 22 or later and keep npm's optional dependencies enabled.
 In fish, use `fish_add_path "$HOME/.local/bin"` instead of the `export` line.
 The adapter bundles Claude Code; a separate installation is unnecessary.
-The auth status must report a first-party Claude account with a Pro or Max plan,
-not an API-key source.
+The auth status must report a first-party Claude account with a Pro, Max, or
+Ultra plan, not an API-key source.
 Disable paid Usage credits in Claude's Settings > Usage if no paid overage is
 permitted.
 JP does not copy Claude Code's tokens.

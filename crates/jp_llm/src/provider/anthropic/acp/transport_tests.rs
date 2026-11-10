@@ -276,6 +276,30 @@ fn the_transcript_is_removed_after_the_request() {
     assert!(!path.exists());
 }
 
+/// The adapter generates a session title with a background Haiku request,
+/// billed to the subscription, unless the session file already names the
+/// session.
+/// JP titles conversations itself and never reads that title.
+#[test]
+fn the_transcript_names_its_session() {
+    let directory = camino_tempfile::tempdir().unwrap();
+    let artifact = NativeArtifact::write(
+        &prepared(),
+        directory.path(),
+        directory.path(),
+        "jp-c123-otvo8",
+        false,
+    )
+    .unwrap();
+    let session = artifact.session.unwrap();
+    let transcript = fs::read_to_string(transcript_path(directory.path(), session)).unwrap();
+
+    assert_eq!(
+        transcript.lines().last().unwrap(),
+        format!(r#"{{"type":"custom-title","customTitle":"JP","sessionId":"{session}"}}"#)
+    );
+}
+
 #[test]
 fn a_kept_transcript_outlives_the_request() {
     // `JP_DEBUG` keeps the file: it is the only record of what JP handed

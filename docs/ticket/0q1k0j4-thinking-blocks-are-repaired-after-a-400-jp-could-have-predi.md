@@ -104,3 +104,23 @@ Sonnet 5.5 narrows the options for fixing this:
   a second way reasoning gets lost without any notice.
 
 Source: https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-09T20:00:51Z
+
+Claude Fable 5.2 (`claude-fable-5-2`) widens this.
+Its prefix check applies to **every account**, not only to accounts created on
+or after 2026-08-31 as on Fable 5.1.
+Every mid-conversation `--cfg` change to `system` or `tools` therefore costs one
+400 and one repair round trip, for every user.
+
+Fable 5.2 thinking blocks are also read only by Fable 5.2 and Mythos 5.2.
+Switching to any other model, Fable 5.1 and Opus 5.5 included, drops them
+without an error.
+So does a credential fallback to another account
+(`organization_binding_mismatch`).
+Both are lost reasoning with no notice to the user.
+
+Source: https://platform.claude.com/docs/en/models/fable-5-2/whats-new-fable-5-2

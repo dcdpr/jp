@@ -55,7 +55,7 @@ pub(super) struct Account {
 
 impl AgentAuth {
     pub(super) fn is_subscription(&self) -> bool {
-        matches!(self, Self::Account { account } if matches!(account.plan.as_str(), "Claude Pro" | "Claude Max" | "pro" | "max"))
+        matches!(self, Self::Account { account } if matches!(account.plan.as_str(), "Claude Pro" | "Claude Max" | "Claude Ultra" | "pro" | "max" | "ultra"))
     }
 }
 

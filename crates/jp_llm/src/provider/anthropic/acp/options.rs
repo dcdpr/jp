@@ -7,7 +7,7 @@ use jp_config::{assistant::request::CachePolicy, model::id::Name};
 use serde::Serialize;
 use serde_json::Value;
 
-use super::transcript::PreparedRequest;
+use super::transcript::{PreparedRequest, SESSION_TITLE};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +40,9 @@ struct Options<'a> {
     env: &'a BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_format: Option<&'a JsonOutputFormat>,
+    /// Names a new session; a resumed session keeps the title its transcript
+    /// holds.
+    title: &'static str,
 }
 
 #[derive(Serialize)]
@@ -145,6 +148,7 @@ pub(super) fn metadata(
                 persist_session: !prepared.history.is_empty(),
                 env,
                 output_format: prepared.schema.as_ref(),
+                title: SESSION_TITLE,
             },
         },
     })

@@ -29,7 +29,7 @@ use super::{
         ProtocolVersion, RequestPermissionRequest, SessionConfigKind, SessionNotification,
         SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, agent_method, client_method,
     },
-    transcript::PreparedRequest,
+    transcript::{PreparedRequest, TitleRecord},
 };
 use crate::{
     error::StreamError,
@@ -645,6 +645,11 @@ impl NativeArtifact {
             serde_json::to_writer(&mut file, &record).map_err(Error::NativeJson)?;
             file.write_all(b"\n").map_err(Error::NativeIo)?;
         }
+        // The adapter asks a small model for a title, billed to the
+        // subscription, unless the session file already holds one. Last in the
+        // file, where Claude Code appends its own title records.
+        serde_json::to_writer(&mut file, &TitleRecord::new(session)).map_err(Error::NativeJson)?;
+        file.write_all(b"\n").map_err(Error::NativeIo)?;
         file.flush().map_err(Error::NativeIo)?;
         if keep {
             artifact.path = None;

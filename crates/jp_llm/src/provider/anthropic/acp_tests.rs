@@ -16,23 +16,23 @@ use crate::{
 
 #[test]
 fn qualified_runtime_pair() {
-    qualify_versions(b"0.81.0\n", b"2.1.280 (Claude Code)\n").unwrap();
+    qualify_versions(b"0.102.0\n", b"2.1.321 (Claude Code)\n").unwrap();
     assert_matches!(
-        qualify_versions(b"0.82.0", b"2.1.280"),
+        qualify_versions(b"0.103.0", b"2.1.321"),
         Err(Error::UnsupportedVersion {
             check: Check::AdapterVersion,
             ..
         })
     );
     assert_matches!(
-        qualify_versions(b"0.81.0", b"2.1.281"),
+        qualify_versions(b"0.102.0", b"2.1.322"),
         Err(Error::UnsupportedVersion {
             check: Check::ClaudeVersion,
             ..
         })
     );
     assert_matches!(
-        qualify_versions(b"0.81.0", b"2.1.280-extra"),
+        qualify_versions(b"0.102.0", b"2.1.321-extra"),
         Err(Error::UnsupportedVersion { .. })
     );
 }
@@ -42,6 +42,8 @@ fn subscription_status_is_fail_closed() {
     let login = || Login::Named("/accounts/personal".into());
     validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","email":"ignored"}"#, login()).unwrap();
     validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"Claude Pro"}"#, login()).unwrap();
+    validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"ultra"}"#, login()).unwrap();
+    validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"Claude Ultra"}"#, login()).unwrap();
     for (status, expected) in [
         (r#"{"loggedIn":false}"#, Rejection::SignedOut),
         (r#"{"loggedIn":true}"#, Rejection::NotClaudeAccount),
@@ -252,7 +254,7 @@ async fn missing_runtime_has_setup_guidance() {
     assert_eq!(
         error.to_string(),
         "Claude ACP adapter-version check failed; install \
-         @agentclientprotocol/claude-agent-acp@0.81.0 with Node.js 22+ and optional dependencies \
+         @agentclientprotocol/claude-agent-acp@0.102.0 with Node.js 22+ and optional dependencies \
          enabled"
     );
 }

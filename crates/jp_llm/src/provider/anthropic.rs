@@ -2449,6 +2449,14 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                ..ModelOverrides::new("claude-fable-5-2")
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 6),
+                always_on: true,
                 ..ModelOverrides::new("claude-fable-5-1")
             },
         },

@@ -29,6 +29,27 @@ fn thinking_with_reasoning_off(model: &str) -> Option<Value> {
     metadata["claudeCode"]["options"].get("thinking").cloned()
 }
 
+/// The first request of a conversation opens a new session, which the runtime
+/// titles with a background Haiku request unless the session already has one.
+#[test]
+fn a_new_session_is_titled_up_front() {
+    let timestamp = datetime!(2026-09-30 12:00:00 Z);
+    let mut events =
+        ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
+    events.extend([ConversationEvent::new(
+        ChatRequest::from("Hello."),
+        timestamp,
+    )]);
+    let thread = ThreadBuilder::new().with_events(events).build().unwrap();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
+    let prepared = PreparedRequest::new(&model, thread.into()).unwrap();
+    assert!(prepared.history.is_empty());
+
+    let metadata = metadata(&prepared, &BTreeMap::new()).unwrap();
+
+    assert_eq!(metadata["claudeCode"]["options"]["title"], json!("JP"));
+}
+
 /// Sonnet 5.5 rejects `thinking: disabled`; `between_tools` is the lowest
 /// setting it accepts.
 #[test]
@@ -44,6 +65,7 @@ fn reasoning_off_on_sonnet_5_5_sends_between_tools() {
 #[test]
 fn reasoning_off_on_an_always_on_model_sends_no_thinking() {
     assert_eq!(thinking_with_reasoning_off("claude-opus-5-5"), None);
+    assert_eq!(thinking_with_reasoning_off("claude-fable-5-2"), None);
     assert_eq!(thinking_with_reasoning_off("claude-fable-5-1"), None);
     assert_eq!(thinking_with_reasoning_off("claude-fable-5"), None);
 }
