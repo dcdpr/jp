@@ -2709,24 +2709,7 @@ fn quota_reset_at(seconds: u64) -> Option<chrono::DateTime<chrono::Utc>> {
 /// See:
 /// <https://docs.claude.com/en/docs/build-with-claude/structured-outputs#json-schema-limitations>
 fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
-    if let Some(r) = src.remove("$ref") {
-        return Map::from_iter([("$ref".into(), r)]);
-    }
-
     let mut out = Map::new();
-
-    // Helper macro to move a field from src to out.
-    macro_rules! move_field {
-        ($key:literal) => {
-            if let Some(v) = src.remove($key) {
-                out.insert($key.into(), v);
-            }
-        };
-    }
-
-    // Extract common fields
-    move_field!("title");
-    move_field!("description");
 
     // Recursive Transformation Helpers
     let transform_val = |v: Value| match v {
@@ -2742,9 +2725,47 @@ fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
         |v: Vec<Value>| -> Vec<Value> { v.into_iter().map(transform_val).collect() };
 
     // Handle Recursive Dictionaries
+    //
+    // Extract `$defs` and `definitions` before returning early on `$ref`, so a
+    // root `$ref` schema (such as Pydantic's `RootModel`) retains its sibling
+    // definitions.
     for key in ["$defs", "definitions"] {
         if let Some(Value::Object(defs)) = src.remove(key) {
             out.insert(key.into(), Value::Object(transform_map(defs)));
+        }
+    }
+
+    if let Some(r) = src.remove("$ref") {
+        out.insert("$ref".into(), r);
+        return out;
+    }
+
+    // Helper macro to move a field from src to out.
+    macro_rules! move_field {
+        ($key:literal) => {
+            if let Some(v) = src.remove($key) {
+                out.insert($key.into(), v);
+            }
+        };
+    }
+
+    // Extract common fields
+    move_field!("title");
+    move_field!("description");
+
+    // Anthropic accepts only string, number, boolean, and null enum members,
+    // and rejects a request with any other. Leave any other `enum` in `src` to
+    // be appended to `description` rather than sent as a constraint. The whole
+    // list moves, so a mixed enum doesn't lose its complex members.
+    if let Some(values) = src.remove("enum") {
+        let primitive = values
+            .as_array()
+            .is_some_and(|members| members.iter().all(|m| !m.is_array() && !m.is_object()));
+
+        if primitive {
+            out.insert("enum".into(), values);
+        } else {
+            src.insert("enum".into(), values);
         }
     }
 
