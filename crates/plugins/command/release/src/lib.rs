@@ -19,8 +19,10 @@
 //!
 //! `cut`, `pick`, and `finalize` make releases on release branches and their
 //! notes on notes branches, in this repository, and print the push that
-//! publishes them; `abandon` takes back a release nobody has published, and
-//! `due` says when the next release should be cut.
+//! publishes them; `build` builds a release's binaries with the project's
+//! command and keeps them in the workspace's user-local storage; `abandon`
+//! takes back a release nobody has published, and `due` says when the next
+//! release should be cut.
 //! `releases` decides what they may do, and `repository` runs the git they need
 //! in worktrees of their own, reading what this repository and `origin` hold.
 //!
@@ -28,6 +30,7 @@
 //! `docs/rfd/122-release-pipeline.md`
 
 mod abandon;
+mod build;
 mod cut;
 mod definitions;
 mod due;
@@ -70,6 +73,7 @@ use semver::Version;
 use serde_json::Value;
 
 use crate::{
+    build::Profile,
     edit::Host,
     entry::{Fragments, HIGHLIGHTS},
     options::Options,
@@ -204,6 +208,27 @@ enum Command {
         /// The release, such as `0.3.0`.
         #[arg(value_parser = parse_version)]
         version: Version,
+    },
+
+    /// Build a release's binaries with `plugins.command.release.options.build`,
+    /// and keep them in this workspace's user-local storage.
+    ///
+    /// Builds the commit the release's tag names, or while the release is in
+    /// preparation, the tip of its release branch, in a temporary worktree.
+    /// Checks what the build wrote, its archives, `checksums.txt`, and
+    /// `manifest.json`, then keeps it in `release/<version>/` of `jp path
+    /// user-workspace`, replacing an earlier build of that version.
+    /// Publishers take only a build made with the release profile from the
+    /// commit the release's tag names.
+    Build {
+        /// The release, such as `0.3.0`.
+        #[arg(value_parser = parse_version)]
+        version: Version,
+
+        /// Build with the quick profile, to test the build in less time;
+        /// publishers refuse quick builds.
+        #[arg(long)]
+        quick: bool,
     },
 
     /// Take back a release nobody has published, so it can be cut again.
@@ -489,13 +514,33 @@ fn handle_command(
         Command::Finalize { version } => make_release(root, &options, |pipeline| {
             finalize::finalize(pipeline, &version)
         }),
+        Command::Build { version, quick } => {
+            let profile = if quick {
+                Profile::Quick
+            } else {
+                Profile::Release
+            };
+            builds(init)
+                .ok_or_else(|| {
+                    "This workspace has no user-local storage, where `jp release build` keeps \
+                     builds."
+                        .to_owned()
+                })
+                .and_then(|builds| {
+                    make_release(root, &options, |pipeline| {
+                        build::build(pipeline, &builds, &version, profile, &mut |line| {
+                            send_print(stdout, &format!("{line}\n"), "chrome", "plain")
+                        })
+                    })
+                })
+        }
         Command::Abandon { version } => make_release(root, &options, |pipeline| {
             abandon::abandon(pipeline, &version)
         }),
         Command::Due => due_release(root, &options, ctx.format),
-        Command::Status => {
-            make_release(root, &options, |pipeline| status::status(pipeline, now()?))
-        }
+        Command::Status => make_release(root, &options, |pipeline| {
+            status::status(pipeline, now()?, builds(init).as_deref())
+        }),
         Command::Tools {
             command: ToolsCommand::Init { path, force },
         } => definitions::init(&resolve_dir(root, &path), force),
@@ -749,6 +794,15 @@ fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Resu
         json: format.is_json(),
         note: None,
     })
+}
+
+/// Where builds of the workspace's releases are kept: `release/` in its
+/// user-local storage, when it has some.
+fn builds(init: &InitMessage) -> Option<Utf8PathBuf> {
+    init.paths
+        .user_workspace
+        .as_ref()
+        .map(|storage| storage.join(build::BUILDS))
 }
 
 /// The time now, in seconds since the Unix epoch.

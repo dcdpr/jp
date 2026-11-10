@@ -393,6 +393,30 @@ fn a_tag_only_this_repository_has_is_dated_from_here() {
     assert_eq!(repository.tag_date("v0.1.0"), Ok(OCTOBER_1));
 }
 
+/// An annotated tag names a tag object; both sides read the commit under it, as
+/// they read a lightweight tag's.
+#[test]
+fn tags_name_their_commits_here_and_on_origin() {
+    let fixture = Fixture::new();
+    let commit = fixture.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    fixture.git(&["tag", "--annotate", "v0.1.0", "--message", "Release 0.1.0"]);
+    fixture.git(&["tag", "v0.2.0"]);
+    fixture.publish(&["v0.1.0"]);
+    let shell = fixture.shell();
+    let repository = Repository::open(&shell, fixture.root()).unwrap();
+
+    let tags = repository.tags().unwrap();
+
+    assert_eq!(
+        tags.local,
+        BTreeMap::from([
+            ("v0.1.0".to_owned(), commit.clone()),
+            ("v0.2.0".to_owned(), commit.clone()),
+        ])
+    );
+    assert_eq!(tags.origin, BTreeMap::from([("v0.1.0".to_owned(), commit)]));
+}
+
 #[test]
 fn a_tag_neither_has_cannot_be_dated() {
     let fixture = Fixture::new();

@@ -109,6 +109,27 @@ fn tags_name_a_v_and_a_version_that_is_no_pre_release() {
     );
 }
 
+/// `git ls-remote --tags` lists an annotated tag peeled after its tag object,
+/// and the commit is what a tag names.
+#[test]
+fn an_annotated_tag_names_the_commit_it_peels_to() {
+    let listing = concat!(
+        "aaaa\trefs/tags/v0.1.0\n",
+        "1111\trefs/tags/v0.1.0^{}\n",
+        "bbbb\trefs/tags/v0.2.0\n",
+    );
+
+    let tags = parse_tags(listing);
+
+    assert_eq!(
+        tags,
+        BTreeMap::from([
+            ("v0.1.0".to_owned(), "1111".to_owned()),
+            ("v0.2.0".to_owned(), "bbbb".to_owned()),
+        ])
+    );
+}
+
 #[test]
 fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
     // As `git log -z --format=%H%n%ct%n%B` writes it, newest first.

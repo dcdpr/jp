@@ -6,30 +6,39 @@
 //! It says, in this order: that the checkout lacks commits of `origin`'s
 //! `main`; a pick a conflict stopped; what only this repository has, with the
 //! push that publishes it; each release in preparation, with where its notes
-//! are and the next step; and, while no minor or major release is in
+//! are and the next step; the finalized releases with no publishable build kept
+//! in user-local storage; and, while no minor or major release is in
 //! preparation, whether the next one is due.
 //! It changes nothing.
 
+use camino::Utf8Path;
 use semver::Version;
 
 use crate::{
+    build::{self, Kept},
     due,
     finalize::{self, Notes},
     pick,
     pipeline::{Pipeline, counted, listed, push},
     releases::{self, Line, NOTES_BRANCH, RELEASE_BRANCH, Releases, Standing},
-    repository::{Checkout, MAIN, ORIGIN, Worktree},
+    repository::{Checkout, MAIN, ORIGIN, Tags, Worktree},
 };
 
 /// Where the releases of the workspace stand at `now`, in seconds since the
-/// Unix epoch, and what to run next.
+/// Unix epoch, and what to run next; `builds` is where builds are kept, when
+/// the workspace has user-local storage.
 ///
 /// The error says why the repository can't be read.
-pub(crate) fn status(pipeline: &Pipeline<'_>, now: i64) -> Result<String, String> {
+pub(crate) fn status(
+    pipeline: &Pipeline<'_>,
+    now: i64,
+    builds: Option<&Utf8Path>,
+) -> Result<String, String> {
     let repo = &pipeline.repo;
     repo.refuse_shallow()?;
     repo.fetch()?;
     let releases = repo.releases()?;
+    let tags = repo.tags()?;
     let checkout = repo.checked_out()?;
 
     let mut paragraphs = vec![];
@@ -42,7 +51,7 @@ pub(crate) fn status(pipeline: &Pipeline<'_>, now: i64) -> Result<String, String
              run:\n\n    jp release pick --continue"
         ));
     }
-    paragraphs.extend(unpublished(pipeline, &checkout)?);
+    paragraphs.extend(unpublished(pipeline, &checkout, &tags)?);
 
     let main = repo.worktree("status", &checkout.head)?;
     for line in releases.lines.values() {
@@ -51,6 +60,9 @@ pub(crate) fn status(pipeline: &Pipeline<'_>, now: i64) -> Result<String, String
                 pipeline, &releases, line, version, &checkout, &main,
             )?);
         }
+    }
+    if let Some(builds) = builds {
+        paragraphs.extend(unbuilt(&releases, &tags, builds));
     }
 
     let cutting = releases
@@ -74,7 +86,11 @@ pub(crate) fn status(pipeline: &Pipeline<'_>, now: i64) -> Result<String, String
 /// Then the notes branches here and on `origin` that diverged; diverged release
 /// branches stop reading the releases before this, saying how to bring them
 /// together.
-fn unpublished(pipeline: &Pipeline<'_>, checkout: &Checkout) -> Result<Vec<String>, String> {
+fn unpublished(
+    pipeline: &Pipeline<'_>,
+    checkout: &Checkout,
+    tags: &Tags,
+) -> Result<Vec<String>, String> {
     let repo = &pipeline.repo;
     let mut branches = vec![];
     let mut diverged = vec![];
@@ -111,7 +127,6 @@ fn unpublished(pipeline: &Pipeline<'_>, checkout: &Checkout) -> Result<Vec<Strin
         }
     }
 
-    let tags = repo.tags()?;
     let tags: Vec<String> = tags
         .local
         .keys()
@@ -150,6 +165,39 @@ fn unpublished(pipeline: &Pipeline<'_>, checkout: &Checkout) -> Result<Vec<Strin
     }
 
     Ok(paragraphs)
+}
+
+/// The finalized releases with no publishable build kept in `builds`, and the
+/// command that builds one; nothing when every one has.
+fn unbuilt(releases: &Releases, tags: &Tags, builds: &Utf8Path) -> Option<String> {
+    let mut unbuilt = vec![];
+    let mut newest = None;
+    for version in &releases.tagged {
+        let tag = releases::tag(version);
+        // `origin`'s tag is the one published.
+        let Some(commit) = tags.origin.get(&tag).or_else(|| tags.local.get(&tag)) else {
+            continue;
+        };
+
+        match build::assess(builds, version, commit) {
+            Kept::Publishable => continue,
+            Kept::Nothing => unbuilt.push(version.to_string()),
+            Kept::ForTesting(what) => unbuilt.push(format!("{version} (only {what})")),
+        }
+        newest = Some(version);
+    }
+    let newest = newest?;
+
+    let how = if unbuilt.len() == 1 {
+        "Build one with:"
+    } else {
+        "Build each with `jp release build <version>`, such as the newest:"
+    };
+
+    Some(format!(
+        "No publishable build of {} is kept here. {how}\n\n    jp release build {newest}",
+        listed(&unbuilt)
+    ))
 }
 
 /// The version of the release the notes branch `name` files the notes of.

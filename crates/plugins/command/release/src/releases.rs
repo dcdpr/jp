@@ -158,19 +158,31 @@ fn number(text: &str) -> Option<u64> {
     text.parse().ok()
 }
 
-/// The tags `git ls-remote --tags --refs` lists, each
-/// `<hash>\trefs/tags/<name>`, as their names and the hashes of the objects
-/// they name.
+/// The tags `git ls-remote --tags` lists, each `<hash>\trefs/tags/<name>`, as
+/// their names and the commits they name.
+///
+/// An annotated tag is listed twice, first with the hash of the tag object,
+/// then peeled, as `refs/tags/<name>^{}`, with its commit's: the peeled line
+/// wins, wherever it stands.
 pub(crate) fn parse_tags(listing: &str) -> BTreeMap<String, String> {
-    listing
-        .lines()
-        .filter_map(|line| {
-            let (hash, reference) = line.split_once('\t')?;
-            let name = reference.strip_prefix("refs/tags/")?;
+    let mut tags = BTreeMap::new();
+    let mut peeled = BTreeMap::new();
+    for line in listing.lines() {
+        let Some((hash, reference)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some(name) = reference.strip_prefix("refs/tags/") else {
+            continue;
+        };
 
-            Some((name.to_owned(), hash.to_owned()))
-        })
-        .collect()
+        match name.strip_suffix("^{}") {
+            Some(name) => peeled.insert(name.to_owned(), hash.to_owned()),
+            None => tags.insert(name.to_owned(), hash.to_owned()),
+        };
+    }
+
+    tags.extend(peeled);
+    tags
 }
 
 /// The versions the tags `names` finalize: each `v`, then a semantic version

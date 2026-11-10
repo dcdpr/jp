@@ -5,6 +5,7 @@
 //! fragments_dir = "changelog.d"
 //! forge = "github"
 //! bump = "cargo set-version --package jp_cli {version}"
+//! build = "bash .config/release/build.sh {source} {out} {profile}"
 //! cadence = "2w"
 //!
 //! [plugins.command.release.options.headings]
@@ -29,6 +30,14 @@
 //! It is split into words as a shell splits them, but runs without a shell.
 //! Unset, a version lives only in its tag.
 //!
+//! `build` is the command `jp release build` runs in the workspace root to
+//! build a release's binaries, split into words as `bump` is, with `{version}`,
+//! the release's version, `{source}`, a checkout of its code, `{out}`, the
+//! empty directory its archives, `checksums.txt`, and `manifest.json` go, and
+//! `{profile}`, `release` or `quick`.
+//! It has to name `{source}` and `{out}`.
+//! Unset, `jp release build` refuses to run.
+//!
 //! `cadence` is how long after a minor or major release is cut the next one is
 //! due, which `jp release due` reports: a duration such as `2w`, `10d`, or
 //! `1week 3days`, two weeks by default.
@@ -39,7 +48,7 @@
 
 use std::{collections::BTreeMap, fmt, time::Duration};
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{Forge, Headings, Type, UnknownType};
 use semver::Version;
 use serde::Deserialize;
@@ -53,6 +62,18 @@ const VERSION: &str = "{version}";
 
 /// The setting `bump` is read from, as errors name it.
 pub(crate) const BUMP_KEY: &str = "plugins.command.release.options.bump";
+
+/// The setting `build` is read from, as errors name it.
+pub(crate) const BUILD_KEY: &str = "plugins.command.release.options.build";
+
+/// What `build` writes where the checkout of the release's code is.
+const SOURCE: &str = "{source}";
+
+/// What `build` writes where the directory the build goes is.
+const OUT: &str = "{out}";
+
+/// What `build` writes where the profile to build with goes.
+const PROFILE: &str = "{profile}";
 
 /// The cadence, when `cadence` isn't set, as configuration writes it and in
 /// seconds.
@@ -75,6 +96,9 @@ pub(crate) struct Options {
     /// The command that writes a new version where the project keeps it.
     pub bump: Option<Bump>,
 
+    /// The command that builds a release's binaries.
+    pub build: Option<Build>,
+
     /// How long after a minor or major release is cut the next one is due.
     pub cadence: Cadence,
 }
@@ -86,6 +110,7 @@ impl Default for Options {
             forge: None,
             headings: Headings::default(),
             bump: None,
+            build: None,
             cadence: Cadence::default(),
         }
     }
@@ -153,11 +178,7 @@ impl Bump {
     ///
     /// The error says what is wrong with it.
     fn parse(command: &str) -> Result<Self, String> {
-        let words = shlex::split(command)
-            .ok_or_else(|| format!("`{BUMP_KEY}` can't be split into words; check its quotes."))?;
-        if words.is_empty() {
-            return Err(format!("`{BUMP_KEY}` is empty."));
-        }
+        let words = split(BUMP_KEY, command)?;
         if !words.iter().any(|word| word.contains(VERSION)) {
             return Err(format!(
                 "`{BUMP_KEY}` names no `{VERSION}`, so it couldn't write the new version."
@@ -181,6 +202,90 @@ impl Bump {
     }
 }
 
+/// The command `build` configures: words as a shell splits them, `{source}` and
+/// `{out}` each in at least one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Build {
+    words: Vec<String>,
+}
+
+impl Build {
+    /// Split `command` into the program and its arguments.
+    ///
+    /// The error says what is wrong with it.
+    fn parse(command: &str) -> Result<Self, String> {
+        let words = split(BUILD_KEY, command)?;
+        for (placeholder, why) in [
+            (SOURCE, "so it couldn't find the release's code"),
+            (OUT, "so it couldn't say where the build goes"),
+        ] {
+            if !words.iter().any(|word| word.contains(placeholder)) {
+                return Err(format!("`{BUILD_KEY}` names no `{placeholder}`, {why}."));
+            }
+        }
+
+        Ok(Self { words })
+    }
+
+    /// The program to run, and its arguments, with `{version}`, `{source}`,
+    /// `{out}`, and `{profile}` replaced.
+    pub(crate) fn command(
+        &self,
+        version: &Version,
+        source: &Utf8Path,
+        out: &Utf8Path,
+        profile: &str,
+    ) -> (String, Vec<String>) {
+        let version = version.to_string();
+        let values = [
+            (VERSION, version.as_str()),
+            (SOURCE, source.as_str()),
+            (OUT, out.as_str()),
+            (PROFILE, profile),
+        ];
+        let mut words = self.words.iter().map(|word| fill(word, &values));
+        let program = words.next().unwrap_or_default();
+
+        (program, words.collect())
+    }
+}
+
+/// `command` split into words as a shell splits them, for the setting `key`.
+///
+/// The error says it can't be split, or holds no words.
+fn split(key: &str, command: &str) -> Result<Vec<String>, String> {
+    let words = shlex::split(command)
+        .ok_or_else(|| format!("`{key}` can't be split into words; check its quotes."))?;
+    if words.is_empty() {
+        return Err(format!("`{key}` is empty."));
+    }
+
+    Ok(words)
+}
+
+/// `word` with each placeholder of `values` replaced by its value, in one pass,
+/// so a value holding a placeholder, such as a path with `{out}` in it, is left
+/// as it is.
+fn fill(word: &str, values: &[(&str, &str)]) -> String {
+    let mut filled = String::with_capacity(word.len());
+    let mut rest = word;
+    'scan: while !rest.is_empty() {
+        for (placeholder, value) in values {
+            if let Some(after) = rest.strip_prefix(placeholder) {
+                filled.push_str(value);
+                rest = after;
+                continue 'scan;
+            }
+        }
+
+        let mut chars = rest.chars();
+        filled.extend(chars.next());
+        rest = chars.as_str();
+    }
+
+    filled
+}
+
 /// The options as the configuration writes them.
 #[derive(Deserialize)]
 #[serde(default)]
@@ -189,6 +294,7 @@ struct Settings {
     forge: Option<String>,
     headings: BTreeMap<String, String>,
     bump: Option<String>,
+    build: Option<String>,
     cadence: Option<String>,
 }
 
@@ -199,6 +305,7 @@ impl Default for Settings {
             forge: None,
             headings: BTreeMap::new(),
             bump: None,
+            build: None,
             cadence: None,
         }
     }
@@ -238,6 +345,7 @@ impl Options {
         }
 
         let bump = settings.bump.as_deref().map(Bump::parse).transpose()?;
+        let build = settings.build.as_deref().map(Build::parse).transpose()?;
 
         let cadence = settings
             .cadence
@@ -251,6 +359,7 @@ impl Options {
             forge,
             headings,
             bump,
+            build,
             cadence,
         })
     }

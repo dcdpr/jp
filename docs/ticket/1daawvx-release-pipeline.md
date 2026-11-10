@@ -40,7 +40,7 @@ Tracking ticket for [RFD 122].
       `changelog.d/`, and adds `abandon`.
       `cut` tells the person releasing to merge the notes branch into `main`.
       Depends on Phase 2.
-- [ ] **Build releases**: Adds `build` with the `build` option and `--quick`,
+- [x] **Build releases**: Adds `build` with the `build` option and `--quick`,
       the build directory and its checks, and `status` naming finalized releases
       without a publishable build.
       `--remote` and `builders` land with a project's first remote builder.

@@ -138,6 +138,68 @@ fn a_bump_that_cannot_write_the_version_is_refused() {
 }
 
 #[test]
+fn build_takes_the_version_the_source_the_output_and_the_profile() {
+    let options = read(json!({
+        "build": "bash 'release tools/build.sh' {source} --out={out} {profile} v{version}"
+    }))
+    .unwrap();
+
+    let (program, args) = options.build.unwrap().command(
+        &Version::parse("0.3.0").unwrap(),
+        Utf8Path::new("/tmp/source"),
+        Utf8Path::new("/tmp/out"),
+        "quick",
+    );
+    assert_eq!(program, "bash");
+    assert_eq!(args, [
+        "release tools/build.sh",
+        "/tmp/source",
+        "--out=/tmp/out",
+        "quick",
+        "v0.3.0"
+    ]);
+}
+
+/// The placeholders are replaced in one pass, so a path that happens to hold
+/// one is passed on as it is.
+#[test]
+fn a_value_holding_a_placeholder_is_left_as_it_is() {
+    let options = read(json!({ "build": "build {source} {out}" })).unwrap();
+
+    let (_, args) = options.build.unwrap().command(
+        &Version::parse("0.3.0").unwrap(),
+        Utf8Path::new("/tmp/{out}"),
+        Utf8Path::new("/tmp/{profile}"),
+        "release",
+    );
+    assert_eq!(args, ["/tmp/{out}", "/tmp/{profile}"]);
+}
+
+#[test]
+fn a_build_that_cannot_find_the_code_or_say_where_it_goes_is_refused() {
+    assert_eq!(
+        read(json!({ "build": "make release OUT={out}" })),
+        Err(
+            "`plugins.command.release.options.build` names no `{source}`, so it couldn't find the \
+             release's code."
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        read(json!({ "build": "make -C {source} release" })),
+        Err(
+            "`plugins.command.release.options.build` names no `{out}`, so it couldn't say where \
+             the build goes."
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        read(json!({ "build": "" })),
+        Err("`plugins.command.release.options.build` is empty.".to_owned())
+    );
+}
+
+#[test]
 fn the_cadence_is_two_weeks_by_default() {
     let options = read(json!({})).unwrap();
 

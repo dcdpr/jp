@@ -1,5 +1,6 @@
-use std::slice;
+use std::{fs, slice};
 
+use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
@@ -28,7 +29,7 @@ fn status_at(fixture: &Fixture, now: i64) -> String {
     let options = options();
     let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
 
-    status(&pipeline, now).unwrap()
+    status(&pipeline, now, None).unwrap()
 }
 
 /// Run `command` in the workspace of `fixture` with `shell`.
@@ -151,6 +152,89 @@ fn a_release_tagged_here_says_how_to_publish_it_and_when_the_next_is_due() {
         "Only this repository has v0.1.0. Publish it with:\n\n    git push origin v0.1.0\n\nor, \
          if a rehearsal left it, delete it with `git tag -d v0.1.0`.\n\n0.1.0 was cut on \
          2026-10-01, and the cadence is 2w, so the next release is due at 2026-10-15 12:00 UTC.\n"
+    );
+}
+
+/// What `status` says at `now` in the workspace of `fixture`, which keeps
+/// builds in `builds`.
+fn status_with_builds(fixture: &Fixture, now: i64, builds: &Utf8Path) -> String {
+    let shell = fixture.shell();
+    let options = options();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
+
+    status(&pipeline, now, Some(builds)).unwrap()
+}
+
+/// [`cut_on_october_1`], with its notes merged, finalized, and everything
+/// published.
+fn finalized_on_october_1() -> Fixture {
+    let fixture = cut_on_october_1();
+    fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#2)");
+    run(&fixture, &fixture.shell(), |pipeline| {
+        finalize(pipeline, &Version::parse("0.1.0").unwrap())
+    })
+    .unwrap();
+    fixture.publish(&["v0.1.0"]);
+
+    fixture
+}
+
+/// Keep a build of 0.1.0 in `builds`, made from `commit` with `profile`.
+fn keep_build(builds: &Utf8Path, commit: &str, profile: &str) {
+    let dir = builds.join("0.1.0");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("manifest.json"),
+        json!({
+            "format": 1,
+            "version": "0.1.0",
+            "commit": commit,
+            "profile": profile,
+            "artifacts": [{ "file": "jp.tar.xz", "target": "aarch64-apple-darwin" }],
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_finalized_release_without_a_build_says_how_to_build_one() {
+    let fixture = finalized_on_october_1();
+    let builds = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        status_with_builds(&fixture, OCTOBER_1 + DAY, builds.path()),
+        "No publishable build of 0.1.0 is kept here. Build one with:\n\n    jp release build \
+         0.1.0\n\n0.1.0 was cut on 2026-10-01, and the cadence is 2w, so the next release is due \
+         at 2026-10-15 12:00 UTC.\n"
+    );
+}
+
+#[test]
+fn a_quick_build_is_not_taken_for_a_publishable_one() {
+    let fixture = finalized_on_october_1();
+    let builds = Utf8TempDir::new().unwrap();
+    keep_build(builds.path(), &fixture.hash("v0.1.0^{commit}"), "quick");
+
+    assert_eq!(
+        status_with_builds(&fixture, OCTOBER_1 + DAY, builds.path()),
+        "No publishable build of 0.1.0 (only a quick build) is kept here. Build one with:\n\n    \
+         jp release build 0.1.0\n\n0.1.0 was cut on 2026-10-01, and the cadence is 2w, so the \
+         next release is due at 2026-10-15 12:00 UTC.\n"
+    );
+}
+
+#[test]
+fn a_finalized_release_with_a_publishable_build_needs_nothing_more() {
+    let fixture = finalized_on_october_1();
+    let builds = Utf8TempDir::new().unwrap();
+    keep_build(builds.path(), &fixture.hash("v0.1.0^{commit}"), "release");
+
+    assert_eq!(
+        status_with_builds(&fixture, OCTOBER_1 + DAY, builds.path()),
+        "0.1.0 was cut on 2026-10-01, and the cadence is 2w, so the next release is due at \
+         2026-10-15 12:00 UTC.\n"
     );
 }
 

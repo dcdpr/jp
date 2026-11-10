@@ -770,6 +770,115 @@ fn making_a_release_needs_a_git_repository() {
     }
 }
 
+/// The `init` running `args` in the workspace at `root`, keeping builds in
+/// user-local storage at `storage`, with `options`.
+fn building(root: &Utf8Path, args: &[&str], storage: &Utf8Path, options: Value) -> InitMessage {
+    let Value::Object(options) = options else {
+        panic!("options are an object");
+    };
+    let mut message = init_message(root, args);
+    message.paths.user_workspace = Some(storage.to_path_buf());
+    message.options = options;
+
+    message
+}
+
+#[test]
+fn building_needs_user_local_storage() {
+    let root = workspace();
+
+    let messages = command(root.path(), &["build", "0.1.0"], &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some("This workspace has no user-local storage, where `jp release build` keeps builds.")
+    );
+}
+
+#[test]
+fn building_needs_a_git_repository() {
+    let root = workspace();
+    let storage = Utf8TempDir::new().unwrap();
+    let message = building(
+        root.path(),
+        &["build", "0.1.0"],
+        storage.path(),
+        json!({ "build": "sh build.sh {source} {out}" }),
+    );
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    let reason = exit(&messages).reason.clone().unwrap_or_default();
+    assert!(
+        reason.starts_with(&format!(
+            "The workspace at {} isn't in a git repository",
+            root.path()
+        )),
+        "{reason}"
+    );
+}
+
+/// The build's progress is chrome, which `--quiet` silences; what it built is
+/// the command's output.
+#[cfg(unix)]
+#[test]
+fn a_build_prints_its_progress_as_chrome_and_what_it_built_as_content() {
+    let fixture = Fixture::new();
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
+    // Cut with the fixture's git identity: the session runs git with the
+    // machine's, which may sign commits or have none to make them with.
+    let shell = fixture.shell();
+    let options = Options::default();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
+    cut::cut(&pipeline, None, None).unwrap();
+    fixture.write(
+        "build.sh",
+        indoc! {r#"
+            set -e
+            version=$1 source=$2 out=$3 profile=$4
+            echo "compiling jp $version"
+            printf 'an archive\n' > "$out/jp.tar.xz"
+            printf '%s  %s\n' 4cd36b3ca046f7c17e81e1aa31bf2dc6a91b98c94238810db57456b4904d3a22 jp.tar.xz > "$out/checksums.txt"
+            commit=$(git -C "$source" rev-parse HEAD)
+            printf '{"format":1,"version":"%s","commit":"%s","profile":"%s","artifacts":[{"file":"jp.tar.xz","target":"aarch64-apple-darwin"}]}\n' \
+                "$version" "$commit" "$profile" > "$out/manifest.json"
+        "#},
+    );
+    let storage = Utf8TempDir::new().unwrap();
+    let tip = &fixture.hash("release/0.1")[..7];
+    let message = building(
+        fixture.root(),
+        &["build", "0.1.0", "--quick"],
+        storage.path(),
+        json!({ "build": "sh build.sh {version} {source} {out} {profile}" }),
+    );
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    assert_eq!(exit(&messages).code, 0, "{messages:?}");
+    assert_eq!(prints(&messages), [
+        (
+            "chrome",
+            "plain",
+            format!("Building 0.1.0 from release/0.1 at {tip} with the quick profile.\n").as_str()
+        ),
+        ("chrome", "plain", "compiling jp 0.1.0\n"),
+        (
+            "content",
+            "plain",
+            format!(
+                "Built 0.1.0 from release/0.1 at {tip} with the quick profile, into {}:\n\n    \
+                 jp.tar.xz  aarch64-apple-darwin\n\nIt's a quick build, for testing: publishers \
+                 refuse it.\n",
+                storage.path().join("release/0.1.0")
+            )
+            .as_str()
+        ),
+    ]);
+}
+
 #[test]
 fn pick_takes_a_version_and_commits_or_continue() {
     let root = workspace();

@@ -158,8 +158,9 @@ Every option is optional:
   is not the project's forge, such as a rehearsal's, sets it.
 - `bump` has no default.
   Without it, a version lives only in its tag.
-- `build` has no default, and `builders` names commands that build elsewhere
-  ([Building a release](#building-a-release)).
+- `build` has no default, and has to name `{source}` and `{out}`; `builders`
+  names commands that build elsewhere ([Building a
+  release](#building-a-release)).
 - `headings` renames a type's section in the release notes.
   A type it does not name keeps its default heading, its id capitalized
   (`Added`, `Performance`), and layered `headings` merge key by key.
@@ -373,9 +374,13 @@ the tag, which keeps the notes the release was tagged with.
    builds with today's build definition, with `{version}`, `{source}` (the
    worktree), `{out}` (an empty directory), and `{profile}`: `release`, or
    `quick` with `--quick`.
+   What the command prints is shown as it runs, and `--quiet` hides it.
 3. It checks what the command left in `{out}`: the archives, `checksums.txt`
    with a SHA-256 for each, and `manifest.json`, which names the version,
-   commit, and profile built and the platform each archive is for.
+   commit, and profile built and the platform each archive is for, and nothing
+   else.
+   A build that fails, or whose output breaks any of this, is not kept, and the
+   check names every problem at once.
 4. It moves the result to `release/0.3.0/` in the workspace's user-local storage
    (`jp path user-workspace`), replacing an earlier build of that version.
 
@@ -394,10 +399,12 @@ the tag, which keeps the notes the release was tagged with.
 }
 ```
 
-A build of a tag with the `release` profile is **publishable**.
-A `--quick` build, a build of a release in preparation, and a build of a commit
-its version's tag no longer names, left from before an abandon, are for testing,
-and publishers refuse them ([RFD 123]).
+A build made with the `release` profile from the commit its version's tag names
+is **publishable**, so a build of a release in preparation becomes publishable
+when `finalize` tags the commit it was made from.
+A `--quick` build, and a build of a commit the tag doesn't name, such as one
+left from before an abandon, are for testing, and publishers refuse them ([RFD
+123]).
 `jp release status` names each finalized release without a publishable build.
 
 A **remote builder** builds elsewhere, such as on dedicated hardware a CI job

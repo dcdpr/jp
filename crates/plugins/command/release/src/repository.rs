@@ -111,7 +111,7 @@ impl Checkout {
 }
 
 /// The tags this repository and `origin` each have: each tag's name, such as
-/// `v0.3.0`, and the hash of the object it names.
+/// `v0.3.0`, and the hash of the commit it names.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Tags {
     pub local: BTreeMap<String, String>,
@@ -153,6 +153,11 @@ impl<'a> Repository<'a> {
 
     pub(crate) fn shell(&self) -> &Shell {
         self.shell
+    }
+
+    /// The workspace root, in the checkout the command runs from.
+    pub(crate) fn root(&self) -> &Utf8Path {
+        &self.root
     }
 
     /// The path from the top of the work tree to the workspace root: empty, or
@@ -343,12 +348,16 @@ impl<'a> Repository<'a> {
 
     /// The `v` tags in this repository, and those on `origin`.
     pub(crate) fn tags(&self) -> Result<Tags, String> {
-        let local = self.git(&[
-            "for-each-ref",
-            "--format=%(objectname)%09%(refname)",
-            "refs/tags/v*",
-        ])?;
-        let origin = self.git(&["ls-remote", "--tags", "--refs", ORIGIN, "refs/tags/v*"])?;
+        // An annotated tag names a tag object, which `*objectname` peels to the
+        // commit; a lightweight tag names the commit itself.
+        let format = concat!(
+            "--format=",
+            "%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)",
+            "%09%(refname)",
+        );
+        let local = self.git(&["for-each-ref", format, "refs/tags/v*"])?;
+        // Without `--refs`, each annotated tag is listed peeled too.
+        let origin = self.git(&["ls-remote", "--tags", ORIGIN, "refs/tags/v*"])?;
 
         Ok(Tags {
             local: releases::parse_tags(&local),
@@ -407,7 +416,7 @@ impl<'a> Repository<'a> {
         let object = if self.hash(&reference)?.is_some() {
             reference
         } else {
-            self.git(&["fetch", "--quiet", "--no-tags", ORIGIN, &reference])?;
+            self.fetch_tag(tag)?;
             "FETCH_HEAD".to_owned()
         };
 
@@ -422,6 +431,22 @@ impl<'a> Repository<'a> {
         };
 
         date.ok_or_else(|| format!("The tag {tag} has no time git can read."))
+    }
+
+    /// Fetch `origin`'s tag `tag` into `FETCH_HEAD`, with the objects it needs,
+    /// writing no tag here.
+    pub(crate) fn fetch_tag(&self, tag: &str) -> Result<(), String> {
+        let reference = format!("refs/tags/{tag}");
+
+        self.git(&["fetch", "--quiet", "--no-tags", ORIGIN, &reference])
+            .map(drop)
+    }
+
+    /// Whether this repository has the commit `hash`.
+    pub(crate) fn has_commit(&self, hash: &str) -> Result<bool, String> {
+        let object = format!("{hash}^{{commit}}");
+
+        Ok(self.hash(&object)?.is_some())
     }
 
     /// The web address of `origin`, when it has one.
