@@ -1,5 +1,4 @@
-//! Comparing the findings of a base revision with those of the tree being
-//! measured.
+//! Diffing `rustqual` findings between a base revision and a target tree.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -7,23 +6,23 @@ use serde::Serialize;
 
 use crate::{Finding, Policy, Report};
 
-/// Files renamed between the base and the measured tree, old path to new.
+/// File renames between the base revision and the target tree, mapping old path
+/// to new path.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Renames(BTreeMap<String, String>);
 
-/// `git diff --name-status -z` output that doesn't have the expected shape.
+/// Malformed `git diff --name-status -z` output.
 #[derive(Debug, thiserror::Error)]
 #[error("unexpected `git diff --name-status -z` output: {0}")]
 pub struct RenamesError(String);
 
 impl Renames {
-    /// Read the renames from `git diff -M --name-status -z` output.
-    ///
-    /// Every other status is skipped.
+    /// Parse file renames (`R*`) from `git diff -M --name-status -z` output,
+    /// ignoring all other status entries.
     ///
     /// # Errors
     ///
-    /// Returns an error when a status isn't followed by the paths it needs.
+    /// Returns an error if a status token is missing its path field(s).
     pub fn from_name_status(output: &str) -> Result<Self, RenamesError> {
         let mut renames = BTreeMap::new();
         let mut fields = output.split('\0').filter(|field| !field.is_empty());
@@ -32,7 +31,8 @@ impl Renames {
             let missing = || RenamesError(format!("status {status:?} has no path"));
             let from = fields.next().ok_or_else(missing)?;
 
-            // A rename or a copy names its source and then its destination.
+            // `R` (rename) and `C` (copy) entries carry two NUL-terminated
+            // paths (source and destination); other statuses carry one.
             if !status.starts_with(['R', 'C']) {
                 continue;
             }
@@ -45,66 +45,70 @@ impl Renames {
         Ok(Self(renames))
     }
 
-    /// Where `file` lives in the measured tree.
+    /// Return the path of `file` in the target tree, or `file` unchanged if it
+    /// was not renamed.
     #[must_use]
     pub fn new_path<'a>(&'a self, file: &'a str) -> &'a str {
         self.0.get(file).map_or(file, String::as_str)
     }
 }
 
-/// How many findings share a key with a new one.
+/// Count increase for findings that share a `(rule, file, symbol)` key.
 ///
-/// Findings that share a rule, file and symbol can't be told apart, so when the
-/// base had some and the tree has more, every one of them is listed and this
-/// says how many are new.
+/// Because findings with the same key cannot be distinguished individually, all
+/// instances in the target tree are reported when the count increases over the
+/// base revision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Shared {
-    /// How many more there are than at the base.
+    /// Net increase in findings for this key compared to the base revision.
     pub new: usize,
 
-    /// How many there are in the measured tree.
+    /// Total findings with this key in the target tree.
     pub of: usize,
 }
 
-/// A finding the base doesn't have.
+/// A finding introduced since the base revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NewFinding {
     #[serde(flatten)]
     pub finding: Finding,
 
-    /// Set when the finding shares its key with findings the base has.
+    /// Present when the base revision already had at least one finding with the
+    /// same [`Finding::key`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared: Option<Shared>,
 }
 
-/// What the measured tree adds, and what fails regardless.
+/// Result of comparing a target report against a base report under a
+/// [`Policy`].
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct Verdict {
-    /// Findings the base doesn't have, in rules that aren't enforced.
+    /// New findings for non-enforced gating rules.
     pub new: Vec<NewFinding>,
 
-    /// Every finding of an enforced rule, new or not.
+    /// All findings in the target tree for enforced rules, whether or not they
+    /// existed at the base revision.
     pub enforced: Vec<Finding>,
 
-    /// How many gating findings each pass reported at the base.
+    /// Gating finding count per pass at the base revision.
     pub base: BTreeMap<String, usize>,
 
-    /// How many gating findings each pass reported in the measured tree.
+    /// Gating finding count per pass in the target tree.
     pub head: BTreeMap<String, usize>,
 
-    /// Rule ID to its one-line title.
+    /// Map from rule ID to its short description.
     #[serde(skip)]
     pub titles: BTreeMap<String, String>,
 }
 
 impl Verdict {
-    /// Whether the measured tree passes the gate.
+    /// Return `true` if there are no new or enforced findings.
     #[must_use]
     pub fn passed(&self) -> bool {
         self.new.is_empty() && self.enforced.is_empty()
     }
 
-    /// The rules of every finding in the verdict.
+    /// Distinct rule IDs present in `new` and `enforced`.
     #[must_use]
     pub fn rules(&self) -> BTreeSet<&str> {
         self.new
@@ -115,10 +119,10 @@ impl Verdict {
     }
 }
 
-/// Compare `head` against `base`.
+/// Compare `head` against `base` under `policy`.
 ///
-/// Exempt rules are left out.
-/// A base finding in a renamed file is compared under the file's new path.
+/// Exempt rules are excluded, and base findings in renamed files are mapped to
+/// their paths in `head` before comparison.
 #[must_use]
 pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy) -> Verdict {
     let gating = |finding: &&Finding| policy.gates(&finding.rule);
@@ -170,7 +174,6 @@ pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy)
     }
 }
 
-/// How many gating findings each pass in `policy` contributed to `report`.
 fn counts(report: &Report, policy: &Policy) -> BTreeMap<String, usize> {
     let mut counts: BTreeMap<_, _> = policy
         .passes

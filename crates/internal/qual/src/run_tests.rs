@@ -81,7 +81,6 @@ fn sarif(results: &[(&str, &str, usize, &str)]) -> String {
     .to_string()
 }
 
-/// A successful run printing `stdout`, as a responder answers.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "responders answer with `io::Result`"
@@ -133,9 +132,9 @@ fn report_reads_each_rule_from_its_pass_and_names_its_symbol() {
 
     let report = workspace.report(&runner).unwrap();
 
-    // The DRY pass's magic number is the main pass's, read once; IOSP is
-    // exempt; and a file-length finding names no item, though line 1 is in
-    // `run`.
+    // `CX-003` is owned by `main` and deduplicated from `dry`; `iosp/violation`
+    // is exempt; and `SRP-002` is a file-level rule, so its symbol is empty
+    // even though line 1 spans `run`.
     assert_eq!(report.findings, vec![
         finding("src/lib.rs", 1, "SRP-002", "", "lib: 900 production lines"),
         finding("src/lib.rs", 2, "CX-003", "run", "Magic number 42 in run"),
@@ -244,8 +243,8 @@ fn an_invalid_policy_is_an_error() {
 /// Answers a full `diff` run: the base has a magic number in `run`, and the
 /// working tree adds dead code in `unused`.
 ///
-/// `main` forked from the working tree at `0123abcd`; only that commit can be
-/// checked out as the base.
+/// Resolves `git merge-base HEAD main` to `0123abcd` and only accepts that
+/// commit for `git worktree add`.
 fn diff_responder(root: Utf8PathBuf) -> MockProcessRunner {
     MockProcessRunner::responding(move |spec| {
         let args: Vec<&str> = spec.args.iter().map(String::as_str).collect();

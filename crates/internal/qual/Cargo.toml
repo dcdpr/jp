@@ -1,5 +1,5 @@
 [package]
-description = "Compare rustqual findings between two revisions, finding by finding."
+description = "Compare rustqual findings across git revisions."
 name = "qual"
 
 authors.workspace = true
@@ -18,7 +18,7 @@ jp_process = { workspace = true }
 camino = { workspace = true }
 camino-tempfile = { workspace = true }
 clap = { workspace = true, features = ["derive", "std", "help", "usage", "error-context"] }
-# Line numbers from spans, to find the item a finding sits in.
+# Needed for `Span::start()`/`end()` line numbers during symbol resolution.
 proc-macro2 = { workspace = true, features = ["span-locations"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }

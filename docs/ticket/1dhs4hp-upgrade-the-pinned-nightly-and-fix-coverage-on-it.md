@@ -35,4 +35,5 @@ Start by reproducing it.
 4. Fix whatever the new nightly's rustc and clippy report, and update anything
    else tied to the toolchain (`rust-analyzer`, `llvm-tools`, CI caches).
 
-The toolchain comment in `rust-toolchain.toml` goes once the reason for it does.
+Remove the `llvm-cov` workaround comment from `rust-toolchain.toml` once
+coverage runs cleanly on the new nightly.

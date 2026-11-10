@@ -1,7 +1,7 @@
-//! Printing a verdict or a report.
+//! Formatting [`Verdict`] and [`Report`] output.
 //!
-//! Every format carries rustqual's message for each finding, and the guidance
-//! for its rule when there is any.
+//! Text, GitHub, Markdown, and AI formats include `rustqual`'s message for each
+//! finding and any matching rule [`Guidance`].
 
 use std::{
     collections::BTreeMap,
@@ -10,7 +10,7 @@ use std::{
 
 use crate::{Finding, Report, Shared, Verdict};
 
-/// How to print findings.
+/// Output format for [`verdict`] and [`report`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum Format {
     /// Plain text, grouped by rule.
@@ -26,25 +26,24 @@ pub enum Format {
     /// Markdown grouped by rule, with the guidance after each group.
     Ai,
 
-    /// The findings as JSON, without guidance.
+    /// JSON serialization of the verdict or findings, without guidance.
     Json,
 }
 
-/// How to fix findings of each rule, the JP way.
+/// Per-rule remediation guidance loaded from `.config/rustqual/guidance/`.
 ///
-/// Read from `.config/rustqual/guidance/`; see [`Guidance::file_name`].
+/// See [`Guidance::file_name`] for the filename mapping.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Guidance(BTreeMap<String, String>);
 
 impl Guidance {
-    /// The file the guidance for `rule` is read from: the rule ID with every
-    /// `/` replaced by `_`, plus `.md`.
+    /// Return the guidance filename for `rule` (`/` replaced with `_`, plus
+    /// `.md`).
     #[must_use]
     pub fn file_name(rule: &str) -> String {
         format!("{}.md", rule.replace('/', "_"))
     }
 
-    /// The guidance for `rule`, if there is any.
     #[must_use]
     pub fn get(&self, rule: &str) -> Option<&str> {
         self.0.get(rule).map(String::as_str)
@@ -61,7 +60,7 @@ impl FromIterator<(String, String)> for Guidance {
     }
 }
 
-/// Print what a comparison found.
+/// Format a diff [`Verdict`].
 #[must_use]
 pub fn verdict(verdict: &Verdict, guidance: &Guidance, format: Format) -> String {
     if format == Format::Json {
@@ -102,7 +101,7 @@ pub fn verdict(verdict: &Verdict, guidance: &Guidance, format: Format) -> String
     render(&sections, Level::Error, &verdict.titles, guidance, format)
 }
 
-/// Print every finding in a report.
+/// Format a full [`Report`].
 #[must_use]
 pub fn report(report: &Report, guidance: &Guidance, format: Format) -> String {
     if format == Format::Json {
@@ -174,7 +173,8 @@ fn passed(verdict: &Verdict, format: Format) -> String {
     }
 }
 
-/// `level` is the severity GitHub annotations carry; other formats have none.
+/// `level` sets the GitHub workflow annotation severity; other formats ignore
+/// it.
 fn render(
     sections: &[Section<'_>],
     level: Level,
@@ -361,7 +361,7 @@ fn github(
     Ok(())
 }
 
-/// The items of a section grouped by rule, each group in finding order.
+/// Group section items by rule ID, preserving finding order within each group.
 fn by_rule<'s, 'a>(items: &'s [Item<'a>]) -> BTreeMap<&'a str, Vec<&'s Item<'a>>> {
     let mut groups = BTreeMap::<_, Vec<_>>::new();
     for item in items {
@@ -395,7 +395,7 @@ fn shared_note(shared: Shared) -> String {
     )
 }
 
-/// Make `text` fit in one Markdown table cell.
+/// Escape pipes and newlines so `text` fits in a single Markdown table cell.
 fn cell(text: &str) -> String {
     text.replace('|', "\\|").replace(['\r', '\n'], " ")
 }

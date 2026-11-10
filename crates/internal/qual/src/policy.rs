@@ -1,4 +1,4 @@
-//! Which rules gate, and which rustqual pass each rule is read from.
+//! Rule policy configuration: pass ownership, exemptions, and enforced rules.
 //!
 //! The policy lives in `.config/rustqual/qual.toml`:
 //!
@@ -23,15 +23,15 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Deserializer};
 
-/// The policy file, inside the rustqual config directory.
+/// Policy filename inside the `rustqual` config directory.
 pub const FILE: &str = "qual.toml";
 
-/// A rule ID, or a prefix of one followed by `*`.
+/// An exact rule ID or a prefix pattern ending with `*`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pattern(String);
 
 impl Pattern {
-    /// Whether `rule` is the ID this names, or starts with its prefix.
+    /// Return `true` if `rule` matches this exact rule ID or prefix pattern.
     #[must_use]
     pub fn matches(&self, rule: &str) -> bool {
         match self.0.strip_suffix('*') {
@@ -56,45 +56,44 @@ impl<'de> Deserialize<'de> for Pattern {
     }
 }
 
-/// One rustqual run over the workspace, and the rules it is read for.
+/// A configured `rustqual` analysis pass and the rules collected from it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pass {
-    /// What reports call this pass.
     pub name: String,
 
-    /// The rustqual config the pass runs with, relative to the policy file.
+    /// Path to the `rustqual` config file, relative to the policy file.
     pub config: String,
 
-    /// The rules this pass is read for.
+    /// Rule patterns owned by this pass.
     ///
-    /// A rule is read from the first pass listing a pattern that matches it,
-    /// and dropped from every other pass.
-    /// That way a rule two passes both report, such as IOSP, which can't be
-    /// disabled, is counted once.
+    /// Each rule is collected from the first pass whose patterns match it and
+    /// ignored in later passes, so rules reported by multiple passes are
+    /// counted once.
     pub rules: Vec<Pattern>,
 }
 
-/// The rules that gate, and the passes that find them.
+/// Rule gating policy and analysis pass configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
-    /// The passes, in the order rule ownership is decided.
+    /// Analysis passes in priority order for rule ownership.
     #[serde(rename = "pass")]
     pub passes: Vec<Pass>,
 
-    /// Rules that never gate and are left out of every report.
+    /// Rules that never fail the gate and are omitted from reports.
     #[serde(default)]
     pub exempt: Vec<Pattern>,
 
-    /// Rules with no findings left, where any finding fails, new or not.
+    /// Rules that fail the gate on any finding, even if present at the base
+    /// revision.
     ///
-    /// A rule matching both lists is enforced.
+    /// Takes precedence over `exempt` if a rule matches both lists.
     #[serde(default)]
     pub enforced: Vec<Pattern>,
 }
 
-/// A policy file that can't be used.
+/// Error parsing or validating a [`Policy`].
 #[derive(Debug, thiserror::Error)]
 pub enum PolicyError {
     #[error("invalid policy: {0}")]
@@ -115,8 +114,9 @@ impl Policy {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid TOML, an unknown key, a malformed rule
-    /// pattern, no pass, a pass name used twice, or a pass with no rules.
+    /// Returns an error if the TOML is invalid, contains unknown keys or
+    /// malformed rule patterns, defines no passes, repeats a pass name, or
+    /// leaves a pass with no rules.
     pub fn parse(input: &str) -> Result<Self, PolicyError> {
         let policy: Self = toml::from_str(input)?;
         if policy.passes.is_empty() {
@@ -136,7 +136,7 @@ impl Policy {
         Ok(policy)
     }
 
-    /// The pass `rule` is read from, if any pass is read for it.
+    /// Return the first pass whose rule patterns match `rule`.
     #[must_use]
     pub fn owner(&self, rule: &str) -> Option<&Pass> {
         self.passes
@@ -144,13 +144,13 @@ impl Policy {
             .find(|pass| pass.rules.iter().any(|pattern| pattern.matches(rule)))
     }
 
-    /// Whether findings of `rule` gate.
+    /// Return `true` if findings for `rule` are included in reports and gating.
     #[must_use]
     pub fn gates(&self, rule: &str) -> bool {
         self.is_enforced(rule) || !self.exempt.iter().any(|pattern| pattern.matches(rule))
     }
 
-    /// Whether any finding of `rule` fails, whether or not it is new.
+    /// Return `true` if `rule` fails the gate regardless of the base report.
     #[must_use]
     pub fn is_enforced(&self, rule: &str) -> bool {
         self.enforced.iter().any(|pattern| pattern.matches(rule))

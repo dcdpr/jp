@@ -1,29 +1,30 @@
-# Rule policy for `qual`, the crate that compares rustqual findings between a
-# base revision and the tree being measured (`crates/internal/qual`).
+# Rule policy for `qual` (`crates/internal/qual`), which compares `rustqual`
+# findings between a base revision and the working tree.
 #
-# A rule pattern is a rule ID as rustqual's SARIF output names it (`CX-001`,
-# `DRY-002`, `iosp/violation`), or a prefix followed by `*`.
+# A rule pattern is a SARIF rule ID (`CX-001`, `DRY-002`, `iosp/violation`) or
+# a prefix followed by `*`.
 
-# Rules that never gate and are left out of every report.
+# Rules that never fail the gate and are omitted from reports.
 #
-# IOSP is here because rustqual has no switch to turn it off: 862 violations,
-# 6.2% of functions, over the 5% `max_suppression_ratio`, so suppressing them
-# one by one is not an option either.
+# IOSP is exempt because rustqual cannot disable it, and the 862 existing
+# violations (6.2% of functions) exceed the 5% `max_suppression_ratio`, so
+# per-function suppressions are not an option.
 exempt = ["iosp/violation"]
 
-# Rules with no findings left on `main`. Any finding of an enforced rule fails,
-# whether or not it is new. Rules are only ever added to this list.
+# Rules with zero findings on `main`. Any finding for an enforced rule fails the
+# gate, even if it already existed at the base revision. Rules are only ever
+# added to this list.
 #
-# `CX-006` (`unsafe`) joins once every existing site carries an audited
-# `qual:allow(unsafe) reason: "…"`, so from then on an unmarked `unsafe`
-# fails wherever it appears. Those markers don't count toward
-# `max_suppression_ratio`. Decided in T-0yh5m6r.
+# `CX-006` (`unsafe`) will be added here once every existing site carries an
+# audited `qual:allow(unsafe) reason: "…"`. After that, any unmarked `unsafe`
+# block fails the gate. `unsafe` markers do not count toward
+# `max_suppression_ratio` (T-0yh5m6r).
 enforced = []
 
-# The rustqual passes, and the rules each is read for. A rule is read from the
-# first pass whose `rules` match it, and dropped from the others: the DRY pass
-# also reports IOSP and MAGIC_NUMBER, which it cannot disable, and orphaned
-# suppressions for the dimensions it does disable. See `dry.toml`.
+# Each rule is collected from the first pass whose `rules` pattern matches it
+# and ignored in later passes. This deduplicates rules that `dry.toml` cannot
+# disable (`iosp/violation` and `CX-003` magic numbers) and ignores
+# `ORPHAN_SUPPRESSION` warnings caused by disabled dimensions in `dry.toml`.
 
 [[pass]]
 name = "dry"

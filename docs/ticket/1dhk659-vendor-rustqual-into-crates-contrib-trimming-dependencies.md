@@ -59,12 +59,12 @@ what differs, as `crates/contrib/xct2cli` does.
 
 ## Dependencies
 
-What gets cut is dependencies, not features. rustqual is a general tool, and a
-feature JP doesn't use today is one another workspace does: the baseline
-(`--save-baseline`, `--compare`), every output format, the architecture
-dimension, `--init`, `--explain`.
-A feature stays unless keeping it means a crate the workspace doesn't already
-have.
+Trim dependencies, not features. rustqual is a general-purpose tool, and
+features JP does not use today (`--save-baseline`, `--compare`, all output
+formats, the architecture dimension, `--init`, `--explain`) are still useful in
+other workspaces.
+Keep every feature unless it requires an external crate that the workspace does
+not already depend on.
 Where a dependency can be upgraded or swapped for one the workspace has, do that
 and keep the feature.
 
@@ -100,8 +100,8 @@ Keep the rule cards: they supply the rule titles in the SARIF rules table, and
 
 ## Next: fold `qual` into rustqual
 
-After this ticket, and before any of the analyser fixes listed under *Why*.
-Its own ticket or tickets; one commit per feature moved.
+Do this in follow-up ticket(s) after vendoring lands and before the analyzer
+fixes listed under *Why*, with one commit per feature moved.
 
 Almost everything `qual` does works around something rustqual can't do yet, or
 is a generic feature rustqual should have:

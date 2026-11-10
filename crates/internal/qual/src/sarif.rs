@@ -1,45 +1,39 @@
-//! Reading the SARIF report rustqual writes with `--format sarif`.
+//! Parsing `rustqual --format sarif` output.
 //!
-//! SARIF is the input because it is the one rustqual format that carries the
-//! stable rule ID (`CX-001`, `DRY-002`, `BP-009`) on every result.
-//! It carries no symbol; [`crate::symbol`] supplies that from the source.
+//! SARIF is the only `rustqual` output format that includes the stable rule ID
+//! (`CX-001`, `DRY-002`, `BP-009`) on every finding.
+//! Because SARIF results do not include the enclosing Rust symbol,
+//! [`crate::symbol`] resolves symbols from the source files.
 
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-/// One result from a report, before the item it sits in is known.
+/// A SARIF result before symbol resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawFinding {
-    /// The rule ID, as rustqual names it.
     pub rule: String,
 
-    /// The file, relative to the analysed directory.
-    ///
-    /// Empty for a finding about the whole workspace, such as a dependency
-    /// cycle.
+    /// Path relative to the analyzed directory, or empty for workspace-wide
+    /// findings (such as dependency cycles).
     pub file: String,
 
-    /// The 1-based line, or 0 when the finding has no location.
+    /// 1-based line number, or `0` when the finding has no line location.
     pub line: usize,
 
-    /// rustqual's description of the finding.
     pub message: String,
 }
 
-/// The results of one report, and the titles of the rules it knows.
+/// Parsed findings and rule titles from a single SARIF report.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Sarif {
     pub findings: Vec<RawFinding>,
 
-    /// Rule ID to its one-line title.
+    /// Map from rule ID to its `shortDescription` text.
     pub titles: BTreeMap<String, String>,
 }
 
-/// A report that can't be read.
-///
-/// Never treated as an empty report: a gate that reads nothing passes
-/// everything.
+/// Error parsing or validating a `rustqual` SARIF report.
 #[derive(Debug, thiserror::Error)]
 pub enum SarifError {
     #[error("not a SARIF report: {0}")]

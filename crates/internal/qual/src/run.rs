@@ -1,5 +1,5 @@
-//! The shell around the comparison: running rustqual and git, reading source
-//! and guidance files, and caching base reports.
+//! Execution shell: running `rustqual` and `git`, resolving symbols from source
+//! files, loading guidance, and caching base reports.
 
 use std::{
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
@@ -27,14 +27,15 @@ pub const GUIDANCE_DIR: &str = "guidance";
 /// Where base reports are cached, relative to the workspace root.
 pub const CACHE_DIR: &str = "target/qual";
 
-/// Bumped whenever a cached report would mean something else: a change to the
-/// shape of [`Report`], or to how symbols are named.
+/// Cache schema version.
+/// Increment when [`Report`] serialization or symbol resolution changes.
 const CACHE_VERSION: &str = "1";
 
-/// Rules whose findings are about a whole file, so their line names no item.
+/// File-level rules that should not be resolved to an enclosing item even when
+/// reported at line 1.
 const FILE_RULES: &[&str] = &["SRP-002"];
 
-/// Why a comparison or a report couldn't be produced.
+/// Errors returned while running `rustqual`, `git`, or reading workspace files.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("could not run `{command}`: {source}")]
@@ -58,8 +59,8 @@ pub enum Error {
         source: SarifError,
     },
 
-    /// rustqual skips a file it can't read or parse, and reports nothing in it,
-    /// so a new finding there would go unseen.
+    /// `rustqual` skips files it cannot read or parse and emits no findings for
+    /// them, so skipped files must fail the run.
     #[error("rustqual's {pass} pass skipped files:\n{warnings}")]
     Skipped { pass: String, warnings: String },
 
@@ -91,7 +92,7 @@ pub enum Error {
     TempDir(#[source] io::Error),
 }
 
-/// A git checkout with a rustqual policy, and where to cache base reports.
+/// A git working tree with a `rustqual` policy and base-report cache.
 #[derive(Debug, Clone)]
 pub struct Workspace {
     root: Utf8PathBuf,
@@ -100,8 +101,8 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    /// The checkout at `root`, with its policy in [`CONFIG_DIR`] and its cache
-    /// in [`CACHE_DIR`].
+    /// Create a [`Workspace`] rooted at `root`, using [`CONFIG_DIR`] and
+    /// [`CACHE_DIR`].
     pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
         let root = root.into();
         Self {
@@ -111,29 +112,29 @@ impl Workspace {
         }
     }
 
-    /// The root of the checkout.
     #[must_use]
     pub fn root(&self) -> &Utf8Path {
         &self.root
     }
 
-    /// Read the policy.
+    /// Load and validate the workspace [`Policy`] from
+    /// `.config/rustqual/qual.toml`.
     ///
     /// # Errors
     ///
-    /// Returns an error when the policy file can't be read or isn't valid.
+    /// Returns an error if the policy file cannot be read or is invalid.
     pub fn policy(&self) -> Result<Policy, Error> {
         let path = self.config_dir.join(policy::FILE);
         let text = read(&path)?;
         Policy::parse(&text).map_err(|source| Error::Policy { path, source })
     }
 
-    /// Every gating finding in the working tree.
+    /// Collect all gating findings in the working tree.
     ///
     /// # Errors
     ///
-    /// Returns an error when the policy can't be read, a rustqual pass fails or
-    /// skips a file, or a file with a finding doesn't parse.
+    /// Returns an error if the policy cannot be read, a `rustqual` pass fails
+    /// or skips a file, or a source file with a finding fails to parse.
     pub fn report(&self, runner: &dyn ProcessRunner) -> Result<Report, Error> {
         let policy = self.policy()?;
         let mut report = self.analyze(runner, &self.root, &policy)?;
@@ -143,26 +144,24 @@ impl Workspace {
         Ok(report)
     }
 
-    /// Compare the working tree against the commit it forked from `base` at.
+    /// Compare the working tree against its merge base with `base`.
     ///
-    /// That is the merge base of `HEAD` and `base`, so commits `base` gained
-    /// after the fork aren't counted against the working tree, the way `git
-    /// diff base...HEAD` leaves them out.
+    /// Resolving `git merge-base HEAD <base>` (like `git diff base...HEAD`)
+    /// ignores commits added to `base` after the branch forked.
     /// When `base` is an ancestor of `HEAD`, the merge base is `base` itself.
     ///
-    /// The base is analysed in a temporary worktree, with the working tree's
-    /// rustqual configs, so a config change shows up on both sides rather than
-    /// as new findings.
-    /// Its report is cached under [`CACHE_DIR`], keyed by the base commit, the
-    /// rustqual version, and the contents of the policy and the configs.
+    /// The merge-base commit is analyzed in a temporary git worktree using the
+    /// working tree's `rustqual` configuration, so configuration changes apply
+    /// to both revisions.
+    /// Base reports are cached under [`CACHE_DIR`], keyed by the merge-base
+    /// commit SHA, the `rustqual` version, and the policy and pass config
+    /// contents.
     ///
     /// # Errors
     ///
-    /// Returns an error when `base` isn't a commit or shares no history with
-    /// `HEAD`, git or rustqual fails, or any step of [`report`] does, for
-    /// either tree.
-    ///
-    /// [`report`]: Self::report
+    /// Returns an error if `base` cannot be resolved to a merge base with
+    /// `HEAD`, if `git` or `rustqual` fails, or if analysis of either tree
+    /// fails (see [`Self::report`]).
     pub fn diff(&self, runner: &dyn ProcessRunner, base: &str) -> Result<Verdict, Error> {
         let policy = self.policy()?;
         let sha = run(runner, "git", &["merge-base", "HEAD", base], &self.root)?;
@@ -181,11 +180,12 @@ impl Workspace {
         Ok(diff::verdict(&base_report, &head_report, &renames, &policy))
     }
 
-    /// The guidance for each of `rules` that has a file in [`GUIDANCE_DIR`].
+    /// Load remediation guidance for each rule in `rules` that has a file in
+    /// [`GUIDANCE_DIR`].
     ///
     /// # Errors
     ///
-    /// Returns an error when a guidance file exists but can't be read.
+    /// Returns an error if a guidance file exists but cannot be read.
     pub fn guidance<'a>(
         &self,
         rules: impl IntoIterator<Item = &'a str>,
@@ -203,8 +203,8 @@ impl Workspace {
         Ok(found.into_iter().collect())
     }
 
-    /// Run every pass over `tree`, keeping each rule's findings from the pass
-    /// that owns it.
+    /// Run every configured pass over `tree`, retaining each rule's findings
+    /// from its owning pass.
     fn analyze(
         &self,
         runner: &dyn ProcessRunner,
@@ -251,8 +251,8 @@ impl Workspace {
         Ok(Report { findings, titles })
     }
 
-    /// Analyse the commit `sha` in a temporary worktree, or read its report
-    /// from the cache.
+    /// Analyze commit `sha` in a temporary worktree, or return its cached
+    /// report.
     fn analyze_base(
         &self,
         runner: &dyn ProcessRunner,
@@ -310,8 +310,8 @@ impl Workspace {
     }
 }
 
-/// Give each finding the symbol it sits in, parsing each file under `tree` at
-/// most once.
+/// Resolve each finding to its enclosing symbol, parsing each source file under
+/// `tree` at most once.
 fn locate(tree: &Utf8Path, raw: Vec<(String, RawFinding)>) -> Result<Vec<Finding>, Error> {
     let mut files = BTreeMap::<String, Symbols>::new();
     let mut findings = Vec::with_capacity(raw.len());
@@ -346,7 +346,7 @@ fn locate(tree: &Utf8Path, raw: Vec<(String, RawFinding)>) -> Result<Vec<Finding
     Ok(findings)
 }
 
-/// The lines in which rustqual says it skipped a file.
+/// Extract stderr lines where `rustqual` warns that it skipped a file.
 fn skipped_files(stderr: &str) -> String {
     stderr
         .lines()
@@ -398,16 +398,13 @@ fn read(path: &Utf8Path) -> Result<String, Error> {
     })
 }
 
-/// A cached report, or `None` when there is none that can be read.
 fn read_cache(path: &Utf8Path) -> Option<Report> {
     let text = fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-/// Cache `report`, if the cache can be written.
-///
-/// A cache that can't be written costs the next run a rustqual analysis, and
-/// nothing else, so the failure is ignored.
+/// Write `report` to the cache at `path`, ignoring I/O errors so a read-only or
+/// missing cache directory only costs a re-analysis on the next run.
 fn write_cache(path: &Utf8Path, report: &Report) {
     let Ok(text) = serde_json::to_string(report) else {
         return;

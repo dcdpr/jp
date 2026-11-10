@@ -67,13 +67,13 @@ Candidates for JP:
 - `clippy_utils` is released for one exact nightly, and rustc's internal API
   changes between nightlies.
   Every toolchain bump has to land on a nightly that has a `clippy_utils`
-  release, and ports the lint crate.
-- Its own Cargo workspace (it can't be a member), and a `dylint-link` linker
-  setting per target.
+  release and port the lint crate to any rustc API changes.
+- Requires a separate Cargo workspace (it cannot be a member of the root
+  workspace) and a per-target `dylint-link` linker configuration.
   `exodus_lints` configures only `aarch64-apple-darwin`; CI runs Linux and
   Windows.
-- `cargo-dylint` and `dylint-link` in CI, and one more type-checking pass over
-  the workspace, about the cost of the `lint` task.
+- Requires `cargo-dylint` and `dylint-link` in CI, plus an extra type-checking
+  pass over the workspace (roughly the cost of the `lint` job).
 
 Step 1 has none of these costs, so it goes first; it may cover enough that step
 2 can wait.

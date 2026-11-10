@@ -1,21 +1,19 @@
-//! Compare rustqual findings between two revisions, finding by finding.
+//! Compare `rustqual` findings across git revisions.
 //!
-//! rustqual reports what it finds in one tree.
-//! This crate runs every pass of the [`policy`] over the working tree and over
-//! a base revision, identifies each finding by its rule, file and symbol, and
-//! keeps the ones the base doesn't have.
-//! CI, `cargo_check` and the burn-down loop all call it, so they reach the same
-//! verdict and print the same messages.
+//! This crate runs every pass configured in [`policy`] over both the working
+//! tree and a base revision, keys each finding by `(rule, file, symbol)`, and
+//! reports findings introduced since the base revision along with any findings
+//! for enforced rules.
 //!
 //! [`Workspace`] is the entry point.
-//! The core is pure: [`sarif`] reads a rustqual report, [`symbol`] names the
-//! item a line sits in, [`diff`] compares two reports, and [`render`] prints
-//! the result.
-//! [`run`] is the shell around them that runs rustqual and git.
+//! The core modules are pure: [`sarif`] parses `rustqual` SARIF output,
+//! [`symbol`] resolves source lines to their enclosing Rust items, [`diff`]
+//! compares two reports, and [`render`] formats the output.
+//! [`run`] is the I/O shell that invokes `rustqual` and `git`.
 //!
-//! Every failure is an error, never a pass: a report that can't be read, a
-//! rustqual run that fails, or a source file that doesn't parse stops the
-//! comparison.
+//! Analysis fails closed: an unreadable report, a failed `rustqual` run, a
+//! skipped file, or an unparseable Rust source file returns an error rather
+//! than passing.
 
 use std::collections::BTreeMap;
 
@@ -33,54 +31,50 @@ pub use policy::Policy;
 pub use render::{Format, Guidance};
 pub use run::{Error, Workspace};
 
-/// One rustqual finding, located by the item it sits in.
+/// A `rustqual` finding resolved to its enclosing Rust item.
 ///
-/// Fields are declared in the order findings sort by.
+/// Fields are ordered to define the [`Ord`] sort order.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Finding {
-    /// The file, relative to the workspace root, with `/` separators.
-    ///
-    /// Empty for a finding about the whole workspace.
+    /// Workspace-relative file path with `/` separators, or empty for
+    /// workspace-wide findings.
     pub file: String,
 
-    /// The 1-based line, or 0 when the finding has no location.
+    /// 1-based line number, or `0` when the finding has no line location.
     ///
-    /// Not part of the finding's identity, so editing code above it changes
-    /// nothing.
+    /// Excluded from [`Finding::key`] so line shifts do not change the
+    /// finding's identity.
     pub line: usize,
 
-    /// The rule ID, as rustqual names it: `CX-001`, `DRY-002`,
-    /// `iosp/violation`.
+    /// SARIF rule ID (e.g. `CX-001`, `DRY-002`, `iosp/violation`).
     pub rule: String,
 
-    /// The path of the item the finding sits in, such as `Parser::run`.
-    ///
-    /// Empty for a finding about a whole file, or outside every item.
+    /// File-relative path of the enclosing item (e.g. `Parser::run`), or empty
+    /// for file-level and top-level findings.
     pub symbol: String,
 
-    /// rustqual's description of the finding.
     pub message: String,
 
-    /// The name of the pass that reported it.
     pub pass: String,
 }
 
 impl Finding {
-    /// What identifies the finding across revisions: its rule, file and symbol.
+    /// Identity key across revisions: `(rule, file, symbol)`.
     ///
-    /// Two findings can share a key, such as two magic numbers in one function;
-    /// they are then compared by how many there are.
+    /// Multiple findings with the same key (such as two magic numbers in the
+    /// same function) are compared by count.
     #[must_use]
     pub fn key(&self) -> (&str, &str, &str) {
         (&self.rule, &self.file, &self.symbol)
     }
 }
 
-/// Every finding in one tree, across all passes, sorted.
+/// Aggregated findings across all configured passes for a single tree, sorted
+/// by [`Finding`]'s [`Ord`] implementation.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
     pub findings: Vec<Finding>,
 
-    /// Rule ID to its one-line title, for the rules rustqual described.
+    /// Map from rule ID to its short description from the SARIF rules table.
     pub titles: BTreeMap<String, String>,
 }

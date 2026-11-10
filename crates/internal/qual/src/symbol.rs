@@ -1,11 +1,10 @@
-//! Naming the item a line of Rust source sits in.
+//! Resolving source lines to their enclosing Rust items.
 //!
-//! A finding's symbol is the path of the innermost named item spanning its
-//! line, relative to the file: `parse`, `Parser::run`, `<Parser as
-//! Display>::fmt`, `tests::reads_input`.
-//! The module path is left out, so moving a file changes no symbol in it.
-//! Generic parameters are left out too, so they can change without changing the
-//! symbol.
+//! A finding's symbol is the file-relative path of the innermost named item
+//! spanning its line: `parse`, `Parser::run`, `<Parser as Display>::fmt`,
+//! `tests::reads_input`.
+//! File-level module paths and generic parameters are omitted so moving a file
+//! or editing bounds does not change its item symbols.
 
 use proc_macro2::Span;
 use syn::{
@@ -15,7 +14,7 @@ use syn::{
     visit::{self, Visit},
 };
 
-/// Every named item in one file, with the lines it spans.
+/// Index of named items and their line spans within a single Rust source file.
 #[derive(Debug, Default)]
 pub struct Symbols {
     scopes: Vec<Scope>,
@@ -45,11 +44,12 @@ impl Symbols {
         })
     }
 
-    /// The path of the innermost named item spanning the 1-based `line`.
+    /// Return the path of the innermost named item spanning the 1-based `line`.
     ///
-    /// An item spans its attributes, doc comments included.
-    /// Empty when no item does: a `use`, a plain `//` comment between items, or
-    /// a line past the end.
+    /// Item spans include outer attributes and doc comments.
+    /// Returns an empty string when `line` falls outside any named item (such
+    /// as a top-level `use` declaration, a standalone `//` comment, or a line
+    /// past EOF).
     #[must_use]
     pub fn at(&self, line: usize) -> String {
         self.scopes
@@ -166,7 +166,8 @@ impl<'ast> Visit<'ast> for Collector {
         });
     }
 
-    // `macro_rules! name` is the only item macro with a name of its own.
+    // Only `macro_rules! <name>` items carry an identifier; macro invocations
+    // at item position do not.
     fn visit_item_macro(&mut self, item: &'ast ItemMacro) {
         match &item.ident {
             Some(ident) => self.enter(ident.to_string(), item.span(), |c| {
@@ -177,10 +178,9 @@ impl<'ast> Visit<'ast> for Collector {
     }
 }
 
-/// `Type` for an inherent impl, `<Type as Trait>` for a trait impl.
-///
-/// The trait is part of the name because two trait impls on one type often
-/// define a method with the same name, `fmt` for `Display` and `Debug`.
+/// Format an `impl` header as `Type` for inherent impls or `<Type as Trait>`
+/// for trait impls (disambiguating methods like `Display::fmt` and
+/// `Debug::fmt`).
 fn impl_name(item: &ItemImpl) -> String {
     let self_ty = type_name(&item.self_ty);
     match &item.trait_ {

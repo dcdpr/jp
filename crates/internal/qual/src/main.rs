@@ -1,7 +1,7 @@
-//! `qual`: compare rustqual findings between revisions, finding by finding.
+//! CLI for comparing `rustqual` findings across git revisions.
 //!
-//! Exits 0 when the comparison passes, 1 when it finds something, and 2 when it
-//! can't be made.
+//! Exits 0 when the check passes, 1 when new or enforced findings are reported,
+//! and 2 on execution or parse errors.
 
 use std::{
     env,
@@ -21,8 +21,8 @@ use qual::{Format, Workspace, render};
     about = "Compare rustqual findings between revisions, finding by finding."
 )]
 struct Cli {
-    /// The root of the checkout.
-    /// Defaults to the one containing the current directory.
+    /// Git working tree root.
+    /// Defaults to the repository containing the current directory.
     #[arg(long, global = true)]
     root: Option<Utf8PathBuf>,
 
@@ -32,14 +32,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Print what the working tree adds since it forked from a base revision,
-    /// and every finding of an enforced rule.
+    /// Report new findings since the merge base with `--base`, plus any
+    /// findings for enforced rules.
     ///
-    /// Exits 1 when there is any.
+    /// Exits with code 1 if any new or enforced findings are present.
     Diff {
-        /// The revision to compare against.
-        /// The working tree is compared with its merge base with this revision,
-        /// so commits made on it after the fork don't count.
+        /// Base revision to compare against.
+        /// Compared at `git merge-base HEAD <base>`.
         #[arg(long)]
         base: String,
 
@@ -47,7 +46,7 @@ enum Command {
         format: Format,
     },
 
-    /// Print every finding in the working tree, leaving out exempt rules.
+    /// List all non-exempt findings in the working tree.
     Report {
         #[arg(long, value_enum, default_value_t)]
         format: Format,
@@ -66,7 +65,6 @@ fn main() -> ExitCode {
     }
 }
 
-/// Run the command, returning whether it passed.
 fn run(cli: Cli) -> Result<bool, Box<dyn Error>> {
     let runner = SystemProcessRunner;
     let root = match cli.root {
@@ -96,7 +94,6 @@ fn run(cli: Cli) -> Result<bool, Box<dyn Error>> {
     Ok(passed)
 }
 
-/// The root of the git checkout containing the current directory.
 fn toplevel(runner: &dyn ProcessRunner) -> Result<Utf8PathBuf, Box<dyn Error>> {
     let cwd = Utf8PathBuf::try_from(env::current_dir()?)?;
     let output = runner.run("git", &["rev-parse", "--show-toplevel"], &cwd)?;

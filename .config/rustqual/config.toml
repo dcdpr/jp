@@ -25,8 +25,8 @@ enabled = false
 # rustqual's default of 300 is its own house style, not JP's. Only code lines
 # count: blank lines, `//`, `///` and block comments don't, and counting stops
 # at the first `#[cfg(test)]` in the file. `SRP-002` also fires on the
-# independent-cluster cohesion check, so raising the length alone doesn't take
-# it to zero. Decided in T-0yh5m6r.
+# independent-cluster cohesion check, so raising the line limit alone does not
+# eliminate all `SRP-002` findings. Decided in T-0yh5m6r.
 [srp]
 file_length = 800
 
@@ -43,10 +43,10 @@ allow_expect = false
 # their `#[cfg(test)] #[path = "…"] mod tests;` declaration, and `tests/`
 # directories. JP's tests are self-contained by design, so they run long.
 #
-# - `file_length`: no limit. Set far beyond any real file, since rustqual has no
-#   switch to turn the check off for tests alone.
-# - `max_function_lines`: 150, against 60 for production code. Of the 185 test
-#   functions over 60 lines on 2026-10-07, 14 are over 150. The limit is a
+# - `file_length`: no limit. Set far beyond any real file, because rustqual
+#   cannot disable the check for test files alone.
+# - `max_function_lines`: 150 (compared to 60 for production code). Of the 185
+#   test functions over 60 lines on 2026-10-07, 14 are over 150. The limit is a
 #   starting point; individual cases are decided as they come up.
 #
 # Decided in T-0yh5m6r.
