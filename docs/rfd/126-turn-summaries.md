@@ -12,19 +12,18 @@
 
 Every turn in a conversation carries an optional single-line summary on its
 `TurnStart` event, alongside the turn's stable `event_id` ([RFD 097]).
-Summaries are generated from the completed turn (user request, tool call
-outcomes, and assistant response) by a background task ([RFD 107]) at the start
-of the next `jp query` invocation, using a configurable fast or local model.
-This gives turn-level interfaces such as interactive conversation editing a `git
-rebase -i`-style `<event_id> <summary>` header for every turn without a
-dedicated LLM round-trip at the end of a query: the summary request overlaps the
-next turn instead.
+At the start of the next `jp query` invocation, a background task ([RFD 107])
+summarizes completed turns from their user request, tool call outcomes, and
+assistant response using a configurable fast or local model.
+Turn-level interfaces such as interactive conversation editing get a `git rebase
+-i`-style `<event_id> <summary>` header for each turn without blocking at the
+end of a query, because the summary request overlaps the next turn.
 
 ## Terminology
 
 - **Turn summary**: a single-line (~60 character) factual description of what a
-  single turn asked and accomplished, stored on `TurnStart` for human navigation
-  and stream editing.
+  turn asked and accomplished, stored on `TurnStart` for human navigation and
+  stream editing.
 
 **Not the same as** a compaction **Summary** ([RFD 064]), which is
 multi-paragraph prose attached to a `Compaction` overlay (`SummaryPolicy`) that
@@ -35,41 +34,37 @@ A turn summary is display metadata on `TurnStart` and never enters a `Thread`.
 
 As conversations grow across dozens of turns, navigating or editing them at the
 turn level becomes difficult.
-In an interactive stream editor (`jp conversation edit --interactive`), the user
-is presented with a plan file (`CONVERSATION`) grouping events by turn.
-Without a summary of each turn, the plan file can only display bare turn indices
-(`# Turn 1`, `# Turn 2`) or a mechanical truncation of the user's `ChatRequest`.
+An interactive stream editor (`jp conversation edit --interactive`) presents a
+plan file (`CONVERSATION`) that groups events by turn.
+Without turn summaries, the plan file can only show bare turn indices (`# Turn
+1`, `# Turn 2`) or a truncated `ChatRequest`.
 
-Neither is sufficient for a git-style interactive rebase workflow:
+Neither works well for an interactive rebase workflow:
 
 1. **Bare turn numbers carry no context.** Finding "the turn where we switched
-   from `Mutex` to `RwLock`" requires opening individual event files until the
-   right exchange is found.
-2. **Truncating `ChatRequest` fails on conversational follow-ups.** In pair
-   programming, many turns start with short directives such as `"continue"`,
-   `"yes, do option 2"`, `"fix that warning"`, or a pasted compiler error.
-   The meaning of the turn lives in the combination of the request, the tools
-   invoked, and the assistant's response.
-3. **Synchronous post-turn summarization hurts inner-loop speed.** Summarizing
-   the full turn after the assistant finishes streaming requires an additional
-   LLM round-trip.
-   Waiting for that call before returning the shell prompt adds 0.5 to 3 seconds
-   of dead time at the end of every `jp query`.
+   from `Mutex` to `RwLock`" requires opening event files one by one.
+2. **Truncating `ChatRequest` fails on conversational follow-ups.** Many turns
+   start with short prompts such as `"continue"`, `"yes, do option 2"`, `"fix
+   that warning"`, or a pasted compiler error.
+   What the turn actually did depends on the request, the tool calls, and the
+   assistant's response together.
+3. **Synchronous post-turn summarization hurts inner-loop speed.** Summarizing a
+   turn after the assistant finishes streaming requires an extra LLM round-trip,
+   adding 0.5 to 3 seconds before `jp query` returns to the shell.
 
-We already generate conversation titles in the background using a cheap or local
+JP already generates conversation titles in the background with a fast or local
 model (`conversation.title.generate`).
-We need an analogous mechanism for per-turn summaries that captures full-turn
-outcomes without delaying CLI exit.
+Turn summaries can use the same approach to summarize completed turns without
+delaying CLI exit.
 
 ## Design
 
 ### Consumer Contract
 
-This RFD does not ship a consumer.
-It provides the storage, accessors, and generation pipeline that turn-level
-views build on.
-An interactive stream editor, for example, could label the turns in its plan
-file like this:
+This RFD provides the storage, accessors, and generation pipeline for turn-level
+views; it does not ship a consumer.
+An interactive stream editor, for example, can label turns in its plan file like
+this:
 
 ```txt
 # Turn 1 (k3m9x2a): Set up project structure with error handling
@@ -89,27 +84,26 @@ file like this:
 
 A consumer can rely on:
 
-- `Turn::id()` and `Turn::summary()` to read a turn's identity and its stored
+- `Turn::id()` and `Turn::summary()` to read a turn's `EventId` and stored
   summary.
-- `Turn::fallback_summary()` (also re-exported as
-  `mechanical_turn_summary(&Turn)`) as the display fallback when no summary is
-  stored: the first non-empty line of the turn's first `ChatRequest`, collapsed
-  to a single line and truncated to 72 characters.
-- `ConversationStream::set_turn_summary` to normalize and persist a summary it
-  generated itself.
+- `Turn::fallback_summary()` (re-exported as `mechanical_turn_summary(&Turn)`)
+  as the display fallback when a turn has no stored summary.
+  It takes the first non-empty line of the turn's first `ChatRequest`, collapses
+  whitespace, and truncates to 72 characters.
+- `ConversationStream::set_turn_summary` to normalize and store a summary on a
+  `TurnStart` entry.
 
 A consumer that rewrites the stream, such as an editor that reconstructs events
 from files, must:
 
-- Keep the original `TurnStart` entry, `event_id` and `summary` included, for
-  every turn whose content it did not change.
-- Clear `summary` on every turn whose content it changed, so catch-up
-  regenerates it on the next query (see [Summary
-  Freshness](#summary-freshness)).
-- Own any on-demand generation it offers, such as summarizing the most recent
-  turn before opening `$EDITOR`, including the mechanical fallback when
-  generation is disabled or fails, and persist the result while holding the
-  conversation lock.
+- Preserve the original `TurnStart` entry (`event_id` and `summary`) on every
+  unchanged turn.
+- Clear `summary` on every modified turn so background catch-up regenerates it
+  on the next query (see [Summary Freshness](#summary-freshness)).
+- Run any on-demand summarization itself (such as summarizing the latest turn
+  before opening `$EDITOR`), fall back to the mechanical summary when generation
+  is disabled or fails, and persist the result while holding the conversation
+  lock.
 
 ### Configuration
 
@@ -128,24 +122,24 @@ id = "ollama/llama3.2:3b"
 - `auto` (default `true`): whether `jp query` spawns background tasks to
   summarize completed turns that lack a summary.
 - `batch_size` (default `5`): maximum number of unsummarized completed turns to
-  process in a single `jp query` invocation, bounding token and compute cost
-  when resuming a long legacy conversation.
+  summarize per `jp query` invocation.
+  This bounds token and compute cost when resuming a conversation with many
+  unsummarized turns.
 - `model` (optional `ModelConfig`): the model and parameters used for turn
   summarization.
 
 #### Model Resolution Chain
 
-Most users who configure a fast or local model for `conversation.title.generate`
-want the same model for turn summaries.
-Model resolution therefore follows a three-step fallback chain:
+Model resolution falls back through three settings so users who already
+configure a fast or local model for `conversation.title.generate` do not need to
+configure it twice:
 
 1. `conversation.turn_summary.generate.model` (if configured)
 2. `conversation.title.generate.model` (if configured)
-3. `assistant.model.id` with fresh `ParametersConfig::default()`
+3. `assistant.model.id` with `ParametersConfig::default()`
 
-As in `jp_llm::title::resolve_model`, if the resolved model config leaves
-`parameters.reasoning` unset, it defaults to `ReasoningEffort::Low` with
-`exclude = true`.
+As in `jp_llm::title::resolve_model`, an unset `parameters.reasoning` defaults
+to `ReasoningEffort::Low` with `exclude = true`.
 
 ### Data Model: `TurnStart`
 
@@ -173,28 +167,27 @@ and `summary` on the same JSON object:
 }
 ```
 
-When `summary` is `None`, the key is omitted and the serialized form is
-byte-for-byte identical to today's `TurnStart`.
-Legacy files without `summary` deserialize with `summary: None`.
+When `summary` is `None`, the field is omitted and the JSON matches the existing
+`TurnStart` format.
+Existing `events.json` files without `summary` deserialize with `summary: None`.
 
-#### Why `TurnStart` In-Place Update Preserves Stream Invariants
+#### Updating `TurnStart` In Place
 
 `ConversationStream` treats provider-visible events as append-only ([RFD 064])
 because mutating them invalidates cryptographic thinking signatures, alters
 provider prompt caches, and destroys raw history.
+`TurnStart` is not provider-visible (`EventKind::is_provider_visible()` is
+`false`): it never enters a `Thread` and is never sent to an LLM provider, so
+updating its `summary` in place preserves all provider-stream invariants.
 
-None of those constraints apply to `TurnStart`:
+Storing `summary` directly on `TurnStart` also fits existing stream storage:
 
-- `TurnStart` is not provider-visible (`EventKind::is_provider_visible()` is
-  `false`).
-  It never enters a `Thread` and is never sent to an LLM provider.
-- Storing `summary` on `TurnStart` co-locates the turn's summary with the turn's
-  `event_id`.
-- Every turn-slicing operation (`retain_turns`, `retain_last_turns`, `fork`,
-  `sanitize`, `normalize_turn_starts`) already keeps `TurnStart` attached to its
-  turn, so summaries are retained or dropped with their turn automatically.
-- `PersistBackend::write` already writes `events.json` atomically via a
-  temp-file rename when flushing a `ConversationMut`.
+- Each turn's summary lives on the same entry as its `event_id`.
+- Turn-slicing operations (`retain_turns`, `retain_last_turns`, `fork`,
+  `sanitize`, `normalize_turn_starts`) keep `TurnStart` with its turn, so
+  summaries stay or drop with the turn automatically.
+- `PersistBackend::write` writes `events.json` atomically via a temp-file rename
+  when flushing a `ConversationMut`.
 
 #### Stream and Turn API
 
@@ -217,9 +210,8 @@ impl<'a> Turn<'a> {
 }
 ```
 
-`ConversationStream` gains targeted setters that address the turn by its
-`TurnStart` `EventId` rather than by positional turn index, and clears the
-trailing turn's summary when `pop` removes events from it:
+`ConversationStream` adds two methods that target a turn by its `TurnStart`
+`EventId` rather than by positional index:
 
 ```rust
 impl ConversationStream {
@@ -234,75 +226,74 @@ impl ConversationStream {
 }
 ```
 
-Addressing by `EventId` decides *which* `TurnStart` a summary is written to.
-If the turn was trimmed or replayed away while the task ran, the setter finds no
-match and the summary is dropped.
+Targeting by `EventId` ensures a background task never writes a summary to the
+wrong turn if earlier turns were trimmed while the task ran; if the target turn
+was removed, the setter finds no match and drops the summary.
+In addition, `ConversationStream::pop` clears the trailing turn's summary
+whenever it removes events from that turn.
 
 #### Summary Freshness
 
 A matching `event_id` does not prove the summary still describes the turn.
-[RFD 097] keeps an entry's `event_id` when its content is edited, so a turn's
-content can change underneath its `TurnStart`.
-This happens in two ways:
+Because [RFD 097] preserves `event_id` across edits, a turn's events can change
+while its `TurnStart` keeps the same `event_id`:
 
-- **While a summary is in flight.** The task captures its turns while the query
-  holds the conversation lock, but `sync` reacquires the lock only after the
-  background-task drain, which can wait up to [RFD 107]'s shutdown budget.
-  Another process can edit the conversation in between.
-  `sync` therefore compares each turn's *fingerprint* (a hash of the stripped
-  transcript the model received for that turn, event IDs included) against the
-  same fingerprint recomputed from the freshly locked stream, and drops any
-  result whose turn no longer matches.
-  That turn stays `None` and is retried on the next query.
-- **After a summary is stored.** Catch-up only nominates turns whose `summary`
-  is `None`, so a stored summary is never revisited.
-  Managed edits clear it ([Consumer Contract](#consumer-contract)).
-  Raw edits through `jp conversation edit --events` are the user's
-  responsibility: removing the `summary` key from a turn's `turn_start` entry
-  after changing that turn's content makes catch-up regenerate it.
+- **While a summary is in flight.** `Query::run` snapshots the candidate turns
+  while holding the conversation lock, then releases the lock before
+  `TaskHandler::sync` waits for background tasks (up to [RFD 107]'s shutdown
+  budget) and reacquires it.
+  Another process can edit the conversation during that window.
+  To detect concurrent edits, the task hashes each turn's stripped transcript
+  (including event IDs) into a *fingerprint*.
+  When `sync` reacquires the lock, it recomputes the fingerprint from the
+  current stream and drops any summary whose turn changed.
+  The skipped turn keeps `summary: None` and is retried on the next query.
+- **After a summary is stored.** Catch-up only selects turns with `summary:
+  None`, so it does not revisit turns that already have a summary.
+  Managed editors clear `summary` on modified turns ([Consumer
+  Contract](#consumer-contract)).
+  For raw edits via `jp conversation edit --events`, the user must remove the
+  `summary` field from a modified turn's `turn_start` entry so the next query
+  regenerates it.
 
-### What is Summarized: Bounded Turn Transcripts
+### Bounded Turn Transcripts
 
-To produce an accurate summary, the summarizer needs the complete turn: the
-user's `ChatRequest`, the tools that were called and whether they succeeded, and
-the assistant's `ChatResponse::Message`.
+An accurate summary needs the complete turn: the user's `ChatRequest`, the tool
+calls and their outcomes, and the assistant's `ChatResponse::Message`.
+Raw coding turns, however, often contain tens of kilobytes of tool output (file
+reads, grep matches, diffs), long `ChatResponse::Reasoning` blocks, or large
+pasted logs in `ChatRequest`.
+Sending raw turns to a small local model overflows its context window or adds
+seconds of prompt evaluation.
 
-However, raw coding turns routinely contain tens of kilobytes of tool output
-(file reads, grep matches, diffs), long `ChatResponse::Reasoning` blocks, or
-large pasted logs in `ChatRequest`.
-Sending raw turns to a small local model overflows its context window or causes
-multi-second prompt-evaluation latency.
-
-Candidate turns are transcribed directly from raw events in `ConversationStream`
-(ignoring compaction overlays so turns inside a compaction summary are still
-read from their own events) into compact XML `<turn id="...">` blocks:
+The summarizer transcribes candidate turns directly from raw events in
+`ConversationStream`, ignoring compaction overlays so compacted turns are still
+read from their original events.
+Each turn is formatted as a compact `<turn id="...">` XML block:
 
 - `ChatResponse::Reasoning`, `TurnStart`, and inquiry events are omitted.
-- `ToolCallRequest` is rendered as `<tool_call name="..."/>` (arguments
-  omitted), and `ToolCallResponse` is rendered as `<tool_result/>` or
-  `<tool_error/>`.
+- `ToolCallRequest` renders as `<tool_call name="..."/>` without arguments, and
+  `ToolCallResponse` renders as `<tool_result/>` or `<tool_error/>`.
 - `ChatRequest` and `ChatResponse` messages longer than `MAX_MESSAGE_CHARS`
-  (4,000 characters) are truncated to their first and last halves separated by
+  (4,000 characters) are truncated to their first and last halves, separated by
   `[…]`.
 
-This shrinks a 50k-token coding turn down to a few hundred tokens while keeping
-the user prompt, every tool name and outcome, and the assistant's final answer.
+This reduces a 50k-token coding turn to a few hundred tokens while keeping the
+user prompt, every tool name and outcome, and the assistant's final response.
 
-### When Summarization Runs: Lagged Background Catch-Up
+### Lagged Background Catch-Up
 
-`TaskHandler::sync` ([RFD 107]) runs at the end of `jp_cli::lib::run` and blocks
-process exit while waiting for spawned tasks to finish their `run` phase (up to
-the 10-second shutdown budget, displaying `⏱ Finishing background tasks…`
-after 1 second).
+`TaskHandler::sync` ([RFD 107]) runs at the end of `jp_cli::lib::run` and waits
+for spawned background tasks to finish their `run` phase before exiting.
+`TitleGeneratorTask` hides its latency by spawning **before** `run_turn` and
+running concurrently with the assistant stream.
+A task spawned *after* `run_turn` has no assistant turn to overlap and blocks
+the shell prompt at the end of every query.
 
-`TitleGeneratorTask` hides its latency because it is spawned **before**
-`run_turn` starts and runs concurrently with the main assistant stream.
-A task spawned *after* `run_turn` finishes has nothing to hide behind: it blocks
-the user's terminal prompt at the end of every turn.
-
-To get full-turn accuracy (request + tool calls + response) without a post-turn
-round-trip, turn summarization uses **lagged background catch-up**: Turn $N$ is
-summarized concurrently with Turn $N+1$'s assistant stream.
+To summarize the full turn (request, tool calls, and response) without blocking
+at the end of a turn, turn summarization uses **lagged background catch-up**:
+Turn $N$ is summarized in the background while Turn $N+1$ streams from the
+assistant.
 
 ```txt
 Turn 1 (jp query "...")
@@ -317,16 +308,14 @@ Turn 2 (jp query "...")
      (waits only if the summary request outlasts Turn 2)
 ```
 
-The overlap hides the summary request behind the assistant's turn; it does not
-remove it.
-When the request outlasts the turn (a cold local model, a short answer, or a
-catch-up batch on a legacy conversation), `TaskHandler::sync` waits for it under
-[RFD 107]'s budget: up to 10 seconds, then cancellation, with the
-finishing-tasks line shown after 1 second.
-
-The task is not cancelled when the turn ends.
-With a summary model slower than the user's turns, cancelling at turn end would
-discard every result, and each query would request the same batch again.
+When the summary request finishes during Turn $N+1$, it adds no exit latency.
+If it outlasts the turn (for example, on a cold local model, a short assistant
+reply, or a catch-up batch on an older conversation), `TaskHandler::sync` waits
+under [RFD 107]'s shutdown budget: it prints `⏱ Finishing background tasks…`
+after 1 second and cancels the task after 10 seconds.
+The task is not cancelled when the assistant turn ends, because a summary model
+slower than the assistant turn would otherwise have every result discarded and
+re-request the same batch on every query.
 
 #### Spawn (Main Thread)
 
@@ -334,12 +323,12 @@ In `crates/jp_cli/src/cmd/query.rs`, alongside the existing `TitleGeneratorTask`
 spawn (before `setup.flush()` and `inputs.run()`):
 
 1. Check `cfg.conversation.turn_summary.generate.auto && ctx.term.args.persist`.
-2. Scan `stream` (which contains all turns prior to the new turn about to start)
-   for completed turns whose `TurnStart` has `summary: None`.
-3. If any exist, construct `TurnSummaryTask` with the `stream` snapshot and the
-   candidates' `event_id`s, and spawn it on `ctx.task_handler`.
-   Choosing which candidates fit happens in `run`, once the summary model's
-   context window is known.
+2. Scan `stream` (which holds all turns before the new turn starts) for
+   completed turns whose `TurnStart` has `summary: None`.
+3. If any exist, construct `TurnSummaryTask` with a snapshot of `stream` and the
+   candidate `event_id`s, and spawn it on `ctx.task_handler`.
+   Context-window packing is deferred to `run`, where the summary model's window
+   size is known.
 
 #### Run (Background)
 
@@ -348,14 +337,14 @@ spawn (before `setup.flush()` and `inputs.run()`):
 1. Resolve the summary model (see [Model Resolution
    Chain](#model-resolution-chain)) and its context window.
 
-2. Build each candidate's stripped transcript (see [What is
-   Summarized](#what-is-summarized-bounded-turn-transcripts)).
+2. Build each candidate's stripped transcript (see [Bounded Turn
+   Transcripts](#bounded-turn-transcripts)).
 
 3. Exclude candidates whose transcript alone exceeds the request budget.
 
-4. Pack the remaining candidates whole, newest first, until either `batch_size`
-   turns or the budget is reached.
-   A turn is either in the request entirely or not at all.
+4. Pack the remaining candidates, newest first, until reaching `batch_size`
+   turns or the token budget.
+   Each turn is included in full or omitted.
 
 5. Request structured JSON output with a `summaries` object keyed by each packed
    turn's `TurnStart` `event_id`:
@@ -368,55 +357,56 @@ spawn (before `setup.flush()` and `inputs.run()`):
    }
    ```
 
-6. Keep only entries whose `turn_id` is in the packed set, discarding anything
-   else the model returns, and keep each packed turn's fingerprint for `sync`.
+6. Filter the response to `turn_id`s in the packed set, discarding any
+   unrequested IDs, and record each packed turn's fingerprint for `sync`.
 
-7. Observe the `CancellationToken` via `jp_macro::select!`, returning early if
-   cancelled.
+7. Run the provider call inside `jp_macro::select!` against the
+   `CancellationToken`, returning early if cancelled.
 
-`jp_llm::window::truncate_to_fit` is not used.
-It drops the oldest events and empties a stream whose `ChatRequest`s did not
-survive, which suits a title request appended after fitting, but not a batch in
-which every returned label must describe a turn the model actually received.
+`TurnSummaryTask` does not use `jp_llm::window::truncate_to_fit`.
+That helper drops individual events from the front of a stream and clears the
+stream if no `ChatRequest` remains.
+That works when appending a title prompt to a single truncated stream, but turn
+summarization needs whole-turn transcripts so every returned summary corresponds
+to a complete turn the model saw.
 
 #### Sync (Main Thread)
 
 In `TurnSummaryTask::sync`, after `Query::run` has released the conversation
 lock:
 
-1. Acquire a non-blocking lock on the conversation via
-   `Workspace::acquire_conversation` and `Workspace::lock_conversation` (same as
-   `TitleGeneratorTask::sync`).
-   If `LockResult::AlreadyLocked`, log and skip; the turns will be retried on
-   the next run.
-2. Call `conv.update_events`.
-   For each returned summary, recompute the turn's fingerprint from the locked
-   stream and skip the summary if the turn is gone or the fingerprint differs
-   (see [Summary Freshness](#summary-freshness)).
-   Invoke `stream.set_turn_summary(&turn_id, summary)` for the rest.
+1. Acquire a non-blocking conversation lock via
+   `Workspace::acquire_conversation` and `Workspace::lock_conversation`,
+   matching `TitleGeneratorTask::sync`.
+   On `LockResult::AlreadyLocked`, log and return; the next query retries the
+   unsummarized turns.
+2. In `conv.update_events`, recompute each target turn's fingerprint from the
+   locked stream.
+   Skip any summary whose turn was removed or whose fingerprint changed (see
+   [Summary Freshness](#summary-freshness)), and store the rest with
+   `stream.set_turn_summary(&turn_id, summary)`.
 3. Flush `conv`.
 
 ## Drawbacks
 
-- **One-turn lag on persisted summaries.** Immediately after Turn $N$ finishes,
-  Turn $N$'s `TurnStart.summary` on disk is still `None`; it is populated when
-  Turn $N+1$ runs.
+- **One-turn lag on persisted summaries.** Turn $N$'s `TurnStart.summary`
+  remains `None` on disk until Turn $N+1$ runs.
 - **A slow summary model can delay exit.** When the summary request outlasts the
-  turn it overlaps, the CLI waits for it under [RFD 107]'s shutdown budget.
-  This is most likely while a legacy conversation catches up.
-  If routine queries show the finishing-tasks line, the trade-off flips: cancel
-  the task when the turn ends and accept the repeated requests.
-- **Oversized turns stay unsummarized.** A turn whose stripped transcript alone
-  exceeds the summary model's window keeps the mechanical fallback.
-  It is re-estimated, never sent, on every query.
-- **Additional background LLM request per turn.** From Turn 2 onward, each `jp
-  query` makes a background call to the summary model.
-  Although mechanical stripping keeps the input small (~200-500 tokens per
-  turn), this still spends tokens on remote providers or compute on local
-  models.
-- **`TurnStart` is no longer a unit struct.** Pattern matches and constructors
-  using bare `TurnStart` must be updated to `TurnStart::default()` or `TurnStart
-  { .. }`.
+  overlapped turn, the CLI waits for it up to [RFD 107]'s shutdown budget, most
+  often while catching up on an older conversation.
+  If routine queries regularly hit the `Finishing background tasks…` prompt, we
+  can instead cancel the task when the turn ends and accept retrying unfinished
+  batches.
+- **Oversized turns stay unsummarized.** Each query re-estimates a turn whose
+  stripped transcript alone exceeds the summary model's window and skips it
+  without sending a request, leaving the turn on the mechanical fallback.
+- **Extra background LLM request per turn.** From Turn 2 onward, each `jp query`
+  sends a background request to the summary model.
+  Stripping keeps each turn small (~200 to 500 tokens), but the call still
+  consumes remote tokens or local compute.
+- **`TurnStart` is no longer a unit struct.** Existing constructors and pattern
+  matches using bare `TurnStart` must use `TurnStart::default()` or `TurnStart {
+  .. }`.
 
 ## Alternatives
 
@@ -429,21 +419,20 @@ Rejected for four reasons:
 
 1. **Split identity.** `TurnStart` already carries the turn's `event_id` ([RFD
    097]).
-   Putting the summary on `TurnEnd` splits a turn's ID and its summary across
-   two separate stream entries.
+   Storing `summary` on `TurnEnd` splits the turn's ID and summary across two
+   stream entries.
 2. **Broken invariants on incomplete and edited turns.** As [RFD 023] noted when
    rejecting `TurnEnd`, turns can be interrupted, crash mid-stream, or be edited
    by hand.
    A turn without a `TurnEnd` still needs to appear in `jp conversation edit
    -i`, and every stream-mutating method (`pop`, `retain`, `sanitize`) would
    have to maintain matching `TurnStart`/`TurnEnd` pairs.
-3. **Does not avoid in-place mutation.** When a summary is generated in a
-   background task on the next turn or regenerated on demand, `TurnEnd` has
-   already been persisted, so updating the summary still rewrites a historical
-   entry.
+3. **Does not avoid in-place mutation.** Because summaries are generated on the
+   next turn or regenerated on demand, `TurnEnd` is already on disk when the
+   summary arrives, so storing it still mutates a persisted entry in place.
 4. **Token usage is per-response, not per-turn.** A single turn can span
    multiple tool-call cycles, retries, continuations, and inquiry models.
-   Usage counters belong on provider-response records rather than a single
+   Usage counters belong on individual provider responses, not on a per-turn
    `TurnEnd` event.
 
 ### 2. Summarize Only `ChatRequest` Concurrently During Turn $N$
@@ -451,34 +440,31 @@ Rejected for four reasons:
 Spawn the summary task at the start of Turn $N$ with only Turn $N$'s
 `ChatRequest`, eliminating the one-turn lag.
 
-Rejected because user prompts in multi-turn coding sessions are frequently brief
-continuation directives (`"continue"`, `"do option 2"`, `"fix it"`).
-Without the tool calls and assistant response, the generated summary cannot
-describe what the turn actually did.
+Rejected because user prompts in multi-turn coding sessions are often short
+follow-ups (`"continue"`, `"do option 2"`, `"fix it"`).
+Without the tool calls and assistant response, the summary cannot describe what
+the turn accomplished.
 
-### 3. Summarize Full Turn $N$ Post-Turn Before Process Exit
+### 3. Summarize Turn $N$ After the Turn Completes
 
 Spawn the summary task after `run_turn` completes and wait for it in
 `drain_background_tasks`.
 
-Rejected because `TaskHandler::sync` blocks CLI exit.
-Waiting for an LLM call after the assistant's final response has already been
-printed delays the return of the shell prompt on every query, by the full
-duration of the summary request.
-Lagged catch-up waits only for the part of the request that outlasts the next
-turn.
+Rejected because `TaskHandler::sync` blocks CLI exit: waiting for an LLM call
+after the assistant finishes streaming delays the shell prompt by the full
+duration of the summary request on every query.
+Lagged catch-up waits only when the summary request outlasts the next turn.
 
 ### 4. Two-Stage Progressive Summarization
 
 Generate a provisional request-only summary for Turn $N$ concurrently during
 Turn $N$, then overwrite it with a full-turn summary during Turn $N+1$.
 
-Not adopted for the initial design.
-It eliminates the one-turn lag on disk without a post-turn round-trip, but
-requires tracking `Provisional` vs `Final` summary state on `TurnStart` and
-summarizes every turn twice.
-Can be added later if consumers find the most recent turn's missing summary
-noticeable.
+Not adopted.
+While this removes the one-turn lag without a post-turn wait, it summarizes
+every turn twice and requires tracking `Provisional` versus `Final` state on
+`TurnStart`.
+We can revisit this if the missing summary on the latest turn proves noticeable.
 
 ### 5. Store Turn Summaries in `metadata.json` or a Sidecar File
 
@@ -495,34 +481,35 @@ edits) to garbage-collect orphaned `EventId` keys.
   labels for human navigation and never replace events in a `Thread`.
 - **Persisting token usage or cost metrics.** Durable usage tracking requires
   per-response identity and is out of scope.
-- **Building a consumer.** Interactive conversation editing, including any
-  on-demand generation before opening `$EDITOR`, is a separate feature.
+- **Building a consumer.** Interactive conversation editing, including on-demand
+  summarization before opening `$EDITOR`, is a separate feature.
   This RFD provides the storage and generation pipeline and defines the
-  [Consumer Contract](#consumer-contract) such an editor must follow.
+  [Consumer Contract](#consumer-contract).
 
 ## Risks and Open Questions
 
 - **Prompt cache isolation.** Unlike `jp_llm::title::generate`, which clones and
-  rebases the conversation stream, `TurnSummaryTask` constructs a standalone
-  request containing only the mechanically stripped target turns.
-  This avoids polluting or invalidating the main assistant's prompt cache, which
-  should be verified across providers during implementation.
-- **Summary quality on stripped tool calls.** `ToolCallPolicy::Strip` preserves
-  tool names, call IDs, and success/error status while dropping response bodies.
-  If summaries lack specificity when the assistant's final `ChatResponse` is
-  terse (e.g. `"Done."`), `ToolCallPolicy::Strip { request: false, response:
-  true }` (keeping tool request arguments such as file paths while stripping
-  large response bodies) is a cheap adjustment.
-- **Stale summaries after raw edits.** Detection of raw `--events` edits relies
-  on the user clearing `summary`.
-  Persisting a fingerprint on `TurnStart` would detect them automatically, at
-  the cost of an on-disk field that exists only for an escape hatch.
-  Not adopted unless stale labels show up in practice.
-- **Naming in the ubiquitous language.** "Summary" is already used by [RFD 064]
-  for compaction summaries.
-  During discussion we should confirm whether `turn_summary` /
-  `TurnStart.summary` is clear enough or if `TurnStart.title`
-  (`conversation.title.turn`) is preferable.
+  rebases the conversation stream, `TurnSummaryTask` sends a standalone request
+  containing only the stripped target turns.
+  This keeps the summary request from invalidating or polluting the assistant's
+  prompt cache, which should be verified across providers during implementation.
+- **Summary quality on stripped tool calls.** `ToolCallPolicy::Strip` keeps tool
+  names, call IDs, and success/error status while dropping arguments and
+  response bodies.
+  If summaries are too vague when the assistant's final `ChatResponse` is terse
+  (for example, `"Done."`), switching to `ToolCallPolicy::Strip { request:
+  false, response: true }` keeps request arguments such as file paths while
+  still stripping large response bodies.
+- **Stale summaries after raw edits.** Detecting raw `--events` edits relies on
+  the user clearing `summary`.
+  Persisting a turn fingerprint on `TurnStart` would detect raw edits
+  automatically, but adds an on-disk field solely for an escape hatch.
+  We will only add it if stale summaries become a problem in practice.
+- **Naming in the ubiquitous language.** [RFD 064] already uses "Summary" for
+  compaction summaries.
+  Discussion should confirm whether `turn_summary` and `TurnStart.summary` are
+  distinct enough or whether `TurnStart.title` (`conversation.title.turn`) is
+  clearer.
 
 ## Implementation Plan
 
@@ -540,8 +527,7 @@ edits) to garbage-collect orphaned `EventId` keys.
   compatibility with legacy `turn_start` JSON, and `set_turn_summary` by
   `EventId`.
 
-Independent.
-Can be reviewed and merged on its own.
+Independent; can be reviewed and merged on its own.
 
 ### Phase 2: Configuration
 
@@ -552,8 +538,7 @@ Can be reviewed and merged on its own.
   `ToPartial`.
 - Unit tests for config loading, `--cfg` assignment, and delta generation.
 
-Independent.
-Can be reviewed and merged in parallel with Phase 1.
+Independent; can be reviewed and merged in parallel with Phase 1.
 
 ### Phase 3: Turn Summarizer in `jp_llm`
 
@@ -575,9 +560,9 @@ Can be reviewed and merged in parallel with Phase 1.
     first `ChatRequest`.
 - Unit tests for model resolution, mechanical stripping, schema extraction, and
   mechanical fallback.
-  Packing tests cover a candidate inside an existing summary compaction (it is
-  summarized from its raw events), an oversized turn (excluded without a
-  request), and a response naming an unrequested ID (discarded).
+  Packing tests cover compacted candidate turns (summarized from raw events),
+  oversized turns (excluded without a request), and responses naming unrequested
+  IDs (discarded).
 
 Depends on Phase 1 and Phase 2.
 
@@ -591,8 +576,8 @@ Depends on Phase 1 and Phase 2.
     `ConversationStream::set_turn_summary`, and flushes.
 - Spawn `TurnSummaryTask` in `crates/jp_cli/src/cmd/query.rs` with the completed
   turns lacking a summary when `auto && persist`.
-- Extend the `jp conversation edit --events` long help: clear a turn's `summary`
-  after changing its content.
+- Document in `jp conversation edit --events` help that editing a turn's events
+  requires clearing its `summary`.
 - Integration tests verifying that Turn 1 is summarized during Turn 2 and
   persisted on `TurnStart`, and that an edit to Turn 1 between spawn and sync
   leaves its summary `None`.

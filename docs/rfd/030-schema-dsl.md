@@ -9,12 +9,10 @@
 
 ## Summary
 
-JP accepts a concise DSL for defining JSON Schema objects via `--schema` / `-s`.
-This guide documents the syntax, rules, and examples for the DSL.
-
-The DSL is designed for the common case: flat or moderately nested objects with
-typed fields and descriptions.
-For complex schemas, full JSON Schema is accepted as a passthrough.
+JP accepts a concise DSL via `--schema` / `-s` for defining JSON Schema objects.
+The DSL targets the common case: flat or moderately nested objects with typed
+fields and descriptions.
+For complex schemas, `--schema` accepts full JSON Schema as a passthrough.
 
 ## Quick Start
 
@@ -84,7 +82,7 @@ continuation = "\" *WSP LF
 
 ## Fields
 
-A field has four parts, all except the name are optional:
+A field has four parts; only `name` is required:
 
 ```
 [?] name [type] [: description]
@@ -92,21 +90,21 @@ A field has four parts, all except the name are optional:
 
 ### Name
 
-Any sequence of non-reserved characters.
-Reserved characters are:
+A field name is any sequence of non-reserved characters.
+The reserved characters are:
 
 ```
 space  tab  newline  ,  :  [  ]  {  }  |  ?  \  "
 ```
 
-Names containing reserved characters (or spaces) can be quoted:
+Quote names that contain reserved characters:
 
 ```
 "my field" int
 "items[0]" string
 ```
 
-### Optional marker
+### Optional Marker
 
 Prefix a field with `?` to exclude it from the `required` array:
 
@@ -114,7 +112,7 @@ Prefix a field with `?` to exclude it from the `required` array:
 name, ?nickname, ?age int
 ```
 
-Produces:
+This produces:
 
 ```json
 {
@@ -128,11 +126,11 @@ Produces:
 }
 ```
 
-If all fields are optional, the `required` key is omitted entirely.
+If all fields are optional, the schema omits the `required` key.
 
-### Default type
+### Default Type
 
-When no type is specified, fields default to `string`.
+Fields without an explicit type default to `string`.
 
 ## Types
 
@@ -146,8 +144,8 @@ When no type is specified, fields default to `string`.
 | `bool`, `boolean` | `"boolean"`               |
 | `any`             | `{}` (no type constraint) |
 
-A word following a field name is always interpreted as a type.
-If it is not a recognized keyword or literal, the parser produces an error:
+The parser interprets any word following a field name as a type and returns an
+error if it is not a recognized keyword or literal:
 
 ```
 age blorp
@@ -165,7 +163,7 @@ items [any]             → array of anything
 data []                 → same as [any]
 ```
 
-Arrays can contain union items (see below) or nested objects:
+Arrays can contain unions or nested objects:
 
 ```
 people [{ name, ?age int }]
@@ -179,10 +177,11 @@ Curly braces define nested object types:
 address { city, zip, ?state }
 ```
 
-Objects must contain at least one field — empty objects (`{}`) are rejected
-because LLM providers in strict mode require explicit property definitions.
+Objects must contain at least one field.
+The parser rejects empty objects (`{}`) because LLM providers in strict mode
+require explicit property definitions.
 
-Objects can be nested arbitrarily:
+Objects can nest to any depth:
 
 ```
 a { b { c } }
@@ -201,22 +200,21 @@ answer true                    → {"type": "boolean", "const": true}
 cleared null                   → {"type": "null", "const": null}
 ```
 
-A literal carries both its type and its value.
-`{"type": "integer", "const": 1}` and `{"const": 1}` accept the same documents;
-the first also says what kind of value it is.
+A literal emits both `"type"` and `"const"` in the schema.
+`{"type": "integer", "const": 1}` and `{"const": 1}` accept the same documents,
+but the first also declares the value's type.
 
-Strings must be quoted in the type position to distinguish them from type
-keywords.
-`string` is the type; `"string"` is the literal value `"string"`.
+Quote strings in the type position to distinguish them from type keywords:
+`string` is the type, whereas `"string"` is the literal value `"string"`.
 
 ### Unions
 
-The pipe `|` creates union types.
-When every variant is a literal and the literals share a type, the output is a
-typed `enum`; integer and float literals together widen to `number`.
-Every other union is an `anyOf`.
+The pipe operator (`|`) combines types into a union.
+When all variants are literals of the same type, the parser emits a typed `enum`
+(mixing integer and float literals widens the type to `number`).
+All other unions emit `anyOf`.
 
-**All literals of one type — typed `enum`:**
+**Literals of one type (typed `enum`):**
 
 ```
 status "active"|"inactive"|"archived"
@@ -226,7 +224,7 @@ status "active"|"inactive"|"archived"
 {"type": "string", "enum": ["active", "inactive", "archived"]}
 ```
 
-**Mixed types — `anyOf`:**
+**Mixed types (`anyOf`):**
 
 ```
 value "special"|int
@@ -236,7 +234,7 @@ value "special"|int
 {"anyOf": [{"type": "string", "const": "special"}, {"type": "integer"}]}
 ```
 
-**Mixed literal types — `anyOf`:**
+**Mixed literal types (`anyOf`):**
 
 ```
 value "foo"|"bar"|42
@@ -252,7 +250,7 @@ value "foo"|"bar"|42
 }
 ```
 
-Inside arrays, `|` defines which item types the array accepts:
+Inside brackets, `|` defines a union of array item types:
 
 ```
 data [string|int]
@@ -262,7 +260,7 @@ data [string|int]
 {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}}
 ```
 
-Arrays with literal items:
+Literal unions inside an array also collapse to a typed `enum`:
 
 ```
 tags ["foo"|"bar"|"baz"]
@@ -272,7 +270,7 @@ tags ["foo"|"bar"|"baz"]
 {"type": "array", "items": {"type": "string", "enum": ["foo", "bar", "baz"]}}
 ```
 
-At the field level, `|` creates a union of the entire type:
+At the field level, `|` forms a union of the entire type:
 
 ```
 value [string]|int
@@ -284,14 +282,14 @@ value [string]|int
 
 ## Descriptions
 
-A colon after the type (or name, if no type) starts a description.
-Descriptions are passed as the `description` field in JSON Schema, which models
-use as a generation hint.
+A colon (`:`) after the type (or after the field name when the type is omitted)
+starts a description.
+This sets the `description` field in JSON Schema, which models use as a
+generation hint.
 
 ### Inline
 
-The simplest form.
-Ends at the next comma, newline, or closing `}`:
+An unquoted description runs until the next comma, newline, or closing `}`:
 
 ```
 summary: a brief two-sentence summary
@@ -299,7 +297,7 @@ summary: a brief two-sentence summary
 
 ### Quoted
 
-Use double quotes when the description contains commas:
+Wrap the description in double quotes when it contains commas:
 
 ```
 bar bool: "hello, universe"
@@ -307,7 +305,7 @@ bar bool: "hello, universe"
 
 ### Heredoc
 
-Use triple quotes for multi-line descriptions:
+Wrap multi-line descriptions in triple quotes:
 
 ```
 baz: """
@@ -316,11 +314,11 @@ multiple lines.
 """
 ```
 
-The opening `"""` may be followed by a newline (which is stripped).
+The parser strips a newline immediately following the opening `"""` and
+preserves internal newlines.
 The closing `"""` must appear on its own.
-Internal newlines are preserved.
 
-### On nested types
+### On Nested Types
 
 Descriptions can follow object and array types:
 
@@ -331,9 +329,10 @@ people [{ name, age int }]: list of people mentioned
 
 ## Separators
 
-Fields are separated by commas or newlines (or both — a comma followed by a
-newline counts as one separator).
-Trailing separators are allowed.
+Commas and newlines are interchangeable field separators at the top level and
+inside `{ }` objects.
+A comma followed by a newline counts as a single separator, and trailing
+separators are allowed:
 
 ```
 name, age int, active bool      ← commas
@@ -344,34 +343,31 @@ name,                           ← trailing comma
 age int,
 ```
 
-Commas and newlines are interchangeable.
-Inside `{ }` objects, the same rules apply.
-
 ## Line Continuation
 
-A backslash before a newline joins the current line with the next, allowing a
-single field definition to span multiple lines:
+A backslash (`\`) before a newline joins the current line with the next so a
+field definition can span multiple lines:
 
 ```
 ?age \
       int
 ```
 
-This also works inside inline descriptions:
+Line continuations also work inside inline descriptions:
 
 ```
 summary: a long \
   description here
 ```
 
-The backslash, any trailing whitespace before it, the newline, and any leading
-whitespace on the next line are replaced by a single space.
+The parser replaces the backslash, any trailing whitespace before it, the
+newline, and any leading whitespace on the next line with a single space.
 
 ## JSON Passthrough
 
-If the input starts with `{` and parses as valid JSON, it is returned as-is
-without DSL processing.
-This allows full JSON Schema to be used when the DSL is insufficient:
+If the input starts with `{` and parses as valid JSON, the parser returns it
+as-is without DSL processing.
+Pass a full JSON Schema when the DSL is insufficient:
 
 ```sh
 jp q -s '{"type":"object","properties":{"x":{"type":"string","minLength":1}}}' "..."
@@ -432,10 +428,10 @@ This produces:
 
 ## References
 
-- [RFD 029: Scriptable Structured Output][RFD 029] — motivation and design
+- [RFD 029: Scriptable Structured Output][RFD 029]: motivation and design
   context for the schema DSL
 - [JSON Schema specification]
-- [simonw/llm schema DSL] — prior art that inspired this syntax
+- [simonw/llm schema DSL]: prior art that inspired this syntax
 - Implementation: `crates/jp_cli/src/schema.rs`
 
 [JSON Schema specification]: https://json-schema.org/

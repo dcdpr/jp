@@ -9,44 +9,41 @@
 
 ## Summary
 
-This RFD introduces a reranker primitive: a `Provider` trait that scores and
-ranks candidates by relevance to a query, with implementations for Voyage AI's
-HTTP reranking API and a local `ember` server backed by `fastembed`.
-The trait provides low-latency relevance scoring for downstream features without
-paying for full LLM inference.
+This RFD introduces a reranker primitive: a `Provider` trait that scores
+candidates by relevance to a query, with implementations for Voyage AI's HTTP
+reranking API and a local `ember` server backed by `fastembed`.
+The trait gives downstream features low-latency relevance scoring without the
+cost of full LLM inference.
 
 ## Motivation
 
-JP has no reusable cross-encoder reranker primitive available to core consumers.
-Lexical ranking exists in a contrib crate but is domain-specific (Bear notes)
-and not exposed as a general API.
+JP has no general-purpose cross-encoder reranker primitive.
+Lexical ranking exists in a contrib crate, but it is specific to Bear notes and
+not exposed as a general API.
 Several near-term features need general-purpose relevance scoring:
 
-- **Instruction reminders** want to score the project's instructions against the
-  assistant's last reply, and remind the assistant of the most relevant ones.
-- **Knowledge base retrieval** (a future consumer) could use the same mechanism
-  to pick which subjects to surface for a given query.
-- **Future quality signals** such as sentiment, turn classification, sit
-  adjacent to this primitive.
+- **Instruction reminders** score project instructions against the assistant's
+  last reply and surface the most relevant ones.
+- **Knowledge base retrieval** selects which subjects to surface for a query.
+- **Quality signals** such as sentiment analysis and turn classification rely on
+  adjacent scoring primitives.
 
-LLM-based relevance scoring works but is the wrong tool.
-A Haiku-class chat-completion call costs roughly 500-2000ms and a few cents per
-invocation, generates output through a constrained-decoding schema, and uses a
-model that was trained for open-ended generation, not relevance ranking.
-Cross-encoder rerankers (e.g. `BAAI/bge-reranker-v2-m3`) solve the same problem
-in ~50ms, locally, with task-specific training, and at zero per-call cost once
-installed.
+Using an LLM for relevance scoring is too slow and expensive.
+A Haiku-class chat completion takes 500-2000ms, costs a few cents per call,
+requires constrained decoding, and uses a model trained for open-ended
+generation rather than relevance ranking.
+A task-specific cross-encoder reranker such as `BAAI/bge-reranker-v2-m3` runs
+locally in ~50ms at zero per-call cost once installed.
 
-This RFD introduces the primitive so consumers can be designed against it.
-The consumers themselves (instruction reminders, KB retrieval) ship as separate
-RFDs.
+This RFD defines the reranker primitive so downstream consumers (instruction
+reminders, knowledge base retrieval) can build on it in separate RFDs.
 
 ## Design
 
 ### Configuration
 
-Users configure one or more reranker providers under `providers.rerank.*`,
-mirroring the shape of `providers.llm.*`:
+Reranker providers are configured under `providers.rerank.*`, matching
+`providers.llm.*`:
 
 ```toml
 [providers.rerank.voyage]
@@ -57,8 +54,7 @@ api_key_env = "VOYAGE_API_KEY"
 # base_url = "http://127.0.0.1:7373"  # override for tests
 ```
 
-Consumers reference a provider and model together using the `<provider>/<model>`
-shorthand, mirroring how `jp_llm` consumers reference models:
+Consumers select a provider and model with the `<provider>/<model>` shorthand:
 
 ```toml
 # Illustrative — the real consumer RFD defines the actual key path.
@@ -66,14 +62,13 @@ shorthand, mirroring how `jp_llm` consumers reference models:
 model = "ember/rozgo/bge-reranker-v2-m3"
 ```
 
-Provider IDs accepted in v1 are `voyage` and `ember`.
-Unknown provider IDs in a `<provider>/<model>` reference fail at config-load
-time; see [Provider identifiers](#provider-identifiers) below.
+The v1 provider IDs are `voyage` and `ember`.
+Unknown provider IDs fail at config-load time; see [Provider
+identifiers](#provider-identifiers).
 
-### The `Provider` trait
+### `Provider` trait
 
-The trait lives in a new `jp_rerank` crate, parallel to `jp_llm`.
-Shape:
+The `Provider` trait lives in a new `jp_rerank` crate, parallel to `jp_llm`:
 
 ```rust
 use jp_config::model::id::Name;
@@ -128,37 +123,34 @@ pub enum Error {
 }
 ```
 
-The trait deliberately exposes no batching and no top-k — those are
-provider-config concerns, hidden inside each implementation.
-Model selection lives on the call, not the provider config: the caller hands the
-trait a model, query, and candidates and receives scores.
-This mirrors `jp_llm::Provider`, where the provider is the transport and the
-model is chosen per call.
+The trait exposes neither batching nor top-k filtering; both stay internal to
+each provider implementation.
+Model selection happens per call rather than in provider configuration, matching
+`jp_llm::Provider`, where the provider handles transport and the caller supplies
+the model, query, and candidates.
 
-All error variants describe the state of the provider, not how the caller should
-react.
-Consumers decide whether to skip, fall back, retry, or surface the error — the
-primitive does not prescribe a policy.
+Error variants describe the provider's failure state rather than prescribing a
+recovery policy.
+Each consumer decides whether to skip, fall back, retry, or surface the error.
 
 ### Observability
 
-Each rerank call is an external boundary — Voyage HTTP call or ember HTTP call
-— and the layer logs enough at that boundary for users to diagnose issues when
-consumers swallow errors silently.
+Every rerank call crosses an HTTP boundary to Voyage or `ember`.
+Because consumers may swallow rerank errors, the provider layer logs enough
+metadata at that boundary to diagnose failures:
 
-- **What every rerank call records.** Provider ID, model name, candidate count,
-  latency, outcome (success / error variant).
-  Logged at `debug` level by default.
-- **What it does *not* record by default.** Query text, candidate text.
-  Personally-identifiable or project-confidential content stays out of the
-  default log stream.
-- **Payload tracing.** When deeper inspection is needed, providers serialize the
-  outgoing request body via the existing `jp_llm::provider::trace_to_tmpfile`
-  pattern (or a `jp_rerank`-local sibling) and emit the path at `trace` level.
-  This avoids dumping large payloads into the structured log stream while
-  keeping them accessible when investigating a bad-rerank report.
-- **Policy stays with the consumer.** The primitive logs facts; how the consumer
-  reacts (skip, warn, surface, fall back) remains the consumer's choice.
+- **Default `debug` log**: provider ID, model name, candidate count, latency,
+  and outcome (success or error variant).
+- **Omitted by default**: query and candidate text, keeping confidential or
+  personally identifiable content out of the default log stream.
+- **Payload tracing (`trace` level)**: providers serialize the outgoing request
+  body to a temporary file using the `jp_llm::provider::trace_to_tmpfile`
+  pattern (or a `jp_rerank` equivalent) and log its path.
+  This keeps large payloads out of the structured log stream while preserving
+  them for debugging.
+
+The provider layer only logs facts; error recovery remains the consumer's
+responsibility.
 
 ### Voyage provider
 
@@ -177,15 +169,15 @@ endpoint:
 }
 ```
 
-`truncation` is always `true`.
-Voyage's API default is also `true`, and the alternative (rejecting overlong
-inputs with an error) has no useful behavior in our context.
+`truncation` is always `true` (matching Voyage's API default), since rejecting
+overlong inputs with an error is not useful here.
+`top_k` and `return_documents` are omitted because callers receive all scores
+and already hold the input documents.
 
-`top_k` and `return_documents` are not sent.
-We always want all scores; we already hold the documents.
-
-The API key is read from the env var named by `api_key_env` (default
-`VOYAGE_API_KEY`), matching the convention in `providers.llm.*`.
+Following `providers.llm.*`, the provider reads its API key from the environment
+variable named by `api_key_env` (default `VOYAGE_API_KEY`) and sends requests to
+`base_url` (default `https://api.voyageai.com/v1`, overridable for test
+recording).
 
 Error mapping:
 
@@ -198,24 +190,20 @@ Error mapping:
 | HTTP 5xx, timeout, DNS failure, connection refused | `Unavailable`  |
 | Network OK, body parse fails                       | `Failed`       |
 
-`base_url` defaults to `https://api.voyageai.com/v1` and is overridable for test
-recording (matches how LLM providers work in JP today).
-
 ### Ember provider and the `ember` binary
 
-`jp_rerank::provider::ember::EmberProvider` is an HTTP client that talks to a
-local `ember` server.
-The server holds a fixed set of models in memory between calls, so every
-successful request is just inference (~50ms).
+`jp_rerank::provider::ember::EmberProvider` is an HTTP client for a local
+`ember` server (`crates/contrib/ember/`).
+The server wraps `fastembed` v5 and keeps a fixed set of models in memory
+between calls, so each request pays only the inference cost (~50ms).
 
-JP does not start or manage the `ember` server.
-Users run `ember serve` themselves — in a terminal, via systemd/launchd, or
-however they prefer.
-
-The `ember` binary lives at `crates/contrib/ember/`.
-It is a standalone tool that wraps `fastembed` v5 and is generic enough to be
-useful outside JP — the provider is what adapts ember's HTTP responses to the
-`Provider` trait, not the other way around.
+JP does not start or manage the `ember` server; users run `ember serve`
+themselves in a terminal, via systemd or launchd, or as another background
+service.
+`ember` is a standalone tool usable outside JP, and `EmberProvider` adapts its
+HTTP responses to the `Provider` trait: a Rust user can install it with `cargo
+install --path crates/contrib/ember`, run `ember serve`, and POST to it from any
+language.
 
 #### `ember` CLI
 
@@ -226,10 +214,10 @@ $ ember serve --port 7373 \
 ```
 
 Starts an HTTP server bound to `127.0.0.1:7373` (port configurable).
-Each `--model` (repeatable) is loaded during startup; the server begins
-accepting requests once all declared models are loaded.
-The loaded set is fixed for the lifetime of the process — there is no lazy
-loading and no model hot-swap.
+Each repeatable `--model` flag is loaded at startup before the server accepts
+requests.
+The loaded model set is fixed for the lifetime of the process, with no lazy
+loading or model hot-swap.
 
 A single endpoint, `POST /rerank`, accepts a JSON body:
 
@@ -261,52 +249,38 @@ and returns:
 }
 ```
 
-The `scores` array is sorted by `score` descending; callers reconstruct input
-order via `index` if they need it.
-JP's `EmberProvider` normalizes back to input order before returning, per the
-trait contract.
+The server applies a sigmoid to raw BGE logits so scores fall in `[0, 1]`,
+matching Voyage's range.
+The `scores` array is sorted by `score` descending; callers that need input
+order reconstruct it via `index`, which `EmberProvider` does before returning.
 
 Requests for a model not in the server's `--model` list return HTTP 404 with a
 JSON error body.
+Logs go to stderr, and the process exits with code 0 on graceful shutdown or
+non-zero on startup failure.
 
-Scores are normalized to `[0, 1]` — the server applies a sigmoid to the raw BGE
-logits before returning, so the response range matches Voyage's out-of-the-box.
+#### Latency costs
 
-Logs go to stderr.
-Exit code 0 on graceful shutdown, non-zero on startup failure.
+Ember separates startup costs from request-time inference:
 
-The CLI shape is ember's contract, not JP's.
-The contrib crate is meant to be useful independently — a Rust user who wants a
-fast local reranker can `cargo install --path crates/contrib/ember`, run `ember
-serve`, and POST to it from any language.
-
-#### Three latency costs
-
-Ember has three distinct latency costs that matter for consumer planning:
-
-- **Model download** (~600 MB per model, once per machine). Happens during
-  startup for any `--model` not already in the HuggingFace cache at
-  `~/.cache/huggingface/`.
-  Paid before the server accepts requests.
-- **Model / ONNX session load** (~1–2s per model, once per server start).
-  The ONNX session build and tokenizer load run inside
+- **Model download** (~600 MB per model, once per machine): downloads any
+  `--model` not yet cached in `~/.cache/huggingface/` at startup.
+- **Model and ONNX session load** (~1-2s per model, once per server start):
+  builds the ONNX session and loads the tokenizer inside
   `fastembed::TextRerank::try_new` for each `--model` at startup.
-  Paid before the server accepts requests.
-- **Inference** (~50ms per call).
-  The per-rerank cost — the *only* cost paid at request time.
+- **Inference** (~50ms per call): the only cost paid at request time.
 
-Every successful request is ~50ms.
-The HTTP-server design plus the explicit `--model` declaration mean download and
-session-build costs are paid once per server start, never at request time.
+Because all declared `--model` instances load before the server accepts
+connections, requests never block on model downloads or session initialization.
 
 #### Ember provider behavior
 
 The provider holds an HTTP client and a `base_url` (default
 `http://127.0.0.1:7373`).
-It is purely a client: no subprocess management, no readiness polling, no
+It is a pure client with no subprocess management, readiness polling, or
 lifecycle code.
-If `base_url` is unreachable, the call returns `Error::Unavailable`; the user
-starts or restarts `ember serve` to recover.
+If `base_url` is unreachable, the call returns `Error::Unavailable` until the
+user starts or restarts `ember serve`.
 
 Error mapping:
 
@@ -346,9 +320,8 @@ crates/contrib/ember/
 The `ember` crate depends on `fastembed`, `clap`, `serde`, `serde_json`,
 `tokio`, an HTTP server crate (axum or similar), and stdlib.
 It does not depend on `jp_rerank`, `jp_config`, or any other JP crate.
-JP, in turn, does not depend on the ember crate as a library or a binary — it
-only needs an HTTP server reachable at `base_url`, which the user provides by
-running `ember serve`.
+Conversely, JP does not depend on `ember` as a library or binary; it only
+communicates with the HTTP server at `base_url` started by `ember serve`.
 
 ### Configuration types
 
@@ -368,15 +341,14 @@ pub struct RerankProvidersConfig {
 }
 ```
 
-Each provider's config struct lives in its own submodule with provider-specific
-fields.
+Each provider's config struct lives in its own submodule.
 `VoyageRerankConfig` carries `api_key_env` and `base_url`; `EmberRerankConfig`
 carries only `base_url`.
-Both fields have schematic defaults, so omitting `[providers.rerank.voyage]` or
-`[providers.rerank.ember]` from a TOML file is equivalent to using the defaults,
-identical to how `providers.llm.*` works.
-The model is not a provider-config field — it's named per call by the consumer
-(see [Provider identifiers](#provider-identifiers) below).
+All fields have schematic defaults, so omitting `[providers.rerank.voyage]` or
+`[providers.rerank.ember]` from a TOML file uses the defaults, matching
+`providers.llm.*`.
+Model selection is configured per call by the consumer rather than on the
+provider (see [Provider identifiers](#provider-identifiers)).
 
 #### Provider identifiers
 
@@ -398,34 +370,30 @@ pub enum RerankProviderId {
 ```
 
 The v1 IDs are `voyage` and `ember`.
-No aliases, no user-defined named instances — if a consumer ever needs two
-Voyage instances with different credentials, base URLs, or policies, that gets
-its own RFD.
+Neither aliases nor user-defined named instances are supported; supporting
+multiple Voyage instances with distinct credentials, base URLs, or policies is
+deferred to a separate RFD.
 
-Consumers reference a `(provider, model)` pair using the `<provider>/<model>`
-shorthand, parallel to how `jp_llm` consumers reference models:
+Consumers specify a `(provider, model)` pair with the `<provider>/<model>`
+shorthand:
 
 ```toml
 [some_consumer]
 model = "ember/rozgo/bge-reranker-v2-m3"
 ```
 
-The shape is defined by a sibling `RerankerModelIdConfig` in
-`jp_config::providers::rerank::id` — the same pattern as
-`jp_config::model::id::ModelIdConfig`, just over `RerankProviderId`.
-
-Behavior:
+`RerankerModelIdConfig` in `jp_config::providers::rerank::id` parses this
+string, following the same pattern as `jp_config::model::id::ModelIdConfig` over
+`RerankProviderId`:
 
 - **Unknown provider ID** (e.g. `model = "cohere/..."`) fails at config-load
-  time with a typed deserialization error.
-  Consumer code never sees an unresolvable provider.
-- **Omitting a provider's config block is fine** — schematic fills in defaults.
-  The `Unavailable` error only surfaces when a consumer actually calls a
-  provider whose runtime prerequisites (env var, binary on PATH) aren't met.
+  time with a typed deserialization error, so consumer code never sees an
+  unresolvable provider.
+- **Omitting a provider's config block** uses schematic defaults.
+  `Error::Unavailable` surfaces only when a consumer calls a provider whose
+  runtime prerequisites (env var, binary on PATH) are not met.
 - **No default reranker provider.** Consumers that need a reranker must name one
-  explicitly.
-  A built-in default would create silent fallback paths the user can't see in
-  their config.
+  explicitly, avoiding hidden fallback paths in user configuration.
 
 Resolution lives in `jp_rerank::provider::get_provider`, mirroring
 `jp_llm::provider::get_provider`:
@@ -437,15 +405,14 @@ pub fn get_provider(
 ) -> Result<Arc<dyn Provider>>;
 ```
 
-The model is passed at call time, not at resolution.
 A consumer holding a `RerankerModelIdConfig` calls `get_provider(id.provider,
-...)` to obtain the provider, then `provider.rerank(&id.name, query,
-candidates)` for each call.
+...)` to obtain the provider, then passes `&id.name` to
+`provider.rerank(&id.name, query, candidates)` on each call.
 
 ### Installation
 
-For v1, ember is installed from the workspace via a justfile recipe (matching
-`just _install-comfort`):
+In v1, a justfile recipe installs `ember` from the workspace (matching `just
+_install-comfort`):
 
 ```sh
 just _install-ember
@@ -453,170 +420,145 @@ just _install-ember
 
 This runs `cargo install --path crates/contrib/ember --locked` and places the
 binary on the user's PATH.
-If a user configures the ember provider but has not installed the binary or is
-not running `ember serve`, rerank calls return `Error::Unavailable`.
-How a consumer reacts is the consumer's choice (see the trait's error docs).
+If a user configures the ember provider without installing the binary or running
+`ember serve`, rerank calls return `Error::Unavailable`.
 
-Better distribution (release artifacts, package managers) is a follow-up
-concern, not a v1 blocker.
+Release artifacts and package-manager distribution are follow-up work beyond v1.
 
 ## Drawbacks
 
-- **Two-binary install for the ember provider.** Users have to install both `jp`
+- **Two-binary install for the ember provider.** Users must install both `jp`
   and `ember`.
-  If a consumer needs reranking and the user hasn't run `just _install-ember`,
-  the provider returns `Error::Unavailable`.
+  Until the user runs `just _install-ember`, `EmberProvider` returns
+  `Error::Unavailable`.
 
-- **User-managed ember lifecycle.** JP does not start or manage the `ember`
-  server — users run `ember serve` themselves, in a terminal or as a system
-  service.
-  If the server isn't running, rerank calls return `Error::Unavailable`; the
-  consumer decides whether to skip, surface the error, or fall back.
+- **User-managed ember lifecycle.** JP does not start or supervise `ember
+  serve`; users run it in a terminal or as a system service.
+  When the server is not running, rerank calls return `Error::Unavailable` and
+  the consumer decides whether to skip, surface the error, or fall back.
 
 - **New top-level config namespace.** `providers.rerank.*` increases JP's config
-  surface area.
-  Mitigated by mirroring `providers.llm` exactly, so there's no new mental
-  model.
+  surface area, though mirroring `providers.llm` avoids introducing a new
+  configuration model.
 
-- **Cold model load.** Ember's first server start on a new machine downloads
-  each `--model` not already in the HuggingFace cache (~600 MB for
-  `bge-reranker-v2-m3`). Subsequent server starts hit the cache but still build
-  ONNX sessions (~1–2s per model).
-  The download is one-time per machine; session build is once per server start.
+- **Cold model load.** Starting `ember serve` on a new machine downloads each
+  uncached `--model` to the HuggingFace cache (~600 MB for
+  `bge-reranker-v2-m3`), and every server start builds ONNX sessions (~1-2s per
+  model).
 
-- **Voyage requires an API key.** Users without a Voyage account can't use the
-  cloud provider.
-  Ember is the offline fallback.
+- **Voyage requires an API key.** Users without a Voyage account cannot use the
+  cloud provider; `ember` is the offline alternative.
 
 ## Alternatives
 
 ### LLM-as-classifier
 
-Use an existing `jp_llm::Provider` (Haiku, Sonnet) with a structured-output
-schema to return relevance scores.
-Works, but:
+An existing `jp_llm::Provider` (Haiku, Sonnet) can return relevance scores
+through a structured-output schema, but it is the wrong tool for per-turn
+scoring:
 
-- 500–2000ms per call vs ~50ms for a cross-encoder.
-- $0.001–0.01 per call vs zero for local.
-- Generative LLMs are not trained for relevance ranking; cross-encoders are.
+- Latency is 500-2000ms per call, compared to ~50ms for a cross-encoder.
+- Cost is $0.001-0.01 per call, compared to zero for local execution.
+- Generative LLMs are not trained for relevance ranking, whereas cross-encoders
+  are.
 
-Rejected: wrong tool for the job.
-Latency and cost both compound at per-turn frequency.
+Latency and cost both compound when reranking runs on every turn.
 
 ### In-tree `fastembed` linkage behind a feature flag
 
-A `fastembed` provider that links `fastembed-rs` directly as a JP dependency,
-gated by a `rerank-fastembed` feature flag.
+Linking `fastembed-rs` directly into JP behind a `rerank-fastembed` feature flag
+was rejected due to dependency and binary bloat.
+`fastembed` pulls in `ort`, `tokenizers`, `hf-hub`, and ~50-80 transitive crates
+plus a ~10-20 MB binary size increase.
+Even behind a feature flag, the workspace must maintain the option, CI must test
+both modes, and config schema generation must handle both surfaces.
 
-Rejected: the bloat tradeoff doesn't favor it.
-`fastembed` pulls in `ort`, `tokenizers`, `hf-hub`, and ~50–80 transitive
-crates plus a ~10–20 MB binary size increase.
-Even behind a feature flag, the workspace has to know about the option, CI has
-to test both modes, and config schema generation has to handle both surfaces.
-The contrib-binary approach pays workspace and CI costs (Cargo.lock,
-supply-chain review, workspace-wide compile and test time) but avoids them in
-the `jp` binary itself: the `jp` crate graph never depends on `fastembed`, so
-JP's binary size, startup time, and dependency surface are unaffected.
-The contrib-crate CI cost is the standard price of in-tree maintained tools, and
-we accept it.
-
-The contrib binary can grow an in-process companion crate later if a concrete
-consumer needs to avoid the spawn cost.
-That cost is ~10ms today, dwarfed by inference.
+Isolating `fastembed` in a contrib binary still incurs workspace and CI costs
+(`Cargo.lock`, supply-chain review, and workspace-wide compile and test time),
+which is standard for in-tree tools, but keeps `fastembed` out of the `jp` crate
+graph so JP's binary size, startup time, and dependency surface remain
+unaffected.
+If a concrete consumer later needs to avoid the ~10ms spawn cost (dwarfed by
+~50ms inference), the contrib binary can grow an in-process companion library
+crate.
 
 ### Generic stdio rerank protocol
 
-A single `Provider` implementation that accepts any binary speaking a JP-defined
-stdio protocol, with the binary configured per provider instance.
-
-Rejected: YAGNI.
-We ship one binary today.
-A second binary, if it ever materializes, can be a second provider with its own
-trait implementation and its own config struct.
-The cost of one extra impl is ~50 lines of code; the cost of a generic protocol
-contract is documentation, support, and Hyrum's-Law debt forever.
+A single `Provider` implementation that speaks a JP-defined stdio protocol to a
+configured binary is unnecessary when JP ships only one local binary.
+If a second binary is ever needed, adding a dedicated `Provider` implementation
+and config struct takes ~50 lines of code without taking on the documentation,
+support, and Hyrum's-Law burden of a generic protocol contract.
 
 ### Cohere Rerank as the cloud provider
 
-Cohere has a comparable reranking API.
-The choice of Voyage over Cohere is pragmatic: Voyage has cleaner free-tier
-limits and the API is essentially identical in shape.
-A Cohere provider can be added later as a small follow-up RFD; the trait shape
-is designed to accommodate it.
+Cohere offers a comparable reranking API, but Voyage has cleaner free-tier
+limits and an almost identical API shape.
+A Cohere provider can be added in a follow-up RFD without changing the
+`Provider` trait.
 
 ## Non-Goals
 
-- **`Classifier` trait and zero-shot classification.** A different ML primitive
-  with different use cases (turn quality, sentiment, content moderation).
-  It belongs in a follow-up RFD if and when a concrete consumer needs it.
+- **`Classifier` trait and zero-shot classification.** Turn quality, sentiment,
+  and content moderation require a different ML primitive and belong in a
+  follow-up RFD when a concrete consumer needs them.
 
-- **In-process linking of `fastembed-rs` from JP.** See alternatives above.
-  Worth revisiting if the HTTP-sidecar overhead ever becomes a measurable
-  problem on a real consumer's critical path.
+- **In-process linking of `fastembed-rs` from JP.** Covered under
+  [Alternatives](#in-tree-fastembed-linkage-behind-a-feature-flag); worth
+  revisiting only if HTTP-sidecar overhead becomes a measurable problem on a
+  consumer's critical path.
 
-- **Additional cloud rerank providers (Cohere, Jina, etc.).** Each can be added
-  as a small follow-up RFD when needed.
-  The trait is designed to accommodate them without changes.
+- **Additional cloud rerank providers (Cohere, Jina, etc.).** The `Provider`
+  trait accommodates additional providers without changes; each can be added in
+  a follow-up RFD.
 
 - **Plugin-based provider hosting.** When [RFD 016]'s WASM plugin architecture
-  matures, the ember provider can migrate from "talk to a local HTTP sidecar" to
-  "invoke a plugin."
-  Same trait, different transport.
-  Out of scope here.
+  matures, `EmberProvider` can migrate its transport from a local HTTP sidecar
+  to a plugin behind the same `Provider` trait.
 
-- **Polished distribution for the ember binary.** v1 is "use the justfile
-  recipe."
-  Release artifacts, package managers, and auto-install are a follow-up.
+- **Polished distribution for the ember binary.** v1 uses the justfile recipe;
+  release artifacts, package managers, and auto-install are follow-up work.
 
-- **Low-friction built-in fallback.** A "rerank without configuring a provider"
-  path — whether via LLM-as-classifier, lexical/fuzzy matching, or something
-  else — is out of scope here.
-  Consumer RFDs that need reranking can either require explicit provider
-  configuration or define their own fallback behavior until a follow-up RFD
-  addresses this.
+- **Low-friction built-in fallback.** Reranking without configuring a provider
+  (via LLM-as-classifier, lexical/fuzzy matching, or another fallback) is out of
+  scope.
+  Consumer RFDs must either require explicit provider configuration or define
+  their own fallback behavior.
 
 ## Risks and Open Questions
 
-- **Latency on a cold cache or fresh server start.** A first-ever ember server
-  start on a new machine downloads each `--model` (~600 MB for
-  `bge-reranker-v2-m3`) and builds ONNX sessions (~1–2s per model).
-  Subsequent starts skip the download but still pay session build.
-  All of this happens before the server accepts requests, so JP's first call
-  hits a warm server — cold-start cost is entirely on whoever starts `ember
-  serve`.
+- **Latency on a cold cache or fresh server start.** Model downloads (~600 MB
+  for `bge-reranker-v2-m3` on a new machine) and ONNX session builds (~1-2s per
+  model on every start) run before `ember serve` accepts requests.
+  JP's first call hits a warm server, placing cold-start latency entirely on
+  whoever starts `ember serve`.
 
-- **Voyage API stability.** We're pinning to a specific API version
-  (`/v1/rerank`).
-  If Voyage breaks the contract, the provider breaks.
-  Standard cloud-API risk; mitigated by the `base_url` override making it
-  trivial to point at a recorded test fixture.
+- **Voyage API stability.** `VoyageProvider` pins to `/v1/rerank` and will break
+  if Voyage makes incompatible changes to that contract.
+  The `base_url` override mitigates this by allowing tests to run against
+  recorded fixtures.
 
 - **Score distribution differences across models.** Voyage returns normalized
-  relevance scores natively; ember applies a sigmoid to raw BGE logits.
-  Both fall in `[0, 1]`, and both support the same "top-N + threshold" usage
-  pattern.
-  The relationship between score magnitude and "true" relevance differs between
-  models — and between providers normalizing the same nominal relevance
-  differently — so a threshold tuned for one model may need adjustment when
-  switching.
-  Consumer RFDs should treat the threshold as a per-model config value, not a
-  universal constant.
+  relevance scores natively, while `ember` applies a sigmoid to raw BGE logits.
+  Both fall in `[0, 1]` and support top-N plus threshold filtering, but the
+  mapping between score magnitude and relevance differs across models and
+  normalization methods.
+  A threshold tuned for one model may need adjustment when switching, so
+  consumer RFDs should treat the threshold as a per-model config value rather
+  than a constant.
 
-- **ember binary upgrade path.** When `fastembed-rs` ships a major version with
-  breaking changes, we bump `crates/contrib/ember`'s dep.
-  Users running an old `ember` binary against a new JP shouldn't break (the CLI
-  contract is stable), but mismatched model files in cache might confuse the
+- **ember binary upgrade path.** Bumping `fastembed-rs` across major versions in
+  `crates/contrib/ember` preserves the HTTP contract between JP and an older
+  `ember` binary, but mismatched model files in the cache could confuse the
   HuggingFace cache layer.
-  Worth monitoring.
 
 ## Implementation Plan
 
 ### Phase 1: `jp_rerank` crate
 
-Create the crate with the `Provider` trait, `RerankScore` struct, and `Error`
-enum (`Unavailable`, `UnknownModel`, `Failed`).
-No implementations yet.
-Unit tests cover the trait shape and the three error variants.
+Create `jp_rerank` with the `Provider` trait, `RerankScore` struct, and `Error`
+enum (`Unavailable`, `UnknownModel`, `Failed`), along with unit tests covering
+the trait shape and the three error variants.
 
 Independent of all other phases.
 
@@ -624,34 +566,31 @@ Independent of all other phases.
 
 Create `crates/contrib/ember/` wrapping `fastembed` v5.
 Implement `ember serve` with a repeatable `--model` flag and a single `POST
-/rerank` endpoint.
-Each `--model` is loaded at startup; requests for unloaded models return HTTP
-404.
-Apply sigmoid normalization to raw BGE logits before returning, with the
-`scores` array sorted by score descending.
-Add `just _install-ember` recipe.
-Smoke test: start the server with one `--model`, POST a request for the loaded
-model and assert the response shape, POST a request for an unloaded model and
-assert HTTP 404.
+/rerank` endpoint that loads each `--model` at startup, returns HTTP 404 for
+unloaded models, applies sigmoid normalization to raw BGE logits, and sorts
+`scores` descending.
+Add the `just _install-ember` recipe.
+Smoke test by starting the server with one `--model`, POSTing a request for the
+loaded model to assert the response shape, and POSTing a request for an unloaded
+model to assert HTTP 404.
 
-Independent of `jp_rerank`.
-Can be merged before or after Phase 1.
+Independent of `jp_rerank`; can be merged before or after Phase 1.
 
 ### Phase 3: Voyage provider
 
-Implement `VoyageProvider` in `jp_rerank::provider::voyage`.
-Integration test against recorded HTTP fixtures using the `base_url` override.
+Implement `VoyageProvider` in `jp_rerank::provider::voyage` and integration test
+it against recorded HTTP fixtures using the `base_url` override.
 
 Depends on Phase 1.
 
 ### Phase 4: Ember provider
 
-Implement `EmberProvider` in `jp_rerank::provider::ember` as a pure HTTP client.
-Normalize the server's relevance-sorted response back to input order before
+Implement `EmberProvider` in `jp_rerank::provider::ember` as a pure HTTP client
+that restores the server's relevance-sorted response to input order before
 returning.
-Tests use recorded HTTP fixtures via the `base_url` override, matching the
-Voyage test pattern, and cover the HTTP 404 → `UnknownModel` mapping.
-Real binary tested separately via the contrib crate's tests.
+Test against recorded HTTP fixtures via the `base_url` override, matching the
+Voyage test pattern and covering the HTTP 404 → `UnknownModel` mapping; the
+binary itself is tested in the contrib crate.
 
 Depends on Phases 1 and 2.
 
@@ -659,32 +598,29 @@ Depends on Phases 1 and 2.
 
 Add `jp_config::providers::rerank::{id, voyage, ember}` modules, including a
 `RerankerModelIdConfig` that parses `<provider>/<model>` strings into a typed
-`(RerankProviderId, Name)` pair.
-Wire `RerankProvidersConfig` into `AppConfig`.
+`(RerankProviderId, Name)` pair, and wire `RerankProvidersConfig` into
+`AppConfig`.
 Implement `jp_rerank::provider::get_provider(id, config)` returning an `Arc<dyn
-Provider>` — the model is passed at call time, not at resolution.
+Provider>`.
 
 Depends on Phases 3 and 4.
 
 ### Phase 6: Documentation
 
-Document the providers under `docs/configuration.md` (or wherever provider docs
-live).
-Note the install requirement for ember.
+Document the providers and the `ember` install requirement under
+`docs/configuration.md` (or wherever provider docs live).
 
 Depends on Phase 5.
 
 ## References
 
-- [`fastembed-rs`] — the Rust embedding/reranking library wrapped by the ember
+- [`fastembed-rs`]: Rust embedding and reranking library wrapped by the `ember`
   binary.
-- [Voyage AI Reranker API] — the HTTP contract for the Voyage provider.
-- [`rozgo/bge-reranker-v2-m3`] — the reranking model used in this RFD's
-  examples.
-  An ONNX-format upload of `BAAI/bge-reranker-v2-m3`; the ONNX variant is
-  required because `fastembed` only loads ONNX models.
-- [`jp_llm`] — the existing provider crate whose shape this RFD mirrors.
-- [RFD 016] — future WASM plugin system the ember provider may migrate to.
+- [Voyage AI Reranker API]: HTTP contract for `VoyageProvider`.
+- [`rozgo/bge-reranker-v2-m3`]: ONNX-format upload of `BAAI/bge-reranker-v2-m3`
+  used in this RFD's examples (`fastembed` only loads ONNX models).
+- [`jp_llm`]: Existing provider crate whose shape this RFD mirrors.
+- [RFD 016]: Future WASM plugin system that `EmberProvider` may migrate to.
 
 [RFD 016]: ../016-wasm-plugin-architecture.md
 [Voyage AI Reranker API]: https://docs.voyageai.com/docs/reranker

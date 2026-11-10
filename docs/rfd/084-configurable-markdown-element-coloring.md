@@ -16,49 +16,46 @@ elements (headings, list markers, inline code, blockquotes, links, emphasis, and
 strikethrough) to structured `Style` values configured under
 `style.markdown.elements.*`.
 It replaces fixed SGR escape constants and one-off style parameters in the
-terminal renderer with a stack-based style sheet.
+terminal renderer with a stack-based stylesheet.
 
 ## Motivation
 
-The terminal markdown renderer in `jp_md` currently bakes every styling decision
-into the AST walker as fixed SGR constants from `ansi.rs`:
+The terminal markdown renderer in `jp_md` hard-codes styling decisions in the
+AST walker using fixed SGR constants from `ansi.rs`:
 
 - Headings use `BOLD_START`/`BOLD_END` regardless of level.
-- The `#` glyphs are emitted unstyled while the heading text is bold; there is
-  no way to style the marker independently of the text.
-- Bullet markers (`-`, `*`) and ordered-list markers carry no styling.
-- Inline code can override its background (via `inline_code_bg`) but not its
-  foreground; the only colored aspect of inline code is the theme-derived
-  background.
-- Blockquote bodies pick up the syntect theme's gutter foreground, but the `>`
-  marker can't be styled differently from the body.
+- Heading `#` glyphs are emitted unstyled while the heading text is bold, with
+  no way to style the marker and text separately.
+- Bullet markers (`-`, `*`) and ordered-list markers are unstyled.
+- Inline code supports a background override (via `inline_code_bg`), defaulting
+  to the theme background, but has no foreground setting.
+- Blockquote bodies use the syntect theme's gutter foreground, and the `>`
+  marker cannot be styled separately from the body.
 - Thematic breaks, links, task checkboxes, and table borders have no
-  user-controllable styling at all.
+  configurable styling.
 
-The one place we *did* add a knob — inline code background — required
-threading `Option<(String, String)>` through `Formatter`, `TerminalFormatter`,
-the table formatter, and the render-site wiring in `jp_cli::render::chat`.
-Adding the next knob (inline code foreground, heading-level colors, dim bullets)
-by the same pattern compounds the surface area linearly per attribute.
-Users increasingly want per-element control; doing this piecemeal produces a
-builder with dozens of scalar methods and a config schema that has to grow in
-lockstep.
+The one configurable attribute, inline code background, required threading
+`Option<(String, String)>` through `Formatter`, `TerminalFormatter`, the table
+formatter, and the render-site wiring in `jp_cli::render::chat`.
+Adding further attributes (inline code foreground, per-level heading colors, dim
+bullets) in the same way grows the `Formatter` builder and the config schema by
+one scalar per attribute.
 
-The renderer also has correctness work that a structured representation makes
-easier: `AnsiState` already tracks bold, italic, underline, strikethrough, fg,
-and bg across wrap breaks (see commit `b5bb5eff`).
-What's missing is a push/pop discipline so that multiple overlapping element
-styles can be unwound in order; the current code special-cases one
-snapshot/restore for blockquote fg.
-Generalizing it once (push/pop stack of element styles) costs less than
-open-coding the same logic per element.
+A structured style representation also simplifies state restoration in the
+renderer.
+`AnsiState` already tracks bold, italic, underline, strikethrough, `fg`, and
+`bg` across wrap breaks (commit `b5bb5eff`), but the renderer only special-cases
+a single snapshot/restore for blockquote `fg`.
+A push/pop style stack unwinds overlapping element styles in order without
+duplicating snapshot logic per element.
 
 ## Design
 
-### What the user sees
+### User-facing configuration
 
-A new `style.markdown.elements` subtree, where each leaf is a `Style` value with
-`fg`, `bg`, `intensity`, `italic`, `underline`, and `strikethrough`:
+The `style.markdown.elements` config table maps each element slot to a `Style`
+value with `fg`, `bg`, `intensity`, `italic`, `underline`, and `strikethrough`
+attributes:
 
 ```toml
 [style.markdown.elements.heading.h1]
@@ -100,36 +97,30 @@ intensity = "bold"
 intensity = "dim"
 ```
 
-Every slot is optional, and every attribute within a slot is independently
-optional.
-Omitting an attribute means "no user override" — theme-derived defaults and
-renderer baselines still apply (see "Effective style resolution"); only when
-neither applies does the surrounding context show through.
-Use `"inherit"` on `fg` / `bg` / `intensity` to explicitly suppress those
-defaults and force the surrounding-context fallback.
-Most users will only want to set one or two attributes per slot.
+Every slot and every attribute within a slot is optional.
+Omitting an attribute leaves theme-derived defaults and renderer baselines in
+effect, falling back to the surrounding context only when neither applies (see
+"Effective style resolution").
 
 `intensity` accepts `"normal"`, `"bold"`, `"dim"`, or `"inherit"`.
-Bold and dim share a single SGR slot (SGR 1 / 2, both cleared by SGR 22), so
-they are modeled as four mutually-exclusive states rather than independent
-booleans — see "Style composition" below.
+Because bold (SGR 1) and dim (SGR 2) share a single SGR slot cleared by SGR 22,
+intensity is modeled as four mutually exclusive states rather than independent
+booleans (see "Style composition").
 
 `fg` and `bg` accept a color value (an ANSI 256-color index such as `244`, a
 standard named ANSI color such as `"yellow"` or `"bright_yellow"` mapping to
-palette indices `0`–`15`, or a hex RGB string such as `"#3c3836"`) or one of
+palette indices `0` to `15`, or a hex RGB string such as `"#3c3836"`) or one of
 two literal strings: `"default"` resets that channel to the terminal's own
-default (SGR 39 / 49); `"inherit"` suppresses theme-derived and renderer
-defaults *without* resetting the channel, so the surrounding context shows
-through.
-Omitting the key keeps today's behavior — theme-derived defaults apply first,
-then the renderer baseline, then the surrounding context.
+default (SGR 39 / 49), and `"inherit"` (also accepted on `intensity`) suppresses
+theme-derived and renderer defaults without resetting the channel, so the
+surrounding context shows through.
 
 The existing `style.inline_code.background` key becomes a deprecated alias for
-`style.markdown.elements.inline_code.body.bg`; see Drawbacks and Phase 3.
+`style.markdown.elements.inline_code.body.bg` (see Drawbacks and Phase 3).
 
 ### `jp_md` API
 
-A new `jp_md::style` module:
+`jp_md::style` defines the stylesheet types:
 
 ````rust
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -142,13 +133,13 @@ pub struct Style {
     pub strikethrough: Option<bool>,
 }
 
-/// Intensity is a single SGR slot (bold = SGR 1, dim = SGR 2, normal =
-/// SGR 22). Terminals cannot render bold and dim simultaneously, so the
-/// values are modeled as one enum rather than independent booleans.
+/// Intensity is a single SGR slot (bold = SGR 1, dim = SGR 2, normal = SGR 22).
+/// Terminals cannot render bold and dim simultaneously, so the values are
+/// modeled as one enum rather than independent booleans.
 ///
-/// [`Intensity::Inherit`] is an *explicit* opt-out from the renderer
-/// baseline (e.g. heading-bold) without committing to a specific
-/// intensity — the surrounding context's intensity is preserved.
+/// [`Intensity::Inherit`] is an *explicit* opt-out from the renderer baseline
+/// (e.g. heading-bold) without committing to a specific intensity — the
+/// surrounding context's intensity is preserved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intensity {
     Inherit,
@@ -160,13 +151,13 @@ pub enum Intensity {
 /// A color override for `fg` / `bg`.
 ///
 /// `Option::None` at the field level means "no override" — theme-derived
-/// defaults and renderer baselines still apply. The variants below are
-/// explicit overrides:
+/// defaults and renderer baselines still apply.
+/// The variants below are explicit overrides:
 ///
-/// - [`ColorOverride::Inherit`] bypasses theme / renderer defaults and
-///   takes the surrounding context's color.
-/// - [`ColorOverride::Default`] resets the channel to the terminal's
-///   own foreground / background (SGR 39 / 49).
+/// - [`ColorOverride::Inherit`] bypasses theme / renderer defaults and takes
+///   the surrounding context's color.
+/// - [`ColorOverride::Default`] resets the channel to the terminal's own
+///   foreground / background (SGR 39 / 49).
 /// - [`ColorOverride::Color`] is an explicit color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorOverride {
@@ -175,9 +166,9 @@ pub enum ColorOverride {
     Color(Color),
 }
 
-/// Logical color: ANSI 256-color index or 24-bit RGB. Owned by `jp_md`
-/// so SGR escape construction stays inside the renderer crate (see
-/// "Effective style resolution" for the boundary rationale).
+/// Logical color: ANSI 256-color index or 24-bit RGB.
+/// Owned by `jp_md` so SGR escape construction stays inside the renderer crate
+/// (see "Effective style resolution" for the boundary rationale).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     Ansi256(u8),
@@ -246,12 +237,12 @@ pub struct MarkdownStyleSheet {
 }
 ````
 
-`MarkdownStyleSheet::default()` produces an empty override sheet — every slot
-is `Style::default()` and every attribute is `None`.
-Today's rendered output is preserved by the theme-derived and renderer-baseline
-defaults `jp_md` already applies; see "Effective style resolution" below.
+`MarkdownStyleSheet::default()` produces an empty override sheet where every
+slot is `Style::default()` and every attribute is `None`.
+Theme-derived and renderer-baseline defaults inside `jp_md` preserve the
+existing output when no overrides are set (see "Effective style resolution").
 
-`Formatter` grows one builder method:
+`Formatter` exposes a builder method for the stylesheet:
 
 ```rust
 impl Formatter {
@@ -259,106 +250,92 @@ impl Formatter {
 }
 ```
 
-`Formatter::inline_code_bg` is removed; callers configure inline code background
-through `MarkdownStyleSheet::inline_code.body.bg` instead.
-The CLI helper that today reads `style.inline_code.background` is updated to
-bridge that field into the stylesheet so existing user config keeps working
-without the legacy builder (see Phase 1).
+`Formatter::inline_code_bg` is removed in favor of
+`MarkdownStyleSheet::inline_code.body.bg`.
+The CLI helper bridges `style.inline_code.background` into the stylesheet so
+existing configurations continue to work without the legacy builder (see Phase
+1).
 
 ### Effective style resolution
 
-The `MarkdownStyleSheet` carries *overrides only*.
-`jp_md` owns the theme defaults and renderer baselines that make up today's
-rendering.
-At render time, the effective style for each element is composed in this order:
+`MarkdownStyleSheet` carries overrides only; `jp_md` owns the theme defaults and
+renderer baselines.
+At render time, the effective style for each element is resolved in three steps:
 
-1. **Theme defaults.** Theme-derived values such as the inline-code background
+1. **Theme defaults**: theme-derived values such as the inline-code background
    (`theme_bg(theme)`) and the blockquote-body foreground
-   (`theme_blockquote_fg(theme)`).
-   Only `jp_md` has access to the resolved `syntect::Theme`.
+   (`theme_blockquote_fg(theme)`), resolved from the `syntect::Theme` inside
+   `jp_md`.
 
-2. **Renderer baseline.** Hard-coded baseline attributes — headings bold,
-   `strong` bold, `emph` italic, `strikethrough` struck, `underline` underlined
-   — that the AST walker emits today as fixed SGR pairs.
+2. **Renderer baseline**: hard-coded baseline attributes (headings bold,
+   `strong` bold, `emph` italic, `strikethrough` struck, `underline` underlined)
+   that the AST walker previously emitted as fixed SGR pairs.
 
-3. **User overrides.** Values set in the `MarkdownStyleSheet` passed via
+3. **User overrides**: values set on the `MarkdownStyleSheet` passed via
    `Formatter::style_sheet(...)`.
+   `ColorOverride::Inherit` and `Intensity::Inherit` short-circuit steps 1 and 2
+   for the affected field, suppressing the theme-derived default and the
+   renderer baseline so the surrounding context shows through.
 
-   `Inherit` overrides (both `ColorOverride::Inherit` and `Intensity::Inherit`)
-   are an explicit short-circuit: they bypass steps 1 and 2 for the affected
-   field, suppressing the theme-derived default and the renderer baseline
-   without committing to a specific replacement.
-
-Steps 1 and 2 live entirely inside `jp_md`.
-`jp_cli` only constructs step 3 — a sparse override sheet from user config —
-and never touches the resolved theme or the renderer baseline.
-This keeps theme knowledge out of the crate boundary.
+Steps 1 and 2 run entirely inside `jp_md`.
+`jp_cli` constructs only step 3 (a sparse override sheet from user config) and
+never inspects the resolved theme or the renderer baseline.
 
 SGR escape construction also stays inside `jp_md`.
-The `Color` and `ColorOverride` types above are owned by `jp_md`; `jp_cli`
-converts from `jp_config::types::color::Color` at the construction boundary in
-the shared CLI helper (see "Translation in `jp_cli`" below).
-`push_style` generates the SGR parameters at write time — the today-only
-`jp_cli` helper `color_to_bg_param` is removed.
-
-For this boundary to actually hold, the reasoning-block background path is
-migrated alongside: `DefaultBackground` (in `jp_md::format`) today carries a
-pre-built SGR parameter populated by `color_to_bg_param` in `jp_cli`.
-Its `param: String` field becomes a logical `Color`, and `jp_md` builds the
-escape internally.
-The user-visible `style.reasoning.background` knob keeps working unchanged;
-folding `reasoning` styling onto the new `Style` type itself remains a non-goal
-(see Non-Goals).
+`jp_md` owns `Color` and `ColorOverride`, `jp_cli` converts from
+`jp_config::types::color::Color` in the shared CLI helper (see "Translation in
+`jp_cli`"), and `push_style` generates SGR parameters at write time.
+To keep all SGR construction inside `jp_md`, `DefaultBackground` (in
+`jp_md::format`, used for `style.reasoning.background`) replaces its pre-built
+`param: String` field with a logical `Color`, and the `jp_cli` helper
+`color_to_bg_param` is removed.
+Folding `reasoning` styling onto `Style` itself remains a non-goal (see
+Non-Goals).
 
 ### Style composition
 
-Within a single rendering context, attributes compose as follows:
+Within a rendering context, attributes compose with surrounding styles as
+follows:
 
-- **`None` (key omitted) falls through defaults.** With no user override, the
-  field picks up its theme-derived default (step 1 of effective style
-  resolution), then the renderer baseline (step 2); if neither applies, the
-  surrounding context is used.
-- **`Some(Inherit)` is an explicit opt-out from defaults.** For both `intensity`
-  and `fg`/`bg`, `Inherit` skips steps 1 and 2 of effective style resolution for
-  that field and takes the surrounding context's value instead.
-  Use this when you want to suppress a theme-derived inline-code background or a
-  renderer-baseline heading-bold without committing to a specific replacement.
-- **`italic` / `underline` / `strikethrough`** are independent booleans.
-  `Some(true)` enables the attribute regardless of context; `Some(false)`
-  disables it even if the surrounding context had it on.
-  On `pop_style`, the prior `AnsiState` snapshot is restored.
-- **`intensity` is enumerated, not two booleans.** SGR has a single intensity
-  slot: SGR 1 (bold), SGR 2 (dim/faint), SGR 22 (normal, which resets both).
-  `Some(Intensity::Bold)` or `Some(Intensity::Dim)` set the slot;
-  `Some(Intensity::Normal)` clears it even if the surrounding context was bold
-  or dim.
-  On `pop_style`, the surrounding intensity is restored — emitting SGR 1 or SGR
-  2 again if needed after an SGR 22 transition.
-- **`fg` / `bg` are innermost-wins.** `Some(ColorOverride::Color(c))` sets the
-  channel to `c`; `Some(ColorOverride::Default)` resets the channel to the
-  terminal default (SGR 39 / 49), overriding any theme-derived default that step
-  1 of resolution would otherwise apply.
-  On `pop_style` the surrounding color is restored.
-  This matches what the existing renderer already does via `attrs.foreground` /
-  `attrs.background` snapshot/restore.
+- **`None` (key omitted)**: uses the theme-derived default (step 1) or the
+  renderer baseline (step 2), or preserves the surrounding context if neither
+  applies.
+- **`Some(Inherit)`**: skips steps 1 and 2 for `intensity`, `fg`, or `bg` and
+  preserves the surrounding context's value (for example, suppressing a
+  theme-derived inline-code background or baseline heading bold without setting
+  a replacement value).
+- **`italic` / `underline` / `strikethrough`**: independent booleans.
+  `Some(true)` enables the attribute and `Some(false)` disables it regardless of
+  the surrounding context.
+  `pop_style` restores the prior `AnsiState` snapshot.
+- **`intensity`**: a single SGR slot shared by SGR 1 (bold), SGR 2 (dim/faint),
+  and SGR 22 (normal, which resets both).
+  `Some(Intensity::Bold)` and `Some(Intensity::Dim)` set the slot;
+  `Some(Intensity::Normal)` clears an active bold or dim from the surrounding
+  context.
+  `pop_style` restores the surrounding intensity, re-emitting SGR 1 or SGR 2
+  after an SGR 22 transition when needed.
+- **`fg` / `bg`**: innermost-wins.
+  `Some(ColorOverride::Color(c))` sets the channel to `c`, and
+  `Some(ColorOverride::Default)` resets the channel to the terminal default (SGR
+  39 / 49), overriding any theme-derived default from step 1.
+  `pop_style` restores the surrounding color via the `attrs.foreground` /
+  `attrs.background` snapshot.
 
-Two worked examples:
+For example:
 
 1. Inline code (`intensity: Some(Normal)`, `fg: Some(Color(magenta))`) inside an
-   `h1` heading (`intensity: Some(Bold)`, `fg: Some(Color(red))`): the inline
-   code renders non-bold magenta.
-   On exit, the heading's bold red is restored for any trailing heading text.
+   `h1` heading (`intensity: Some(Bold)`, `fg: Some(Color(red))`) renders as
+   non-bold magenta, then restores the heading's bold red on exit for any
+   trailing heading text.
 2. Link text (`fg: Some(Color(blue))`, no `intensity`) inside `strong`
-   (`intensity: Some(Bold)`): the link text renders bold blue.
-   On exit, `strong` continues bold with the surrounding (or absent) foreground
-   restored.
+   (`intensity: Some(Bold)`) renders as bold blue, then restores the surrounding
+   (or absent) foreground on exit while remaining bold.
 
 #### Slot overlay contract
 
-A few slots compose with each other within the same element rather than with the
-surrounding context.
-The table below pins the contract so config behavior is stable before users
-build themes against it.
+Some elements split styling across multiple slots that layer over each other or
+the surrounding context:
 
 | Slot                    | Applies to                                                         | Overlays                                                                                     |
 | ----------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -377,17 +354,15 @@ build themes against it.
 
 ### Renderer changes
 
-`AnsiState` (`crates/jp_term/src/ansi.rs`) grows an `intensity: Intensity` field
-in place of its existing `bold: bool`.
-`restore_sequence` re-emits SGR 1 or SGR 2 as appropriate after any SGR 22
-transition, so wrap-break and pop-style restoration handle dim with the same
-guarantees today's renderer offers for bold.
-This is what allows `Intensity::Dim` to be a first-class attribute rather than a
-layering hack.
+`AnsiState` (`crates/jp_term/src/ansi.rs`) replaces `bold: bool` with
+`intensity: Intensity`.
+`restore_sequence` re-emits SGR 1 or SGR 2 after any SGR 22 transition, so
+wrap-break and `pop_style` restoration preserve `Intensity::Dim` alongside
+`Intensity::Bold`.
 
-The hard-coded `write_escape(BOLD_START)` / `write_escape(BOLD_END)` pairs in
-`TerminalFormatter` are replaced by calls into a stylesheet-aware helper on the
-writer:
+In `TerminalFormatter`, hard-coded `write_escape(BOLD_START)` /
+`write_escape(BOLD_END)` pairs are replaced by a style stack on
+`TerminalWriter`:
 
 ```rust
 impl TerminalWriter<'_> {
@@ -396,14 +371,14 @@ impl TerminalWriter<'_> {
 }
 ```
 
-Internally this is a `Vec<AnsiState>` snapshot stack.
-`push_style` records the current `attrs`, applies the new style on top, and
-emits the resulting SGR escape.
-`pop_style` restores the snapshot and emits whatever combination of start/end
-escapes (or full re-establish) is needed to transition.
-This generalizes the existing blockquote fg push/restore pattern.
+`TerminalWriter` maintains a `Vec<AnsiState>` snapshot stack, generalizing the
+blockquote `fg` snapshot/restore pattern.
+`push_style` records the current `attrs`, applies `style` on top, and emits the
+resulting SGR escape.
+`pop_style` restores the snapshot and emits the SGR sequence needed to
+transition back.
 
-The AST walker calls into these per element:
+The AST walker pushes and pops styles per element:
 
 ```rust
 // In format_heading:
@@ -418,107 +393,85 @@ self.writer.push_style(text)?;
 // On exit: pop heading style.
 ```
 
-`HeadingStyles::for_level(u8) -> &Style` is a small accessor that maps `1..=6`
-to the corresponding named field.
-Out-of-range levels (none should reach the renderer, but comrak's
-`NodeHeading::level` is a `u8`) fall back to `h6`.
+`HeadingStyles::for_level(u8) -> &Style` maps levels `1..=6` to `h1` through
+`h6`, falling back to `h6` for any other `u8` value from comrak's
+`NodeHeading::level`.
+`format_item` (bullet and ordered markers vs. body), `format_code`
+(`inline_code.body` and `inline_code.delim`), and `format_block_quote`
+(`blockquote.marker` and `blockquote.body`) follow the same pattern.
 
-Same mechanism for `format_item` (bullet / ordered marker vs body),
-`format_code` (`inline_code.body` and `inline_code.delim`), `format_block_quote`
-(`blockquote.marker` and `blockquote.body`), etc.
-
-The wrap-break path inside `TerminalWriter` restores fg/bg across line breaks
-through `AnsiState`, but the prefix mechanism is a separate concern that the
-stylesheet exposes for the first time.
-`TerminalWriter::prefix` is currently a flat `String` written verbatim at the
-start of each continuation line — so the `>` glyph on wrapped blockquote lines
-would inherit body styling, not `blockquote.marker`.
-To honor the marker / body split, `prefix` becomes a sequence of styled spans
-(`Vec<PrefixSpan>`, each carrying an optional `Style`).
-`write_prefix` walks the spans and emits `push_style` / `pop_style` around each.
-`format_block_quote` pushes a `> ` span styled as `blockquote.marker`; list
-items push their indentation span with no style.
-The continuation-line styling now matches the first line by construction.
+Soft-wrapped continuation lines also require styled prefixes.
+`TerminalWriter` restores `fg` and `bg` across line breaks through `AnsiState`,
+but `TerminalWriter::prefix` is a flat `String` written verbatim at the start of
+each continuation line, which would render wrapped blockquote `>` glyphs with
+`blockquote.body` instead of `blockquote.marker`.
+To preserve the marker/body split across wraps, `prefix` becomes a
+`Vec<PrefixSpan>` where each span carries an optional `Style`, and
+`write_prefix` wraps each span in `push_style` / `pop_style`.
+`format_block_quote` pushes a `> ` span styled with `blockquote.marker`, while
+list items push unstyled indentation spans.
 
 ### Renderer data flow
 
-The stylesheet has to reach every code path that emits styled output, not only
-the AST walker.
-Four paths need wiring:
+Four rendering paths consume `MarkdownStyleSheet`:
 
-1. **AST walker (`format_terminal` / `format_terminal_with`).** The stylesheet
-   is held on `TerminalFormatter`.
-   All AST elements — headings, lists, blockquotes, inline code, math, strong,
-   emphasis, underline, strikethrough, links, thematic breaks — go through
-   `push_style` / `pop_style` against it.
+1. **AST walker (`format_terminal` / `format_terminal_with`)**:
+   `TerminalFormatter` holds the stylesheet and styles headings, lists,
+   blockquotes, inline code, math, strong, emphasis, underline, strikethrough,
+   links, and thematic breaks through `push_style` / `pop_style`.
    Comrak's `math_dollars` extension is enabled so `$..$` and `$$..$$` parse as
    `NodeValue::Math`, and `Buffer`'s inline ground-state scanner tracks `$`
    delimiters so streaming paragraphs hold open math spans across chunk
    boundaries.
 2. **Streaming code fence helpers (`render_code_fence`, `render_closing_fence`,
-   `render_code_line`).** These live outside the AST walker
-   (`crates/jp_md/src/format.rs`, around the `Formatter::render_code_*` block)
-   and are consumed by `jp_cli::render::chat` for live streaming.
+   `render_code_line`)**: these helpers in `crates/jp_md/src/format.rs` (around
+   `Formatter::render_code_*`) are called by `jp_cli::render::chat` during live
+   streaming.
    They take the stylesheet so `code_fence` styling applies identically to
    streamed and buffered fenced code.
-3. **Table renderer (`jp_md::table::format_table`).** Tables go through a nested
-   `TerminalFormatter` per cell (`crates/jp_md/src/table.rs`).
-   The stylesheet is threaded through `format_table` and forwarded to each cell
-   formatter, so `table.border`, `table.header`, and inline element styles
-   inside cells all use the same sheet.
-4. **Tool-result renderer (`jp_cli::render::tool::ToolRenderer`).** Tool call
-   results are rendered through a separately-constructed `Formatter`
-   (`crates/jp_cli/src/render/tool.rs`) that calls `begin_code_block` /
-   `render_code_line` and emits its own fence markers.
-   The same shared CLI helper that produces `ChatRenderer`'s formatter produces
-   this one, so `code_fence` styling and syntax highlighting are identical
-   across chat output and tool-result output.
-   Tool-result bodies are not parsed as markdown by this RFD; inline markdown
-   element styling (`strong`, `emph`, `link.*`, `blockquote.*`, etc.) applies to
-   tool results only if a future change routes those bodies through
-   `format_terminal`.
-   The current manual ` ``` ` emission in `ToolRenderer::render_result` migrates
-   to `render_code_fence` / `render_closing_fence` so `code_fence` styling
-   actually applies.
-
-Without (2)–(4), schema slots like `code_fence`, `table.border`, and
-`table.header` would be visible in config but never reach the output, and
-buffered vs streamed vs tool-result rendering of the same fenced block could
-diverge.
+3. **Table renderer (`jp_md::table::format_table`)**:
+   `crates/jp_md/src/table.rs` constructs a nested `TerminalFormatter` per cell.
+   `format_table` receives the stylesheet and forwards it to each cell
+   formatter, so `table.border`, `table.header`, and inline elements inside
+   cells all use the same sheet.
+4. **Tool-result renderer (`jp_cli::render::tool::ToolRenderer`)**:
+   `crates/jp_cli/src/render/tool.rs` constructs its `Formatter` through the
+   same shared CLI helper as `ChatRenderer`, and `ToolRenderer::render_result`
+   migrates from manual ` ``` ` emission to `render_code_fence` /
+   `render_closing_fence` alongside `begin_code_block` / `render_code_line`.
+   Tool-result bodies are not parsed as markdown by this RFD; inline element
+   styles (`strong`, `emph`, `link.*`, `blockquote.*`) apply to tool results
+   only if a future change routes those bodies through `format_terminal`.
 
 ### Configuration types
 
 `jp_config` gains:
 
-- `style::Style` — a `Config`-derived struct mirroring `jp_md::Style`: `fg`,
-  `bg`, `intensity`, `italic`, `underline`, `strikethrough`, each `Option<...>`.
-  `fg` / `bg` deserialize from either a color value (ANSI 256 number or hex
-  string via the existing `jp_config::types::color::Color`) or one of the
-  literal strings `"default"` / `"inherit"`, producing a `ColorOverride`.
-  `intensity` deserializes from `"normal"` / `"bold"` / `"dim"` / `"inherit"`.
-- `style::markdown::HeadingStylesConfig` — a `Config`-derived struct with six
-  named fields `h1` through `h6`, each a `Style`.
-  Mirrors `HeadingStyles` in `jp_md`.
-  Six fixed levels means no runtime range validation is needed; an unknown
-  segment such as `h0`, `h7`, or `foo` is rejected by the assignment glue as a
-  missing key.
-- Grouped sub-style configs mirror their `jp_md` counterparts:
-  `InlineCodeStylesConfig` (`body`, `delim`), `BlockquoteStylesConfig`
-  (`marker`, `body`), `TableStylesConfig` (`border`, `header`),
-  `TaskCheckboxStylesConfig` (`base`, `checked`), and `LinkStylesConfig`
-  (`text`, `url`, `delimiters`).
-  Each leaf field is a `Style`.
-- `style::markdown::ElementsConfig` — the slot tree from `MarkdownStyleSheet`,
-  mirrored with `Style` and grouped sub-style values; `heading` and
-  `heading_marker` use `HeadingStylesConfig`.
-- `MarkdownConfig` gains an `elements: ElementsConfig` field.
+- `style::Style`: a `Config`-derived struct mirroring `jp_md::Style` with
+  optional `fg`, `bg`, `intensity`, `italic`, `underline`, and `strikethrough`
+  fields.
+  `fg` and `bg` deserialize from a color value (ANSI 256 number or hex string
+  via `jp_config::types::color::Color`) or the literal strings `"default"` and
+  `"inherit"`, producing a `ColorOverride`.
+  `intensity` deserializes from `"normal"`, `"bold"`, `"dim"`, or `"inherit"`.
+- `style::markdown::HeadingStylesConfig`: a `Config`-derived struct with six
+  named `Style` fields (`h1` through `h6`) mirroring `HeadingStyles` in `jp_md`.
+  Fixed fields avoid runtime range validation; unknown segments such as `h0`,
+  `h7`, or `foo` are rejected by the assignment glue as missing keys.
+- Grouped sub-style configs mirroring their `jp_md` counterparts, with `Style`
+  leaf fields: `InlineCodeStylesConfig` (`body`, `delim`),
+  `BlockquoteStylesConfig` (`marker`, `body`), `TableStylesConfig` (`border`,
+  `header`), `TaskCheckboxStylesConfig` (`base`, `checked`), and
+  `LinkStylesConfig` (`text`, `url`, `delimiters`).
+- `style::markdown::ElementsConfig`: the slot tree from `MarkdownStyleSheet`,
+  mirrored with `Style` and grouped sub-style configs (`heading` and
+  `heading_marker` use `HeadingStylesConfig`).
+- `MarkdownConfig::elements`: an `ElementsConfig` field on `MarkdownConfig`,
+  wired with the standard `PartialConfigDelta`, `FillDefaults`,
+  `AssignKeyValue`, and `ToPartial` implementations (matching `MarkdownConfig`
+  and `InlineCodeConfig`).
 
-The shared CLI helper translates `jp_config::style::Style` values into
-`jp_md::Style` at the boundary — including the `Color` → `jp_md::Color` and
-`"default"` → `ColorOverride::Default` conversions.
-SGR escape generation stays inside `jp_md`.
-
-CLI assignment uses path segments per the existing `KvAssignment` convention:
+CLI assignment uses path segments per the `KvAssignment` convention:
 
 ```sh
 jp query --cfg style.markdown.elements.heading.h1.fg="#fb4934"
@@ -528,156 +481,121 @@ jp query --cfg style.markdown.elements.blockquote.marker.intensity=bold
 jp query --cfg style.markdown.elements.link.delimiters.intensity=dim
 ```
 
-The usual `PartialConfigDelta`, `FillDefaults`, `AssignKeyValue`, and
-`ToPartial` glue follows the existing pattern (see `MarkdownConfig` and
-`InlineCodeConfig` today).
-
-`Style` is reusable: `tool_call`, `reasoning`, and other style sections that
-currently roll their own attribute bags can migrate to it as a follow-up, but
-that's out of scope for this RFD.
-
 ### Translation in `jp_cli`
 
-A single shared helper (today: `formatter_from_config` in
-`crates/jp_cli/src/render/chat.rs`, ~20 lines; lifted into a sibling module
-shared by both renderers) becomes the only place that maps
-`style.markdown.elements.*` config into a sparse `MarkdownStyleSheet` — the
-user-override layer, step 3 of "Effective style resolution".
-Both `ChatRenderer` and `ToolRenderer` construct their `Formatter` through this
-helper, so they receive identical stylesheets and themes.
-The helper does not resolve theme defaults or apply renderer baselines; those
+`formatter_from_config` (in `crates/jp_cli/src/render/chat.rs`, lifted into a
+sibling module shared by `ChatRenderer` and `ToolRenderer`) is the single place
+that translates `style.markdown.elements.*` (`jp_config::style::Style`,
+including `Color` -> `jp_md::Color` and `"default"` -> `ColorOverride::Default`)
+into a sparse `MarkdownStyleSheet` (step 3 of "Effective style resolution").
+Both renderers construct their `Formatter` through this helper, receiving
+identical stylesheets and themes, while theme defaults and renderer baselines
 stay inside `jp_md`.
-The existing `inline_code_bg` branch is deleted; its logic moves into the
-stylesheet construction.
-The config-color-to-SGR translation (`crate::format::color_to_bg_param`) is also
-deleted: `jp_md::Color` / `ColorOverride` are passed through and `jp_md` emits
-the SGR.
-The reasoning-background path constructs `DefaultBackground` with a logical
-`Color` (in `ChatRenderer::terminal_options`); the SGR is built inside `jp_md`.
-No `jp_cli` code path constructs SGR escapes for markdown element styling or
-`DefaultBackground` after Phase 2 completes.
-Other terminal chrome owned by `jp_cli` — role headers, the reasoning-timer
-line, tool-call labels, progress indicators — keeps its existing styling path
-and is out of scope for this RFD.
+
+The legacy `inline_code_bg` branch moves into stylesheet construction,
+`ChatRenderer::terminal_options` passes a logical `Color` to
+`DefaultBackground`, and `crate::format::color_to_bg_param` is deleted.
+After Phase 2, no `jp_cli` code path constructs SGR escapes for markdown element
+styling or `DefaultBackground`.
+Terminal chrome owned by `jp_cli` (role headers, the reasoning-timer line,
+tool-call labels, and progress indicators) keeps its existing styling path.
 
 ## Drawbacks
 
-- **Upfront diff size.** New module in `jp_md`, refactor of ~12 call sites in
-  `render.rs`, new config types with full schematic glue, new tests.
-  Bigger than "add one more scalar knob."
-- **Stack discipline becomes a correctness invariant.** Every `push_style` needs
-  a matching `pop_style`, including in error paths and in the comrak
-  pre/post-order traversal.
-  Today's symmetric `START`/`END` pairs are easier to audit visually.
-  A debug assertion in `finish()` that the stack is empty mitigates this but
-  doesn't eliminate it.
+- **Upfront diff size.** The change adds a new module in `jp_md`, refactors
+  roughly 12 call sites in `render.rs`, and introduces config types with
+  schematic glue and snapshot tests.
+- **Stack discipline invariant.** Every `push_style` requires a matching
+  `pop_style` across error paths and comrak's pre/post-order traversal, which is
+  harder to audit visually than symmetric `START`/`END` constant pairs.
+  A debug assertion in `finish()` verifies that the stack is empty on exit.
 - **Style composition becomes a user-visible contract.** The rule for omitted
-  keys (theme default → renderer baseline → surrounding context), the explicit
-  `Inherit` opt-out for both `intensity` and `fg` / `bg`, the four-state
-  `intensity` semantics, and the innermost-wins / explicit-default rule for `fg`
-  / `bg` (see "Style composition") are part of the config surface once shipped.
-  Snapshot tests for nested cases (inline code in heading, link in strong) pin
-  the behavior.
-- **Prefix becomes styled.** `TerminalWriter::prefix` changes from a flat
-  `String` to a list of styled spans so the blockquote `>` marker can be styled
-  independently of body content on wrapped continuation lines.
-  The per-line cost is small (prefix length is bounded by nesting depth × a few
-  characters), but it touches a hot path and rewrites prefix bookkeeping in
-  `format_block_quote` / `format_item`.
-- **Deprecated config key.** `style.inline_code.background` becomes a deprecated
-  alias for `style.markdown.elements.inline_code.body.bg` (see Phase 3).
-  This RFD does not hard-break existing config files, environment variables,
-  `--cfg` assignments, or stored conversation deltas; hard removal is deferred
-  to a follow-up.
-- **Config surface gets bigger.** `style.markdown.elements.*` is roughly 30 leaf
-  slots × 6 attributes.
-  Most users will set none of these and rely on defaults, but the schema is
-  visibly larger.
+  keys (theme default -> renderer baseline -> surrounding context), the explicit
+  `Inherit` opt-out for `intensity` and `fg` / `bg`, the four-state `intensity`
+  semantics, and the innermost-wins / explicit-default rule for `fg` / `bg` (see
+  "Style composition") become part of the config contract once shipped.
+  Snapshot tests for nested elements (inline code in a heading, link in
+  `strong`) pin this behavior.
+- **Styled continuation prefixes.** Changing `TerminalWriter::prefix` from a
+  flat `String` to a list of styled spans touches the line-wrapping path and
+  rewrites prefix bookkeeping in `format_block_quote` and `format_item`, though
+  the per-line cost is bounded by nesting depth.
+- **Deprecated config key.** `style.inline_code.background` remains as a
+  deprecated alias for `style.markdown.elements.inline_code.body.bg` (see Phase
+  3) so existing config files, environment variables, `--cfg` assignments, and
+  stored conversation deltas continue to load until hard removal in a follow-up.
+- **Larger config schema.** `style.markdown.elements.*` adds roughly 30 leaf
+  slots with 6 attributes each to the schema.
 
 ## Alternatives
 
 ### A. Incremental scalar knobs
 
-Add `Formatter::heading_fg(level, color)`, `Formatter::bullet_fg(color)`,
-`Formatter::inline_code_fg(color)`, etc., one at a time as users ask.
-Each with a matching `style.markdown.heading_h1_fg`-style config key.
+Add builder methods such as `Formatter::heading_fg(level, color)`,
+`Formatter::bullet_fg(color)`, and `Formatter::inline_code_fg(color)` on demand,
+each with a matching `style.markdown.heading_h1_fg`-style config key.
 
-Rejected because the Cartesian product (~30 leaf slots × ~6 attributes) makes
-the builder unwieldy and the config schema visually noisy.
-Each addition touches `Formatter`, `TerminalFormatter::new`, the `Debug` impl,
-the config schema, the assignment glue, and the wiring in
-`formatter_from_config`.
-The piecemeal cost is acceptable for one knob; for twenty it is not.
+Rejected because the Cartesian product (~30 leaf slots by ~6 attributes) makes
+the builder and config schema unwieldy, and each addition touches `Formatter`,
+`TerminalFormatter::new`, its `Debug` impl, the config schema, the assignment
+glue, and `formatter_from_config`.
 
 ### B. Adopt `termimad`'s `MadSkin`
 
-`termimad` already solved the "per-element terminal styling" schema problem with
-`MadSkin` / `LineStyle` / `CompoundStyle`.
-Adopting it wholesale would replace `jp_md`'s renderer.
+`termimad` models per-element terminal styling with `MadSkin`, `LineStyle`, and
+`CompoundStyle`, which served as a reference for `Style` and
+`MarkdownStyleSheet`.
 
-Rejected because termimad ships its own parser, its own soft-wrap, its own table
-renderer, and no streaming API.
-JP's renderer is comrak-based with ANSI-aware soft-wrap, default-background
-fills for reasoning blocks, OSC-8 file/copy links, and a streaming code-block
-API consumed by `jp_cli::render::chat`.
-Replacing it is a rewrite, not a refactor.
-Importing termimad for the `MadSkin` schema alone is poor coupling for a serde
-struct.
-
-The shape of `MadSkin` is, however, a useful reference for the `Style` and
-`MarkdownStyleSheet` design above.
+Adopting `termimad` directly was rejected because it ships its own parser,
+soft-wrapper, and table renderer without a streaming API, whereas `jp_md` is
+comrak-based with ANSI-aware soft-wrapping, default-background fills for
+reasoning blocks, OSC-8 file/copy links, and a streaming code-block API consumed
+by `jp_cli::render::chat`.
+Importing `termimad` for the `MadSkin` schema structs alone would add an
+unnecessary crate dependency.
 
 ### C. Map directly onto the syntect theme
 
-Reuse `syntect::highlighting::Theme` for element coloring (it already supports
-named scopes like `markup.heading`).
-Rejected because syntect themes have no mapping for "the `#` glyph vs the
-heading text," no "bullet marker" scope, and are oriented around tokenized
-source code, not block-level markdown.
-Mixing the two namespaces would conflate "code syntax highlighting" with
-"markdown element appearance" — they are independently meaningful and should
-stay decoupled.
+Reuse `syntect::highlighting::Theme` scopes (such as `markup.heading`) for
+element coloring.
+Rejected because syntect themes target tokenized source code rather than
+block-level markdown: they have no scopes separating the `#` glyph from heading
+text or styling bullet markers, and coupling markdown element appearance to code
+syntax highlighting prevents configuring the two independently.
 
 ## Non-Goals
 
-- **Replacing the syntect theme.** Code-block bodies continue to be styled by
-  the syntect theme selected via `style.markdown.theme`.
-  The stylesheet only affects markdown *element* styling (headings, lists,
-  etc.), not the tokens inside fenced code.
-- **Migrating `tool_call`, `reasoning`, and friends to `Style`.** The new
-  `Style` type is reusable, but folding existing style sections into it is a
-  follow-up.
-  This RFD focuses on the markdown renderer.
-- **Light/dark theme presets.** Out of scope.
-  Users compose their own stylesheet; we may ship presets later but not in this
-  RFD.
-- **Terminal capability detection.** The stylesheet is applied as-is.
-  Whether the terminal actually renders 24-bit RGB, ANSI 256, italic, dim, etc.
-  is the terminal's problem.
-  Detection is a separate concern.
+- **Replacing the syntect theme.** Code-block bodies continue to use the syntect
+  theme selected via `style.markdown.theme`.
+  The stylesheet affects only markdown elements (headings, lists, etc.), not
+  tokens inside fenced code.
+- **Migrating `tool_call`, `reasoning`, and other style sections to `Style`.**
+  `Style` is reusable, but folding existing style sections into it is deferred
+  to a follow-up.
+- **Light/dark theme presets.** Users compose their own stylesheet; built-in
+  presets are out of scope.
+- **Terminal capability detection.** The renderer emits the configured SGR
+  sequences (24-bit RGB, ANSI 256, italic, dim) as-is without probing terminal
+  support.
 - **Styling every comrak node.** Footnote definitions and references, wiki
   links, image delimiters, raw/HTML inline and block content, front matter, and
-  escaped tags are passed through unstyled today and remain so.
-  Slots can be added in a later RFD if a concrete need appears.
+  escaped tags remain unstyled.
 
 ## Risks and Open Questions
 
-- **Naming bikeshed.** `style.markdown.elements` vs `style.markdown.colors` vs
-  per-element keys hanging directly off `style.markdown.*`.
-  The proposal picks `elements` because "colors" undersells it (we also set
-  intensity, italic, underline, strikethrough) and because flat per-element keys
-  would conflict with existing scalar fields (`wrap_width`, `theme`,
-  `hr_style`).
-  Worth confirming.
-- **Stack-discipline regressions.** A push without a pop would leak styling into
-  following content.
-  Mitigated by: debug-assert empty stack in `TerminalWriter::finish`, plus
-  per-element snapshot tests that compare exact ANSI byte sequences (the
-  renderer already has these for code blocks).
+- **Config key naming.** `style.markdown.elements` was chosen over
+  `style.markdown.colors` (slots also control `intensity`, `italic`,
+  `underline`, and `strikethrough`) and over flat per-element keys under
+  `style.markdown.*` (which would conflict with scalar fields such as
+  `wrap_width`, `theme`, and `hr_style`).
+- **Stack-discipline regressions.** A `push_style` without a matching
+  `pop_style` leaks styling into subsequent output.
+  Mitigated by a debug assertion in `TerminalWriter::finish` that the stack is
+  empty, plus per-element snapshot tests comparing exact ANSI byte sequences.
 
 ## Implementation Plan
 
-Three phases, each reviewable as a logical slice, shipped together so no
+The implementation splits into three reviewable phases shipped together so no
 intermediate config surface is exposed.
 
 ### Phase 1: `Style` and the writer stack (internal)
@@ -685,113 +603,93 @@ intermediate config surface is exposed.
 - Add `jp_md::style` with `Style`, `Intensity`, `ColorOverride`, `Color`,
   `HeadingStyles`, `InlineCodeStyles`, `BlockquoteStyles`, `TableStyles`,
   `TaskCheckboxStyles`, `LinkStyles`, and `MarkdownStyleSheet` as sparse
-  override types — every field optional, `Default` empty.
+  override types with optional fields and an empty `Default`.
 - Replace `AnsiState::bold: bool` with `AnsiState::intensity: Intensity` and
-  update `restore_sequence` / `update` to handle the SGR 22 bold / dim
-  collision.
+  update `restore_sequence` / `update` to handle the SGR 22 bold/dim reset.
 - Restructure `TerminalWriter::prefix` from `String` to `Vec<PrefixSpan>` (each
-  span carrying an optional `Style`) so the `blockquote.marker` style reaches
-  wrap-break continuation lines.
-  Update `format_block_quote` and `format_item` to push styled / unstyled spans
-  accordingly.
+  span carrying an optional `Style`) so `blockquote.marker` reaches wrap-break
+  continuation lines, and update `format_block_quote` and `format_item` to push
+  styled and unstyled spans.
 - Implement theme-derived and renderer-baseline style resolution inside `jp_md`
   (see "Effective style resolution").
   Existing snapshot tests must continue to pass byte-for-byte.
 - Add `TerminalWriter::push_style` / `pop_style` with the `Vec<AnsiState>`
-  snapshot stack and the debug-assert in `finish()`.
+  snapshot stack and the empty-stack debug assertion in `finish()`.
 - Refactor `TerminalFormatter`, the streaming code fence helpers
   (`render_code_fence`, `render_closing_fence`), and `table::format_table` to
-  consult the stylesheet via `push_style` / `pop_style` instead of hard-coded
-  `BOLD_START` / etc.
-- Add the `Formatter::style_sheet` builder method.
-- Bridge the existing `style.inline_code.background` config field into
-  `MarkdownStyleSheet::inline_code.body.bg` inside `formatter_from_config`, so
-  removing `Formatter::inline_code_bg` doesn't regress current user config.
-- Remove `Formatter::inline_code_bg`.
-
-Reviewable in isolation.
-No new config keys; existing `style.inline_code.background` keeps working
-through the `formatter_from_config` bridge.
+  apply styles via `push_style` / `pop_style` instead of hard-coded `BOLD_START`
+  / `BOLD_END` constants.
+- Add the `Formatter::style_sheet` builder method, bridge
+  `style.inline_code.background` into `MarkdownStyleSheet::inline_code.body.bg`
+  inside `formatter_from_config`, and remove `Formatter::inline_code_bg`.
 
 ### Phase 2: Config surface
 
-- Add `jp_config::style::Style` config struct (with the six optional attribute
-  fields), the grouped sub-style configs (`InlineCodeStylesConfig`,
-  `BlockquoteStylesConfig`, `TableStylesConfig`, `TaskCheckboxStylesConfig`,
-  `LinkStylesConfig`), and `ElementsConfig`.
-- Wire it through `MarkdownConfig` with the standard `PartialConfigDelta` /
-  `FillDefaults` / `AssignKeyValue` / `ToPartial` glue.
+- Add `jp_config::style::Style`, the grouped sub-style configs
+  (`InlineCodeStylesConfig`, `BlockquoteStylesConfig`, `TableStylesConfig`,
+  `TaskCheckboxStylesConfig`, `LinkStylesConfig`), and `ElementsConfig`, and
+  wire `ElementsConfig` into `MarkdownConfig` with `PartialConfigDelta`,
+  `FillDefaults`, `AssignKeyValue`, and `ToPartial`.
 - Lift `formatter_from_config` out of `jp_cli::render::chat` into a shared
-  module reachable from both `ChatRenderer` and `ToolRenderer`, and have it also
-  translate `style.markdown.elements.*` into the `MarkdownStyleSheet`.
-  The Phase-1 bridge for the legacy `style.inline_code.background` key stays in
-  place alongside.
-  Construct `ToolRenderer`'s `Formatter` through the same helper.
+  module used by both `ChatRenderer` and `ToolRenderer`, and translate
+  `style.markdown.elements.*` into `MarkdownStyleSheet` alongside the Phase-1
+  bridge for `style.inline_code.background`.
 - Migrate `ToolRenderer::render_result` from manual ` ``` ` emission to
   `Formatter::render_code_fence` / `render_closing_fence` so `code_fence`
   styling reaches tool-result output.
-- Migrate `DefaultBackground` (in `jp_md::format`) from `param: String` to a
-  logical `color: Color` field so SGR construction for the reasoning-background
-  path lives inside `jp_md`.
-  Update `jp_cli::render::chat::terminal_options` to pass `Color` directly.
-- Delete `jp_cli::format::color_to_bg_param`.
-  The stylesheet path already routes `Color` / `ColorOverride` through `jp_md`;
-  with `DefaultBackground` migrated, no callers remain.
-- Snapshot tests covering per-element rendering, plus soft-wrap tests that
-  verify fg colors *and* the `blockquote.marker` style survive line breaks.
-  Add a tool-result snapshot that exercises fenced-code styling.
+- Migrate `DefaultBackground` (in `jp_md::format`) from `param: String` to
+  `color: Color`, update `jp_cli::render::chat::terminal_options` to pass
+  `Color` directly, and delete `jp_cli::format::color_to_bg_param`.
+- Add snapshot tests for per-element rendering, soft-wrap tests verifying that
+  `fg` colors and `blockquote.marker` survive line breaks, and a tool-result
+  snapshot exercising `code_fence` styling.
 
 Depends on Phase 1.
 
 ### Phase 3: Deprecate `style.inline_code.background`
 
-Hard removal is out of scope for this RFD — stored conversation
-`base_config.json` snapshots and event deltas already contain the old key, and
-`jp_conversation::compat::strip_unknown_fields` strips anything not in the
-schema before deserializing.
-Removing the field would silently drop the override on load.
-Instead, this phase promotes the Phase-1 CLI bridge into a proper config-layer
-alias:
+Hard removal is out of scope for this RFD: stored conversation
+`base_config.json` snapshots and event deltas already contain
+`style.inline_code.background`, and
+`jp_conversation::compat::strip_unknown_fields` strips fields absent from the
+schema before deserializing, which would silently drop the override on load.
+Instead, this phase replaces the Phase-1 CLI bridge with a config-layer alias:
 
-- Keep `style.inline_code.background` as a first-class but deprecated schema
-  field on `InlineCodeConfig`.
-  It must remain in the schema so `strip_unknown_fields` does not strip it from
-  persisted conversation data before the alias logic runs.
+- Keep `style.inline_code.background` as a deprecated schema field on
+  `InlineCodeConfig` so `strip_unknown_fields` preserves it when loading stored
+  conversations.
 - During the config load / `FillDefaults` pass, copy the alias value into
   `style.markdown.elements.inline_code.body.bg` if the new key is unset, then
   clear the alias.
-  Applies uniformly to: TOML files, `--cfg style.inline_code.background=...`,
-  `JP_CFG_STYLE_INLINE_CODE_BACKGROUND`, and stored conversation base configs /
-  config delta events.
-- With the config-layer alias in place, retire the Phase-1
-  `formatter_from_config` bridge for `style.inline_code.background` — by the
-  time the formatter helper runs, the value lives at the new key.
-- Emit a `tracing::warn!` deprecation message when the old key is observed in
-  any of those sources, naming the replacement key.
-- Document the mapping in the change log:
-  - `style.inline_code.background` →
-    `style.markdown.elements.inline_code.body.bg`
-  - `JP_CFG_STYLE_INLINE_CODE_BACKGROUND` →
-    `JP_CFG_STYLE_MARKDOWN_ELEMENTS_INLINE_CODE_BODY_BG`
-- Update the schema snapshot to reflect the deprecation, and update the docs to
-  point users at the new key.
+  This applies uniformly to TOML files, `--cfg
+  style.inline_code.background=...`, `JP_CFG_STYLE_INLINE_CODE_BACKGROUND`, and
+  stored conversation base configs and config delta events.
+- Retire the Phase-1 `formatter_from_config` bridge for
+  `style.inline_code.background`, since the value already lives at the new key
+  when the formatter helper runs.
+- Emit a `tracing::warn!` deprecation message naming the replacement key when
+  the old key is observed in any source.
+- Document the mapping in the change log (`style.inline_code.background` ->
+  `style.markdown.elements.inline_code.body.bg` and
+  `JP_CFG_STYLE_INLINE_CODE_BACKGROUND` ->
+  `JP_CFG_STYLE_MARKDOWN_ELEMENTS_INLINE_CODE_BODY_BG`), update the schema
+  snapshot, and update user documentation to reference the new key.
 
-Hard removal of `InlineCodeConfig::background` is scheduled for a follow-up RFD
-or release once the alias has been in place long enough to migrate.
-At that point, `--cfg=NONE` (RFD 038) is the recovery path if broken config
-prevents JP from starting.
+Hard removal of `InlineCodeConfig::background` is deferred to a follow-up RFD or
+release once the alias has been in place long enough to migrate, with
+`--cfg=NONE` (RFD 038) as the recovery path if broken config prevents JP from
+starting.
 
 Depends on Phase 2.
 
 ## References
 
 - [RFD 004]: original decision to maintain a custom comrak-based terminal
-  renderer in `jp_md`.
-  This RFD extends that renderer's styling surface.
-- `jp_md::render::TerminalFormatter` — the AST walker whose hard-coded SGR
-  calls this RFD replaces.
-- `jp_term::ansi::AnsiState` — the existing state-tracking primitive that the
-  proposed writer stack builds on.
-- `termimad`'s `MadSkin` — referenced as schema inspiration; not adopted.
+  renderer in `jp_md`, which this RFD extends.
+- `jp_md::render::TerminalFormatter`: the AST walker whose hard-coded SGR calls
+  this RFD replaces.
+- `jp_term::ansi::AnsiState`: the state-tracking primitive that the writer style
+  stack builds on.
+- `termimad`'s `MadSkin`: referenced as schema inspiration; not adopted.
 
 [RFD 004]: 004-streaming-markdown-parser-and-terminal-renderer-in-jp_md.md

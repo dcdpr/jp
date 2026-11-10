@@ -13,15 +13,14 @@
 ## Summary
 
 This RFD extends [RFD D25]'s argument-conditional tool policies to evaluate
-rules incrementally as individual tool parameters finish streaming ([RFD 043]).
-Evaluating rules before the full argument payload arrives allows early
-permission prompts and immediate stream cancellation when a tool call is
-declined.
+rules incrementally as individual parameters finish streaming ([RFD 043]).
+JP can prompt for permission or cancel the stream before the full argument
+payload arrives.
 
 ## Motivation
 
-[RFD D25] introduces conditional policy rules that match on argument values.
-Its evaluation model waits for all arguments to arrive before evaluating:
+[RFD D25] introduces conditional policy rules that match on argument values, but
+evaluates them only after all arguments arrive:
 
 ```txt
 ToolCallPart::Start { id, name }     ← tool name known
@@ -33,44 +32,45 @@ Flush                                ← arguments parsed, policy evaluated NOW
 
 For `fs_create_file` with a rule `{ arg = "/path", prefix = "src/", mode =
 "unattended" }`, the decision depends only on `path`.
-The `path` value finishes streaming in the first chunk — but JP waits for
+The `path` value finishes streaming in the first chunk, yet JP waits for
 `content` (potentially thousands of lines) before acting on it.
 
-The cost of waiting:
+Waiting has three costs:
 
 - **Wasted streaming time.** If the policy resolves to `ask` and the user
-  declines, all time spent streaming `content` was wasted.
-  For large files this is seconds of LLM output tokens billed but never used.
+  declines, every token spent streaming `content` is wasted.
+  For large files, that is seconds of billed LLM output that is never used.
 - **Delayed approval.** If the policy resolves to `unattended`, execution could
-  begin as soon as `path` is known.
-  Instead it waits for the full argument object.
-- **Delayed prompt.** If the policy resolves to `ask`, the user could be
-  reviewing and deciding while `content` streams in the background.
-  Instead they wait, then decide, then wait again for execution.
+  begin as soon as `path` is known instead of waiting for the full argument
+  object.
+- **Delayed prompt.** If the policy resolves to `ask`, the user could review and
+  decide while `content` streams in the background, instead of waiting for
+  streaming to finish before deciding and then waiting again for execution.
 
 ## Design
 
 ### Prerequisites
 
-This RFD depends on two prior RFDs:
-
 - **[RFD D25]** defines the conditional policy types (`RunPolicy`, `RunRule`,
   `ParamCondition`, `TypedMatcher`), the `policy` config namespace, and the
   first-match-wins evaluation model.
-  This RFD extends [RFD D25]'s post-flush evaluation with a streaming
-  equivalent.
+  This RFD extends its post-flush evaluation to run on streaming arguments.
 - **[RFD 043]** introduces incremental argument parsing via
   `ToolCallArgumentProgress` events.
-  Each event carries a `StreamFragment`; `ObjectEntry { key, value: Done }`
-  signals that a parameter's value is complete at any nesting level.
+  Each event carries a `StreamFragment`, where `ObjectEntry { key, value: Done
+  }` signals that a parameter value is complete at any nesting level.
   This RFD consumes those signals to drive policy evaluation.
 
 ### Evaluation algorithm
 
-The core evaluator is a pure function.
-It takes the policy's rule list and a map of parameter values received so far,
-and returns `Option<RunMode>` — `Some` if a rule matched, `None` if the first
-non-eliminated rule needs a parameter that hasn't arrived yet.
+The core evaluator is a pure function in `jp_cli::cmd::query::tool::policy`.
+It imports the rule types from `jp_config::conversation::tool::policy` ([RFD
+D25]) and matches against `serde_json::Value` parameter values: `jp_config`
+defines the types and `jp_cli` evaluates them at runtime.
+
+Given the policy's rule list and the map of parameter values received so far,
+`evaluate` returns `Option<RunMode>`: `Some` if a rule matched, or `None` if the
+first non-eliminated rule needs a parameter that has not arrived yet.
 
 ```rust
 fn evaluate(rules, known_params) -> Option<RunMode>:
@@ -89,35 +89,26 @@ fn evaluate(rules, known_params) -> Option<RunMode>:
     return Some(RunMode::Ask)           // implicit safety fallback
 ```
 
-The critical property: **a rule whose parameter hasn't arrived yet blocks
-evaluation.** First-match-wins means that rule has higher priority than
-everything below it.
-Skipping it to evaluate a lower-priority rule could produce the wrong mode.
+**A rule whose parameter has not arrived yet blocks evaluation.** Under
+first-match-wins semantics, that rule has higher priority than every rule below
+it, so skipping ahead to a lower-priority rule could return the wrong mode.
 
 Policies without conditional rules (string aliases like `run = "ask"`, or a
 single catch-all rule) resolve on the first call with an empty `known_params`
-map — the catch-all matches immediately.
-These go through the existing permission fast path in
-`ToolCoordinator::decide_permission`; no `StreamingPolicyState` is created.
+map because the catch-all matches immediately.
+These policies take the existing permission fast path in
+`ToolCoordinator::decide_permission` without creating a `StreamingPolicyState`.
 
-### Where the evaluator lives
+### Integration with `ToolCallArgumentProgress`
 
-The evaluation function lives in `jp_cli::cmd::query::tool::policy`.
-It imports the rule types from `jp_config::conversation::tool::policy` (defined
-by [RFD D25]) and operates on `serde_json::Value` for parameter values.
+In [RFD 043], `EventBuilder::handle_part` returns
+`Vec<ToolCallArgumentProgress>` for `ArgumentChunk` events, and the turn loop
+forwards each event's `StreamFragment` to `ToolRenderer` for incremental
+display.
+This RFD adds the policy evaluator as a second consumer.
 
-`jp_config` defines the types; `jp_cli` evaluates them at runtime.
-
-### Integration with ToolCallArgumentProgress
-
-[RFD 043] makes `EventBuilder::handle_part` return
-`Vec<ToolCallArgumentProgress>` for `ArgumentChunk` events.
-Each progress event carries a `StreamFragment`.
-The turn loop forwards these to the `ToolRenderer` for incremental display.
-
-This RFD adds a second consumer: the policy evaluator.
-A `StreamingPolicyState` struct, held per in-flight tool call, tracks which
-parameters have completed and feeds them to the evaluator:
+A `StreamingPolicyState` struct, held per in-flight tool call, tracks completed
+parameters and feeds them to the evaluator:
 
 ```rust
 struct StreamingPolicyState {
@@ -130,25 +121,24 @@ struct StreamingPolicyState {
 }
 ```
 
-When the turn loop receives a `ToolCallArgumentProgress` whose fragment signals
-a parameter completion (see [Nested argument paths](#nested-argument-paths) for
-how completion is detected at any depth), it:
+When a `ToolCallArgumentProgress` fragment signals that a parameter is complete
+(see [Nested argument paths](#nested-argument-paths) for nested completion
+detection), the turn loop:
 
-1. Uses the `FragmentAggregator` (from [RFD 043]) to obtain the complete
-   `serde_json::Value` for that parameter.
-2. Inserts it into `known_params`.
-3. Re-evaluates: calls the evaluator with the updated `known_params`.
-4. If the result is `Decided`, triggers the permission flow immediately.
+1. Reads the complete `serde_json::Value` for that parameter from the
+   `FragmentAggregator` ([RFD 043]).
+2. Inserts the value into `known_params`.
+3. Calls the evaluator with the updated `known_params`.
+4. Triggers the permission flow immediately if the result is `Decided`.
 
-### Integration point in the turn loop
+### Turn loop integration
 
-Today, permission is decided at the Flush boundary in `turn_loop.rs` (after
-`EventBuilder` emits the final `ToolCallRequest`).
-The streaming evaluator runs earlier — during the `StreamingLoopEvent::Llm`
-match arm, alongside the existing `ToolCallArgumentProgress` forwarding to the
-renderer.
+Without streaming evaluation, `turn_loop.rs` decides permission at the Flush
+boundary after `EventBuilder` emits the final `ToolCallRequest`.
+The streaming evaluator runs earlier in the `StreamingLoopEvent::Llm` match arm,
+alongside `ToolCallArgumentProgress` forwarding to the renderer.
 
-The flow per tool call becomes:
+Each tool call follows this flow:
 
 ```txt
 ToolCallPart::Start { id, name }
@@ -167,19 +157,16 @@ Flush → ToolCallRequest with complete arguments
   → If still None: all parameters are now known, evaluate once more
 ```
 
-The Flush fallback handles providers that don't stream arguments incrementally
-(e.g., Ollama emitting the entire argument object in one chunk).
-In that case, all `ToolCallArgumentProgress` events arrive in the same batch as
-Flush, and evaluation completes immediately.
-There is no separate "post-flush evaluation path" — the same evaluator is
-called, just with all parameters available at once.
+The Flush step handles providers that do not stream arguments incrementally (for
+example, Ollama emitting the entire argument object in one chunk).
+All `ToolCallArgumentProgress` events then arrive in the same batch as Flush,
+and the same evaluator runs once with all parameters available.
 
 ### Early permission prompt with partial arguments
 
-When the evaluator resolves to `ask` before all arguments have arrived, the
-permission prompt is shown with partial argument information.
-The turn loop renders completed parameters and shows a placeholder for
-in-progress ones.
+When the evaluator resolves to `ask` before all arguments arrive, the turn loop
+prompts for permission using completed parameters and placeholders for
+parameters still streaming.
 
 For the `function_call` display style:
 
@@ -197,18 +184,14 @@ For the `json` display style:
 }
 ```
 
-The user sees the parameter that triggered the policy rule (e.g., `path`) and
-can make an informed decision.
-If the user approves, streaming continues and execution begins when all
-arguments are complete.
-If the user declines, the tool call is cancelled immediately.
+Because the parameter that matched the policy rule (such as `path`) is already
+visible, the user can decide immediately.
+Approving lets streaming continue and starts execution once all arguments
+arrive; declining cancels the tool call immediately.
 
-Partial argument rendering is new functionality that this RFD requires from the
-`ToolRenderer`.
-[RFD 043] defines the progress event protocol but explicitly defers renderer
-changes.
-This RFD's Phase 4 covers the renderer work needed to display partial arguments
-during the permission prompt.
+[RFD 043] defines the progress event protocol but defers renderer changes, so
+Phase 4 extends `ToolRenderer` to render partial arguments during the permission
+prompt.
 
 ### Cancellation on rejection
 
@@ -217,41 +200,36 @@ When the user declines a tool call during streaming, JP:
 1. Marks the tool call as `Completed` with a "skipped by user" response.
 2. Discards remaining `ArgumentChunk` events for that tool call index.
 3. **If this is the only pending tool call**, cancels the LLM response stream.
-   LLMs emit tool calls as the terminal content of a response — no message text
-   follows.
-   Cancelling the stream avoids generating (and billing for) argument tokens
-   that will be discarded.
-   For a thousand-line `fs_create_file`, this can save significant token cost.
-4. **If other tool calls are still in flight**, keeps the stream alive so those
-   tool calls can complete.
-   The rejected tool call's argument chunks are silently discarded.
+   Because tool calls are the terminal content of an LLM response, no message
+   text follows; cancelling avoids generating and paying for discarded argument
+   tokens (such as a thousand-line `fs_create_file` payload).
+4. **If other tool calls are still in flight**, keeps the stream open so the
+   remaining tool calls can complete.
 
-Stream cancellation uses the existing `CancellationToken` infrastructure.
-The turn loop already handles mid-stream cancellation via `Ctrl+C` signals; the
-mechanism is identical.
+Stream cancellation reuses the `CancellationToken` mechanism that handles
+mid-stream `Ctrl+C` interrupts in the turn loop.
 
 ### Nested argument paths
 
-[RFD D25] supports `arg` pointers at any depth — `/path` (top-level),
-`/patterns/paths` (nested array), `/patterns/old` (nested string).
+[RFD D25] supports `arg` pointers at any depth, such as `/path` (top-level),
+`/patterns/paths` (nested array), and `/patterns/old` (nested string).
 Streaming evaluation works at all depths by consuming [RFD 043]'s nested `Done`
 signals.
 
 #### Top-level parameters
 
-For a top-level parameter like `/path`, completion is signaled by a top-level
-`ObjectEntry { key: "path", value: Done }` in the fragment stream.
-The aggregator yields the complete `serde_json::Value` for `path`.
-The evaluator matches against it.
+For a top-level parameter like `/path`, a top-level `ObjectEntry { key: "path",
+value: Done }` fragment signals completion.
+The aggregator yields the complete `serde_json::Value` for `path`, and the
+evaluator matches against it.
 
 #### Nested parameters with array traversal
 
 For a nested parameter like `/patterns/paths`, [RFD D25] defines existential
 semantics: the condition is met if **any** resolved value satisfies the matcher.
-
-Existential matching is monotonic: the decision can go from "no match yet" to
-"match" as array elements arrive, but never from "match" to "no match."
-This makes incremental evaluation safe.
+Because existential matching is monotonic, a rule can transition from unmatched
+to matched as array elements arrive, never the reverse, which makes incremental
+evaluation sound.
 
 [RFD 043]'s fragment protocol emits `Done` at each nesting level.
 For `/patterns/paths`:
@@ -271,46 +249,38 @@ ObjectEntry { key: "patterns", value: ArrayItem { index: 1, value: ... } }
 ObjectEntry { key: "patterns", value: Done }             ← patterns array complete
 ```
 
-The evaluator processes this as follows:
+`StreamingPolicyState` tracks a boolean "matched" flag per array-traversal rule
+and processes fragments as they arrive:
 
-1. As each leaf value completes (e.g., `"src/a.rs"` in `patterns[0].paths[0]`),
-   check the matcher.
-   If it matches, the rule is satisfied — return `Decided` immediately.
-   No need to wait for the rest of the array.
-2. If a leaf value doesn't match, continue.
-   More elements may arrive.
-3. When the top-level parameter completes (`patterns` Done), all nested values
-   have been seen.
-   If no element matched, the rule is eliminated.
-
-The `StreamingPolicyState` tracks per-rule match state for array traversals: a
-boolean "matched" flag.
-Once set, the rule is decided and further elements for that rule are ignored.
-If the top-level parameter completes without a match, the flag remains false and
-the rule is eliminated.
+1. When a leaf value completes (such as `"src/a.rs"` in `patterns[0].paths[0]`),
+   test it against the matcher.
+   On a match, set the rule's matched flag, ignore further elements for that
+   rule, and return `Decided` immediately.
+2. When a leaf value does not match, keep waiting for subsequent array elements.
+3. When the top-level parameter completes (`patterns` emits `Done`) with the
+   matched flag still false, all nested values have been inspected without a
+   match, so the rule is eliminated.
 
 #### When evaluation blocks
 
-A rule's `arg` pointer references a specific top-level parameter.
-The evaluator returns `Waiting` only when that top-level parameter hasn't
-started arriving yet.
-Once any fragment for the parameter appears, the evaluator is actively checking.
-Once the parameter's `Done` arrives, the rule is either matched (Decided) or
-eliminated (try next rule).
+Each rule's `arg` pointer targets a specific top-level parameter.
+The evaluator returns `Waiting` while that parameter has not started arriving,
+checks leaf values as fragments stream in, and either resolves (`Decided`) on
+the first matching element or eliminates the rule when the top-level parameter
+emits `Done`.
+A rule on `/patterns/paths` therefore resolves as soon as any nested `paths`
+element matches or `patterns` finishes streaming without a match, rather than
+blocking until Flush.
 
-This means a rule on `/patterns/paths` doesn't block evaluation until Flush —
-it resolves as soon as either (a) any nested `paths` element matches, or (b)
-`patterns` finishes streaming without a match.
+### `RunMode::Edit` waits for complete arguments
 
-### RunMode::Edit waits for complete arguments
+Because the user cannot edit partial arguments, `edit` requires the complete
+argument object.
+When a rule resolves to `edit`, the streaming evaluator records the decision
+immediately but defers the editor prompt until all arguments arrive.
 
-When the evaluator resolves to `edit`, the editor needs the complete argument
-object — the user can't edit partial arguments.
-The streaming evaluator treats `edit` as decided (the mode is known) but defers
-the actual editor prompt until all arguments have arrived.
-
-`ask` and `unattended` are the modes that benefit from early action.
-`skip` also benefits trivially (the tool is rejected immediately).
+Early resolution therefore benefits `ask`, `unattended`, and `skip` (which
+rejects the tool call immediately).
 
 ### Parameter ordering convention
 
@@ -322,113 +292,99 @@ which reflects the declaration order in the tool's TOML definition.
 Most tool definitions already declare short, policy-relevant parameters first
 (`path`, `source`, `util`) and large content parameters last (`content`,
 `patterns`).
-This RFD documents this as a convention:
+This RFD documents that ordering as a convention:
 
 > Parameters referenced by `policy.run` or `policy.result` rules should be
 > declared before large content parameters in the tool's parameter list.
 
-This is a soft convention.
-JP does not enforce ordering or reorder parameters automatically.
+This convention is advisory; JP does not enforce ordering or reorder parameters
+automatically.
 If a provider streams parameters out of schema order, the evaluator returns
-`Waiting` until the needed parameter arrives — no incorrect decisions, just
-lost optimization.
-The worst case is identical to [RFD D25]'s current behavior (evaluate after all
-arguments arrive).
+`Waiting` until the needed parameter arrives.
+Correctness is unaffected, and the worst case matches [RFD D25]'s post-flush
+evaluation.
 
 ## Drawbacks
 
-- **Monotonic array evaluation adds per-rule state.** Each rule with an array
-  traversal needs a "matched" flag tracked across multiple fragment events.
-  This is simple bookkeeping, but it's state that doesn't exist in [RFD D25]'s
-  post-complete evaluation where the full argument object is available.
+- **Per-rule state for array traversal.** Each array-traversal rule tracks a
+  matched flag across fragment events, state that [RFD D25]'s post-flush
+  evaluator does not need because the full argument object is already assembled.
 
-- **Partial argument rendering requires new renderer work.** The permission
-  prompt needs to display known parameters alongside streaming placeholders.
-  This is new functionality in the `ToolRenderer` that doesn't exist today and
-  isn't provided by [RFD 043].
+- **Partial argument rendering in `ToolRenderer`.** Displaying known parameters
+  alongside streaming placeholders in the permission prompt requires new
+  `ToolRenderer` functionality beyond [RFD 043].
 
 ## Alternatives
 
 ### Cancel the LLM stream unconditionally on rejection
 
 Always cancel the LLM stream when the user rejects a tool call, even if other
-tool calls are in flight.
-The other tool calls would be re-requested in the next turn.
+tool calls are in flight, and let the model re-request them in the next turn.
 
-Rejected.
-Cancelling discards partially-streamed tool calls that may be nearly complete.
-The re-request costs a full additional LLM round-trip.
-Selective cancellation (only when the rejected call is the last pending) is
-strictly better.
+Rejected because cancelling discards partially-streamed tool calls that may be
+nearly complete and forces an extra LLM round-trip.
+Selective cancellation (only when the rejected call is the last pending) avoids
+that cost.
 
-### Speculative evaluation past Waiting rules
+### Speculative evaluation past `Waiting` rules
 
-When a rule returns `Waiting`, speculatively evaluate later rules to see if any
-can be decided.
-If a later rule matches, use its mode provisionally and re-evaluate when the
-pending parameter arrives.
+When a rule returns `Waiting`, speculatively evaluate later rules, use a
+matching rule's mode provisionally, and re-evaluate when the pending parameter
+arrives.
 
-Rejected.
-This violates first-match-wins semantics.
-A provisional decision from rule 3 might be wrong if rule 1's parameter arrives
-and matches.
-The user would see a prompt based on rule 3's mode, then potentially a different
-behavior when rule 1 resolves.
+Rejected because it violates first-match-wins semantics.
+A provisional decision from rule 3 is wrong if rule 1's parameter later arrives
+and matches, which would show the user a prompt for rule 3's mode and then
+switch behavior when rule 1 resolves.
 
 ### Top-level parameters only
 
-Restrict streaming evaluation to rules whose `arg` pointer has a single segment
-(e.g., `/path`).
-Multi-segment pointers (`/patterns/paths`) fall back to evaluation after all
-arguments arrive.
+Restrict streaming evaluation to single-segment `arg` pointers (such as `/path`)
+and fall back to post-flush evaluation for multi-segment pointers
+(`/patterns/paths`).
 
-Rejected.
-`fs_modify_file`'s `patterns` array with nested `paths` is a core use case for
-argument-conditional policies.
-Deferring nested evaluation removes the streaming benefit for one of the most
-important tools.
-The monotonic property of existential array matching makes incremental nested
-evaluation sound without excessive complexity.
+Rejected because `fs_modify_file`'s `patterns` array with nested `paths` is a
+core use case for argument-conditional policies.
+Monotonic existential array matching supports nested evaluation incrementally
+without excessive complexity.
 
 ## Non-Goals
 
 - **LLM stream cancellation with multiple pending tool calls.** When other tool
-  calls are still streaming, the rejected call's chunks are discarded but the
-  stream stays alive.
+  calls are still streaming, JP discards the rejected call's chunks and keeps
+  the stream open.
 
-- **Argument reordering.** Manipulating the JSON schema property order to ensure
-  policy-relevant parameters stream first.
-  The schema order is a convention, not a guarantee.
+- **Argument reordering.** JP does not reorder JSON schema properties to make
+  policy-relevant parameters stream first; schema order is a convention, not a
+  guarantee.
 
-- **Partial argument execution.** Starting tool execution before all arguments
-  arrive (e.g., beginning a file write as soon as `path` is known, before
-  `content` finishes).
-  Tool execution always uses the complete argument object.
+- **Partial argument execution.** Tool execution always waits for the complete
+  argument object (for example, `fs_create_file` does not start writing as soon
+  as `path` is known, before `content` finishes).
 
 ## Risks and Open Questions
 
-1. **RFD 043 completion signal granularity.** This RFD assumes [RFD 043]'s
-   `ToolCallArgumentProgress` emits `Done` at each nesting level, including
-   within arrays.
-   If 043's fragment protocol changes during implementation, the nested
+1. **RFD 043 completion signal granularity.** Nested evaluation assumes [RFD
+   043]'s `ToolCallArgumentProgress` emits `Done` at each nesting level,
+   including within arrays.
+   If [RFD 043]'s fragment protocol changes during implementation, nested
    evaluation integration may need adjustment.
 
-2. **Prompt display during streaming.** The permission prompt shows partial
-   arguments.
-   For the `json` display style, the placeholder syntax (`"#": "streaming..."`)
-   is not ideal — `#` is a valid JSON key.
-   A dedicated partial-arguments rendering approach may be needed.
+2. **Prompt display during streaming.** For the `json` display style, rendering
+   in-progress parameters as `"#": "streaming..."` in the permission prompt
+   collides with `#` as a valid JSON key, so a dedicated partial-arguments
+   rendering format may be needed.
 
 3. **Multiple tool calls in one response.** When the LLM emits multiple tool
    calls, each has independent streaming policy state.
-   Concurrent prompts need sequencing — the existing `prompt_active` /
-   `pending_prompts` queue in `ToolCoordinator` handles this.
+   The existing `prompt_active` and `pending_prompts` queue in `ToolCoordinator`
+   sequences concurrent prompts.
 
-4. **Provider streaming behavior.** The optimization assumes providers stream
+4. **Provider streaming behavior.** Early evaluation assumes providers stream
    argument JSON incrementally in small chunks.
-   If a provider buffers arguments and emits them as a single large
-   `ArgumentChunk`, streaming evaluation adds no benefit (but no cost beyond
-   creating the `StreamingPolicyState`).
+   If a provider buffers arguments into a single large `ArgumentChunk`,
+   streaming evaluation adds no benefit (and no cost beyond creating
+   `StreamingPolicyState`).
    This should be validated empirically with Anthropic, OpenRouter, and OpenAI.
 
 ## Implementation Plan
@@ -436,51 +392,49 @@ evaluation sound without excessive complexity.
 ### Phase 1: Policy evaluator function
 
 - Implement `evaluate(rules: &[RunRule], known_params: &HashMap<String, Value>)
-  -> PolicyDecision` in `jp_cli::cmd::query::tool::policy`.
-- Handle both return cases: `Decided`, `Waiting`.
+  -> PolicyDecision` in `jp_cli::cmd::query::tool::policy`, handling both
+  `Decided` and `Waiting`.
 - For array-traversal rules, accept a pre-resolved `Value` in `known_params`
   (the caller handles fragment aggregation; the evaluator walks the value with
   [RFD D25]'s existential semantics).
-- Unit tests covering: catch-all policies, single-rule match, rule elimination,
-  waiting on missing param, catch-all after eliminations, implicit fallback,
-  nested array existential matching.
+- Add unit tests covering catch-all policies, single-rule match, rule
+  elimination, waiting on a missing param, catch-all after eliminations,
+  implicit fallback, and nested array existential matching.
 
-No dependencies beyond [RFD D25]'s types.
-Can merge independently.
+No dependencies beyond [RFD D25]'s types; can merge independently.
 
 ### Phase 2: StreamingPolicyState
 
-- Implement `StreamingPolicyState` struct that wraps the evaluator with
-  per-tool-call state (`known_params` map, current decision, per-rule array
-  match flags).
-- Method `feed_parameter(key: String, value: Value) -> Option<RunMode>` that
-  inserts the value and re-evaluates if currently unresolved.
-- Method `feed_nested_element(top_level_key: &str, path: &[PathSegment], value:
+- Implement `StreamingPolicyState` to wrap the evaluator with per-tool-call
+  state (`known_params` map, current decision, and per-rule array match flags).
+- Add `feed_parameter(key: String, value: Value) -> Option<RunMode>` to insert a
+  value and re-evaluate while unresolved.
+- Add `feed_nested_element(top_level_key: &str, path: &[PathSegment], value:
   Value) -> Option<RunMode>` for incremental array element evaluation.
-- Unit tests covering: parameter arrival order, re-evaluation on each new param,
-  early array match, array exhaustion without match.
+- Add unit tests covering parameter arrival order, re-evaluation on each new
+  param, early array match, and array exhaustion without a match.
 
 Depends on Phase 1.
 
 ### Phase 3: Turn loop integration
 
-- On `ToolCallPart::Start`: look up the tool's `RunPolicy`.
-  If no conditional rules, use the existing fast path.
-  Otherwise, create `StreamingPolicyState`.
-- On `ToolCallArgumentProgress` with parameter completion: call
+- On `ToolCallPart::Start`, look up the tool's `RunPolicy`.
+  Use the existing fast path when there are no conditional rules; otherwise
+  create `StreamingPolicyState`.
+- On `ToolCallArgumentProgress` with parameter completion, call
   `StreamingPolicyState::feed_parameter` or `feed_nested_element`.
-  If resolved:
+  When resolved:
   - For `ask`: trigger the permission prompt with partial arguments.
-  - For `unattended`: mark as pre-approved, render the tool call header with
+  - For `unattended`: mark as pre-approved and render the tool call header with
     known arguments.
   - For `skip`: mark as completed with a skip response.
-  - For `edit`: record the decision but defer the editor prompt until all
+  - For `edit`: record the decision and defer the editor prompt until all
     arguments arrive.
-- On Flush: if still `Waiting` (non-streaming provider fallback), all parameters
-  are now available — evaluate once more.
+- On Flush, if still `Waiting` (non-streaming provider fallback), evaluate once
+  more with all parameters available.
 - Wire up cancellation: if the user declines and this is the only pending tool
-  call, cancel the LLM stream.
-  Otherwise discard remaining argument chunks for that tool call index.
+  call, cancel the LLM stream; otherwise discard remaining argument chunks for
+  that tool call index.
 
 Depends on Phase 2 and [RFD 043] Phase 3 (event plumbing).
 
@@ -492,19 +446,18 @@ Depends on Phase 2 and [RFD 043] Phase 3 (event plumbing).
 - Update the permission prompt to render partial arguments when triggered during
   streaming.
 
-Depends on Phase 3.
-Can be refined iteratively after the core integration lands.
+Depends on Phase 3; can be refined iteratively after the core integration lands.
 
 ## References
 
-- [RFD D25] — Argument-conditional tool policy.
+- [RFD D25]: Argument-conditional tool policy.
   Defines the rule types, matchers, first-match-wins evaluation, and post-flush
   evaluation model that this RFD extends.
-- [RFD 043] — Incremental tool call argument streaming.
+- [RFD 043]: Incremental tool call argument streaming.
   Provides the `ToolCallArgumentProgress` events and `FragmentAggregator` that
   this RFD consumes for per-parameter completion signals.
-- [RFD 075] — Tool sandbox and access policy.
-- [RFD 076] — Tool access grants.
+- [RFD 075]: Tool sandbox and access policy.
+- [RFD 076]: Tool access grants.
 
 [RFD 043]: ../043-incremental-tool-call-argument-streaming.md
 [RFD 075]: ../075-tool-sandbox-and-access-policy.md

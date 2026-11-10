@@ -10,17 +10,16 @@
 
 ## Summary
 
-This RFD introduces a `ToolRuntime` trait that abstracts tool execution and a
-`runtime` configuration field on `ToolConfig` that selects how a tool runs.
+This RFD introduces a `ToolRuntime` trait for executing tools and a `runtime`
+field on `ToolConfig` that selects how a local tool runs.
 Tool resolution pairs each `ToolDefinition` with an `Arc<dyn ToolRuntime>`
 (`StdioRuntime`, `McpRuntime`, `BuiltinRuntime`, or a future `WasmRuntime` from
-[RFD 016]) so the coordinator calls `runtime.execute()` polymorphically.
+[RFD 016]) so the coordinator can call `runtime.execute()` polymorphically.
 `ToolSource` remains responsible only for where a tool's definition originates.
 
 ## Motivation
 
-Tool execution in JP is currently dispatched through a `match` on `ToolSource`
-inside `ToolDefinition::execute()`:
+`ToolDefinition::execute()` dispatches tool calls by matching on `ToolSource`:
 
 ```rust
 match config.source() {
@@ -30,59 +29,47 @@ match config.source() {
 }
 ```
 
-Each arm has its own argument handling, error mapping, and cancellation logic.
-The `execute_local` path builds a JSON context, renders templates, spawns a
-subprocess, and parses the output.
-`execute_mcp` calls the MCP client.
-`execute_builtin` looks up a hardcoded executor.
-These are three independent code paths that share no interface.
+Each arm is an independent code path with its own argument handling, error
+mapping, and cancellation logic: `execute_local` builds a JSON context, renders
+templates, spawns a subprocess, and parses stdout; `execute_mcp` calls the MCP
+client; and `execute_builtin` looks up a hardcoded executor.
 
-This causes several problems:
+This structure causes four problems:
 
-1. **Every consumer of tool execution must pass all possible dependencies.** The
-   `Executor::execute()` trait method takes `mcp_client: &Client` and `root:
-   &Utf8Path` even though MCP tools don't use `root` and builtin tools use
-   neither.
-   The `ToolCoordinator` threads both through every call site.
-   The `run_turn_loop` function takes both as parameters and passes them through
-   multiple layers.
-   Adding a new execution mechanism (WASM, VFS-mediated IPC) means adding more
-   parameters to every function in the chain.
+1. **Callers must thread every runtime's dependencies.** `Executor::execute()`
+   takes both `mcp_client: &Client` and `root: &Utf8Path`, even though MCP tools
+   ignore `root` and builtin tools use neither.
+   `run_turn_loop` and `ToolCoordinator` pass both parameters through every
+   layer of the call chain.
 
-2. **Testing requires all dependencies regardless of what's under test.** The
-   `MockExecutor` ignores `mcp_client` and `root`, but they must still be
-   provided.
+2. **Tests must construct unused dependencies.** `MockExecutor` ignores
+   `mcp_client` and `root`, yet callers must still provide them.
    Integration tests in `turn_loop_tests.rs` create temporary directories for
-   `root` even when testing MCP or builtin tool behavior.
-   A test for builtin tool coordination shouldn't need a filesystem path.
+   `root` even when testing only MCP or builtin tool coordination.
 
-3. **New execution mechanisms require modifying the dispatch.** Adding [RFD 016]
-   WASM support means adding a fourth arm to the match and a fourth set of
-   parameters threaded through the call chain.
-   A future VFS-mediated IPC runtime would be a fifth.
-   Each addition touches `ToolDefinition`, `Executor`, `ToolCoordinator`,
-   `run_turn_loop`, and `handle_turn`.
+3. **Adding a runtime touches the entire call chain.** Supporting WASM ([RFD
+   016]) or a VFS-mediated IPC runtime requires a new `match` arm and another
+   set of parameters threaded through `handle_turn`, `run_turn_loop`,
+   `ToolCoordinator`, `Executor`, and `ToolDefinition`.
 
 4. **Source and execution are conflated.** `ToolSource::Local` implies
-   subprocess execution.
-   But a local tool could run in a WASM sandbox or through a VFS-mediated IPC
-   channel — "where the definition comes from" and "how it runs" are
-   independent axes.
-   The current design cannot express a local tool with WASM execution without
-   introducing a new `ToolSource` variant that mixes source identity with
+   subprocess execution, but where a tool's definition comes from and how the
+   tool runs are independent axes.
+   A local tool cannot run in a WASM sandbox or over a VFS-mediated IPC channel
+   without adding a `ToolSource` variant that mixes source identity with
    execution mechanics.
 
-The fix is to extract execution into a trait.
-Tool resolution produces a runtime object alongside the definition.
-The coordinator calls the runtime without knowing what's behind it.
-Dependencies are captured at construction time, not threaded through call sites.
+Extracting execution into a `ToolRuntime` trait resolves these problems.
+Tool resolution constructs the appropriate runtime with its dependencies
+captured up front and pairs it with the `ToolDefinition`, so the coordinator
+executes every tool through a single interface.
 
 ## Design
 
 ### The `ToolRuntime` Trait
 
 `ToolRuntime` abstracts the execution of a single tool call.
-It is the runtime-side counterpart of `ToolDefinition`, which describes a tool's
+It is the runtime counterpart to `ToolDefinition`, which describes a tool's
 schema and metadata.
 
 ```rust
@@ -111,24 +98,19 @@ pub trait ToolRuntime: Send + Sync {
 }
 ```
 
-Each runtime captures its own dependencies at construction time:
-
-- `StdioRuntime` holds the project root path (or a `ProjectFiles` reference once
-  [RFD D09] is implemented).
-- `McpRuntime` holds an `Arc<jp_mcp::Client>`.
-- `BuiltinRuntime` holds a `BuiltinExecutors` registry.
-- A future `WasmRuntime` would hold the `wasmtime::Engine` and component cache.
-
-The coordinator and executor no longer need `mcp_client: &Client` or `root:
-&Utf8Path` as parameters — those are internal to the runtime that needs them.
+Each implementation captures its own dependencies at construction time, so the
+coordinator and executor no longer take `mcp_client: &Client` or `root:
+&Utf8Path` as parameters.
 
 ### Runtime Implementations
 
 #### `StdioRuntime`
 
-Wraps the current `execute_local` logic: build a JSON context from the tool
-name, arguments, answers, and options; render templates; spawn a subprocess;
-parse `jp_tool::Outcome` from stdout.
+`StdioRuntime` is the default runtime for `source = "local"` tools.
+It encapsulates the `execute_local` flow: building a JSON context from the tool
+name, arguments, answers, and options; rendering templates; spawning a
+subprocess with `root` passed as both `current_dir` and the tool context root;
+and parsing `jp_tool::Outcome` from stdout.
 
 ```rust
 pub struct StdioRuntime {
@@ -136,17 +118,14 @@ pub struct StdioRuntime {
 }
 ```
 
-The `root` field becomes `Arc<dyn ProjectFiles>` once [RFD D09] is implemented.
-For now, it remains a path.
-The subprocess receives `root` as `current_dir` and in the tool context JSON,
-exactly as today.
-
-`StdioRuntime` is the default runtime for `source = "local"` tools.
+Once [RFD D09] is implemented, `root` will change from `Utf8PathBuf` to `Arc<dyn
+ProjectFiles>`.
 
 #### `McpRuntime`
 
-Wraps the current `execute_mcp` logic: call the MCP server, collect content
-blocks, map errors.
+`McpRuntime` is the sole runtime for `source = "mcp.*"` tools.
+It wraps the `execute_mcp` logic, calling the shared MCP client, collecting
+content blocks, and mapping server errors.
 
 ```rust
 pub struct McpRuntime {
@@ -154,13 +133,12 @@ pub struct McpRuntime {
 }
 ```
 
-`McpRuntime` is the sole runtime for `source = "mcp.*"` tools.
-The MCP client is shared across all MCP tool calls.
-
 #### `BuiltinRuntime`
 
-Wraps the current `execute_builtin` logic: look up the tool in the executor
-registry, call it with arguments and answers.
+`BuiltinRuntime` is the sole runtime for `source = "builtin"` tools.
+It wraps the `execute_builtin` logic, looking up the tool in the
+`BuiltinExecutors` registry and invoking it with the call arguments and inquiry
+answers.
 
 ```rust
 pub struct BuiltinRuntime {
@@ -168,27 +146,26 @@ pub struct BuiltinRuntime {
 }
 ```
 
-`BuiltinRuntime` is the sole runtime for `source = "builtin"` tools.
-
 #### Future: `WasmRuntime`
 
-When [RFD 016] is implemented, `WasmRuntime` would instantiate a WASM component,
-provide `jp:host/*` imports, and call the tool's exported function.
-This RFD does not define `WasmRuntime` — it only establishes the trait that a
-future implementation would satisfy.
+When [RFD 016] is implemented, `WasmRuntime` will hold the `wasmtime::Engine`
+and component cache, instantiate a WASM component, provide `jp:host/*` imports,
+and call the tool's exported function.
+This RFD establishes the `ToolRuntime` trait that `WasmRuntime` will implement,
+not `WasmRuntime` itself.
 
 #### Future: `VfsRuntime`
 
-A future RFD will define a VFS-mediated IPC runtime where the subprocess
-accesses host resources (files, network, processes) through a JSON-RPC protocol
-over stdin/stdout rather than direct system calls.
-This runtime would implement the same `ToolRuntime` trait.
-This RFD does not define `VfsRuntime`.
+A future RFD will define `VfsRuntime`, a VFS-mediated IPC runtime in which the
+subprocess accesses host resources (files, network, processes) over stdin/stdout
+via JSON-RPC rather than direct system calls.
+Like `WasmRuntime`, `VfsRuntime` will implement `ToolRuntime` and is out of
+scope for this RFD.
 
 ### The `runtime` Configuration Field
 
-A new optional field on `ToolConfig` selects the execution environment for local
-tools:
+An optional `runtime` field on `ToolConfig` selects the execution environment
+for local tools:
 
 ```rust
 pub enum ToolRuntimeKind {
@@ -227,38 +204,34 @@ source = "local"
 command = ".config/jp/tools/target/release/jp-tools cargo check"
 ```
 
-Resolution order for `runtime`:
+JP resolves `runtime` in the following order:
 
-1. If `runtime` is set explicitly, use it.
-2. If `command` ends in `.wasm`, infer `runtime = "wasm"`.
+1. Use `runtime` if set explicitly.
+2. Infer `runtime = "wasm"` if `command` ends in `.wasm`.
 3. Default to `"stdio"`.
 
-The `runtime` field only applies to `source = "local"` tools.
-For `mcp` and `builtin` sources, the runtime is determined by the source —
-there is only one way to execute them.
-The field is ignored (with a warning) if set on a non-local tool.
+The `runtime` field applies only to `source = "local"` tools.
+`mcp` and `builtin` tools each have a single runtime determined by their source;
+setting `runtime` on a non-local tool logs a warning and has no effect.
 
-At this time, only `stdio` is implemented.
-Configuring `runtime = "vfs"` or `runtime = "wasm"` (or a `.wasm` command)
-produces a clear error:
+Only `stdio` is implemented in this RFD.
+Configuring `runtime = "vfs"`, `runtime = "wasm"`, or a `.wasm` command returns
+an error:
 
 ```text
 Error: Tool 'my_tool' uses runtime 'vfs', which is not yet supported.
 ```
 
-This makes the config surface forward-compatible without requiring
-implementation of all runtimes upfront.
+Accepting these values in `ToolRuntimeKind` keeps the configuration surface
+forward-compatible before `VfsRuntime` and `WasmRuntime` are implemented.
 
 ### Runtime Resolution
 
-Tool resolution currently happens in `tool_definitions()` (in `jp_llm/src/
-tool.rs`), which iterates tool configs, checks enablement, and resolves
-definitions from local config or MCP servers.
-This function returns `Vec<ToolDefinition>`.
-
-After this RFD, resolution produces `Vec<(ToolDefinition, Arc<dyn
-ToolRuntime>)>`.
-The runtime is selected based on source and config:
+`tool_definitions()` in `jp_llm/src/tool.rs` iterates tool configs, checks
+whether each tool is enabled, and resolves definitions from local config or MCP
+servers.
+Instead of `Vec<ToolDefinition>`, it returns `Vec<(ToolDefinition, Arc<dyn
+ToolRuntime>)>`, selecting each tool's runtime from its source and config:
 
 ```rust
 fn resolve_runtime(
@@ -281,14 +254,14 @@ fn resolve_runtime(
 }
 ```
 
-Runtime instances are created once at the start of `jp query` and shared across
-all tool calls of the same type.
-`StdioRuntime`, `McpRuntime`, and `BuiltinRuntime` are all `Send + Sync` and
-stateless (or hold `Arc`-wrapped shared state), so sharing is safe.
+`jp query` constructs the runtime instances once at startup and shares them
+across all tool calls of the same kind.
+`StdioRuntime`, `McpRuntime`, and `BuiltinRuntime` are `Send + Sync` and hold
+only immutable or `Arc`-wrapped shared state.
 
 ### Changes to `Executor` and `ToolCoordinator`
 
-The `Executor` trait (in `jp_llm/src/tool/executor.rs`) currently takes
+`Executor::execute()` in `jp_llm/src/tool/executor.rs` currently takes
 `mcp_client` and `root` as parameters:
 
 ```rust
@@ -301,8 +274,8 @@ async fn execute(
 ) -> ExecutorResult;
 ```
 
-After this RFD, those parameters are removed.
-The executor holds an `Arc<dyn ToolRuntime>` and delegates to it:
+With dependencies stored on the runtime, `Executor::execute()` drops both
+parameters:
 
 ```rust
 async fn execute(
@@ -312,7 +285,7 @@ async fn execute(
 ) -> ExecutorResult;
 ```
 
-The `ToolExecutor` (in `jp_cli`) is updated to hold the runtime:
+`ToolExecutor` in `jp_cli` holds the tool's `Arc<dyn ToolRuntime>`:
 
 ```rust
 pub struct ToolExecutor {
@@ -323,7 +296,8 @@ pub struct ToolExecutor {
 }
 ```
 
-Its `execute` method delegates to the runtime:
+Its `execute` method delegates to `self.runtime` and maps the `ExecutionOutcome`
+into an `ExecutorResult`:
 
 ```rust
 async fn execute(
@@ -363,8 +337,8 @@ async fn execute(
 }
 ```
 
-The `TerminalExecutorSource` is updated to receive runtimes at construction and
-pass them to each `ToolExecutor`:
+`TerminalExecutorSource` receives the runtime-paired definitions at construction
+and passes the matching runtime to each `ToolExecutor`:
 
 ```rust
 pub struct TerminalExecutorSource {
@@ -372,107 +346,92 @@ pub struct TerminalExecutorSource {
 }
 ```
 
-`ToolCoordinator::execute_with_prompting` and `spawn_tool_execution` drop their
-`mcp_client` and `root` parameters.
-The coordinator no longer knows or cares what dependencies a runtime needs.
+`ToolCoordinator::execute_with_prompting` and `spawn_tool_execution` also drop
+their `mcp_client` and `root` parameters.
 
 ### Changes to `run_turn_loop`
 
-The `run_turn_loop` function currently takes `mcp_client` and `root` as
-parameters and threads them through to the coordinator.
-After this RFD, those parameters are removed from `run_turn_loop`'s signature
-because runtimes are already captured inside the executor source.
+`run_turn_loop` no longer threads `mcp_client` or `root` into `ToolCoordinator`,
+because the executor source already holds the constructed runtimes.
 
-`mcp_client` is still needed by the *inquiry backend* (for LLM-answered tool
-questions), so it remains as a parameter for that purpose.
-But it no longer flows through the tool execution path.
+`root` is removed from `run_turn_loop` entirely.
+`ToolRenderer`, which uses `root` to run custom argument-formatting commands,
+receives `root` directly at construction time in `jp_cli` (or via
+`StdioRuntime`), keeping terminal rendering separate from tool execution.
 
-The `root` parameter is removed entirely from `run_turn_loop`.
-It currently also serves the `ToolRenderer` (for custom argument formatting),
-which will receive it through the `StdioRuntime` or, more practically, continue
-to receive it directly since rendering is a CLI concern, not a runtime concern.
+`mcp_client` remains a parameter on `run_turn_loop` because the inquiry backend
+still uses it to resolve tool definitions for LLM-answered tool questions, but
+it no longer flows through the tool execution path.
 
-### What Stays the Same
+### Unchanged Types and Behavior
 
-- **`ToolSource`** is unchanged.
-  It remains a string-based enum (`builtin`, `local`, `mcp.<server>.<tool>`)
-  that describes where a tool's definition comes from.
-- **`ToolDefinition`** is unchanged.
-  It describes a tool's name, docs, and parameters.
-- **`ExecutionOutcome`** is unchanged.
-  It is the return type of both the current dispatch and the new
-  `ToolRuntime::execute()`.
-- **`ToolConfigWithDefaults`** is unchanged (except for the new `runtime`
-  field).
-  It carries all per-tool configuration.
-- **Tool behavior** is unchanged.
-  Every existing tool produces identical results before and after this refactor.
+- **`ToolSource`**: Remains a string-based enum (`builtin`, `local`,
+  `mcp.<server>.<tool>`) that describes where a tool's definition comes from.
+- **`ToolDefinition`**: Continues to describe a tool's name, docs, and
+  parameters.
+- **`ExecutionOutcome`**: Remains the return type of `ToolRuntime::execute()`.
+- **`ToolConfigWithDefaults`**: Carries per-tool configuration as before, with
+  the addition of the `runtime` field.
+- **Tool behavior**: Existing tools produce identical results before and after
+  this refactor.
 
 ### Crate Boundaries
 
-`ToolRuntime` and `ToolRuntimeKind` live in `jp_llm`, alongside the existing
-`ToolDefinition` and `ExecutionOutcome` types.
-This keeps all tool execution abstractions in one crate.
+`ToolRuntime` and `ToolRuntimeKind` live in `jp_llm` alongside `ToolDefinition`
+and `ExecutionOutcome`, keeping all tool execution abstractions in one crate.
 
-The concrete runtime implementations live where their dependencies are:
+The three initial runtime implementations (`StdioRuntime`, `McpRuntime`, and
+`BuiltinRuntime`) also live in `jp_llm`, which already houses their underlying
+execution helpers (`run_tool_command`, `execute_mcp`, and `execute_builtin`).
 
-- `StdioRuntime` — in `jp_llm`, since it uses `run_tool_command` which is
-  already there.
-- `McpRuntime` — in `jp_llm`, since it already contains `execute_mcp`.
-- `BuiltinRuntime` — in `jp_llm`, since it already contains `execute_builtin`.
-
-The `jp_cli` crate constructs the runtime instances (it knows the workspace
-root, the MCP client, and the builtin registry) and passes them into the
+`jp_cli` owns the workspace root, the MCP client, and the builtin executor
+registry, so it constructs the runtime instances and passes them into the
 resolution layer.
 
 ## Drawbacks
 
-- **Indirection.** The current `match` dispatch is explicit and easy to follow
-  in a debugger.
-  A trait object adds a vtable lookup and makes it harder to "go to definition"
-  from a call site.
-  For three implementations, the `match` is arguably simpler.
+- **Indirection.** A `match` dispatch is explicit and easy to step through in a
+  debugger.
+  A trait object adds a vtable lookup and makes "go to definition" land on the
+  trait rather than the concrete implementation.
+  For only three implementations, a `match` is simpler.
 
-- **Runtime construction is front-loaded.** All runtime instances are created at
-  the start of `jp query`, even if no tools of a given type are used.
-  This is cheap (the runtimes are small structs wrapping `Arc`s) but represents
-  allocated-but-unused objects for some invocations.
+- **Upfront runtime construction.** `jp query` creates all runtime instances at
+  startup even if a session invokes no tools of a given kind.
+  The overhead is small because each runtime is a thin struct wrapping an `Arc`
+  or path, but unused instances are still allocated.
 
-- **Config field for future use.** The `runtime` field accepts `"vfs"` and
-  `"wasm"` values that produce errors today.
-  This is forward-compatible but could confuse users who try to use them before
-  the implementations exist.
-  The error message must be clear about this.
+- **Unimplemented `runtime` values in configuration.** `ToolConfig` accepts
+  `"vfs"` and `"wasm"` before those runtimes exist, which could confuse users
+  who configure them early.
+  Returning a clear unsupported-runtime error mitigates this.
 
 ## Alternatives
 
 ### Keep the `match` dispatch
 
-Leave the three-way match in `ToolDefinition::execute()`.
-Add arms as new execution mechanisms arrive.
+Leave the three-way `match` in `ToolDefinition::execute()` and add arms as new
+execution mechanisms arrive.
 
-Rejected because it requires threading every runtime's dependencies through the
-entire call chain.
-The parameter lists on `Executor::execute()`,
-`ToolCoordinator::execute_with_prompting()`, `spawn_tool_execution()`, and
-`run_turn_loop()` already have too many parameters.
-Adding WASM and VFS dependencies would make this worse.
+Rejected because every runtime's dependencies would still have to be threaded
+through `run_turn_loop()`, `ToolCoordinator::execute_with_prompting()`,
+`spawn_tool_execution()`, and `Executor::execute()`.
+Adding WASM and VFS dependencies would widen those parameter lists further.
 
 ### Put `runtime` into `ToolSource`
 
-Replace `ToolSource::Local` with `ToolSource::Stdio`, `ToolSource::Vfs`,
-`ToolSource::Wasm`.
-The source enum directly determines the execution mechanism.
+Replace `ToolSource::Local` with `ToolSource::Stdio`, `ToolSource::Vfs`, and
+`ToolSource::Wasm` so the source enum determines the execution mechanism
+directly.
 
-Rejected because it conflates two orthogonal concerns.
-`ToolSource` answers "where does the definition come from?"
-(local config, MCP server, hardcoded builtin).
-`runtime` answers "how does it execute?"
+Rejected because definition source and execution mechanism are orthogonal.
+`ToolSource` answers where a tool's definition comes from (local config, MCP
+server, hardcoded builtin), whereas `runtime` answers how it executes
 (subprocess, IPC, WASM).
-A local tool can execute as a subprocess today and as a WASM component tomorrow
+A local tool can run as a subprocess today and as a WASM component tomorrow
 without changing its source.
-Mixing them in one enum prevents this and forces the enum to grow with the
-product of sources × runtimes.
+Combining both axes in one enum prevents this and forces the enum to grow with
+the product of sources × runtimes.
 
 ### Use an enum instead of a trait
 
@@ -484,108 +443,90 @@ enum ToolRuntime {
 }
 ```
 
-Dispatch via `match` on the enum variants instead of dynamic dispatch.
+Dispatch calls by matching on `ToolRuntime` enum variants instead of dynamic
+dispatch.
 
-Rejected because it closes the extension point.
-The `ToolRuntime` trait is designed to support future runtimes (WASM, VFS)
-without modifying the enum.
-Plugin-provided runtimes (a possibility once [RFD 016] matures) would also need
-the open extension point.
-The vtable cost is negligible at I/O boundaries.
+Rejected because a closed enum cannot be extended with new runtimes (WASM, VFS,
+or plugin-provided runtimes once [RFD 016] matures) without modifying `jp_llm`.
+The vtable cost of `Arc<dyn ToolRuntime>` is negligible at I/O boundaries.
 
 ## Non-Goals
 
 - **Implementing `VfsRuntime` or `WasmRuntime`.** This RFD defines the trait and
-  config surface they will use.
-  The implementations are scoped to future RFDs.
+  configuration surface they will use; future RFDs implement the runtimes.
 
-- **Changing tool behavior.** Every tool produces identical results before and
-  after this refactor.
-  This is a structural change, not a behavioral one.
+- **Changing tool behavior.** Every existing tool produces identical results
+  before and after this refactor.
 
-- **Sandboxing.** Tool sandboxing is addressed by [RFD 075].
+- **Sandboxing.** [RFD 075] addresses tool sandboxing and access policies.
   This RFD does not add security restrictions to tool execution.
 
 - **Stateful tool protocol.** [RFD 009] defines multi-turn tool interaction
   (spawn/fetch/apply/abort).
-  The `ToolRuntime` trait covers single-execution invocations.
-  When [RFD 009] is implemented, the stateful lifecycle will be managed above
-  the runtime layer — the runtime executes one step, and the coordinator
-  manages state transitions.
+  `ToolRuntime` covers a single execution step; when [RFD 009] is implemented,
+  the coordinator will manage state transitions above the runtime layer.
 
-- **Self-describing tools.** [RFD D06] and [RFD D07] improve how tool schemas
-  are authored and discovered.
-  Those are orthogonal to how tools execute.
+- **Self-describing tools.** [RFD D06] and [RFD D07] cover how tool schemas are
+  authored and discovered, which is orthogonal to how tools execute.
 
 ## Risks and Open Questions
 
 ### `ToolRenderer` and `root`
 
-The `ToolRenderer` in `jp_cli` uses `root` for custom argument formatting (it
-runs a subprocess to format arguments).
-After this RFD, `root` is no longer threaded through `run_turn_loop`.
-The renderer will need to receive `root` through its own construction, not
-through the execution path.
-This is straightforward but is a change to the renderer's initialization.
+`ToolRenderer` in `jp_cli` spawns a subprocess for custom argument formatting
+and needs the workspace `root`.
+Because `root` is no longer threaded through `run_turn_loop`, `ToolRenderer`
+must receive `root` at construction time instead of through the execution path.
 
 ### Inquiry backend and `mcp_client`
 
-The inquiry backend (for LLM-answered tool questions) needs the MCP client to
-resolve tool definitions for the inquiry conversation.
-This dependency remains on `run_turn_loop` even after tool execution no longer
-needs it.
-This is correct — the inquiry backend is not a tool runtime concern — but it
-means `mcp_client` doesn't fully disappear from the turn loop signature.
+The inquiry backend uses `mcp_client` to resolve tool definitions for
+LLM-answered tool questions.
+Because inquiry resolution is separate from tool execution, `mcp_client` remains
+a parameter on `run_turn_loop` even after the tool execution path stops using
+it.
 
 ### `config` parameter on `ToolRuntime::execute()`
 
-The trait method receives `&ToolConfigWithDefaults`, which carries the full tool
-configuration including `command`, `source`, `parameters`, `options`, etc. The
-runtime uses what it needs (`command` for stdio, nothing for builtin) and
-ignores the rest.
-An alternative is to pass only runtime-specific config (e.g., `command` for
-stdio), but this would require per-runtime config extraction logic that adds
-complexity without clear benefit.
-The current approach is pragmatic: pass the full config, let each runtime take
-what it needs.
+`ToolRuntime::execute()` receives `&ToolConfigWithDefaults`, which carries the
+full tool configuration (`command`, `source`, `parameters`, `options`).
+Each runtime reads only the fields it needs (`command` for `StdioRuntime`,
+nothing for `BuiltinRuntime`) and ignores the rest.
+Passing only runtime-specific config would require per-runtime extraction logic
+that adds complexity without simplifying callers.
 
 ### Migration of `execute_local` internals
 
-`execute_local` currently handles parameter defaults, argument validation,
-context JSON construction, and command execution.
-All of this moves into `StdioRuntime::execute()`.
-The logic is unchanged; only its location changes.
-The risk is introducing bugs during the move.
+`StdioRuntime::execute()` takes over parameter defaults, argument validation,
+context JSON construction, and command execution from
+`ToolDefinition::execute_local()`.
+The logic is unchanged, but moving it risks introducing regressions.
 The existing test suite (`tool_tests.rs`, `turn_loop_tests.rs`,
-`coordinator_tests.rs`) provides coverage, and all tests must pass unchanged
-after the refactor.
+`coordinator_tests.rs`) covers these paths and must pass unchanged.
 
 ## Implementation Plan
 
 ### Phase 1: Define `ToolRuntime` trait and `ToolRuntimeKind` config
 
-Add the `ToolRuntime` trait to `jp_llm`.
-Add the `ToolRuntimeKind` enum and `runtime` field to `ToolConfig` in
-`jp_config`.
-Implement config parsing, serialization, and the `.wasm` inference logic.
-No runtime implementations yet.
+Add the `ToolRuntime` trait to `jp_llm`, and add the `ToolRuntimeKind` enum and
+`runtime` field to `ToolConfig` in `jp_config` with config parsing,
+serialization, and `.wasm` inference.
 
 **Depends on:** Nothing.
 **Mergeable:** Yes.
 
 ### Phase 2: Implement `StdioRuntime`
 
-Extract `execute_local` from `ToolDefinition` into `StdioRuntime`.
-The `StdioRuntime::execute()` method contains the same logic: parameter
-defaults, argument validation, context building, subprocess spawning, output
-parsing.
+Move `execute_local` from `ToolDefinition` into `StdioRuntime::execute()`,
+preserving parameter defaults, argument validation, context construction,
+subprocess spawning, and output parsing.
 
 **Depends on:** Phase 1.
 **Mergeable:** Yes.
 
 ### Phase 3: Implement `McpRuntime` and `BuiltinRuntime`
 
-Extract `execute_mcp` into `McpRuntime` and `execute_builtin` into
+Move `execute_mcp` into `McpRuntime` and `execute_builtin` into
 `BuiltinRuntime`.
 
 **Depends on:** Phase 1.
@@ -593,22 +534,20 @@ Extract `execute_mcp` into `McpRuntime` and `execute_builtin` into
 
 ### Phase 4: Update `Executor` trait and `ToolCoordinator`
 
-Remove `mcp_client` and `root` from `Executor::execute()`.
-Update `ToolExecutor` to hold `Arc<dyn ToolRuntime>`.
-Update `TerminalExecutorSource` to receive runtime-paired definitions.
-Update `ToolCoordinator` and `spawn_tool_execution` to drop the removed
-parameters.
+Remove `mcp_client` and `root` from `Executor::execute()`, `ToolCoordinator`,
+and `spawn_tool_execution`.
+Update `ToolExecutor` to hold `Arc<dyn ToolRuntime>` and
+`TerminalExecutorSource` to accept runtime-paired definitions.
 
 **Depends on:** Phases 2 and 3.
 **Mergeable:** Yes.
 
 ### Phase 5: Update `run_turn_loop` and `handle_turn`
 
-Remove `root` from `run_turn_loop`'s parameter list.
-Update `ToolRenderer` to receive `root` at construction.
-Update `handle_turn` in `jp_cli` to construct runtimes and pass them into the
-resolution layer.
-Remove `root` threading from the call chain.
+Remove `root` from `run_turn_loop` and pass it to `ToolRenderer` at
+construction.
+Update `handle_turn` in `jp_cli` to construct the runtimes and pass them into
+the resolution layer.
 
 **Depends on:** Phase 4.
 **Mergeable:** Yes.
@@ -616,42 +555,38 @@ Remove `root` threading from the call chain.
 ### Phase 6: Update `MockExecutor` and `TestExecutorSource`
 
 Remove `mcp_client` and `root` from `MockExecutor::execute()` and
-`TestExecutorSource`.
-Update all test helpers and assertions.
-All existing tests must pass unchanged.
+`TestExecutorSource`, and update test helpers and assertions so all existing
+tests pass unchanged.
 
 **Depends on:** Phase 4.
 **Mergeable:** Yes (parallel with Phase 5).
 
 ### Phase 7: Remove `ToolDefinition::execute()` dispatch
 
-Once all call sites use `ToolRuntime`, remove the `execute()`, `execute_local`,
-`execute_mcp`, and `execute_builtin` methods from `ToolDefinition`.
-The dispatch logic is fully replaced by runtime resolution.
+Remove `execute()`, `execute_local`, `execute_mcp`, and `execute_builtin` from
+`ToolDefinition` once all call sites use `ToolRuntime`.
 
 **Depends on:** Phases 5 and 6.
 **Mergeable:** Yes.
 
 ## References
 
-- [RFD 009] — Stateful tool protocol.
+- [RFD 009]: Stateful tool protocol.
   Defines multi-turn tool interaction; `ToolRuntime` covers single-execution
   steps within that model.
-- [RFD 016] — WASM plugin architecture.
-  A future `WasmRuntime` would implement `ToolRuntime` using the WASM plugin
+- [RFD 016]: WASM plugin architecture.
+  A future `WasmRuntime` will implement `ToolRuntime` using the WASM plugin
   infrastructure.
-- [RFD 075] — Tool sandbox and access policy.
-  Sandboxing is orthogonal to the runtime model; sandbox profiles are applied by
-  the runtime implementation (e.g., `StdioRuntime` applies `sandbox-exec` before
+- [RFD 075]: Tool sandbox and access policy.
+  Sandboxing is orthogonal to the runtime model; runtime implementations apply
+  sandbox profiles (for example, `StdioRuntime` applies `sandbox-exec` before
   spawning).
-- [RFD D06] — Self-describing local tools.
-  Schema discovery is orthogonal to execution; it happens at resolution time,
-  before the runtime is invoked.
-- [RFD D07] — Typed tool SDK for Rust.
+- [RFD D06]: Self-describing local tools.
+  Schema discovery happens at resolution time before the runtime is invoked.
+- [RFD D07]: Typed tool SDK for Rust.
   SDK improvements affect tool authoring, not execution dispatch.
-- [RFD D09] — Project filesystem abstraction.
-  `StdioRuntime`'s `root` field will evolve into `Arc<dyn ProjectFiles>` when
-  this RFD is implemented.
+- [RFD D09]: Project filesystem abstraction.
+  Replaces `StdioRuntime`'s `root` path with `Arc<dyn ProjectFiles>`.
 
 [RFD 009]: ../009-stateful-tool-protocol.md
 [RFD 016]: ../016-wasm-plugin-architecture.md

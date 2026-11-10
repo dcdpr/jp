@@ -10,134 +10,128 @@
 
 ## Summary
 
-This RFD introduces a styling system split into two layers: a frontend-agnostic
-*semantic styling* layer (a `Style` model, a base16 `Palette`, named element
-*scopes*, and a theme) living in a neutral `jp_style` crate, and a
-terminal-specific *rendering* layer owned by `jp_printer`.
-The terminal sink adapts resolved styling to the terminal it is writing to:
-downgrading 24-bit color to 256 or 16, selecting a light or dark default theme,
-and stripping color and unsafe control sequences for non-terminal channels and
-`NO_COLOR`.
+This RFD splits styling into two layers: a frontend-agnostic semantic layer in
+`jp_style` (`Style`, a base16 `Palette`, named element scopes, and themes) and a
+terminal rendering layer in `jp_printer`.
+The terminal sink adapts resolved styles to the active terminal by selecting a
+light or dark default theme, downgrading 24-bit color to 256 or 16 colors, and
+stripping color and unsafe control sequences for `NO_COLOR` and non-terminal
+channels.
 This fixes unreadable inline code on light terminals and garbled syntax
-highlighting on non-truecolor terminals (e.g. Apple Terminal), while keeping the
-styling model reusable by future web or TUI frontends.
+highlighting on non-truecolor terminals such as Apple Terminal, while keeping
+the styling model reusable across future web and TUI frontends.
 
 ## Motivation
 
 JP emits 24-bit ANSI color unconditionally and assumes a dark terminal.
-Two concrete, reported failures follow:
+This causes two reported failures:
 
 1. **Inline code is unreadable on a light terminal.** `format_code` in `jp_md`
-   sets a theme-derived *background* but never a *foreground*, so the code text
-   falls back to the terminal's default foreground.
-   On a white-background terminal that is black text on the dark `gruvbox-dark`
-   background.
-   The snapshot test today encodes exactly this: `Hello
+   sets a theme-derived background (`gruvbox-dark`) without setting a
+   foreground, so the code text falls back to the terminal's default foreground.
+   On a light terminal, that renders black text on a dark background.
+   The existing snapshot test encodes this directly: `Hello
    \x1b[48;2;34;34;34m`World`\x1b[49m!`.
 
 2. **Syntax-highlighted tool output is garbled on non-truecolor terminals.**
-   Apple Terminal sets `TERM=xterm-256color` and no `COLORTERM`, and does not
+   Apple Terminal sets `TERM=xterm-256color` without `COLORTERM` and does not
    support 24-bit color.
-   A `\x1b[48;2;r;g;b` sequence is misparsed (everything after `2` is read as
-   separate SGR parameters), so a syntax-highlighted file rendered by
-   `fs_create_file`, one truecolor pair per token, turns to noise.
+   It misparses `\x1b[48;2;r;g;b` by reading every parameter after `2` as a
+   separate SGR code.
+   When `fs_create_file` renders a syntax-highlighted file with one truecolor
+   sequence per token, the output turns into visual noise.
 
-The shared root cause is structural: color is emitted as final bytes from many
-places (syntect's `as_24_bit_terminal_escaped`, `theme_bg`,
-`theme_blockquote_fg`, and assorted `jp_cli` chrome), and *no single layer knows
-the terminal's capabilities*.
-There is nowhere to put the fix.
-If we do nothing, every new styled element repeats the same two bugs, and JP
-stays unusable on a large class of terminals.
+Both failures have the same structural cause: multiple call sites emit final
+ANSI bytes directly (syntect's `as_24_bit_terminal_escaped`, `theme_bg`,
+`theme_blockquote_fg`, and `jp_cli` chrome), and no single layer knows the
+terminal's capabilities.
+Without a central rendering boundary, every new styled element repeats these
+bugs and leaves JP unusable on light and non-truecolor terminals.
 
 ## Design
 
 ### Layering
 
-Two layers, in separate homes:
+Styling is split into two layers in separate crates:
 
-- **Semantic styling (frontend-agnostic), in a new `jp_style` crate.** `Style`
-  (foreground, background, intensity, italic, underline, strikethrough), the
-  `Palette` and its base16 roles, the theme, the *scope* taxonomy
-  (`markdown.heading.h1`, `tool_call.function_name`, ...), and stylesheet
-  resolution.
-  None of this is terminal-specific: a web frontend renders `Style` as CSS, a
-  TUI as widget styles.
+- **Semantic styling (frontend-agnostic) in `jp_style`:** Defines `Style`
+  (foreground, background, intensity, italic, underline, strikethrough),
+  `Palette` and its base16 roles, themes, the scope taxonomy
+  (`markdown.heading.h1`, `tool_call.function_name`), and stylesheet resolution.
   `jp_style` is pure and depends on `anstyle` only for its `Color`
   representation.
-  `jp_config` holds the config shapes and converts into `jp_style`; `jp_md` and
-  `jp_printer` depend on `jp_style`.
-- **Rendering target (terminal-specific), in `jp_term`/`jp_printer`.** The
-  `ColorProfile`, the truecolor-to-256-to-16 downgrade, SGR byte construction,
-  and the escape adapter.
+  `jp_config` holds the configuration types and converts them into `jp_style`;
+  `jp_md` and `jp_printer` consume `jp_style`.
+- **Terminal rendering (target-specific) in `jp_term` and `jp_printer`:** Owns
+  `ColorProfile` detection, truecolor-to-256-to-16 color downgrading, SGR byte
+  construction, and the escape-sequence adapter.
 
-The terminal is one *frontend sink*.
-The general pattern, not just this instance: logical `Style`/scope is the
-interchange, and each frontend has exactly one sink that turns it into
-target-native output.
-A future web or TUI frontend brings its own sink and reuses `jp_style`
-unchanged.
-This RFD builds the terminal sink and `jp_style`; it does not build the generic
-abstraction (see Non-Goals).
-`jp_md`'s terminal output remains terminal-specific for D57: a future frontend
-renders the same stylesheet through its own serializer rather than reusing
+Logical `Style` values and scopes are the interchange format between the two
+layers.
+Each frontend has a single sink that translates resolved styles into
+target-native output: the terminal sink emits ANSI sequences, while a future web
+or TUI frontend can reuse `jp_style` unchanged to emit CSS or widget styles.
+This RFD builds `jp_style` and the terminal sink, not a generic frontend trait
+(see Non-Goals).
+`jp_md` output remains terminal-specific in D57; a future non-terminal frontend
+will render the shared stylesheet through its own serializer rather than reusing
 `jp_md`'s SGR strings.
 
-### The model
+### Styling Model
 
-- **`ColorProfile`** carries a `depth` (`Truecolor | Ansi256 | Ansi16 | None`)
-  and a `scheme: Option<Scheme>` where `Scheme` is `Light | Dark`.
-  `None` means the scheme could not be determined (no `COLORFGBG`, no OSC 11
-  answer, or the query was skipped); the readability rule depends on this.
-  Depth and scheme describe the terminal *program* and are shared across its
-  handles; whether a given handle emits color at all is decided per output
-  target (is that handle a TTY?).
-- **`Palette`** is a small set of semantic color *roles* using the base16
-  vocabulary (`base00`..
-  `base0F`: `base00` background, `base05` default foreground, `base08`
-  red/error, `base0D` blue/function, ...).
-  A *theme* name resolves to a `{ palette, syntect theme }` pair: the palette
-  colors chrome and markdown elements, the syntect theme colors code blocks.
-  JP ships curated light and dark default themes; the exhaustive set of built-in
-  names is an implementation detail.
-- **`Scope` stylesheet.** Every styled element is named by an open-set string
-  path.
-  The default stylesheet maps each scope to a palette *role* (not a raw color),
-  so switching the theme reassigns every scope for free.
-  Users override per scope, with either a role reference or a literal color (see
-  Configuration surface).
+- **`ColorProfile`** carries `depth` (`Truecolor | Ansi256 | Ansi16 | None`) and
+  `scheme: Option<Scheme>`, where `Scheme` is `Light | Dark`.
+  `scheme` is `None` when the terminal background cannot be determined (no
+  `COLORFGBG`, no OSC 11 reply, or the query was skipped), which selects the
+  fallback in the readability rule.
+  Depth and scheme describe the terminal emulator and apply across all of its
+  streams; whether a specific handle emits color depends on whether that output
+  target is a TTY.
+- **`Palette`** defines a set of semantic color roles using the base16
+  vocabulary (`base00` through `base0F`: `base00` background, `base05` default
+  foreground, `base08` red/error, `base0D` blue/function, and so on).
+  A theme name resolves to a `{ palette, syntect theme }` pair: the palette
+  colors UI chrome and markdown elements, while the syntect theme colors fenced
+  code blocks.
+  JP ships curated light and dark default themes; the exact set of built-in
+  theme names is an implementation detail.
+- **`Scope` and stylesheet:** Every styled element is addressed by an open-set
+  dot-separated path.
+  The default stylesheet maps each `Scope` to a palette role rather than a raw
+  color, so switching themes recolors every scope automatically.
+  Users can override individual scopes with either a palette role or a literal
+  color (see Configuration Surface).
 
-### The terminal sink
+### Terminal Sink
 
-Logical `Style`/scope is the interchange; the terminal sink is the only place
-that turns it into capability-adapted bytes.
+The terminal sink is the sole component that converts resolved styles into
+capability-adapted terminal bytes.
 Two producers feed it:
 
-- `jp_md` resolves *markdown* scopes against the shared stylesheet and palette
-  and emits **canonical truecolor** strings.
-  It keeps string output and stays usable as a library; the sink does not know
-  markdown scopes.
-- Chrome hands the sink a logical `Style` (or a chrome scope the sink resolves).
+- `jp_md` resolves markdown scopes against the shared stylesheet and palette and
+  emits canonical truecolor SGR strings.
+  Returning `String` keeps `jp_md` usable as a standalone library, and the sink
+  does not need to know about markdown scopes.
+- UI chrome passes a logical `Style` or a chrome scope that the sink resolves.
 
-The adaptation lives in the **per-sink writer**, not in a single `print` method.
-Many call sites do not call `Printer::print`; they obtain an `out_writer` /
-`err_writer` handle and write to it.
-The policy therefore lives in the per-sink adapter those handles are already
-wrapped in (the `AnsiStripper`/`Sink` layer introduced in `e2db8c90`), so
-`print` and borrowed writers get identical treatment with no caller awareness.
-The adapter is a **per-sink state machine with a persistent `vte::Parser`**, not
-a per-write string transform, so escape sequences split across `write` calls
-(and the per-character typewriter path) are handled correctly.
-Tests cover split CSI sequences and typewriter output.
+Color adaptation runs in the per-sink writer (`AnsiStripper`/`Sink`, introduced
+in `e2db8c90`) rather than in `Printer::print`.
+Because many call sites write through borrowed `out_writer` and `err_writer`
+handles instead of calling `Printer::print`, placing the policy in the
+underlying sink wrapper gives `print` and borrowed writers identical behavior
+without changes at call sites.
+Each sink maintains a persistent `vte::Parser` state machine rather than
+transforming strings per write, so escape sequences split across `write` calls
+or emitted byte-by-byte through the typewriter path are parsed intact.
+Unit tests cover split CSI sequences and typewriter output.
 
-### Escape and color policy
+### Escape and Color Policy
 
-The policy is keyed on **sequence category and target**, never on the source of
-the bytes.
-This is what makes it work uniformly through borrowed writers without threading
-provenance: the sink cannot tell JP-generated bytes from relayed bytes, so it
-does not try.
-For every write:
+The sink filters escape sequences by sequence category and output target, never
+by byte provenance.
+Because borrowed writers do not carry origin metadata, the sink cannot
+distinguish JP-generated bytes from relayed tool output and treats all content
+writes uniformly:
 
 | Sequence                                         | Styled TTY                                              | Non-styled (non-TTY / structured) |
 | ------------------------------------------------ | ------------------------------------------------------- | --------------------------------- |
@@ -147,52 +141,57 @@ For every write:
 | Out-of-band cursor/erase control                 | strip from content; JP emits via a trusted control path | strip                             |
 | Dangerous OSC (52 clipboard, 0/1/2 title), other | strip                                                   | strip                             |
 
-Two consequences:
+Two rules follow from this table:
 
-- **Color off is not the same as styling off.** `NO_COLOR` (and `depth = None`)
-  drops foreground/background color but keeps text attributes, per the
-  [NO_COLOR] convention.
-  Stripping *all* SGR happens only on a non-styled channel (non-TTY or
-  structured/JSON output, which always runs non-styled regardless of color env
-  vars).
-- **Out-of-band control needs a trusted path.** JP's own cursor/erase usage
-  (progress lines, `\r\x1b[K`) is emitted through a dedicated control method
-  that bypasses the strip; anything written as normal content is stripped.
-  The failure mode is therefore safe: forget the trusted path and you lose a
-  progress redraw, never leak a relayed escape.
-  There is no per-caller flag and no "sanitize first" rule.
+- **Disabling color is distinct from disabling styling.** Setting `NO_COLOR` or
+  `depth = None` drops foreground and background colors while preserving text
+  attributes (bold, italic, underline, strikethrough), following the [NO_COLOR]
+  convention.
+  All SGR sequences are stripped only on non-styled channels: non-TTY streams
+  and structured JSON output (which is never styled, regardless of color
+  environment variables).
+- **Out-of-band cursor and erase sequences use a dedicated control path.** JP
+  emits its own cursor and line-erase sequences (such as progress redraws using
+  `\r\x1b[K`) through an explicit control method that bypasses content
+  stripping; any cursor or erase sequence written through normal content handles
+  is stripped.
+  This fails closed: forgetting to use the control method drops a progress
+  redraw rather than leaking a relayed escape sequence, without requiring
+  per-caller flags or pre-sanitization.
 
-Deliberate tradeoff: OSC 8 hyperlinks are allowed inline by category, so a
-tool's output *can* emit a hyperlink.
-This is acceptable (the URL is not auto-followed, the link text is visible) and
-avoids reintroducing source tracking.
-A complete trust-boundary policy for tool-emitted terminal control belongs with
-[RFD 075]; D57 only sets the default sink behavior.
+Allowing inline OSC 8 hyperlinks by category means tool output can also emit
+clickable links.
+This is an acceptable tradeoff: the terminal does not open URLs automatically,
+the link text remains visible, and the sink avoids tracking byte provenance.
+A broader trust-boundary policy for tool-emitted terminal control belongs in
+[RFD 075]; D57 defines only the default sink behavior.
 
-### Readability rule
+### Readability Rule
 
-A background-bearing element must contrast with whatever foreground is shown.
-JP resolves this on `ColorProfile.scheme`:
+Any element that sets a background color must remain legible against its
+foreground text.
+JP resolves foreground and background pairs based on `ColorProfile.scheme`:
 
-- **`Some(Light | Dark)`:** honor the user's terminal foreground and set only
-  the scheme-matched background (e.g. `inline_code.body.bg = base01`).
-  A light theme yields a light code background that the user's dark text reads
-  on; JP does not override a foreground it cannot improve on.
-- **`None` (undetermined):** set a self-contained pair (`fg = base05`, `bg =
-  base01`) so the element is legible without depending on the terminal's
-  foreground.
+- **`Some(Light | Dark)`:** Keep the terminal's default foreground and set only
+  the scheme-matched background (for example, `inline_code.body.bg = base01`).
+  Because the theme matches the terminal's light or dark scheme, the user's
+  default text color already contrasts with `base01`.
+- **`None` (undetermined):** Set an explicit foreground and background pair (`fg
+  = base05`, `bg = base01`) so the element is legible regardless of the
+  terminal's default text color.
 
-So inline code never renders as background-only-with-inherited-foreground when
-the scheme is unknown (the cause of bug 1), and when the scheme is known it
-honors the user's foreground.
-A user override that sets `bg` without `fg` is accepted as an explicit escape
-hatch and is not auto-completed.
+This prevents bug 1 (a dark inline-code background paired with inherited black
+text when the scheme is unknown) while preserving the user's default text color
+when the scheme is known.
+If a user explicitly configures `bg` without `fg` on a scope, JP respects that
+override and does not inject a fallback `fg`.
 
-### Configuration surface
+### Configuration Surface
 
-`style` is redesigned around a node-major layout.
-Each presentation *node* owns its behavior and its visual *elements*; two global
-sections hold the cross-cutting concerns.
+The `style` configuration uses a node-major layout: each presentation node
+groups its behavioral settings with its visual `elements` table, while two
+top-level sections (`style.theme` and `style.terminal`) configure global theme
+selection and terminal capabilities.
 
 ```toml
 # Global: the color source (shared by every frontend)
@@ -226,39 +225,37 @@ fg = "base0D"
 intensity = "bold"
 ```
 
-Rules:
-
-- **`fg`/`bg` value grammar**, consistent with [RFD 084]: a palette role
-  (`"base0D"`), a hex literal (`"#fb4934"`), an ANSI-256 index (`244`),
-  `"default"` (reset the channel to the terminal default, SGR 39/49), or
-  `"inherit"` (suppress theme/renderer defaults without resetting, so the
-  surrounding context shows through).
-  `"inherit"` is how the stylesheet expresses the readability rule's "honor the
-  user's foreground."
-- **Visual styling for every node lives under `style.<node>.elements.*`**,
-  generalizing [RFD 084]'s `style.markdown.elements.*`.
-  Behavioral knobs stay on the node (`style.markdown.wrap_width`,
+- **`fg` and `bg` value grammar:** Following [RFD 084], color fields accept a
+  palette role (`"base0D"`), a hex literal (`"#fb4934"`), an ANSI-256 index
+  (`244`), `"default"` (reset the channel to the terminal default via SGR
+  39/49), or `"inherit"` (omit the SGR code so the surrounding context shows
+  through).
+  The default stylesheet uses `"inherit"` to preserve the user's terminal
+  foreground when the scheme is known.
+- **Per-node `elements` tables:** Visual styling for every node lives under
+  `style.<node>.elements.*`, generalizing `style.markdown.elements.*` from [RFD
+  084].
+  Behavioral settings remain directly on the node (`style.markdown.wrap_width`,
   `style.tool_call.parameters`).
-- **Theme is global.** It moves from `style.markdown.theme` to `style.theme`,
-  because post-D57 it drives chrome and tool-call colors, not only markdown.
-  `default = "auto"` is what makes the absence of an explicit choice trigger
-  scheme-based selection; `dark`/`light` name the theme used for each scheme and
-  may reference a built-in or a custom palette.
-  `style.inline_code` folds into `style.markdown.elements.inline_code`.
-- **`style.terminal`** holds only rendering-target capability overrides, so it
-  sits as a sibling to any future frontend's target section rather than being a
+- **Global theme configuration:** Theme selection moves from
+  `style.markdown.theme` to `style.theme` because the active theme drives UI
+  chrome and tool-call colors in addition to markdown.
+  Setting `default = "auto"` selects the `dark` or `light` theme based on the
+  detected terminal scheme; both keys accept a built-in theme name or a custom
+  palette defined under `style.theme.palettes`.
+  `style.inline_code` moves into `style.markdown.elements.inline_code`.
+- **Terminal capability overrides:** `style.terminal` holds only
+  rendering-target capability overrides (`color_depth` and `background`), so it
+  sits as a sibling to future frontend target sections rather than acting as a
   catch-all.
 
-This is a deliberate breaking change to the `style` config, accepted as part of
-accepting this RFD.
-Old keys that no longer exist will not be silently ignored (config structs deny
-unknown fields), so the rename is handled explicitly: [RFD 084]'s
-deprecation-alias phase for `style.inline_code.background` is dropped in favor
-of this clean rename, and the implementation maps the known old keys during
-load.
-D57 and [RFD 084] share this single target shape.
+Restructuring `style` is an intentional breaking change.
+Because config structs reject unknown fields, the loader explicitly maps the
+previous keys instead of ignoring them.
+This replaces the deprecation-alias phase for `style.inline_code.background` in
+[RFD 084] so D57 and [RFD 084] target a single configuration layout.
 
-### Data flow
+### Data Flow
 
 ```
 jp_md     -->  markdown scopes resolved to truecolor  -+
@@ -266,226 +263,244 @@ chrome    -->  logical Style / chrome scope            +-->  per-sink adapter  -
 tool/raw  -->  relayed bytes                           -+
 ```
 
-The per-sink adapter (behind both `Printer::print` and the borrowed
-`out_writer`/`err_writer` handles): resolves chrome scopes, adapts each color to
-`ColorProfile.depth`, applies the category-based escape policy, and gates on the
-target (styled vs non-styled).
+For every write through `Printer::print`, `out_writer`, or `err_writer`, the
+per-sink adapter resolves chrome scopes, downgrades each color to
+`ColorProfile.depth`, enforces the category-based escape policy, and strips all
+styling on non-styled targets.
 
-### Detection and startup order
+### Capability Detection and Startup Order
 
-Detection lives in `jp_term` and produces a `ColorProfile`.
-Depth and scheme are terminal-wide; whether color is emitted on a given handle
-is per `PrintTarget` (`Out`, `Err`, `Tty`), based on that handle's own TTY
-state.
-So `jp query > file` still colors chrome on a TTY stderr, and the structured
-channel always runs non-styled.
+`jp_term` detects terminal capabilities and produces a `ColorProfile`.
+While `depth` and `scheme` apply across the terminal, color emission is decided
+independently for each `PrintTarget` (`Out`, `Err`, `Tty`) based on whether that
+handle is a TTY.
+Redirecting stdout (`jp query > file`) therefore keeps colored chrome on a TTY
+stderr, while structured output remains unstyled.
 
-This is a deliberate amendment to [RFD 048]: the *serialization format*
-(text/json) still resolves once from stdout per RFD 048, but the *color
-decision* is now per-target rather than following the global format.
-In `--format json`, both streams emit NDJSON and are never styled, regardless of
-color env vars or TTY state.
+This amends [RFD 048]: the serialization format (text or JSON) still resolves
+once from stdout, but color emission is decided per target rather than following
+the global format.
+Under `--format json`, both streams emit NDJSON and are never styled, regardless
+of color environment variables or TTY state.
 
-Because `style.terminal.*` has the highest precedence, the `ColorProfile` is
-resolved in `jp_cli` *after* config loads (merging config overrides with
-`jp_term` detection) and installed into the sink before any command rendering
+Because `style.terminal.*` has the highest precedence, `jp_cli` resolves the
+final `ColorProfile` after loading configuration (merging config overrides with
+`jp_term` detection) and installs it into the sink before command rendering
 begins.
-Output emitted before that point (final error printing, bootstrap messages
-already outside the configured `Printer`) stays un-themed; those direct writes
-are out of scope (see The terminal sink).
+Direct writes outside the configured `Printer`, such as early bootstrap messages
+and top-level fatal error output, remain unstyled and out of scope (see Terminal
+Sink).
 
-Precedence:
+Each setting resolves in the following precedence order:
 
-- **Emit color on a target:** explicit config -> `NO_COLOR` (off) ->
+- **Color emission (per target):** explicit config -> `NO_COLOR` (off) ->
   `CLICOLOR_FORCE` (on, even when not a TTY) -> handle is a TTY (on) -> off.
 - **Depth (terminal-wide):** explicit config -> `COLORTERM` truecolor -> `TERM`
-  `*-256color` -> colorful `TERM` (16).
+  `*-256color` -> color-capable `TERM` (16).
 - **Scheme (terminal-wide):** explicit config -> `COLORFGBG` -> best-effort OSC
   11 query -> `None`.
 
-`CLICOLOR_FORCE` precedes the TTY check, so it can force color into a pipe;
-`NO_COLOR` still wins over it.
-Apple Terminal needs no special-casing: no `COLORTERM` plus
-`TERM=xterm-256color` lands it on `Ansi256`.
+Because `CLICOLOR_FORCE` precedes the TTY check, it forces color output into
+pipes, while `NO_COLOR` still takes precedence over `CLICOLOR_FORCE`.
+Apple Terminal requires no special case: the absence of `COLORTERM` combined
+with `TERM=xterm-256color` selects `Ansi256`.
 
-### Reusing the ecosystem
+### Dependencies
 
-The mechanical substrate is largely already in `Cargo.lock` via the `anstyle`
-family (pulled through clap), all MIT/Apache and already audited:
+Most of the required crates are already in `Cargo.lock` through `clap`'s
+`anstyle` dependencies (all MIT/Apache-2.0 licensed and audited):
 
-- **`anstyle`** is the color model `jp_style` wraps, so the rest composes with
-  no adapter code.
-  This amends [RFD 084], which currently defines a bespoke `Color` enum; the
-  enum maps 1:1.
-- **`anstyle-query`** provides the `COLORTERM`/`TERM`/`NO_COLOR`/`CLICOLOR`
-  heuristics.
-- **`anstyle-parse` / `vte`** provide the SGR/escape parsing for the per-sink
+- **`anstyle`:** Provides the core color model wrapped by `jp_style`, allowing
+  the rest of the `anstyle` crates to compose without adapter code.
+  This amends [RFD 084] by replacing its custom `Color` enum with `anstyle`'s
+  1:1 equivalent.
+- **`anstyle-query`:** Implements the `COLORTERM`, `TERM`, `NO_COLOR`, and
+  `CLICOLOR` detection heuristics.
+- **`anstyle-parse` and `vte`:** Parse SGR and escape sequences in the per-sink
   adapter.
 
-Two small additions: **`anstyle-lossy`** (MIT/Apache, `const fn`
-truecolor-to-256-to-16 math) and **`termbg`** (light/dark detection).
-The base16 *format* is parsed in-house (a few dozen lines of serde over 16 hex
-strings); we deliberately do not pull `tinted-builder` (GPL-3.0) or
-`ansi_colours` (LGPL).
+Two dependencies are added: **`anstyle-lossy`** (MIT/Apache-2.0, `const fn`
+truecolor-to-256-to-16 quantization) and **`termbg`** (light/dark scheme
+detection).
+Base16 palettes are parsed in-house with `serde` over 16 hex strings (a few
+dozen lines of code) to avoid the copyleft licenses of `tinted-builder`
+(GPL-3.0) and `ansi_colours` (LGPL).
 
 ## Drawbacks
 
-- **The scope taxonomy is a public contract.** Once a user writes
-  `tool_call.function_name.fg = "..."`, that name is fixed forever ([Hyrum's
-  Law]).
-  The taxonomy must grow deliberately, not churn.
-- **The per-sink adapter reparses output to quantize.** Adapting truecolor to a
-  lower tier means parsing the stream per write.
-  Mitigated by a memoized RGB-to-index cache keyed on the active `ColorProfile`.
-- **It amends [RFD 084] and [RFD 048] while both interact.** 084's "SGR
-  construction stays in `jp_md`" narrows to "`jp_md` resolves markdown scopes to
-  canonical truecolor; the terminal sink owns tier adaptation," and 084's
-  deprecation-alias phase is dropped in favor of the clean `style` rename. 048's
-  global color behavior becomes per-target.
-  The RFDs must land coherently.
-- **Breaking the `style` config** resets users' existing style customizations on
-  upgrade and requires the explicit key migration noted above.
-  Accepted as part of this RFD.
-- **Curated per-tier light/dark default themes are real work**, distinct from
-  auto-downgrading an arbitrary theme.
+- **The scope taxonomy is a permanent public contract.** Once users configure
+  keys such as `tool_call.function_name.fg = "..."`, those scope names cannot be
+  changed without breaking user configs ([Hyrum's Law]).
+  New scopes must be added deliberately.
+- **Per-write ANSI parsing overhead.** Downgrading truecolor sequences to 256 or
+  16 colors requires parsing the byte stream on every write.
+  A memoized RGB-to-index lookup cache keyed on the active `ColorProfile` keeps
+  quantization cost negligible.
+- **Cross-RFD coordination with [RFD 084] and [RFD 048].** In [RFD 084],
+  `jp_md`'s responsibility narrows from final SGR construction to emitting
+  canonical truecolor for markdown scopes while the terminal sink handles depth
+  adaptation, and its deprecation-alias phase is dropped in favor of the `style`
+  rename.
+  In [RFD 048], color emission changes from a global decision to a per-target
+  decision.
+  These changes must land together coherently.
+- **Breaking changes to the `style` configuration.** Restructuring `style`
+  invalidates existing user style customizations unless migrated, requiring the
+  explicit key-mapping pass during config loading.
+- **Curating default themes across color tiers and schemes.** Maintaining
+  built-in light and dark themes that read well at truecolor, 256-color, and
+  16-color depths requires manual curation beyond automatic color quantization.
 
 ## Alternatives
 
-- **Set the inline-code foreground from the theme unconditionally.** Rejected as
-  the *default*: it overrides a foreground the user chose even when the scheme
-  is correctly detected.
-  Adopted only as the unknown-scheme fallback.
-- **Tag each print with a `PrintOrigin` (JP chrome / markdown / tool / ...).**
-  Rejected: it pushes a per-call-site classification onto every `Printer`
-  caller, inviting "you used it wrong" bugs.
-  The category-based sink policy needs no provenance and keeps callers unaware.
-- **Sanitize tool output at the call site before printing.** Rejected for the
-  same reason: it is caller awareness by another name.
-  Safe-by-default in the sink is the only approach that keeps borrowed-writer
-  callers unaware.
-- **Downgrade at each emission seam instead of in the sink.** Rejected: color is
-  emitted from the 084 stylesheet, the syntect path, and `jp_cli` chrome; a
-  single sink covers all three and is the natural per-frontend boundary.
-- **Default to 256 or base16 always.** Rejected: throws away color quality on
-  terminals that do support truecolor.
-- **Aspect-major config (`style.terminal.elements.<node>`).** Rejected: splits a
-  node's config across two trees and contradicts [RFD 084]'s shipped
-  `style.markdown.elements.*`.
-- **Adopt `termprofile` as the all-in-one engine.** Rejected for now: it pulls
-  the heavy `palette` dependency, while `anstyle-query` + `anstyle-lossy` cover
-  the same ground.
-  Worth reading as a reference.
+- **Always set the inline-code foreground from the theme.** Overriding the
+  foreground unconditionally replaces the user's chosen terminal text color even
+  when the light or dark scheme is known.
+  JP sets an explicit foreground only as the fallback when `scheme` is `None`.
+- **Tag each print call with a `PrintOrigin` (chrome, markdown, tool output).**
+  Requiring every `Printer` caller to classify its output is error-prone and
+  does not work across borrowed `Write` handles.
+  Keying the sink policy on sequence category and output target avoids tracking
+  provenance.
+- **Sanitize tool output at each call site before printing.** Like
+  `PrintOrigin`, call-site sanitization requires every caller (including code
+  writing to borrowed `out_writer` and `err_writer` handles) to sanitize before
+  writing.
+  Enforcing the policy inside the sink makes every write safe by default.
+- **Downgrade colors at each emission site instead of in the sink.** Colors
+  originate from the [RFD 084] markdown stylesheet, `syntect`, and `jp_cli`
+  chrome.
+  Adapting colors once in the terminal sink covers all three sources at the
+  frontend boundary.
+- **Always emit 256-color or 16-color output.** Fixed low-depth output discards
+  color fidelity on truecolor terminals.
+- **Use an aspect-major config layout (`style.terminal.elements.<node>`).**
+  Splitting a node's behavioral and visual settings across two config trees is
+  harder to navigate and conflicts with `style.markdown.elements.*` from [RFD
+  084].
+- **Use `termprofile` as an all-in-one engine.** `termprofile` pulls in the
+  heavyweight `palette` dependency, whereas `anstyle-query` and `anstyle-lossy`
+  cover the same functionality with minimal dependencies.
 
 ## Non-Goals
 
-- **Building the web/TUI frontends or a generic frontend/sink abstraction.** D57
-  ships the terminal sink and `jp_style`.
-  The generic abstraction is introduced when a second frontend exists; defining
-  it now, with one implementation, would be speculative.
+- **Web or TUI frontends, or a generic frontend sink trait.** D57 ships
+  `jp_style` and the terminal sink.
+  A generic sink abstraction waits until a second frontend exists to validate
+  its interface.
 - **A full chrome scope taxonomy.** This RFD ships `markdown.*` (via [RFD 084])
-  and `tool_call.*` scopes; other chrome comes in follow-on RFDs against the
-  same engine.
-- **Palette generation / LAB interpolation** (the base16-to-256-cube technique
-  from the [color256] writeup).
-  Curated defaults need no LAB.
-- **Converting behavioral style sections onto the `Style` type.** Adding an
-  `elements` tree to a node does not change its behavioral config (`hidden`,
-  `parameters`, reasoning display mode).
-- **Replacing the `syntect` theme.** Code blocks stay themed by `syntect`; only
-  their emitted colors flow through the same depth downgrade.
-- **Perfect scheme detection.** Best-effort plus a config override is the
-  contract; `None` is a first-class outcome.
-- **A complete tool-emitted-escape trust policy.** D57 sets the default sink
-  behavior; the fuller policy is [RFD 075]'s.
+  and `tool_call.*` scopes; additional chrome scopes will follow in subsequent
+  RFDs on the same engine.
+- **Automatic palette generation via LAB interpolation** (such as the
+  base16-to-256 cube technique from the [color256] writeup).
+  JP ships curated default themes instead.
+- **Migrating behavioral style settings onto `Style`.** Adding an `elements`
+  table to a node leaves its behavioral configuration (`hidden`, `parameters`,
+  reasoning display mode) unchanged.
+- **Replacing `syntect` themes for code blocks.** `syntect` continues to theme
+  fenced code blocks; its emitted 24-bit colors pass through the terminal sink's
+  depth downgrade.
+- **Infallible scheme detection.** Terminal scheme detection is best-effort with
+  a configuration override (`style.terminal.background`), and `None` is a
+  supported outcome.
+- **A full trust policy for tool-emitted escape sequences.** D57 defines default
+  sink filtering; broader sandbox and trust-boundary policy belongs to [RFD
+  075].
 
 ## Risks and Open Questions
 
-- **Unknown-scheme fallback.** With `scheme: Option<Scheme>`, the readability
-  rule has an explicit `None` path that picks a self-contained pair, so the
-  legibility risk is removed.
-  The residual question is the exact default pair and keeping the set of
-  background-bearing default scopes small.
-- **Scheme query reliability.** `termbg`/OSC 11 put the terminal into raw mode
-  and read a reply.
-  This runs once at startup, before any background work or streaming, so it is
-  isolated.
-  The only requirement is a short timeout with a clean fallback to `None`, and
-  skipping the query when stdout is not a TTY.
-- **Cache invalidation.** The memoized RGB-to-index cache must key on the active
-  `ColorProfile` so a mid-session change does not serve stale colors.
-- **`anstyle` version coupling.** `jp_style` wrapping `anstyle` ties us to its
-  (stable, clap-maintained) API; acceptable given it is already a transitive
-  dependency.
+- **Unknown-scheme fallback defaults.** When `scheme` is `None`, the readability
+  rule sets a self-contained foreground and background pair so text remains
+  legible.
+  Choosing the exact default pair and keeping the set of background-bearing
+  default scopes small remain open details for implementation.
+- **OSC 11 scheme query reliability.** `termbg` queries the terminal via OSC 11
+  by briefly entering raw mode and reading the reply.
+  Because this runs once at startup before any background tasks or output
+  streaming begin, it does not race with other I/O, provided it uses a short
+  timeout, falls back cleanly to `None`, and skips the query when stdout is not
+  a TTY.
+- **Quantization cache invalidation.** The memoized RGB-to-index cache must
+  include the active `ColorProfile` in its key so mid-session profile changes do
+  not return stale color indices.
+- **`anstyle` API coupling.** Wrapping `anstyle` types in `jp_style` couples JP
+  to `anstyle`'s API.
+  This risk is low because `anstyle` is stable, maintained by the `clap`
+  project, and already a transitive dependency.
 
 ## Implementation Plan
 
 ### Phase 1: `ColorProfile` and the terminal sink
 
-- Add `ColorProfile { depth, scheme: Option<Scheme> }` and detection in
-  `jp_term` (`anstyle-query` + `TERM`; `scheme` stubbed to `None` for now).
-  Resolve the profile in `jp_cli` after config loads and install it into the
-  sink before rendering, with per-`PrintTarget` color gating.
-- Extend the per-sink adapter (the `AnsiStripper`/`Sink` layer, persistent
-  `vte::Parser`) to adapt SGR depth via `anstyle-lossy`, apply the
-  category-based escape policy, and run non-styled channels at strip-all.
-  Add the trusted out-of-band control path for JP's progress/cursor sequences.
-  The adapter covers both `Printer::print` and borrowed
-  `out_writer`/`err_writer` handles.
-  Tests cover split CSI sequences and typewriter output.
-- `jp_md` and chrome emit canonical truecolor; the sink adapts on the way out.
-  Add `anstyle-lossy`.
-- **Fixes bug (2)** (garbled tool output on non-truecolor terminals).
-  The only new config is `style.terminal.color_depth`.
+- Add `ColorProfile { depth, scheme: Option<Scheme> }` and capability detection
+  in `jp_term` (`anstyle-query` and `TERM`, with `scheme` initially stubbed to
+  `None`).
+  Resolve the profile in `jp_cli` after configuration loads and install it into
+  the sink before rendering, with per-`PrintTarget` color gating.
+- Extend the per-sink adapter (`AnsiStripper`/`Sink` with a persistent
+  `vte::Parser`) to downgrade SGR depth via `anstyle-lossy`, enforce the
+  category-based escape policy, and strip all SGR sequences on non-styled
+  channels.
+  Add the trusted out-of-band control path for JP's progress and cursor
+  sequences, covering both `Printer::print` and borrowed
+  `out_writer`/`err_writer` handles, with tests for split CSI sequences and
+  typewriter output.
+- Keep `jp_md` and UI chrome emitting canonical truecolor so the sink adapts
+  colors on write.
+  Add `anstyle-lossy` and `style.terminal.color_depth`.
+- This phase fixes bug 2 (garbled syntax-highlighted tool output on
+  non-truecolor terminals).
 
 ### Phase 2: `jp_style`, themes, and scheme selection
 
-- Add the `jp_style` crate (`Style`, `Palette`, `Scope`, stylesheet resolution,
-  wrapping `anstyle::Color`), an in-house base16 loader, and curated light/dark
-  default themes.
-  Align `jp_md`'s logical `Color` with `anstyle` (amends [RFD 084]).
-- Add scheme detection (`termbg` + `COLORFGBG`) producing `Option<Scheme>`, and
-  scheme-driven default theme selection.
-  Apply the hybrid readability rule.
-- Move `theme` to the global `style.theme` with `default = "auto"`.
-- **Fixes bug (1)** (inline-code readability).
-  Depends on Phase 1.
+- Create the `jp_style` crate (`Style`, `Palette`, `Scope`, stylesheet
+  resolution, wrapping `anstyle::Color`), an in-house base16 loader, and curated
+  light and dark default themes.
+  Align `jp_md`'s logical `Color` type with `anstyle` (amending [RFD 084]).
+- Add scheme detection (`termbg` and `COLORFGBG`) producing `Option<Scheme>`,
+  scheme-driven default theme selection, and the readability rule.
+- Move `theme` to the global `style.theme` section with `default = "auto"`.
+- This phase depends on Phase 1 and fixes bug 1 (unreadable inline code on light
+  terminals).
 
 ### Phase 3: Node-major config surface and chrome scopes
 
-- Land the node-major `style` layout: global `style.theme` and `style.terminal`,
-  per-node `style.<node>.elements.*`.
-  Land [RFD 084]'s `style.markdown.elements.*` on this engine (084 amended to
-  drop its alias phase), and add `tool_call.*` scopes.
-  Implement the `fg`/`bg` grammar and the theme resolution model (`name -> {
-  palette, syntect }`).
-- This is a breaking change to `style`; the load path maps the known old keys
-  and documents the new shape.
-  The full scope taxonomy beyond markdown + tool_call is deferred to follow-on
-  RFDs.
-  Depends on Phase 2.
+- Implement the node-major `style` layout: global `style.theme` and
+  `style.terminal` sections, and per-node `style.<node>.elements.*` tables.
+  Build `style.markdown.elements.*` from [RFD 084] (without its
+  deprecation-alias phase) and `tool_call.*` scopes on this engine, along with
+  the `fg`/`bg` value grammar and `name -> { palette, syntect }` theme
+  resolution.
+- Map the previous `style` configuration keys during loading and document the
+  new schema.
+  Scopes beyond `markdown.*` and `tool_call.*` are deferred to follow-up RFDs.
+  This phase depends on Phase 2.
 
 ## References
 
-- [RFD 004]: the custom `jp_md` terminal renderer this builds on.
-- [RFD 048]: the four-channel output model.
-  D57 reuses its per-target channels and amends its global color behavior to be
-  per-target.
-- [RFD 075]: tool sandbox and access policy.
-  D57 sets the default sink sanitization of tool-emitted escapes; a future RFD
-  075 revision may define a fuller trust-boundary policy.
-- [RFD 084]: configurable markdown element coloring.
-  D57 extends it: it reuses the `Style`/stylesheet design, narrows the
-  SGR-emission boundary to the sink, drops the alias phase, and shares the
-  node-major `style` shape.
-  The `Extended by` back-link on 084 is filled when this draft is promoted.
-- [RFD 096]: terminal output sanitization for untrusted content.
-  It neutralizes untrusted content where it enters the render pipeline; this
-  draft's terminal sink adapts already-trusted styling downstream of it.
-  The untrusted-content SGR allowlist is owned by RFD 096, not the sink, so the
-  sink must not grow a second untrusted-content policy.
-- [color256]: terminal 256-color palette generation from base16 (informative).
-- [`anstyle`], [`termbg`]: the crates this RFD reuses or adds.
-- [base16 styling spec]: the palette role vocabulary and file format.
+- [RFD 004]: Custom `jp_md` terminal renderer that this design builds on.
+- [RFD 048]: Four-channel output model.
+  D57 reuses its per-target channels and amends color emission from a global
+  decision to a per-target decision.
+- [RFD 075]: Tool sandbox and access policy.
+  D57 defines default sink sanitization for tool-emitted escape sequences; a
+  future RFD 075 revision may define a broader trust-boundary policy.
+- [RFD 084]: Configurable markdown element coloring.
+  D57 extends it by reusing its `Style` and stylesheet design, moving SGR depth
+  adaptation to the terminal sink, dropping the deprecation-alias phase, and
+  sharing the node-major `style` configuration layout.
+  Promoting this draft adds the `Extended by` back-link to RFD 084.
+- [RFD 096]: Terminal output sanitization for untrusted content.
+  RFD 096 neutralizes untrusted content where it enters the render pipeline,
+  while D57's terminal sink adapts trusted styling downstream.
+  RFD 096 owns the SGR allowlist for untrusted content, so the terminal sink
+  must not introduce a second untrusted-content policy.
+- [color256]: Writeup on generating 256-color terminal palettes from base16
+  themes (informative).
+- [`anstyle`], [`termbg`]: Terminal styling and background-detection crates
+  reused or added by this RFD.
+- [base16 styling spec]: Specification for the palette role vocabulary and theme
+  file format.
 
 [Hyrum's Law]: https://www.hyrumslaw.com/
 [NO_COLOR]: https://no-color.org/

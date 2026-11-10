@@ -11,33 +11,29 @@
 ## Summary
 
 This RFD proposes recording `InquiryRequest` and `InquiryResponse` events in the
-persisted `ConversationStream`, and introducing a centralized filtering
-mechanism so that these internal events are never sent to LLM providers.
-This gives us a complete audit trail of what happened during tool execution
-while preserving the provider contract that requires tool call requests to be
-immediately followed by tool call responses.
+persisted `ConversationStream` and filtering them out in one place before
+sending the stream to LLM providers.
+This preserves a complete audit trail of tool execution without breaking the
+provider contract that tool call responses immediately follow tool call
+requests.
 
 ## Motivation
 
 The stateful tool inquiry system (see [architecture doc][inquiry-arch]) resolves
 tool questions by making structured output calls to the LLM.
-Today, these inquiries happen on a cloned conversation stream that is discarded
-after the answer is extracted.
-The real `ConversationStream`, the one persisted to disk, contains no record
-that an inquiry occurred.
-It looks like this:
+These inquiries run on a cloned conversation stream that is discarded after the
+answer is extracted, leaving no record in the persisted `ConversationStream`:
 
 ```rust
 ToolCallRequest(call_123, fs_modify_file, {path, patterns})
 ToolCallResponse(call_123, "File modified successfully")
 ```
 
-A reader of the conversation history cannot tell that between those two events,
-the tool paused, asked the LLM a question ("Create backup files?"), received an
-answer (true), and then completed.
-That context is lost.
+Nothing in the history shows that between those two events the tool paused,
+asked the LLM a question ("Create backup files?"), and received an answer (true)
+before completing.
 
-With first-class inquiry events, the stream would look like:
+With first-class inquiry events, the stream records the exchange:
 
 ```rust
 ToolCallRequest(call_123, fs_modify_file, {path, patterns})
@@ -46,55 +42,48 @@ InquiryResponse(inq_1, true)
 ToolCallResponse(call_123, "File modified successfully")
 ```
 
-This matters for:
+Persisting these events supports three use cases:
 
-- **Debugging**: When a tool produces unexpected results, knowing what questions
-  it asked and what answers it received is essential.
+- **Debugging**: Inspecting unexpected tool behavior requires knowing what
+  questions the tool asked and what answers it received.
 - **Conversation replay**: Tooling that replays or analyzes conversations can
   reconstruct the full execution flow.
-- **Future UI**: A conversation viewer could display inquiry events as a
-  collapsible sub-flow within a tool call, giving users visibility into the
-  system's decision-making.
-
-If we do nothing, inquiry state remains ephemeral and invisible.
-The persisted conversation is an incomplete record of what the system did.
+- **Future UI**: A conversation viewer can display inquiries as a collapsible
+  sub-flow under the parent tool call.
 
 ## Design
 
 ### Overview
 
-Three changes, in order of dependency:
+The design has three parts, in dependency order:
 
-1. **`EventKind::is_provider_visible()`** — A method on the event enum that
-   declares whether an event type should be included in provider message
-   streams.
-   Structural and type-level.
-2. **`Thread::into_parts()`** — A new decomposition method on `Thread` that
-   renders system content and filters events in a single place.
-   Providers consume `ThreadParts` instead of destructuring `Thread` manually.
-3. **Recording inquiry events** — The `ToolCoordinator` pushes `InquiryRequest`
-   and `InquiryResponse` into the real conversation stream at the right points
-   during tool execution.
+1. **`EventKind::is_provider_visible()`**: A type-level predicate on `EventKind`
+   that declares whether an event variant belongs in provider message streams.
+2. **`Thread::into_parts()`**: A decomposition method on `Thread` that renders
+   system content and filters events in one place.
+   Providers consume `ThreadParts` instead of destructuring `Thread` directly.
+3. **Recording inquiry events**: `ToolCoordinator` pushes `InquiryRequest` and
+   `InquiryResponse` events into the conversation stream during tool execution.
 
 ### Design Goals
 
-| Goal                         | Description                                   |
-| ---------------------------- | --------------------------------------------- |
-| **Complete audit trail**     | Every inquiry is recorded in the persisted    |
-|                              | stream.                                       |
-| **Provider contract intact** | Providers never see inquiry events. The       |
-|                              | ToolCallRequest → ToolCallResponse pairing    |
-|                              | is preserved in the provider-facing stream.   |
-| **Single filtering point**   | Event visibility is determined once, in one   |
-|                              | place. Providers don't need defensive         |
-|                              | catch-all arms.                               |
-| **No provider regression**   | Adding new internal event types in the future |
-|                              | requires updating one method, not six         |
-|                              | providers.                                    |
+| Goal                         | Description                                  |
+| ---------------------------- | -------------------------------------------- |
+| **Complete audit trail**     | Every inquiry is recorded in the persisted   |
+|                              | stream.                                      |
+| **Provider contract intact** | Providers never see inquiry events. The      |
+|                              | ToolCallRequest → ToolCallResponse pairing   |
+|                              | is preserved in the provider-facing stream.  |
+| **Single filtering point**   | Event visibility is defined in one place, so |
+|                              | providers do not need defensive catch-all    |
+|                              | arms.                                        |
+| **No provider regression**   | Adding an internal event type requires       |
+|                              | updating one method, not all six providers.  |
 
 ### Event Visibility
 
-A new method on `EventKind`:
+`EventKind::is_provider_visible()` defines which event variants are sent to
+providers:
 
 ```rust
 impl EventKind {
@@ -116,30 +105,29 @@ impl EventKind {
 }
 ```
 
-This is a positive list (allowlist), not a denylist.
-New event types are invisible to providers by default — you have to opt them
-in.
-This is safer than a denylist where forgetting to exclude a new type sends
-garbage to every provider.
+`is_provider_visible()` uses an allowlist rather than a denylist.
+New event variants are hidden from providers unless explicitly opted in, so
+adding an internal event cannot accidentally leak it to providers.
 
 ### Thread Decomposition
 
-`Thread` has four public fields.
-Three providers use `Thread::into_messages()` (Llamacpp, Ollama, OpenAI), which
-renders system content and delegates event conversion to a closure.
-Three providers (Anthropic, Google, OpenRouter) destructure `Thread` manually
-because their APIs need system content and conversation messages as separate
-values — `into_messages` concatenates them into a single list.
+Three providers (Llamacpp, Ollama, OpenAI) call `Thread::into_messages()`, which
+renders system content and passes the event stream to a conversion closure.
+The other three (Anthropic, Google, OpenRouter) destructure `Thread`'s four
+public fields directly because their APIs take system content and conversation
+messages separately, whereas `into_messages` concatenates them into a single
+list.
 
-This means event filtering has no single enforcement point.
-Each provider independently skips non-provider events in its own
-`convert_events` function, or via `_ => None` catch-all match arms.
-Every new internal event type requires touching every provider.
+Because `Thread` has no single decomposition path, each provider filters
+non-provider events on its own in `convert_events` or with `_ => None` catch-all
+arms.
+Adding an internal event type requires updating every provider.
 
-We introduce `Thread::into_parts()` as the universal decomposition method.
-System parts are returned as tagged `SystemPart` values rather than plain
-`String`s, so that providers needing per-part cache control (Anthropic,
-OpenRouter) can match on the variant to decide cache placement:
+`Thread::into_parts()` replaces manual destructuring as the universal
+decomposition method.
+It returns system content as tagged `SystemPart` values rather than plain
+`String`s so providers with per-part cache control (Anthropic, OpenRouter) can
+match on the variant to place cache breakpoints:
 
 ```rust
 /// A rendered piece of system content, tagged by origin.
@@ -165,8 +153,8 @@ impl Thread {
 }
 ```
 
-`into_messages` delegates to `into_parts()` and flattens the tags to plain
-`String`s for providers that don't need them:
+`into_messages` delegates to `into_parts()` and unwraps `SystemPart` values into
+plain `String`s for providers that do not need the origin tags:
 
 ```rust
 pub fn into_messages<T, U, M, S>(
@@ -188,47 +176,43 @@ pub fn into_messages<T, U, M, S>(
 }
 ```
 
-The three providers using `into_messages` (Llamacpp, Ollama, OpenAI) get
-filtering for free — no code changes.
-The three that destructure `Thread` manually (Anthropic, Google, OpenRouter)
-migrate to `into_parts()`.
+Llamacpp, Ollama, and OpenAI inherit the filtering through `into_messages`
+without code changes.
+Anthropic, Google, and OpenRouter migrate from manual destructuring to
+`into_parts()`.
 
 ### Recording Inquiry Events
 
-The `ToolCoordinator` records inquiry events at two points:
+`ToolCoordinator` records inquiry events at two points:
 
 1. **On question arrival** (`handle_tool_result`, before any routing decision):
    Push an `InquiryRequest` into the conversation stream.
-
-2. **On resolution**: Push an `InquiryResponse` into the conversation stream —
+2. **On resolution**: Push an `InquiryResponse` into the conversation stream:
    `Answered` when an answer resolves the question, `Redacted` for
    `AnswerType::Secret` answers, or `Cancelled` when the question closes without
    an answer.
 
-Inquiry events are recorded for **every** `Outcome::NeedsInput` round-trip,
+Inquiry events are recorded for every `Outcome::NeedsInput` round-trip,
 regardless of routing path (amended by [RFD 082]; this section originally
 excluded prompter-answered questions):
 
-- Questions resolved by the interactive prompter (TTY + `QuestionTarget::User`).
-- Questions resolved by a cached "remember for turn" answer from earlier in the
-  same turn.
-- Questions resolved by a static `QuestionConfig.answer` value.
-- Questions routed through the `InquiryBackend` (explicit
-  `QuestionTarget::Assistant`, or user-targeted questions falling through in
-  non-interactive environments).
+- Interactive prompter (TTY + `QuestionTarget::User`).
+- Cached "remember for turn" answer from earlier in the same turn.
+- Static `QuestionConfig.answer` value.
+- `InquiryBackend` (explicit `QuestionTarget::Assistant`, or user-targeted
+  questions falling through in non-interactive environments).
 
-When a question closes without an answer, the pair is completed with
-`InquiryResponse::Cancelled { reason }` rather than left dangling: `user` for a
-user cancellation (Ctrl-C at the prompt, or a cancellation token fired by a user
-action), `backend_error` for an inquiry-backend failure, and `no_prompt_backend`
-/ `assistant_routing_denied` for `AnswerType::Secret` questions that could not
-be routed to a human.
+When a question closes without an answer, the coordinator completes the pair
+with `InquiryResponse::Cancelled { reason }` rather than leaving the request
+dangling.
+The `reason` is `user` on user cancellation (Ctrl-C at the prompt or a
+user-triggered cancellation token), `backend_error` on an inquiry-backend
+failure, and `no_prompt_backend` or `assistant_routing_denied` when an
+`AnswerType::Secret` question cannot be routed to a human.
 
-`execute_with_prompting` receives `events: &mut ConversationStream` so the
-coordinator has write access.
-
-The events sit between the `ToolCallRequest` and `ToolCallResponse` for the tool
-in question:
+`execute_with_prompting` takes `events: &mut ConversationStream` so
+`ToolCoordinator` can append these events between the tool's `ToolCallRequest`
+and `ToolCallResponse`:
 
 ```txt
 ToolCallRequest(call_123, fs_modify_file, {...})
@@ -237,7 +221,7 @@ ToolCallRequest(call_123, fs_modify_file, {...})
 ToolCallResponse(call_123, "File modified successfully")
 ```
 
-For multi-question tools, multiple inquiry pairs appear:
+A tool that asks multiple questions records one pair per question:
 
 ```txt
 ToolCallRequest(call_123, fs_modify_file, {...})
@@ -248,105 +232,89 @@ ToolCallRequest(call_123, fs_modify_file, {...})
 ToolCallResponse(call_123, "File modified successfully")
 ```
 
-For parallel tool calls, inquiry events for different tools may interleave, but
-each `InquiryRequest`/`InquiryResponse` pair is matched by `id`, so ordering
-between tools doesn't affect correctness.
+When tools run in parallel, inquiry events from different tools may interleave;
+matching each `InquiryRequest` and `InquiryResponse` by `id` keeps pairs
+unambiguous.
 
 ### Schema Extraction Edge Case
 
-Several providers check `events.last().as_chat_request().schema` to detect
+Several providers inspect `events.last().as_chat_request().schema` to detect
 structured output requests.
-If inquiry events were at the tail of the stream, this check could break.
-In practice, inquiry events always sit between a `ToolCallRequest` and
-`ToolCallResponse` — never at the tail — so this is not an issue.
-The `into_parts()` filtering makes it impossible regardless, since the provider
-receives a stream where inquiry events don't exist.
+An inquiry event at the tail of the stream would break this check, but two
+invariants prevent that: inquiry events are always followed by a
+`ToolCallResponse` before the next provider call, and `into_parts()` strips them
+before the provider sees the stream.
 
 ### Serialization
 
-`InquiryRequest` and `InquiryResponse` are already fully integrated into the
-serialization system.
-`EventKind` includes both variants, `InternalEventFlattened` (the optimized
-deserializer) handles them, and `ConversationStream` has `add_inquiry_request()`
-/ `add_inquiry_response()` helpers.
-No serialization work is needed.
+No serialization changes are needed.
+`EventKind` already includes `InquiryRequest` and `InquiryResponse`,
+`InternalEventFlattened` (the optimized deserializer) handles both variants, and
+`ConversationStream` provides `add_inquiry_request()` and
+`add_inquiry_response()` helpers.
 
 ## Drawbacks
 
-- **Stream size**: Inquiry events add to the persisted conversation.
-  Each inquiry pair is small (the question text + a JSON answer value), but
-  tools with many questions over many turns will accumulate.
-  This is a minor cost compared to the tool arguments and responses already
-  stored.
-
+- **Stream size**: Each inquiry adds a question string and a JSON answer value
+  to the persisted stream.
+  Even across many turns, this overhead is minor compared to tool call arguments
+  and responses.
 - **Mutable stream reference**: `execute_with_prompting` and
-  `handle_tool_result` take `&mut ConversationStream`.
-  The change is contained within the tool execution module.
+  `handle_tool_result` must take `&mut ConversationStream`, though the signature
+  change is confined to the tool execution module.
 
 ## Alternatives
 
 ### Per-event metadata flag (`provider_hidden: bool`)
 
-Instead of type-level visibility, add a `provider_hidden` field to
-`ConversationEvent` that any event instance can set.
+Add a `provider_hidden` field to `ConversationEvent` so any event instance can
+hide itself from providers.
 
-Rejected because: for inquiry events, the flag would always be `true` — it's a
-property of the event *type*, not individual instances.
-A runtime flag adds serialization overhead to every event and makes the
-filtering intent implicit rather than structural.
-If a future need arises for per-instance visibility control (e.g. hiding a
-specific `ChatRequest`), this field can be added later in a backward-compatible
-way.
+Rejected because visibility for inquiry events is a property of the event type,
+not of individual instances.
+A runtime flag adds serialization overhead to every event and makes filtering
+implicit rather than structural.
+If per-instance visibility is needed later (for example, hiding a specific
+`ChatRequest`), the field can be added in a backward-compatible way.
 
 ### Filter in each provider (status quo)
 
-Keep the current pattern where each provider's `convert_events` function skips
-non-provider events via pattern matching.
+Keep filtering in each provider's `convert_events` function (Anthropic and
+OpenRouter match `InquiryRequest` and `InquiryResponse` explicitly; Google,
+Llamacpp, and Ollama rely on `_ => None` catch-all arms).
 
-Rejected because: it's fragile.
-Every new internal event type requires touching every provider.
-The three providers that don't use `into_messages` each have their own filtering
-logic (Anthropic and OpenRouter explicitly match `InquiryRequest` /
-`InquiryResponse`; Google, Llamacpp, and Ollama use `_ => None`).
-This is the pattern we're trying to eliminate.
+Rejected because every new internal event type requires updating every provider.
 
-### Filter via `ConversationStream::provider_events()` method
+### Filter via `ConversationStream::provider_events()`
 
-Add a method that returns a filtered iterator, and have each provider call it
+Add a method that returns a filtered iterator and have each provider call it
 instead of `into_iter()`.
 
-This is better than the status quo but still requires each provider to remember
-to call the right method.
-A new provider that calls `into_iter()` instead of `provider_events()` silently
-gets unfiltered events.
-`into_parts()` makes the filtering mandatory — you can't get the events without
-going through it.
+Rejected because filtering remains opt-in: a provider that calls `into_iter()`
+by mistake silently receives unfiltered events.
+`into_parts()` makes filtering mandatory before a provider can access the event
+stream.
 
 ## Non-Goals
 
-- **Rendering inquiry events in `conversation show`**: Display formatting for
-  inquiry events in the CLI is deferred.
-  The events are stored and visible in the raw JSON.
-  A future change can add pretty-printing.
-- **Exposing inquiry events to the LLM**: Inquiry events are always
-  provider-hidden.
-  The inquiry itself is already represented by a `ChatRequest` (with structured
-  schema) and `ChatResponse::Structured` in the inquiry backend's cloned stream
-  — those are the provider-visible artifacts.
-  The `InquiryRequest`/`InquiryResponse` events are our internal bookkeeping.
+- **Rendering inquiry events in `conversation show`**: The events are stored and
+  visible in the raw JSON, but CLI formatting is deferred.
+- **Exposing inquiry events to the LLM**: `InquiryRequest` and `InquiryResponse`
+  are internal bookkeeping and are always hidden from providers.
+  The inquiry backend's cloned stream already represents the exchange to the
+  provider as a structured `ChatRequest` and `ChatResponse::Structured`.
 - **Batching multiple inquiries**: Combining questions from multiple tools into
-  a single structured request.
-  Noted as a future enhancement in the [inquiry architecture doc][inquiry-arch].
+  a single structured request remains future work (see the [inquiry architecture
+  doc][inquiry-arch]).
 
 ## Risks and Open Questions
 
-- **Parallel tool calls and stream ordering**: When multiple tools run in
-  parallel and both trigger inquiries, their `InquiryRequest`/`InquiryResponse`
-  events may interleave in the stream.
-  Each pair is correlated by `id`, so this is correct, but it may look confusing
-  in the raw JSON.
-  We could buffer inquiry events and insert them in tool-order, but this adds
-  complexity for marginal readability benefit.
+- **Parallel tool calls and stream ordering**: When parallel tools trigger
+  inquiries concurrently, their `InquiryRequest` and `InquiryResponse` events
+  may interleave in the stream.
+  Each pair is correlated by `id`, so execution is unaffected, and buffering
+  events to group them by tool is not worth the added complexity just to make
+  raw JSON easier to read.
 
 ## Implementation Plan
 
@@ -356,9 +324,8 @@ Add `EventKind::is_provider_visible()` to `jp_conversation`.
 Add `Thread::into_parts()` with the `SystemPart` enum and refactor
 `into_messages()` to delegate to it.
 
-No provider changes.
-No behavioral changes.
-Can be merged independently.
+This phase makes no provider or behavioral changes and can be merged
+independently.
 
 ### Phase 2: Record inquiry events in the stream
 
@@ -380,7 +347,8 @@ Independent of Phase 2.
 ### Phase 4: Migrate Google to `into_parts()`
 
 Replace manual `Thread` destructuring.
-System parts go to `system_instruction`, filtered events go to `convert_events`.
+Pass `system_parts` to `system_instruction` and filtered `events` to
+`convert_events`.
 
 Independent of Phase 3.
 
@@ -389,19 +357,19 @@ Independent of Phase 3.
 Replace manual `Thread` destructuring.
 Anthropic extracts attachments from the thread before calling `into_parts()` to
 send them as native document blocks rather than XML.
-Cache control budget distribution across `system_parts` and events uses the
-`SystemPart` tags — no complex counter threading is needed.
+Cache control budget distribution across `system_parts` and events matches on
+the `SystemPart` tags instead of threading a counter.
 
 Independent of Phase 4.
 
 ## References
 
-- [Stateful Tool Inquiries Architecture][inquiry-arch] — the inquiry system
-  this RFD builds on.
-- [Query Stream Pipeline] — turn loop and streaming architecture.
-- `jp_conversation::event::inquiry` — existing `InquiryRequest` and
+- [Stateful Tool Inquiries Architecture][inquiry-arch]: The inquiry system this
+  RFD builds on.
+- [Query Stream Pipeline]: Turn loop and streaming architecture.
+- `jp_conversation::event::inquiry`: Existing `InquiryRequest` and
   `InquiryResponse` event types.
-- `jp_conversation::thread::Thread` — the thread type being extended with
+- `jp_conversation::thread::Thread`: The thread type extended with
   `into_parts()`.
 
 [Query Stream Pipeline]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md

@@ -10,52 +10,49 @@
 
 ## Summary
 
-This RFD allows any configuration field to source its value from another file
-(and an optional JSON Pointer within that file) using a `{ file, pointer }`
+This RFD allows opted-in configuration fields to load their values from another
+file (and an optional JSON Pointer within that file) using a `{ file, pointer }`
 table.
 File references resolve relative to the declaring configuration file at load
-time before merging, without executing external commands.
+time, before merging, without executing external commands.
 
 ## Motivation
 
-Every config source JP has today is a static byte stream someone typed: the four
-file locations, the `extends` targets, `JP_CFG_*`, `--cfg` entries.
-[RFD 079] documents them; [RFD 080] adds the editor as another.
+Every config source in JP reads static configuration written directly as config:
+the four file locations, `extends` targets, `JP_CFG_*` environment variables,
+`--cfg` arguments ([RFD 079]), and the interactive editor ([RFD 080]).
+None of these sources can derive a config value from project data that already
+lives in the repository.
 
-That covers config a human writes.
-It does not cover config that is a *function of project data the repository
-already holds*.
+The in-repo ticket board ([RFD 100]) illustrates the gap.
+It defines a closed label vocabulary in `docs/ticket/.labels.json` that declares
+the valid label keys and their allowed values.
+The `ticket_*` tools need that same list as a JSON Schema `enum` so the
+assistant selects from valid labels rather than inventing them.
+The vocabulary cannot move into the tool declarations because `jp ticket` and
+the docs build both read `.labels.json` without loading JP's tool config, and
+the file must travel with the tickets when `--dir` moves them.
+As a result, the label list exists twice, and the two copies drift.
 
-The case that forced the question: the in-repo ticket board ([RFD 100]) has a
-closed label vocabulary in `docs/ticket/.labels.json`, declaring which keys
-exist and which values each accepts.
-The `ticket_*` tools need that same list as a JSON Schema `enum`, so the
-assistant is offered valid labels rather than inventing them.
-The vocabulary cannot move into the tool declarations: `jp ticket` and the docs
-build both read it, neither loads JP's tool config, and the file has to travel
-with the tickets when `--dir` moves them.
-So the list exists twice, and the copies drift.
+Existing workarounds all have drawbacks.
+A test that compares the two files requires updating both whenever a label
+changes, or CI fails.
+A generator recipe still requires contributors to remember to run it after
+editing `.labels.json`.
+Dropping the `enum` from the tool schema avoids the duplication, but every
+invalid guess by the model costs a corrective round trip, and on `ticket_create`
+that round trip triggers an approval prompt for a call that will fail
+validation.
 
-The available answers are all bad in the same way.
-A test comparing the two turns "add a label" into "add a label and update a
-second file or CI goes red", which taxes an edit that should cost nothing.
-A generator recipe moves the tax rather than removing it, and only helps the
-people who remember to run it.
-Dropping the `enum` costs a corrective round trip every time the model guesses,
-and on `ticket_create` that round trip is an approval prompt for a call that
-cannot land.
-
-None of that is specific to labels.
-Any config value that mirrors project data has it.
-
-Doing nothing means each such case grows its own bespoke sync, and the generic
-capability never arrives because no single case justifies it alone.
+This problem applies to any config field that mirrors project data.
+Without a general mechanism in the config loader, each case requires its own
+synchronization recipe or drift test.
 
 ## Design
 
-### What the user writes
+### Reference Syntax
 
-Any field that opts in accepts either a literal or a reference object:
+Any field that opts in accepts either a literal value or a reference table:
 
 ```toml
 # Literal, exactly as today.
@@ -65,64 +62,69 @@ enum = ["client=cli", "client=web"]
 enum = { file = "../../../docs/ticket/.labels.json", pointer = "/client/values" }
 ```
 
-The reference has three fields:
+The reference table supports three fields:
 
 | Field     | Required | Meaning                                                        |
 | --------- | -------- | -------------------------------------------------------------- |
-| `file`    | yes      | Path, relative to the file declaring it                        |
+| `file`    | yes      | Path to the target file, relative to the declaring config file |
 | `pointer` | no       | [RFC 6901] JSON Pointer into the document; defaults to root |
 | `select`  | no       | `value` (default), or `keys` to take an object's keys          |
 
-`file` is read with the same format detection the config loader already uses, so
-a reference can point at TOML, JSON, or YAML regardless of the declaring file's
-format.
+`file` is parsed with the config loader's existing format detection, so a
+reference can target a TOML, JSON, or YAML file regardless of the declaring
+file's format.
 
-`select = "keys"` exists because "the names in this map" is the common shape for
-data files that pair a name with a description.
-Without it, every such file needs a parallel array.
+`select = "keys"` extracts the keys of a map as a list of strings.
+Data files often map each item name to a description or metadata object; `select
+= "keys"` lets config fields reference those names directly without maintaining
+a separate array in the data file.
 
 ### Resolution
 
-References resolve during load, per file, in the same pass that resolves
-`extends`:
+References resolve per file during config loading, in the same pass that
+resolves `extends`:
 
-1. Read the declaring file into a raw document.
-2. Walk it for reference objects.
-3. For each, resolve `file` relative to the declaring file's directory, read it,
-   apply `pointer`, apply `select`, substitute the result.
-4. Hand the substituted document to the partial parser.
+1. Read the declaring config file into a raw document.
+2. Locate each reference object in the document.
+3. Resolve `file` relative to the declaring file's directory, parse the target
+   file, apply `pointer` and `select`, and substitute the resulting value in
+   place.
+4. Pass the substituted document to the partial config parser.
 
-Resolving before parsing rather than after keeps the partial types unchanged: by
-the time `PartialAppConfig` exists, every value is a literal.
-Resolving before *merging* means a reference is a property of the file that
-declares it, not of the merged result, so a higher layer overrides a
-reference-derived value exactly as it overrides a literal one.
+Resolving references before parsing keeps the partial config types unchanged: by
+the time `PartialAppConfig` is constructed, every value is a literal.
+Resolving before merging scopes each reference to the file that declares it, so
+a higher-precedence config layer overrides a file-sourced value the same way it
+overrides a literal.
 
-Referenced files do not participate in `extends` and are not themselves config:
-they are data, read once, at one pointer.
+Referenced files are treated as plain data rather than config files: they are
+read once at the requested pointer and do not participate in `extends`.
 
-### Failure behavior
+### Failure Behavior
 
-Matching `extends`, which warns and continues on a missing non-glob target:
+Like `extends` on a missing non-glob target, a missing `file` logs a warning and
+continues:
 
-| Condition                         | Behavior                        |
-| --------------------------------- | ------------------------------- |
-| `file` missing                    | Warn, leave the field unset     |
-| `file` unparseable                | Error                           |
-| `pointer` names nothing           | Error                           |
-| `select = "keys"` on a non-object | Error                           |
-| Resolved value has the wrong type | Error, from the existing parser |
+| Condition                         | Behavior                       |
+| --------------------------------- | ------------------------------ |
+| `file` missing                    | Warn and leave the field unset |
+| `file` unparseable                | Error                          |
+| `pointer` target missing          | Error                          |
+| `select = "keys"` on a non-object | Error                          |
+| Resolved value has the wrong type | Error from the existing parser |
 
-A missing file is the lenient case because a reference can legitimately point at
-something optional.
-Everything else means the reference is wrong, and a silently unset field would
-be harder to diagnose than a failed load.
+Missing files are treated leniently because a reference may point to an optional
+file.
+Every other failure indicates a broken reference or invalid target data, where
+failing at load time is easier to diagnose than silently leaving the field
+unset.
 
-### Opting a field in
+### Opting Fields In
 
-Not a change to the `schematic` derive, and not a capability every field gets.
-A field opts in by declaring a type that accepts the reference form, the way
-`extends` opts into `ExtendingRelativePath` today:
+File sourcing does not change the `schematic` derive macro and does not apply to
+every config field automatically.
+A field opts in by wrapping its value type in `Sourced<T>`, following the
+pattern `extends` uses with `ExtendingRelativePath`:
 
 ```rust
 pub enum Sourced<T> {
@@ -131,166 +133,168 @@ pub enum Sourced<T> {
 }
 ```
 
-This keeps the blast radius to the fields that want it, keeps the merge, delta,
-and fill machinery untouched, and makes "can this field be sourced from a file?"
-answerable from its type.
+Scoping support to `Sourced<T>` leaves the merge, delta, and default-filling
+machinery untouched and makes a field's support for file references explicit in
+its Rust type.
 
 ### Provenance
 
-Each resolved reference records the file it came from, so [RFD 060] can report
-`enum ← docs/ticket/.labels.json#/client/values` rather than a bare value.
+Each resolved reference records its source file and pointer so [RFD 060] can
+report `enum ← docs/ticket/.labels.json#/client/values` instead of an
+unattributed value.
 
 ## Drawbacks
 
-**A query language wants to grow here.** `pointer` and `select` are two knobs;
-the third request will be `filter`, the fourth `map`.
-The line this RFD draws: a reference addresses *one location* in *one document*
-and takes it whole.
-Anything that transforms content belongs in the file being referenced, or in
-whatever writes it.
-If a case genuinely needs transformation, that is evidence for the
-command-execution design this RFD rejects, not for growing `pointer`.
+**Pressure to grow into a query language.** Once `pointer` and `select` exist,
+callers will eventually ask for `filter` or `map`.
+This RFD draws a hard boundary: a reference addresses a single location in a
+single document and reads it without transformation.
+Data transformations belong in the referenced file or the tool that writes it.
+If a use case genuinely requires load-time transformation, that argues for the
+command-execution design rejected below rather than expanding `pointer` and
+`select`.
 
-**Two ways to write the same thing.** Every opted-in field now has a literal
-form and a reference form, in docs, in examples, in error messages.
-That is a real cost paid by every reader, for a feature most fields never use.
+**Two forms for opted-in fields.** Every opted-in field accepts both a literal
+value and a reference table, which complicates documentation, examples, and
+parser error messages for a feature most fields never use.
 
-**Config stops being self-contained.** Reading a config file no longer tells you
-its values.
-Provenance in `--explain` mitigates this for anyone who thinks to look; nothing
-mitigates it for someone reading the file directly.
+**Config files are less self-contained.** Reading a config file no longer shows
+all of its values directly.
+Provenance in `--explain` helps when inspecting resolved config through the CLI,
+but does not help someone reading the raw file.
 
-**It is one consumer today.** Labels is the forcing case.
-The other candidates named below are plausible, not requested.
-If none of them materialize, this is machinery serving a single caller, which is
-the midlayer mistake.
+**Only one immediate consumer.** Ticket labels are the only concrete use case so
+far; the other candidates in the implementation plan are plausible but
+unrequested.
+If none of them materialize, this adds general loader machinery for a single
+caller.
 
 ## Alternatives
 
-**Command output as a config source.** `extends = [{ command = "..." }]`, with
-the source being a process's stdout.
-Strictly more general: it covers secrets from a keychain, per-machine paths,
-anything a file cannot answer.
-Rejected because the cost is not proportional to this problem.
-Config loads on every invocation, so this executes repository-supplied commands
-on `jp --help` in a freshly cloned checkout, before any user intent.
-`providers.mcp.*.command` and tool `command` already run repo-supplied code, but
-only when a tool is actually invoked, and [RFD 077] exists to govern exactly
-that.
-A load-time equivalent needs its own trust design, plus caching (because a
-process spawn per source per invocation is an inner-loop cost), plus cache
-invalidation, plus an answer for what `--explain` reports when the output
-differs between runs.
-If dynamism is ever wanted, it should be its own RFD carrying its own trust
-argument.
-Nothing here forecloses it: a `command` variant slots into the same resolution
-step.
+**Command output as a config source.** A command source such as `extends = [{
+command = "..." }]` that reads a subprocess's stdout is strictly more general:
+it can fetch secrets from a keychain, compute per-machine paths, or produce
+values that do not exist in a file.
+Rejected because its security and performance costs are disproportionate to this
+problem.
+Config loads on every CLI invocation, so command sources would execute
+repository-supplied commands even on `jp --help` in a freshly cloned checkout.
+While `providers.mcp.*.command` and tool `command` settings already run
+repository-supplied code, they run only when a tool is invoked and are governed
+by [RFD 077].
+A load-time equivalent would require its own trust model, output caching and
+cache invalidation to avoid spawning processes on every invocation, and a way
+for `--explain` to report output that changes between runs.
+If dynamic command sources are needed later, a `command` variant can slot into
+the same resolution pass under its own RFD.
 
-**A drift test.** Duplicate the value, compare in CI.
-Zero new machinery, and the duplication becomes visible rather than silent.
-Rejected because it taxes the edit: changing project data now fails an unrelated
-test until a second file is updated.
-That is the wrong incentive on data that should be cheap to change.
+**A drift test.** Duplicating the value in both files and asserting equality in
+CI requires no loader changes and makes divergence visible before merge.
+Rejected because it penalizes routine edits: changing project data fails an
+unrelated test until the contributor also updates the second file.
 
-**A generator recipe.** `just ticket-labels-sync` rewrites the derived file.
-Rejected as a permanent answer for the same reason, one step removed: it does
-not fail, but it still requires remembering.
-Accepted as the *interim* for labels, precisely because it is deletable when
-this RFD lands.
+**A generator recipe.** A `just ticket-labels-sync` recipe that rewrites the
+derived file avoids manual edits, but still requires contributors to remember to
+run it after changing the source data.
+It is used as an interim workaround for ticket labels because it can be deleted
+once this RFD lands.
 
-**Make the data file a config partial.** Shape `.labels.json` as an `AppConfig`
-fragment and `extends` it.
-Rejected: the vocabulary is ticket-board data, and this would put it in JP's
-config namespace where `jp ticket` and the docs build cannot reasonably read it,
-and where per-label descriptions have no natural home.
+**Format the data file as a config partial.** Shaping `.labels.json` as an
+`AppConfig` fragment and loading it via `extends` avoids new syntax.
+Rejected because the label vocabulary is ticket-board data: placing it in JP's
+config namespace would force `jp ticket` and the docs build to parse `AppConfig`
+partials, where per-label descriptions have no natural home.
 
-**Self-describing tools ([RFD D06]).** A local tool could return its own schema
-at call time, computing the `enum` itself.
-This solves the labels case and nothing else, does not help any non-tool field,
-and is a much larger change to the tool protocol.
+**Self-describing tools ([RFD D06]).** Allowing a local tool to return its own
+schema at call time and compute the `enum` itself would solve the ticket labels
+case, but it does not help non-tool config fields and requires a much larger
+change to the tool protocol.
 
 ## Non-Goals
 
-- **Executing anything.** See Alternatives.
-- **Writing back.** A reference is read-only.
-  [RFD D02]'s lossless editing does not follow the reference to edit the target.
-- **Watching for changes.** Resolution happens at load.
-  A long-running host that wants to notice a changed data file is [RFD D36]'s
-  problem.
-- **Referencing across the network.** Local paths only.
-- **Environment or shell expansion inside `file`.** A path is a path.
+- **Executing external commands.** References only read static files; see
+  Alternatives.
+- **Writing back to referenced files.** References are read-only; lossless
+  config editing ([RFD D02]) does not follow a reference to edit its target.
+- **Watching referenced files for changes.** References resolve once at load
+  time.
+  Detecting changed data files in a long-running host is covered by [RFD D36].
+- **Network references.** `file` accepts local filesystem paths only.
+- **Environment or shell expansion inside `file`.** Paths are resolved literally
+  relative to the declaring file.
 
 ## Risks and Open Questions
 
-**Is `select = "keys"` the right primitive, or a special case in disguise?** It
-exists for one shape (a map of name to description).
-An array of objects with a `name` field is just as common and `keys` does not
-help there.
-Either the answer is "reference an array and shape the data file accordingly",
-or `select` needs a third value, and that is the slope this RFD claims not to
-slide down.
+**Is `select = "keys"` the right primitive, or an overly narrow special case?**
+`select = "keys"` exists for maps keyed by item name, but an array of objects
+with a `name` field is just as common and `keys` does not help there.
+Supporting object arrays would require either reshaping the data file to expose
+a flat array or adding a third `select` mode, which crosses into the query
+language this RFD avoids.
 
-**How does a reference interact with `--cfg` deltas and conversation config?** A
-reference resolves at load; the resolved value is what lands in a recorded
-`ConfigDelta`.
-That means a conversation replays the value as it was, not as the file now
-reads.
-Probably correct (a recorded conversation should be stable), but it means a
-delta can disagree with the file, and `--explain` should say so.
+**How does a reference interact with `--cfg` deltas and conversation config?**
+References resolve at load time, so a recorded `ConfigDelta` stores the resolved
+literal value rather than the reference.
+Replaying a conversation therefore uses the value from when the turn was
+recorded, even if the referenced file has since changed.
+Keeping recorded conversations stable is desirable, but a persisted delta can
+disagree with the current file on disk, and `--explain` should surface that
+difference.
 
-**Relative paths are long.** `../../../docs/ticket/.labels.json` from inside
-`.jp/mcp/tools/ticket/` is fragile against moving either end.
-Workspace-root anchoring (`//docs/ticket/.labels.json`) would help.
-Deferred rather than decided, since [RFD D35] is already reworking loader path
-semantics and the two should agree.
+**Fragile relative paths.** Referencing `../../../docs/ticket/.labels.json` from
+inside `.jp/mcp/tools/ticket/` breaks if either directory moves.
+Workspace-root anchoring (`//docs/ticket/.labels.json`) would shorten and
+stabilize these paths, but is deferred so it can align with the loader path
+semantics in [RFD D35].
 
-**Does the warn-on-missing case hide typos?** A misspelled `file` is
-indistinguishable from an intentionally optional one.
-The alternative is erroring on missing files, which diverges from `extends`.
-Worth revisiting if it bites.
+**Does warn-on-missing mask typos?** A misspelled `file` path logs a warning and
+leaves the field unset, making it indistinguishable from an intentionally
+optional file.
+Returning an error on missing files would catch typos immediately, at the cost
+of diverging from `extends`.
 
 ## Implementation Plan
 
-**Phase 1: the reference type and resolver.** `FileReference` and `Sourced<T>`
-in `jp_config::types`, plus resolution in `jp_config::util` alongside the
-`extends` walk.
-No field uses it yet; tested directly.
-Mergeable alone.
+**Phase 1: Reference types and resolver.** Add `FileReference` and `Sourced<T>`
+in `jp_config::types`, and implement reference resolution in `jp_config::util`
+alongside the `extends` walk.
+No config field uses `Sourced<T>` yet; this phase is tested directly and can
+merge on its own.
 
-**Phase 2: opt in the first field.** `enum` on tool parameters
-(`conversation.tools.*.parameters.*.items.enum`).
-Delete the label mirror file and the `just ticket-labels-sync` recipe added for
-[RFD 100].
-Depends on phase 1.
+**Phase 2: Opt in tool parameter enums.** Wrap tool parameter `enum` fields
+(`conversation.tools.*.parameters.*.items.enum`) in `Sourced<T>`, then delete
+the label mirror file and the `just ticket-labels-sync` recipe added for [RFD
+100].
+Depends on Phase 1.
 
-The ticket vocabulary is nested (key, then `values` and `retired`), and the
-tokens the schema wants are `key=value` strings rather than either list
-verbatim.
-A pointer plus `select` cannot build them, so phase 2 either accepts a flatter
-mirror shape or concedes that this consumer needs a transformation the design
-refuses.
-Resolve that before starting: it is the sharpest test of whether the
-`pointer`-only line holds.
+The ticket label vocabulary in `docs/ticket/.labels.json` is nested by key (each
+with `values` and `retired` lists), whereas the tool schema expects `key=value`
+strings rather than either list verbatim.
+Because `pointer` and `select` cannot construct `key=value` strings from a
+nested map, Phase 2 must either flatten the label file shape or concede that the
+motivating consumer requires a transformation this design refuses.
+Resolve that question before starting Phase 2, as it directly tests whether the
+`pointer`-only boundary holds.
 
-**Phase 3: provenance.** Record the source path per resolved reference and
+**Phase 3: Provenance.** Record the source path for each resolved reference and
 surface it in `--explain`.
-Depends on phase 1 and on [RFD 060]; mergeable independently of phase 2.
+Depends on Phase 1 and [RFD 060], and can merge independently of Phase 2.
 
-Candidate consumers after phase 2, none of them committed to here: model alias
-lists, `assistant.instructions` shared across workspaces, plugin registries.
+Candidate follow-up consumers (not committed to here) include model alias lists,
+`assistant.instructions` shared across workspaces, and plugin registries.
 
 ## References
 
-- [RFD 079]: Config Sources and Load Order — the load pipeline this extends.
-- [RFD 080]: Editor as a Config Source — the other in-flight source addition.
-- [RFD 100]: In-Repo Ticket Tracking — the forcing case.
-- [RFD 060]: Config Explain — consumer of the provenance in phase 3.
-- [RFD 077]: Plugin Configuration and Trust Policy — the trust model a
-  command-execution variant would have to extend.
-- [RFC 6901]: JSON Pointer.
-- `crates/jp_config/src/types/extending_path.rs` — the opt-in-by-type
-  precedent.
-- `crates/jp_config/src/util.rs` — where `extends` resolution lives.
+- [RFD 079]: Config Sources and Load Order, the load pipeline this RFD extends.
+- [RFD 080]: Editor as a Config Source, another config source addition.
+- [RFD 100]: In-Repo Ticket Tracking, the motivating use case.
+- [RFD 060]: Config Explain, which consumes the provenance recorded in Phase 3.
+- [RFD 077]: Plugin Configuration and Trust Policy, the trust model that a
+  command-execution source would need to extend.
+- [RFC 6901]: JSON Pointer specification.
+- `crates/jp_config/src/types/extending_path.rs`: precedent for opting a field
+  in through its Rust type.
+- `crates/jp_config/src/util.rs`: `extends` resolution implementation.
 
 [RFC 6901]: https://datatracker.ietf.org/doc/html/rfc6901
 [RFD 060]: ../060-config-explain.md

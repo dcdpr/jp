@@ -21,27 +21,20 @@ strategies.
 
 ## Motivation
 
-JP's conversations are currently a flat list.
-Every conversation is a peer — there is no structural relationship between
-them.
-This creates two problems:
+JP stores conversations as a flat list of peers with no structural relationship
+between them, which creates two problems:
 
-**Forks have no lineage.** `conversation fork` creates a new top-level
-conversation by copying events.
-The fork has no reference to its source.
-Over time, the relationship is lost.
-You can't answer "what conversations were derived from this one?"
+- **Forks have no lineage.** `conversation fork` copies events into a new
+  top-level conversation with no reference to its source, so there is no way to
+  tell which conversations were derived from another.
+- **No organizational hierarchy.** Related conversations for a single task
+  (explorations, sub-tasks, alternatives) accumulate in `conversation ls` as
+  unrelated entries with no way to group them.
 
-**No organizational hierarchy.** Users working on complex tasks often create
-multiple related conversations (exploration, sub-tasks, alternatives).
-These pile up in `conversation ls` as unrelated entries.
-There is no way to group them.
-
-A tree model solves both: forks are children of their source, and related
-conversations can be grouped under a parent.
-The tree also provides a natural foundation for future features that need
-parent-child conversation relationships, such as delegating tasks to sub-agents
-or branching explorations.
+Organizing conversations into a tree solves both problems: forks become children
+of their source, and related conversations can be grouped under a shared parent.
+A parent-child hierarchy also supports features such as delegating tasks to
+sub-agents or branching explorations.
 
 > [!TIP]
 > [RFD 040] is the first major consumer of conversation trees, organizing
@@ -52,8 +45,8 @@ or branching explorations.
 
 ### Storage layout
 
-All conversations are stored in a flat directory structure, unchanged from
-today:
+All conversations live directly under `.jp/conversations/` in a flat directory
+layout, regardless of their position in the tree:
 
 ```txt
 .jp/conversations/
@@ -71,27 +64,20 @@ today:
     metadata.json
 ```
 
-No nesting.
-Every conversation lives directly under `.jp/conversations/`, regardless of its
-position in the tree.
-The tree structure is encoded in each conversation's metadata (see [Parent-child
-relationship](#parent-child-relationship)), not in the directory hierarchy.
-
-Existing conversations are root conversations — they have `parent_id: null` (or
-absent, via serde default).
-No migration is needed.
+The tree hierarchy is encoded in each conversation's metadata (see [Parent-child
+relationship](#parent-child-relationship)) rather than in nested directories, so
+existing conversations require no migration.
 
 > [!TIP]
 > [RFD 031] extends this storage layout with dual-write persistence to
 > user-local storage.
-> Because conversations remain flat, each conversation is independently synced
-> between user-local and workspace storage — the tree structure introduces no
-> additional sync complexity.
+> Because conversations remain flat, each conversation is synced independently
+> between user-local and workspace storage, and the tree structure adds no sync
+> complexity.
 
 ### Parent-child relationship
 
-The parent-child relationship is stored as a `parent_id` field in each
-conversation's `metadata.json`:
+Each conversation records its parent in a `parent_id` field in `metadata.json`:
 
 ```json
 {
@@ -101,10 +87,6 @@ conversation's `metadata.json`:
 }
 ```
 
-Root conversations have no `parent_id` field (omitted via serde's
-`skip_serializing_if`).
-Existing conversations deserialize with `parent_id: None` via serde defaults.
-
 The `Conversation` struct gains:
 
 ```rust
@@ -113,121 +95,112 @@ The `Conversation` struct gains:
 pub parent_id: Option<ConversationId>,
 ```
 
+Root conversations omit `parent_id` on serialization (`skip_serializing_if`),
+and existing conversations without the field deserialize as roots (`parent_id:
+None`).
 Because `parent_id` lives in the conversation's own `metadata.json`, it travels
-with the conversation through git — team members who pull a conversation also
-get its parent reference.
-Reparenting a conversation is an edit to a single file.
+with the conversation through git, and reparenting a conversation only edits a
+single file.
 
-### Depth is unbounded
+### Unbounded depth
 
-Trees nest to any depth: a child conversation can itself have children.
-A `parent_id` chain of arbitrary length is a supported shape, not an accident of
-the storage format, and every operation defined below is written against it.
-`--promote` reparents children onto the *grandparent* rather than onto the root,
-`--tree` indents each level under its own parent, and `--root=<id>` renders a
-subtree from any node rather than only from a top-level conversation.
+Trees can nest to any depth: a child conversation can have children of its own
+(for example, when a sub-agent delegates to another sub-agent, producing a
+three-level hierarchy automatically).
+Every tree operation supports arbitrary depth: `--promote` reparents children
+onto the grandparent rather than the root, `--tree` indents each level under its
+parent, and `--root=<id>` renders a subtree starting from any node.
 
-A sub-agent delegating to a further sub-agent is the motivating case: the
-hierarchy that produces is three levels deep before any user has organized
-anything by hand.
+Only two structural constraints apply:
 
-Only two limits apply.
-A conversation has exactly one parent (see [Non-Goals](#non-goals)), so the
-structure is a tree rather than a graph, and a `parent_id` cycle is invalid —
-the tree index treats a conversation reachable from itself as a root and warns,
-the same way it treats a missing parent.
+- **Single parent.** A conversation has at most one parent (see
+  [Non-Goals](#non-goals)), forming a tree rather than a general graph.
+- **No cycles.** A `parent_id` cycle is invalid.
+  Like a missing parent, a conversation reachable from itself is treated as a
+  root by the tree index with a warning.
 
 ### Tree index
 
 On workspace load, JP builds an in-memory tree index from the `parent_id` fields
-of all loaded conversations.
-This index supports `parent_of`, `children_of`, and `has_children` queries
-without scanning metadata files on each call.
-
-The index is rebuilt on load and updated incrementally when conversations are
+of all loaded conversations and updates it incrementally when conversations are
 created, removed, or reparented.
-It is not persisted — it is derived state.
+The index is derived state and is not persisted to disk.
+It answers `parent_of`, `children_of`, and `has_children` queries without
+rescanning metadata files.
 
-`conversation ls` already loads all conversation metadata (for titles, event
-counts, timestamps).
-Building the tree index is an additional pass over data that is already in
-memory.
+Because `conversation ls` already loads all conversation metadata for titles,
+event counts, and timestamps, building the tree index is a single pass over data
+already in memory.
 
 ### Config inheritance
 
-When a child conversation is created (via `--fork=0` or `conversation fork`),
-config inheritance is handled by [RFD 038]'s `--inherit` flag.
-The default behavior (`--inherit=conversation`) inherits the parent's resolved
-config, which is the natural choice for child conversations.
+When a child conversation is created via `--fork=0` or `conversation fork`, [RFD
+038]'s `--inherit` flag controls config inheritance.
+The default (`--inherit=conversation`) inherits the parent's resolved config.
 
 ### Creating child conversations
 
-Child conversations are created using `--fork=0` from [RFD 020]:
+`jp query --fork=0` ([RFD 020]) creates a blank child conversation with no
+copied event history (0 turns) and `parent_id` set to the parent's ID:
 
 ```sh
 jp query --fork=0 "message"
 jp query --fork=0 --id=<parent-id> "message"
 ```
 
-`--fork=0` creates a child conversation that inherits the parent's config but
-copies no event history (0 turns).
-Without `--id`, the parent is the session's active conversation.
-With `--id`, the parent is the specified conversation.
-
-The new conversation's `parent_id` is set to the parent's ID.
-
-For creating a child with some event history, use `--fork[=N]` with a larger N,
-as defined in [RFD 020].
+Without `--id`, the parent is the session's active conversation; with `--id`,
+the parent is `<parent-id>`.
+To copy recent turns into the new child conversation, pass `--fork[=N]` with a
+larger `N` ([RFD 020]).
 
 ### Fork as a child conversation
 
-`conversation fork` changes from creating a top-level copy to creating a child
-of the source conversation:
+`conversation fork` creates a child of the source conversation rather than a new
+root conversation:
 
 ```sh
 jp conversation fork <id>
 ```
 
-Creates a child conversation with `parent_id` set to `<id>` and copied events
-(filtered by the shared turn selector — `--from`/`--to`, `--turn`,
-`--first`/`--last` — as today).
-
-The `--activate` flag continues to work — it sets the fork as the active
-conversation.
+The new conversation sets `parent_id` to `<id>` and copies the selected events.
+Time-based and count-based turn selectors (`--from`, `--to`, `--turn`,
+`--first`, `--last`) filter which events are copied without affecting
+`parent_id`, and `--activate` sets the new fork as the active conversation.
 
 ### `conversation ls` views
 
-Two new flags control the listing:
+`conversation ls` gains `--root` and `--tree` flags to filter and format the
+hierarchy.
+
+By default, `conversation ls` prints a flat list of all conversations with a
+`Root` column (`Y`/`N`) to distinguish roots from children:
 
 ```sh
 jp conversation ls
 ```
 
-Flat list of all conversations.
-Includes a `Root` column (`Y`/`N`) to distinguish roots from children.
+Passing `--root` without a value lists only root conversations and omits the
+redundant `Root` column (`--tree` is accepted here but has no effect because
+children are excluded):
 
 ```sh
 jp conversation ls --root
 ```
 
-Flat list of root conversations only.
-No `Root` column (redundant since all shown conversations are roots).
-`--tree` is accepted but has no effect (roots have no visible children in this
-view).
+Passing `--root=<conversation-id>` lists the descendants of that conversation as
+a flat list:
 
 ```sh
 jp conversation ls --root=<conversation-id>
 ```
 
-Flat list of conversations that are descendants of the specified conversation.
-Combine with `--tree` to see the subtree structure.
+Passing `--tree` renders all conversations as a tree using box-drawing
+characters in the table framework, with root conversations at the top level and
+children indented under their parent:
 
 ```sh
 jp conversation ls --tree
 ```
-
-Tree view of all conversations, rendered using the existing table framework with
-box-drawing characters:
 
 ```txt
 jp-c17528832001  Refactor error handling in jp_llm   3  5 mins ago
@@ -236,14 +209,12 @@ jp-c17528832001  Refactor error handling in jp_llm   3  5 mins ago
 jp-c17528812001  Fix CI pipeline                     1  2 hours ago
 ```
 
-Root conversations are listed at the top level.
-Children are indented under their parent.
+Combining `--tree` with `--root=<conversation-id>` renders only that
+conversation's subtree:
 
 ```sh
 jp conversation ls --tree --root=<conversation-id>
 ```
-
-Tree view of a specific subtree:
 
 ```txt
 jp-c17528832001  Refactor error handling in jp_llm    3  5 mins ago
@@ -254,7 +225,8 @@ jp-c17528832001  Refactor error handling in jp_llm    3  5 mins ago
 
 ### `conversation rm` with children
 
-Removing a conversation that has children requires specifying a strategy:
+Removing a conversation that has children fails unless a removal strategy is
+specified:
 
 ```sh
 jp conversation rm <id>
@@ -263,33 +235,19 @@ jp conversation rm <id>
 # Use --promote to remove it and promote its children to root conversations.
 ```
 
-Two strategies:
+- **`--cascade`** deletes the conversation and its entire subtree of
+  descendants.
+- **`--promote`** deletes the conversation and reparents its direct children
+  onto its parent by setting each child's `parent_id` to the removed
+  conversation's `parent_id` (or `None` if the removed conversation was a root).
 
-**`--cascade`**: Removes the conversation and all its descendants.
-This is a destructive operation — the entire subtree is deleted.
-
-**`--promote`**: Removes the conversation but promotes its direct children to
-the grandparent (or root if there is no grandparent).
-Each promoted child's `parent_id` is updated to the removed conversation's
-`parent_id` (or set to `None` if the removed conversation was a root).
-
-Without a strategy flag, removal of a conversation with children is refused.
-
-The existing `--yes` flag (skip confirmation prompt) is orthogonal to the
-strategy flags.
-`--cascade --yes` deletes the tree without prompts.
-
-### `conversation fork` with `--from` / `--to` / `--last`
-
-The current fork command supports time-based and count-based event filtering.
-These continue to work: the fork creates a child conversation with a filtered
-copy of the parent's events.
-The child's `parent_id` points to the source regardless of filtering.
+The strategy flags are orthogonal to `--yes` (which skips confirmation prompts);
+for example, `--cascade --yes` deletes the subtree without prompting.
 
 ### Workspace API changes
 
-The existing `create_conversation` and `remove_conversation` methods gain
-optional parent and strategy handling:
+`Workspace::create_conversation` and `Workspace::remove_conversation` gain
+optional parent and removal-strategy parameters:
 
 ```rust
 /// Creates a new conversation, optionally as a child of the given parent.
@@ -325,7 +283,8 @@ pub enum RemovalStrategy {
 }
 ```
 
-Additional query methods:
+`Workspace` also exposes three tree query methods backed by the in-memory tree
+index:
 
 ```rust
 /// Returns the parent conversation ID, read from the conversation's
@@ -339,13 +298,11 @@ pub fn children_of(&self, parent_id: &ConversationId) -> Vec<ConversationId>;
 pub fn has_children(&self, id: &ConversationId) -> bool;
 ```
 
-These methods read from the in-memory tree index, not from disk.
-
 ### Path-shaped targeting
 
-Once conversations form a hierarchy, the natural way to name a position in it is
-the vocabulary users already have for hierarchies.
-The intended grammar, as an extension of `ConversationTarget`:
+The tree index also provides the `parent_of` and root-traversal queries needed
+for path-shaped `ConversationTarget` syntax (deferred to a separate change; see
+[Non-Goals](#non-goals)):
 
 | Target  | Meaning                                          |
 | ------- | ------------------------------------------------ |
@@ -354,105 +311,73 @@ The intended grammar, as an extension of `ConversationTarget`:
 | `../..` | its grandparent, and so on for any depth         |
 | `/`     | the root of the active conversation's tree       |
 
-The segments compose against whatever the target resolves to, so `..` applied to
-a root conversation is an error naming the conversation that has no parent,
-rather than silently resolving to the root itself.
+Segments compose against the resolved conversation, so applying `..` to a root
+conversation returns an error naming that conversation rather than silently
+resolving to the root itself.
 
-The grammar is deliberately shared with workspace targeting ([RFD 087]), where
-the same segments walk the workspace-nesting hierarchy instead: `jp -w .` is the
-current workspace whichever subdirectory you stand in, while `jp c show ..` is
-the active conversation's parent.
-One navigation vocabulary, two hierarchies — which is what makes `.` worth
-keeping as a conversation target rather than a lone borrowed character.
-
-The segments resolve against the hierarchy, never against directories: `.`,
-`..`, `../..`, and `/` are keywords, and a filesystem path is spelled with a
-named segment (`./foo`, `../foo`, `/foo/bar`).
-That distinction is what lets `..` mean "one level up the hierarchy" rather than
-"one directory up", which are different questions on the workspace axis and only
-the first of which has an answer on the conversation axis.
-
-This RFD does not implement the grammar; it establishes the tree the grammar
-addresses.
-`..` and `/` need `parent_of` and a walk to the root, both of which the tree
-index provides.
+This grammar is shared with workspace targeting ([RFD 087]), where the same
+segments walk nested workspaces: `jp -w .` selects the current workspace from
+any of its subdirectories, and `jp c show ..` selects the active conversation's
+parent.
+In both contexts, bare `.`, `..`, `../..`, and `/` are hierarchy keywords that
+walk the workspace or conversation tree rather than the filesystem, whereas
+filesystem paths include a named segment (`./foo`, `../foo`, `/foo/bar`).
 
 ### Interaction with RFD 020 (Parallel Conversations)
 
-[RFD 020] introduces conversation locks and per-session conversation tracking.
-The tree structure interacts in two ways:
+Conversation trees interact with [RFD 020]'s conversation locks and `--fork`
+flag in two ways:
 
-**Locking scope.** A lock on a conversation does NOT lock its children.
-Each conversation has its own independent lock.
-Two sessions can work on a parent and child simultaneously.
-
-**`--fork` creates children.** RFD 020's `--fork[=N]` creates a new conversation
-by copying events from the source.
-With trees, the fork has `parent_id` set to the source conversation.
-The fork gets its own independent lock.
+- **Independent locks.** Locking a conversation does not lock its children or
+  parent.
+  Each conversation has its own lock, so separate sessions can work on a parent
+  and its child simultaneously.
+- **`--fork` sets `parent_id`.** `--fork[=N]` creates the forked conversation
+  with `parent_id` set to the source conversation and its own independent lock.
 
 ### Interaction with RFD 031 (Durable Conversation Storage)
 
-[RFD 031] introduces dual-write persistence: every conversation is always
-written to user-local storage, and projected (non-local) conversations are
-additionally written to workspace storage.
+[RFD 031] writes every conversation to user-local storage and syncs projected
+(non-local) conversations to workspace storage via `mtime` comparison.
+Because all conversations use a flat directory layout, each conversation's
+`metadata.json` (including `parent_id`) syncs independently with no storage
+coupling between parents and children:
 
-Because all conversations remain in a flat directory layout, RFD 031's
-per-conversation sync model applies without modification.
-Each conversation's `metadata.json` (which contains `parent_id`) is synced
-independently between user-local and workspace via mtime comparison.
-There is no structural coupling between a parent's storage and its children's
-storage.
-
-This means:
-
-- **`--local` is independent per-conversation.** A child can be local-only while
-  its parent is projected to workspace, or vice versa.
-  No cascade is needed.
-- **No orphan cleanup.** Conversations don't live inside each other's
-  directories, so deleting one conversation's workspace copy can't affect
+- **Independent `--local` projection.** A child can be local-only while its
+  parent is projected to the workspace, or vice versa, without cascading.
+- **No orphan cleanup.** Conversations do not nest inside each other's
+  directories, so deleting one conversation's workspace copy never affects
   another.
-- **External conversations work unchanged.** When a team member pulls
-  conversations from git, each conversation arrives with its own `parent_id`.
-  The tree is reconstructed from metadata on load.
-  No ancestor chain needs to be imported for the tree to be valid — a
-  `parent_id` can reference a conversation that doesn't exist locally (the
-  parent might be local-only on the other team member's machine).
-  The tree index treats missing parents as roots.
-- **Reparenting propagates through git.** If a team member changes a
-  conversation's `parent_id` and commits the change, pulling it updates the tree
-  structure for everyone.
+- **Missing parents are treated as roots.** When a team member pulls
+  conversations from git, the tree index reconstructs the hierarchy from each
+  conversation's `parent_id`.
+  If a `parent_id` references a conversation that does not exist locally (for
+  example, a local-only parent on another machine), the tree index treats the
+  child as a root without requiring the ancestor chain to be imported.
+- **Reparenting propagates through git.** Committing and pulling a `parent_id`
+  change in `metadata.json` updates the tree structure for other team members.
 
 ## Drawbacks
 
-**Tree reconstruction cost.** Building the tree index requires loading all
-conversation metadata.
-For a workspace with tens to low hundreds of conversations, this is negligible
-— `conversation ls` already loads all metadata.
-For workspaces with thousands of conversations (unlikely in practice), the lazy
-`OnceCell` loading pattern ensures metadata is read from disk on demand, not all
-at startup.
-
-**Fork behavior change.** Existing users expect `fork` to create an independent
-top-level conversation.
-After this change, forks are children.
-They still appear in `conversation ls` and can be activated, so the user-visible
-behavior is similar.
-But tools or scripts that assume a flat conversation namespace may need
-adjustment.
-
-**Tree structure not visible on disk.** Unlike a nested directory layout, the
-flat structure doesn't reveal the tree hierarchy in a file browser.
-The tree is only visible through `jp conversation ls --tree` or by inspecting
-individual `metadata.json` files.
-In practice this is fine — the workspace directory is primarily for git
-visibility of conversation contents, not their hierarchy.
+- **Tree reconstruction cost.** Building the tree index requires loading all
+  conversation metadata.
+  This is negligible for workspaces with tens or hundreds of conversations
+  because `conversation ls` already loads all metadata, and lazy `OnceCell`
+  loading avoids reading metadata for thousands of conversations at startup.
+- **Fork behavior change.** `fork` creates a child conversation instead of an
+  independent root conversation.
+  Forks still appear in `conversation ls` and can be activated directly, but
+  tools or scripts that assume a flat conversation namespace may need updates.
+- **Tree structure not visible on disk.** The flat `.jp/conversations/` layout
+  does not show the hierarchy in a file browser; viewing the tree requires `jp
+  conversation ls --tree` or reading `metadata.json` files directly.
 
 ## Alternatives
 
 ### Nested directory layout
 
-Store child conversations inside the parent's directory:
+Child conversations could be stored inside their parent's directory, deriving
+the hierarchy from the filesystem layout:
 
 ```
 .jp/conversations/
@@ -463,188 +388,149 @@ Store child conversations inside the parent's directory:
       CHILD_ID/
 ```
 
-Derive the parent-child relationship from the directory structure.
-
-Rejected because the nested layout creates significant complexity when combined
-with [RFD 031]'s dual-write persistence model.
-Both user-local and workspace storage must maintain identical tree structures,
-projection status (`--local`) cascades through the tree (removing a parent's
-workspace copy removes all children's copies), manual filesystem operations can
-create orphaned duplicates requiring recursive cleanup on every persist, and
-external conversation import must reconstruct ancestor chains.
-The flat layout avoids all of these issues — each conversation is independently
-synced, independently projected, and independently importable.
+This was rejected because nesting complicates [RFD 031]'s dual-write persistence
+model: user-local and workspace storage would have to mirror the same directory
+tree, `--local` projection would cascade when removing a parent's workspace
+copy, manual filesystem moves could leave orphaned duplicates requiring
+recursive cleanup on every persist, and importing an external conversation would
+require reconstructing its ancestor chain.
+A flat layout avoids these problems because each conversation is synced,
+projected, and imported independently.
 
 ### Symbolic links for tree structure
 
-Keep a flat storage directory but create symbolic links to represent
-parent-child relationships.
-
-Rejected because symlinks add platform-specific complexity (Windows
-compatibility), are fragile (break on rename), and don't provide meaningful
-benefits over a metadata field.
+Parent-child relationships could be represented with symbolic links inside a
+flat storage directory.
+This was rejected because symlinks add Windows compatibility issues, break on
+rename, and offer no advantage over a `parent_id` field in `metadata.json`.
 
 ### `--parent` flag instead of `--fork=0`
 
-A dedicated `--parent` flag on `jp query` for creating child conversations.
-
-Not adopted because `--fork=0` from [RFD 020] achieves the same thing: it
-creates a child conversation that inherits config but has no event history.
-Reusing `--fork` avoids a new flag and keeps the concepts unified — a fork with
-0 turns is conceptually a blank child.
+`jp query` could add a dedicated `--parent` flag for creating child
+conversations.
+This was not adopted because `--fork=0` ([RFD 020]) already creates a child
+conversation that inherits the parent's config with 0 copied turns, avoiding a
+second flag for the same operation.
 
 ### Centralized relationship file
 
-Store all parent-child relationships in the top-level
-`conversations/metadata.json` instead of per-conversation `parent_id`.
-
-Rejected because the top-level `metadata.json` is user-local only (it holds
-`active_conversation_id` and per-session state from [RFD 020]).
-Tree structure needs to travel with conversations through git so that team
-members who pull conversations also get the hierarchy.
-Per-conversation `parent_id` achieves this — each conversation is
-self-contained.
+All parent-child relationships could be stored in the top-level
+`conversations/metadata.json` file instead of per-conversation `parent_id`
+fields.
+This was rejected because the top-level `metadata.json` is user-local only
+(storing `active_conversation_id` and per-session state from [RFD 020]), whereas
+per-conversation `parent_id` fields travel with each conversation through git.
 
 ## Non-Goals
 
-- **Cross-tree references.** A conversation can only be a child of one parent.
-  Having a conversation appear in multiple trees is not supported.
-
-- **The path-shaped targeting grammar itself.** [Path-shaped
-  targeting](#path-shaped-targeting) records the intended spelling so the tree
-  is designed to support it, but `..`, `../..`, and `/` are a separate change.
-
-- **Tree-level config overrides.** Config inheritance flows from parent to child
-  at creation time (via [RFD 038]).
-  There is no mechanism to change a parent's config and have it propagate to
-  existing children.
-
-- **Conversation merge.** Combining two conversations into one (reverse of fork)
-  is not in scope.
+- **Cross-tree references.** Each conversation has at most one parent and cannot
+  appear in multiple trees.
+- **Path-shaped targeting grammar.** [Path-shaped
+  targeting](#path-shaped-targeting) documents the planned `..`, `../..`, and
+  `/` syntax so the tree index supports it, but implementing those target
+  keywords is a separate change.
+- **Live config propagation.** Config inheritance copies the parent's config at
+  child creation time ([RFD 038]); later changes to a parent's config do not
+  propagate to existing children.
+- **Conversation merge.** Merging two conversations into one (the inverse of
+  `fork`) is out of scope.
 
 ## Risks and Open Questions
 
 ### Active conversation in a subtree
 
-The active conversation (per [RFD 020], the session's default conversation) can
-be any conversation in the tree — root or child.
-When the active conversation is a deeply nested child, commands like `jp query`
-operate on it directly.
-This is correct but may surprise users who expect the active conversation to
-always be a root.
-Clear indication in the prompt or `conversation show` (showing the parent chain)
-mitigates this.
+A session's active conversation ([RFD 020]) can be any root or child node in a
+tree.
+When the active conversation is a nested child, commands such as `jp query`
+operate on it directly, which may surprise users who expect the active
+conversation to be a root.
+Showing the parent chain in the prompt or in `conversation show` mitigates this.
 
 ### Garbage collection of tree nodes
 
-The existing `expires_at` mechanism removes expired conversations.
-With trees, an expired parent with non-expired children creates a dangling
-reference situation.
-Policy: a parent's effective expiration time is the maximum of its own
-`expires_at` and the `expires_at` of its longest-lived descendant.
-A parent cannot expire before all of its children have expired.
-This prevents dangling references by construction.
-
-The expiration check requires building the tree (which is already available via
-the in-memory index) and computing the effective expiration by walking
-descendants.
+Removing an expired parent while its children are still live would leave
+dangling `parent_id` references.
+To prevent a parent from expiring before its descendants, a conversation's
+effective expiration time is the maximum of its own `expires_at` and the
+`expires_at` of its longest-lived descendant, computed by walking descendants in
+the in-memory tree index.
 
 ### Partial trees from independent projection
 
-Because `--local` is independent per-conversation, a child can be projected to
-workspace while its parent is local-only.
-Team members who pull that child from git will have a `parent_id` referencing a
-conversation that doesn't exist on their machine.
-The tree index handles this gracefully — the child appears as a root.
-
-This is acceptable for the current design, where parent-child relationships are
-purely organizational (tree views, fork lineage).
-However, if future work introduces hard dependencies between parent and child
-(shared state, inherited runtime config, delegated tool access), a missing
-parent would break those features.
-At that point, projecting a child may need to require that its ancestors are
-also projected, or the dependent feature must explicitly handle the
-missing-parent case.
+When a projected child conversation references a local-only parent,
+collaborators who pull from git do not have the parent conversation locally, and
+the tree index treats the child as a root.
+This works while parent-child links are purely organizational (tree views and
+fork lineage), but if later features introduce runtime dependencies on the
+parent (such as shared state or delegated tool access), projecting a child will
+need to either require projecting its ancestors or handle missing parents
+explicitly.
 
 ### Concurrent `parent_id` edits
 
-Two team members could reparent the same conversation on different branches.
-When git merges, the `metadata.json` conflict is a normal JSON merge conflict —
-the same as any other metadata field (title, expires_at).
-Git's conflict markers surface the issue, and the user resolves it manually.
-JP does not attempt automatic merge resolution.
+If two collaborators reparent the same conversation on different branches,
+merging produces a standard git conflict on `parent_id` in `metadata.json` (just
+like conflicting edits to `title` or `expires_at`), which the user resolves
+manually.
 
 ## Implementation Plan
 
 ### Phase 1: `parent_id` field and tree index
 
-Add `parent_id` to `Conversation`.
-Update serialization (serde default `None`, skip if absent).
-Build the in-memory tree index at workspace load time from all loaded
-conversation metadata.
-Add `parent_of`, `children_of`, `has_children` to `Workspace`.
-
-Existing conversations continue to work — they're roots with `parent_id: None`.
-
-Can be merged independently.
-No behavioral change for users.
+Add `parent_id` to `Conversation` with `#[serde(default, skip_serializing_if =
+"Option::is_none")]` so existing conversations deserialize as roots with no
+user-visible behavior change.
+Build the in-memory tree index at workspace load time and add `parent_of`,
+`children_of`, and `has_children` to `Workspace`.
+This phase can be merged independently.
 
 ### Phase 2: `create_conversation` with parent
 
-Update `Workspace::create_conversation` to accept an optional parent ID.
-When a parent is provided, set `parent_id` on the new conversation and update
-the in-memory tree index.
-
+Update `Workspace::create_conversation` to accept an optional parent ID, set
+`parent_id` on the new conversation, and update the in-memory tree index.
 Depends on Phase 1.
 
 ### Phase 3: Fork as child conversation
 
-Update `conversation fork` to set `parent_id` to the source conversation's ID.
-Update `--fork` in `jp query` ([RFD 020]) to set `parent_id` on the new
-conversation.
-
+Update `conversation fork` and `jp query --fork` ([RFD 020]) to set `parent_id`
+to the source conversation's ID.
 Depends on Phase 2.
 
 ### Phase 4: `conversation ls` tree view
 
-Add `--tree` and `--root` flags.
-Implement tree rendering using the existing table framework with box-drawing
-characters.
-Add the `Root` column to the default flat view.
-
-Depends on Phase 1 (needs tree index).
+Add `--tree` and `--root` to `conversation ls`, render trees with box-drawing
+characters in the table framework, and add the `Root` column to the default flat
+view.
+Depends on Phase 1.
 
 ### Phase 5: `conversation rm` strategies
 
-Add `has_children` check to `remove_conversation`.
-Implement `--cascade` (remove conversation and all descendants) and `--promote`
-(update children's `parent_id` to grandparent, then remove).
-Wire the strategy flags.
-
+Check `has_children` in `Workspace::remove_conversation`, implement `--cascade`
+and `--promote`, and wire both flags into `conversation rm`.
 Depends on Phase 1.
 
 ### Phase 6: Garbage collection update
 
-Update the `expires_at` garbage collection to respect the tree: a parent's
-effective expiration is the maximum of its own and its descendants'.
-Use the in-memory tree index to walk descendants.
-
+Update `expires_at` garbage collection to walk the in-memory tree index so a
+parent's effective expiration is the maximum of its own `expires_at` and its
+descendants'.
 Depends on Phase 1.
 
 ## References
 
-- [RFD 020: Parallel Conversations][RFD 020] — defines `--fork[=N]`,
-  conversation locks, and session identity.
-- [RFD 031: Durable Conversation Storage][RFD 031] — dual-write persistence,
-  mtime-based sync, and projection model.
-- [RFD 038: Config Reset Keywords][RFD 038] — `--inherit` flag used by child
+- [RFD 020: Parallel Conversations][RFD 020]: defines `--fork[=N]`, conversation
+  locks, and session identity.
+- [RFD 031: Durable Conversation Storage][RFD 031]: dual-write persistence,
+  `mtime`-based sync, and workspace projection.
+- [RFD 038: Config Reset Keywords][RFD 038]: `--inherit` flag used by child
   conversations for config resolution.
-- `crates/jp_workspace/src/lib.rs` — current workspace implementation.
-- `crates/jp_storage/src/lib.rs` — current storage implementation.
-- `crates/jp_conversation/src/conversation.rs` — `Conversation` struct.
-- `crates/jp_cli/src/cmd/conversation/fork.rs` — current fork implementation.
-- `crates/jp_cli/src/cmd/conversation/ls.rs` — current listing implementation.
-- `crates/jp_cli/src/cmd/conversation/rm.rs` — current removal implementation.
+- `crates/jp_workspace/src/lib.rs`: workspace implementation.
+- `crates/jp_storage/src/lib.rs`: storage implementation.
+- `crates/jp_conversation/src/conversation.rs`: `Conversation` struct.
+- `crates/jp_cli/src/cmd/conversation/fork.rs`: `conversation fork`
+  implementation.
+- `crates/jp_cli/src/cmd/conversation/ls.rs`: `conversation ls` implementation.
+- `crates/jp_cli/src/cmd/conversation/rm.rs`: `conversation rm` implementation.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md

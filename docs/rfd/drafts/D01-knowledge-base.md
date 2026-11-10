@@ -12,45 +12,41 @@
 This RFD proposes a knowledge base (KB) system that organizes reusable,
 project-specific knowledge into configured directories of **topics** and
 **subjects**.
-The assistant discovers available topics through the system prompt and retrieves
-subjects on demand via a built-in `learn` tool, or users can pre-load subjects
-into the system prompt or per query with `-k`.
+The assistant discovers available topics in the system prompt and retrieves
+subjects on demand with a built-in `learn` tool.
+Users can also pre-load subjects into the system prompt through configuration or
+per query with `-k`.
 
 ## Motivation
 
 JP's assistant operates with whatever context it receives: the system prompt,
 conversation history, attachments, and tool call results.
-For project-specific knowledge — coding conventions, architecture decisions,
-team information, skill guides — users currently have two options:
+For project-specific knowledge (coding conventions, architecture decisions, team
+information, skill guides), users have two options:
 
 1. **Inline everything in the system prompt.** This works for small amounts of
-   knowledge but doesn't scale.
+   knowledge but does not scale.
    A system prompt stuffed with every convention and guide wastes context window
-   on knowledge the assistant may never need for a given query.
+   on material the assistant never uses for a given query.
 
 2. **Attach files per query.** The attachment system (`-a`) loads files into
-   each query, but attachments are designed for ephemeral, query-specific
-   context (a file to review, command output to analyze).
-   They lack structure for organizing persistent project knowledge, and there is
-   no way for the assistant to discover or request knowledge it doesn't know
-   about.
+   each query, but attachments target ephemeral, query-specific context such as
+   a file to review or command output to analyze.
+   They provide no structure for organizing persistent project knowledge, and
+   the assistant cannot discover or request attachments on its own.
 
 > REVIEW:
 >
-> Attachments are also added to the system prompt, they are just a convenient
-> way to attach "something" that can be fetched using a handler (e.g. `file://`
-> or `https://`), and thus are mostly similar to "inline everything in the
-> system prompt" approach.
+> Attachments are also added to the system prompt; they are a convenient way to
+> attach content fetched by a handler (such as `file://` or `https://`), making
+> them similar to inlining everything in the system prompt.
 
-Neither approach gives the assistant a structured way to discover what knowledge
-is available and pull in only what it needs.
-The knowledge base fills this gap: a lightweight, file-based system where the
-assistant sees a menu of available topics and retrieves specific subjects on
-demand.
-
-If we do nothing, users continue to either over-stuff the system prompt or
-manually attach files — both of which degrade quality for non-trivial projects
-with meaningful domain knowledge.
+Neither option lets the assistant discover available knowledge and fetch only
+what a query requires.
+Without a dedicated mechanism, projects with substantial domain knowledge must
+either bloat the system prompt or attach files by hand on every query.
+The knowledge base addresses this with a file-based catalog: the assistant sees
+a menu of topics in the system prompt and loads individual subjects on demand.
 
 ## Design
 
@@ -77,8 +73,8 @@ subjects = ".jp/kb/skills"
 
 The assistant sees available topics in its system prompt and retrieves subjects
 by calling the `learn` tool.
-Users can also pre-load subjects into the system prompt or inject them
-per-query:
+Users can also pre-load subjects into the system prompt per query or through
+configuration:
 
 ```sh
 # Pre-load via CLI flag
@@ -90,13 +86,13 @@ jp query --cfg kb.topic.project.learned+="maintainers/*" "Review this PR"
 
 ### Design Goals
 
-| Goal                     | Description                                  |
-| ------------------------ | -------------------------------------------- |
-| **Structured knowledge** | Organize knowledge into topics with subjects |
-| **On-demand retrieval**  | Assistant fetches subjects via `learn` tool  |
-| **Hidden subjects**      | `.`-prefixed paths excluded from listings    |
-| **Pre-loaded subjects**  | Inject critical knowledge into system prompt |
-| **Glob support**         | Load multiple subjects with patterns         |
+| Goal                     | Description                                              |
+| ------------------------ | -------------------------------------------------------- |
+| **Structured knowledge** | Organize knowledge into topics and subjects              |
+| **On-demand retrieval**  | Fetch subjects on demand via the `learn` tool            |
+| **Hidden subjects**      | Exclude `.`-prefixed paths from default listings         |
+| **Pre-loaded subjects**  | Inject selected subjects directly into the system prompt |
+| **Glob support**         | Match multiple subjects with glob patterns               |
 
 ### Configuration Schema
 
@@ -179,10 +175,10 @@ pub struct TopicConfig {
 | Field          | Required | Default | Description                            |
 | -------------- | -------- | ------- | -------------------------------------- |
 | `enable`       | No       | `true`  | Set `false` to deactivate the topic    |
-| `title`        | No       | —       | Display name shown to the assistant    |
-| `introduction` | No       | —       | One-line summary in system prompt      |
-| `description`  | No       | —       | Extended description in `learn` output |
-| `subjects`     | **Yes**  | —       | Path to subject directory              |
+| `title`        | No       | `-`     | Display name shown to the assistant    |
+| `introduction` | No       | `-`     | One-line summary in system prompt      |
+| `description`  | No       | `-`     | Extended description in `learn` output |
+| `subjects`     | **Yes**  | `-`     | Path to subject directory              |
 | `learned`      | No       | `[]`    | Glob patterns for pre-loaded subjects  |
 | `disabled`     | No       | `[]`    | Excluded subject slugs                 |
 
@@ -219,20 +215,21 @@ A subject is **hidden** when any component of its path starts with `.`:
 | `.hidden-dir/visible.md` | Yes     | Parent directory starts with `.` |
 | `maintainers/jean.md`    | No      | No `.`-prefixed components       |
 
-Hidden subjects:
+Hidden subjects are:
 
-- **Not listed** by `learn` (even with `*` or `**` globs)
-- **Loadable** only by exact slug: `learn(topic, subjects: ["ast-grep/rules"])`
-- **Discoverable** only via external hints — e.g., a non-hidden subject
-  mentions "read `ast-grep/rules` for full rule documentation"
+- **Omitted from listings**: `learn` never lists them, and `*` or `**` globs do
+  not match them.
+- **Loadable by exact slug**: `learn(topic, subjects: ["ast-grep/rules"])` loads
+  the subject directly.
+- **Discovered through references**: a visible subject can point the assistant
+  to a hidden slug (for example, "read `ast-grep/rules` for full rule
+  documentation").
 
 #### Disabled Subjects
 
-Subjects matching entries in the `disabled` array are fully excluded:
-
-- Not listed by `learn`
-- Not loadable, even by exact slug
-- Override `learned` — a subject in both `disabled` and `learned` is disabled
+Subjects matching an entry in `disabled` are excluded completely: `learn`
+neither lists nor loads them, even by exact slug, and `disabled` takes
+precedence over `learned`.
 
 #### Resolution Algorithm
 
@@ -272,8 +269,9 @@ resolve_subjects(topic_config, glob_patterns):
 
 #### Knowledge Section
 
-When at least one topic has available (non-hidden, non-disabled) subjects, the
-system prompt includes a `<knowledge>` section:
+When at least one enabled topic has subjects that are neither hidden, disabled,
+nor pre-loaded via `learned`, the system prompt includes a `<knowledge>`
+section:
 
 ```xml
 <knowledge>
@@ -291,18 +289,17 @@ exposing too much irrelevant knowledge upfront)
 </knowledge>
 ```
 
-**Generation rules:**
+Each entry in the topic list follows three rules:
 
-1. Only list enabled topics with at least one non-hidden, non-disabled subject
-   that is NOT already `learned`.
-2. Show the `title` in bold after the topic ID, when present.
-3. Append the `introduction` after the title, when present.
-4. Omit topics where ALL subjects are pre-loaded via `learned`.
+1. Include only enabled topics that have at least one non-hidden, non-disabled
+   subject not already matched by `learned`.
+2. Show `title` in bold after the topic ID when set.
+3. Append `introduction` after the title when set.
 
 #### Pre-loaded Knowledge
 
-When a topic has `learned` patterns matching subjects, those subjects are
-expanded inline in the system prompt:
+Subjects matched by a topic's `learned` patterns are expanded inline in
+`<knowledge>`:
 
 ```xml
 <knowledge>
@@ -334,27 +331,24 @@ exposing too much irrelevant knowledge upfront)
 </knowledge>
 ```
 
-Pre-loaded subjects do NOT appear in `learn` tool listings.
-They are shown in a separate "already learned" section when `learn` is called
-without `subjects`, so the assistant knows they exist.
+Pre-loaded subjects are omitted from the available subjects list in `learn`.
+Calling `learn` without `subjects` lists them under a separate "Already learned"
+heading so the assistant knows they are already in context.
 
 #### Why Not Configurable Sections
 
-The existing `SectionConfig` type (content, tag, position) is designed for
-user-controlled system prompt sections.
-The `<knowledge>` section is **not user-configurable** — its content is derived
-from KB config.
-It is built programmatically and injected directly into the system prompt string
-during thread construction.
-
-Internally, the implementation MAY use `SectionConfig` as a container (with a
-fixed tag of `"knowledge"` and a low position value), but this is an
-implementation detail, not a user-facing feature.
+`SectionConfig` (content, tag, position) defines user-configured system prompt
+sections.
+The `<knowledge>` section is derived from the KB configuration rather than
+configured directly, so it is built programmatically during thread construction.
+The implementation may still use `SectionConfig` internally as a container (with
+a fixed `"knowledge"` tag and a low position value), without exposing it as a
+user-facing section setting.
 
 #### Injection Point
 
-The knowledge section is built during `Query::run`, after config is resolved but
-before the LLM request is built:
+`Query::run` builds the `<knowledge>` section after resolving the configuration
+and before constructing the LLM request:
 
 ```rust
 // Pseudo-code
@@ -372,9 +366,9 @@ if let Some(section) = kb_section {
 
 #### Registration
 
-`learn` is registered as a built-in tool via `ToolSource::Builtin`.
-Its definition is generated dynamically based on the KB configuration at query
-time.
+`learn` is registered via `ToolSource::Builtin` when at least one enabled topic
+has subjects that are neither pre-loaded nor disabled.
+Its definition is generated at query time from the resolved KB configuration:
 
 ```rust
 // Pseudo-code for registration
@@ -392,15 +386,12 @@ if config.kb.has_learnable_topics() {
 }
 ```
 
-The tool is only registered when at least one topic has subjects available to
-learn (not all pre-loaded or disabled).
-
 #### JSON Schema
 
-The `topic` parameter is a free-form string.
-The description lists available topics so the LLM knows what to pass.
-The schema itself is stable — it does not change when the KB configuration
-changes.
+The `topic` parameter is a free-form string whose description is generated from
+the KB configuration to list available topic IDs and titles.
+Keeping the schema structure constant across KB configuration changes avoids
+provider issues with cached tool schemas between turns:
 
 ```json
 {
@@ -429,20 +420,18 @@ changes.
 }
 ```
 
-The description is dynamically generated from the KB configuration (listing
-available topic IDs and titles).
-The schema structure remains constant.
-This avoids issues with providers caching stale tool schemas between turns.
-
 #### Topic Resolution
 
-When the assistant provides a `topic` value:
+The tool resolves the `topic` argument in order:
 
-1. Exact match on topic ID → resolved
-2. Case-insensitive match on title → resolved
-3. No match → return error listing valid topics
+1. Exact match on the topic ID.
+2. Case-insensitive match on the topic `title`.
+3. Otherwise, return an error listing the valid topics.
 
-#### Behavior: List Subjects (no `subjects` argument)
+#### Listing Subjects
+
+Calling `learn` without `subjects` returns the topic metadata and lists its
+available subjects:
 
 ```
 learn(topic: "skills")
@@ -479,24 +468,21 @@ Use the `learn` tool with the `subjects` argument to learn specific subjects.
 - maintainers/ryan
 ```
 
-#### Behavior: Load Subjects (with `subjects` argument)
+#### Loading Subjects
 
-Single subject:
+Loading a single subject returns the formatted content of
+`.jp/kb/skills/ast-grep.md` (see [File Format Handling](#file-format-handling)):
 
 ```js
 learn(topic: "skills", subjects: ["ast-grep"])
 ```
 
-Returns the raw file content of `.jp/kb/skills/ast-grep.md` (with format
-handling applied — see [File Format Handling](#file-format-handling)).
-
-Multiple subjects (or glob):
+Loading multiple subjects or a glob returns all matching non-hidden subjects,
+each wrapped in a `<subject>` tag:
 
 ```js
 learn(topic: "skills", subjects: ["**"])
 ```
-
-Returns all matching non-hidden subjects, each wrapped in tags:
 
 ```xml
 <subject "ast-grep">
@@ -504,11 +490,13 @@ Returns all matching non-hidden subjects, each wrapped in tags:
 </subject>
 ```
 
-#### Glob Behavior
+#### Glob Matching
 
-Standard glob semantics.
-`*` matches at one directory level.
-`**` matches recursively across directories.
+`subjects` patterns follow standard glob semantics: `*` matches within a single
+directory level, and `**` matches recursively across directories.
+Globs never match hidden subjects; loading a hidden subject requires its exact
+slug.
+Disabled subjects are excluded from both glob and exact matches.
 
 | Pattern          | Matches                                                    |
 | ---------------- | ---------------------------------------------------------- |
@@ -516,53 +504,42 @@ Standard glob semantics.
 | `**`             | All non-hidden subjects, recursively                       |
 | `maintainers/*`  | Non-hidden subjects directly under `maintainers/`          |
 | `maintainers/**` | Non-hidden subjects under `maintainers/`, recursively      |
-| `ast-grep/rules` | Exact match — loads hidden subject                         |
+| `ast-grep/rules` | Exact match (loads hidden subject)                         |
 | `maintainers/j*` | Non-hidden subjects starting with `j` under `maintainers/` |
 
-Key rules:
+#### Repeated `learn` Calls
 
-- `*` matches files at the current level (non-recursive)
-- `**` traverses directories recursively
-- Globs never match hidden subjects
-- Hidden subjects require an exact slug
-- Disabled subjects are excluded from all matches, including exact
-
-#### No De-duplication Across Calls
-
-There is no mechanism to prevent the assistant from calling `learn` with the
-same subject twice.
-System prompt subjects (via `learned`) ARE excluded from the tool, because the
-system prompt is never compacted.
-But subjects learned via tool calls may have been compacted away from the
-context window, so re-learning them is valid.
+`learn` does not deduplicate subjects across tool calls.
+Subjects pre-loaded via `learned` stay in the system prompt, which is never
+compacted, so `learn` excludes them.
+Subjects loaded through earlier tool calls can be compacted out of the
+conversation history, so the assistant is allowed to load them again.
 
 ### CLI Integration
 
 #### The `-k` / `--knowledge` Flag
 
-A convenience flag on the `query` command for pre-loading subjects into the
-system prompt:
+`jp query` accepts `-k` / `--knowledge` as a shorthand for pre-loading subjects
+into the system prompt:
 
 ```sh
 jp query -k "project/maintainers/*" "Review this PR"
 ```
 
-Equivalent to:
+This is equivalent to:
 
 ```sh
 jp query --cfg kb.topic.project.learned+="maintainers/*" "Review this PR"
 ```
 
-**Behavior:**
-
-- Format: `topic_id/glob_pattern`
-- Repeatable: `-k "project/*" -k "skills/ast-grep"`
-- Merges with existing `learned` patterns (does not replace)
-- Affects the current conversation going forward
+Each flag value has the form `topic_id/glob_pattern` and can be repeated (for
+example, `-k "project/*" -k "skills/ast-grep"`).
+Patterns append to the topic's existing `learned` list and persist for the rest
+of the conversation.
 
 #### Config Load Paths
 
-Pre-loading can also be configured via `config_load_paths`:
+Reusable sets of pre-loaded subjects can also live in `config_load_paths`:
 
 ```toml
 # .jp/config.d/kb/maintainers.toml
@@ -573,9 +550,6 @@ learned = ["maintainers/*"]
 ```bash
 jp query --cfg kb/maintainers "Review this PR"
 ```
-
-This leverages the existing configuration loading system without any new
-infrastructure.
 
 #### Implementation
 
@@ -588,17 +562,17 @@ infrastructure.
 knowledge: Vec<String>,
 ```
 
-Each value is split on the first `/` into `(topic_id, pattern)` and converted to
-a config merge on `kb.topic.<id>.learned`.
+Each `-k` value is split on the first `/` into `(topic_id, pattern)` and merged
+into `kb.topic.<id>.learned`.
 
 ### File Format Handling
 
-Subject files are read as UTF-8 text.
-The file extension determines presentation format.
+Subject files are read as UTF-8 text, and the file extension determines how
+their content is formatted.
 
 #### Pass-through Formats
 
-Included as-is in tool output:
+Markdown and plain-text files are included as-is in tool output:
 
 | Extension | Format     |
 | --------- | ---------- |
@@ -609,7 +583,8 @@ Included as-is in tool output:
 
 #### Fenced Code Block Formats
 
-Wrapped in fenced code blocks with the extension as language:
+Other text files are wrapped in a fenced code block tagged with the language for
+their extension:
 
 | Extension        | Language tag   |
 | ---------------- | -------------- |
@@ -622,7 +597,7 @@ Wrapped in fenced code blocks with the extension as language:
 | `.ts`            | `typescript`   |
 | (other)          | extension name |
 
-Example: a `.toml` file is returned as:
+For example, a `.toml` file is returned as:
 
 ````
 ```toml
@@ -633,9 +608,8 @@ name = "example"
 
 #### Binary File Detection
 
-If the first 8192 bytes of a file contain a null byte, the file is treated as
-binary and skipped.
-The `learn` tool returns a message indicating the file was skipped.
+If the first 8192 bytes of a file contain a null byte, `learn` treats the file
+as binary, skips it, and returns a message indicating that the file was skipped.
 
 ### Data Flow
 
@@ -704,18 +678,16 @@ Host returns tool result to LLM
 
 #### `jp_config`
 
-New module `src/kb.rs` with `KnowledgeBaseConfig` and `TopicConfig`, including
-partial config types, merging, and CLI assignment.
-New `kb` field on `AppConfig`.
+Add `src/kb.rs` defining `KnowledgeBaseConfig` and `TopicConfig` (with partial
+config types, merging, and CLI assignment), and add `kb` to `AppConfig`.
 
 #### `jp_tool_learn`
 
-New crate at `crates/jp_tool_learn/`.
-In v1, a regular Rust library called from the host.
-Contains the `learn` tool logic: directory scanning, hidden/disabled filtering,
-glob matching, file reading, format handling, and output formatting.
-
-The public API is designed as a pure function:
+Create `crates/jp_tool_learn/` as a native Rust library called by the host in
+v1.
+It implements directory scanning, hidden and disabled subject filtering, glob
+matching, file reading, format handling, and output formatting, exposed through
+a pure function:
 
 ```rust
 // crates/jp_tool_learn/src/lib.rs
@@ -758,92 +730,74 @@ the LLM's tool arguments, then calls `execute()`.
 
 #### `jp_conversation`
 
-No changes.
-The `learn` tool produces standard `ToolCallRequest` / `ToolCallResponse` events
-in the conversation stream.
+`jp_conversation` requires no changes; `learn` produces standard
+`ToolCallRequest` and `ToolCallResponse` events in the conversation stream.
 
 ## Drawbacks
 
-- **Config surface area.** Adds a new top-level `kb` field with nested topic
-  configuration, increasing the amount of config a user needs to understand.
-  Mitigated by sane defaults (only `subjects` is required).
+- **Config surface area.** Adds a top-level `kb` section with nested topic
+  settings.
+  Requiring only `subjects` keeps the minimal configuration small.
 
 - **System prompt growth.** Pre-loaded subjects (`learned`) expand inline into
-  the system prompt.
-  Large or numerous pre-loaded subjects consume context window before the
-  conversation starts.
-  Users must manage this tradeoff themselves.
+  the system prompt, consuming context window before the conversation starts.
+  Users must balance what they pre-load against what stays on demand.
 
-- **Discovery depends on descriptions.** The assistant only knows what topics
-  contain based on the `title`, `introduction`, and `description` fields.
-  Poor metadata leads to the assistant not knowing when to call `learn`.
-  This is a garbage-in, garbage-out problem.
+- **Discovery depends on descriptions.** The assistant decides when to call
+  `learn` from each topic's `title`, `introduction`, and `description`.
+  Vague metadata leaves the assistant unable to tell when a topic is relevant.
 
-- **No search.** The `learn` tool requires knowing (or guessing) subject slugs.
-  For topics with many subjects, the assistant must first list subjects, then
-  load specific ones — a two-step interaction that consumes tool calls and
-  tokens.
+- **No search.** `learn` addresses subjects by slug or glob rather than search
+  query.
+  In topics with many subjects, the assistant must list subjects in one tool
+  call and load them in a second, spending an extra round-trip and tokens.
 
 ## Alternatives
 
-### Use attachments for knowledge
+### Use Attachments for Knowledge
 
-The existing attachment system (`-a`) can load files per query.
-However, attachments are designed for ephemeral, query-specific context.
-They lack:
+The attachment system (`-a`) loads files into a query, but attachments target
+ephemeral, query-specific context.
+They have no topic or slug hierarchy, cannot be fetched on demand by the
+assistant, and are not organized as a persistent catalog across queries.
 
-- Structured organization (topics, slugs)
-- On-demand retrieval (the assistant cannot request more)
-- Persistent configuration across queries
+### Use MCP Resources
 
-KB and attachments serve different purposes: attachments are "here's context for
-this specific question," KB is "here's what the project knows."
+MCP resource subscriptions could expose knowledge files, but doing so requires
+running an external MCP server and does not integrate with JP's layered
+configuration.
+A built-in `learn` tool is self-contained.
 
-### Use MCP resources
+### Embed Everything in the System Prompt
 
-MCP resource subscriptions could expose knowledge files.
-This adds complexity (an MCP server to manage), external dependencies, and
-doesn't integrate naturally with JP's config system.
-The `learn` tool is simpler and self-contained.
+Inlining all project knowledge into the system prompt works for small projects,
+but once knowledge exceeds a few thousand tokens it wastes context window on
+unrelated material, increases latency, and raises per-query cost.
 
-### Embed everything in the system prompt
+### RAG / Vector Search
 
-For small projects this works.
-It breaks down when knowledge exceeds a few thousand tokens — wasted context
-window on irrelevant knowledge, slower responses, and higher cost per query.
-The KB's on-demand retrieval avoids this.
-
-### RAG / vector search
-
-Embedding-based retrieval (vector store, semantic search) is a different
-category of solution — heavier infrastructure, requires an embedding model, and
-adds latency.
-The KB is intentionally simple: files on disk, glob patterns, structured
-metadata.
-If a project needs semantic search, it can run an MCP server for that.
-The KB serves the common case where the user knows what knowledge exists and
-wants to organize it for the assistant.
+Embedding-based retrieval requires a vector store and an embedding model, adding
+infrastructure and query latency.
+Projects that need semantic search can expose it through an MCP server; the KB
+covers the common case where users already organize knowledge as files on disk.
 
 ## Non-Goals
 
-- **Semantic search or indexing.** The KB is file-based with explicit
-  addressing.
-  No embeddings, no full-text search, no indexing.
+- **Semantic search or indexing.** The KB addresses files by topic and slug
+  without embeddings, full-text search, or indexing.
 
-- **Cross-workspace sharing.** Topics are scoped to the workspace.
-  Sharing knowledge between workspaces is out of scope (users can symlink or use
-  shared config).
+- **Cross-workspace sharing.** Topics are scoped to a single workspace; users
+  who want shared knowledge across workspaces can use symlinks or shared
+  configuration files.
 
-- **Versioning or change tracking.** Subject files are plain files in the
-  workspace.
-  Version control is handled by Git, not by JP.
+- **Versioning or change tracking.** Subject files are plain workspace files
+  tracked by Git rather than JP.
 
-- **Write access.** The `learn` tool is read-only.
-  A future `memory` tool (see [#102]) may add write capabilities.
-  This RFD does not cover that.
+- **Write access.** `learn` is read-only.
+  Write capabilities belong to a future `memory` tool (see [#102]).
 
-- **Wasm execution.** The v1 implementation runs `jp_tool_learn` as native Rust.
-  Migration to Wasm is deferred to a later phase.
+- **Wasm execution.** v1 runs `jp_tool_learn` as native Rust and defers Wasm
+  execution to a later phase.
 
   > [!TIP]
   > [RFD 016] defines the Wasm plugin infrastructure that `learn` would migrate
@@ -851,27 +805,23 @@ wants to organize it for the assistant.
 
 ## Risks and Open Questions
 
-- **LLM glob literacy.** The tool accepts glob patterns (`*`, `**`).
-  Some LLMs may not understand glob semantics well and could produce invalid
-  patterns.
-  Mitigated by clear tool description text and the fallback of exact slug
-  matching.
+- **LLM glob literacy.** Models that misapply `*` and `**` may pass invalid or
+  overly broad patterns.
+  The parameter description explains both wildcards, and exact slug matching
+  works without globs.
 
-- **Large subject files.** No size limit is enforced on subject files.
-  A single large file could blow out the context window.
-  Should we warn or truncate above a threshold?
-  For now, this is the user's responsibility.
+- **Large subject files.** Subject files have no size limit, so a single large
+  file can fill the context window.
+  Whether JP should warn or truncate above a size threshold remains open; for
+  v1, sizing subjects is the user's responsibility.
 
-- **Topic discovery at scale.** With many topics, the `<knowledge>` system
-  prompt section grows.
-  If a workspace defines 20+ topics, the topic listing itself becomes noise.
-  This is unlikely in practice but worth monitoring.
+- **Topic discovery at scale.** Defining 20+ topics bloats the `<knowledge>`
+  listing in the system prompt.
 
-- **`ToolSource::Builtin` implementation.** The `learn` tool is the first
-  builtin tool.
-  The `ToolSource::Builtin` code path in `jp_llm` is currently `todo!()`.
-  The implementation needs to handle tool definition generation, argument
-  passing, and result handling — all of which are new for this source type.
+- **`ToolSource::Builtin` implementation.** `learn` is the first built-in tool,
+  and the `ToolSource::Builtin` path in `jp_llm` is currently `todo!()`.
+  It requires wiring up tool definition generation, argument passing, and result
+  handling.
 
 ## Implementation Plan
 
@@ -907,14 +857,14 @@ Depends on Phase 1.
 Depends on Phase 1.
 Can proceed in parallel with Phase 2.
 
-### Phase 4: `learn` Tool Execution (v1 — native Rust)
+### Phase 4: `learn` Tool Execution (v1, Native Rust)
 
 1. Create `jp_tool_learn` crate as a regular Rust library
 2. Implement `LearnInput` and `execute()` as a pure function
 3. Implement listing logic (directory scan, hidden/disabled filter)
 4. Implement loading logic (glob matching, file reading, format handling)
-5. Implement `ToolSource::Builtin` in `jp_llm` — construct `LearnInput` from
-   `TopicConfig` + LLM arguments, call `jp_tool_learn::execute()`
+5. Implement `ToolSource::Builtin` in `jp_llm` to construct `LearnInput` from
+   `TopicConfig` and LLM arguments and call `jp_tool_learn::execute()`
 6. Add integration tests (tool call → file content)
 
 Depends on Phases 2 and 3.
@@ -931,10 +881,10 @@ Runs alongside Phase 4.
 
 ## References
 
-- [Issue #102: Long-term memory system][#102] — broader vision for
+- [Issue #102: Long-term memory system][#102]: broader vision for
   cross-conversation knowledge
-- [Wasm Tools Architecture][Wasm Tools] — target Wasm plugin infrastructure
-  that `learn` will migrate to in v2
+- [Wasm Tools Architecture][Wasm Tools]: target Wasm plugin infrastructure that
+  `learn` migrates to in v2
 
 [#102]: https://github.com/dcdpr/jp/issues/102
 [RFD 016]: ../016-wasm-plugin-architecture.md

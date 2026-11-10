@@ -12,16 +12,16 @@
 
 This RFD removes the `content` parameter from `fs_create_file` and delivers file
 content through a schema-typed inquiry instead.
-This structurally prevents LLMs from wasting tokens by dumping file contents
-into tool call arguments, and moves file content out of the provider-visible
-conversation stream entirely.
+This prevents LLMs from wasting tokens in tool call arguments and keeps file
+bodies out of the provider-visible conversation stream.
 
 ## Motivation
 
 LLMs frequently misuse `fs_create_file` to overwrite existing files instead of
-using `fs_modify_file` for incremental edits.
-The system prompt tells them not to, but they often ignore it.
-The current flow when an LLM overwrites an existing file:
+using `fs_modify_file` for incremental edits, despite the system prompt warning
+("DO NOT re-create files that already exist").
+When an LLM attempts to overwrite an existing file, the call proceeds as
+follows:
 
 ```
 1. LLM generates fs_create_file(path, content="<500 lines>")  ← tokens generated
@@ -30,50 +30,44 @@ The current flow when an LLM overwrites an existing file:
 4. If false: 500 lines of content wasted
 ```
 
-The problem is structural: by the time we detect the file exists, the LLM has
-already generated and transmitted the full file content.
+By the time the tool checks whether the file exists, the LLM has already
+generated and transmitted the full file content.
 Those tokens are stored in `ToolCallRequest.arguments`, which is
-provider-visible — they persist in the conversation's context window for all
-future turns.
+provider-visible, so they remain in the conversation's context window for every
+subsequent turn.
 
-The system prompt reminder ("DO NOT re-create files that already exist") is a
-soft guardrail.
-LLMs comply inconsistently.
-A hard guardrail — making it physically impossible to send content in the tool
-call — is the only reliable fix.
+A system prompt warning is a soft guardrail that LLMs follow inconsistently.
+Removing `content` from the tool call is a hard guardrail: the LLM cannot send
+file content before the tool checks the path.
 
 ### Token economics
 
-`ToolCallRequest` events are provider-visible: they're sent to the LLM on every
-subsequent turn.
-`InquiryResponse` events are NOT provider-visible: they're stored in the
-conversation stream but filtered out before reaching providers.
-
-Moving file content from tool call arguments to inquiry answers has a direct
-context window benefit:
+`ToolCallRequest` events are sent to the provider on every subsequent turn,
+whereas `InquiryResponse` events are stored in the conversation stream but
+filtered out before provider requests are built.
+Moving file content from `ToolCallRequest.arguments` to `InquiryResponse` keeps
+it out of the context window across all three outcomes:
 
 | Scenario                 | Current (content in args)               | Proposed (content in inquiry) |
 | ------------------------ | --------------------------------------- | ----------------------------- |
-| New file                 | Content in context forever              | Content NOT in context        |
-| Existing, LLM overwrites | Content in context forever              | Content NOT in context        |
+| New file                 | Content in context forever              | Content not in context        |
+| Existing, LLM overwrites | Content in context forever              | Content not in context        |
 | Existing, LLM cancels    | Content in context forever (**wasted**) | Near-zero tokens              |
 
-The third row is where the savings are largest.
-Today, when an LLM generates 500 lines for an existing file and then decides not
-to overwrite, those 500 lines live in the context window permanently.
-With this change, the LLM generates only a small `fs_create_file(path)` call,
-learns the file exists through the inquiry question text, and makes an informed
-decision before generating any content.
+The largest savings occur when the LLM cancels an overwrite.
+Instead of generating the full file upfront, the LLM sends a minimal
+`fs_create_file(path)` call, learns from the inquiry prompt that the file
+already exists, and decides whether to overwrite before generating any content.
 
 ## Design
 
 ### Overview
 
-`fs_create_file` loses its `content` parameter and always returns `NeedsInput`
+`fs_create_file` drops its `content` parameter and always returns `NeedsInput`
 with an `AnswerType::Schema` question (see [RFD D13]).
-The inquiry system routes this to the assistant, which provides file content
-through a structured output response.
-The tool then creates or overwrites the file with the provided content.
+The inquiry system routes the question to the assistant, which returns the file
+content (or cancels the overwrite) as structured output.
+The tool then writes the file or aborts.
 
 ```
 New file:
@@ -89,12 +83,10 @@ Existing file:
   Tool: returns "use fs_modify_file instead"
 ```
 
-The inquiry is invisible to the user.
-From the user's perspective, the tool call appears, the tool runs, and the
-result appears — same as today.
-The extra LLM round-trip happens behind the scenes.
+The extra LLM round-trip is hidden from the user: the tool call, execution, and
+result render in the terminal as a single step.
 
-### Tool parameter changes
+### Tool parameters
 
 The tool's parameter schema changes from:
 
@@ -108,13 +100,13 @@ To:
 fs_create_file(path: string)
 ```
 
-The tool always returns `NeedsInput` after path validation.
-The question ID is `file_content` in both cases, with different schemas and
-question text depending on whether the file exists.
+After validating `path`, the tool returns `NeedsInput` with question ID
+`file_content`.
+The schema and question text depend on whether the file already exists.
 
-### New file path
+### New file
 
-Schema:
+When the target file does not exist, the inquiry uses this schema:
 
 ```json
 {
@@ -135,11 +127,12 @@ Question text:
 > File '{path}' does not exist and will be created.
 > Provide the file content.
 
-On answer: create parent directories, create the file, write `content`.
+When the inquiry returns, the tool creates any missing parent directories and
+writes `content` to the new file.
 
-### Existing file path
+### Existing file
 
-Schema:
+When the target file already exists, the inquiry uses this schema:
 
 ```json
 {
@@ -169,162 +162,143 @@ Question text:
 > File '{path}' already exists ({size} bytes).
 > To overwrite it, set `overwrite` to true and provide the full new content.
 > If you only need to change part of the file, set `overwrite` to false and use
-> `fs_modify_file` instead — `fs_modify_file` is more token-efficient because
-> it only transmits the changed portions.
+> `fs_modify_file` instead: `fs_modify_file` is more token-efficient because it
+> only transmits the changed portions.
 > Overwriting regenerates the entire file content, which consumes tokens and
 > context window space.
 
-On answer:
+When the inquiry returns:
 
-- `overwrite: true` + `content`: truncate file, write content.
-- `overwrite: true` + no `content`: truncate file (empty).
-- `overwrite: false`: return message suggesting `fs_modify_file`.
+- `overwrite: true` with `content`: truncate the file and write `content`.
+- `overwrite: true` without `content`: truncate the file to zero bytes.
+- `overwrite: false`: leave the file untouched and return a message directing
+  the assistant to `fs_modify_file`.
 
 ### Inquiry model routing
 
-The `file_content` inquiry generates file content — a task that requires the
-main assistant model.
-The question is configured with the `inherit` model alias ([RFD D13]) so the
-inquiry goes to the same model as the main conversation:
+Because the `file_content` inquiry writes the file body, it needs the capability
+of the main conversation model rather than a smaller default inquiry model.
+The question uses the `inherit` model alias ([RFD D13]) to route the inquiry to
+the active conversation model:
 
 ```toml
 [conversation.tools.fs_create_file.questions.file_content.target]
 model.id = "inherit"
 ```
 
-### Configuration changes
+### Configuration
 
-The existing `overwrite_file` question config becomes obsolete.
-All config files that reference it are updated:
+The `file_content` question replaces `overwrite_file`, and the tool and skill
+definitions drop the `content` parameter:
 
 | File                    | Old                                                     | New                                                                 |
 | ----------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
 | `personas/dev.toml`     | `fs_create_file.questions.overwrite_file.answer = true` | `fs_create_file.questions.file_content.target.model.id = "inherit"` |
 | `skill/rfd.toml`        | `fs_create_file.questions.overwrite_file.answer = true` | `fs_create_file.questions.file_content.target.model.id = "inherit"` |
-| `skill/edit-files.toml` | Describes `content` param                               | Updated description                                                 |
-| `create_file.toml`      | Has `content` parameter                                 | Parameter removed                                                   |
+| `skill/edit-files.toml` | Describes `content` parameter                           | Explains follow-up prompt                                           |
+| `create_file.toml`      | Defines `content` parameter                             | Removes `content` parameter                                         |
 
-The skill description in `edit-files.toml` is updated:
+`skill/edit-files.toml` describes the two-step flow:
 
 > - fs_create_file: Create a new file.
 >   Content is provided via a follow-up prompt, not inline.
 
-### Format arguments mode
+### Formatting tool arguments
 
-The `FormatArguments` action (used for rendering tool calls in the terminal) is
-simplified.
-It no longer needs to syntax-highlight a `content` parameter because there is
-none.
-The output shows only the file path.
+With `content` removed, the `FormatArguments` action no longer syntax-highlights
+a file body when rendering tool calls in the terminal; it prints only the file
+path.
 
 ## Drawbacks
 
-- **Extra round-trip for every file creation.** Every `fs_create_file` call now
-  requires an inquiry round-trip, even for new files where there's no conflict.
-  This adds latency (one structured output LLM call).
-  The latency is offset by context window savings and the inquiry being
-  invisible to the user.
+- **Extra round-trip for every file creation.** Every `fs_create_file` call
+  requires a structured-output inquiry call, even for new files with no
+  conflict.
+  The extra round-trip adds latency, traded off against lower context usage on
+  subsequent turns.
 
-- **`inherit` model means inquiry cost equals main model cost.** Routing the
-  inquiry to the main model (e.g. Opus) instead of a cheap model (Haiku) is more
-  expensive per call.
-  This is unavoidable — generating file content requires the main model's
-  capabilities.
-  The cost is comparable to what the LLM would have spent generating content
-  inline in the tool call arguments.
+- **Main-model cost for inquiries.** Routing `file_content` to `inherit` (e.g.
+  Opus) costs more per inquiry than routing a simple boolean question to a
+  smaller model (e.g. Haiku).
+  Because the inquiry generates the file body, it needs the main model's
+  capabilities, and the token cost matches what the model would have spent
+  generating `content` inline in the tool call.
 
-- **`fs_modify_file` on empty files is unintuitive.** If an LLM creates an empty
-  file via `fs_create_file` (by answering `overwrite: true` with no content) and
-  later wants to populate it, it must call `fs_modify_file` with `old=""`.
-  This works but is not obvious.
-  In practice, this path should be rare — the inquiry provides content
-  directly.
+- **Populating empty files via `fs_modify_file` is unintuitive.** If the LLM
+  truncates a file to zero bytes (`overwrite: true` without `content`) and later
+  populates it through `fs_modify_file`, it must pass `old=""`.
+  This is non-obvious, though uncommon because the inquiry collects the new
+  content directly.
 
 ## Alternatives
 
 ### Keep `content` parameter, discard it for existing files
 
-Keep `content` on `fs_create_file` but ignore it when the file exists.
-Return a `NeedsInput` with a select offering "overwrite" or "cancel."
+Keep `content` on `fs_create_file` but ignore it when the file exists, returning
+`NeedsInput` with a select question offering "overwrite" or "cancel."
 
-Rejected: the LLM still generates and transmits the full file content before we
-can intervene.
-Those tokens are stored in `ToolCallRequest.arguments` (provider-visible) and
-persist in the context window.
-The token waste is the core problem and this approach doesn't address it.
+Rejected: the LLM still generates the full file body before the tool runs, and
+those tokens remain in `ToolCallRequest.arguments` in the provider-visible
+context window.
 
 ### Remove `content`, use `fs_modify_file` for all content
 
-The tool only creates empty files.
-Content is always provided via a separate `fs_modify_file` call with `old=""`,
-`new="<content>"`.
+Have `fs_create_file` create only empty files, and require a follow-up
+`fs_modify_file` call with `old=""` and `new="<content>"` to populate them.
 
-Rejected: requires two tool calls for every new file (create + modify).
-The `fs_modify_file` call puts content in `ToolCallRequest.arguments`, which is
-provider-visible — so there is no context window benefit over the current
-design.
-The inquiry approach moves content to `InquiryResponse`, which is NOT
-provider-visible.
+Rejected: creating a file takes two tool calls, and `fs_modify_file` still
+records the file body in `ToolCallRequest.arguments`, which is provider-visible.
+Delivering content through `InquiryResponse` keeps it out of provider context.
 
 ## Non-Goals
 
-- **Changing `fs_modify_file` behavior.** The modify tool is unaffected by this
-  change.
+- **Changing `fs_modify_file` behavior.** Incremental file edits continue to
+  pass patterns inline in tool call arguments.
 - **Applying this pattern to other tools.** Other tools that accept large
-  content parameters (e.g. hypothetical `fs_write_file`) could benefit from the
-  same pattern, but that is separate work.
-- **Context compaction.** Reducing existing conversation context through
-  summarization or trimming.
-  This RFD prevents content from entering the context in the first place;
-  compaction addresses content that's already there.
+  content parameters (e.g. a hypothetical `fs_write_file`) are separate work.
+- **Context compaction.** This RFD keeps file bodies out of the conversation
+  context upfront; summarizing or trimming existing context is separate work.
 
 ## Risks and Open Questions
 
-- **LLM compliance with schema-based overwrite decisions.** The existing-file
-  schema asks the LLM to set `overwrite: false` when it should use
-  `fs_modify_file`.
-  LLMs might still set `overwrite: true` habitually.
-  The question text is explicit about the trade-off, but real-world compliance
-  needs validation.
-  If LLMs consistently overwrite, the schema description may need tuning.
+- **Habitual overwrites.** The existing-file prompt and schema instruct the LLM
+  to set `overwrite: false` for partial edits, but models can still set
+  `overwrite: true` out of habit.
+  Real-world compliance needs testing, and the prompt or schema description can
+  be tuned if models continue to overwrite.
 
-- **Optional `content` field across providers.** The existing-file schema uses
-  `required: ["overwrite"]` without requiring `content`.
-  This is valid JSON Schema but providers' structured output implementations may
-  handle optional fields differently.
-  If a provider always generates all properties regardless of `required`, the
-  LLM may produce an empty `content` string even when `overwrite` is false —
-  wasting tokens on an empty field.
-  This is minor (a few tokens) but worth monitoring.
+- **Optional `content` field across providers.** The existing-file schema lists
+  only `overwrite` in `required` and leaves `content` optional.
+  Providers that require every schema property to appear in structured output
+  will emit an empty `content` string even when `overwrite` is `false`, costing
+  a few extra tokens.
 
 ## Implementation Plan
 
 ### Phase 1: Rewrite `fs_create_file` tool
 
-Remove the `content` parameter from `create_file.rs`.
-Implement the two inquiry paths (new file, existing file) using
-`AnswerType::Schema`.
-Update the `FormatArguments` rendering.
-Update unit tests.
+Remove the `content` parameter from `create_file.rs`, implement the new-file and
+existing-file inquiry flows using `AnswerType::Schema`, and update
+`FormatArguments` rendering and unit tests.
 
 Depends on [RFD D13] Phase 1 (`AnswerType::Schema`).
 
 ### Phase 2: Configuration updates
 
 Update tool definitions (`create_file.toml`), skill descriptions
-(`edit-files.toml`), and persona configs (`dev.toml`, `rfd.toml`).
-Remove the old `overwrite_file` question configs.
-Add `file_content` question with `inherit` model targeting.
+(`edit-files.toml`), and persona configs (`dev.toml`, `rfd.toml`) to remove the
+`overwrite_file` question config and add the `file_content` question with
+`inherit` model targeting.
 
 Depends on Phase 1 and [RFD D13] Phase 3 (`inherit` alias).
 
 ## References
 
-- [RFD D13: Schema Answer Type and Inherit Model Alias][RFD D13] — the
+- [RFD D13: Schema Answer Type and Inherit Model Alias][RFD D13]: the
   infrastructure this RFD depends on.
-- [RFD 028: Structured Inquiry System for Tool Questions][RFD 028] — the
-  inquiry system used for content delivery.
-- [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034] — per-question
+- [RFD 028: Structured Inquiry System for Tool Questions][RFD 028]: the inquiry
+  system used for content delivery.
+- [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034]: per-question
   model targeting.
 
 [RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md

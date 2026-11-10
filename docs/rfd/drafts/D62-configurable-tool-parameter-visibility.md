@@ -13,45 +13,42 @@
 This RFD adds an `enabled` flag to tool parameter configuration.
 A parameter with `enabled = false` is omitted from the JSON Schema sent to the
 model and from `describe_tools`, and is rejected if the model supplies it, while
-any configured `default` value is still injected by the host.
+the host still injects any configured `default` value.
 Configuration layers can toggle `enabled` to keep context-specific parameters
 hidden by default and expose them only when needed.
 
 ## Motivation
 
-A tool parameter is useful to the model in some contexts and pure noise in
-others.
-Today the choice is binary and permanent: a parameter is either in the schema
-for every conversation, or it does not exist.
+Some tool parameters are useful to the model only in specific contexts.
+However, parameter visibility in JP is binary and permanent: a parameter is
+either included in the schema for every conversation or omitted entirely.
 
-Take a tool that usually acts on the workspace root, but occasionally needs to
-act somewhere else — a second build workspace inside the repository, or a
-checkout mounted alongside it.
-Two designs are available today:
+Consider a tool that usually operates on the workspace root, but occasionally
+needs to target another directory, such as a second build workspace inside the
+repository or a checkout mounted alongside it.
+Two designs are available without per-layer visibility:
 
-1. **Declare the parameter unconditionally.** Every conversation now carries an
-   argument the model must reason about and can misuse, to serve a case that
-   arises in a minority of them.
-2. **Move the choice into `options`.** Host-configured, invisible to the model,
-   fixed for the whole conversation.
-   The model cannot act on one location and then the other, because it is not
-   the one choosing.
+1. **Declare the parameter unconditionally.** Every conversation includes an
+   argument the model must reason about and can misuse, even though most
+   conversations do not need it.
+2. **Move the setting into `options`.** Options are configured by the host,
+   hidden from the model, and fixed for the entire conversation.
+   Because the host sets the value, the model cannot target one directory and
+   then another within the same conversation.
 
-Neither is wrong in itself, and the second is right whenever the value genuinely
-is the user's to fix.
-What is missing is the axis that separates them: *who chooses*, and *in which
-contexts is the model allowed to*.
-
-Doing nothing keeps that decision welded to the parameter's declaration.
-A parameter that should be invisible by default and available on demand has
-nowhere to live: exposing it everywhere is noise, and moving it to `options`
-puts it permanently out of the model's reach.
+Moving the setting to `options` works when the user should always fix the value.
+However, JP conflates *who chooses the value* with *when the model is allowed to
+choose it*.
+Because visibility is tied to the parameter's declaration, a parameter cannot be
+hidden by default and exposed on demand: declaring it as a parameter exposes it
+everywhere, while moving it to `options` puts it permanently out of the model's
+reach.
 
 ## Design
 
 ### Configuration
 
-`ToolParameterConfig` gains one field:
+`ToolParameterConfig` gains an `enabled` boolean field:
 
 ```toml
 [conversation.tools.run_build.parameters.root]
@@ -60,7 +57,7 @@ enabled = false
 summary = "Directory to build in. Defaults to the workspace root."
 ```
 
-A later config layer re-enables it:
+A later config layer can re-enable the parameter:
 
 ```toml
 [conversation.tools.run_build.parameters.root]
@@ -68,145 +65,132 @@ enabled = true
 default = "crates/some-project"
 ```
 
-`enabled` defaults to `true`, so every existing configuration is unaffected.
+`enabled` defaults to `true`, leaving existing configurations unchanged.
 
 ### Scope: top-level parameters only
 
-`ToolParameterConfig` doubles as a recursive JSON Schema node — `properties`
-describes an object's fields, `items` an array's elements — so adding a field
-to it adds that field everywhere in the tree.
+`ToolParameterConfig` doubles as a recursive JSON Schema node (`properties`
+describes an object's fields, and `items` describes an array's elements), so
+adding a field to `ToolParameterConfig` exposes that field at every level of the
+schema tree.
 
-`enabled` is honoured only on entries directly under `parameters`.
-Setting it on a nested `properties` entry or inside `items` is a **config
-error**, reported with the full path to the offending entry.
+`enabled` is honored only on entries directly under `parameters`.
+Setting `enabled` on a nested `properties` entry or inside `items` is a **config
+error** that reports the full path to the offending entry.
 
-Rejecting is not the same as ignoring, and the difference matters.
-A nested `enabled` would be offered by schema completion, accepted by the
-parser, and then do nothing: the config loads clean while the field stays
-visible to the model.
-That failure is silent and invisible at exactly the moment the user believes
-they have hidden something.
-An error at load time costs a moment; a silently-ignored one costs a debugging
-session, or a parameter the user thinks is closed.
+Rejecting nested `enabled` settings rather than ignoring them prevents silent
+misconfiguration.
+Because `ToolParameterConfig` is recursive, schema completion offers `enabled`
+on nested nodes and the parser accepts it.
+Ignoring the field there would let the config load cleanly while leaving the
+nested field visible to the model.
 
-Top-level-only is the smaller design and it covers the motivating case.
-Recursive visibility raises questions this RFD does not need to answer: whether
-a disabled object property is stripped from `required` as well as `properties`,
-whether a nested default is injected when the parent object is itself absent,
-and what disabling `items` could mean for an array.
+Restricting `enabled` to top-level parameters covers the motivating use case and
+avoids the edge cases of recursive visibility: whether disabling an object
+property also removes it from the parent object's `required` list, whether a
+nested `default` is injected when the parent object itself is omitted, and what
+disabling `items` means for an array.
 
-The validation rule is a stopgap for a type problem.
-The cleaner expression is a type split — a top-level parameter type carrying
-`enabled`, a nested schema-node type without it — so the config surface cannot
-state something that has no meaning, and no runtime check is needed.
-That refactor is worth doing and is not required to ship the flag.
+This load-time validation rule is a stopgap for the shared recursive type.
+Splitting `ToolParameterConfig` into a top-level parameter type (with `enabled`)
+and a nested schema-node type (without it) would make nested `enabled` fields
+unrepresentable in the schema and eliminate the validation check, but that
+refactoring is not required to ship this feature.
 
-### What "disabled" means
+### Behavior of disabled parameters
 
-Disabled is total.
-The parameter does not exist as far as the model is concerned:
+A disabled parameter is completely hidden from the model:
 
 - It is omitted from the JSON Schema sent to the provider.
 - It is omitted from `describe_tools` output.
 - It is rejected if the model supplies it anyway.
 
-The first two are pure schema filtering and apply to every tool source.
+The first two rules are schema filters that apply to every tool source.
+Rejecting model-supplied values requires an additional check before tool
+dispatch because argument validation only runs for local tools.
+While `validate_tool_arguments` (`crates/jp_llm/src/tool.rs`) rejects any
+argument absent from `parameters`, only `execute_local` calls it.
+`execute_mcp` forwards the argument object directly to `mcp_client.call_tool`,
+and `execute_builtin` passes it directly to the builtin executor without
+validation.
+Without a pre-dispatch check, a model that guesses a disabled parameter's name
+(from earlier conversation history or ordinary schema noncompliance) would still
+pass that argument to MCP and builtin tools.
 
-The third needs work that this RFD has to include, because rejection is not
-currently universal.
-`validate_tool_arguments` (`crates/jp_llm/src/tool.rs`) does reject any argument
-absent from `parameters`, but it is called only inside `execute_local`.
-`execute_mcp` forwards the argument object straight to `mcp_client.call_tool`,
-and `execute_builtin` hands it straight to the executor; neither validates.
-A model that guesses a disabled parameter's name — from stale context, or
-ordinary schema noncompliance, which models produce in normal use — would have
-that argument delivered.
+Leaving disabled parameters unreachable for local tools but merely unadvertised
+for MCP and builtin tools would break the guarantee that disabled parameters
+cannot be set by the model.
+Moreover, `parameters` already applies to MCP tools (unlike `options`, which
+[RFD 042] scoped to local tools), so `enabled` must work across all tool
+sources.
 
-So a disabled parameter is unreachable for local tools today and merely
-unadvertised for the other two.
-That is not a defensible contract for a feature whose whole claim is that the
-parameter does not exist, and `parameters` already applies to MCP tools (unlike
-`options`, which [RFD 042] scoped to local tools), so narrowing this RFD to
-local tools would contradict the field it extends.
+**This RFD therefore adds a source-independent preprocessing step before tool
+dispatch.** For every tool source, this step:
 
-**This RFD therefore adds one source-independent step, scoped to the visibility
-contract alone.** For every tool source, before dispatch:
+1. Rejects any argument that names a disabled parameter.
+2. Injects the configured `default` value for any disabled parameter.
 
-1. Reject an argument naming a disabled parameter.
-2. Inject a disabled parameter's configured `default`.
+### Scope of pre-dispatch preprocessing
 
-That is the whole of it.
+Default injection for *enabled* parameters and rejection of unknown arguments
+(arguments not declared in `parameters` at all) remain inside `execute_local`
+and apply only to local tools.
 
-### What this step deliberately does not do
+Hoisting all of `apply_parameter_defaults` and `validate_tool_arguments` above
+tool dispatch would unify argument handling across all three tool sources, but
+it would also introduce unrelated behavioral changes:
 
-Everything else stays exactly where it is.
-Default injection for *enabled* parameters, and rejection of arguments that name
-no parameter at all, remain inside `execute_local` and remain local-only.
+- **MCP servers would receive default arguments they previously did not.** JSON
+  Schema treats `default` as an annotation rather than a value for the caller to
+  populate, and an MCP server may distinguish an omitted field from an
+  explicitly supplied one even when the values match.
+  Injecting defaults into enabled parameters would change the wire payload for
+  every MCP tool with a configured default.
+- **Builtin tools would reject undeclared arguments** that currently reach their
+  executors untouched.
 
-The temptation is to hoist all of `apply_parameter_defaults` and
-`validate_tool_arguments` above the dispatch and unify the three sources in one
-go.
-That would be a larger, unrelated behavioural change:
-
-- **MCP servers would start receiving arguments they never received.** JSON
-  Schema treats `default` as an annotation, explicitly *not* a value to populate
-  on the caller's behalf, and a server may distinguish an absent field from an
-  explicitly-supplied one even where the values coincide.
-  Injecting into an MCP call changes the wire format for every MCP tool that has
-  a configured default.
-- **Builtin tools would start rejecting arguments** that reach their executors
-  untouched today.
-
-Neither has anything to do with parameter visibility.
-Unifying host-side argument handling across sources is worth doing on its own
-terms, with its own compatibility analysis; it is not this RFD's to smuggle in.
-
-Because the step is scoped this way, a configuration with no disabled parameters
-produces byte-identical behaviour on every path.
+Unifying host-side argument handling across tool sources requires its own
+compatibility analysis and is out of scope for this RFD.
+Scoping the pre-dispatch step to disabled parameters ensures that configurations
+without disabled parameters behave identically to existing releases.
 
 ### Disabled and `required` are orthogonal
 
-Hiding a parameter says nothing about whether the tool needs a value for it.
-The two are separate axes and both combinations are meaningful:
+`required` specifies whether a parameter must have a value, while `enabled`
+specifies whether the model sees and can supply that parameter.
+Combining `enabled = false` with `required = true` means the parameter is
+mandatory for the tool, but the host supplies its value rather than the model:
 
 |                    | `enabled = true`     | `enabled = false`                                          |
 | ------------------ | -------------------- | ---------------------------------------------------------- |
 | `required = false` | Model may supply it  | Tool falls back to its own default                         |
 | `required = true`  | Model must supply it | `default` is mandatory; the config is rejected without one |
 
-`required` describes the schema the model is held to; `enabled` describes
-whether the model sees that schema at all.
-Disabled plus required is coherent: the value is mandatory *and* not the model's
-to choose.
+Two validation rules enforce this behavior:
 
-Two rules make that concrete, and both are needed — without them the
-combination is merely undefined.
+**Argument validation checks only enabled parameters.** Because the model cannot
+see a disabled parameter, tool call validation does not require the model to
+supply it.
+Validating against all configured parameters would fail every call when a
+disabled parameter is marked `required = true`.
 
-**Validation runs against the enabled set.** A disabled parameter is not
-required of the model, because the model cannot see it.
-Validating against the full set instead would mark a disabled parameter
-permanently missing and fail every single call.
+**Config resolution rejects `enabled = false` + `required = true` without a
+`default`.** Without a `default`, the model cannot supply the parameter, the
+host injects nothing, argument validation skips it, and the tool (which has no
+visibility metadata) cannot distinguish it from an omitted optional parameter.
+A mandatory value would never reach the tool.
+Because this is a static configuration error rather than a runtime condition, JP
+rejects it at config load time, following the precedent of
+`reject_access_on_non_local_tools`.
 
-**Disabled + required + no `default` is rejected at config resolution.** Given
-the rule above, such a parameter would otherwise be silently absent: the model
-cannot supply it, nothing injects it, validation no longer asks for it, and the
-tool — which by design knows nothing about visibility — cannot tell it apart
-from an omitted optional.
-A value declared mandatory would simply never arrive.
-That is a stable mistake in configuration, not a runtime condition, so it is
-caught once at load rather than on every invocation.
-`reject_access_on_non_local_tools` is the precedent: an incoherent combination
-refused at config time rather than half-honoured later.
+### Default injection
 
-### Defaults, mostly already solved
+For local tools, `apply_parameter_defaults` already populates any configured
+`default` for omitted parameters before validation runs, because models
+routinely omit defaulted parameters even when marked `required`.
 
-`apply_parameter_defaults` already fills in a configured `default` for any
-parameter the arguments omit, and already runs before validation.
-It exists because models routinely omit defaulted parameters even when they are
-marked required.
-
-A disabled parameter is always omitted by definition, so it always takes its
-default:
+Because a valid tool call always omits disabled parameters, a disabled parameter
+with a `default` always receives that default value:
 
 ```toml
 [conversation.tools.run_build.parameters.root]
@@ -214,262 +198,251 @@ enabled = false
 default = "crates/some-project"
 ```
 
-The tool receives `root = "crates/some-project"` and cannot tell the difference
-between that and the model having passed it.
-"Hide this parameter and always pass this value" therefore needs no new concept
-— only the ability to hide the parameter.
+The tool receives `root = "crates/some-project"` just as if the model had passed
+it.
+Pinning a parameter to a fixed value therefore requires no separate mechanism
+beyond setting `enabled = false` and `default`.
 
-For local tools this is entirely existing behaviour.
-For MCP and builtin tools, where nothing injects today, the visibility check
-carries the disabled parameter's default and nothing else; their handling of
-*enabled* parameters is untouched.
+For local tools, `apply_parameter_defaults` already provides this behavior.
+For MCP and builtin tools, which do not otherwise inject defaults, the
+pre-dispatch visibility check injects defaults only for disabled parameters and
+leaves enabled parameters untouched.
 
-**Injection behaviour is unchanged for enabled parameters, on every source.** An
-earlier draft of this RFD proposed restricting injection to disabled parameters;
-that would have been a breaking change.
-An enabled, required parameter with a default that the model omits succeeds
-today and must continue to — turning it into a failed tool call would persist
-that failure into the conversation and feed it back to the model on the next
-cycle.
+**Default injection for enabled parameters remains unchanged across all tool
+sources.** Restricting default injection to disabled parameters would break
+existing local tool configurations: when a model omits an enabled, required
+parameter that has a `default`, the call succeeds rather than recording a failed
+tool call in the conversation stream and forcing a retry.
 
-### Two argument maps, and where each is used
+### Stored vs. effective argument maps
 
 The stored `ToolCallRequest` keeps the model's raw arguments.
-That is deliberate and unchanged: stored requests are replayed to providers as
-conversation history, so persisting an injected value would hand the model back
-a parameter this feature exists to hide.
+Because stored requests are replayed to providers as conversation history,
+persisting an injected default would expose a disabled parameter to the model on
+subsequent turns.
 
-Preprocessing therefore produces a second, **effective** map, and everything
-that acts on or reports the call uses that one:
+Preprocessing therefore produces a separate **effective** argument map used by
+every stage that inspects or executes the call:
 
 | Map       | Contents                                 | Used for                                                               |
 | --------- | ---------------------------------------- | ---------------------------------------------------------------------- |
 | Stored    | Exactly what the model emitted           | The conversation stream; replay to providers as history                |
 | Effective | Stored, plus disabled-parameter defaults | Permission prompts, argument formatting, rendering, tracing, execution |
 
-**The ordering is the point.** Preprocessing happens when the executor is
-created — before `permission_info` builds a prompt — not on the way into the
-tool.
+**Preprocessing runs when the executor is created, before `permission_info`
+builds the approval prompt.** Currently, `execute_local` injects defaults only
+during execution, after the approval prompt has already been rendered from
+`request.arguments`.
+For an enabled parameter with a default, this causes an occasional mismatch when
+the model omits the argument.
+For a disabled parameter, the mismatch would happen on every call: because the
+model never emits the parameter, its injected default would never appear in the
+prompt.
 
-Today injection happens inside `execute_local`, well after the approval prompt
-is rendered from `request.arguments`.
-For an enabled parameter with a default that is an occasional cosmetic mismatch.
-For a disabled one it is systematic: a disabled parameter is *always* absent
-from the model's output, so its configured value would *always* be missing from
-the prompt.
+For example, a tool configured with `run = "ask"` and a disabled `root`
+parameter defaulting to a second build directory would prompt the user to
+approve a call with no `root` argument (implying the workspace root) and then
+execute in the second directory.
+Running preprocessing before `permission_info` ensures that the approval prompt
+displays the exact arguments the tool will receive.
 
-A tool with `run = "ask"` and a disabled `root` defaulting to a second build
-directory would ask the user to approve a call showing no `root` at all —
-implying the workspace root — and then run somewhere else.
-The user's consent would not describe the operation performed, which defeats the
-only thing `ask` mode exists to do.
-
-After an `edit` permission changes the arguments, preprocessing and validation
-run again on the edited map, so the final prompt and the executed call still
-agree.
-
-The residual cost is unchanged from today: a tool's observed arguments do not
-match the stored request, which matters to anything auditing or replaying tool
-calls from the stream.
-What this RFD fixes is that the *human being asked to approve* now sees what the
-tool will actually receive.
+If the user modifies arguments via `run = "edit"`, preprocessing and validation
+re-run on the edited map so the final prompt and the executed call remain
+consistent.
+As with existing default injection, the arguments passed to the tool differ from
+the raw `ToolCallRequest` stored in the conversation stream, which affects
+stream auditing and replay, but the user approving the call always sees the
+effective arguments.
 
 ### Tools stay ignorant of visibility
 
-Tools are not told which parameters are disabled.
-A tool reads its arguments and applies its own fallback when one is missing,
-exactly as today.
+Tools do not receive metadata about which parameters are disabled; a tool simply
+reads its arguments and applies its own fallback when an optional argument is
+omitted.
 
-The alternative — exposing the disabled set so a tool can branch on it — is
-deliberately not adopted.
-It pushes visibility awareness into every tool that wants a context-dependent
-default, when `default` injection already covers the motivating need.
-It can be added later if a tool appears that genuinely cannot express itself
-through a default value.
+Exposing the set of disabled parameters to tools would push visibility logic
+into every tool that needs a context-dependent default, even though host-side
+`default` injection already handles that case.
+If a future tool cannot express its behavior through a default value, visibility
+metadata can be exposed then.
 
 ### Relationship to tool options
 
-Options and parameters answer different questions, and this feature sharpens the
-line between them.
+Options and parameters serve distinct roles:
 
-An **option** is a setting the model has no business choosing: a credential, a
-feature toggle, an environment detail.
-It is host-configured and never appears in a schema.
+- An **option** is a host-configured setting that the model should never choose,
+  such as a credential, a feature toggle, or an environment setting.
+  Options never appear in the tool schema.
+- A **parameter** is an input that the model can choose when appropriate.
+  Without `enabled`, hiding a parameter in most contexts required converting it
+  into an option, which also prevented the model from choosing it in contexts
+  where it should be exposed.
 
-A **parameter** is an input the model could sensibly choose.
-Until now, a parameter that should be hidden in most contexts had to be demoted
-to an option to get out of the way — which also removed the model's ability to
-choose it in the contexts where it should.
-`enabled` removes that forced trade.
-
-The test for which to reach for is unchanged and simple: could the model ever
-sensibly pick this value?
-If yes, it is a parameter, and `enabled` decides where it is offered.
+The rule for choosing between them is simple: if the model should ever choose
+the value, declare it as a parameter and use `enabled` to control which contexts
+expose it.
 
 ## Drawbacks
 
-**A parameter's existence becomes layer-dependent, and nothing reports the
-result.** Reading a tool's config no longer tells you what the model sees; you
-need the merged view, and no command produces one.
-`jp config show` prints a commented skeleton of available keys, or defaults with
-`--defaults`; neither reflects merged configuration, and the command loads no
-conversation, so conversation-layer state is out of reach entirely.
-The failure mode is a user wondering why the model ignores a documented
-argument, with no way to check.
+**Effective parameter visibility depends on merged config layers, with no CLI
+command to inspect it.** Reading a single tool configuration file does not show
+what the model sees across merged layers.
+`jp config show` prints only a commented template of available keys (or default
+values with `--defaults`) rather than the merged configuration, and it does not
+load conversation state.
+A user investigating why the model ignores a documented parameter has no command
+to check whether a layer disabled it.
+[RFD 060] proposes
+`--explain=conversation.tools.<tool>.parameters.<name>.enabled`, which would
+provide this diagnostic, but [RFD 060] is still in Discussion.
 
-[RFD 060] would close this — a focused
-`--explain=conversation.tools.<tool>.parameters.<name>.enabled` is exactly the
-diagnostic — but it is in Discussion, so this RFD ships without one.
-
-**Two axes multiply.** `enabled` times `required` times `default` is eight
-combinations, one of which is refused at config resolution.
-That is a third axis to hold in mind when reading a tool's parameters, and the
-one illegal combination is discoverable mainly by tripping over it.
+**Three interacting parameter settings.** Combining `enabled`, `required`, and
+`default` creates eight configuration states, one of which (`enabled = false`
+with `required = true` and no `default`) is rejected at config resolution.
+Authors must track a third setting when reading tool parameter definitions, and
+the invalid combination is only surfaced when config loading fails.
 
 ## Alternatives
 
-**Leave it in `options`.** Zero work, and correct whenever the value should be
-fixed for a conversation.
-Rejected as the general answer because it cannot express "the model may choose
-this here", which is the actual gap.
+**Use `options` instead.** Keeping context-specific settings in `options`
+requires no changes and works when the value is fixed for the entire
+conversation, but it cannot expose the parameter to the model in contexts where
+the model should choose the value.
 
-**Reversing [RFD 042].** This RFD proposes what RFD 042 considered and rejected,
-so the reversal needs stating rather than assuming.
-RFD 042's Alternatives dismissed "hidden parameters that the LLM doesn't see but
-the tool reads" on two grounds, and the intervening design answers both:
+**Keep [RFD 042]'s rejection of hidden parameters.** [RFD 042] considered and
+rejected "hidden parameters that the LLM doesn't see but the tool reads" on two
+grounds, both of which JP's current design addresses:
 
-- *"The LLM might hallucinate values for these hidden parameters."* It may, and
-  the call is now rejected.
-  The source-independent check (see above) makes that true for every tool
-  source, which is precisely what closes 042's objection.
-- *"Validation might reject tool calls that omit them."* It does not.
-  `apply_parameter_defaults` fills the value in before validation runs, so an
-  omitted-but-defaulted parameter is not a failure.
-  That machinery post-dates RFD 042.
+- *"The LLM might hallucinate values for these hidden parameters."* The
+  source-independent pre-dispatch check rejects any call that supplies a
+  disabled parameter across all tool sources.
+- *"Validation might reject tool calls that omit them."*
+  `apply_parameter_defaults` (added after [RFD 042]) populates defaults before
+  validation runs, and validation only checks enabled parameters.
 
-What survives from 042 is its central distinction, and this RFD keeps it: a
-setting the model should never choose is an option, not a hidden parameter.
-What changes is narrower — a parameter that is model-meaningful *in some
-contexts* no longer has to be demoted to an option to stay out of the way in the
-others.
+This RFD preserves [RFD 042]'s core distinction: a setting the model should
+never choose belongs in `options`, whereas a parameter that is relevant to the
+model only in specific contexts stays in `parameters` and uses `enabled` to
+control its visibility.
 
-**Tool groups ([RFD 055], [RFD 056], [RFD 057]).** Swap whole tool definitions
-per context, so a context supplies a variant with the parameter declared.
-Heavier: it duplicates a tool definition to vary one field, and the group
-machinery is still in Discussion.
+**Tool groups ([RFD 055], [RFD 056], [RFD 057]).** Swapping entire tool
+definitions per context so that specific contexts supply a variant with the
+extra parameter would duplicate the tool definition just to toggle a single
+field, and tool groups are still in Discussion.
 
-**A `hidden` flag on the parameter instead of `enabled`.** Same mechanism,
-different word.
-`hidden` suggests presentation-only, which would be a mischaracterisation — the
-parameter is rejected, not merely undisplayed.
+**Name the flag `hidden` instead of `enabled`.** `hidden` implies a display-only
+setting, whereas a disabled parameter is also rejected at call time.
 
-**Follow the tool-level `state` / `allow_toggle` split ([RFD 081]).** Tools
-distinguish "is it on" from "may a later layer change that".
-Parameters could too.
-Not adopted: no case yet needs to pin a parameter's visibility against later
-layers, and a single boolean is the smaller step.
-The split remains available if such a case appears.
+**Split visibility into `state` and `allow_toggle` ([RFD 081]).** Tools separate
+whether a tool is enabled from whether later config layers may toggle it.
+No current use case requires locking a parameter's visibility against later
+layers, so a single `enabled` boolean is simpler and can be split later if
+needed.
 
 ## Non-Goals
 
-- **Conditional visibility.** No expressions, no "enable when another parameter
-  is set".
-  Static per-layer configuration only.
-- **Per-call visibility.** The set is fixed when tool definitions are resolved
-  for an invocation.
-- **Recursive visibility.** `enabled` on nested `properties` or `items` is a
-  config error, not a feature; see the scope section.
-- **Changing `options`.** They keep their meaning; this only removes the cases
-  where a parameter was forced into them.
-- **Changing default injection for enabled parameters.** Existing behaviour is
-  preserved exactly, on every tool source.
-- **Unifying host-side argument handling across tool sources.** Worth doing, but
-  it is a separate change with its own compatibility analysis; see "What this
-  step deliberately does not do".
-- **Telling tools which parameters are disabled.** See above.
+- **Conditional visibility.** Visibility is configured statically per layer;
+  parameters cannot be enabled dynamically based on expressions or other
+  parameter values.
+- **Per-call visibility.** Parameter visibility is fixed when tool definitions
+  are resolved for an invocation.
+- **Recursive visibility.** Setting `enabled` on nested `properties` or `items`
+  is a configuration error.
+- **Changing `options`.** Tool options keep their existing semantics.
+- **Changing default injection for enabled parameters.** Existing default
+  injection behavior for enabled parameters is preserved across all tool
+  sources.
+- **Unifying host-side argument handling across tool sources.** Generalizing
+  default injection and unknown-argument rejection across local, MCP, and
+  builtin tools is a separate change with its own compatibility requirements.
+- **Exposing disabled-parameter metadata to tools.** Tools receive only the
+  effective argument map.
 
 ## Risks and Open Questions
 
-**May the user supply a disabled parameter when editing a call?** `run = "edit"`
-lets the user rewrite arguments before approval.
-`enabled = false` means "not the model's to choose", and the user is the host,
-not the model — so a user-supplied value is arguably legitimate where a
-model-supplied one is not.
-Validation as described cannot tell the two apart: it sees one argument map.
-Rejecting the edit blocks a defensible host override; accepting it reopens the
-channel for anything that can write to that map.
-This needs deciding during implementation rather than falling out of it.
+**Allowing users to supply disabled parameters during `run = "edit"`.** `run =
+"edit"` lets the user modify tool call arguments before approval.
+Because `enabled = false` restricts the model rather than the user, a
+user-supplied value for a disabled parameter is a valid host override.
+However, re-running validation on the single edited argument map cannot
+distinguish user-added arguments from model-supplied ones: rejecting the edit
+blocks a legitimate user override, while skipping the check after an edit allows
+any disabled parameter in the edited map through.
+Implementation must decide whether to track user edits separately or reject
+disabled parameters in edited calls.
 
-**MCP tools whose server-side schema is richer than JP's config.** JP rejects an
-argument naming a parameter it has been told is disabled, which presumes the
-configured `parameters` map describes the same parameter the server means.
-Worth confirming against a server that declares parameters JP's config does not
-mirror.
+**MCP tools whose server-side schema differs from JP's config.** Rejecting
+arguments that match a disabled entry in JP's `parameters` map assumes that JP's
+config mirrors the MCP server's parameter names.
+We should verify how this behaves when an MCP server declares parameters that
+are only partially mirrored in JP's config.
 
-**Sequencing against [PR 998].** That open pull request validates resolved tool
-schemas and touches the same resolution path.
-Whichever lands second inherits the merge; worth agreeing an order rather than
-discovering it.
+**Merge ordering with [PR 998].** [PR 998] validates resolved tool schemas and
+modifies the same schema resolution path, so we should coordinate the merge
+order between the two changes.
 
-**[RFD D10] moves in the opposite direction.** It relocates parameter defaults
-and argument validation *into* `StdioRuntime`, one runtime among several, while
-this RFD places the visibility check above the source dispatch precisely because
-it is source-independent.
-D10 is a Draft, so it does not block this; but if this lands first, D10's
-migration section needs revising to keep the visibility contract out of the
+**Interaction with [RFD D10].** [RFD D10] moves parameter defaults and argument
+validation into `StdioRuntime` (one of several per-source runtimes), whereas
+this RFD places the disabled-parameter check above tool dispatch so it applies
+to all tool sources.
+Because [RFD D10] is still a Draft, it does not block this RFD, but its
+migration plan will need updating to keep the visibility check above the
 per-source runtimes.
 
 ## Implementation Plan
 
-**Phase 1: The flag and the schema filter.** Add `enabled` to
-`ToolParameterConfig`, defaulting to `true`.
-Filter disabled parameters out of the schema sent to providers and out of
-`describe_tools`.
-Validate against the enabled set, reject `enabled` on nested schema nodes, and
-reject disabled + required without a `default` at config resolution.
-Mergeable on its own; with nothing configured, behaviour is unchanged.
+**Phase 1: Config field and schema filtering.** Add `enabled` (defaulting to
+`true`) to `ToolParameterConfig`.
+Filter disabled parameters out of provider tool schemas and `describe_tools`
+output.
+Update argument validation to check only enabled parameters, reject `enabled` on
+nested schema nodes (`properties` and `items`), and reject `enabled = false`
+with `required = true` and no `default` during config resolution.
+This phase can merge independently and leaves existing behavior unchanged when
+no parameters are disabled.
 
-**Phase 2: The visibility check, above the dispatch.** Reject arguments naming a
-disabled parameter and inject disabled-parameter defaults, for every tool
-source, producing the effective argument map.
-Run it at executor creation so the map reaches the approval prompt, and re-run
-it after an `edit`.
+**Phase 2: Pre-dispatch visibility check and effective argument map.** Before
+tool dispatch for any tool source, reject arguments that name a disabled
+parameter and inject configured `default` values for disabled parameters to
+produce the effective argument map.
+Run this preprocessing at executor creation (before `permission_info` renders
+the approval prompt) and re-run it after `run = "edit"`.
 Depends on Phase 1.
-This is the phase that makes "disabled is total" true and keeps approval honest;
-until it lands, Phase 1 hides parameters without closing the guess path.
+While Phase 1 hides disabled parameters from schemas, Phase 2 prevents the model
+from guessing disabled parameter names and ensures approval prompts show
+injected defaults.
 
-Injection for enabled parameters needs no phase: `apply_parameter_defaults`
-already does the right thing, and is left alone.
-
-With no parameter configured as disabled, both phases are no-ops: schemas,
-arguments, and the wire format for every tool source are identical to today.
+Default injection for enabled parameters in `apply_parameter_defaults` requires
+no changes, and when no parameters are disabled, schemas, arguments, and wire
+payloads across all tool sources remain unchanged.
 
 ## References
 
-- `crates/jp_config/src/conversation/tool.rs` — `ToolParameterConfig`,
-  including its recursive `properties` and `items`.
-- `crates/jp_llm/src/tool.rs` — `apply_parameter_defaults`,
-  `validate_tool_arguments`, and the three `execute_*` paths that do not
-  currently share them.
-- `crates/jp_cli/src/cmd/query/tool/executor.rs` — `permission_info` and
-  `arguments`, which read the stored request; where the effective map has to be
-  in place by.
-- `crates/jp_cli/src/cmd/config/show.rs` — what `jp config show` actually
-  prints.
-- [RFD D10] — unified tool execution model; moves defaults and validation into
-  per-source runtimes, which this RFD's visibility check must sit above.
-- [RFD 042] — tool options, and the rejected "hidden parameters" alternative
+- `crates/jp_config/src/conversation/tool.rs`: Defines `ToolParameterConfig`,
+  including its recursive `properties` and `items` fields.
+- `crates/jp_llm/src/tool.rs`: Defines `apply_parameter_defaults`,
+  `validate_tool_arguments`, and the `execute_local`, `execute_mcp`, and
+  `execute_builtin` dispatch paths.
+- `crates/jp_cli/src/cmd/query/tool/executor.rs`: Defines `permission_info` and
+  `arguments`, which must read the effective argument map rather than the raw
+  stored request.
+- `crates/jp_cli/src/cmd/config/show.rs`: Implements `jp config show`.
+- [RFD D10]: Unified tool execution model, which moves parameter defaults and
+  validation into per-source runtimes below this RFD's pre-dispatch visibility
+  check.
+- [RFD 042]: Tool options and the rejected "hidden parameters" alternative that
   this RFD revisits.
-- [RFD 055], [RFD 056], [RFD 057] — tool groups.
-- [RFD 060] — config explain, the natural home for a visibility diagnostic.
-- [RFD 081] — the tool-level `state` / `allow_toggle` split.
-- [Issue 208] — tool templates with parameter constraints (`fixed`, `default`,
+- [RFD 055], [RFD 056], [RFD 057]: Tool groups.
+- [RFD 060]: Config explain (`--explain`), which would report effective
+  parameter visibility across layers.
+- [RFD 081]: The tool-level `state` and `allow_toggle` split.
+- [Issue 208]: Tool templates with parameter constraints (`fixed`, `default`,
   `enum`, `remove`) and host-side call validation.
-  This RFD is the narrow first slice of that design: one boolean on the existing
-  `parameters` map, no templating, no multi-exposure.
-  The vocabularies should converge rather than diverge — `enabled = false` is
-  208's `remove`, and `enabled = false` with a `default` is its `fixed`.
-- [PR 998] — resolved tool schema validation, in flight against the same path.
+  This RFD implements the first slice of that design with a single boolean on
+  the existing `parameters` map, without templating or multiple exposures:
+  `enabled = false` corresponds to `remove`, and `enabled = false` with a
+  `default` corresponds to `fixed`.
+- [PR 998]: Resolved tool schema validation touching the same resolution path.
 
 [Issue 208]: https://github.com/dcdpr/jp/issues/208
 [PR 998]: https://github.com/dcdpr/jp/pull/998

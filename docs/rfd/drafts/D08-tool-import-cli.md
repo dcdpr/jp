@@ -10,38 +10,37 @@
 
 ## Summary
 
-This RFD introduces `jp tool` subcommands that streamline adding new tools to a
-JP workspace: `jp tool new` for scaffolding empty configs, `jp tool import` for
-LLM-assisted tool registration from arbitrary commands, and `jp tool import
---mcp` for importing tools from MCP servers.
+This RFD introduces `jp tool` subcommands for adding tools to a JP workspace:
+`jp tool new` scaffolds an empty config, `jp tool import` generates a tool
+config from a CLI command with LLM assistance, and `jp tool import --mcp`
+imports tool definitions from an MCP server.
 
 ## Motivation
 
-Adding a tool to JP today requires manually creating a TOML config file with the
-correct structure, parameter types, descriptions, and source configuration.
-For local tools, this means understanding the command's flags and translating
-them into JP's parameter schema.
-For MCP tools, it means knowing the server name, tool name, and manually
-referencing them in config.
+Adding a tool to JP requires manually writing a TOML config file with the source
+configuration, parameter types, and descriptions.
+For local tools, the user must read the command's flags and translate them into
+JP's parameter schema.
+For MCP tools, the user must look up the server and tool names and reference
+them in the config by hand.
 
-This friction is the single biggest barrier to tool adoption.
-Users who want to expose a CLI command to the assistant face a multi-step manual
-process before they can even test whether the tool works.
-
-The goal is to reduce "I want to use ripgrep as a tool" to a single command that
-produces a working tool config.
+Users who want to expose a CLI command to the assistant face this manual setup
+before they can even test whether the tool works.
+Turning "I want to use ripgrep as a tool" into a working tool config should take
+a single command.
 
 ## Design
 
 ### `jp tool new <name>`
 
-Scaffolds an empty TOML tool config file.
+`jp tool new` scaffolds an empty TOML tool config file:
 
 ```
 jp tool new my_tool
 ```
 
-Creates `.jp/mcp/tools/my_tool.toml` with a minimal template:
+Running this command creates `.jp/mcp/tools/my_tool.toml` with a minimal
+template:
 
 ```toml
 [conversation.tools.my_tool]
@@ -55,157 +54,134 @@ summary = ""
 # summary = "Description of the parameter."
 ```
 
-This is the lowest-friction starting point.
-The user fills in the command and parameters manually.
-The template includes commented-out parameter examples as a guide.
+The template includes a commented-out parameter example as a guide while the
+user fills in the command and parameters manually.
 
 ### `jp tool import <command>`
 
-LLM-assisted tool registration from an arbitrary CLI command.
+`jp tool import` registers a tool from an arbitrary CLI command with LLM
+assistance:
 
 ```
 jp tool import rg
 jp tool import -- kubectl get pods
 ```
 
-**Flow:**
-
-1. JP runs `<command> --help` (and optionally `man <command>` if available) to
-   collect help text.
+1. JP runs `<command> --help` (and `man <command>` if available) to collect help
+   text.
 2. JP starts a conversation (or uses the current one) with the help text
    attached.
-3. Using structured output, the assistant generates a `ToolConfig` TOML based on
-   the help text and any additional user instructions.
-4. JP validates the generated TOML against the config schema.
-5. JP writes the result to `.jp/mcp/tools/<name>.toml`.
-6. The user can review, edit, and iterate.
+3. Using structured output, the assistant generates a `ToolConfig` TOML from the
+   help text and any additional user instructions.
+4. JP validates the generated TOML against the config schema and writes it to
+   `.jp/mcp/tools/<name>.toml` for the user to review and edit.
 
-This dogfoods JP's own capabilities — the assistant reads `--help` output and
-produces structured config, the same way a human would but faster.
-
-**Safety:** The assistant generates *config*, not *executions*.
-It proposes example invocations in its output that the user can manually test,
-but it does not run the tool during the import process.
-This keeps the human in the loop for state-mutating commands.
+The import process generates configuration without executing the tool itself,
+keeping a human in the loop for state-mutating commands.
+The assistant can still propose example invocations in its output for the user
+to test manually.
 
 ### `jp tool import --mcp <server>`
 
-Import tools from a configured MCP server.
+`jp tool import --mcp` imports tools from a configured MCP server:
 
 ```
 jp tool import --mcp my_mcp_server
 jp tool import --mcp my_mcp_server --tool search_files
 ```
 
-**Flow:**
-
-1. JP connects to the named MCP server (must already be configured in
-   `providers.mcp`).
-2. Lists available tools from the server.
-3. If `--tool` is specified, imports that specific tool.
-   Otherwise, presents a selection UI (or imports all).
-4. For each selected tool, generates a TOML config entry with:
+1. JP connects to the named MCP server, which must already be configured in
+   `providers.mcp`.
+2. JP lists the tools available on the server.
+3. If `--tool` is specified, JP imports that tool; otherwise, it presents a
+   selection UI (or imports all tools).
+4. For each selected tool, JP writes `.jp/mcp/tools/<tool>.toml` with:
    - `source = "mcp.<server>.<tool>"`
    - Summary and description from the MCP tool definition
-   - Parameter overrides pre-filled where useful
-   - Default run mode, style settings
-5. Writes to `.jp/mcp/tools/<tool>.toml`.
-
-This reduces MCP tool setup from manual TOML authoring to a single command.
+   - Pre-filled parameter overrides where useful
+   - Default run mode and style settings
 
 ### Output Location
 
-All commands write to `.jp/mcp/tools/<name>.toml` by default.
-This is the project-level tool config directory.
-A `--global` flag could write to the user-level config directory instead (future
-consideration).
+All commands write to the project-level tool config directory,
+`.jp/mcp/tools/<name>.toml`, by default.
+A future `--global` flag could write to the user-level config directory instead.
 
 ## Drawbacks
 
-- **`jp tool import <command>` depends on `--help` quality.** Some commands have
-  poor, nonstandard, or nonexistent help text.
-  The LLM can only work with what it gets.
-  The fallback is always `jp tool new` + manual editing.
-- **LLM-generated config may need editing.** The structured output won't be
-  perfect for complex tools.
-  This is a starting point, not a final product.
-  The user should expect to review and adjust.
-- **New CLI surface area.** Adding `jp tool` subcommands increases the number of
-  commands to document and maintain.
-  However, these are simple scaffolding commands with minimal logic.
+- **`jp tool import <command>` depends on `--help` quality.** Commands with
+  poor, nonstandard, or missing help text give the LLM little to work with.
+  In those cases, users can fall back to `jp tool new` and manual editing.
+- **LLM-generated config may need editing.** Generated configs for complex tools
+  will not always be complete or accurate, so users should expect to review and
+  adjust the output.
+- **New CLI surface area.** The `jp tool` subcommands add CLI surface to
+  document and maintain, though they are thin scaffolding commands with minimal
+  logic.
 
 ## Alternatives
 
-**Parse `--help` output programmatically.** Instead of using the LLM, write a
-parser for common help text formats (argparse, clap, getopt).
-Rejected because help text formats vary wildly, and maintaining parsers for each
-is more work than the LLM approach.
-The LLM handles variety naturally.
+**Parse `--help` output programmatically.** Writing parsers for common help text
+formats (argparse, clap, getopt) would avoid an LLM call, but help output varies
+too widely across tools to maintain dedicated parsers.
+The LLM handles arbitrary formats directly.
 
-**Parse shell completion scripts.** Some tools ship structured completions for
-bash/zsh/fish that are more parseable than `--help`.
-Coverage is spotty and formats differ.
-Could be a future enhancement as an additional signal for the LLM.
+**Parse shell completion scripts.** Some tools ship structured bash, zsh, or
+fish completions that are easier to parse than `--help` output, but coverage is
+inconsistent and each shell uses a different format.
+Completion scripts could still serve as an additional input signal for the LLM
+in the future.
 
-**No import command — just documentation.** Users follow a guide to write TOML
-by hand.
-This is the status quo.
-It works but doesn't scale to the "make it easy" goal.
+**Document manual TOML authoring only.** Relying on documentation alone
+preserves the status quo and keeps the manual barrier to adding tools.
 
 ## Non-Goals
 
-- **Automatic tool discovery from PATH.** This RFD is about explicit import, not
-  ambient discovery.
-  The user decides what to import.
-- **Running imported tools during the import process.** The import flow
-  generates config only.
-  Testing the tool is a separate step.
-- **Tool registries or package managers.** No central repository of tool
-  definitions.
-  Each user imports tools from their own environment.
+- **Automatic tool discovery from PATH.** The user explicitly chooses which
+  commands to import; JP does not scan PATH for tools.
+- **Running imported tools during the import process.** The import flow only
+  generates configuration; testing the tool is a separate step.
+- **Tool registries or package managers.** There is no central repository of
+  tool definitions; users import tools from their own environment.
 
 ## Risks and Open Questions
 
-- **Structured output maturity.** The `jp tool import <command>` flow relies on
+- **Structured output maturity.** `jp tool import <command>` relies on
   structured output (RFD 029) to generate valid TOML.
-  If structured output isn't reliable enough for TOML generation, the fallback
-  is the assistant producing the TOML in a code block for the user to copy.
-  Need to assess structured output readiness.
-- **MCP server availability during import.** `jp tool import --mcp` requires the
-  MCP server to be running and reachable.
-  If the server is down, the import fails.
-  Error messages should be clear about this.
-- **Config file conflicts.** If a tool config file already exists, the import
-  commands need a strategy: overwrite, merge, or error.
-  Likely: error with a `--force` flag, or prompt the user.
+  If structured output is not reliable enough for TOML generation, the assistant
+  can fall back to emitting the TOML in a code block for the user to copy.
+- **MCP server availability during import.** `jp tool import --mcp` requires a
+  running, reachable MCP server and should fail with a clear error message when
+  the server cannot be reached.
+- **Config file conflicts.** When a tool config file already exists, the import
+  commands must either overwrite, merge, or error.
+  Failing by default with a `--force` flag to overwrite, or prompting the user
+  interactively, are the main options.
 
 ## Implementation Plan
 
 ### Phase 1: `jp tool new`
 
-Add the `jp tool new` subcommand.
-Scaffolds a TOML template.
-No LLM interaction.
-This is a straightforward CLI addition.
+Add the `jp tool new` subcommand to scaffold a TOML tool config template without
+LLM interaction.
 
 ### Phase 2: `jp tool import <command>`
 
-Add the LLM-assisted import flow.
-Depends on structured output (RFD 029) being functional.
-Start with `--help` as the only input signal.
+Add the LLM-assisted import flow, starting with `--help` output as the only
+input signal.
+This phase depends on structured output (RFD 029).
 
 ### Phase 3: `jp tool import --mcp`
 
-Add MCP server import.
-Depends on the MCP client being available in the CLI context.
-Uses the existing `jp_mcp::Client` to list tools.
+Add MCP server import using the existing `jp_mcp::Client` to list tools.
+This phase depends on the MCP client being available in the CLI context.
 
 ## References
 
 - RFD D06: Self-Describing Local Tools (defines the protocol that imported tools
   can implement)
 - RFD 029: Scriptable Structured Output (prerequisite for LLM-assisted import)
-- `.jp/mcp/tools/` — default tool config directory
-- `crates/jp_config/src/conversation/tool.rs` — `ToolConfig` type
+- `.jp/mcp/tools/`: default tool config directory
+- `crates/jp_config/src/conversation/tool.rs`: `ToolConfig` type
 
 [RFD 029]: ../029-scriptable-structured-output.md

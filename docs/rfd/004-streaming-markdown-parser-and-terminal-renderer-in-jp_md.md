@@ -11,93 +11,90 @@
 ## Summary
 
 `jp_md` pairs `comrak` with two custom components: a block-boundary detector
-(`Buffer`) for streaming segmentation and a terminal renderer for ANSI-aware
-styled output.
+(`Buffer`) for streaming segmentation and an ANSI-aware terminal renderer
+(`TerminalRenderer`) for styled output.
 This RFD records why JP maintains both components and why it uses `comrak`
 rather than `pulldown-cmark`.
 
 ## Context
 
-JP streams LLM responses token-by-token.
-To render markdown progressively, we need to know where one block ends and the
-next begins — before the full response has arrived.
-Neither comrak nor pulldown-cmark supports incremental parsing; both require the
-complete input upfront.
+JP streams LLM responses token by token.
+Progressive markdown rendering requires detecting block boundaries before the
+full response arrives, but neither `comrak` nor `pulldown-cmark` supports
+incremental parsing; both require the complete input upfront.
 
-A CommonMark document is a sequence of block-level elements, and a single block
-is a valid document.
-So if we can segment the stream into individual blocks, any standard parser can
-handle each one independently.
-`Buffer` does this segmentation: it buffers incoming chunks and drains them as
-soon as it recognizes a complete block.
-It implements just enough of the CommonMark block-level grammar (headings,
-fenced/indented code, HTML blocks, paragraph interruption rules) to detect
-boundaries — inline parsing is left entirely to comrak.
+Because a CommonMark document is a sequence of block-level elements and each
+block is a valid document on its own, a standard parser can parse each block
+independently once the stream is segmented.
+`Buffer` performs this segmentation by buffering incoming chunks and draining
+each block as soon as its boundary is reached.
+It implements only enough of the CommonMark block-level grammar (headings,
+fenced and indented code blocks, HTML blocks, and paragraph interruption rules)
+to detect block boundaries, leaving inline parsing to `comrak`.
 
-Fenced code blocks are the exception to one-block-at-a-time buffering: Buffer
-streams the opening fence, each content line, and the closing fence as separate
-events.
-This allows line-by-line syntax highlighting without waiting for the full block.
+Fenced code blocks are the exception to whole-block buffering: `Buffer` emits
+the opening fence, each content line, and the closing fence as separate events
+so the renderer can syntax-highlight code line by line without waiting for the
+full block.
 The trade-off is that an unclosed fence causes all subsequent content to render
 as code.
-Buffering the full block would be strictly worse: the user waits for the entire
-remaining response only for the parser to discover the fence was never closed.
+Buffering the entire code block to avoid this would be worse: the user would
+wait for the rest of the response only for the parser to discover the fence was
+never closed.
 
-Once a block is segmented, it needs to be rendered as styled terminal output.
-The initial approach injected `Node::Raw` ANSI escape nodes into comrak's AST
-([comrak#743]), then used comrak's CommonMark formatter for output.
-This broke in two ways: comrak's line wrapping counts escape sequences as
-visible characters, producing incorrect wrap points; and when a wrap happened
-between an opening and closing escape sequence, the unclosed sequence caused
-incorrect rendering.
-The current terminal renderer is ANSI-aware — it counts only visible characters
-for wrapping, and closes open sequences before a line break and re-opens them
-after.
+Segmented blocks then render as styled terminal output.
+The initial approach injected `Node::Raw` ANSI escape nodes into `comrak`'s AST
+([comrak#743]) and used `comrak`'s CommonMark formatter for output.
+This failed in two ways: `comrak`'s line wrapper counted escape sequences as
+visible characters, wrapping lines too early, and line breaks between opening
+and closing escape sequences left sequences unclosed across lines.
+`TerminalRenderer` walks the AST directly instead: it counts only visible
+characters when wrapping, closes active ANSI sequences before a line break, and
+reopens them on the next line.
 
-Since we no longer manipulate comrak's AST, switching to pulldown-cmark is
-technically possible.
-However, comrak still offers a built-in CommonMark formatter
-(`format_commonmark`) for non-terminal output and a convenient AST.
-With pulldown-cmark we'd need a separate crate (`pulldown-cmark-to-cmark`) for
-the same formatting capability.
+Because `TerminalRenderer` does not modify `comrak`'s AST, switching to
+`pulldown-cmark` is technically possible.
+However, `comrak` provides a convenient AST and a built-in CommonMark formatter
+(`format_commonmark`) for non-terminal output, whereas `pulldown-cmark` would
+require a separate crate (`pulldown-cmark-to-cmark`).
 
 ## Decision
 
-We maintain two custom components in `jp_md`:
+`jp_md` maintains two custom components:
 
-1. **`Buffer`** — a block-boundary detector for streaming segmentation.
-2. **`TerminalRenderer`** — an ANSI-aware AST walker for styled terminal output
-   with correct line wrapping and sequence management.
+1. **`Buffer`**: a block-boundary detector for streaming segmentation.
+2. **`TerminalRenderer`**: an ANSI-aware AST walker for styled terminal output
+   with visible-width line wrapping and escape-sequence management.
 
-We use comrak for parsing (AST construction) and non-terminal formatting.
-We choose comrak over pulldown-cmark for its built-in CommonMark formatter and
-AST convenience.
+`jp_md` uses `comrak` rather than `pulldown-cmark` for AST construction and
+non-terminal CommonMark formatting because `comrak` provides both a convenient
+AST and a built-in formatter.
 
-Quality goals, in priority order: minimally buffered (time-to-first-token),
-streaming (tokens/second), well-formatted (themed terminal output), correct
-(spec-faithful).
-Correctness is last deliberately — we prefer showing content with potentially
-wrong styling over making the user wait.
+`jp_md` orders its quality goals by priority: minimal buffering
+(time-to-first-token), streaming throughput (tokens/second), well-formatted
+output (themed terminal rendering), and spec-faithful correctness.
+Correctness comes last by design: rendering content immediately with potentially
+wrong styling is preferable to making the user wait.
 
 ## Consequences
 
-- Buffer and comrak must agree on block boundaries.
-  If they diverge, the affected block renders incorrectly and damage may cascade
+- `Buffer` and `comrak` must agree on block boundaries.
+  If they diverge, the affected block renders incorrectly and errors can cascade
   until the parser state self-corrects.
-  The existing proptest fuzz suite verifies Buffer's self-consistency (chunked
-  vs. whole-document), but does not yet cross-validate against comrak's block
-  boundaries — that is a potential next step.
-- We maintain ~400 lines of block-level grammar that partially overlaps with
-  comrak's parser.
-  This is the cost of streaming capability no existing crate provides.
-- An unclosed fenced code block misrenders all subsequent content as code.
-  This is an accepted latency-over-correctness trade-off.
+  The `proptest` fuzz suite verifies `Buffer`'s self-consistency (chunked vs.
+  whole-document input), but does not yet cross-validate against `comrak`'s
+  block boundaries.
+- `jp_md` maintains ~400 lines of block-level grammar that partially overlaps
+  with `comrak`'s parser, which is the cost of streaming support that no
+  existing crate provides.
+- An unclosed fenced code block renders all subsequent content as code, an
+  accepted latency-over-correctness trade-off.
 
 ## References
 
-- `crates/jp_md/src/buffer.rs` — block-boundary detector
-- `crates/jp_md/src/format.rs` — comrak-based formatter
-- `crates/jp_md/src/render.rs` — terminal renderer (comrak AST walker)
+- `crates/jp_md/src/buffer.rs`: block-boundary detector
+- `crates/jp_md/src/format.rs`: `comrak`-based formatter
+- `crates/jp_md/src/render.rs`: terminal renderer (`comrak` AST walker)
 - [comrak]
 - [pulldown-cmark]
 

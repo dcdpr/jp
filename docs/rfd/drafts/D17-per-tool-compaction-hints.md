@@ -10,36 +10,37 @@
 
 ## Summary
 
-This RFD extends [RFD 064] with per-tool compaction hints: a per-tool override
-that decides how an individual tool's calls are compacted, instead of applying a
-rule's `tool_calls` policy uniformly to every tool.
-A tool can keep its request, keep its response, be stripped, or be omitted
-entirely, independent of the rule's default.
+This RFD extends [RFD 064] with per-tool compaction hints that override a
+compaction rule's `tool_calls` policy for individual tools.
+Each tool can keep its calls intact, strip requests, strip responses, strip
+both, or omit its calls entirely.
 
 ## Motivation
 
-[RFD 064] applies a compaction rule's `tool_calls` policy uniformly:
-`ToolCallPolicy::Strip` strips every tool's request and response the same way,
-and `Omit` removes every tool's calls.
-But tools are not uniform in where their tokens sit:
+[RFD 064] applies a compaction rule's `tool_calls` policy uniformly across all
+tools: `ToolCallPolicy::Strip` strips every tool's requests and responses the
+same way, and `Omit` removes every tool's calls.
+Tools, however, differ in which parts of a call are worth keeping:
 
 - A search-style tool takes a short query and returns a large result.
-  Its request is cheap to keep and useful for context; its response is bulk.
+  The request is cheap and useful for context, while the response holds most of
+  the tokens.
 - A write-style tool takes a large payload and returns a short acknowledgement.
-  Its request is bulk; its response is cheap.
-- A noisy diagnostic tool may be pure clutter, worth removing entirely.
+  The request holds most of the tokens, while the response is cheap.
+- A noisy diagnostic tool adds clutter without useful context and is better
+  omitted altogether.
 
-With one uniform policy the user picks a single trade-off for all of them: strip
-aggressively and lose the cheap, useful parts, or strip conservatively and keep
-the bulk.
-Per-tool hints let each tool declare its own treatment.
+A single uniform policy forces one trade-off across all tools: strip
+aggressively and lose small, useful context, or strip conservatively and retain
+large payloads.
+Per-tool hints let each tool specify its own compaction policy.
 
 ## Design
 
-### What the user configures
+### Configuration
 
-A tool's compaction treatment is a single value on its config, drawn from the
-same vocabulary as a rule's `tool_calls` policy, plus `keep`:
+Each tool config accepts an optional `compaction` setting.
+It uses the same values as a compaction rule's `tool_calls` policy, plus `keep`:
 
 ```toml
 # A search-style tool: keep the query, drop the large result.
@@ -63,35 +64,27 @@ Accepted values:
 
 - `keep`: never compact this tool's calls.
 - `strip`: strip both request arguments and response content.
-- `strip-requests`: strip the request, keep the response.
-- `strip-responses`: keep the request, strip the response.
+- `strip-requests`: strip request arguments and keep response content.
+- `strip-responses`: keep request arguments and strip response content.
 - `omit`: remove this tool's call pairs entirely.
-- *unset* (the default): inherit the rule's `tool_calls` policy.
+- *unset* (default): inherit the rule's `tool_calls` policy.
 
-This reuses the rule-level `tool_calls` vocabulary, so there is one set of
-values to learn.
-The `conversation.tools.*` defaults section can set a hint for every tool at
-once.
+Setting `compaction` under `conversation.tools.*` configures a default hint for
+all tools.
+Because JP ships no built-in tools, it defines no default hints; users or
+bundled tool configs set them for the tools they use.
 
-JP ships no tools of its own, so it ships no default hints.
-Hints are opt-in, set by the user (or by a tool's own bundled config) for the
-tools they actually use.
+### Resolution and Storage
 
-### Resolved at creation, stored in the event
+Per-tool hints are resolved from config when a `Compaction` event is created and
+stored directly in the event, rather than looked up at projection time.
+This preserves [RFD 064]'s guarantee that projection is a pure, deterministic
+function of the stored stream: each compaction freezes its per-tool policies
+alongside its turn range and summary, and later config edits do not alter how
+past compactions project.
 
-Per-tool hints are resolved from config when a compaction is created, and the
-result is stored in the compaction event.
-They are not looked up at projection time.
-
-This follows the same principle as the rest of [RFD 064]: the projection layer
-is a pure function of the stored stream, so the compacted view is deterministic.
-Resolving hints live would thread tool config into projection and let a later
-config edit silently rewrite the projection of every past compaction.
-Resolving at creation freezes each compaction's per-tool decisions the way its
-range and any summary are already frozen.
-
-The `Compaction` event gains a per-tool override map beside the existing
-default:
+`Compaction` stores these resolved hints in `tool_overrides` alongside the
+default `tool_calls` policy:
 
 ```rust
 pub struct Compaction {
@@ -101,8 +94,8 @@ pub struct Compaction {
 }
 ```
 
-At creation, every tool with a `compaction` hint is resolved into
-`tool_overrides`:
+When a compaction is created, every tool with a `compaction` hint is resolved
+into `tool_overrides`:
 
 | Hint              | Stored `ToolCallPolicy`                     |
 | ----------------- | ------------------------------------------- |
@@ -112,104 +105,104 @@ At creation, every tool with a `compaction` hint is resolved into
 | `strip-responses` | `Strip { request: false, response: true }`  |
 | `omit`            | `Omit`                                      |
 
-`ToolCallPolicy` already carries `Omit`, so omit and full-`keep` both fall out
-of the existing type; no new policy variant is needed.
+Because `Strip { request: false, response: false }` represents `keep` and
+`ToolCallPolicy` already includes `Omit`, all five hints map to existing
+`ToolCallPolicy` variants.
 
 ### Projection
 
-The projection layer already resolves a per-turn `tool_calls` policy and already
-has the tool name in hand (on the request directly, on the response via the
-`tool_names` map).
-The only change: before applying the policy to a tool event, look up the tool's
-name in `tool_overrides` and use that policy when present, otherwise the turn's
-default `tool_calls`.
+The projection layer already resolves a per-turn `tool_calls` policy and knows
+each event's tool name (directly on requests and via the `tool_names` map on
+responses).
+When projecting a tool event, it checks `tool_overrides` for the tool's name
+before falling back to the turn's default `tool_calls` policy:
 
 ```text
 effective = tool_overrides.get(name).unwrap_or(default tool_calls)
 ```
 
-A per-tool `omit` drops both the request and the response for that tool, exactly
-as rule-level `Omit` does for all tools.
+A per-tool `omit` drops both the request and the response for that tool,
+matching how rule-level `Omit` drops calls for all tools.
 Projection takes no new inputs and stays pure.
 
 ## Drawbacks
 
-- **Config surface per tool.** Every tool gains an optional `compaction` value.
-  It is a single optional scalar, inherits the rule policy when unset, and most
-  tools never need it.
-- **Hints are frozen at creation.** Re-tuning a tool's hint does not change
-  compaction events that already exist.
-  This is the same deterministic property as compaction ranges and summaries;
-  `jp conversation compact --reset` clears the old events so a re-run picks up
-  the new hints.
+- **Additional per-tool config surface.** Every tool gains an optional
+  `compaction` setting, though it inherits the rule policy when unset and can be
+  omitted for most tools.
+- **Hints are frozen at creation.** Changing a tool's `compaction` hint does not
+  update existing compaction events, matching the deterministic behavior of
+  compaction ranges and summaries.
+  Running `jp conversation compact --reset` clears prior compaction events so a
+  subsequent run applies the updated hints.
 
 ## Alternatives
 
-### Resolve hints at projection time
+### Resolve Hints at Projection Time
 
-Look up each tool's hint from the resolved config *during* projection, storing
-nothing in the event.
-Rejected: it makes the projection layer depend on live config, so editing a hint
-silently changes how past compactions project, and it breaks the pure-stream
-projection boundary [RFD 064] relies on.
+Projection could read each tool's hint from the resolved config instead of
+storing overrides in the compaction event.
+This was rejected because it couples projection to live config: editing a hint
+would silently change how past compactions project and break [RFD 064]'s
+pure-stream projection boundary.
 
-### Two booleans (`request` / `response`) instead of one value
+### Two Booleans (`request` / `response`) Instead of One Value
 
-Give each tool a `request` and a `response` field, each `keep` or `strip`.
-Rejected: two independent booleans cannot express `omit` (whole-pair removal is
-not a per-field choice), the shape does not match the rule-level `tool_calls`
-vocabulary, and its four combinations are exactly `keep` / `strip` /
-`strip-requests` / `strip-responses` in the single-value form.
-The single value is more expressive and reuses one vocabulary.
+Each tool could expose separate `request` and `response` fields, each set to
+`keep` or `strip`.
+This was rejected because two independent booleans cannot express `omit`
+(removing a call pair is not a per-field choice), whereas a single setting
+covers all four keep/strip combinations (`keep`, `strip`, `strip-requests`,
+`strip-responses`) plus `omit` and reuses the rule-level `tool_calls`
+vocabulary.
 
 ## Non-Goals
 
 - **Per-tool summarization or custom transforms.** A hint selects among the
-  existing `tool_calls` behaviors (keep, strip, omit).
-  Tool-specific compaction functions, such as summarizing one tool's output, are
-  a larger feature and out of scope.
-- **Argument-aware hints.** A hint applies to a tool by name, not to particular
-  argument values.
-  Deciding per call (for example, keep small reads and strip large ones) is not
-  covered here.
+  existing `tool_calls` behaviors (keep, strip, omit) rather than running
+  tool-specific compaction functions such as summarizing a tool's output.
+- **Argument-aware hints.** A hint applies to a tool by name rather than
+  inspecting call arguments or payload sizes (for example, keeping small reads
+  while stripping large ones).
 
 ## Risks and Open Questions
 
-- **Is frozen-at-creation what users expect?** It is consistent with the rest of
-  compaction, but a user who tunes hints and expects existing conversations to
-  follow may be surprised.
-  `--reset` is the answer; whether it needs to be more discoverable is open.
-- **Tool identity.** Hints key on the tool name as it appears in the stream.
-  Renamed, grouped, or plugin-namespaced tools must use the name the stream
-  records, which needs checking against how tool names are stored.
+- **Expectations around frozen hints.** Freezing hints at creation time is
+  consistent with the rest of compaction, but users who edit a hint may expect
+  existing conversations to update automatically.
+  Re-running compaction with `--reset` applies the new hints; whether `--reset`
+  needs to be more discoverable remains open.
+- **Tool identity.** `tool_overrides` is keyed by the tool name recorded in the
+  conversation stream.
+  Implementation must verify that config keys for renamed, grouped, or
+  plugin-namespaced tools match the names stored in stream events.
 
 ## Implementation Plan
 
 ### Phase 1: Config
 
-1. Add the per-tool `compaction` hint to `ToolConfig` (an optional value over
-   the `tool_calls` vocabulary plus `keep`), and to the `*` defaults.
-2. Tests for parsing and inheritance.
+1. Add the optional `compaction` hint (`tool_calls` values plus `keep`) to
+   `ToolConfig` and the `*` defaults.
+2. Add tests for parsing and inheritance.
 
-No behavioral change until projection reads it.
+This phase introduces no behavioral change.
 
-### Phase 2: Event and projection
+### Phase 2: Event and Projection
 
-1. Add `tool_overrides: BTreeMap<String, ToolCallPolicy>` to `Compaction` (serde
-   default empty, backward compatible).
+1. Add `tool_overrides: BTreeMap<String, ToolCallPolicy>` to `Compaction`
+   (defaulting to empty in serde for backward compatibility).
 2. In projection, select the per-tool policy from `tool_overrides` before
    falling back to the turn default.
-3. Tests for per-tool strip, omit, keep, and inheritance.
+3. Add tests for per-tool strip, omit, keep, and inheritance.
 
 Depends on Phase 1.
 
-### Phase 3: Bake hints at creation
+### Phase 3: Resolve Hints at Creation
 
-1. When building a compaction event, resolve each tool's hint from config into
-   `tool_overrides`.
-2. Any path that creates a compaction event gets this automatically, since it
-   builds the same event.
-3. Tests that created events carry the resolved overrides.
+1. Resolve each configured tool's `compaction` hint into `tool_overrides` when
+   constructing a `Compaction` event, so every compaction creation path
+   populates the overrides.
+2. Add tests verifying that created events carry the resolved overrides.
 
 Depends on Phases 1 and 2.
 

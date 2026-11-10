@@ -13,7 +13,7 @@
 This RFD replaces ad-hoc SIGINT handling with a global signal router that
 dispatches notifications through a LIFO stack of RAII-scoped handlers executing
 in the caller's context.
-When no handler is registered, SIGINT triggers a graceful shutdown via a
+When no handler is registered, SIGINT triggers graceful shutdown via a
 `CancellationToken`.
 Unanswered Ctrl-C presses escalate from the active handler to graceful shutdown
 and then immediate termination, while handled menu actions reset the escalation
@@ -21,38 +21,32 @@ counter.
 
 ## Motivation
 
-JP currently handles SIGINT in two places: during LLM streaming and during tool
+JP currently handles SIGINT in only two places: LLM streaming and tool
 execution.
-Both are wired up inside `run_turn_loop` by subscribing to a broadcast channel
-and multiplexing signals alongside other events in a `SelectAll` or `mpsc` event
-loop.
+Both subscribe to a broadcast channel inside `run_turn_loop` and multiplex
+signals alongside other events in a `SelectAll` or `mpsc` event loop.
 
-This works for those two phases, but leaves gaps.
-Between the time the CLI binary starts and the streaming loop begins — during
-config loading, editor interaction, MCP server startup, conversation selection,
-and the HTTP request to start the LLM stream — nobody consumes signals from the
-broadcast channel.
-The user presses Ctrl-C and nothing happens.
-The signals buffer in the channel (capacity 128) and are silently discarded on
-the next `.resubscribe()`.
-
-The same gap exists between tool execution cycles, during conversation
+Any phase that does not subscribe to the broadcast channel is a dead zone where
+pressing Ctrl-C does nothing.
+Before the streaming loop begins (during config loading, editor interaction, MCP
+server startup, conversation selection, and the initial HTTP request to start
+the LLM stream), nothing consumes signals from the channel.
+The same gap occurs between tool execution cycles, during conversation
 persistence, and during the transition from `Idle` to `Streaming` in the turn
 loop's outer state machine.
-Any phase that doesn't explicitly subscribe to the broadcast channel is a dead
-zone.
+Signals buffer in the channel (capacity 128) and are silently discarded on the
+next `.resubscribe()`.
 
-The result is unpredictable UX: sometimes Ctrl-C shows an interrupt menu,
-sometimes it does nothing, and the user has to mash the key or wait.
-There is no reliable "just stop the program" behavior.
+This makes Ctrl-C unpredictable: sometimes it opens an interrupt menu, and
+sometimes it does nothing, forcing the user to mash the key or wait without a
+reliable way to stop the program.
 
-A secondary problem: the two existing interrupt handlers
-(`handle_streaming_signal` and `handle_tool_signal`) are standalone functions
-called from specific points in the turn loop.
-Adding a third context (e.g., a turn-level handler for graceful turn shutdown,
-or an interrupt handler during editor interaction) requires threading signals to
-yet another ad-hoc consumption point.
-The pattern doesn't scale.
+In addition, the two existing interrupt handlers (`handle_streaming_signal` and
+`handle_tool_signal`) are standalone functions called from specific points in
+the turn loop.
+Adding another interrupt context, such as a turn-level handler for graceful turn
+shutdown or a handler during editor interaction, requires threading signals to
+another ad-hoc consumption point.
 
 ## Design
 
@@ -60,66 +54,60 @@ The pattern doesn't scale.
 
 The design separates two concerns that the current implementation conflates:
 
-1. **Signal routing** — consuming OS signals once, managing escalation
-   (double/triple Ctrl-C), and notifying the right handler.
-   This is a global, always-on system.
-2. **Interrupt handling** — showing context-specific menus and returning an
-   action to the surrounding code.
-   This is a stack of scoped handlers that execute in the caller's context.
+1. **Signal routing**: A global, always-on system that consumes OS signals once,
+   manages escalation across repeated Ctrl-C presses, and notifies the active
+   handler.
+2. **Interrupt handling**: A stack of scoped handlers that execute in the
+   caller's context, display context-specific menus, and return an action to the
+   surrounding code.
 
-The critical constraint: handlers must execute in the event loop's context, not
-on the router's async task.
-Today, when a signal arrives in the streaming `SelectAll`, the handler is called
-synchronously on the same task.
-It shows an interactive terminal menu (blocking for user input), then returns an
-`InterruptAction` that the loop acts on immediately.
-This pauses the loop during menu interaction, preventing interleaved terminal
-output.
-The new design preserves this property.
+Handlers must execute in the caller's event loop rather than on the router's
+async task.
+In the current streaming `SelectAll` loop, a signal invokes the handler
+synchronously on the same task: it blocks on the interactive terminal menu and
+returns an `InterruptAction` that the loop acts on immediately, pausing the loop
+so terminal output does not interleave with the menu.
+Running handlers in the caller's context preserves this behavior.
 
 ### Escalating Ctrl-C
 
-Ctrl-C follows a three-level escalation, counting only presses that no handler
-has acted on:
+Ctrl-C follows a three-level escalation ladder that counts only unanswered
+presses:
 
 | Level | Behavior                                |
 | ----- | --------------------------------------- |
 | 1st   | Invoke the topmost handler immediately. |
 |       | If no handler is registered, trigger    |
 |       | graceful shutdown.                      |
-| 2nd   | Bypass all handlers. Trigger graceful   |
-|       | shutdown (cancel the root               |
+| 2nd   | Bypass all handlers and trigger         |
+|       | graceful shutdown (cancel the root      |
 |       | `CancellationToken`).                   |
-| 3rd   | Immediate process exit                  |
+| 3rd   | Exit the process immediately            |
 |       | (`std::process::exit(130)`).            |
 
-The 2nd level can be reached through two paths: the router receives a second
-SIGINT (when the terminal is in normal mode), or a handler's interactive prompt
-is cancelled by Ctrl-C (when the terminal is in raw mode, see [Dual Delivery
+The 2nd level is reached either when the router receives a second SIGINT in
+normal terminal mode, or when Ctrl-C cancels a handler's interactive prompt in
+raw terminal mode (see [Dual Delivery
 Paths](#dual-delivery-paths-and-prompt-escalation)).
-Both produce the same result: graceful shutdown.
+Both paths trigger graceful shutdown.
 
-Two things reset the router's escalation counter.
+The router's escalation counter resets in two ways:
 
-A handler that acts on a press reports it, which clears the count immediately.
-This is what keeps the ladder out of ordinary menu use: opening the streaming
-menu, choosing "Continue", and interrupting again a second later gives a fresh
-first press rather than a shutdown.
-Only presses that produced nothing accumulate, which is the situation the ladder
-exists for.
+- **Handled interrupt**: When a handler acts on a press, it reports the press as
+  handled and clears the count immediately.
+  Opening the streaming menu, choosing "Continue", and pressing Ctrl-C again a
+  second later starts a fresh first press rather than triggering shutdown.
+  Only unanswered presses accumulate.
+- **Cooldown expiry**: A configurable cooldown (2 seconds by default via
+  `interrupt.escalation_cooldown_secs`) resets the counter so an unanswered
+  press does not trigger escalation minutes later.
 
-A configurable cooldown also resets it (2 seconds by default, set through
-`interrupt.escalation_cooldown_secs`), so an unanswered press does not count
-toward escalation minutes later.
-
-SIGTERM always triggers graceful shutdown (cancels the root
-`CancellationToken`).
-SIGQUIT always triggers immediate process exit.
-Neither goes through the handler stack.
-Both are documented here so that systems relying on the `CancellationToken` for
-graceful teardown — MCP server connections, conversation persistence, printer
-flush — know that SIGTERM and the 2nd Ctrl-C produce the same signal, giving
-them a chance to clean up before the process exits.
+SIGTERM and SIGQUIT bypass the handler stack: SIGTERM cancels the root
+`CancellationToken` for graceful shutdown, and SIGQUIT exits the process
+immediately.
+Subsystems that await the `CancellationToken` for teardown (MCP server
+connections, conversation persistence, and printer flush) clean up on both
+SIGTERM and the 2nd Ctrl-C.
 
 ### Signal Router
 
@@ -154,20 +142,18 @@ struct RouterInner {
 
 The signal task is a long-lived async task that:
 
-1. Waits for OS signals (via `tokio::signal`, same as today's `os_signals`).
-2. On SIGINT: updates escalation state, then acts based on the press count.
+1. Waits for OS signals via `tokio::signal` (same as `os_signals`).
+2. On SIGINT: updates escalation state and acts based on the press count.
 3. On SIGTERM: cancels `shutdown_token`.
 4. On SIGQUIT: calls `std::process::exit`.
 
-On SIGINT, the signal task does NOT call the handler.
-It sends a notification to the handler's event loop via a channel.
-The handler's event loop — which is already polling this channel alongside its
-other sources — wakes up and calls the handler in its own context.
+On SIGINT, the signal task does not invoke the handler directly.
+Instead, it sends a notification over the topmost handler's channel.
+The handler's event loop polls this channel alongside its other event sources,
+wakes up, and calls the handler in its own context.
 
-When the stack is empty (no handler registered), the signal task cancels the
-`shutdown_token` directly.
-This is the "no dead zones" guarantee: Ctrl-C always does something, even during
-config loading or MCP startup.
+When the stack is empty, the signal task cancels `shutdown_token` directly, so
+Ctrl-C always takes effect even during config loading or MCP startup.
 
 ### Handler Stack
 
@@ -204,12 +190,9 @@ struct RegisteredHandler {
 }
 ```
 
-Handlers are not trait objects stored in the stack.
-The stack only stores notification channels.
-The actual handler logic lives in the event loop that registered the handler —
-it knows what to do when notified.
-This avoids the problem of calling terminal-interactive code from the router's
-async task.
+The stack stores notification channels rather than handler trait objects.
+The handler logic stays in the event loop that registered the channel, avoiding
+terminal-interactive calls from the router's async task.
 
 ### Handler Registration
 
@@ -228,10 +211,10 @@ impl SignalRouter {
 }
 ```
 
-The caller includes `rx` as a stream source in its event loop (e.g., as an
-additional arm in `SelectAll` or `select!`).
-When it fires, the caller runs its interrupt logic (show a menu, save state,
-whatever is appropriate) on its own task, synchronously.
+The caller includes `rx` as a stream source in its event loop (for example, as
+an arm in `SelectAll` or `select!`).
+When `rx` yields a notice, the caller runs its interrupt logic (such as showing
+a menu or saving state) synchronously on its own task.
 
 The guard deregisters the handler when dropped:
 
@@ -248,10 +231,9 @@ impl Drop for InterruptGuard {
 }
 ```
 
-The `remove` operation uses the `HandlerId` (a monotonic counter), not stack
-position.
-If an inner guard drops before an outer one due to early return or panic
-unwinding, the stack remains consistent.
+`remove` looks up the handler by its monotonic `HandlerId` rather than by stack
+position, so the stack remains consistent if an inner guard drops before an
+outer one during an early return or panic unwind.
 
 ### Resolving a Delivered Press
 
@@ -272,68 +254,60 @@ impl InterruptNotice {
 }
 ```
 
-Dropping a notice without resolving it leaves the press on the ladder.
-That is the safe default: a handler that was notified but produced nothing
-visible should still escalate on the next press.
+Dropping a notice without calling `handled()` or `decline()` leaves the press on
+the escalation ladder.
+If a notified handler exits without taking visible action, the next Ctrl-C press
+still escalates.
 
-The reset lives on the delivered value rather than on the router so it cannot be
-forgotten independently of receiving the press.
-An event loop cannot reach the point of deciding what a press did without
-holding the notice that records the decision, and the type is `#[must_use]`.
-This matters because the ladder has to behave the same wherever it exists: a
-reset each handler had to remember to call separately would make escalation
-depend on which handler answered.
+Putting resolution on the `#[must_use]` `InterruptNotice` rather than on
+`SignalRouter` ensures handlers cannot receive a press and forget to update the
+escalation state.
+Every handler resolves the notice it receives through the same interface,
+keeping escalation behavior uniform across handlers.
 
 ### Notification Dispatch
 
-When SIGINT arrives and the escalation count is 1 (first press):
+When SIGINT arrives on the first press (escalation count 1):
 
 1. The signal task locks the stack, clones the topmost handler's `notify_tx`,
    and releases the lock.
 2. It sends an `InterruptNotice` to `notify_tx`.
-   If the channel is full (handler hasn't consumed the previous notification),
-   the send is a no-op — the handler already has a pending interrupt, and the
-   undelivered notice is dropped unresolved, which correctly leaves the press on
-   the ladder.
+   If the channel is full because the handler has not consumed the previous
+   notification, the send is a no-op: the handler already has a pending
+   interrupt, and dropping the undelivered notice leaves the new press on the
+   escalation ladder.
 3. The handler's event loop wakes up and processes the interrupt.
 
-If the handler's event loop has exited but the guard hasn't been dropped yet (a
-brief window during cleanup), the `notify_tx.send()` fails.
-The signal task treats this as "handler declined" and falls back to graceful
-shutdown.
+If the handler's event loop has exited before dropping its guard (a brief window
+during cleanup), `notify_tx.send()` fails.
+The signal task treats the failed send as a declined interrupt and falls back to
+graceful shutdown.
 
 ### Concrete Handlers
 
-The existing interrupt behavior maps onto this system.
-The handler logic stays in the event loop — only the *routing* changes.
+Existing interrupt handler logic stays in each event loop; only signal routing
+changes.
 
-**Streaming loop.** Registers a handler at the start of the `SelectAll` loop.
-The notification receiver is added as another `StreamSource` variant.
-When it fires, the loop calls the existing `handle_streaming_signal` logic:
-flush the renderer, show the interrupt menu, act on the user's choice.
-The guard drops when the streaming loop exits.
-
-**Tool execution.** Registers a handler at the start of
-`execute_with_prompting`.
-The notification receiver is forwarded into the `ExecutionEvent` channel (same
-pattern as today's signal forwarding).
-When it fires, the existing `handle_tool_signal` logic runs: check
-`is_prompting`, show the tool interrupt menu if appropriate, return the action.
-The guard drops when execution completes.
-
-**Turn-level handler (new).** Registered at the start of `run_turn_loop`, before
-the inner streaming/tool handlers.
-This handler covers the gaps: between streaming and tool execution, during
-persistence, during thread building.
-When the notification fires, it saves partial state and transitions to
-`TurnPhase::Complete`.
-It is the outermost handler within the turn, so it catches signals that the
-streaming and tool handlers don't.
-
-**No handler (stack empty).** The router cancels the `shutdown_token`.
-Any code awaiting the token (or checking `is_cancelled()`) can clean up.
-The existing cleanup in `Ctx::drop` (printer shutdown, workspace persistence)
-runs as part of normal process teardown.
+- **Streaming loop**: Registers a handler at the start of the `SelectAll` loop
+  and adds the notification receiver as a `StreamSource` variant.
+  When notified, the loop runs `handle_streaming_signal` to flush the renderer,
+  show the interrupt menu, and act on the user's choice.
+  The guard drops when the streaming loop exits.
+- **Tool execution**: Registers a handler at the start of
+  `execute_with_prompting` and forwards the notification receiver into the
+  `ExecutionEvent` channel (matching existing signal forwarding).
+  When notified, `handle_tool_signal` checks `is_prompting`, shows the tool
+  interrupt menu if appropriate, and returns the chosen action.
+  The guard drops when tool execution completes.
+- **Turn-level handler (new)**: Registers at the start of `run_turn_loop`,
+  outside the streaming and tool handlers.
+  As the outermost handler in the turn, it catches signals during the gaps
+  between streaming and tool execution, during persistence, and during thread
+  building, saving partial state and transitioning to `TurnPhase::Complete`.
+- **Empty stack (no handler)**: The router cancels `shutdown_token`.
+  Tasks awaiting the token or checking `is_cancelled()` clean up, and
+  `Ctx::drop` (printer shutdown and workspace persistence) runs during normal
+  process teardown.
 
 ### Tool Interrupt Actions
 
@@ -351,21 +325,20 @@ The tool interrupt menu offers four choices:
 | `t` | Restart              | Cancel the running tools and run the batch |
 |     |                      | again.                                     |
 
-Every cancelled tool call still records a response, so the conversation stream
-stays consistent (each tool call has a matching result).
-When the user supplies a message via "Stop & respond", that message is recorded
+Every cancelled tool call records a response so that every tool call in the
+conversation stream has a matching result.
+When the user provides a message via "Stop & respond", that message is recorded
 for each cancelled call.
-When no message is supplied — an empty "Stop & respond" reply, a menu-less
-`Ctrl+C` during reply composition, or "Stop (cancel & exit)" — each tool
-answers with its configured cancellation response instead:
+When no message is provided (an empty "Stop & respond" reply, a menu-less
+`Ctrl+C` during reply composition, or "Stop (cancel & exit)"), each cancelled
+call records its configured cancellation response instead:
 `conversation.tools.defaults.cancellation_response` sets the global default (a
 canned rejection notice asking the assistant to reflect on why the call was
 cancelled), and `conversation.tools.<name>.cancellation_response` overrides it
 per tool.
 
-The menu can be skipped entirely by setting `interrupt.tool_call.action` to
-`continue`, `restart`, `respond`, or `stop`; the configured action then runs as
-if the corresponding menu entry had been chosen.
+Setting `interrupt.tool_call.action` to `continue`, `restart`, `respond`, or
+`stop` skips the menu and runs the configured action directly.
 
 ### Handler Nesting During a Turn
 
@@ -401,47 +374,43 @@ CLI starts:
   (stack empty again)
 ```
 
-At every point, Ctrl-C does something meaningful and does it instantly.
+Every phase of the turn has an active handler, and phases outside a turn fall
+back to `shutdown_token`.
 
 ### Dual Delivery Paths and Prompt Escalation
 
-Ctrl-C reaches the application through two different mechanisms depending on the
-terminal mode:
+Ctrl-C reaches the application through two mechanisms depending on the terminal
+mode:
 
 | Terminal mode       | Ctrl-C becomes | Who sees it    |
 | ------------------- | -------------- | -------------- |
 | Normal (cooked)     | SIGINT         | Signal router  |
 | Raw (during prompt) | Byte `0x03`    | Prompt library |
 
-When a handler shows an interactive menu (e.g., the streaming or tool interrupt
-menu), the prompt library (`jp_inquire`, backed by `inquire`) puts the terminal
-in raw mode.
-While the menu is displayed, Ctrl-C is consumed by the prompt library as a
-terminal byte and never reaches the signal router.
-The router's escalation counter is not incremented.
+When a handler shows an interactive menu (such as the streaming or tool
+interrupt menu), the prompt library (`jp_inquire`, backed by `inquire`) puts the
+terminal in raw mode.
+While the menu is displayed, the prompt library consumes Ctrl-C as byte `0x03`,
+so the press never reaches the signal router and does not increment its
+escalation counter.
 
-Today this produces bad UX.
-The current code handles a cancelled prompt with
-`inline_select(...).unwrap_or('c')` (streaming) or `.unwrap_or('c')` (tool),
-which silently falls back to "Continue."
-The user presses Ctrl-C twice — once to open the menu, once to dismiss it —
-and tool execution resumes as if nothing happened.
+In the current implementation, `inline_select(...).unwrap_or('c')` (streaming)
+and `.unwrap_or('c')` (tool) treat a cancelled prompt as "Continue".
+When the user presses Ctrl-C once to open the menu and a second time to dismiss
+it, execution resumes as if nothing happened.
 
-The fix: **a Ctrl-C that cancels an interrupt menu is an escalation, not a
-"continue."** When `inline_select` returns `OperationCanceled`, the handler
-returns a new `InterruptOutcome::Escalated` variant.
-The event loop receives this and cancels the `shutdown_token`, producing the
-same effect as the router's 2nd-Ctrl-C path.
+To fix this, **cancelling an interrupt menu with Ctrl-C is treated as an
+escalation rather than "Continue"**.
+When `inline_select` returns `OperationCanceled`, the handler returns
+`InterruptOutcome::Escalated`, and the event loop cancels `shutdown_token`,
+matching the router's 2nd-Ctrl-C path.
 
-A prompt that *cannot run* is a different case, and must not escalate.
-An I/O failure or a missing terminal answers nothing, so treating it as an
-escalation would end the run on a decision the user never made — silently,
-since there is no menu on screen to explain it.
-The handler returns `PromptFailed` instead: the event loop leaves its work as it
-was and leaves the press on the escalation ladder.
-The user's next Ctrl-C then reaches the router with the count intact and
-escalates through the ladder, so getting out never depends on the prompt
-working.
+A prompt that fails to run (because of an I/O error or a missing terminal) must
+not escalate, because doing so would abort the run silently without user input.
+Instead, the handler returns `PromptFailed`: the event loop leaves its work
+untouched and leaves the press on the escalation ladder.
+The next Ctrl-C reaches the router with the count intact and escalates through
+the ladder, so exiting never depends on the prompt succeeding.
 
 ```rust
 pub enum InterruptOutcome {
@@ -462,18 +431,12 @@ pub enum InterruptOutcome {
 }
 ```
 
-This bridges the two delivery paths: whether the 2nd Ctrl-C arrives as SIGINT
-(normal mode → router increments to 2 → graceful shutdown) or as byte `0x03`
-(raw mode → prompt cancelled → handler returns `Escalated` → graceful
-shutdown), the outcome is the same.
-
-For a 3rd Ctrl-C: graceful shutdown cancels the `shutdown_token`, cleanup runs,
-and the terminal returns to normal mode.
-The signal router is still listening for SIGINT.
-The next Ctrl-C arrives through the normal SIGINT path and triggers immediate
-process exit.
-
-The full escalation sequence when a handler is showing a prompt:
+Whether the 2nd Ctrl-C arrives as SIGINT in normal mode (incrementing the router
+count to 2) or as byte `0x03` in raw mode (cancelling the prompt and returning
+`Escalated`), both paths cancel `shutdown_token` to begin graceful shutdown.
+Once graceful shutdown starts, cleanup runs and the terminal returns to normal
+mode while the signal router continues listening for SIGINT; a 3rd Ctrl-C
+arrives as SIGINT and triggers immediate process exit:
 
 ```text
 1. Ctrl-C (normal mode)
@@ -490,270 +453,206 @@ The full escalation sequence when a handler is showing a prompt:
    → SIGINT → router (escalation=2) → std::process::exit(130)
 ```
 
-Note: `inquire` already distinguishes the two keys — ESC produces
-`InquireError::OperationCanceled` and Ctrl-C produces
-`InquireError::OperationInterrupted` (with the `crossterm` backend, which JP
-uses).
-Cancelling an interrupt menu by either means escalates, so the two are treated
-alike.
-What must stay distinct is cancellation versus failure: every other
-`InquireError` — `NotTTY`, an I/O error, a custom error — means the prompt
-never ran, and maps to `PromptFailed` rather than an escalation.
+With the `crossterm` backend, `inquire` distinguishes ESC
+(`InquireError::OperationCanceled`) from Ctrl-C
+(`InquireError::OperationInterrupted`).
+Cancelling an interrupt menu with either key escalates.
+Every other `InquireError` (`NotTTY`, an I/O error, or a custom error) means the
+prompt never ran and maps to `PromptFailed` rather than `Escalated`.
 
-For non-interrupt prompts (tool permissions, tool questions), distinguishing ESC
-("skip this prompt") from Ctrl-C ("I want the interrupt menu") remains valuable
+For non-interrupt prompts (tool permissions and tool questions), distinguishing
+ESC ("skip this prompt") from Ctrl-C ("open the interrupt menu") remains useful
 and requires no upstream change.
 
 ### Handler Decline and Propagation
 
-A handler can decline to process the interrupt.
-The tool handler already does this: when `is_prompting` is true, it suppresses
-the interrupt menu to let the active tool prompt handle Ctrl-C.
+A handler can decline an interrupt.
+For example, when `is_prompting` is true, the tool handler suppresses its
+interrupt menu so the active tool prompt can handle Ctrl-C.
 
-With the new model, decline works as follows: the event loop receives the
-notice, evaluates whether it should handle the interrupt, and if not, resolves
-the notice with `decline()`.
-This tells the router to notify the next handler down the stack.
-If no handler remains, the router cancels the `shutdown_token`.
-
-Declining leaves the press on the escalation ladder.
-Nothing has acted on it yet — it is only being offered to a different handler
-— so it still counts if the user presses again.
+When an event loop decides not to handle an `InterruptNotice`, it calls
+`decline()`, which tells the router to notify the next handler down the stack,
+or cancel `shutdown_token` if no handler remains.
+Because declining only forwards the press to another handler without acting on
+it, the press remains on the escalation ladder and counts toward escalation if
+the user presses Ctrl-C again.
 
 ### Interaction With RFD 026 and RFD 027
 
-[RFD 026] (Agent Loop Extraction) moves `SignalTo` and the interrupt handlers
-into `jp_agent`.
-The handler stack, the notification protocol, and the concrete handler logic
-(streaming, tool, turn-level) all belong in `jp_agent`.
-The `SignalRouter` itself stays in `jp_cli`, since OS signal subscription is a
-process-level concern.
-`jp_agent` defines a trait or receives a notification receiver from the caller.
+[RFD 026] (Agent Loop Extraction) moves `SignalTo`, the handler stack, the
+notification protocol, and the concrete handlers (streaming, tool, and
+turn-level) into `jp_agent`.
+`SignalRouter` stays in `jp_cli` because OS signal subscription is a
+process-level concern, and `jp_agent` either defines a trait or receives a
+notification receiver from the caller.
 
-[RFD 027] (Client-Server Query Architecture) changes the interrupt source: the
-client sends `Signal { kind: Interrupt }` over IPC instead of receiving an OS
-signal.
-On the server side, the handler stack works identically — the router accepts
-interrupts from IPC in addition to (or instead of) OS signals.
-The notification-based dispatch model is transport-agnostic.
+[RFD 027] (Client-Server Query Architecture) changes the interrupt source from
+OS signals to `Signal { kind: Interrupt }` messages sent by the client over IPC.
+Because notification dispatch is transport-agnostic, the server-side handler
+stack works identically when the router accepts interrupts from IPC in addition
+to (or instead of) OS signals.
 
 ## Drawbacks
 
-**Shared mutable state.** The `stream_alive` flag, the `is_prompting` flag, and
-similar state that handlers need to make decisions must be shared between the
-handler's event loop and the state that the handler inspects.
-Today this is passed as function arguments.
-With the layered model, some of this state needs to be in shared references
-(e.g., `Arc<AtomicBool>`) since the handler code runs in the event loop but the
-state is updated by other tasks.
-This is straightforward but adds wiring.
-
-**Migration cost.** The existing interrupt handling code works and is
-well-tested.
-Replacing it requires touching the turn loop, the streaming loop, and the tool
-coordinator.
-The tests need to be updated.
-This is not a small change, though the phased implementation plan mitigates
-risk.
-
-**Decline propagation latency.** When a handler declines, the router must notify
-the next handler down the stack.
-That handler's event loop must then wake up and process the notification.
-In practice this is sub-millisecond (it's a channel send + task wake), but it
-adds a round-trip that doesn't exist today.
+- **Shared mutable state**: Flags such as `stream_alive` and `is_prompting` are
+  currently passed to handlers as function arguments.
+  Because handler code runs in the event loop while other tasks update those
+  flags, the state must be shared via atomic references (such as
+  `Arc<AtomicBool>`), which adds wiring.
+- **Migration cost**: Replacing the existing interrupt handling touches the turn
+  loop, the streaming loop, the tool coordinator, and their test suites, though
+  the phased implementation plan limits the risk of each step.
+- **Decline propagation latency**: When a handler declines, the router notifies
+  the next handler down the stack, waking its event loop.
+  A channel send and task wake take less than a millisecond, but add a
+  round-trip that direct calls do not have.
 
 ## Alternatives
 
-### Keep the broadcast channel, add more subscribers
+### Keep the broadcast channel and add more subscribers
 
-Add signal consumption at every gap point: subscribe in the editor, subscribe
-during MCP startup, subscribe during persistence.
-This is the minimal change.
-
-Rejected because it leads to an unbounded number of ad-hoc subscription points,
-each with its own interpretation of what to do with a signal.
-The set of gaps grows as the application grows.
-The layered model handles all current and future gaps with a single mechanism.
+Subscribing to the existing broadcast channel at every gap (in the editor,
+during MCP startup, and during persistence) is the smallest change, but leads to
+a growing number of ad-hoc subscription points that each interpret signals
+independently.
+The handler stack covers all current and future gaps with a single mechanism.
 
 ### Global `ctrlc` handler with a state enum
 
-Use the `ctrlc` crate to register a single global handler.
-Store the current application state in an `AtomicU8` or similar.
-The handler checks the state and acts accordingly.
+Registering a single global handler via the `ctrlc` crate that inspects an
+`AtomicU8` application state conflates signal routing with interrupt handling.
+Adding a new state requires modifying the central handler, whereas the handler
+stack lets callers register new scoped handlers without modifying existing ones.
 
-Rejected because a single handler with a state enum conflates routing and
-handling.
-Adding a new state requires modifying the central handler.
-The layered model is open for extension — new handlers are added without
-modifying existing ones.
+### `CancellationToken` tree as the primary mechanism
 
-### CancellationToken tree as the primary mechanism
-
-Use `CancellationToken` parent-child relationships for hierarchical
-cancellation.
-Pressing Ctrl-C cancels the innermost token; if no one handles it within a
-timeout, the parent token is cancelled.
-
-Rejected as the *primary* mechanism because `CancellationToken` is a
-cancellation primitive, not an interaction primitive.
-It can signal "stop" but not "show a menu and let the user choose."
-The handler stack is the interaction layer; `CancellationToken` complements it
-for non-interactive shutdown.
-The `SignalRouter` owns a root `CancellationToken` that is cancelled when the
-handler stack is empty, on the 2nd Ctrl-C, or on SIGTERM.
+Using parent-child `CancellationToken` relationships for hierarchical
+cancellation (where Ctrl-C cancels the innermost token and escalates to the
+parent token after a timeout) does not support interactive handling.
+`CancellationToken` is a cancellation primitive rather than an interaction
+primitive: it can signal "stop", but cannot show a menu and let the user choose.
+Instead, the handler stack provides the interaction layer while `SignalRouter`
+owns a root `CancellationToken` that is cancelled when the stack is empty, on
+the 2nd Ctrl-C, or on SIGTERM.
 
 ### Handler trait objects on the stack, invoked by the router
 
-Store `Box<dyn InterruptHandler>` on the stack and have the signal task call
-`handler.handle_interrupt()` directly.
-
-Rejected because it forces handlers to run on the router's async task.
-Handlers that do terminal I/O (interactive menus) would need `spawn_blocking`,
-and they couldn't return actions directly to the event loop that registered
-them.
-The notification model preserves the current execution flow: the event loop
-calls the handler in its own context, has direct access to local state
-(`TurnCoordinator`, `ConversationStream`, `Printer`), and acts on the result
+Storing `Box<dyn InterruptHandler>` on the stack and having the signal task call
+`handler.handle_interrupt()` directly forces handlers to run on the router's
+async task.
+Handlers that perform terminal I/O for interactive menus would need
+`spawn_blocking` and could not return actions directly to the event loop that
+registered them.
+Notification channels preserve the current execution flow: the event loop calls
+the handler in its own context, has direct access to local state
+(`TurnCoordinator`, `ConversationStream`, and `Printer`), and acts on the result
 immediately.
 
 ## Non-Goals
 
-- **Per-signal handler registration.** Only SIGINT uses the handler stack.
+- **Per-signal handler registration**: Only SIGINT uses the handler stack.
   SIGTERM and SIGQUIT have fixed behavior (graceful shutdown and immediate exit,
   respectively).
-
-- **Handler priorities beyond LIFO.** The stack is strictly last-in-first-out.
-  No numeric priorities, no reordering.
-  Scope-based guard nesting provides the right ordering automatically.
-
-- **Cross-process interrupt routing.** [RFD 027]'s IPC interrupt protocol is a
-  separate concern.
-  This RFD covers in-process signal handling.
-
-- **Async handler execution.** Handlers execute synchronously in the caller's
-  event loop.
-  Async handlers would require the stack to be `async`-aware and complicate the
-  dispatch for minimal benefit.
+- **Handler priorities beyond LIFO**: The stack is strictly last-in-first-out,
+  with no numeric priorities or reordering.
+  Scope-based guard nesting provides the required ordering automatically.
+- **Cross-process interrupt routing**: This RFD covers in-process signal
+  handling; [RFD 027]'s IPC interrupt protocol is a separate concern.
+- **Async handler execution**: Handlers execute synchronously in the caller's
+  event loop, avoiding an `async`-aware stack and dispatch path.
 
 ## Risks and Open Questions
 
-**Handler removal during notification.** If a handler's guard is dropped between
-the router sending the notification and the event loop processing it, the event
-loop receives a notification for a handler that no longer exists on the stack.
-This is benign — the event loop processes the notification, does its work, and
-the guard is already gone.
-The router has already moved on.
-No deadlock or inconsistency.
-
-**Escalation state across handlers.** The escalation counter tracks Ctrl-C
-presses globally rather than per handler.
-A press answered by the streaming menu clears the count, so a later press during
-tool execution starts fresh and reaches the tool handler.
-An *unanswered* press still carries across handler boundaries: if the streaming
-menu never appeared, the next press escalates even though the tool handler never
-got a chance.
-That is the intent — the user is escalating because nothing happened — and the
-cooldown bounds how long such a press stays armed.
-
-**Escalation counter and raw-mode presses.** Because Ctrl-C during a raw-mode
-prompt doesn't generate SIGINT, the router's escalation counter and the
-prompt-based escalation (`Escalated` outcome) are two independent paths to the
-same result.
-The router counts SIGINT-delivered presses; the handler detects prompt-cancelled
-presses.
-Both trigger graceful shutdown.
-The risk is that a sequence mixing the two paths (e.g., SIGINT arrives during a
-brief normal-mode window while the prompt is being set up) could behave
-unexpectedly.
-In practice the window is negligible, and the outcome (graceful shutdown) is
-correct regardless of which path triggers it.
-
-The paths are independent, but only one of them is a hard guarantee.
-A prompt library that swallowed Ctrl-C outright would leave the raw-mode path
-dead, and the router cannot see the press to compensate.
-`PromptFailed` covers the case the router *can* observe — a prompt that failed
-rather than one that silently ate the key — by keeping the press on the ladder
-so the next one escalates.
-Closing the remaining gap would mean keeping signal delivery enabled during
-prompts, which is a property of `reedline` and `inquire` rather than of JP.
-
-**Turn-level handler granularity.** The `TurnInterruptHandler` covers all gaps
-between streaming and tool execution.
-Some of these gaps are very brief (a few milliseconds of persistence).
-Whether the handler can meaningfully act in such a short window (save partial
-state) depends on what state is available at that point.
-During the implementation, we may find that some gap phases need specific logic.
-The handler can inspect `TurnPhase` to decide what to do.
+- **Handler removal during notification**: If a handler's guard drops after the
+  router sends a notification but before the event loop processes it, the event
+  loop receives a notification for a handler that is no longer on the stack.
+  This is benign: the event loop processes the notification and the router has
+  already moved on, with no deadlock or inconsistency.
+- **Escalation state across handlers**: The escalation counter tracks Ctrl-C
+  presses globally rather than per handler.
+  A press answered by the streaming menu clears the count, so a later press
+  during tool execution starts fresh and reaches the tool handler.
+  An unanswered press carries across handler boundaries: if the streaming menu
+  never appeared, the next press escalates even though the tool handler never
+  ran.
+  That is the intended behavior when an interrupt produced no response, and the
+  cooldown bounds how long an unanswered press stays armed.
+- **Escalation counter and raw-mode presses**: Because Ctrl-C during a raw-mode
+  prompt does not generate SIGINT, the router's SIGINT counter and the handler's
+  `Escalated` outcome are independent paths to graceful shutdown.
+  Mixing the two paths (for example, if SIGINT arrives during the brief
+  normal-mode window while a prompt is being set up) is harmless because the
+  window is negligible and both paths trigger graceful shutdown.
+  However, the raw-mode path relies on the prompt library reporting Ctrl-C: if a
+  prompt library swallowed Ctrl-C without returning an error, the router could
+  not see the press to compensate.
+  `PromptFailed` covers the observable failure case (where a prompt fails to
+  run) by keeping the press on the escalation ladder so the next press
+  escalates; closing the silent-swallow gap would require keeping signal
+  delivery enabled during prompts in `reedline` and `inquire`.
+- **Turn-level handler granularity**: `TurnInterruptHandler` covers all gaps
+  between streaming and tool execution, some of which last only a few
+  milliseconds during persistence.
+  Whether the handler can save partial state in that window depends on what
+  state is available at each point; if specific gap phases need custom handling,
+  the handler can inspect `TurnPhase`.
 
 ## Implementation Plan
 
 ### Phase 0: Fix prompt cancellation behavior
 
-Change the existing `handle_streaming_interrupt` and `handle_tool_interrupt`
-methods to treat `OperationCanceled` from `inline_select` as an escalation
-instead of falling back to "Continue."
-This is a bug fix independent of the layered handler model — it can be done
-immediately with the current architecture.
+Update `handle_streaming_interrupt` and `handle_tool_interrupt` to treat
+`OperationCanceled` from `inline_select` as an escalation instead of falling
+back to "Continue" via `inline_select(...).unwrap_or('c')`.
+Return `InterruptAction::Stop` during streaming or trigger graceful shutdown
+during tool execution.
+This fixes the double-Ctrl-C bug in the current architecture without waiting for
+the full router implementation, has no dependencies, and can be merged
+immediately.
 
-Replace `inline_select(...).unwrap_or('c')` with explicit error handling that
-returns `InterruptAction::Stop` (streaming) or triggers graceful shutdown
-(tool).
-This fixes the existing double-Ctrl-C UX problem without waiting for the full
-router implementation.
+### Phase 1: `SignalRouter` with empty-stack fallback
 
-No dependencies.
-Can be merged immediately.
+Introduce `SignalRouter` in `jp_cli::signals` to consume OS signals, track
+escalation state, and own `shutdown_token`.
+With no handlers registered, SIGINT cancels `shutdown_token`.
+Update `Ctx::new` to create a `SignalRouter` instead of `SignalPair`, and wire
+process teardown to respect `shutdown_token`.
 
-### Phase 1: SignalRouter with empty-stack fallback
-
-Introduce `SignalRouter` in `jp_cli::signals`.
-It consumes OS signals, tracks escalation state, and owns a `shutdown_token`.
-With no handlers registered, SIGINT cancels the shutdown token.
-Wire `Ctx::new` to create a `SignalRouter` instead of the current `SignalPair`.
-Wire the existing process teardown to respect the shutdown token.
-
-At this point, Ctrl-C works everywhere — it just kills the process.
-This alone fixes the worst UX issue (dead zones where Ctrl-C does nothing).
-
-Can be reviewed and merged independently.
-No changes to the turn loop.
+This eliminates signal dead zones across the CLI so Ctrl-C always terminates the
+process.
+It requires no changes to the turn loop and can be reviewed and merged
+independently.
 
 ### Phase 2: Migrate streaming handler
 
-Register a handler at the start of the streaming `SelectAll` loop.
-Add the notification receiver as a `StreamSource` variant.
-When it fires, call the existing `handle_streaming_signal` logic.
-Drop the guard when the loop exits.
-
-Remove the direct broadcast channel subscription from the streaming loop —
-signals now arrive via the router's notification channel.
+Register a handler at the start of the streaming `SelectAll` loop, add the
+notification receiver as a `StreamSource` variant, and call
+`handle_streaming_signal` when it fires.
+Drop the guard when the loop exits and remove the direct broadcast channel
+subscription from the streaming loop.
 
 Depends on Phase 1.
 
 ### Phase 3: Migrate tool handler
 
-Register a handler at the start of `execute_with_prompting`.
-Forward the notification receiver into the `ExecutionEvent` channel.
-When it fires, call the existing `handle_tool_signal` logic.
+Register a handler at the start of `execute_with_prompting`, forward the
+notification receiver into the `ExecutionEvent` channel, and call
+`handle_tool_signal` when it fires.
 Drop the guard when execution completes.
 
-Depends on Phase 1.
-Independent of Phase 2.
+Depends on Phase 1 and is independent of Phase 2.
 
 ### Phase 4: Add turn-level handler
 
-Implement the `TurnInterruptHandler` that covers gaps between streaming and tool
+Implement `TurnInterruptHandler` to cover gaps between streaming and tool
 execution.
-Register it at the start of `run_turn_loop`, drop it at the end.
-This handler saves partial state and transitions to `TurnPhase::Complete`.
+Register it at the start of `run_turn_loop` and drop it at the end; when
+notified, save partial state and transition to `TurnPhase::Complete`.
+Check for pending notifications between phase transitions with a non-blocking
+`try_recv()` on the notification channel at the top of each iteration of the
+outer `loop` in `run_turn_loop`.
 
-The outer `loop` in `run_turn_loop` needs to check for pending notifications
-between phase transitions.
-This can be done with a non-blocking `try_recv()` on the notification channel at
-the top of each loop iteration.
-
-Depends on Phase 1.
-Can be done alongside or after Phases 2–3.
+Depends on Phase 1 and can be done alongside or after Phases 2 and 3.
 
 ### Phase 5: Remove legacy signal wiring
 
@@ -761,14 +660,14 @@ Remove `SignalPair`, the broadcast channel, and the signal-forwarding spawned
 tasks in `execute_with_prompting`.
 Update tests to register handlers via the router.
 
-Depends on Phases 2–4.
+Depends on Phases 2 through 4.
 
 ## References
 
-- [RFD 026: Agent Loop Extraction][RFD 026] — moves the turn loop and interrupt
+- [RFD 026: Agent Loop Extraction][RFD 026]: Moves the turn loop and interrupt
   handlers into `jp_agent`.
-- [RFD 027: Client-Server Query Architecture][RFD 027] — changes interrupt
-  routing to use IPC messages; handler stack semantics remain the same.
+- [RFD 027: Client-Server Query Architecture][RFD 027]: Changes interrupt
+  routing to use IPC messages while keeping handler stack semantics unchanged.
 - Current implementation: `crates/jp_cli/src/signals.rs`,
   `crates/jp_cli/src/cmd/query/interrupt/`.
 

@@ -11,39 +11,35 @@
 ## Summary
 
 This RFD extracts the turn loop and its supporting components from `jp_cli` into
-a new `jp_agent` crate.
-The crate provides a self-contained agent execution engine with trait-based
-hooks for I/O.
-This separates the core agent logic from CLI-specific concerns like terminal
-rendering, interactive prompts, and process lifecycle.
+a standalone `jp_agent` crate.
+`jp_agent` provides an agent execution engine with trait-based I/O hooks,
+separating core agent logic from CLI concerns such as terminal rendering,
+interactive prompts, and process lifecycle.
 
 ## Motivation
 
-The turn loop (`run_turn_loop`) and its supporting components —
-`TurnCoordinator`, `ToolCoordinator`, `ChatResponseRenderer`,
-`InterruptHandler`, `StreamRetryState`, and the inquiry backend — currently
-live inside `jp_cli::cmd::query`.
-They are `pub(crate)` and tightly coupled to the CLI binary.
+The turn loop (`run_turn_loop`) and its supporting components
+(`TurnCoordinator`, `ToolCoordinator`, `ChatResponseRenderer`,
+`InterruptHandler`, `StreamRetryState`, and the inquiry backend) live inside
+`jp_cli::cmd::query` with `pub(crate)` visibility.
 
-This creates two problems:
+This coupling creates two problems:
 
-**The agent loop cannot be called from outside `jp_cli`.** Any consumer that
-wants to run the turn loop with different I/O backends (different output sinks,
-non-terminal prompt backends, programmatic signal injection) cannot do so.
-The code is locked inside the CLI crate with `pub(crate)` visibility.
+**The agent loop cannot be called from outside `jp_cli`.** Because these types
+are `pub(crate)` inside the CLI crate, external consumers cannot run the turn
+loop with custom output sinks, non-terminal prompt backends, or programmatic
+signal injection.
 
-**The boundary between "run the agent" and "interact with the user" is
-implicit.** The turn loop directly uses `TerminalPromptBackend`, references
-`crate::error::Error`, and calls `crate::signals::SignalTo`.
-These are CLI concerns baked into the agent logic.
-The `PromptBackend` trait exists as a seam for testing, but the turn loop still
-assumes a specific signal type and error type.
+**The boundary between agent execution and user interaction is implicit.** The
+turn loop uses `TerminalPromptBackend`, `crate::error::Error`, and
+`crate::signals::SignalTo` directly.
+Although the `PromptBackend` trait provides a testing seam, the turn loop still
+depends on CLI-specific signal and error types.
 
-Extracting the agent loop forces a clean API surface: here is a function that
-runs a conversation turn given a provider, tools, config, and a set of I/O
-hooks.
-The caller decides what those hooks do — write to a terminal, discard, or
-something else entirely.
+Extracting the agent loop defines an explicit API boundary: a function that runs
+a conversation turn given a provider, tools, configuration, and I/O hooks.
+The caller supplies those hooks, whether they write to a terminal, discard
+output, or route I/O elsewhere.
 
 > [!TIP]
 > [RFD 027] is the primary consumer of `jp_agent`, using `run_turn_loop()` as
@@ -55,9 +51,9 @@ something else entirely.
 
 The following modules move from `jp_cli::cmd::query` into `jp_agent`:
 
-| Current location       | New location                   | What it is                 |
+| Current location       | New location                   | Role                       |
 | ---------------------- | ------------------------------ | -------------------------- |
-| `turn_loop.rs`         | `jp_agent::turn_loop`          | The main agent loop        |
+| `turn_loop.rs`         | `jp_agent::turn_loop`          | Main agent loop            |
 | `turn/coordinator.rs`  | `jp_agent::turn::coordinator`  | Turn state machine         |
 | `turn/state.rs`        | `jp_agent::turn::state`        | Per-turn accumulated state |
 | `stream/retry.rs`      | `jp_agent::stream::retry`      | Stream retry logic         |
@@ -68,33 +64,34 @@ The following modules move from `jp_cli::cmd::query` into `jp_agent`:
 
 ### What Stays in `jp_cli`
 
+Modules that handle CLI presentation and workspace integration remain in
+`jp_cli`:
+
 | Module                          | Why it stays                            |
 | ------------------------------- | --------------------------------------- |
-| `query.rs`                      | Arg parsing, config resolution, editor, |
-|                                 | conversation selection                  |
-| `stream/renderer.rs`            | `ChatResponseRenderer` — implements     |
-|                                 | `ResponseRenderer` using `jp_md`.       |
-|                                 | Presentation concern.                   |
-| `stream/structured_renderer.rs` | `StructuredRenderer` — same pattern.    |
-| `tool/executor.rs`              | `TerminalExecutorSource` — creates real |
-|                                 | executors from resolved definitions.    |
-|                                 | CLI-specific because it references      |
-|                                 | workspace tool resolution.              |
-| `tool/prompter.rs`              | `ToolPrompter` — renders                |
-|                                 | permission/question prompts to the      |
-|                                 | terminal. The trait boundary is         |
-|                                 | `PromptBackend`; the implementation     |
-|                                 | stays in CLI.                           |
-| `tool/renderer.rs`              | `ToolRenderer` — renders tool call      |
-|                                 | progress/headers. Display-only, tied to |
-|                                 | terminal UX.                            |
-| `tool/builtins.rs`              | Builtin tool registration (e.g.         |
+| `query.rs`                      | Argument parsing, config resolution,    |
+|                                 | editor integration, and conversation    |
+|                                 | selection.                              |
+| `stream/renderer.rs`            | `ChatResponseRenderer`, which           |
+|                                 | implements `ResponseRenderer` using     |
+|                                 | `jp_md` for terminal presentation.      |
+| `stream/structured_renderer.rs` | `StructuredRenderer`, which follows the |
+|                                 | same `ResponseRenderer` pattern.        |
+| `tool/executor.rs`              | `TerminalExecutorSource`, which creates |
+|                                 | tool executors from workspace-resolved  |
+|                                 | definitions.                            |
+| `tool/prompter.rs`              | `ToolPrompter`, which renders           |
+|                                 | permission and question prompts to the  |
+|                                 | terminal behind the `PromptBackend`     |
+|                                 | trait.                                  |
+| `tool/renderer.rs`              | `ToolRenderer`, which renders tool call |
+|                                 | progress and headers for the terminal.  |
+| `tool/builtins.rs`              | Built-in tool registration (such as     |
 |                                 | `describe_tools`).                      |
 
-### The Boundary
+### Dependency Boundary
 
-The key insight: the turn loop's external dependencies are already mostly
-trait-based.
+Most of the turn loop's external dependencies are already trait-based:
 
 | Dependency      | Current type                      | Abstraction                            |
 | --------------- | --------------------------------- | -------------------------------------- |
@@ -109,20 +106,20 @@ trait-based.
 | Persistence     | `&mut Workspace`                  | Concrete type                          |
 | Error type      | `crate::error::Error`             | CLI-specific enum                      |
 
-The concrete dependencies that need abstraction or relocation:
+The remaining concrete dependencies are abstracted or moved as follows:
 
-**`SignalTo`** — currently defined in `jp_cli::signals`.
-This is a simple enum (`Shutdown`, `Quit`).
-It moves to `jp_agent` since the agent loop needs to react to signals regardless
-of where they originate.
+**`SignalTo`**: Defined in `jp_cli::signals` as a two-variant enum (`Shutdown`,
+`Quit`).
+It moves to `jp_agent` so the agent loop can react to signals regardless of
+their source.
 
-**`crate::error::Error`** — the turn loop returns `crate::error::Error`, which
-is CLI-specific.
-`jp_agent` defines its own error type that the CLI wraps.
+**`crate::error::Error`**: The turn loop returns `crate::error::Error`, which is
+CLI-specific.
+`jp_agent` defines its own `AgentError` type, and `jp_cli` wraps it.
 
-**`Workspace`** — the turn loop calls `workspace.get_events()`,
-`workspace.get_events_mut()`, `workspace.persist_active_conversation()`.
-These are the persistence operations.
+**`Workspace`**: The turn loop calls `workspace.get_events()`,
+`workspace.get_events_mut()`, and `workspace.persist_active_conversation()` to
+read and persist conversation events.
 Rather than depending on `jp_workspace` directly, `jp_agent` uses a
 `ConversationStore` trait defined in `jp_conversation`:
 
@@ -134,30 +131,27 @@ pub trait ConversationStore {
 }
 ```
 
-`jp_workspace::Workspace` implements the trait.
-Other callers can provide their own implementation.
+`jp_workspace::Workspace` implements `ConversationStore`, and other callers can
+provide their own implementation.
 
-**`ToolRenderer`** and **`ToolPrompter`** — these are passed into the turn loop
-as parameters.
-They stay concrete (defined in `jp_cli`) and passed in by the caller.
-The turn loop accepts them via traits or generic parameters:
+**`ToolRenderer`** and **`ToolPrompter`**: Both stay concrete types constructed
+inside the turn loop from its injected dependencies, rather than passed in via
+new traits or generic parameters.
 
-`ToolRenderer` is used for display (progress indicators, tool call headers).
-Rather than making `ToolRenderer` a trait, the turn loop accepts an
-`Arc<Printer>` (which it already does) and the renderer is constructed inside
-the loop from the printer.
-The printer's writers determine where output goes.
+`ToolRenderer` renders progress indicators and tool call headers.
+Rather than abstracting `ToolRenderer` behind a trait, the turn loop constructs
+it from the `Arc<Printer>` it already accepts, and the printer's writers
+determine where output goes.
 
-`ToolPrompter` wraps `PromptBackend` and adds CLI-specific formatting
-(permission prompts with colored output, editor integration for result editing).
-The turn loop already accepts `Arc<dyn PromptBackend>` — the `ToolPrompter` is
-constructed inside the loop from this backend.
-The CLI passes `TerminalPromptBackend`; other callers provide their own
-implementation.
+`ToolPrompter` wraps `PromptBackend` with CLI formatting (colored permission
+prompts and editor integration for result editing).
+The turn loop constructs `ToolPrompter` from the `Arc<dyn PromptBackend>` it
+already accepts; `jp_cli` passes `TerminalPromptBackend`, and other callers
+provide their own implementation.
 
 ### `run_turn_loop` Signature
 
-The extracted function signature:
+The extracted `run_turn_loop` function has the following signature:
 
 ```rust
 pub async fn run_turn_loop(
@@ -180,16 +174,15 @@ pub async fn run_turn_loop(
 ) -> Result<(), AgentError>
 ```
 
-This is close to the current signature.
-The main changes:
+Three types change from the `jp_cli` signature:
 
-- `&mut Workspace` → `&mut dyn ConversationStore`
-- `crate::error::Error` → `AgentError`
-- `SignalRx` and `SignalTo` come from `jp_agent`
+- `&mut Workspace` becomes `&mut dyn ConversationStore`.
+- `crate::error::Error` becomes `AgentError`.
+- `SignalRx` and `SignalTo` move to `jp_agent`.
 
 ### `ToolRenderer` Stays Internal
 
-`ToolRenderer` is constructed inside `run_turn_loop` today:
+`run_turn_loop` constructs `ToolRenderer` internally:
 
 ```rust
 let mut tool_renderer = ToolRenderer::new(
@@ -204,20 +197,20 @@ let mut tool_renderer = ToolRenderer::new(
 );
 ```
 
-This construction stays inside the extracted `run_turn_loop`.
-`ToolRenderer` moves to `jp_agent` alongside the turn loop.
-Its output goes through the `Printer`, which the caller controls via writer
-injection.
+`ToolRenderer` moves to `jp_agent` alongside the turn loop, and this
+construction stays inside `run_turn_loop`.
+Because `ToolRenderer` writes through `Printer`, the caller controls its output
+via writer injection.
 
 ### Response Rendering
 
-The `TurnCoordinator` currently owns a `ChatResponseRenderer` (which depends on
-`jp_md`) and calls it on every streamed `ChatResponse` chunk.
-The agent loop controls *when* rendering happens (on each chunk, flush before
-tool calls, reset on continuation), but *how* rendering works is a presentation
-concern.
+`TurnCoordinator` owns a `ChatResponseRenderer` (which depends on `jp_md`) and
+calls it on every streamed `ChatResponse` chunk.
+The agent loop controls *when* rendering happens (on each chunk, flushing before
+tool calls, and resetting on continuation), whereas *how* responses are rendered
+is a presentation concern.
 
-`jp_agent` defines a rendering trait:
+`jp_agent` defines a `ResponseRenderer` trait:
 
 ```rust
 pub trait ResponseRenderer {
@@ -239,237 +232,216 @@ pub trait ResponseRenderer {
 }
 ```
 
-Three methods, each with clear semantics for any implementation:
+Callers supply an implementation suited to their environment:
 
-- A terminal renderer (`ChatResponseRenderer`) buffers markdown, formats with
+- A terminal renderer (`ChatResponseRenderer`) buffers Markdown, formats it with
   ANSI styling, and writes to the printer.
-- A no-op renderer discards everything (e.g. non-interactive execution).
+- A no-op renderer discards output during non-interactive execution.
 - A test renderer captures events for assertions.
 
-The current `reset_content_kind()` call in `TurnCoordinator` — which exists
-because the markdown renderer tracks reasoning vs. message transitions —
-becomes an internal concern of the `ChatResponseRenderer` implementation.
-The agent loop just calls `flush()` when a tool call arrives; the renderer
-decides what bookkeeping that entails.
+`TurnCoordinator` currently calls `reset_content_kind()` because the Markdown
+renderer tracks transitions between reasoning and message content.
+With `ResponseRenderer`, that bookkeeping moves inside `ChatResponseRenderer`:
+the agent loop calls `flush()` when a tool call arrives, and the renderer
+updates its own state.
 
 `StructuredRenderer` follows the same pattern, either folded into
-`ResponseRenderer` or as a parallel trait.
-
-This removes `jp_md` from `jp_agent`'s dependency graph entirely.
+`ResponseRenderer` or defined as a parallel trait.
+Keeping both renderers in `jp_cli` removes `jp_md` from `jp_agent`'s dependency
+graph.
 
 ### Crate Dependencies
 
 `jp_agent` depends on:
 
-- `jp_config` (for `AppConfig`, `StyleConfig`, tool config types)
-- `jp_conversation` (for `ConversationStream`, events, `ConversationId`,
+- `jp_config` (`AppConfig`, `StyleConfig`, and tool config types)
+- `jp_conversation` (`ConversationStream`, events, `ConversationId`, and
   `ConversationStore`)
-- `jp_llm` (for `Provider`, `Event`, `ToolDefinition`, `Executor`)
-- `jp_printer` (for `Printer`)
-- `jp_inquire` (for `PromptBackend`)
-- `jp_mcp` (for `Client`)
-- `jp_attachment` (for `Attachment`)
-- `jp_tool` (for `Question`, `AnswerType`)
+- `jp_llm` (`Provider`, `Event`, `ToolDefinition`, and `Executor`)
+- `jp_printer` (`Printer`)
+- `jp_inquire` (`PromptBackend`)
+- `jp_mcp` (`Client`)
+- `jp_attachment` (`Attachment`)
+- `jp_tool` (`Question` and `AnswerType`)
 
 `jp_cli` depends on `jp_agent` and provides:
 
 - `TerminalPromptBackend` (via `jp_inquire`)
-- `TerminalExecutorSource` (creates real executors)
-- `Workspace` as `ConversationStore`
-- OS signal setup
-- Arg parsing, editor, config resolution
+- `TerminalExecutorSource` (creates tool executors)
+- `Workspace` implementing `ConversationStore`
+- OS signal handling
+- Argument parsing, editor integration, and config resolution
 
-### What `jp_cli::cmd::query` Becomes
+### Query Orchestration in `jp_cli`
 
 After extraction, `query.rs` is the orchestration layer:
 
-1. Parse args, resolve config, select conversation
-2. Open editor, build `ChatRequest`
-3. Resolve tools, set up MCP, register attachments
-4. Create a `ToolCoordinator` with `TerminalExecutorSource`
-5. Create the `LlmInquiryBackend`
-6. Call `jp_agent::run_turn_loop(...)` with terminal-backed I/O
-7. Handle the result, persist, clean up
+1. Parse arguments, resolve configuration, and select the conversation.
+2. Open the editor and build the `ChatRequest`.
+3. Resolve tools, set up MCP, and register attachments.
+4. Create a `ToolCoordinator` with `TerminalExecutorSource`.
+5. Create the `LlmInquiryBackend`.
+6. Call `jp_agent::run_turn_loop(...)` with terminal-backed I/O.
+7. Handle the result, persist the conversation, and clean up.
 
-This is essentially what `Query::run()` does today, minus the turn loop itself.
+This matches what `Query::run()` does prior to extraction, without the turn loop
+implementation itself.
 
 ## Drawbacks
 
-**More crates.** The workspace gains another crate.
-Build times increase slightly.
-The dependency graph gets one more node.
+**Workspace overhead.** Adding `jp_agent` introduces another node in the
+workspace dependency graph and slightly increases build times.
 
-**Parameter proliferation.** `run_turn_loop` already has 16 parameters.
-Adding a trait for persistence doesn't reduce this.
-A builder or context struct could help, but that's a separate refactor.
+**Parameter count.** `run_turn_loop` takes 16 parameters, and replacing `&mut
+Workspace` with a persistence trait does not reduce that count.
+Grouping parameters into a builder or context struct is left to a separate
+refactoring.
 
 > [!TIP]
-> That separate refactor has landed: `TurnInputs` in `jp_cli::cmd::query`
-> gathers a turn's inputs and splits the work in two, where collecting reads the
-> CLI context and running does not.
-> Its fields are the "context that varies by caller" set this RFD names above.
-> `Query::run_turn` holds the call Phase 4 redirects to
-> `jp_agent::run_turn_loop`; `TurnInputs::run` is steps 3 to 5 of the
-> orchestration list above, which stay in `jp_cli`.
-> It already takes a `&ConversationLock` rather than a `&mut Workspace`, so the
-> `ConversationStore` trait has less to cover than assumed here.
+> `TurnInputs` in `jp_cli::cmd::query` now groups the caller-specific inputs
+> shown in `run_turn_loop` above and separates input collection (which reads CLI
+> context) from turn execution (which does not).
+> `TurnInputs::run` performs steps 3 through 5 of the orchestration sequence
+> above in `jp_cli`, and `Query::run_turn` contains the turn-loop call that
+> Phase 4 redirects to `jp_agent::run_turn_loop`.
+> Because `Query::run_turn` already takes a `&ConversationLock` rather than
+> `&mut Workspace`, `ConversationStore` has a smaller surface area than
+> originally proposed here.
 
-**Incremental move.** Moving modules between crates requires updating every
-import path.
-Tests that reference internal types need adjustment.
-This is mechanical but tedious.
+**Migration churn.** Moving modules across crates requires updating import paths
+and adjusting tests that reference internal types.
 
 ## Alternatives
 
-### Move only the turn loop, keep renderers in CLI
+### Keep Renderers and Interrupt Handling in `jp_cli`
 
-Move `run_turn_loop` and the coordinators, but leave `ChatResponseRenderer`,
-`ToolRenderer`, and the interrupt handler in `jp_cli`.
-Pass them to the turn loop as trait objects or closures.
+Move `run_turn_loop` and the coordinators into `jp_agent`, but leave
+`ChatResponseRenderer`, `ToolRenderer`, and `InterruptHandler` in `jp_cli` and
+pass them to the turn loop as trait objects or closures.
 
-Rejected because the renderers depend on `jp_md` for markdown formatting, which
-is a presentation concern.
-Moving them into `jp_agent` would give the agent crate a dependency on markdown
-rendering.
-The `ResponseRenderer` trait provides a clean boundary: the agent loop calls
-`render`/`flush`/`reset`, and the caller provides the implementation.
+Rejected because only response rendering requires a trait boundary.
+`ChatResponseRenderer` depends on `jp_md` for Markdown formatting, which is a
+presentation concern that does not belong in `jp_agent`; the `ResponseRenderer`
+trait (`render`, `flush`, `reset`) isolates that dependency.
+`ToolRenderer` and `InterruptHandler` already operate through `Printer` and
+`PromptBackend` and can move into `jp_agent` directly.
 
-### Use `jp_llm` instead of a new crate
+### Place the Agent Loop in `jp_llm`
 
-Put the agent loop in `jp_llm` since it already hosts the provider traits and
-tool execution types.
+Put the agent loop in `jp_llm`, which already hosts the provider traits and tool
+execution types.
 
 Rejected because `jp_llm` is a provider abstraction layer.
-The agent loop depends on `jp_printer`, `jp_config` and `jp_conversation` -
-concerns that don't belong in the LLM layer.
+The agent loop depends on `jp_printer`, `jp_config`, and `jp_conversation`,
+which do not belong in the LLM layer.
 A separate crate keeps the dependency graph clean.
 
-### Trait for everything (full DI)
+### Full Dependency Injection
 
 Define traits for `Printer`, `ToolRenderer`, signal handling, and every other
-concrete dependency.
-Make the turn loop fully generic.
+concrete dependency to make the turn loop fully generic.
 
-Rejected as over-engineering.
-The `Printer` already supports writer injection.
-`ToolRenderer` is an internal detail of the loop, not an extension point.
-Signals are a simple enum.
-Full DI adds type parameters and complexity without enabling use cases beyond
-what `ConversationStore` + `PromptBackend` provide.
+Rejected because the existing abstractions are sufficient.
+`Printer` already supports writer injection, `ToolRenderer` is internal to the
+loop rather than an extension point, and `SignalTo` is a simple enum.
+Full dependency injection adds type parameters and complexity without enabling
+use cases beyond what `ConversationStore`, `PromptBackend`, and
+`ResponseRenderer` provide.
 
 ## Non-Goals
 
-- **Public SDK.** `jp_agent` is an internal crate for use within the JP
-  workspace.
-  Its API is not stable and not documented for external consumers.
-  A public SDK can be built on top of it later, but that's a separate effort
-  with different design constraints.
+- **Public SDK.** `jp_agent` is an internal workspace crate without a stable or
+  documented API for external consumers.
+  A public SDK can be built on top of it later as a separate effort with its own
+  design constraints.
 
-- **Plugin system.** The trait-based hooks enable different I/O backends, not
-  arbitrary agent behavior customization.
+- **Plugin system.** The trait-based hooks abstract I/O backends, not agent
+  behavior.
   Hooks for tool filtering, response post-processing, or custom turn logic are
   out of scope.
 
-- **Async trait simplification.** Some traits (`InquiryBackend`,
-  `ExecutorSource`) use `#[async_trait]`.
-  This RFD does not change their signatures or migrate to native async traits.
+- **Async trait migration.** Traits such as `InquiryBackend` and
+  `ExecutorSource` continue to use `#[async_trait]`.
+  This RFD does not change their signatures or migrate them to native async
+  traits.
 
 ## Risks and Open Questions
 
-### `ToolPrompter` and editor integration
+### `ToolPrompter` and Editor Integration
 
-`ToolPrompter` currently handles permission prompts with editor integration (the
-user can edit tool arguments before approving).
-The editor is a CLI concern — it opens `$EDITOR` and reads the result.
-Other callers would need a different mechanism for argument editing.
+`ToolPrompter` handles permission prompts and lets the user edit tool arguments
+in `$EDITOR` before approving.
+Opening `$EDITOR` is a CLI concern, so non-CLI callers need a different
+mechanism for argument editing.
 
-For the initial extraction, `ToolPrompter` is constructed in the turn loop from
-the injected `PromptBackend`.
-The `PromptBackend` trait may need extension to support argument editing, or
-`ToolPrompter` needs its own trait.
-This can be resolved during implementation.
+For the initial extraction, the turn loop constructs `ToolPrompter` from the
+injected `PromptBackend`.
+Supporting argument editing across backends may require extending
+`PromptBackend` or introducing a dedicated trait for `ToolPrompter` during
+implementation.
 
-### MCP client dependency
+### MCP Client Dependency
 
-The turn loop takes `&jp_mcp::Client` for tool execution (some tools are
-MCP-backed).
-This is a direct dependency that flows through to `ToolCoordinator` and
-`Executor`.
-For now, `jp_mcp::Client` stays as a parameter.
-Whether this should be abstracted behind a trait is left for future work.
+The turn loop accepts `&jp_mcp::Client` and passes it through to
+`ToolCoordinator` and `Executor` to run MCP-backed tools.
+For now, `jp_mcp::Client` remains a concrete parameter; abstracting it behind a
+trait is left for future work.
 
-### `is_tty` semantics
+### `is_tty` Semantics
 
 The turn loop uses `is_tty` to control progress indicators and `ToolRenderer`
 behavior.
-This is a property of the output consumer, not the process.
-For the initial extraction, `is_tty` stays as a `bool` parameter.
-If a future caller needs this to change at runtime (e.g. output consumer
-capabilities change mid-turn), the parameter would need to become a dynamic
-check.
+This flag describes the output consumer rather than the process.
+For the initial extraction, `is_tty` stays a `bool` parameter; callers whose
+output capabilities can change mid-turn will require a dynamic check instead.
 
 ## Implementation Plan
 
-### Phase 1: Create `jp_agent` Crate, Move Types
+### Phase 1: Create `jp_agent` and Move Core Types
 
-Create the `jp_agent` crate.
-Move `SignalTo` (and the signal-related types) and `TurnState` first — these
-have no internal dependencies on CLI types.
-Define `AgentError`.
-
-`jp_cli` re-exports or wraps as needed.
-All existing tests pass.
-
-Add `ConversationStore` trait to `jp_conversation`.
-
-Can be merged independently.
+Create the `jp_agent` crate, define `AgentError`, and move `SignalTo` (with its
+signal channel types) and `TurnState`, which have no dependencies on `jp_cli`
+types.
+Add the `ConversationStore` trait to `jp_conversation`.
+`jp_cli` re-exports or wraps the moved types so existing tests continue to pass.
+This phase can be merged independently.
 
 ### Phase 2: Move Turn Coordinator and Stream Retry
 
-Move `TurnCoordinator` and `StreamRetryState` into `jp_agent`.
-Add the `ResponseRenderer` trait.
-`TurnCoordinator` takes `Box<dyn ResponseRenderer>` instead of owning
+Move `TurnCoordinator` and `StreamRetryState` into `jp_agent`, and define the
+`ResponseRenderer` trait.
+Change `TurnCoordinator` to take `Box<dyn ResponseRenderer>` instead of owning
 `ChatResponseRenderer` directly.
-
-`ChatResponseRenderer` and `StructuredRenderer` stay in `jp_cli` and implement
-the new trait.
-
-Update `jp_cli` imports.
-
-Can be merged independently.
+Keep `ChatResponseRenderer` and `StructuredRenderer` in `jp_cli`, implement
+`ResponseRenderer` for them, and update `jp_cli` imports.
+This phase can be merged independently.
 
 ### Phase 3: Move Tool Coordinator and Interrupt Handler
 
-Move `ToolCoordinator` and `InterruptHandler` into `jp_agent`.
-These are the components that interact with `PromptBackend` and signals — the
-I/O boundary.
+Move `ToolCoordinator` and `InterruptHandler` (the components that interact with
+`PromptBackend` and signals at the I/O boundary) into `jp_agent`, and replace
+`crate::Error` references in the moved code with `AgentError`.
+This phase can be merged independently.
 
-Replace `crate::Error` references in the moved code with `AgentError`.
+### Phase 4: Move the Turn Loop
 
-Can be merged independently.
-
-### Phase 4: Move Turn Loop
-
-Move `run_turn_loop` into `jp_agent`.
-Replace `&mut Workspace` with `&mut dyn ConversationStore`.
+Move `run_turn_loop` into `jp_agent` and replace `&mut Workspace` with `&mut dyn
+ConversationStore`.
 Update `jp_cli::cmd::query` to call `jp_agent::run_turn_loop(...)` with the
 workspace as the store and terminal backends for I/O.
-
-This is the final step.
-After this, `jp_cli::cmd::query::run()` is purely orchestration — config
-resolution, conversation selection, and calling the extracted agent loop.
-
-Depends on Phases 1–3.
+After this phase (which depends on Phases 1 through 3),
+`jp_cli::cmd::query::run()` handles only CLI orchestration: config resolution,
+conversation selection, and invoking the extracted agent loop.
 
 ## References
 
-- `run_turn_loop` (`crates/jp_cli/src/cmd/query/turn_loop.rs` — the current
-  turn loop implementation being extracted.
-- `PromptBackend` (`crates/jp_inquire/src/prompt.rs`) — the existing trait that
-  enables I/O injection for prompts.
-- `ExecutorSource` (`crates/jp_llm/src/tool/executor.rs`) — the existing trait
-  for tool executor creation.
-- [yoagent] — prior art for a standalone Rust agent loop library.
+- `run_turn_loop` (`crates/jp_cli/src/cmd/query/turn_loop.rs`): Turn loop
+  implementation extracted by this RFD.
+- `PromptBackend` (`crates/jp_inquire/src/prompt.rs`): Trait for injecting
+  interactive prompt I/O.
+- `ExecutorSource` (`crates/jp_llm/src/tool/executor.rs`): Trait for creating
+  tool executors.
+- [yoagent]: Prior art for a standalone Rust agent loop library.
 
 [RFD 027]: 027-client-server-query-architecture.md
 [yoagent]: https://github.com/yologdev/yoagent

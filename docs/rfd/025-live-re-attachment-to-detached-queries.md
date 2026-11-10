@@ -19,37 +19,31 @@
 
 ## Summary
 
-This RFD introduces `jp conversation attach` for connecting a terminal to a
+This RFD introduces `jp conversation attach`, which connects a terminal to a
 running detached query process.
-The attached client receives live streaming output and can answer inquiries
+The attached client receives live streaming output and answers inquiries
 interactively.
-When the client disconnects, the detached process continues with the configured
+When the client disconnects, the detached process resumes its configured
 detached policy.
 
-This RFD depends on [RFD 024] (Detached Query Execution) for the `--detach`
-flag, process registry, and daemonization, on [RFD 021] (Printer Live
-Redirection) for runtime output swapping, and on [RFD 019] (Non-Interactive
-Mode) for prompt routing.
+This design depends on [RFD 024] (Detached Query Execution) for the `--detach`
+flag, process registry, and daemonization; [RFD 021] (Printer Live Redirection)
+for runtime output swapping; and [RFD 019] (Non-Interactive Mode) for prompt
+routing.
 
 ## Motivation
 
 [RFD 024] introduces `--detach` for running queries in the background.
 When a detached process hits an inquiry, it persists the incomplete turn and
-exits.
-The user later resumes with `--continue`.
-This works well when the user intends to come back later.
+exits so the user can resume it later with `--continue`.
 
-But there's a gap: the user detaches a query, then wants to check on it while
-it's still running.
-Maybe the LLM is streaming a long response.
-Maybe several tool calls are executing and the user wants to see progress.
-Maybe the user knows an inquiry is likely and wants to be there to answer it
-immediately rather than waiting for the process to exit and resuming later.
-
-Without live re-attachment, the user's only option is to wait for the process to
-finish (or exit at an inquiry), then inspect the results via `conversation
-print`.
-There is no way to observe or interact with a running detached process.
+However, a user cannot observe or interact with a detached query while it is
+still running.
+They may want to read a long streaming response, check progress across several
+tool calls, or answer an expected inquiry immediately instead of waiting for the
+process to exit and resuming with `--continue`.
+Without live re-attachment, the only option is to wait for the process to finish
+or exit at an inquiry and then inspect the transcript with `conversation print`.
 
 ## Design
 
@@ -60,11 +54,12 @@ jp conversation attach <cid>
 jp conversation attach                # session's active conversation
 ```
 
-Connects to the running detached process for the specified conversation.
+`jp conversation attach` connects to the running detached process for the
+specified conversation, or the session's active conversation when omitted.
 If no process is running:
 
-- If the conversation has an incomplete turn (pending inquiry), the command
-  suggests `--continue` instead:
+- If the conversation has an incomplete turn (a pending inquiry), the command
+  suggests resuming with `--continue`:
 
   ```sh
   $ jp conversation attach jp-c17528832001
@@ -75,15 +70,15 @@ If no process is running:
                               Resume the incomplete turn.
   ```
 
-- If the conversation is idle, the command errors:
+- If the conversation is idle, the command returns an error:
 
   ```sh
   $ jp conversation attach jp-c17528831000
   Error: No running process for jp-c17528831000.
   ```
 
-`attach` is a read-write connection to the running process.
-It is not a new query — there is no `--attach` flag on `jp query`.
+`attach` opens a read-write connection to an existing process rather than
+starting a new query, so `jp query` has no `--attach` flag.
 
 ### IPC via Unix Domain Sockets
 
@@ -93,18 +88,17 @@ Each detached process listens on a Unix domain socket:
 ~/.local/share/jp/workspace/<workspace-id>/processes/<conversation-id>.sock
 ```
 
-This sits alongside the process registry entry from [RFD 024].
-The socket is created when the detached process starts and removed when it
-exits.
+The socket sits alongside the process registry entry from [RFD 024].
+The detached process creates the socket on startup and removes it on exit.
 
-The socket path is derived from the conversation ID, so `attach` can find it
-without consulting the registry entry (though it checks PID liveness from the
-registry to confirm the process is actually running before connecting).
+Because the socket path is derived from the conversation ID, `attach` does not
+need the registry to locate the socket, though it still checks PID liveness in
+the registry to confirm the process is running before connecting.
 
 ### Attach Protocol
 
-The protocol uses newline-delimited JSON over the Unix domain socket.
-The detached process is the server; the attach client connects.
+The detached process (server) and `attach` command (client) communicate over the
+Unix domain socket using newline-delimited JSON (NDJSON).
 
 #### Message types
 
@@ -140,25 +134,25 @@ enum ClientMessage {
 
 #### Connection lifecycle
 
-1. Client connects to the socket.
-2. Server detects the connection and sets `has_client = true` in its prompt
+1. The client connects to the socket.
+2. The server accepts the connection and sets `has_client = true` in its prompt
    routing state.
-3. Server begins forwarding rendered output to the client via `Output` messages.
-4. If an inquiry arrives, the server sends an `Inquiry` message instead of
+3. The server forwards rendered output to the client as `Output` messages.
+4. When an inquiry arrives, the server sends an `Inquiry` message instead of
    applying the detached policy.
    The client renders the prompt and collects the user's answer.
-5. Client sends `InquiryResponse`.
-   Server delivers the answer to the tool and continues execution.
-6. When the turn completes, server sends `TurnComplete`.
-7. Client can disconnect at any time by sending `Disconnect` or closing the
+5. The client sends `InquiryResponse`, and the server delivers the answer to the
+   tool and continues execution.
+6. When the turn completes, the server sends `TurnComplete`.
+7. The client can disconnect at any time by sending `Disconnect` or closing the
    socket.
-   Server reverts to `has_client = false` and the detached policy resumes.
+   The server resets `has_client = false` and resumes the detached policy.
 
 #### Single client
 
 Only one client can be attached at a time.
-If a second client attempts to connect while one is already attached, the
-connection is rejected:
+If a second client attempts to connect while one is already attached, the server
+rejects the connection:
 
 ```sh
 $ jp conversation attach jp-c17528832001
@@ -167,48 +161,45 @@ Error: Another client is already attached to jp-c17528832001.
 
 ### Output Redirection on Attach
 
-When a client attaches to a running process, the process needs to start sending
-output to the client.
-This uses the `Printer::swap_writers()` mechanism from [RFD 021].
+When a client attaches, the server redirects its terminal output to the socket
+using `Printer::swap_writers()` from [RFD 021].
 
 #### Attach flow
 
 1. **Replay from disk.** The client reads persisted events from the
-   conversation's event stream and renders them using `conversation print`
+   conversation's event stream and renders them using the `conversation print`
    logic.
-   By default, events from the current in-progress turn are shown, giving the
-   user context for what's happening.
+   By default, it renders events from the current in-progress turn so the user
+   sees what has happened so far.
 
 2. **Flush and swap.** The server calls `printer.flush_instant()` followed by
-   `printer.swap_writers(socket_writer)`.
-   All subsequent rendered output goes to the client via the socket instead of
-   the sink.
+   `printer.swap_writers(socket_writer)` to redirect subsequent rendered output
+   from the sink to the client socket.
 
-3. **Live streaming.** From this point, the client's terminal shows the same
-   output the user would see in a foreground query: LLM response chunks, tool
-   call headers, progress indicators.
+3. **Live streaming.** The client terminal renders the same live output as a
+   foreground query: LLM response chunks, tool call headers, and progress
+   indicators.
 
-The gap between "events persisted to disk" and "live output from the printer" is
-the content currently in the `EventBuilder` and renderer buffers that hasn't
-been flushed as a complete event yet.
-This content is captured by the `flush_instant()` call, which forces all
-buffered content through the printer before the swap.
+Between the events persisted on disk and the live output from the printer sits
+any in-flight content in the `EventBuilder` and renderer buffers that has not
+yet been flushed as a complete event.
+Calling `flush_instant()` pushes all buffered content through the printer before
+the writer swap.
 
 #### Detach flow
 
 When the client disconnects:
 
-1. Server calls `printer.flush_instant()` to send any pending output to the
+1. The server calls `printer.flush_instant()` to send any pending output to the
    client.
-2. Server calls `printer.swap_writers(sink)` to revert to discarding output.
-3. Server sets `has_client = false`.
+2. The server calls `printer.swap_writers(sink)` to resume discarding output.
+3. The server sets `has_client = false`.
 4. Subsequent inquiries follow the detached policy (`queue` by default).
 
 ### Context on Attach
 
-When a client attaches mid-stream, it needs enough context to understand what's
-happening.
-The client renders recent history before switching to live output:
+When attaching mid-stream, the client renders recent history before switching to
+live output:
 
 | Flag       | Behavior                                 |
 | ---------- | ---------------------------------------- |
@@ -219,195 +210,168 @@ The client renders recent history before switching to live output:
 | `--tail=0` | Skip history, show only live output from |
 |            | this point.                              |
 
-Content events are `ChatRequest`, `ChatResponse`, `ToolCallRequest`,
+Content events are `ChatRequest`, `ChatResponse`, `ToolCallRequest`, and
 `ToolCallResponse`.
-Structural markers like `TurnStart` and `ConfigDelta` are skipped when counting.
+Structural markers such as `TurnStart` and `ConfigDelta` are skipped when
+counting.
 
 The client renders history locally from the persisted conversation file.
-This avoids the server needing to replay or buffer historical output — the disk
-is the source of truth for completed events.
+Because disk storage is the source of truth for completed events, the server
+does not need to buffer or replay historical output.
 
-### Relationship to Conversation Locks
+### Conversation Locks
 
 The detached process holds the conversation lock ([RFD 020]) for its entire
 execution.
-The attach client does **not** acquire a lock — it communicates with the
-lock-holding process via the socket.
-The attach client is a viewer and input provider, not a writer to the
-conversation stream.
+The attach client acts only as a viewer and input provider: it does **not**
+acquire a lock or write to the conversation stream, and instead communicates
+with the lock-holding process over the socket.
 
-### Relationship to Prompt Routing
+### Prompt Routing
 
-The attach changes the prompt routing state dynamically:
+Attaching and detaching update the prompt routing state dynamically:
 
 - **Client attached**: `has_client = true`.
-  Inquiries are sent to the client via the socket
+  Inquiries are sent to the client over the socket
   (`PromptAction::PromptClient`).
 - **Client detaches**: `has_client = false`.
   Inquiries follow the detached policy (`queue` → persist and exit).
 
-This means a detached query that would normally exit at an inquiry can instead
-have the inquiry answered interactively if a client attaches before the inquiry
-arrives.
-The process doesn't need to know in advance whether a client will be available
-— the routing decision happens at inquiry time.
+Because the server makes the routing decision when each inquiry arrives, it does
+not need to know in advance whether a client will be available.
+A detached query that would otherwise exit at an inquiry can have that inquiry
+answered interactively if a client attaches beforehand.
 
 ## Drawbacks
 
 **IPC complexity.** Unix domain sockets, a message protocol, and output
-redirection add meaningful infrastructure.
-This is the most complex piece of the detached conversations feature set.
+redirection make live attachment the most complex part of the detached
+conversations feature set.
 
 **Platform constraints.** Unix domain sockets are not available on Windows.
-Windows support would require named pipes or a different IPC mechanism.
-The initial implementation targets macOS and Linux only.
+Supporting Windows would require named pipes or another IPC mechanism, so the
+initial implementation targets macOS and Linux only.
 
-**Partial output gap.** Between the last persisted event and the current
-renderer state, there may be content that hasn't been flushed as a complete
-event (partial `ChatResponse` chunks in the `EventBuilder`).
-The `flush_instant()` call minimizes this gap but doesn't eliminate it for
-content that hasn't reached the printer yet.
-In practice, this is a few tokens of LLM output at most.
+**Partial output gap.** Partial `ChatResponse` chunks still accumulating in the
+`EventBuilder` have not yet been flushed as a complete event.
+Calling `flush_instant()` flushes the printer buffer before the swap, but cannot
+capture content that has not reached the printer yet.
+In practice, this gap is at most a few tokens of LLM output.
 
-**Socket cleanup on crash.** If the detached process is killed with SIGKILL, the
-socket file orphans on disk.
-`conversation attach` checks PID liveness before connecting, so stale sockets
-don't cause connection attempts to hang.
-Stale socket files are cleaned up alongside stale registry entries during
-`conversation ls`.
+**Socket cleanup on crash.** If the detached process is killed with `SIGKILL`,
+its socket file remains on disk.
+`conversation attach` checks PID liveness before connecting so stale sockets do
+not cause connection attempts to hang, and `conversation ls` cleans up stale
+socket files alongside stale registry entries.
 
 ## Alternatives
 
 ### HTTP server for IPC
 
-Use a local HTTP server instead of Unix domain sockets.
-
-Rejected because it requires port allocation, firewall considerations, and is
-heavier than needed.
-Unix domain sockets are the standard local IPC mechanism on Unix with better
-security properties (filesystem permissions).
+Using a local HTTP server instead of Unix domain sockets would require port
+allocation and firewall handling and is heavier than needed.
+Unix domain sockets are the standard local IPC mechanism on Unix and enforce
+access control through filesystem permissions.
 
 ### Named pipe (FIFO) instead of socket
 
-Use a named pipe for the output stream and a separate pipe for input.
-
-Rejected because named pipes are unidirectional.
-The bidirectional communication (output to client, inquiry answers from client)
-would require two pipes and coordination logic.
+Because named pipes are unidirectional, bidirectional communication (streaming
+output to the client and receiving inquiry answers from it) would require two
+pipes and extra coordination logic.
 Unix domain sockets provide bidirectional streams natively.
 
-### No live output, just inquiry forwarding
+### Inquiry forwarding without live output
 
-Only forward inquiries to the attached client, not streaming output.
-The client would see inquiry prompts but not the LLM's response or tool
-execution progress.
-
-Rejected because the primary value of attaching is seeing what's happening.
-Inquiry forwarding alone doesn't justify the IPC infrastructure — the user
-could just wait for the process to exit and use `--continue`.
+Forwarding only inquiries would show the client inquiry prompts without the
+LLM's response or tool execution progress.
+The primary reason to attach is to observe a running query; if the user only
+needs to answer inquiries, they can wait for the process to exit and run
+`--continue` without any IPC infrastructure.
 
 ### Shared memory buffer
 
-Use shared memory (mmap) for the output stream instead of a socket.
-
-Rejected because it adds complexity (synchronization, capacity management)
-without meaningful benefit.
-The output rate is bounded by LLM token generation speed, which is well within
-socket throughput.
-Shared memory is useful for high-bandwidth IPC; this is a low-bandwidth text
-stream.
+Streaming output through shared memory (`mmap`) instead of a socket would
+require synchronization and capacity management for no practical benefit.
+Output is a low-bandwidth text stream bounded by LLM token generation speed,
+which fits well within socket throughput.
 
 ## Non-Goals
 
-- **Multi-client attachment.** Only one client at a time.
-  Concurrent attachment would require deciding which client receives output and
-  which answers inquiries.
-  Out of scope.
+- **Multi-client attachment.** Only one client can attach at a time.
+  Supporting concurrent clients would require deciding which client receives
+  output and which answers inquiries.
 
-- **Persistent output buffer.** The detached process does not buffer output for
-  future attach clients.
-  If nobody is attached, output is discarded.
-  The persisted event stream on disk is the record of what happened.
+- **Persistent output buffer.** The detached process discards output while no
+  client is attached rather than buffering it for future clients.
+  The persisted event stream on disk is the record of completed events.
 
-- **Cross-machine attachment.** Sockets are local.
-  No network protocol.
+- **Cross-machine attachment.** Communication uses local Unix domain sockets
+  with no network protocol.
 
-- **Attaching to foreground queries.** `attach` only targets detached processes.
-  A foreground query already has a terminal — there's nothing to attach to.
+- **Attaching to foreground queries.** `attach` only targets detached processes,
+  as a foreground query already has a terminal.
 
 ## Risks and Open Questions
 
 ### Renderer state after swap
 
-When `swap_writers()` redirects output to the socket, the `ChatResponseRenderer`
-and markdown buffer continue mid-stream.
-Their internal state (open code blocks, list nesting, ANSI color stack) carries
-over.
-The client receives output that continues from wherever the renderer was — not
-from the start of the current chunk.
-
-This means the client may see output that starts mid-paragraph or
+When `swap_writers()` redirects output to the socket, `ChatResponseRenderer` and
+the markdown buffer continue mid-stream with their existing internal state (open
+code blocks, list nesting, and ANSI color stack).
+The client receives output from the renderer's current position rather than the
+start of the current chunk, so live output may begin mid-paragraph or
 mid-code-block.
-The replay-from-disk step provides context for completed events, but the live
-transition may be visually rough for a few tokens until the renderer reaches a
-natural boundary (end of paragraph, end of code block).
 
-This is acceptable for an initial implementation.
-A smoother transition could reset the renderer state and replay from the last
-complete event, but that adds complexity for marginal UX improvement.
+Replaying completed events from disk provides prior context, and any visual
+roughness at the transition resolves once the renderer reaches the next
+paragraph or code-block boundary.
+Resetting the renderer state and replaying from the last complete event would
+smooth the transition, but the extra complexity is not worth the minor UX gain
+for an initial implementation.
 
 ### Socket permissions
 
-The socket file inherits the umask of the creating process.
-On most systems this means owner-only access (0700 on the parent directory).
-This is correct — only the same user should be able to attach.
-
-If the user runs JP under different UIDs (e.g., via sudo), the socket may not be
-accessible.
-This is an edge case that can be documented rather than engineered around.
+The socket file inherits the umask of the creating process, and the parent
+directory uses `0700` permissions so only the owning user can attach.
+If the user runs JP under different UIDs (for example, via `sudo`), the socket
+may be inaccessible.
+This edge case can be documented rather than engineered around.
 
 ### Attach during the persist-and-exit window
 
-When a detached process decides to persist and exit (queue policy, inquiry hit),
-there's a brief window where it's persisting the incomplete turn and shutting
-down.
-If a client attaches during this window, the process has already committed to
-exiting.
-
-The simplest behavior: the server sends `ProcessExiting` and closes the socket.
-The client sees the message and suggests `--continue`.
-No special coordination needed.
+When a detached process hits an inquiry under the `queue` policy, it enters a
+brief window where it persists the incomplete turn and shuts down.
+If a client attaches during this window after the process has already committed
+to exiting, the server sends `ProcessExiting` and closes the socket.
+The client sees the message and suggests `--continue` without extra
+coordination.
 
 ### Protocol versioning
 
-The NDJSON protocol has no version field.
-If the message format changes in a future release, an older client connecting to
-a newer server (or vice versa) would see parse errors.
-
-Adding a `version` field to the initial handshake is straightforward and should
-be included from the start, even if the first version is just `1`.
+Without a version field in the NDJSON protocol, a message-format change in a
+future release would cause parse errors when an older client connects to a newer
+server (or vice versa).
+The initial handshake should include a `version` field from the start, beginning
+at `1`.
 
 ## Implementation Plan
 
 ### Phase 1: Socket Listener
 
 Each detached process opens a Unix domain socket alongside its registry entry.
-The socket accepts connections but does nothing — no messages are sent.
-This validates the socket lifecycle (creation, cleanup, stale detection).
+The socket accepts connections without sending messages to validate socket
+creation, cleanup, and stale-socket detection.
 
-Depends on [RFD 024] Phase 3 (`--detach` and daemonization).
-
-Can be merged independently.
+Depends on [RFD 024] Phase 3 (`--detach` and daemonization) and can be merged
+independently.
 
 ### Phase 2: Output Forwarding
 
 When a client connects, the server swaps the printer to a socket-backed writer
-([RFD 021]).
-Rendered output flows to the client.
+([RFD 021]) and streams rendered output chunks for the client to print to its
+terminal.
 On disconnect, the printer reverts to a sink.
-No inquiry handling yet — inquiries follow the detached policy as before.
-
-The client renders received output chunks to its terminal.
+Inquiries continue to follow the detached policy.
 
 Depends on Phase 1 and [RFD 021].
 
@@ -415,31 +379,31 @@ Depends on Phase 1 and [RFD 021].
 
 When a client is attached and an inquiry arrives, the server sends an `Inquiry`
 message instead of applying the detached policy.
-The client renders the prompt, collects the answer, and sends `InquiryResponse`.
-The server delivers the answer and continues execution.
+The client renders the prompt, collects the answer, and sends `InquiryResponse`,
+which the server delivers to the tool to continue execution.
 
 Depends on Phase 2 and [RFD 019] Phase 2 (routing integration for `has_client`).
 
 ### Phase 4: `jp conversation attach` CLI
 
 Implement the `attach` subcommand with history replay (`--tail`), live output
-rendering, and inquiry prompting.
-Handle connection errors, stale sockets, and single-client enforcement.
+rendering, inquiry prompting, connection error handling, stale-socket detection,
+and single-client enforcement.
 
 Depends on Phase 3.
 
 ## References
 
-- [RFD 024: Detached Query Execution][RFD 024] — `--detach`, process registry,
-  and the `queue` policy that this RFD builds on.
-- [RFD 023: Resumable Conversation Turns][RFD 023] — incomplete turn
-  persistence; the fallback when no client is attached.
-- [RFD 021: Printer Live Redirection][RFD 021] — `swap_writers()` used for
-  routing output to the attached client.
-- [RFD 020: Parallel Conversations][RFD 020] — conversation locks; the detached
-  process holds the lock, the attach client does not.
-- [RFD 019: Non-Interactive Mode][RFD 019] — prompt routing and `has_client`
-  state that changes dynamically on attach/detach.
+- [RFD 024: Detached Query Execution][RFD 024]: `--detach`, the process
+  registry, and the `queue` policy that this RFD builds on.
+- [RFD 023: Resumable Conversation Turns][RFD 023]: incomplete-turn persistence,
+  used as the fallback when no client is attached.
+- [RFD 021: Printer Live Redirection][RFD 021]: `swap_writers()`, used to route
+  output to the attached client.
+- [RFD 020: Parallel Conversations][RFD 020]: conversation locks, held by the
+  detached process rather than the attach client.
+- [RFD 019: Non-Interactive Mode][RFD 019]: prompt routing and the `has_client`
+  state updated on attach and detach.
 
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 020]: 020-parallel-conversations.md

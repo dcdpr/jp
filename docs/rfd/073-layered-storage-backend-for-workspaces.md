@@ -14,10 +14,10 @@ This RFD replaces `Workspace`'s `Option<Storage>` with four non-optional trait
 objects (`PersistBackend`, `LoadBackend`, `LockBackend`, and `SessionBackend`)
 that decouple conversation persistence, loading, locking, and session management
 from the filesystem.
-`FsStorageBackend` implements all four for on-disk workspaces,
-`InMemoryStorageBackend` provides a filesystem-free backend for tests, and
-`NullPersistBackend` handles `--no-persist` without optionality in `Workspace`,
-`ConversationLock`, or `ConversationMut`.
+`FsStorageBackend` implements all four traits for on-disk workspaces,
+`InMemoryStorageBackend` provides an in-memory backend for tests, and
+`NullPersistBackend` handles `--no-persist` without optional fields in
+`Workspace`, `ConversationLock`, or `ConversationMut`.
 
 ## Motivation
 
@@ -25,102 +25,88 @@ from the filesystem.
 consequences: `persist_backend` is `Option<Arc<dyn PersistBackend>>`,
 `ConversationLock` holds `file_lock: Option<Arc<ConversationFileLock>>`, and
 `ConversationMut` holds `writer: Option<Arc<dyn PersistBackend>>`.
-A `disable_persistence` boolean adds a third dimension of optionality.
 
-This optional storage creates pervasive branching throughout the workspace
-layer.
-At least 15 methods on `Workspace` branch on `self.storage.as_ref()`:
+At least 15 methods on `Workspace` branch on `self.storage.as_ref()`, with three
+different behaviors when storage is absent:
 
-- **No-op if missing:** `load_conversation_index`, `ensure_all_metadata_loaded`,
+- **No-op:** `load_conversation_index`, `ensure_all_metadata_loaded`,
   `cleanup_stale_files`, `remove_ephemeral_conversations`, `conversations`
   (skips lazy loading), `metadata`/`events` (skip disk initialization).
-- **Error if missing:** `eager_load_conversation`, `lock_conversation`,
+- **Return an error:** `eager_load_conversation`, `lock_conversation`,
   `sanitize`, `activate_session_conversation`.
-- **Returns `None`:** `conversation_lock_info`, `storage_path`,
+- **Return `None`:** `conversation_lock_info`, `storage_path`,
   `user_storage_path`, `load_session_mapping`.
 
-Each of these branches represents a case where the caller must reason about
-whether storage exists.
-Some methods silently do nothing, others return errors, and others return `None`
-— three different failure modes for the same underlying condition.
+Callers must reason about whether storage exists and which failure mode applies
+to each method.
 
-The `PersistBackend` trait ([RFD 069]) was a first step toward abstracting
-storage, but its scope is narrow: only `write` and `remove` for conversations.
-Loading, indexing, locking, and session management still go directly through
-`Storage`, which is why `Option<Storage>` persists alongside the trait.
+The `PersistBackend` trait ([RFD 069]) abstracts conversation `write` and
+`remove` operations, but loading, indexing, locking, and session management
+still call `Storage` directly.
+`Workspace` therefore still holds `Option<Storage>` alongside `PersistBackend`.
 
-The `disable_persistence` flag adds a third dimension of optionality.
-It serves three distinct purposes today:
+A `disable_persistence` boolean on `Workspace` adds another layer of optionality
+and serves three distinct purposes:
 
 1. **`--no-persist` CLI flag (production).** Users run `jp -! query` for
    ephemeral one-off queries, or to try different approaches to the next turn
    without committing to the conversation history.
-   The semantics are: read from the filesystem as normal, but don't write
-   mutations back.
+   This reads from the filesystem as normal, but does not write mutations back.
 
 2. **Error-path safety (production).** When a command fails, the CLI calls
    `workspace.disable_persistence()` before background-task sync to prevent
    writing potentially corrupt state.
-   The query command explicitly opts out of this for turn errors (partial
-   results should still be persisted).
+   The `query` command opts out of this for turn errors so partial results are
+   still persisted.
 
-3. **Test convenience.** Tests call `disable_persistence()` to avoid needing
-   temporary directories.
-   This is a workaround for the real problem: there is no in-memory storage
-   backend.
+3. **Test convenience.** Tests call `disable_persistence()` to avoid creating
+   temporary directories because there is no in-memory storage backend.
 
-Use case #3 is a workaround that `InMemoryStorageBackend` eliminates directly.
-Use cases #1 and #2, however, are legitimate production behaviors that require a
-hybrid model: filesystem-backed loading and locking, but no persistence.
-The trait decomposition in this RFD enables this naturally through backend
-composition — the `persist` trait object can be swapped independently of the
-other three.
+`InMemoryStorageBackend` eliminates the test workaround directly.
+The two production cases require a hybrid configuration that loads and locks on
+the filesystem without persisting writes.
+Splitting storage into separate traits supports this through backend
+composition: the `persist` backend can be swapped independently of the other
+three, so `Workspace` always holds a storage backend even when it is not backed
+by the filesystem.
 
-The goal is to replace optionality with polymorphism.
-`Workspace` always has storage — it just doesn't always have *filesystem*
-storage.
-
-### Concrete pain points
+### Concrete Pain Points
 
 **Tests require temporary directories.** Every test that needs a `Workspace`
-with persistence currently creates a `tempdir`, constructs `Storage`, and calls
+with persistence creates a `tempdir`, constructs `Storage`, and calls
 `persisted_at`.
-Tests that don't need persistence use `Workspace::new(Utf8PathBuf::new())` with
-no storage — but these workspaces can't lock conversations, persist data, or
-load from disk.
-There is no middle ground.
+Tests that do not need persistence use `Workspace::new(Utf8PathBuf::new())` with
+no storage, which means they cannot lock conversations, persist data, or load
+from disk.
 
 **`lock_new_conversation` branches on storage existence.** When creating and
-locking a conversation, the method tries to acquire a flock if storage exists,
-and skips locking if it doesn't.
-This means in-memory workspaces have no locking at all — not even in-process
-mutual exclusion.
-The type system doesn't reflect this: `ConversationLock` looks the same in both
-cases, but one has a real lock and the other doesn't.
+locking a conversation, the method acquires a `flock` if storage exists and
+skips locking if it does not.
+In-memory workspaces therefore have no locking, not even in-process mutual
+exclusion.
+`ConversationLock` has the same type in both cases, whether or not it holds an
+actual lock.
 
 **`ConversationMut` silently skips persistence.** If `writer` is `None` (no
-storage) or `disable_persistence` is `true`, the drop handler does nothing.
-This is correct for tests and `--no-persist`, but the code path is invisible —
-a caller holding a `ConversationMut` has no way to know whether their mutations
-will be persisted.
-The `disable_persistence` boolean creates branching at two levels: the
-`Workspace` checks it when constructing locks (to decide whether to pass
-`writer: None`), and `ConversationMut` checks `if let Some(writer)` on every
-flush and drop.
-With backend polymorphism, both checks collapse: the writer is always present,
-and a `NullPersistBackend` handles the "don't persist" case through the trait.
+storage) or `disable_persistence` is `true`, the drop handler is a no-op, and a
+caller holding a `ConversationMut` cannot tell whether its mutations will be
+persisted.
+`disable_persistence` also branches in two places: `Workspace` checks it when
+constructing locks (passing `writer: None` when set), and `ConversationMut`
+checks `if let Some(writer)` on every flush and drop.
+With backend polymorphism, `writer` is always present and `NullPersistBackend`
+handles the no-op case through the trait.
 
 ## Design
 
 ### Trait Decomposition
 
-The current `Storage` struct's responsibilities split into four traits, each
-covering a distinct concern:
+`Storage`'s responsibilities split into four traits, one per concern:
 
 #### `PersistBackend`
 
-Writes and removes conversation data.
-This trait already exists ([RFD 069]) and is unchanged:
+`PersistBackend` ([RFD 069]) writes and removes conversation data and is
+unchanged:
 
 ```rust
 pub trait PersistBackend: Send + Sync + Debug {
@@ -137,8 +123,8 @@ pub trait PersistBackend: Send + Sync + Debug {
 
 #### `LoadBackend`
 
-Reads conversation data and indexes.
-Covers the loading side of what `Storage` does today:
+`LoadBackend` reads conversation metadata, event streams, and indexes from the
+backing store:
 
 ```rust
 pub trait LoadBackend: Send + Sync + Debug {
@@ -186,8 +172,8 @@ pub trait LoadBackend: Send + Sync + Debug {
 
 #### `LockBackend`
 
-Conversation-level locking.
-Today this is `flock`-based; the trait abstracts over the mechanism:
+`LockBackend` abstracts conversation-level locking, which `Storage` currently
+implements with `flock`:
 
 ```rust
 pub trait LockBackend: Send + Sync + Debug {
@@ -218,7 +204,7 @@ In-memory backends use an in-process mutex-based guard.
 
 #### `SessionBackend`
 
-Session-to-conversation mapping storage:
+`SessionBackend` loads, saves, and lists session-to-conversation mappings:
 
 ```rust
 pub trait SessionBackend: Send + Sync + Debug {
@@ -249,25 +235,20 @@ pub struct Workspace {
 }
 ```
 
-`Option<Storage>` is gone.
-Every method that previously branched on storage existence now calls through the
-trait.
-The `disable_persistence` boolean is also gone, but the `disable_persistence()`
-method is retained — its implementation swaps the `persist` trait object for a
-`NullPersistBackend` instead of flipping a boolean.
-This preserves the existing call sites in the CLI (`--no-persist` flag,
-error-path safety) without any branching in `Workspace` internals.
+This replaces `Option<Storage>` and the `disable_persistence` boolean field.
+Methods that previously branched on `self.storage` now dispatch through the four
+traits.
+`Workspace::disable_persistence()` remains for existing CLI call sites, swapping
+`self.persist` for a `NullPersistBackend` instead of flipping a boolean.
 
-`root` is retained.
-It represents the project root directory and is orthogonal to the storage
-backend abstraction.
-A subsequent RFD may introduce a `ProjectFiles` abstraction and revisit whether
-`root` belongs on `Workspace`, but that is out of scope here.
+`root` remains on `Workspace` because the project root directory is independent
+of conversation storage.
+A future `ProjectFiles` abstraction may revisit whether `root` belongs on
+`Workspace`.
 
 ### `FsStorageBackend`
 
-A single struct that implements all four traits, wrapping the current `Storage`
-logic:
+`FsStorageBackend` implements all four traits by delegating to `Storage`:
 
 ```rust
 #[derive(Debug, Clone)]
@@ -281,19 +262,16 @@ impl LockBackend for FsStorageBackend { /* delegates to storage */ }
 impl SessionBackend for FsStorageBackend { /* delegates to storage */ }
 ```
 
-`Storage` itself remains as an internal implementation detail within
-`jp_storage`.
-Its public API surface shrinks — external code interacts with the traits, not
-`Storage` directly.
-The `storage_path()` and `user_storage_path()` methods remain available on
-`FsStorageBackend` for callers that need filesystem paths (config loading,
-editor file placement).
-They are not part of the trait — they are filesystem-specific.
+`Storage` becomes an internal detail of `jp_storage`, and external callers use
+the backend traits instead.
+Filesystem-specific accessors such as `storage_path()` and `user_storage_path()`
+stay on `FsStorageBackend` rather than the traits, for callers that need on-disk
+paths (config loading and editor file placement).
 
 ### `NullPersistBackend`
 
-A trivial `PersistBackend` that silently discards all writes.
-Used for ephemeral mode (`--no-persist`) and error-path persistence suppression:
+`NullPersistBackend` is a no-op `PersistBackend` that discards all writes, used
+for ephemeral mode (`--no-persist`) and error-path persistence suppression:
 
 ```rust
 #[derive(Debug)]
@@ -315,14 +293,14 @@ impl PersistBackend for NullPersistBackend {
 }
 ```
 
-`NullPersistBackend` only implements `PersistBackend`, not the other three
-traits.
-It is composed with `FsStorageBackend` (for load, lock, and session) when the
-CLI needs filesystem reads but no writes.
+`NullPersistBackend` implements only `PersistBackend`.
+When the CLI needs filesystem reads without writes, it pairs
+`NullPersistBackend` with `FsStorageBackend` for loading, locking, and sessions.
 
 ### `InMemoryStorageBackend`
 
-A purely in-memory implementation for tests and non-filesystem environments:
+`InMemoryStorageBackend` stores conversations, locks, and sessions in memory for
+tests and non-filesystem environments:
 
 ```rust
 #[derive(Debug, Default)]
@@ -338,31 +316,26 @@ impl LockBackend for InMemoryStorageBackend { /* in-process mutex-based locking 
 impl SessionBackend for InMemoryStorageBackend { /* reads/writes sessions map */ }
 ```
 
-Locking in the in-memory backend uses an in-process check: `try_lock` succeeds
-if no other holder has the conversation ID in the locks set.
-This provides the same mutual exclusion semantics within a single process,
-without filesystem `flock`.
-Cross-process locking is not applicable for in-memory backends.
+`try_lock` tracks held conversation IDs in an in-memory `HashSet`, providing
+single-process mutual exclusion without filesystem `flock`.
+Cross-process locking does not apply to in-memory stores.
 
 ### Ephemeral Mode (`--no-persist`)
 
 The `--no-persist` flag requires reading from the filesystem (to load existing
-conversations, config, session mappings) while discarding all writes and
+conversations, config, and session mappings) while discarding writes and
 skipping lock contention.
-The trait decomposition handles this through mixed backend construction:
+The CLI constructs a mixed set of backends in `load_workspace` before passing
+them to `Workspace`:
 
-- `persist: Arc<NullPersistBackend>` — writes are silently discarded
-- `loader: Arc<FsStorageBackend>` — reads from disk as normal
-- `locker: Arc<NullLockBackend>` — every lock attempt succeeds immediately, so
-  ephemeral queries never block on lock contention
-- `sessions: Arc<FsStorageBackend>` — session mapping updates still occur
-  (current behavior: `activate_session_conversation` runs regardless of
-  `--no-persist`)
+- `persist: Arc<NullPersistBackend>`: discards writes silently.
+- `loader: Arc<FsStorageBackend>`: reads conversations from disk as normal.
+- `locker: Arc<NullLockBackend>`: succeeds immediately on every lock attempt, so
+  ephemeral queries never block on lock contention.
+- `sessions: Arc<FsStorageBackend>`: continues to update session mappings
+  (`activate_session_conversation` runs regardless of `--no-persist`).
 
-The CLI constructs this mixed configuration in `load_workspace` before passing
-backends to `Workspace`.
-No runtime flag is needed — the decision is baked into the backend selection at
-construction time:
+Selecting these backends at construction time avoids a runtime flag:
 
 ```rust
 let fs = Arc::new(FsStorageBackend::new(&storage_path)?
@@ -387,16 +360,15 @@ impl Workspace {
 }
 ```
 
-Already-created `ConversationMut` instances hold their own `Arc` clone of the
-original backend, so they still persist on drop.
-This is correct: the query's `ConversationLock` is dropped before the error
-check runs.
-The swap only affects subsequent operations (background task sync, ephemeral
-cleanup), which matches the current semantics exactly.
+Existing `ConversationMut` instances hold their own `Arc` clone of the original
+backend and still persist on drop.
+Because the query's `ConversationLock` is dropped before the error check runs,
+swapping `self.persist` only affects subsequent operations such as background
+task sync and ephemeral cleanup, matching the existing behavior.
 
 ### `ConversationLock` and `ConversationMut` Changes
 
-Both types lose their internal optionality:
+Both types hold non-optional backend and lock-guard fields:
 
 ```rust
 pub struct ConversationLock {
@@ -417,38 +389,20 @@ pub struct ConversationMut {
 }
 ```
 
-The `writer` is always present.
-The `lock_guard` is always present.
-The `InMemoryStorageBackend`'s persist implementation writes to its internal
-map; its lock guard releases the in-process mutex on drop.
-No branching needed.
-
-`ConversationMut::flush` and `Drop` no longer check `if let Some(writer)` —
-they always call `writer.write()`.
-For `InMemoryStorageBackend`, this writes to the in-memory map (useful for test
-assertions).
-For `NullPersistBackend`, this is a no-op (ephemeral mode).
-The branching that currently exists in `flush`, `Drop`, `lock_new_conversation`,
-and `lock_conversation` — checking both `Option<writer>` and
-`disable_persistence` — collapses into a single trait dispatch.
+Both `writer` and `lock_guard` are always present.
+`ConversationMut::flush` and `Drop` call `writer.write()` unconditionally
+instead of branching on `Option<writer>` and `disable_persistence`, and
+`lock_new_conversation` and `lock_conversation` always acquire a guard.
+`InMemoryStorageBackend` writes to its in-memory map (which tests can inspect)
+and releases its in-process lock on drop; `NullPersistBackend` makes `write()` a
+no-op for ephemeral mode.
 
 ### Validation and Sanitization
 
-`Workspace::sanitize()` ([RFD 052]) currently calls `self.storage.as_ref()
-.ok_or(Error::MissingStorage)?`.
-With the new model, `Workspace::sanitize()` delegates to
-`LoadBackend::sanitize()`, which returns a `SanitizeReport`.
-
-For `FsStorageBackend`, this delegates to the existing `Storage` validation and
-trash logic (directory scanning, moving corrupt entries to `.trash/`).
-For `InMemoryStorageBackend`, this trivially returns
-`Ok(SanitizeReport::default())` — in-memory data is always structurally valid
-because it was written through typed APIs.
-
-`Workspace::sanitize()` retains its current signature and continues to return
-`SanitizeReport`.
-The CLI's existing code — printing warnings for trashed conversations — works
-unchanged:
+`Workspace::sanitize()` ([RFD 052]) replaces
+`self.storage.as_ref().ok_or(Error::MissingStorage)?` with a call to
+`LoadBackend::sanitize()`, keeping its `Result<SanitizeReport>` signature so the
+CLI code that warns about trashed conversations works unchanged:
 
 ```rust
 impl Workspace {
@@ -458,55 +412,49 @@ impl Workspace {
 }
 ```
 
-This avoids splitting sanitization into a pre-construction step that would force
-filesystem-specific branching into the CLI initialization logic.
+`FsStorageBackend` delegates to `Storage`'s directory scan and `.trash/`
+recovery logic.
+`InMemoryStorageBackend` returns `Ok(SanitizeReport::default())`, since
+in-memory data is written through typed APIs and is always structurally valid.
+Keeping `sanitize()` on `LoadBackend` avoids moving sanitization into a
+pre-construction step that would require filesystem-specific branching in the
+CLI.
 
 ### Ephemeral Conversation Cleanup
 
 `Storage::remove_ephemeral_conversations` scans conversation directories for
-`expires_at` timestamps.
-This is a persistence concern with a loading dependency (it needs to read
-metadata to check timestamps).
-
-This moves to a method on `Workspace` that uses
+`expires_at` timestamps, combining metadata reads with deletion.
+This method moves to `Workspace`, calling
 `LoadBackend::load_expired_conversation_ids` to find expired conversations and
 `PersistBackend::remove` to delete them.
 
-The dedicated `load_expired_conversation_ids` method is required to preserve the
-current performance characteristics.
-Today, `Storage` uses a specialized private helper (`get_expiring_timestamp`)
-that reads `metadata.json` as raw JSON and extracts **only** the `expires_at`
-field without deserializing the full `Conversation` struct.
-If `remove_ephemeral_conversations` iterated through
-`load_conversation_metadata` instead, it would fully deserialize every
-conversation's metadata into memory just to check a timestamp — a significant
-regression on workspaces with many conversations.
-
-`FsStorageBackend` implements `load_expired_conversation_ids` by delegating to
-this optimized reader.
-`InMemoryStorageBackend` checks its in-memory `Conversation` structs directly,
-which is equally fast.
+`LoadBackend` provides a dedicated `load_expired_conversation_ids` method so
+`FsStorageBackend` can keep using `Storage`'s private `get_expiring_timestamp`
+helper, which extracts **only** the `expires_at` field from raw `metadata.json`
+without deserializing the full `Conversation` struct.
+Iterating through `load_conversation_metadata` instead would deserialize every
+conversation's metadata into memory just to check its expiration timestamp.
+`InMemoryStorageBackend` reads its in-memory `Conversation` structs directly.
 
 ### Filesystem Path Methods
 
-`Workspace` currently exposes several methods that return filesystem paths for
-individual conversations:
+`Workspace` exposes several methods that return filesystem paths for individual
+conversations:
 
-- `build_conversation_dir(id, title, user)` — construct the expected dir path
-- `conversation_dir(id)` — find an existing dir on disk
-- `conversation_events_path(id)` — path to `events.json`
-- `conversation_metadata_path(id)` — path to `metadata.json`
-- `conversation_base_config_path(id)` — path to `base_config.json`
+- `build_conversation_dir(id, title, user)`: constructs the expected directory
+  path.
+- `conversation_dir(id)`: finds an existing directory on disk.
+- `conversation_events_path(id)`: returns the path to `events.json`.
+- `conversation_metadata_path(id)`: returns the path to `metadata.json`.
+- `conversation_base_config_path(id)`: returns the path to `base_config.json`.
 
-These are used by the CLI for editor integration (`jp conversation edit`), the
+The CLI uses these methods for editor integration (`jp conversation edit`), the
 `jp conversation path` command, config loading (reading `base_config.json`), and
-plugin dispatch (which needs `storage_path` and `user_storage_path`).
-They are inherently filesystem-specific and do not belong on `Workspace` or the
-backend traits.
-
-These methods are removed from `Workspace` entirely.
-The CLI retains a typed `Arc<FsStorageBackend>` reference in its `Ctx` (context)
-struct and calls the path methods on the backend directly:
+plugin dispatch (which reads `storage_path` and `user_storage_path`).
+Because they are filesystem-specific, they are removed from `Workspace` and live
+on `FsStorageBackend` instead.
+The CLI retains a typed `Arc<FsStorageBackend>` in its `Ctx` struct and calls
+the path methods on the backend directly:
 
 ```rust
 // jp_cli/src/ctx.rs
@@ -522,35 +470,27 @@ pub(crate) struct Ctx {
 }
 ```
 
-CLI commands that need filesystem paths access `ctx.fs_backend` instead of
-`ctx.workspace`.
 For example, `jp conversation path` calls
 `ctx.fs_backend.as_ref()?.conversation_dir(id)` instead of
 `ctx.workspace.conversation_dir(id)`.
-Commands that require filesystem paths (like `conversation edit` or
+Commands that require filesystem paths (such as `conversation edit` and
 `conversation path`) return a CLI-level error when `fs_backend` is `None`.
+Similarly, `load_partial_configs_from_files` takes `Option<&FsStorageBackend>`
+instead of `Option<&Workspace>` to read `storage_path()` and
+`user_storage_path()`.
 
-The config loading pipeline (`load_partial_configs_from_files`) currently takes
-`Option<&Workspace>` to read `storage_path()` and `user_storage_path()`.
-This changes to accept an `Option<&FsStorageBackend>` parameter instead.
-
-This keeps `Workspace` free of infrastructure coupling — it depends only on the
-four abstract traits.
-The filesystem-specific typed reference lives in the imperative shell
-(`jp_cli`), which is the appropriate layer for infrastructure concerns.
+This keeps filesystem concerns in `jp_cli` while `Workspace` depends only on the
+four backend traits.
 
 ### Error Type Boundary
 
-`PersistBackend` currently lives in `jp_workspace::persist` and its methods
-return `jp_workspace::error::Result`.
-Moving the trait to `jp_storage` (Phase 1) requires changing the error type to
-`jp_storage::error::Result`, since `jp_storage` cannot depend on `jp_workspace`.
-
-This is a straightforward migration: `jp_workspace::Error` already wraps
-`jp_storage::Error` via `#[from]`, so callers in `jp_workspace` (e.g.,
-`ConversationMut::flush`) can use `?` to convert automatically.
-The trait methods in `jp_storage` use `jp_storage::error::Result`; the
-`Workspace` methods that call them convert via the existing `From` impl.
+`PersistBackend` moves from `jp_workspace::persist` to `jp_storage` (Phase 1),
+and its methods return `jp_storage::error::Result` instead of
+`jp_workspace::error::Result` because `jp_storage` cannot depend on
+`jp_workspace`.
+Because `jp_workspace::Error` already wraps `jp_storage::Error` via `#[from]`,
+callers in `jp_workspace` (such as `ConversationMut::flush`) convert errors with
+`?`.
 
 ### Construction Pattern
 
@@ -592,76 +532,62 @@ let workspace = Workspace::new(root);
 // All four backends default to a single shared InMemoryStorageBackend.
 ```
 
-The fluent setter methods (`with_backend`, `with_persist`, `with_locker`, etc.)
-keep construction ergonomic while making the backend selection explicit.
-`FsStorageBackend::new` and `with_user_storage` encapsulate the current
-`Storage` construction and user-storage setup.
-The CLI retains the typed `Arc<FsStorageBackend>` for path queries and config
-loading, while `Workspace` only sees the abstract traits.
+`FsStorageBackend::new` and `with_user_storage` encapsulate `Storage`
+construction and user-storage setup, and the fluent builder methods on
+`Workspace` (`with_backend`, `with_persist`, `with_locker`, etc.) make backend
+selection explicit.
 
 ## Drawbacks
 
-**Four trait objects instead of one `Option<Storage>`.** The workspace now holds
-four `Arc<dyn Trait>` where it previously held one `Option<Storage>`.
-This is more indirection and more dynamic dispatch.
-In practice, the dispatch cost is negligible — these methods are called at I/O
-boundaries, not in hot loops.
+**Four trait objects instead of one `Option<Storage>`.** Holding four `Arc<dyn
+Trait>` fields adds indirection and dynamic dispatch, though the cost is
+negligible because these methods run at I/O boundaries rather than in hot loops.
 
-**Trait surface area.** Four traits with a combined ~18 methods is a meaningful
-API surface to maintain.
-Adding a new storage operation requires updating the trait, both
-implementations, and any mocks.
-However, this surface already exists — it's just currently concrete methods on
-`Storage`.
-The trait makes the contract explicit rather than implicit.
+**Trait surface area.** Four traits with roughly 18 methods in total must be
+updated across the trait definitions, both implementations, and any mocks when
+adding a storage operation.
+These methods already exist as concrete methods on `Storage`, so the traits make
+an existing surface explicit.
 
-**`FsStorageBackend` wraps `Storage` rather than replacing it.** The internal
-`Storage` struct survives as an implementation detail within `jp_storage`.
-This is intentional — `Storage` contains filesystem logic (directory scanning,
-symlink management, path resolution) that is genuinely filesystem-specific.
-Flattening it into `FsStorageBackend` would just move the code without
+**`FsStorageBackend` wraps `Storage` rather than replacing it.** `Storage`
+remains inside `jp_storage` because its directory scanning, symlink management,
+and path resolution are filesystem-specific.
+Inlining `Storage` into `FsStorageBackend` would only move that code without
 simplifying it.
 
 ## Alternatives
 
-### Single wide `StorageBackend` trait
+### Single Wide `StorageBackend` Trait
 
-One trait with all ~15 methods.
-Simpler to construct (one trait object), but couples unrelated concerns.
-A mock that only needs to verify persistence must still implement locking,
-loading, and session methods.
-The layered approach lets tests mock only what they need.
+Combining all ~15 methods into one trait requires only a single trait object on
+`Workspace`, but it couples unrelated concerns.
+A mock that only verifies persistence would still have to implement locking,
+loading, and session methods, whereas separate traits let tests mock only the
+concern under test.
 
-### Enum dispatch instead of trait objects
+### Enum Dispatch Instead of Trait Objects
 
 ```rust
 enum StorageBackend { Fs(FsStorage), InMemory(InMemoryStorage) }
 ```
 
-Avoids `dyn` overhead and `Arc` wrapping.
-But it's a closed set — adding a new backend requires modifying the enum.
-Given the concrete plan for browser/Web Storage backends, trait objects provide
-the needed extensibility.
+Enum dispatch avoids `dyn` overhead and `Arc` wrapping, but it is a closed set:
+every new backend requires modifying the enum.
+Trait objects allow adding planned browser/Web Storage backends without changing
+`jp_storage` or `jp_workspace`.
 
-### Keep `Option<Storage>` and widen `PersistBackend`
+### Keep `Option<Storage>` and Widen `PersistBackend`
 
-Incrementally add methods to `PersistBackend` until it covers all of `Storage`'s
-functionality.
-The trait grows monotonically and `Option<Storage>` is removed once the trait
-covers everything.
+Incrementally adding methods to `PersistBackend` and removing `Option<Storage>`
+only once the trait covers all of `Storage` would leave the codebase split
+between trait calls and `Option<Storage>` branches during the transition.
+Introducing the four traits replaces `Option<Storage>` in a single step.
 
-Rejected because the incremental approach leaves the codebase in a mixed state
-for an extended period — some operations go through the trait, others go
-through `Option<Storage>`.
-The layered approach achieves a clean state in one step.
+### Make `Storage` Non-Optional Without Traits
 
-### Make `Storage` non-optional without traits
-
-Remove the `Option` by requiring `Storage` in `Workspace::new`.
-Tests use `tempdir`.
-
-This eliminates the branching but doesn't solve the extensibility problem.
-Non-filesystem backends (in-memory, browser, database) still can't be used.
+Requiring a concrete `Storage` in `Workspace::new` and using `tempdir` in all
+tests eliminates the `Option<Storage>` branching, but it still ties `Workspace`
+to the filesystem and prevents in-memory, browser, or database backends.
 
 ## Non-Goals
 
@@ -677,59 +603,53 @@ Non-filesystem backends (in-memory, browser, database) still can't be used.
   filesystem roots (user-global, workspace, user-workspace).
   Abstracting this is out of scope.
 
-- **Changes to `Storage`'s internal logic.** The filesystem operations
-  (directory scanning, conversation persistence, symlink management) remain
-  as-is inside `Storage`.
-  This RFD wraps them behind traits; it does not rewrite them.
+- **Changes to `Storage`'s internal logic.** Directory scanning, conversation
+  persistence, and symlink management remain unchanged inside `Storage`; this
+  RFD only wraps them behind traits.
 
 ## Risks and Open Questions
 
-### Trait method granularity
+### Trait Method Granularity
 
-The proposed traits group methods by concern (persist, load, lock, session).
-An alternative grouping is by entity (conversation backend, session backend).
-The concern-based split was chosen because it aligns with how the code branches
-today, but implementation may reveal that a different cut is more natural.
+The proposed traits group methods by concern (persist, load, lock, session)
+rather than by entity (conversation backend, session backend).
+Grouping by concern matches how `Workspace` branches on storage today (such as
+swapping only persistence for `--no-persist`), though implementation may reveal
+a more natural split.
 
-### Shared vs. separate backend instances
+### Shared vs. Separate Backend Instances
 
-The design shows a single `FsStorageBackend` implementing all four traits.
-An alternative is four separate structs, each implementing one trait.
-This gives maximum flexibility (different persist and load backends) but adds
-construction complexity.
+`FsStorageBackend` implements all four traits on a single struct.
+An alternative is four separate structs, each implementing one trait, which
+allows mixing independent filesystem implementations per trait at the cost of
+extra construction boilerplate.
 Starting with a single struct and splitting later if needed is lower risk.
 
-### Sanitization for non-filesystem backends
+### Sanitization for Non-Filesystem Backends
 
-The current sanitization logic (trashing corrupt directories) is inherently
-filesystem-specific.
-For in-memory backends, there is nothing to sanitize — data is always
-structurally valid because it was written through typed APIs.
-For future database backends, sanitization would look different (SQL integrity
-checks, not directory scanning).
-The `LoadBackend::sanitize()` method accommodates this by letting each backend
-define what "sanitize" means.
-`InMemoryStorageBackend` returns an empty report; `FsStorageBackend` runs the
-full directory scan and trash logic.
+Sanitization currently scans conversation directories and moves corrupt entries
+to `.trash/`.
+Other backends have different integrity checks: `InMemoryStorageBackend` needs
+none and returns an empty `SanitizeReport`, while a future database backend
+would run SQL integrity checks rather than scanning directories.
+Placing `sanitize()` on `LoadBackend` lets each backend define its own
+validation.
 
 ## Implementation Plan
 
 ### Phase 1: Define traits in `jp_storage`
 
-Add the four trait definitions (`PersistBackend` is widened from the existing
-trait in `jp_workspace::persist`, then moved to `jp_storage`; `LoadBackend`,
-`LockBackend`, `SessionBackend` are new).
-Add `ConversationLockGuard` trait.
-No implementations yet, no callers yet.
+Move `PersistBackend` from `jp_workspace::persist` to `jp_storage` and define
+`LoadBackend`, `LockBackend`, `SessionBackend`, and `ConversationLockGuard`,
+without implementations or callers yet.
 
 **Depends on:** Nothing.
 **Mergeable:** Yes.
 
 ### Phase 2: `FsStorageBackend`
 
-Implement all four traits for `FsStorageBackend`, delegating to the existing
-`Storage` methods.
-This is a mechanical wrapping — no behavior changes.
+Implement all four traits for `FsStorageBackend` by delegating to the existing
+`Storage` methods, with no behavior changes.
 
 **Depends on:** Phase 1.
 **Mergeable:** Yes.
@@ -746,25 +666,21 @@ behavioral equivalence.
 
 ### Phase 4: Refactor `Workspace`
 
-Replace `Option<Storage>` with the four trait objects.
-Replace the `disable_persistence` boolean with a backend-swap implementation
-(the method signature is unchanged).
-Update all methods that branched on `self.storage.as_ref()` to call through the
-traits.
-Update `ConversationLock` and `ConversationMut` to hold non-optional writer and
-lock guard.
+Replace `Option<Storage>` with the four trait objects and reimplement
+`Workspace::disable_persistence()` to swap `self.persist` for
+`NullPersistBackend`.
+Update all `Workspace` methods that branched on `self.storage.as_ref()` to
+dispatch through the traits, and make `writer` and `lock_guard` non-optional on
+`ConversationLock` and `ConversationMut`.
 
 Update the CLI's `--no-persist` path to construct the workspace with
 `NullPersistBackend` instead of calling `disable_persistence()` after
 construction.
-The error-path call to `disable_persistence()` remains unchanged — it now swaps
-the backend instead of flipping a boolean.
-
-This is the large phase — it touches `Workspace`, `ConversationLock`,
-`ConversationMut`, and all their callers.
+Error-path callers continue to call `disable_persistence()` after construction.
 
 **Depends on:** Phase 2 and Phase 3.
-**Mergeable:** Yes, but this is a single large PR.
+**Mergeable:** Yes, as a single large PR that touches `Workspace`,
+`ConversationLock`, `ConversationMut`, and their callers.
 
 ### Phase 5: Migrate tests
 
@@ -779,26 +695,23 @@ Replace tests that create tempdir-backed workspaces and call
 ### Phase 6: Remove dead code
 
 Remove `MockPersistBackend` from `jp_workspace::persist` (replaced by
-`InMemoryStorageBackend`).
-Remove `Workspace::new()` constructor that takes only a root path (replaced by
-constructor that takes backends).
-Clean up `#[cfg(debug_assertions)]` test helpers that were workarounds for the
-optional storage model.
-Remove the `disable_persistence` boolean field from `Workspace` (the method
-remains, backed by the trait swap).
+`InMemoryStorageBackend`), the root-only `Workspace::new()` constructor
+(replaced by the backend-accepting constructors), `#[cfg(debug_assertions)]`
+test helpers that worked around optional storage, and the `disable_persistence`
+boolean field on `Workspace`.
 
 **Depends on:** Phase 5.
 **Mergeable:** Yes.
 
 ## References
 
-- [RFD 020] — Parallel Conversations.
+- [RFD 020]: Parallel Conversations.
   Introduced conversation locking and session-based tracking.
-- [RFD 031] — Durable Conversation Storage with Workspace Projection.
-  Redesigns the storage model around user-local as source of truth.
-- [RFD 052] — Workspace Data Store Sanitization.
-  Defines `Workspace::sanitize()` which this RFD restructures.
-- [RFD 069] — Guard-Scoped Persistence for Conversations.
+- [RFD 031]: Durable Conversation Storage with Workspace Projection.
+  Redesigns the storage model around user-local storage as the source of truth.
+- [RFD 052]: Workspace Data Store Sanitization.
+  Defines `Workspace::sanitize()`, which this RFD moves behind `LoadBackend`.
+- [RFD 069]: Guard-Scoped Persistence for Conversations.
   Introduced `PersistBackend` and `ConversationMut` auto-persist, which this RFD
   builds on.
 

@@ -13,48 +13,43 @@ This RFD introduces a `[plugins]` section in `AppConfig` that configures plugin
 execution trust policies, binary checksum pinning, and per-plugin options across
 JP's layered configuration chain.
 Under the `ask` policy, a user-local approval store records approved binary
-checksums so each binary only prompts once.
+checksums so each binary prompts only once.
 Official plugins install automatically on first use, while third-party plugins
 require an explicit `jp plugin install`.
 
 ## Motivation
 
 [RFD 072] defines the command plugin system: standalone binaries that
-communicate with JP over a JSON-lines protocol.
-Phase 3 of that RFD adds a plugin registry and auto-install flow.
-But [RFD 072] leaves open how users control plugin behavior:
+communicate with JP over a JSON-lines protocol, backed by a plugin registry and
+auto-install flow (Phase 3).
+It leaves four gaps in how users configure and trust plugins:
 
-- **Trust decisions are ad-hoc.** Without config integration, plugin approval
-  must be tracked in a separate JSON file that doesn't benefit from config
-  inheritance.
-  A user who trusts a plugin globally has no way to deny it in a specific
-  workspace, or vice versa.
+- **Trust decisions are ad-hoc.** Tracking plugin approvals only in a standalone
+  JSON file bypasses config inheritance.
+  A user who trusts a plugin globally cannot deny it in a specific workspace, or
+  vice versa.
 
-- **No checksum pinning.** The registry provides checksums for download
-  verification, but there is no mechanism for a user to pin a specific binary
-  and refuse to run a changed one.
-  This matters for supply-chain security: if a registry-hosted binary is
-  compromised and re-published with a new checksum, users who haven't pinned are
-  silently exposed.
+- **No checksum pinning.** The registry provides checksums to verify downloads,
+  but users cannot pin a specific binary digest and refuse to run a modified
+  binary.
+  If a registry-hosted binary is compromised and republished with a new
+  checksum, unpinned installations are silently exposed.
 
-- **No per-plugin options.** Plugins like `jp-serve` need configuration (bind
-  address, port) that is specific to the plugin.
-  Without a config path, these settings must be passed as CLI arguments every
-  time, or the plugin must invent its own config file.
+- **No per-plugin options.** Plugins like `jp-serve` need plugin-specific
+  settings (bind address, port).
+  Without a config path, users must pass these as CLI arguments on every
+  invocation, or the plugin must manage its own config file.
 
-- **Plugin types aren't distinguished.** The registry currently assumes all
-  plugins are command plugins.
-  When wasm plugins ([RFD 016]) arrive, the registry and config need a way to
-  distinguish between plugin kinds.
-
-This RFD addresses all four gaps by defining the plugin config model and its
-interaction with the dispatch pipeline.
+- **Plugin types aren't distinguished.** The registry assumes all plugins are
+  command plugins.
+  Supporting wasm plugins ([RFD 016]) requires distinguishing plugin kinds in
+  both the registry and the configuration.
 
 ## Design
 
 ### Plugin Kind Taxonomy
 
-The registry introduces a `type` field on each plugin entry:
+Each registry plugin entry carries a `type` field:
 
 ```json
 {
@@ -70,13 +65,13 @@ The registry introduces a `type` field on each plugin entry:
 }
 ```
 
-`type` defaults to `"command"` when absent, so existing registry entries remain
+`type` defaults to `"command"` when omitted, keeping existing registry entries
 valid.
-The dispatch pipeline filters on `type` and ignores entries with unrecognized
-values, allowing future plugin types (e.g. `wasm`) to be added to the registry
-without breaking older JP versions.
+The dispatch pipeline filters on `type` and ignores unrecognized values, so
+future plugin types (such as `wasm`) can be added to the registry without
+breaking older JP versions.
 
-The `PluginKind` enum in `jp_plugin::registry`:
+`jp_plugin::registry` represents this field with `PluginKind`:
 
 ```rust
 pub enum PluginKind {
@@ -87,7 +82,8 @@ pub enum PluginKind {
 
 ### Configuration Schema
 
-The `[plugins]` section is added to `AppConfig`:
+The `[plugins]` section in `AppConfig` configures global plugin settings and
+per-plugin policies:
 
 ```toml
 [plugins]
@@ -101,8 +97,8 @@ run = "allow"                     # execution policy
 
 #### `plugins.shutdown_timeout_secs`
 
-The grace period between sending `Shutdown` over the protocol and killing the
-plugin and everything it started.
+Grace period in seconds between sending `Shutdown` over the protocol and
+forcibly terminating (`SIGKILL`) the plugin and its child processes.
 Applies to all command plugins.
 
 #### Per-Plugin Configuration
@@ -122,39 +118,38 @@ bind = "127.0.0.1"
 port = 3141
 ```
 
-**`run`** (`RunPolicy`) — Execution policy:
+**`run`** (`RunPolicy`): Execution policy.
 
-| Value   | Behavior                                                    |
-| ------- | ----------------------------------------------------------- |
-| `ask`   | Run a binary JP can vouch for, and prompt for any other.    |
-|         | The default for every plugin.                               |
-| `allow` | Run without prompting.                                      |
-| `deny`  | Never run. JP exits with an error if the plugin is invoked. |
+| Value   | Behavior                                                     |
+| ------- | ------------------------------------------------------------ |
+| `ask`   | Run verified official binaries and approved binaries; prompt |
+|         | for any other. The default for every plugin.                 |
+| `allow` | Run without prompting.                                       |
+| `deny`  | Never run. JP exits with an error if the plugin is invoked.  |
 
-The `run` policy applies at every execution point, wherever the binary came
-from.
-Under `ask`, JP vouches for two kinds of binary: an official one whose SHA-256
-matches its registry entry, and one the [approval store](#approval-store) holds.
-An official plugin therefore runs without a prompt, as if it were part of `jp`,
-for as long as its binary is the one the registry publishes.
-`allow` trusts a plugin by name, whatever its binary: it suits a plugin that is
-rebuilt often, which `ask` would prompt for after every build.
+The `run` policy applies at every execution point, regardless of how the binary
+was discovered.
+Under `ask`, two kinds of binary run without prompting: an official binary whose
+SHA-256 matches its registry entry, and a binary recorded in the [approval
+store](#approval-store).
+An unmodified official plugin therefore runs without prompting.
+`allow` trusts a plugin by name regardless of its binary digest, which avoids
+re-prompting after every build during local plugin development.
 
-`allow` names the decision, not how the plugin runs: a plugin that runs without
-a prompt can still ask the user questions.
-`unattended` is accepted as a deprecated spelling of `allow` and logs a warning.
+`allow` governs only the admission decision; an allowed plugin can still prompt
+the user interactively during execution.
+`unattended` is accepted as a deprecated alias for `allow` and logs a warning.
 
-**`checksum`** — Pins the binary to a specific hash.
+**`checksum`**: Pins the binary to a specific digest.
 When set, JP computes the binary's checksum before execution and refuses to run
-if it doesn't match.
+it on a mismatch.
 This catches two scenarios:
 
-1. A registry-hosted binary is re-published with different content (supply-chain
+1. A registry-hosted binary is republished with different contents (supply-chain
    compromise).
-2. A PATH-discovered binary is replaced or modified.
+2. A `$PATH`-discovered binary is replaced or modified.
 
-The checksum config reuses the existing `ChecksumConfig` type from MCP server
-configuration:
+The setting reuses `ChecksumConfig` from MCP server configuration:
 
 ```rust
 pub struct ChecksumConfig {
@@ -163,48 +158,47 @@ pub struct ChecksumConfig {
 }
 ```
 
-When a checksum mismatch occurs, JP prints the expected and actual values and
-tells the user which config key to update.
-This makes it easy to intentionally accept a new binary after reviewing the
-change.
+On a checksum mismatch, JP prints the expected and actual digests and the config
+key to update, so the user can accept a legitimate update after reviewing it.
 
-**`options`** — A table of opaque values passed to the plugin in the `options`
-field of the `init` message.
-JP does not validate the contents — the plugin is responsible for parsing and
-error reporting.
-Options merge key by key across config layers, recursing into nested tables, so
-a later layer only replaces the options it names.
-This follows the same pattern as tool options ([RFD 042]).
+**`options`**: A table of opaque key-value pairs passed to the plugin in the
+`options` field of the `init` message.
+JP does not validate the table; the plugin parses and validates its own options.
+Options merge key by key across config layers, recursing into nested tables so
+later layers override only the keys they specify, matching tool options ([RFD
+042]).
 
-Example: the `serve-web` plugin reads `options.bind` and `options.port` from
+For example, the `serve-web` plugin reads `options.bind` and `options.port` from
 `init` to configure its HTTP listener.
 
-### Installing
+### Plugin Installation
 
-No config decides whether a plugin is installed:
+Plugin installation is not controlled by configuration:
 
-- **Official plugins install on first use.** Typing an official command whose
-  plugin is missing downloads it, checks it against the registry's checksum, and
-  runs it ([RFD 072]).
-  `jp plugin update` updates it the same way when the registry publishes a new
+- **Official plugins install on first use.** Invoking an official command whose
+  binary is missing downloads the binary, verifies it against the registry
+  checksum, and runs it ([RFD 072]).
+  `jp plugin update` uses the same flow when the registry publishes a new
   binary.
-- **Third-party plugins install only when asked.** `jp plugin install <name>`
-  shows where the binary comes from and asks before downloading it.
-  Answering yes is also the approval to run it, so the first run does not ask
-  again.
-  A binary the user places on `$PATH` is installed by that act, and its first
-  run asks.
+- **Third-party plugins require explicit installation.** `jp plugin install
+  <name>` displays the binary source URL and prompts for confirmation before
+  downloading.
+  Confirming the install also records execution approval, so the first run does
+  not prompt again.
+  A binary placed directly on `$PATH` requires no install step and prompts for
+  approval on first run.
 
-`JP_NO_PLUGIN_DOWNLOAD=1` stops JP from downloading an official plugin on its
-own, for a machine where binaries arrive through a package manager or not at
-all.
+Setting `JP_NO_PLUGIN_DOWNLOAD=1` disables automatic downloads of official
+plugins, for environments where binaries are managed by a system package manager
+or offline.
 
 ### Approval Store
 
-Under `ask`, the host remembers the user's answer.
-Running `jp plugin install <name>` for a third-party plugin, answering `Y` at
-the prompt, or running `jp plugin approve <path>` records an approval in
-`$XDG_DATA_HOME/jp/plugin-approvals.json`:
+Under the `ask` policy, JP persists user approvals in
+`$XDG_DATA_HOME/jp/plugin-approvals.json`.
+An entry is recorded when the user runs `jp plugin install <name>` for a
+third-party plugin, answers `Y` at the execution prompt, or runs `jp plugin
+approve <path>`:
 
 ```json
 {
@@ -224,33 +218,34 @@ the prompt, or running `jp plugin approve <path>` records an approval in
 }
 ```
 
-An approval is keyed by the plugin's name, the same key as
-`plugins.command.<name>` ([RFD 072]), and holds one binary: the path it was
-found at and the SHA-256 of its contents.
-`installed` marks a binary JP wrote itself, for an official plugin on first use
-or for `jp plugin install`.
-An official binary needs no approval to run, but the record is how JP tells a
-binary it can update from one changed on this machine, which it leaves alone.
+Each entry is keyed by the plugin name, matching `plugins.command.<name>` ([RFD
+072]), and records a single binary's path and SHA-256 digest.
+`installed: true` marks binaries that JP downloaded itself (either an official
+plugin on first use or a third-party plugin via `jp plugin install`).
+Official binaries do not need approval to run, but recording their installed
+digest lets JP distinguish a binary it manages and can safely update from one
+modified locally, which `jp plugin update` leaves untouched.
 
-An approval answers the prompt for that exact file with those exact bytes, and
-for nothing else:
+An approval applies only to that exact file path and SHA-256 digest:
 
-- **A changed binary asks again.** The same path with different contents, after
-  an upgrade or a rebuild, prompts and says the binary changed since it was
-  approved.
-- **Another path asks again, naming the approved one.** A binary with the same
-  name at a different path prompts with both paths.
-  While both files exist they conflict before admission is reached ([RFD 072]),
-  so this is the case where the approved binary has moved or gone.
-- **Policy comes first.** The store is consulted only when the effective `run`
-  policy is `ask`, after a pinned checksum has matched.
-  A `deny` from any config layer refuses a plugin the user approved, and `allow`
-  needs no approval.
+- **Modified binary prompts again.** If the file at the approved path has a
+  different digest (for example, after an upgrade or rebuild), JP prompts again
+  and notes that the binary changed since it was approved.
+- **Moved binary prompts again.** If a plugin with the same name resolves to a
+  different path, JP prompts and displays both the new path and the previously
+  approved path.
+  (If both files still exist on disk, routing rejects them as a conflict before
+  reaching admission; see [RFD 072].)
+- **Config policy takes precedence.** JP consults the approval store only when
+  the effective `run` policy is `ask` and any pinned `checksum` has already
+  matched.
+  `deny` in any config layer blocks even an approved binary, and `allow` runs
+  without checking the store.
 
-The prompt shows the binary's path, and says which kind of binary it is asking
-about.
-A third-party binary that claims an official command replaces the official
-plugin ([RFD 072]), so its prompt says so, with **third-party** in bold red:
+The confirmation prompt displays the binary path and why confirmation is needed.
+When a third-party binary claims an official command path, it overrides the
+official plugin ([RFD 072]), and the prompt warns the user with **third-party**
+highlighted in bold red:
 
 ```txt
   → jp serve web is claimed by the third-party plugin `webui`, which replaces
@@ -259,41 +254,44 @@ plugin ([RFD 072]), so its prompt says so, with **third-party** in bold red:
 Run it? [y/Y/N]
 ```
 
-An official plugin's binary that does not match its registry entry, such as a
-copy a package manager built, is asked about as not matching the official
-release.
+When an official plugin binary does not match the registry digest (such as a
+binary built by a system package manager), the prompt notes that the binary does
+not match the official release.
 
-`jp plugin approve <path>` names a file, which is consent to run it once: the
-host sends it `describe`, shows its path, description, and claims, refuses when
-the answer disagrees with the binary's manifest, and records the approval.
-For a binary whose manifest cannot be read, such as one compressed with UPX, the
-approval also records the manifest fields from the answer, under `manifest`,
-which is the only way such a binary gets claims to route by ([RFD 072]).
-`jp plugin revoke <name>` removes an approval.
-`jp plugin uninstall <name>` deletes a binary from JP's install directory along
-with its approval; a binary on `$PATH` belongs to whatever put it there, so
-`uninstall` refuses it and points at `revoke`.
-`jp plugin list` shows each plugin's approval state.
+When no interactive terminal is available, JP cannot prompt; it refuses to run
+the unapproved binary and prints the `jp plugin approve <path>` command needed
+to authorize it.
 
-Without a terminal the host cannot prompt.
-It refuses the plugin and prints the `jp plugin approve` command that would
-admit it.
+`jp plugin approve <path>` authorizes a binary non-interactively.
+Running the command grants consent to spawn the binary once for discovery: the
+host sends `describe`, prints the binary's path, description, and command
+claims, verifies that the response matches the binary's embedded manifest, and
+records the approval.
+If the binary's embedded manifest cannot be read from disk (for example, when
+packed with UPX), the approval entry also caches the `describe` response under
+`manifest` so the router can read its command claims without spawning the binary
+([RFD 072]).
 
-Approvals are user-global, not per workspace.
-An approval answers whether the binary may run as the user, and a binary has the
-same reach in every workspace; a plugin that serves several workspaces ([RFD
-114]) reaches all of them at once.
-Refusing a plugin in one workspace is config's job: `run = "deny"` in that
-workspace's config.
+`jp plugin revoke <name>` removes an approval entry.
+`jp plugin uninstall <name>` removes both the binary from JP's plugin directory
+and its approval entry; for binaries discovered on `$PATH`, `uninstall` refuses
+to delete the file and directs the user to `jp plugin revoke` instead.
+`jp plugin list` displays each plugin's approval state.
 
-Approvals are kept out of config because config does not stay on this machine.
-A conversation records the configuration it started with and every change to it,
-and a conversation projected into a checkout is usually committed with the
-project.
-An approval names a path on this machine, and belongs in neither.
-The store follows the trust-on-first-use pattern JP uses for tool mounts outside
-the workspace, but is user-global where that one is per workspace, because
-approving a plugin works outside any workspace.
+Approvals are user-global rather than workspace-scoped.
+A plugin binary runs with the user's OS permissions regardless of the active
+workspace, and multi-workspace plugins ([RFD 114]) access multiple workspaces in
+a single process.
+Blocking a plugin in a specific workspace is handled by setting `run = "deny"`
+in that workspace's configuration.
+
+Approvals live in a dedicated user-data file rather than in `AppConfig` because
+configuration is persisted in conversation event streams and often committed to
+version control alongside workspace files.
+Machine-local binary paths and digests do not belong in shared repository state.
+This follows the same trust-on-first-use pattern JP uses for out-of-workspace
+tool mounts, except plugin approvals are user-global so plugins can be approved
+and used outside a workspace.
 
 ### Config Inheritance
 
@@ -306,56 +304,53 @@ Plugin config participates in JP's standard config inheritance chain:
 3. **Local config** (`.jp.toml`): directory-scoped overrides.
 4. **CLI flags** (`--cfg plugins.command.serve.run=deny`): one-shot overrides.
 
-This means a user can set `run = "allow"` globally and override it to `run =
-"deny"` in a workspace that handles sensitive data.
+A user can set `run = "allow"` globally and override it with `run = "deny"` in a
+workspace that handles sensitive data.
 
 ### Plugin Management Without a Workspace
 
 Plugin management commands (`jp plugin list`, `install`, `uninstall`, `update`,
-`approve`, and `revoke`) need no workspace.
-They work from any directory, including outside of any JP workspace.
-This is intentional: plugin binaries and approvals are user-global (installed to
-`$XDG_DATA_HOME/jp/plugins/`), not workspace-local, so requiring `jp init`
-before installing a plugin would be unnecessary friction.
+`approve`, and `revoke`) run from any directory without requiring a JP
+workspace.
+Because plugin binaries and approvals are stored globally in
+`$XDG_DATA_HOME/jp/`, users do not need to run `jp init` before managing
+plugins.
 
-The trade-off is that management commands only see the user-global config layer.
-Workspace and local config layers are unavailable.
-This means a `run = "deny"` set in a workspace config is enforced during `jp
-<plugin>` dispatch (which runs inside a workspace) but not during `jp plugin
-install` (which runs outside).
-This is acceptable: `deny` means "don't run this plugin here," not "don't
-download it."
-
-Approving runs the plugin once, so `jp plugin approve` refuses a plugin the
-user-global config denies.
+Management commands therefore load only the user-global config layer; workspace
+and local config layers are unavailable.
+A `run = "deny"` rule in a workspace config blocks `jp <plugin>` dispatch within
+that workspace, but does not prevent `jp plugin install` from downloading the
+plugin.
+Because `jp plugin approve` spawns the binary once for `describe`, it enforces
+`run = "deny"` when set in the user-global config.
 
 ### Dispatch Integration
 
-Admission precedes every spawn of a plugin binary, including one that only
-answers `describe` ([RFD 072]).
-Routing has picked a binary by then, downloading an official plugin that was
-missing; that download reads no config.
-Admission then decides under the plugin's configuration, in order:
+Admission runs before every plugin process spawn, including `describe` probes
+([RFD 072]).
+By the time admission runs, routing has already resolved the binary path
+(downloading a missing official plugin if needed, which does not read config).
+Admission then evaluates the plugin's resolved configuration in order:
 
-1. **Deny check**: If `plugins.command.<name>.run = "deny"`, refuse.
-2. **Pinned checksum**: If a checksum is pinned and the binary does not match
-   it, refuse.
-   This also covers a binary just downloaded from the registry: the registry
-   checksum proves the download is intact, and the pin proves it is still the
-   binary the user last reviewed.
-3. **`allow`**: Run.
-4. **`ask`**, the default: run an official binary whose SHA-256 matches its
-   registry entry, or a binary the approval store holds at this path with these
-   contents.
-   Prompt for anything else, and without a terminal, refuse (see [Approval
-   Store](#approval-store)).
+1. **Deny**: If `plugins.command.<name>.run = "deny"`, abort with an error.
+2. **Pinned checksum**: If `checksum` is configured and the binary's digest does
+   not match, abort.
+   This check also applies to newly downloaded official binaries: the registry
+   checksum verifies download integrity, while the config pin verifies that the
+   binary matches the version the user reviewed.
+3. **Allow**: If `run = "allow"`, spawn the binary.
+4. **Ask** (default): Spawn the binary if it is an official plugin whose SHA-256
+   matches its registry entry, or if its path and SHA-256 match an entry in the
+   [approval store](#approval-store).
+   Otherwise, prompt the user for approval, or abort if no interactive terminal
+   is attached (see [Approval Store](#approval-store)).
 
 ### Future: Plugin Options Schema
 
-The current `options` field is an opaque `Value` — JP passes it through without
+The `options` field is an opaque JSON `Value` that JP forwards without
 validation.
-A future extension could have plugins declare their options schema via the
-`describe` protocol:
+A future extension to the `describe` protocol can allow plugins to declare a
+JSON Schema for their options:
 
 ```json
 {
@@ -376,123 +371,124 @@ A future extension could have plugins declare their options schema via the
 }
 ```
 
-This would enable config validation, `jp config show` integration, and help text
-generation.
-It is explicitly deferred — the opaque approach is sufficient for the initial
-plugin set and avoids coupling the config system to plugin internals.
+Declaring a schema would enable config validation, `jp config show` integration,
+and generated help text.
+Schema validation is deferred; opaque options suffice for the initial plugin set
+and avoid coupling `jp_config` to plugin internals.
 
 ## Drawbacks
 
-- **No version constraints.** The config has no `version` field for constraining
-  which plugin version to install.
-  This requires the registry to carry version metadata and JP to implement a
-  resolution algorithm.
-  The checksum pin provides a weaker but simpler guarantee: "run exactly this
-  binary, or nothing."
+- **No version constraints.** Configuration has no `version` field to constrain
+  which plugin version is installed.
+  Supporting version constraints requires version metadata in the registry and a
+  resolution algorithm in JP.
+  Checksum pinning provides a simpler guarantee: run this exact binary or fail.
 
-- **Opaque options are unvalidated.** A typo in `options.web.prrt` is silently
-  ignored.
-  The plugin may or may not report the error.
-  This is the same tradeoff as tool options ([RFD 042]) and is acceptable until
-  the options schema protocol is implemented.
+- **Opaque options are unvalidated.** JP does not catch typos such as
+  `options.web.prrt`; error reporting depends on the plugin.
+  This matches the tool options tradeoff ([RFD 042]) until the `describe`
+  options schema is implemented.
 
-- **No checksum auto-population.** Users must manually obtain the checksum value
-  (e.g., from the registry or by running `shasum`) and paste it into config.
+- **Manual checksum pinning.** Users must obtain the checksum digest manually
+  (for example, from the registry or via `shasum`) and paste it into config.
   A future `jp plugin pin <name>` command could automate this.
 
-- **Approvals are per binary.** A third-party plugin asks again after every
-  upgrade, and a plugin under development after every rebuild.
-  `run = "allow"` trusts a plugin by name instead, for the user who wants that.
+- **Approvals invalidate on binary changes.** Upgrading a third-party plugin or
+  rebuilding a local plugin changes its digest and triggers a new approval
+  prompt.
+  Users developing a plugin locally can set `run = "allow"` to trust it by name
+  instead.
 
-- **One installed version per machine.** `jp plugin update` updates an official
-  plugin for every workspace at once, and a workspace cannot hold it at an older
-  version except by pinning its checksum, which stops the update everywhere.
-  Per-workspace versions need a plugin lock file, which is its own design.
+- **Single installed version per machine.** `jp plugin update` updates an
+  official plugin across all workspaces.
+  A workspace cannot hold an older version without pinning `checksum`, which
+  causes the updated binary to fail admission in that workspace.
+  Supporting per-workspace plugin versions would require a workspace lockfile.
 
 ## Alternatives
 
-### Standalone approval file
+### Standalone Approval File Only
 
-The initial Phase 3 implementation stored plugin approvals in a separate
-`$XDG_DATA_HOME/jp/plugin-approvals.json` file, tracking binary path and
-checksum per approved plugin, as the only trust mechanism.
+The initial Phase 3 implementation used
+`$XDG_DATA_HOME/jp/plugin-approvals.json` as the sole trust mechanism, tracking
+the approved binary path and checksum per plugin without a `[plugins]` config
+section.
 
-Rejected as the trust mechanism because:
+Rejected as the sole mechanism because:
 
-- Does not participate in config inheritance.
-  Can't deny a plugin per-workspace.
-- No support for execution policy beyond binary approve/deny.
-- Mixes concerns: trust decisions (should this run?) and identity assertions (is
-  this the right binary?) should be expressible independently.
+- It does not participate in config inheritance, so a workspace cannot deny a
+  globally approved plugin.
+- It cannot express name-based trust (`allow`) or explicit blocking (`deny`).
+- It conflates execution policy (whether the plugin may run) with binary
+  identity (whether the file matches a known digest).
 
-Kept as the [Approval Store](#approval-store), which only remembers answers
-given under `ask`.
-Config decides whether the host asks, and the store records what the user
-answered for one binary, so policy still layers, a workspace can still deny a
-plugin, and a pinned checksum still asserts identity on its own.
-The cost is a second file to maintain beside config.
+Retained in a narrower role as the [Approval Store](#approval-store) to cache
+user responses under `run = "ask"`.
+Configuration controls execution policy and optional checksum pinning across
+layers, while the store records which specific binaries the user has approved,
+at the cost of maintaining state in a separate file alongside config.
 
-### Approvals in config
+### Storing Approvals in Config
 
-The prompt records an approval as config, `run = "allow"` with a pinned
-checksum, in the user-global config file.
-
-Rejected because:
-
-- Config does not stay on the machine.
-  Every conversation records its configuration, which would carry local paths
-  into checkouts where conversations are committed.
-- A pinned checksum refuses a changed binary, where an approval should ask
-  again.
-- The prompt cannot write to a config file the user manages read-only, such as
-  one generated by a system configuration tool.
-
-A configuration layer JP manages itself and keeps out of conversations could
-hold approvals.
-That is a design of its own, and the store can move into it once it exists.
-
-### Configurable installs
-
-`plugins.auto_install`, and an `install` setting per plugin, decide whether a
-plugin that is missing is installed when its command is typed, third-party
-plugins included.
+Persist interactive approvals by writing `run = "allow"` and a `checksum` pin to
+the user-global config file.
 
 Rejected because:
 
-- Config that decides an install has to be resolved before the binary exists,
-  and which configuration applies depends on the plugin's workspace scope ([RFD
-  114]), which is read from the binary.
-  Resolving it anyway means copying the scope into the registry, or letting one
-  workspace's configuration decide the download and another's the run.
-- A third-party binary would arrive on the machine because a config file said
-  so, including one committed to a repository the user cloned.
-  With installs explicit, third-party code arrives only when the user runs `jp
-  plugin install` or puts a binary on `$PATH`, as with `cargo install`.
-- Official plugins need no switch: a package manager puts their binaries on
-  `$PATH`, and `JP_NO_PLUGIN_DOWNLOAD` stops downloads altogether.
+- Conversations record the resolved configuration in their event streams, which
+  would leak machine-local paths and digests into conversations committed to
+  version control.
+- A `checksum` pin hard-fails when a binary changes, whereas an interactive
+  approval under `ask` should prompt the user again after an upgrade.
+- Interactive prompts cannot mutate a read-only user-global config file (such as
+  one generated by a system configuration tool).
 
-### Environment variables for plugin options
+If JP later introduces a machine-local, JP-managed config layer that is excluded
+from conversation streams, the approval store can move into it.
 
-Pass plugin options via environment variables instead of the config file (e.g.,
-`JP_PLUGIN_SERVE_PORT=3141`).
+### Configurable Auto-Install
+
+Control automatic installation via `plugins.auto_install` and per-plugin
+`install` settings, including for third-party plugins.
 
 Rejected because:
 
-- Doesn't compose with config inheritance.
-- Awkward for nested options (port is fine, but complex structures don't map
-  well to env vars).
-- The plugin protocol already sends the full config in the `init` message, so
-  the transport is free.
+- Evaluating install config requires resolving configuration before the plugin
+  binary exists on disk, but which config layers apply depends on the plugin's
+  workspace scope ([RFD 114]), which is read from the binary itself.
+  Resolving config before download would either duplicate workspace scope in the
+  registry or let one workspace's config govern the download and another's
+  govern execution.
+- A repository's `.jp/config.toml` could trigger automatic downloads of
+  third-party binaries when a user clones the project and runs a command.
+  Requiring explicit installation ensures third-party binaries arrive only when
+  the user runs `jp plugin install` or places them on `$PATH`, matching `cargo
+  install`.
+- Official plugins do not need a config toggle: system package managers can
+  place their binaries on `$PATH`, and `JP_NO_PLUGIN_DOWNLOAD` disables
+  automatic downloads altogether.
 
-### Typed plugin config sections
+### Environment Variables for Plugin Options
 
-Define a typed struct per plugin in `jp_config` (e.g., `ServePluginConfig` with
-`port: u16` and `host: String`).
+Pass plugin options via environment variables instead of the config file (for
+example, `JP_PLUGIN_SERVE_PORT=3141`).
 
-Rejected for the same reasons as in [RFD 042]: it couples the config crate to
-plugin internals and doesn't scale to third-party plugins.
-The opaque `Value` approach is the right starting point, with the schema
-protocol as the future validation layer.
+Rejected because:
+
+- Environment variables do not compose with layered config inheritance.
+- Nested option structures do not map cleanly to flat environment variables.
+- The command plugin protocol already sends the full config in the `init`
+  message, so no extra transport is needed.
+
+### Typed Plugin Config Sections
+
+Define a typed struct per plugin in `jp_config` (for example,
+`ServePluginConfig` with `port: u16` and `host: String`).
+
+Rejected for the same reasons as in [RFD 042]: it couples `jp_config` to plugin
+internals and does not scale to third-party plugins.
+Opaque `Value` options provide a plugin-agnostic starting point, with the
+`describe` schema protocol as the future validation layer.
 
 ## Non-Goals
 
@@ -506,31 +502,25 @@ protocol as the future validation layer.
 
 - **Wasm plugin configuration.** [RFD 016] defines the wasm plugin system.
   When wasm plugins need configuration, the `plugins.wasm.<name>` namespace is
-  reserved but its schema is undefined here.
+  reserved, with its schema left to that design.
 
 ## Risks and Open Questions
 
-- **Checksum rotation workflow.** When a plugin is legitimately updated, users
-  with a pinned checksum must manually update the value.
-  If many users pin checksums, plugin authors need a way to communicate new
-  checksums (release notes, a `jp plugin pin --update` command, etc.).
-  The UX for this needs attention.
+- **Checksum rotation workflow.** When a pinned plugin is legitimately updated,
+  users must update the configured digest manually.
+  If checksum pinning becomes common, plugin authors will need a clear way to
+  publish digests (release notes or a `jp plugin pin --update` command).
 
 - **Options forwarding path.** The `init` message sends the full `AppConfig` as
-  JSON.
-  Plugin-specific options currently live at `plugins.command.<name>.options` in
-  this blob.
-  Plugins must navigate this path to find their options.
-  A cleaner approach might extract the plugin's options and send them in a
-  dedicated `options` field in the `init` message.
-  This is a protocol change that should be coordinated with [RFD 072].
+  JSON, placing plugin options at `plugins.command.<name>.options`.
+  Extracting the active plugin's options into a top-level `options` field on the
+  `init` message is cleaner and should be coordinated with [RFD 072].
 
-- **Config scope during management commands.** As described in the "Plugin
-  Management Without a Workspace" section, management commands only see
-  user-global config.
-  If a future use case requires workspace-aware management (e.g.
-  workspace-scoped plugin lists), the management commands would need to
-  optionally load the workspace when one is available.
+- **Config scope during management commands.** As described in [Plugin
+  Management Without a Workspace](#plugin-management-without-a-workspace),
+  management commands load only user-global config.
+  Supporting workspace-aware management commands (such as workspace-scoped
+  plugin lists) would require loading the workspace when one is available.
 
 ## Implementation Plan
 
@@ -564,21 +554,21 @@ protocol as the future validation layer.
 - [x] **Phase 4: `allow`**
 
   - Rename `run = "unattended"` to `allow`, accepting `unattended` as a
-        deprecated spelling that logs a warning.
-  - Tool and label settings that use the same value (`run`, and a tool's
-        `result` and `format`) are renamed in the same change, so config uses
-        one word for it.
+        deprecated alias that logs a warning.
+  - Rename the matching `unattended` value on tool and label settings
+        (`run`, `result`, and `format`) in the same change so config uses a
+        single term.
   - Can be merged independently.
 
 - [x] **Phase 5: Explicit installs**
 
   - [x] Remove `plugins.auto_install` and `plugins.command.<name>.install`
             ([RFD 072] Phase 5).
-  - [x] Make `ask` the default `run` policy for every plugin, answered
-            without a prompt by a matching registry checksum for an official
-            binary ([RFD 072] Phase 6).
-  - [x] Record an approval for `jp plugin install`, and an `installed`
-            record for every binary JP writes ([RFD 072] Phase 6).
+  - [x] Make `ask` the default `run` policy for every plugin, running
+            official binaries without prompting when their SHA-256 matches the
+            registry ([RFD 072] Phase 6).
+  - [x] Record an approval entry on `jp plugin install`, and set `installed`
+            on every binary JP downloads ([RFD 072] Phase 6).
 
 ## References
 

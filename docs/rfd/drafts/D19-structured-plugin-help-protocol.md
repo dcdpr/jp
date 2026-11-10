@@ -19,31 +19,29 @@ commands.
 
 ## Motivation
 
-[RFD 072] introduced the `Describe` protocol message, which includes an optional
-`help` field containing a raw text string that the host prints verbatim for `jp
-<plugin> -h`.
-This works but has drawbacks:
+In [RFD 072], the `Describe` response includes an optional `help` field
+containing a raw text string that the host prints verbatim for `jp <plugin> -h`.
+Printing pre-formatted text from the plugin has three drawbacks:
 
-- **Inconsistent formatting**: Plugin help text doesn't match clap's column
-  alignment, color, wrapping, or short/long help distinction.
-- **No `-h` vs `--help` support**: clap distinguishes between short help (`-h`,
-  compact) and long help (`--help`, expanded).
-  With a single `help` string, plugins can't participate in this convention.
-- **Duplicated layout logic**: Each plugin must format its own help text,
-  duplicating layout decisions that the host already handles through clap.
+- **Inconsistent formatting**: Plugin help text does not match clap's column
+  alignment, color, or line wrapping.
+- **No `-h` vs `--help` support**: clap distinguishes between compact short help
+  (`-h`) and expanded long help (`--help`), which a single `help` string cannot
+  represent.
+- **Duplicated layout logic**: Each plugin formats its own help output,
+  duplicating layout logic that the host already handles through clap.
 
 The host should own help rendering.
-Plugins provide the semantic content (command name, arguments, flags,
-subcommands), and the host feeds it into clap's `Command` builder for rendering.
+Plugins provide the command definition (command name, arguments, flags, and
+subcommands), and the host renders it through clap's `Command` builder.
 
 ## Design
 
-### New Protocol Message: `Help`
+### `Help` Protocol Message
 
-A new request/response pair is added to the plugin protocol alongside the
-existing `Describe` message.
-`Describe` remains for lightweight metadata (used in `jp -h` listings).
-`Help` returns the full CLI definition.
+The plugin protocol adds a `Help` request/response pair alongside `Describe`.
+While `Describe` returns lightweight metadata for `jp -h` listings, `Help`
+returns the full CLI definition.
 
 **Host → Plugin:**
 
@@ -183,76 +181,75 @@ fn build_clap_command(name: &str, cmd: &PluginCommand) -> clap::Command {
 }
 ```
 
-Then calls `command.print_help()` or `command.print_long_help()` depending on
-whether the user passed `-h` or `--help`.
+The host then calls `command.print_help()` for `-h` or
+`command.print_long_help()` for `--help`.
 
-### Interaction with `Describe`
+### Fallback to `Describe`
 
-`Describe` continues to serve its current role: lightweight metadata for plugin
-discovery and `jp -h` listings.
-The `help` field in `DescribeResponse` becomes a fallback for plugins that don't
-implement the `Help` message.
+`Describe` still provides lightweight metadata for plugin discovery and `jp -h`
+listings, and the `help` field on `DescribeResponse` serves as a fallback for
+plugins that do not implement the `Help` message.
 
-The host's flow for `jp <plugin> -h`:
+For `jp <plugin> -h` or `jp <plugin> --help`, the host runs the following flow:
 
-1. Spawn plugin, send `help`.
-2. If the plugin responds with a `Help` message, build and render via clap.
-3. If the plugin responds with anything else (or doesn't understand `help`),
+1. Spawn the plugin and send `help`.
+2. If the plugin responds with a `Help` message, build the `clap::Command` and
+   render it.
+3. If the plugin responds with anything else (or does not recognize `help`),
    fall back to `describe` and print the `help` text field.
 
 ### Shell Script Plugins
 
-Shell scripts can implement `Help` by echoing the JSON structure.
-For simple plugins with a few flags, this is straightforward.
-For complex plugins, the `describe.help` fallback provides a low-effort
-alternative.
+Shell scripts can implement `Help` by echoing the JSON structure directly.
+Simple plugins with only a few flags can emit `Help` inline, while complex
+plugins can rely on the `describe.help` fallback.
 
 ## Drawbacks
 
-- **Coupling to clap's model**: The structured types mirror clap's API.
-  If clap changes, the protocol types might need updating.
-  In practice, clap's core model (commands + args) is stable across major
+- **Coupling to clap's model**: The protocol types mirror clap's API, so
+  breaking changes in clap could require protocol updates.
+  In practice, clap's core model (commands and arguments) is stable across major
   versions.
 
-- **More work for plugin authors**: Defining args as structured JSON is more
-  verbose than a help string.
-  The fallback to `describe.help` mitigates this for simple plugins.
+- **More work for plugin authors**: Defining arguments as structured JSON is
+  more verbose than returning a single help string, though the `describe.help`
+  fallback mitigates this for simple plugins.
 
 ## Alternatives
 
 ### Keep the free-text `help` field
 
-The current approach.
-Simple but inconsistent.
-Plugin help looks different from built-in command help.
+Keeping the existing free-text `help` field is simpler for plugin authors, but
+leaves plugin help output visually inconsistent with built-in commands.
 
 ### Plugin-side clap rendering
 
-Have plugins use clap (or their own framework) and return pre-rendered text.
-Rejected because it doesn't achieve formatting consistency and requires every
-plugin to depend on a CLI framework.
+Plugins could format their own help text using clap (or another CLI framework)
+and return the pre-rendered string.
+This still fails to guarantee consistent formatting with the host and forces
+every plugin to depend on a CLI framework.
 
 ## Non-Goals
 
-- **Argument validation**: The host renders help from the structured data but
-  does not validate plugin arguments.
-  The plugin is responsible for its own argument parsing and validation.
+- **Argument validation**: The host uses the structured data only to render
+  help; each plugin still parses and validates its own arguments.
 - **Completions**: Shell completions for plugin commands are out of scope for
-  this RFD but could build on the same structured data in the future.
+  this RFD, though future work could build on the same structured data.
 
 ## Implementation Plan
 
 ### Phase 1: Protocol types
 
 - Add `Help` request to `HostToPlugin` and `HelpResponse` to `PluginToHost`.
-- Define `PluginCommand`, `PluginSubcommand`, `PluginArg` in `jp_plugin`.
-- Add fallback logic in the host: try `help` first, fall back to `describe`.
+- Define `PluginCommand`, `PluginSubcommand`, and `PluginArg` in `jp_plugin`.
+- Add fallback logic in the host: try `help` first, then fall back to
+  `describe`.
 
 ### Phase 2: Host-side clap builder
 
-- Implement `build_clap_command()` that constructs a `clap::Command` from
+- Implement `build_clap_command()` to construct a `clap::Command` from
   `PluginCommand`.
-- Wire into the `-h` / `--help` dispatch path.
+- Wire `build_clap_command()` into the `-h` and `--help` dispatch path.
 
 ### Phase 3: Migrate `jp-serve`
 

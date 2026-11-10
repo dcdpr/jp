@@ -9,70 +9,68 @@
 
 ## Summary
 
-This RFD turns `providers.llm` into a map of user-declared, user-named provider
-instances, each pointing at a provider source (the implementation that talks to
-the server) and holding that source's settings.
-Model IDs reference the declared provider name so a single source can back
-multiple servers, each with its own endpoint and credentials.
+This RFD turns `providers.llm` into a map of user-named provider declarations.
+Each entry selects a provider source (the client implementation that talks to
+the server) and holds that source's settings.
+Model IDs reference the declared provider name, so a single source can back
+multiple servers with distinct endpoints and credentials.
 New `openai-chat-completions` and `anthropic-messages` sources support servers
-that speak OpenAI's Chat Completions API or Anthropic's Messages API without
+that implement OpenAI's Chat Completions API or Anthropic's Messages API without
 vendor-specific extensions.
 
 ## Motivation
 
-JP configures LLM providers through one fixed struct, `LlmProviderConfig`, with
-one field per implementation: `anthropic`, `openai`, `vllm`, and so on.
-`ProviderId`, a closed enum, names both the implementation and the configured
-server, and model ids carry it as their prefix (`vllm/qwen3`).
-That shape has three consequences.
+JP configures LLM providers through a fixed struct, `LlmProviderConfig`, with
+one field per implementation (`anthropic`, `openai`, `vllm`, and so on).
+`ProviderId` is a closed enum that identifies both the client implementation and
+the configured server, and model IDs use it as their prefix (`vllm/qwen3`).
+Coupling the implementation to the server config causes three problems.
 
-**One server per implementation.** A local vLLM server and a remote one cannot
-both be configured; neither can two OpenRouter accounts, or a corporate proxy
-next to the vendor's own API.
-Using two compatible servers in one conversation, one for the main model and one
-for title generation, is impossible.
-Swapping config files between invocations does not help, because it never puts
-two servers in one resolved config.
+**One server per implementation.** A user cannot configure both a local and a
+remote vLLM server, two OpenRouter accounts, or a corporate proxy alongside a
+vendor's direct API.
+A single conversation cannot use one compatible server for the main model and
+another for title generation, because swapping config files between invocations
+never puts both servers into the same resolved config.
 
-**Compatible servers have no fitting implementation.** Servers without their own
-JP provider (DeepSeek's API, Groq, Together, LM Studio, a LiteLLM proxy) get
-pointed at the `openai` provider with a custom `base_url`.
-That provider speaks OpenAI's Responses API and carries OpenAI-specific
-behaviour such as ChatGPT login and encrypted reasoning, while most compatible
-servers speak Chat Completions.
+**No neutral implementation for compatible servers.** Users must point servers
+without a dedicated JP provider (DeepSeek's API, Groq, Together, LM Studio, a
+LiteLLM proxy) at the `openai` provider with a custom `base_url`.
+That provider speaks OpenAI's Responses API and carries OpenAI-specific behavior
+such as ChatGPT login and encrypted reasoning, whereas most compatible servers
+speak Chat Completions.
 JP already implements the Chat Completions protocol in
-`jp_llm::provider::openai_compat`, which `cerebras`, `llamacpp` and `vllm` build
-on, but no provider offers it without one of those servers' extensions.
-Servers with an Anthropic-compatible endpoint fare the same with `anthropic`,
-which applies Claude's rules to every model not in its built-in table: adaptive
-thinking, no sampling parameters, and native reasoning replay only for signed
-blocks.
+`jp_llm::provider::openai_compat` as the shared base for `cerebras`, `llamacpp`,
+and `vllm`, but no provider exposes it without vendor-specific extensions.
+Anthropic-compatible endpoints have the same problem with `anthropic`, which
+applies Claude-specific rules to any model outside its built-in table: adaptive
+thinking, omitted sampling parameters, and native reasoning replay restricted to
+signed blocks.
 
-**Model ids name code, not deployments.** A model id is stored in every
-conversation that uses it, so its prefix should identify the user's configured
-deployment rather than the Rust module.
-`vllm/deepseek-v4.1-flash` names the implementation; behind a router that sends
-each model to a different engine, it is also wrong about the engine.
-`ProviderId` also lists `deepseek` and `xai`, which have no implementation:
-`get_provider` answers both with `todo!()`.
+**Model IDs name code, not deployments.** Every conversation stores the model ID
+it uses, so the prefix should identify the configured deployment rather than the
+Rust module.
+`vllm/deepseek-v4.1-flash` names the client implementation, which is also
+inaccurate behind a router that dispatches models to different engines.
+Meanwhile, `ProviderId` includes unimplemented `deepseek` and `xai` variants
+that panic with `todo!()` in `get_provider`.
 
-Without a change, each new compatible server needs a new `ProviderId` variant, a
-config field, and an arm in every match on the enum, or must be routed through
-`openai`.
+Under this design, supporting a new compatible server requires either routing it
+through `openai` or adding a `ProviderId` variant, a config field, and a match
+arm at every dispatch site.
 
 ## Design
 
 ### Terms
 
-- **Provider**: a named entry under `providers.llm`, declared in config.
-  It names a provider source and holds that source's settings.
-  Model ids name it: `<provider>/<model>`.
-- **Provider source**: the client implementation a provider uses, named by a
-  fixed identifier such as `anthropic` or `vllm`.
-  Every source is compiled into JP.
+- **Provider**: A user-named entry declared under `providers.llm`.
+  It selects a provider source, holds that source's settings, and serves as the
+  prefix in model IDs (`<provider>/<model>`).
+- **Provider source**: A compiled-in client implementation, identified by a
+  fixed name such as `anthropic` or `vllm`.
 
-The two vary independently: one source backs any number of providers, and a
-provider's name says nothing about its source.
+Providers and sources vary independently: a single source can back any number of
+providers, and a provider's name does not have to match its source.
 
 ### Configuration
 
@@ -101,16 +99,17 @@ id = "gpu/qwen3.8-27b"
 id = "local/qwen3.8-4b"
 ```
 
-A provider's settings are its source's settings: the fields of today's
-`providers.llm.<source>` block, unchanged.
+Each provider entry takes its source's settings: the existing fields of
+`providers.llm.<source>`, unchanged.
 
-- Provider names use lowercase letters, digits, `-` and `_`, so a name works as
-  a bare TOML key, in a `--cfg` path, and before the `/` of a model id.
-  `aliases` is not a provider name; the alias map keeps that key.
+- Provider names may contain lowercase ASCII letters, digits, `-`, and `_`,
+  making them valid bare TOML keys, `--cfg` path segments, and
+  `<provider>/<model>` prefixes.
+  The key `aliases` remains reserved for the model alias map.
 
-- `source` is required on every provider once layers are merged.
-  A config layer that overrides fields on a provider declared in an earlier
-  layer may omit `source`:
+- Every resolved provider requires a `source` after config layers are merged.
+  A layer that overrides fields on a provider declared in an earlier layer may
+  omit `source`:
 
   ```toml
   # user-local config, patching the workspace's `gpu` provider
@@ -118,38 +117,40 @@ A provider's settings are its source's settings: the fields of today's
   api_key_env = "MY_GPU_KEY"
   ```
 
-- Providers merge by name, then field by field, as today's blocks do.
-  A layer that sets a different `source` than a lower layer replaces the entire
-  provider entry, since settings are specific to a source.
+- Providers with the same name merge field by field across layers.
+  Because settings are specific to a source, a layer that changes a provider's
+  `source` replaces the entire entry instead of merging fields from the earlier
+  layer.
 
-- No name is reserved for a source, and nothing is declared unless config
-  declares it.
+- No provider exists unless declared in config, and source names are not
+  reserved as default providers.
 
-- A conversation records each provider it has seen in full, as it records any
-  setting.
-  A provider added to config after the conversation started has a new key and is
-  merged into the conversation's config, just like a new alias.
+- A conversation snapshots each configured provider in full.
+  Providers added to config after a conversation starts have new keys and merge
+  into the conversation's config alongside existing entries, just like new model
+  aliases.
 
-### Model ids
+### Model IDs
 
-A model id is `<provider>/<model>`, split at the first `/` as today, so
-`gpu/Qwen/Qwen3.8-27B-FP8` names the model `Qwen/Qwen3.8-27B-FP8` on the
-provider `gpu`.
-On disk the id keeps its shape, `{ "provider": "anthropic", "name":
-"claude-opus-5-5" }`; the `provider` field holds a provider name instead of a
-`ProviderId` value.
+A model ID has the form `<provider>/<model>`, split at the first `/`:
+`gpu/Qwen/Qwen3.8-27B-FP8` selects model `Qwen/Qwen3.8-27B-FP8` on the `gpu`
+provider.
+The serialized representation is unchanged (`{ "provider": "anthropic", "name":
+"claude-opus-5-5" }`), except `provider` holds a declared provider name instead
+of a `ProviderId` variant.
 
-A model id that references an undeclared provider is a config error that names
-the unknown provider and lists the declared ones.
+A model ID that references an undeclared provider produces a config error naming
+the unknown provider and listing the declared ones.
 
-A source decides whether a stored reasoning block is its own by comparing the
-provider in the model id recorded with the event (`is_anthropic` in
-`anthropic.rs` does this today).
-It compares provider names, not sources: a signature belongs to one account, and
-an unsigned block to one server, so two providers on the same source exchange
-reasoning as text, as two vendors do today.
+To decide whether to replay a stored reasoning block natively, a source compares
+the current provider name against the provider recorded in the event's model ID
+(matching `is_anthropic` in `anthropic.rs`).
+This check compares provider names rather than sources: cryptographic signatures
+are tied to a single account and unsigned reasoning blocks to a single server,
+so two providers backed by the same source exchange reasoning as plain text,
+just as providers from different vendors do.
 
-### Provider sources
+### Provider Sources
 
 | Source                    | Talks to                                      |
 | ------------------------- | --------------------------------------------- |
@@ -165,78 +166,79 @@ reasoning as text, as two vendors do today.
 | `vllm`                    | Chat Completions, with vLLM's extensions      |
 
 `deepseek` and `xai` are not sources.
-DeepSeek's API speaks Chat Completions, so a provider with `source =
-"openai-chat-completions"` reaches it.
+DeepSeek's API speaks Chat Completions and is served by `source =
+"openai-chat-completions"`.
 
-A source is named after the vendor or engine whose server it talks to
-(`anthropic`, `vllm`).
-Additional endpoints from a vendor append the endpoint's name
-(`openai-chat-completions`, `anthropic-messages`).
-`openai-completions` would name OpenAI's legacy Completions API at
-`/v1/completions`, a different protocol that vLLM and llama.cpp still serve.
+Each source is named after the vendor or engine it targets (`anthropic`,
+`vllm`).
+When a vendor defines multiple protocols, additional sources append the protocol
+name (`openai-chat-completions`, `anthropic-messages`).
+The full name `openai-chat-completions` avoids ambiguity with
+`openai-completions`, which would refer to OpenAI's legacy `/v1/completions`
+endpoint that vLLM and llama.cpp still serve.
 
-A source is a protocol module plus what is specific to its server: model
-listing, credentials, and quirks.
-`openai-chat-completions` exposes the Chat Completions module without vendor
-extensions, and `anthropic-messages` does the same for the Messages module.
-A server with quirks worth handling gets its own source on the same module, as
-`vllm`, `cerebras` and `llamacpp` already have, rather than options on the
-generic one.
-An option on `openai-chat-completions` is right only when many servers differ
-along the same axis.
-The wire protocol stays inside the source and is not a setting (see
-[Alternatives](#alternatives)).
+A source combines a wire-protocol module with server-specific model listing,
+credentials, and request quirks.
+`openai-chat-completions` and `anthropic-messages` expose the shared Chat
+Completions and Messages protocol modules without vendor extensions.
+A server with distinct quirks gets its own source on top of the shared protocol
+module (like `vllm`, `cerebras`, and `llamacpp`) rather than configuration flags
+on the generic source; a flag on `openai-chat-completions` is warranted only
+when many servers vary along the same axis.
+The wire protocol remains fixed per source rather than configurable per provider
+(see [Alternatives](#alternatives)).
 
-### The `openai-chat-completions` source
+### The `openai-chat-completions` Source
 
-Its settings are `base_url` (required), `api_key_env` (optional), and [RFD
-125]'s `models` table.
+`openai-chat-completions` accepts `base_url` (required), `api_key_env`
+(optional), and the `models` table from [RFD 125].
 
-- `base_url` is the URL the vendor documents for the OpenAI SDK, usually ending
-  in `/v1`.
-  JP appends `/chat/completions` and `/models`.
-- With `api_key_env` set, requests carry `Authorization: Bearer <key>`.
-  Without it they carry no credential, which suits a local server.
-- Requests carry fields from OpenAI's Chat Completions reference, plus `top_k`
-  when it is configured: setting `top_k` opts into sending it, and servers that
-  do not support `top_k` typically ignore unknown fields.
+- `base_url` is the base URL the vendor documents for the OpenAI SDK (usually
+  ending in `/v1`), to which JP appends `/chat/completions` and `/models`.
+- When `api_key_env` is set, requests include an `Authorization: Bearer <key>`
+  header; when unset, requests are sent unauthenticated for local servers.
+- Requests include standard fields from OpenAI's Chat Completions specification,
+  plus `top_k` when explicitly configured.
+  Setting `top_k` opts into sending it, and servers that do not support `top_k`
+  typically ignore unknown fields.
 - Reasoning:
-  - unset: no reasoning fields, so the server's default applies;
-  - `off`: `reasoning_effort: "none"`;
-  - an effort: `reasoning_effort`, clamped to the model's ladder when [RFD 125]
-    declares one, and `xlow` sent as `minimal`.
-    A token count is converted to a level against the output limit, since Chat
-    Completions has no budget field.
-- Reasoning in a response is read from `reasoning_content` or `reasoning`, as
-  `openai_compat` already does.
-- Structured output is sent as `response_format` with a JSON schema, unless the
-  model is declared `structured_output = false`, in which case it is a forced
-  tool call.
-- The model list comes from `GET /models`: each model's id, and its context
-  window where the entry reports `context_length` (OpenRouter's and Synthetic's
-  name) or `max_model_len` (vLLM's).
-  If the `/models` request fails or the server has no listing endpoint, JP
-  proceeds with empty reported details and resolves model details in the order
-  defined by [RFD 125].
-- A rejected model is classified as an unknown model, so the model picker
-  applies.
+  - unset: omits reasoning fields so the server's default applies;
+  - `off`: sends `reasoning_effort: "none"`;
+  - effort level: sends `reasoning_effort`, clamped to the model's supported
+    levels when declared via [RFD 125], with `xlow` mapped to `minimal`.
+    Because Chat Completions has no token-budget field, a token-count reasoning
+    config is converted to an effort level relative to the output token limit.
+- Response reasoning is read from `reasoning_content` or `reasoning`, matching
+  `openai_compat`.
+- Structured output uses `response_format` with a JSON schema, falling back to a
+  forced tool call when the model is configured with `structured_output =
+  false`.
+- `GET /models` populates the model list with each model's ID and its context
+  window from `context_length` (used by OpenRouter and Synthetic) or
+  `max_model_len` (used by vLLM).
+  If `GET /models` fails or the server does not implement it, JP falls back to
+  empty server-reported details and resolves model metadata in the order defined
+  by [RFD 125].
+- A server error rejecting the requested model is classified as an unknown-model
+  error, triggering the interactive model picker.
 
-Testing Synthetic's endpoint, which runs vLLM, backs each choice above: it
-honours `reasoning_effort: "none"` and ignores a chat template kwarg meant to do
-the same, accepts `top_k` and ignores unknown fields, follows `response_format`,
-and reports `context_length` in its listing.
+These choices were verified against Synthetic's vLLM-based endpoint, which
+honors `reasoning_effort: "none"` (while ignoring the equivalent chat-template
+kwarg), accepts `top_k`, ignores unknown fields, supports `response_format`, and
+reports `context_length` in `/models`.
 
-### The `anthropic-messages` source
+### The `anthropic-messages` Source
 
-Some servers offer an Anthropic-compatible endpoint, often so Claude Code can
-use them.
-`anthropic` is written for Anthropic's own API, and applies Claude's rules to
-any model not in its built-in table; `anthropic-messages` is the Messages
-protocol with neutral defaults.
-Both run on one Messages module, extracted from today's `anthropic` provider.
+Several third-party servers expose an Anthropic-compatible Messages endpoint,
+often to support Claude Code.
+While `anthropic` targets Anthropic's own API and applies Claude-specific rules
+to any model outside its built-in table, `anthropic-messages` speaks the
+Messages protocol with vendor-neutral defaults.
+Both sources share a common Messages protocol module extracted from the
+`anthropic` provider.
 
-Its settings are `base_url` (required, without `/v1`, as `anthropic` takes it),
-`api_key_env`, and the `models` table.
+`anthropic-messages` accepts `base_url` (required, without a `/v1` suffix,
+matching `anthropic`), `api_key_env`, and the `models` table from [RFD 125].
 
 |                                                        | `anthropic`                                           | `anthropic-messages`                                                                          |
 | ------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -252,34 +254,34 @@ Its settings are `base_url` (required, without `/v1`, as `anthropic` takes it),
 | Output limit when none is configured or reported       | 32,000 tokens                                         | the same                                                                                      |
 | Credentials                                            | the `auth` chain: API keys and subscriptions          | `api_key_env` only                                                                            |
 
-The neutral defaults come from testing Synthetic's endpoint, which serves other
-vendors' models.
-It has no `/v1/models` endpoint, ignores `output_config.format` and answers in
-prose, returns unsigned thinking blocks and accepts them back, accepts sampling
-parameters, and accepts a forced tool call with thinking on.
-Anthropic's own API rejects a thinking block without a valid signature, which is
-why `anthropic` replays unsigned reasoning as text.
+These defaults reflect testing against Synthetic's Anthropic-compatible
+endpoint, which serves non-Claude models: it has no `/v1/models` route, ignores
+`output_config.format` and replies in prose, returns and accepts unsigned
+thinking blocks, honors sampling parameters, and allows forced tool calls
+alongside thinking.
+By contrast, Anthropic's API rejects thinking blocks that lack a valid
+signature, so `anthropic` must replay unsigned reasoning as `<think>` text.
 
 ### Credentials
 
-Credential settings stay where they are: each source keeps the `auth`,
-`api_key_env` and other fields its block has today.
-`--auth` writes the chain onto the provider the turn's model names.
-A provider whose source has no `auth` chain rejects `--auth`, as `llamacpp` and
-`ollama` do today.
+Each source retains the credential fields (`auth`, `api_key_env`, and related
+settings) from its existing config block.
+The `--auth` flag applies its credential chain to the provider selected by the
+turn's model ID; if that provider's source has no `auth` field, `--auth` is
+rejected, as with `llamacpp` and `ollama`.
 
-The credential store keys stored logins by source, so providers that share a
-source share logins: two `anthropic` providers see the same Claude subscription
-profiles.
-Source names match today's provider names, so stored credentials need no
-migration.
-`jp provider llm auth login|list|logout` accept a declared provider name or a
-source name.
+The credential store keys logins by source ID rather than provider name, so
+providers backed by the same source share stored logins (for example, two
+`anthropic` providers share Claude subscription profiles).
+Because source names match existing provider names, stored credentials require
+no migration.
+`jp provider llm auth login|list|logout` accepts either a declared provider name
+or a source name.
 
 ### `jp init`
 
-`jp init` writes a declaration for the provider it offers, next to the model it
-already writes:
+`jp init` prompts the user to choose a provider source and writes both the
+provider declaration and the selected model to the generated config:
 
 ```toml
 [providers.llm.anthropic]
@@ -290,122 +292,130 @@ provider = "anthropic"
 name = "claude-sonnet-5-5"
 ```
 
-Its provider prompt lists sources.
-
 ### Migration
 
-Two places hold configuration in the old shape: config files, and the config
-stored with each conversation.
+Legacy provider configs exist in two places: user and workspace config files,
+and persisted conversation configs.
 
 **Stored conversations.** `jp_conversation::compat::deserialize_partial_config`
-gains a repair next to `migrate_legacy_rule_bounds`: each `providers.llm` entry
-without `source` whose name is a source name gets `source` set to that name, and
-the `deepseek` block is dropped.
-Today's `to_partial` records all nine blocks, so every stored conversation ends
-up declaring every provider it could have used, and its model ids keep resolving
-without being rewritten.
+adds a migration pass alongside `migrate_legacy_rule_bounds`: any
+`providers.llm` entry without `source` whose key matches a known source name
+receives `source` set to that key, and the `deepseek` block is dropped.
+Because `to_partial` previously serialized all nine provider blocks into every
+conversation, migrated conversations automatically declare every provider their
+events might reference, and stored model IDs continue to resolve without
+modification.
 
-**Config files.** For one release, a provider block without `source` whose key
-matches a known source name defaults `source` to that key, and a model id
-referencing an undeclared provider whose name matches a known source resolves to
-that source's default configuration.
-Both print a warning showing the declaration to add.
-The release after makes both errors, with the same declaration in the message.
+**Config files.** For one transition release, a `providers.llm.<key>` block
+without `source` whose key matches a known source name defaults `source` to that
+key, and a model ID referencing an undeclared provider whose name matches a
+known source resolves against that source's default configuration.
+Both fallback paths emit a warning showing the explicit TOML declaration to add.
+The following release turns both into hard errors that include the same
+declaration snippet.
 
-**Older binaries.** A binary built before this RFD rejects a config that sets
-`source` or declares a provider under a new name, because its config types
-reject unknown keys.
-Phase 1 below narrows that window: a release that accepts `source` in today's
-blocks reads any config that declares providers under today's names.
+**Older binaries.** Binaries built before this RFD reject unknown config keys,
+so they fail on `source` fields or custom provider names.
+Phase 1 below narrows that compatibility window: shipping an intermediate
+release that accepts an optional `source` field on the existing fixed provider
+blocks lets configs that use standard provider names load on both versions.
 
 ## Drawbacks
 
-- Every config needs declarations.
-  `jp init` writes them and the transition release warns, but hand-written
-  configs and the documentation's examples grow by two lines per provider.
-- `aliases` shares a table with provider names, so it is the one name a provider
-  cannot have.
-- A patch that misspells a provider name creates a provider with no `source`.
-  That surfaces as a missing-`source` error after merging, which has to name the
-  provider for the misspelling to be findable.
-- `openai-chat-completions` takes a `base_url` ending in `/v1`, as vendors
-  document it; `vllm`, `llamacpp` and both Messages sources take one without.
-  Two conventions sit in one config.
-- Two sources share the Messages module, so a fix to how Claude is called has to
-  land in the module or in `anthropic` deliberately, not by habit.
-- Code that matches on `ProviderId` becomes code that matches on the source.
-  Most of it is mechanical, but `ProviderId` appears on more than 460 lines
-  across the workspace.
+- Every configured provider requires an explicit declaration.
+  Although `jp init` generates the default declaration and the transition
+  release prints migration warnings, hand-written configs and documentation
+  examples grow by two lines per provider.
+- Because `providers.llm.aliases` lives in the same TOML table as declared
+  providers, `aliases` cannot be used as a provider name.
+- A config overlay that misspells a provider name creates a new partial entry
+  with no `source` instead of patching the intended provider.
+  The resulting missing-`source` error after merging must name the provider key
+  so the typo is easy to spot.
+- `openai-chat-completions` expects a `base_url` ending in `/v1` (matching
+  vendor SDK documentation), whereas `vllm`, `llamacpp`, and both Messages
+  sources omit `/v1`.
+  Both URL conventions coexist in the same config.
+- Sharing the Messages protocol module between `anthropic` and
+  `anthropic-messages` means changes to request formatting require choosing
+  whether a behavior belongs to the shared module or only to `anthropic`.
+- Call sites that match on `ProviderId` must be updated to match on the source
+  or key by provider name.
+  The refactoring is mostly mechanical, but `ProviderId` appears on more than
+  460 lines across the workspace.
 
 ## Alternatives
 
 **Named endpoints in a sub-table** (`providers.llm.endpoints.<name>.kind =
 "vllm"`).
-This approach is additive and smaller to build, but it configures backends in
-two places, keeps today's provider blocks as special cases, and does not move
-toward pluggable provider sources.
+An additive sub-table is smaller to implement, but it splits backend
+configuration across two locations, keeps the existing provider blocks as
+special cases, and does not move toward pluggable provider sources.
 
 **Built-in providers with reserved names** (Codex's `model_providers`).
-Requires no initial configuration, but ties each source name to a single default
-provider instance; adding a second Anthropic endpoint requires a different
-configuration style than the first, and overriding a built-in provider requires
-special-case merging.
+Implicitly declaring one default provider per source avoids initial boilerplate,
+but it ties each source name to a single instance, forces a second endpoint on
+the same source to use a different configuration pattern, and requires
+special-case merging to override built-in entries.
 
 **Model-centric configuration** (LiteLLM, Continue).
-Each model entry carries its endpoint and credential.
-That suits a routing proxy, but one server serving several models repeats its
-settings for each, and [RFD 125] plus aliases already cover per-model facts and
+Attaching the endpoint and credentials to each model entry fits a routing proxy,
+but duplicates connection settings whenever one server hosts multiple models.
+[RFD 125] and model aliases already cover per-model metadata and shorthand
 names.
 
 **A wire-protocol setting** (pi's per-model `api`).
-It lets one provider serve different models over different protocols, as
-gateways such as Azure or GitHub Copilot do.
-JP has no such source today.
-Model ids do not name the protocol, so an optional `api` on an [RFD 125] model
-entry can be added later without a migration.
+A per-model protocol field lets one provider serve models over different wire
+protocols, as multi-protocol gateways like Azure and GitHub Copilot do.
+JP has no such source.
+Because model IDs do not encode the wire protocol, an optional `api` field can
+be added to [RFD 125] model entries later without a migration.
 
-**Pointing compatible servers at `openai` or `anthropic`.** Today's workaround.
-`openai` sends Responses API requests, which most compatible servers do not
-accept.
-`anthropic` works against a server without a model route now that the lookup is
-advisory, but drops sampling parameters and replays reasoning as text for every
-model not in its built-in table, and sends Claude-only beta headers.
-Both allow only one such server.
+**Pointing compatible servers at `openai` or `anthropic`.** The status quo
+workaround.
+`openai` speaks the Responses API, which most OpenAI-compatible servers do not
+implement.
+`anthropic` tolerates servers without a `/v1/models/{id}` route now that model
+lookup is advisory, but it strips sampling parameters, replays unsigned
+reasoning as plain text for any model outside its built-in table, and sends
+Claude-specific beta headers.
+Neither allows configuring more than one compatible server.
 
 **`type` instead of `source`.** `source` matches
-`conversation.tools.<name>.source`, which names what serves a tool, and still
-reads correctly once a source can come from a plugin.
+`conversation.tools.<name>.source`, which identifies the implementation backing
+a tool, and continues to fit when provider sources can be loaded from plugins.
 
 ## Non-Goals
 
-- Falling back from one provider to another.
+- Automatic fallback from one provider to another.
 - Recording which provider served a response.
 - Loading provider sources from plugins.
-  Names and dispatch leave room for it; every source here is compiled in.
-- Changing credentials.
-  Splitting `anthropic` and `openai` by credential kind, one credential per
-  provider, and what happens to `--auth` belong to a separate RFD.
-- Request quirks of particular servers beyond what each source already handles,
+  The naming and dispatch design leaves room for plugin-backed sources, but all
+  sources in this RFD are compiled in.
+- Redesigning credential configuration.
+  Splitting `anthropic` and `openai` by credential kind, binding a single
+  credential per provider, and reworking `--auth` belong to a separate RFD.
+- Server-specific request quirks beyond those already handled by each source,
   such as SGLang's reasoning budget (ticket T-19mv7az).
-- Parameters on aliases.
+- Default model parameters on aliases.
 
 ## Risks and Open Questions
 
-**Patching a provider without `source`.** Config types in `jp_config` are
-partials merged layer by layer.
-A provider is naturally an enum tagged by `source`, and `McpProviderConfig`
-shows the cost: its partial needs `type` in every layer that modifies it.
-Letting a layer omit `source` requires either deserializing a provider's
-settings into the source-specific struct after merging, or using a flat partial
-struct that holds every source's fields.
-Phase 3 prototypes this first.
-If neither works, the fallback is requiring `source` in every layer that touches
-a provider.
+**Patching a provider without `source`.** `jp_config` merges partial config
+structs layer by layer.
+Representing a provider as a `source`-tagged enum has the limitation seen in
+`McpProviderConfig`, where every layer that modifies an entry must repeat the
+tag (`type`).
+Allowing an override layer to omit `source` requires either deferring
+source-specific deserialization until after layers are merged or using a flat
+partial struct containing the union of all sources' fields.
+Phase 3 prototypes this first; if neither approach works, every layer that
+modifies a provider will have to include `source`.
 
-**Error locations.** Deserializing settings after merging can lose the source
-file location of an invalid value.
-Validation errors must preserve the file path so misspelled fields are still
-attributed to the file that set them.
+**Error locations.** Deferring source-specific deserialization until after
+merging risks losing the originating file location of an invalid setting.
+Validation errors must preserve per-field file paths so misspelled or invalid
+keys are still attributed to the config file that set them.
 
 **`base_url` for the new source.** Accepting the `/v1`-suffixed URL that vendors
 document matches what users copy from provider docs; omitting `/v1` matches JP's
@@ -414,65 +424,68 @@ This draft chooses the vendor-documented URL.
 
 ## Implementation Plan
 
-1. **Accept `source` in today's blocks.** Each block takes an optional `source`
-   that must equal its name.
-   Nothing else changes.
-   Ships as its own release, so configs that declare providers under today's
-   names load in it and in every later release.
-   Merges alone.
+1. **Accept `source` on existing provider blocks.** Each fixed provider block
+   accepts an optional `source` field that must match the block's name, with no
+   other behavior changes.
+   Shipping this as its own release lets configs that declare providers under
+   existing source names load in both this release and later releases.
+   Merges independently.
 
-2. **Split `ProviderId`.** `SourceId` is a closed enum of today's providers;
-   `ProviderName` is an open string newtype with the name rules above.
-   `ModelIdConfig::provider` becomes a `ProviderName`, `get_provider` looks the
-   provider up and dispatches on its source, the turn loop's provider cache and
-   the inquiry and title paths key on `ProviderName`, the checks that decide
-   whether stored reasoning is a provider's own compare `ProviderName`s, and the
-   credential store keys on `SourceId`.
-   Names still come from today's fixed blocks, so behaviour is unchanged.
-   Merges alone.
+2. **Split `ProviderId`.** Introduce `SourceId` (a closed enum of built-in
+   sources) and `ProviderName` (a validated string newtype).
+   Change `ModelIdConfig::provider` to `ProviderName`; update `get_provider` to
+   look up the declared provider and dispatch on its `SourceId`; key the turn
+   loop's provider cache, inquiry path, title generator, and reasoning-ownership
+   checks by `ProviderName`; and key the credential store by `SourceId`.
+   Provider names still come from the fixed config blocks, so user-visible
+   behavior is unchanged.
+   Merges independently.
 
-3. **The open map.** `LlmProviderConfig` becomes `aliases` plus a map of
-   declared providers, with the merge rules above, per-name `to_partial`, the
-   repair for stored conversations, the transition reading of old blocks, `jp
-   init` writing declarations, and updated schema snapshots.
-   Removes `deepseek` and `xai`.
-   Starts with the prototype from [Risks](#risks-and-open-questions).
-   Depends on phase 2.
+3. **Replace fixed fields with an open map.** Replace the fixed provider fields
+   on `LlmProviderConfig` with `aliases` plus a map of declared providers,
+   implementing layer merging, per-name `to_partial`, conversation config
+   migration, transition fallback resolution for legacy blocks, `jp init`
+   provider declarations, and updated schema snapshots.
+   Remove `deepseek` and `xai`.
+   Begins with the partial-merging prototype from
+   [Risks](#risks-and-open-questions).
+   Depends on Phase 2.
 
-4. **The `openai-chat-completions` source.** Implement the source on top of
-   `openai_compat`, with request-body tests for each reasoning setting, `top_k`,
-   and both forms of structured output, plus VCR cassette tests.
-   Depends on phase 3.
+4. **Implement `openai-chat-completions`.** Build the source on top of
+   `openai_compat`, with request-body unit tests for each reasoning mode,
+   `top_k`, and both structured-output modes, plus VCR cassette tests.
+   Depends on Phase 3.
 
-5. **The `anthropic-messages` source.** Extract the shared Messages protocol
+5. **Implement `anthropic-messages`.** Extract the shared Messages protocol
    module from `anthropic.rs` without changing `anthropic`'s request output
    (verified by existing VCR tests).
-   Then implement `anthropic-messages` on that module, with request-body tests
+   Implement `anthropic-messages` on that module, with request-body unit tests
    for each row of the comparison table above and VCR cassette tests.
-   Depends on phase 3.
+   Depends on Phase 3.
 
-6. **Documentation.** Update the provider section of the configuration guide,
-   and add glossary entries for Provider and Provider Source (the current
-   Provider entry describes a vendor integration and still lists `deepseek`).
-   Depends on phase 3.
+6. **Update documentation.** Update the provider section of the configuration
+   guide and add glossary entries for Provider and Provider Source (replacing
+   the current Provider entry, which describes a fixed vendor integration and
+   still lists `deepseek`).
+   Depends on Phase 3.
 
-7. **End of the transition.** Blocks without `source` and undeclared source
-   names become errors.
-   One release after phase 3.
+7. **Remove transition fallbacks.** Reject provider blocks without `source` and
+   model IDs referencing undeclared source names.
+   Ships one release after Phase 3.
 
-[RFD 125] lands in either order.
-Its `models` table belongs to each source's settings and moves into provider
-entries with them, and its accessor is keyed by `ProviderName` instead of
-`ProviderId`.
+[RFD 125] can land before or after this RFD.
+Its `models` table belongs to each source's settings and moves into declared
+provider entries alongside the other source fields, and its lookup accessor keys
+on `ProviderName` instead of `ProviderId`.
 
 ## References
 
 - [RFD 125]: Configured Model Details per Provider.
-- [RFD 090]: Anthropic Subscription Auth with Credential Fallback, the `auth`
-  chain this RFD leaves in place.
+- [RFD 090]: Anthropic Subscription Auth with Credential Fallback, which defines
+  the `auth` chain preserved by this RFD.
 - [RFD 110]: Anthropic Subscription Queries via ACP.
 - [RFD 079]: Config Sources and Load Order.
-  A config source there is a layer of configuration, a different concept from a
+  A config source in [RFD 079] is a configuration layer, distinct from a
   provider source.
 - [pi's provider and API split][pi-ai].
 

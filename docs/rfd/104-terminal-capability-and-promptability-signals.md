@@ -11,30 +11,28 @@
 
 ## Summary
 
-JP answers four different questions with one boolean: whether stdout is a
-terminal.
-This RFD names the four questions, gives each its own source, moves channel
-capability onto `Printer` where the channels already live, and completes the
-`--interactive` / `--no-interactive` pair so a caller can both override and
-assert promptability.
+JP uses `stdout.is_terminal()` to answer four separate questions: whether stdout
+accepts ANSI escapes, whether stderr accepts ANSI escapes, whether stderr can
+repaint in place, and whether a user is present to answer prompts.
+This RFD gives each question its own signal, moves per-channel capabilities onto
+`Printer`, and pairs `--interactive` with `--no-interactive` so callers can
+either assert or suppress prompting.
 
 ## Motivation
 
-`jp conversation ls | rg fix` stopped and asked which workspace to use
-([\#1068]).
+`jp conversation ls | rg fix` paused to ask which workspace to use ([\#1068]).
 The prompt came from the workspace precedence ladder ([RFD 087]), which runs
-whenever stdin is a terminal — and piping stdout does not change stdin.
+whenever stdin is a terminal, and piping stdout leaves stdin attached to the
+terminal.
 
-The reporter read that as "commands in a pipe must not ask".
-This RFD does not adopt that rule: a piped command still has a user behind it,
-and `jp query | less` may legitimately prompt.
-What the report exposes is narrower and worse — JP had no way to say "do not
-ask me", and the signal it did consult had nothing to do with whether anyone was
-there.
+The issue suggested that piped commands should never prompt.
+This RFD does not adopt that rule: a piped command such as `jp query | less`
+still has a user at the terminal who can answer prompts.
+Instead, the report exposes two problems: JP had no flag to suppress prompts,
+and the signal it consulted did not test whether a user was present.
 
-That report is one symptom of a structural problem.
-JP has, at various points, used three differently-derived signals to answer
-questions that are not the same question:
+Across the codebase, JP has used three differently-derived signals to answer
+four distinct questions:
 
 | Signal                   | Derivation             | Consulted by                                      |
 | ------------------------ | ---------------------- | ------------------------------------------------- |
@@ -43,41 +41,40 @@ questions that are not the same question:
 | `TargetEnv::interactive` | `stdin.is_terminal()`  | The workspace ladder and pickers                  |
 | `Sink` construction      | `--format` is pretty   | ANSI stripping on both channels                   |
 
-The failures follow from the mismatch, not from any one of them being wrong in
-isolation:
+When streams are redirected independently, these signals disagree:
 
-- **A piped listing prompts.** stdout is not a terminal, so the `is_tty`
-  consumers go quiet; stdin still is, so the ladder asks.
-  [\#1068].
-- **A repaint accumulates.** `jp query | less` resolves `--format` to `text`
-  from stdout, so the `Sink` strips `\r\x1b[K` entirely — `StripSink::execute`
-  keeps line feeds and drops every other C0 control, carriage return included.
-  stderr is still the user's terminal, so instead of one retry line updating in
-  place they get a new line per attempt.
-- **A log file collects escapes.** `jp query 2> log.txt` has stdout on a
-  terminal, so `--format` resolves to `text-pretty` and cursor control is
-  written into the file verbatim.
+- **Piped commands still prompt on stdin.** When stdout is piped, `Term::is_tty`
+  consumers suppress prompts, but stdin remains a terminal, so the workspace
+  ladder still prompts ([\#1068]).
+- **In-place repaints print as separate lines.** `jp query | less` resolves
+  `--format` to `text` from stdout, so `Sink` strips `\r\x1b[K` on both channels
+  (`StripSink::execute` keeps line feeds and drops every other C0 control
+  character, including carriage returns).
+  Because stderr is still the user's terminal, each retry prints a new line
+  instead of updating in place.
+- **Redirected stderr writes escape codes to files.** `jp query 2> log.txt` has
+  stdout on a terminal, so `--format` resolves to `text-pretty` and writes
+  cursor-control sequences into `log.txt`.
 
-[RFD 048] already decided the first of these:
+[RFD 048] already separated escape-code support from promptability:
 
 > - `stdout.is_terminal()` → can the consumer handle ANSI escape codes?
 > - `/dev/tty` available → can a user answer prompts?
 
-The decision was merged; the code never implemented it.
-`jp_printer::open_tty` opens `/dev/tty`, but only to give prompts somewhere to
-draw, and `prompt_writer` falls back to `out` when the open fails — so the
-availability that [RFD 048] designates as the promptability signal is computed
-and then discarded.
+That decision was merged, but the code never implemented it.
+`jp_printer::open_tty` opens `/dev/tty` only to give prompts a writer, and
+`prompt_writer` falls back to `out` when opening `/dev/tty` fails, so the
+`/dev/tty` availability check that [RFD 048] designates as the promptability
+signal is computed and then discarded.
 
-Doing nothing keeps a class of bug that reappears with each new prompt or
-progress affordance, because the next contributor reaches for the nearest
-boolean and it is the wrong one.
+As long as these questions share a single boolean, new prompts and progress
+indicators will keep consulting the wrong signal.
 
 ## Design
 
 ### Four properties
 
-Two channels, two properties each, plus one property of the session:
+JP tracks three channel properties and one session property:
 
 | Property                         | Question                             | Source                    |
 | -------------------------------- | ------------------------------------ | ------------------------- |
@@ -88,106 +85,106 @@ Two channels, two properties each, plus one property of the session:
 | **stderr cursor addressability** | Can chrome be repainted in place?    | `stderr.is_terminal()`    |
 | **Promptability**                | Is a user present to answer?         | `/dev/tty`, overridable   |
 
-#### `auto` resolves per channel
+#### `--format auto` resolves per channel
 
-[RFD 048] resolves `--format auto` from stdout and applies the result to both
-channels.
-That is the conflation this RFD removes, one level up: it makes `jp query |
-less` treat the user's terminal as unable to render escapes because *stdout* is
-a pipe.
+[RFD 048] resolves `--format auto` from `stdout.is_terminal()` and applies that
+result to both channels.
+In `jp query | less`, piping stdout therefore disables ANSI escapes on stderr
+even though stderr is still connected to the user's terminal.
 
-Under this RFD an explicit `--format` still forces both channels — 048's rule
-is unchanged for every value a user can type.
-`auto` resolves per channel instead: stdout from `stdout.is_terminal()`, stderr
-from `stderr.is_terminal()`.
-A piped-stdout run on a terminal gets `{escapes: false}` on stdout and
-`{escapes: true}` on stderr, which is what each consumer can actually take.
+Under this RFD, an explicit `--format` value still forces both channels,
+preserving [RFD 048]'s rule whenever the user specifies a format.
+`--format auto` resolves per channel instead: stdout from `stdout.is_terminal()`
+and stderr from `stderr.is_terminal()`.
+When stdout is piped from an interactive terminal, stdout gets `{escapes:
+false}` and stderr gets `{escapes: true}`.
 
-#### Forcing, and what cannot be forced
+#### Overriding escape capability vs. cursor addressability
 
-Escape capability and cursor addressability are separate because their override
-stories differ.
-A user may legitimately ask for colour a channel cannot render —
-`--color=always | less -R` is the canonical case, and `--format text-pretty` is
-JP's spelling of it.
-Nobody legitimately asks to repaint a file: `\r\x1b[K` written to a redirected
-stream is not a preference, it is corruption.
-So `--format` forces escape capability and has no bearing on addressability.
+Escape capability and cursor addressability are separate because only escape
+capability can be overridden.
+A user may force colour on a pipe so a pager can interpret it (`--color=always |
+less -R` is the standard pattern, and `--format text-pretty` is JP's
+equivalent).
+Cursor movement in a redirected stream has no equivalent use case: writing
+`\r\x1b[K` into a file or pipe corrupts the output.
+`--format` therefore overrides escape capability and has no effect on cursor
+addressability.
 
 Cursor addressability is not user-toggleable in either direction.
-Chrome repaints when the channel supports it and prints plainly when it does
-not.
+Chrome repaints in place when stderr is a terminal and prints plain lines when
+it is not.
 
-#### Repainting needs both
+#### Repainting requires both capabilities
 
-A repaint is written as escapes and lands on a channel that must be able to act
-on them, so it requires the conjunction:
+Repainting in place emits ANSI escape sequences to a channel that must interpret
+cursor movement, so it requires both capabilities:
 
 ```txt
 can_repaint = caps(Err).escapes && caps(Err).addressable
 ```
 
 Addressability alone is not enough.
-The `Sink` strips escapes whenever `escapes` is false, so a repaint emitted on
-that basis is stripped on the way out and the line accumulates instead — the
-second failure in the Motivation.
-[RFD 091] reached the same conjunction independently for its status line.
+`Sink` strips escape sequences whenever `escapes` is `false`, so a repaint
+emitted when `escapes` is disabled has its carriage return and erase sequence
+stripped on the way out, causing lines to accumulate on stderr.
+[RFD 091] arrived at the same conjunction independently for its status region.
 
-Promptability is deliberately independent of both.
-A piped `jp query | less` has a user behind it, and JP may ask.
+Promptability is independent of both channel capabilities.
+In `jp query | less`, a user is still at the terminal and JP can prompt them.
 
 ### Promptability
 
-Resolved once, at startup, in this order:
+JP resolves promptability once at startup, in this order:
 
-1. `--interactive` together with `--no-interactive` (or its `--non-interactive`
-   alias) is a **usage error**.
-   The two contradict, and silently letting one win hides the contradiction.
-2. An explicit CLI flag decides: `--no-interactive` → **not promptable**;
-   `--interactive` → **promptable**, or an error if `/dev/tty` cannot be opened
-   for reading and writing.
-3. `JP_NONINTERACTIVE` → **not promptable**.
-4. Otherwise, whether `/dev/tty` can be opened for reading and writing.
+1. Passing `--interactive` together with `--no-interactive` (or its
+   `--non-interactive` alias) is a **usage error** because the two flags
+   contradict each other.
+2. An explicit CLI flag takes precedence: `--no-interactive` resolves to **not
+   promptable**; `--interactive` resolves to **promptable**, or exits with an
+   error if `/dev/tty` cannot be opened for reading and writing.
+3. If `JP_NONINTERACTIVE` is set, the session is **not promptable**.
+4. Otherwise, the session is **promptable** if and only if `/dev/tty` can be
+   opened for reading and writing.
 
-The CLI outranks the environment, which is why steps 2 and 3 are separate.
-A developer whose CI image or wrapper exports `JP_NONINTERACTIVE=1` and who adds
-`--interactive` to one command is asking to be asked; resolving that to "not
-promptable" would silently do the opposite of what they typed.
-This makes promptability a tri-state request — automatic, forced on, forced off
-— rather than a boolean the environment can `|=` into.
+CLI flags take precedence over `JP_NONINTERACTIVE` (steps 2 and 3) so a
+developer whose CI image or wrapper exports `JP_NONINTERACTIVE=1` can pass
+`--interactive` on a single command to force prompting.
+Promptability is therefore a tri-state request (automatic, forced on, or forced
+off) rather than a boolean that the environment can unconditionally disable with
+`|=`.
 
-`/dev/tty` replaces `stdout.is_terminal()` as the derivation.
-It is the controlling terminal, so it survives redirection of stdout and stderr
-both, and it is absent when the process has none — cron, systemd, a daemonised
-process, `ssh` without `-t`.
-On Windows the pair is `CONOUT$` and `CONIN$`.
+`/dev/tty` replaces `stdout.is_terminal()` as the default probe.
+Because `/dev/tty` refers to the controlling terminal, it survives redirection
+of both stdout and stderr, and it is absent when the process has no controlling
+terminal (cron, systemd, a daemonised process, or `ssh` without `-t`).
+On Windows, the equivalent devices are `CONOUT$` and `CONIN$`.
 
-Availability is not the same as being able to *use* it: a process in a
-background process group holds a controlling terminal but is stopped by
-`SIGTTIN` if it reads from one.
-See [Open Questions](#background-process-groups).
+Opening `/dev/tty` does not guarantee that reading from it will succeed: a
+process in a background process group holds a controlling terminal, but the
+kernel stops it with `SIGTTIN` when it reads from `/dev/tty`.
+See [Background process groups](#background-process-groups).
 
-The two flags are asymmetric in kind, which is intended:
+The two CLI flags are intentionally asymmetric:
 
-- `--no-interactive` **overrides** the derivation.
-  There is no user; resolve without asking.
-- `--interactive` **asserts** it.
-  There must be a user; fail now if there is not.
+- `--no-interactive` **overrides** detection: JP treats the session as
+  unattended and resolves prompts without asking.
+- `--interactive` **asserts** detection: JP requires a controlling terminal and
+  fails at startup if `/dev/tty` cannot be opened.
 
-The assertion exists because the default is a silent degradation.
-Without a controlling terminal, JP proceeds unattended and resolves prompts on
-the user's behalf — which is the right default, and the wrong outcome for a
-script that meant to be asked.
-`--interactive` converts that into a startup error, the way `ssh -o BatchMode`
-converts the opposite case.
+Without a controlling terminal, JP defaults to running unattended and resolving
+prompts automatically.
+That fallback is the right default for background jobs, but a script or user
+that expects to be prompted needs a way to fail fast instead.
+`--interactive` turns a missing controlling terminal into a startup error, just
+as `ssh -o BatchMode` fails fast in the opposite case.
 
-Neither flag makes JP prompt into a channel that cannot carry a prompt.
+Neither flag causes JP to write prompts to a channel that cannot carry them.
 
 ### Where each value lives
 
-`Printer` already owns both channels, their sinks, and the ANSI-stripping
-decision.
-Channel capability belongs there rather than beside it:
+`Printer` already owns both output channels, their sinks, and the ANSI-stripping
+logic, so channel capabilities live on `Printer`:
 
 ```rust
 /// What a single output channel can carry.
@@ -204,22 +201,24 @@ impl Printer {
 }
 ```
 
-`erase_line`, the waiting indicator, and the retry notice consult `can_repaint`
-on `PrintTarget::Err`.
-The `Sink`'s strip-or-pass decision becomes `caps(target).escapes`.
+`erase_line`, the waiting indicator, and the retry notice check `can_repaint` on
+`PrintTarget::Err`.
+`Sink` uses `caps(target).escapes` to decide whether to strip or pass ANSI
+sequences.
 
-Promptability is resolved in the shell, before any workspace exists, because the
-workspace ladder ([RFD 087]) is one of its first consumers.
-It reaches pre-`Ctx` code as an argument — `TargetEnv` already takes it — and
-`Ctx::Term` carries it for everything after.
-There is one resolution and no re-derivation at a call site.
+Promptability is resolved in the shell at startup, before any workspace exists,
+because the workspace precedence ladder ([RFD 087]) is one of its first
+consumers.
+Pre-`Ctx` code receives the resolved boolean as an argument (`TargetEnv` already
+takes it), and `Ctx::Term` carries it for the rest of the session.
+Call sites read that stored value rather than re-deriving promptability.
 
 `prompt_writer`'s fallback to `out` is removed in the same change.
-The fallback exists to guarantee a prompt renders somewhere, but a prompt in the
-data channel is worse than no prompt, and once availability is a value the
-caller has already decided not to prompt.
+Writing an interactive prompt to the data channel corrupts stdout, and once
+promptability is resolved up front, callers have already decided whether to
+prompt before acquiring a writer.
 
-`Ctx::Term` keeps what is not a channel property:
+`Ctx::Term` retains the session-level terminal properties:
 
 ```rust
 pub(crate) struct Term {
@@ -230,25 +229,24 @@ pub(crate) struct Term {
 ```
 
 `Term::is_tty` is removed rather than narrowed.
-Every consumer wants one of the four properties by name, and a field called
-`is_tty` invites the fifth reader to guess which.
+Every consumer needs one of the four specific properties (`interactive`,
+`escapes`, or `addressable`), and keeping a field named `is_tty` would leave
+callers to guess which property it represents.
 
 ### The rename sweep
 
-Sixteen sites across four files name promptability `is_tty` — parameters,
-struct fields, and the bindings that read them: `cmd/query/tool/coordinator.rs`
-(six, including `let can_prompt = is_tty`), `cmd/plugin/dispatch.rs` (five),
+Sixteen sites across four files name promptability `is_tty` (parameters, struct
+fields, and local bindings): `cmd/query/tool/coordinator.rs` (six, including
+`let can_prompt = is_tty`), `cmd/plugin/dispatch.rs` (five),
 `cmd/label/resolve.rs` (four), and `cmd/lock.rs` (one).
-They are renamed to `interactive` in one sweep.
+These are renamed to `interactive` in one sweep so parameter and field names
+match the signal they carry.
+The error guidance in `cmd/plugin/dispatch.rs` ("run `jp <name>` in a terminal")
+is updated in the same pass, since promptability depends on `/dev/tty` and
+`--no-interactive` rather than whether stdout is a terminal.
 
-Leaving them is worse than not having split the field at all: a name that merely
-overloads a word costs a reader one lookup, and a name that contradicts its
-value costs them a wrong assumption.
-`dispatch.rs`'s "run `jp <name>` in a terminal" guidance is corrected in the
-same pass — being in a terminal stopped being the deciding factor.
-
-The sweep is not uniform, because some values feed both kinds of consumer.
-The migration is by behaviour, not by identifier:
+Because some existing `is_tty` bindings feed both prompting and rendering
+consumers, each site is migrated by behaviour rather than renamed blindly:
 
 | Consumer                                      | Source                    |
 | --------------------------------------------- | ------------------------- |
@@ -262,20 +260,20 @@ The migration is by behaviour, not by identifier:
 |                                               | target channel            |
 | Table fitting                                 | existing width derivation |
 
-`ToolCoordinator::execute_with_prompting` is the case that proves the point.
-It took one flag and fed it both the permission decisions and the tool-progress
-task, so re-pointing it at promptability silently removed progress from a
-`--no-interactive` terminal run.
-It takes both values.
-`ToolRenderer`, lock waiting, and the pre-`Ctx` workspace prompts are checked
-individually rather than renamed in bulk.
+For example, `ToolCoordinator::execute_with_prompting` took a single `is_tty`
+flag and passed it to both permission prompts and the tool-progress task.
+Replacing that flag with `interactive` alone would disable progress rendering on
+a `--no-interactive` terminal run, so `execute_with_prompting` takes both values
+instead.
+`ToolRenderer`, lock waiting, and the pre-`Ctx` workspace prompts are audited
+individually in the same way.
 
 ### Testing
 
-`Printer::memory` is JP's stand-in for a printer whose behaviour a test
-controls.
-It gains capabilities as a constructor argument, defaulting to today's
-behaviour:
+Tests construct in-memory printers with `Printer::memory`, which continues to
+derive channel capabilities from `OutputFormat`.
+A new `Printer::memory_with` constructor accepts explicit `ChannelCaps` for
+stdout and stderr so tests can exercise split-channel configurations:
 
 ```rust
 // Capabilities derived from the format, as a terminal run would.
@@ -290,55 +288,57 @@ let (printer, out, err) = Printer::memory_with(
 );
 ```
 
-No `Printer` trait is introduced.
-There is one implementation and one test seam; a trait would be an abstraction
-with no second caller.
+This RFD does not introduce a `Printer` trait.
+`Printer` has a single implementation, and `Printer::memory_with` provides the
+necessary test seam.
 
 ### Overlap with RFD 091
 
-[RFD 091] arrives at much of this section from the other direction, and has
-since been implemented — so this is a migration rather than a division of
-unbuilt work.
+[RFD 091] independently arrived at stderr capability checks for its status
+region and has already been implemented, making this a migration of existing
+code rather than a division of unbuilt work.
 
-What shipped is `TerminalCapability`, a `Printer` constructor input carrying
-stderr's tty-ness and the terminal's geometry, with
+[RFD 091] shipped `TerminalCapability`, a `Printer` constructor input carrying
+whether stderr is a terminal and the terminal's geometry, with
 `TerminalCapability::interactive` as the test override and
-`permits_regions(format)` as the predicate.
-That predicate is `can_repaint` under another name, and it already moves the tty
-source for chrome from stdout to stderr.
+`permits_regions(format)` as the enabling predicate.
+`permits_regions(format)` is `can_repaint` under another name and already checks
+stderr rather than stdout.
 
-The two should not both own it.
-This RFD owns channel capability as a general property; the status region
-becomes one client of `can_repaint` rather than carrying its own predicate. 091
-keeps what is genuinely its own: that a tracing layer writing to stderr disables
-the region, since that is about a competing writer rather than about what the
-channel can do.
+Rather than maintaining two parallel capability models, `Printer` owns channel
+capabilities through `ChannelCaps`, and the status region becomes a consumer of
+`can_repaint`.
+[RFD 091] retains its rule that a tracing layer writing to stderr disables the
+status region, since that guards against a competing writer rather than channel
+capability.
 
-Two things the migration has to preserve, which were not in 091 when this
-section was written:
+Migrating `TerminalCapability` must preserve two requirements from the [RFD 091]
+implementation:
 
-- **Geometry, not just capability.** The region's window is sized from the
-  terminal's row count and its rows are bounded to the column count, both
-  re-read on every draw rather than captured once — a block sized against a
-  stale height erases rows the viewport no longer has.
-  `ChannelCaps` as sketched carries neither, so either it grows a size or the
-  region keeps a second input alongside it.
-- **`Printer::memory_with` needs the same.** The region's screen-level tests
-  declare a terminal of a known size; a capability-only override cannot express
-  them.
+- **Live terminal geometry.** The status region sizes its window from the
+  terminal's row count and bounds each row to the column count, re-reading both
+  on every draw so a block sized against a stale height does not erase rows
+  outside the current viewport.
+  `ChannelCaps` as sketched above carries only booleans, so either `ChannelCaps`
+  must include geometry or the status region must keep a separate geometry input
+  alongside it.
+- **Geometry in `Printer::memory_with`.** The status region's screen-level tests
+  declare a terminal of a fixed size, which a boolean-only `ChannelCaps`
+  override cannot express.
 
-One place where 091 is deliberately not followed: it resolves `--format auto` by
-stdout tty-ness per [RFD 048], and its predicate turns the region off under the
-resulting non-pretty format.
-This RFD changes the resolution instead, so a terminal stderr keeps its escapes
-while stdout is piped.
-That is a behaviour change against what 091 shipped: `jp query > answer.txt`
-renders no region today and would render one after.
+This RFD intentionally departs from [RFD 091] on how `--format auto` is
+resolved.
+[RFD 091] resolves `--format auto` from `stdout.is_terminal()` per [RFD 048], so
+`permits_regions(format)` disables the status region whenever stdout is
+redirected.
+Resolving `--format auto` per channel keeps ANSI escapes enabled on a terminal
+stderr when stdout is piped or redirected, so `jp query > answer.txt` will
+render the status region on stderr where it previously suppressed it.
 
 ## Observable behaviour changes
 
-The command from [\#1068] keeps its current behaviour by default, and gains a
-way to change it:
+The pipeline from [\#1068] keeps its current behaviour by default when run from
+a terminal, and can be silenced explicitly with `--no-interactive`:
 
 ```console
 jp conversation ls | rg fix
@@ -348,208 +348,205 @@ jp --no-interactive conversation ls | rg fix
 # Never prompts.
 ```
 
-That is a deliberate choice, not an oversight.
 Suppressing prompts because stdout is a pipe is the heuristic this RFD removes;
-the fix for the report is the override, not a rule about pipes.
+`--no-interactive` provides the explicit override for scripted pipelines.
 
-The rest are fixes, and each is visible:
+Other user-visible changes:
 
-- `jp query | less` — stderr repaints work.
-  Today the escapes are stripped and each retry adds a line.
-- `jp query 2> log.txt` — cursor escapes stop reaching the file.
-- `jp query` from cron or `ssh` without `-t` — already unattended, but now for
-  the stated reason rather than because stdout happens not to be a terminal.
-- `jp query > out.txt` from a terminal — prompts still appear.
-  Under the old derivation they were skipped, because redirecting stdout was
-  read as "no user".
+- `jp query | less`: stderr in-place repaints work instead of having their
+  escape sequences stripped and printing each retry on a new line.
+- `jp query 2> log.txt`: cursor-control sequences are no longer written to
+  `log.txt`.
+- `jp query` from cron or `ssh` without `-t`: runs unattended because no
+  controlling terminal exists, rather than because stdout happens not to be a
+  terminal.
+- `jp query > out.txt` in a terminal: prompts still appear via `/dev/tty`
+  instead of being skipped because stdout was redirected.
 
-The last is the largest change in kind: a redirected-stdout run in a terminal
-becomes interactive where it previously ran unattended.
-That is the behaviour [RFD 048] specifies, and it matches `git`, `sudo`, and
-`fzf`.
+The last case is the most significant change: redirecting stdout in an
+interactive terminal no longer implies unattended execution.
+That matches [RFD 048] as well as tools such as `git`, `sudo`, and `fzf`.
 
 ## Drawbacks
 
-**`/dev/tty` is not portable in spelling.** The Windows equivalents behave
-similarly but are opened differently and fail differently, so the promptability
-probe needs per-platform code and per-platform testing.
+**`/dev/tty` is not portable in spelling.** The Windows equivalents (`CONIN$`
+and `CONOUT$`) behave similarly but are opened and fail differently, so the
+promptability probe needs platform-specific code and tests.
 
-**Opening `/dev/tty` for reading is a new side effect at startup.** It is cheap
-and it is what the prompt path needs anyway, but it is one more thing that can
-fail in a sandbox.
+**Opening `/dev/tty` for reading adds a startup side effect.** The probe is
+inexpensive and required before prompting anyway, but it is one more operation
+that can fail in a restrictive sandbox.
 
-**Four properties are more to hold than one boolean.** The reader who only wants
-"am I on a terminal" now has to know which terminal and for what.
-The cost is real, and it is the cost of the questions actually being different.
+**Four properties replace a single boolean.** Callers can no longer ask a single
+"am I on a terminal?" question; each call site must choose between
+promptability, escape capability, and cursor addressability.
 
-**Per-channel `auto` deviates from [RFD 048].** 048 resolves one format from
-stdout and applies it to both channels, and this RFD keeps that only for
-explicit values.
-A reader who knows 048 will find `--format auto` behaving differently per
-channel surprising until they reach this document, and 048 needs a note pointing
-here.
+**Per-channel `auto` deviates from [RFD 048].** [RFD 048] resolves one format
+from stdout and applies it to both channels, whereas this RFD preserves that
+rule only for explicit `--format` values.
+[RFD 048] will need a note pointing to this RFD so readers are not surprised
+when `--format auto` resolves differently on stdout and stderr.
 
-**The rename sweep touches sixteen sites in four files,** and is not purely
-mechanical: each has to be classified before it is renamed, and at least one
-feeds both a prompt decision and a rendering one.
-It is a wide diff over code that is otherwise stable.
+**The rename sweep touches sixteen sites across four files.** Because each site
+must be classified before renaming and at least one feeds both a prompt decision
+and a rendering decision, the change produces a wide diff across otherwise
+stable code.
 
 ## Alternatives
 
 ### Keep `stdout.is_terminal()` and add flags for the exceptions
 
-Leave the derivation alone; let `--no-interactive` and a hypothetical
-`--assume-tty` paper over the cases it gets wrong.
-Rejected: it makes every user who pipes stdout learn a flag to restore the
-behaviour they had, and it leaves the next affordance to pick the wrong signal
-again.
+Keep `stdout.is_terminal()` as the single signal and let `--no-interactive` and
+a hypothetical `--assume-tty` flag override the cases it gets wrong.
+This was rejected because every user who pipes stdout would have to pass a flag
+to keep stderr progress and prompting working, and new call sites would continue
+to conflate channel formatting with promptability.
 
 ### Derive promptability from stdin
 
-The workspace ladder already does this, and it is right more often than stdout
-is.
-Rejected: it breaks `jp query < prompt.txt`, where stdin is a file and the user
-is still at the keyboard.
+Derive promptability from `stdin.is_terminal()`, as the workspace precedence
+ladder already does.
+This was rejected because it breaks `jp query < prompt.txt`, where stdin is a
+file while the user is still at the keyboard.
 `/dev/tty` is the only source that survives redirection of any standard stream.
 
 ### One `Terminal` type owning all four properties
 
 Fold channel capability and promptability into a single struct passed
 everywhere.
-Rejected: it re-creates the coupling this RFD removes, one indirection further
-out.
-Channel capability belongs to the thing that owns the channels; promptability
+This was rejected because it re-couples unrelated concerns: channel capability
+belongs on `Printer`, which owns the output channels, whereas promptability
 belongs to the session.
 
 ### Introduce a `Printer` trait for testing
 
-Rejected as a midlayer: one implementation, no second caller, and the test seam
-`Printer::memory` already provides is sufficient once it takes capabilities.
+Introduce a trait over `Printer` for test doubles.
+This was rejected because `Printer` has a single implementation with no second
+caller, and `Printer::memory_with` provides the required test seam once it
+accepts `ChannelCaps`.
 
 ## Non-Goals
 
-- **The detached prompt policy.** What JP does *instead of* prompting when there
-  is no user — auto-approve, use defaults, or fail — is [RFD 049].
-  This RFD supplies the signal that policy branches on and takes no position on
-  the branches.
-- **The `Prompt` enum.** Typed prompt routing is [RFD 018].
-- **Whether the workspace conflict prompt should exist.** That is [RFD 087]'s
-  design; this RFD only fixes when it fires.
-- **A toggle for cursor addressability.** Repaints happen when the channel
-  supports them.
-  No flag either way.
+- **The detached prompt policy.** What JP does instead of prompting when no user
+  is present (auto-approve, use defaults, or fail) is defined by [RFD 049].
+  This RFD supplies the promptability signal that policy branches on.
+- **The `Prompt` enum.** Typed prompt routing is covered by [RFD 018].
+- **Whether the workspace conflict prompt should exist.** That belongs to [RFD
+  087]'s design; this RFD only fixes when the prompt fires.
+- **A toggle for cursor addressability.** In-place repaints happen when the
+  channel supports them, with no CLI flag to force them on or off.
 - **The shape of chrome records under `--format json`.** Whether a consumer can
   distinguish chrome from data in a merged stream is a machine-output concern,
-  not a capability concern.
-- **A typed prompt transport.** Several prompts build on a bare `io::stderr()`
-  rather than the printer's prompt channel, so a promptable run can still put a
-  question somewhere the user is not looking.
-  Removing `prompt_writer`'s fallback closes the case where JP has the signal
-  and ignores it; routing every prompt through one transport is [RFD 018].
+  not a terminal capability concern.
+- **A typed prompt transport.** Several prompts still write directly to a bare
+  `io::stderr()` rather than the printer's prompt channel, so a promptable
+  session can still write a prompt to a redirected stderr.
+  Removing `prompt_writer`'s fallback to `out` fixes the case where `jp_printer`
+  ignores its own `/dev/tty` check; routing every prompt through a single
+  transport is [RFD 018].
 
 ## Risks and Open Questions
 
 ### `/dev/tty` availability in containers and multiplexers
 
-The probe is correct in the environments it was designed for.
-Docker without `-t`, some CI runners, and remote agent harnesses are less
-predictable, and a false negative there turns an interactive session unattended.
-`--interactive` gives the user a way to find out immediately rather than by
-inspecting the outcome, which bounds the damage but does not remove the risk.
-Implementation should test these environments explicitly rather than reason
-about them.
+Docker without `-t`, some CI runners, and remote agent harnesses vary in how
+they expose `/dev/tty`, and a false negative there turns an interactive session
+unattended.
+`--interactive` lets the caller fail immediately rather than discover the
+fallback after the fact, which bounds the damage but does not remove the risk.
+Implementation should test these environments directly.
 
 ### The cost of probing at startup
 
-Every invocation opens `/dev/tty`, including the ones that never prompt.
+Every invocation opens `/dev/tty`, including commands that never prompt.
 [RFD 048] made the prompt writer lazy for this reason.
-If the open proves measurable, the probe can be deferred behind a `OnceCell`, at
-the cost of promptability no longer being a plain value resolved in the shell.
+If opening `/dev/tty` at startup has measurable cost, the probe can be deferred
+behind a `OnceCell`, at the cost of evaluating promptability on first use rather
+than resolving it once in the shell.
 
 ### Background process groups
 
 A process in a background process group holds a controlling terminal, so the
-`/dev/tty` probe succeeds, but reading from it raises `SIGTTIN` and the default
-action stops the process.
-`jp query "…" &` therefore passes `--interactive`'s assertion and then suspends
-at the first prompt.
-The shell reports the stopped job, so the damage is visible and contained, but
-the assertion promises more than it can deliver.
+`/dev/tty` probe succeeds, but reading from `/dev/tty` raises `SIGTTIN` and
+stops the process by default.
+`jp query "…" &` therefore passes `--interactive`'s startup assertion and then
+suspends at the first prompt.
+Although the shell reports the stopped job, `--interactive` promises more at
+startup than it can verify.
 
-Two ways out: compare `tcgetpgrp(tty_fd)` with the process group when deriving
-promptability, which is Unix-only and untested against the multiplexers below;
-or narrow the contract to "a controlling-terminal endpoint exists" and let the
-first prompt fail at runtime with a typed error.
-Unresolved.
+Two options remain open: compare `tcgetpgrp(tty_fd)` with the process group ID
+when deriving promptability (which is Unix-only and untested across the
+containers and multiplexers discussed above), or narrow `--interactive`'s
+contract to "a controlling-terminal endpoint exists" and let the first prompt
+fail at runtime with a typed error.
 
 ### Capability and writer destination must change together
 
 [RFD 021] proposes swapping a printer's `out` and `err` writers at runtime.
-Capability captured at construction goes stale the moment a writer is replaced
-by one with different properties.
-Whichever lands second owes the other an atomic swap of destination and
-capability.
+Capabilities captured at construction become stale as soon as a writer is
+replaced by one with different properties.
+Whichever RFD lands second must swap the writer destination and its
+`ChannelCaps` atomically.
 
 ### `--interactive` on a partially available terminal
 
 `/dev/tty` can in principle open for writing but not reading.
-The proposal requires both and errors otherwise, which is the conservative
-reading; whether any real environment produces that state is unknown.
+This proposal requires both read and write access and errors under
+`--interactive` otherwise; whether any real environment produces a write-only
+`/dev/tty` is unknown.
 
 ## Implementation Plan
 
 ### Phase 1: Channel capability on `Printer`
 
 Introduce `ChannelCaps` and `Printer::caps`.
-Resolve `--format auto` per channel, keep explicit formats forcing both, and
-derive `addressable` from `stderr.is_terminal()`.
-Move the `Sink` strip decision onto `caps(target).escapes`.
+Resolve `--format auto` per channel, keep explicit `--format` values forcing
+both channels, and derive `addressable` from `stderr.is_terminal()`.
+Move `Sink`'s ANSI-stripping decision onto `caps(target).escapes`.
 Point `erase_line`, `spawn_line_timer`, and the retry notice at `can_repaint`
 instead of `--format` and `is_tty`.
 Add `Printer::memory_with`.
 
-Fixes the accumulating-retry-line and log-file cases on its own.
-Can be merged independently.
+This phase fixes the accumulating retry lines and redirected log-file escape
+leaks on its own, and can be merged independently.
 
 ### Phase 2: Promptability from `/dev/tty`
 
-Add the read side to `open_tty`, expose availability as a value rather than
-absorbing it in `prompt_writer`'s fallback, and resolve promptability from it in
-the shell.
-Add `--interactive` with assert semantics.
-Remove `Term::is_tty`.
+Add read-access checking to `open_tty`, expose `/dev/tty` availability as a
+boolean value rather than falling back to `out` in `prompt_writer`, and resolve
+promptability from it in the shell.
+Add `--interactive` with assertion semantics and remove `Term::is_tty`.
 
-Depends on Phase 1 for the `Printer`-side capability that the remaining `is_tty`
-readers are re-pointed at.
+This phase depends on Phase 1 for the `Printer`-side capabilities that replace
+the rendering uses of `Term::is_tty`.
 
 ### Phase 3: The rename sweep
 
-Rename the sixteen `is_tty` sites to `interactive`, update their doc comments,
-and correct `dispatch.rs`'s terminal-specific guidance.
+Classify each of the sixteen `is_tty` sites against the migration table above,
+split any site that feeds both a prompt decision and a rendering decision,
+rename the promptability sites to `interactive`, update their doc comments, and
+correct `dispatch.rs`'s terminal-specific guidance.
 
-Mostly mechanical, but not entirely: each site is classified against the
-migration table above first, and any that feeds both a prompt decision and a
-rendering one is split before it is renamed.
-Depends on Phase 2, and is deliberately separate so the behavioural changes and
-the mechanical ones bisect apart.
+This phase depends on Phase 2 and is kept in a separate commit so the
+behavioural changes and the mechanical renames bisect cleanly.
 
 ## References
 
-- [RFD 048: Four-Channel Output Model][RFD 048] — defines the channels and
-  specifies the stdout-versus-`/dev/tty` split this RFD implements.
-- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049] — the
-  detached prompt policy, which consumes this RFD's signal.
-- [RFD 087: Session-Scoped Active Workspace][RFD 087] — its precedence ladder
-  defers to "the same promptability signal JP already uses elsewhere"; this is
-  that signal.
-- [RFD 091: Printer-Owned Status Region][RFD 091] — its enabling predicate is
-  this RFD's `can_repaint`, reached independently and already implemented.
-  See [Overlap with RFD 091](#overlap-with-rfd-091).
-- [RFD 021: Printer Live Redirection][RFD 021] — swapping writers invalidates
-  capability captured at construction.
-- [\#1068] — the report this RFD starts from.
-- `ssh -o BatchMode=yes` — prior art for failing rather than prompting.
-- `git`, `sudo`, `fzf` — prior art for `/dev/tty` as the prompt channel.
+- [RFD 048: Four-Channel Output Model][RFD 048]: defines the four output
+  channels and specifies the stdout-versus-`/dev/tty` split this RFD implements.
+- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049]: defines
+  the detached prompt policy that consumes this RFD's promptability signal.
+- [RFD 087: Session-Scoped Active Workspace][RFD 087]: its precedence ladder
+  defers to "the same promptability signal JP already uses elsewhere"; this RFD
+  defines that signal.
+- [RFD 091: Printer-Owned Status Region][RFD 091]: its enabling predicate is
+  this RFD's `can_repaint`, reached independently and already implemented (see
+  [Overlap with RFD 091](#overlap-with-rfd-091)).
+- [RFD 021: Printer Live Redirection][RFD 021]: swapping writers at runtime
+  invalidates capabilities captured at construction.
+- [\#1068]: the issue report this RFD starts from.
+- `ssh -o BatchMode=yes`: prior art for failing fast rather than prompting.
+- `git`, `sudo`, `fzf`: prior art for `/dev/tty` as the prompt channel.
 
 [RFD 018]: 018-typed-prompt-routing-enum.md
 [RFD 021]: 021-printer-live-redirection.md

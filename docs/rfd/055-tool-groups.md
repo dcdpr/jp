@@ -11,7 +11,7 @@
 ## Summary
 
 This RFD introduces tool groups: named sets of tools that can be enabled or
-disabled as a unit via `--tools GROUP` and `--no-tools GROUP`.
+disabled as a unit with `--tools GROUP` and `--no-tools GROUP`.
 Tools declare their group membership via a `groups` field, and groups marked
 `exhaustive = true` require every loaded tool to explicitly opt into or out of
 the group.
@@ -23,27 +23,27 @@ Named config fragments (loaded via `--cfg` or the `extends` field) bundle tool
 configurations into reusable files, but there is no way to enable or disable a
 *set* of tools from the CLI.
 
-Today, disabling all filesystem write tools requires:
+Disabling all filesystem write tools requires listing each tool by name:
 
 ```sh
 jp query -T fs_create_file,fs_modify_file,fs_delete_file,fs_move_file "explain this code"
 ```
 
-And ensuring that *every* tool in the system is classified as "write" or "not
-write" is impossible — there is no validation mechanism.
-A new MCP tool could silently retain write access when the user expected
+There is also no way to validate that *every* tool in the system is classified
+as "write" or "not write".
+A new MCP tool can silently retain write access when the user expects
 `--no-tools write` to disable all write-capable tools.
 
-A `--cfg disable_write_tools.toml` workaround exists, but it's fragile — you
-maintain a separate file that mirrors tool names, and nothing validates that the
-file stays in sync when tools are added or removed.
+A `--cfg disable_write_tools.toml` fragment works around the CLI verbosity, but
+it is fragile: you must maintain a separate file that mirrors tool names, and
+nothing checks that the file stays in sync when tools are added or removed.
 
 Tool groups solve two problems:
 
 1. **CLI shorthand**: `--no-tools write` disables all write tools in one flag.
-2. **Exhaustive validation**: a group marked `exhaustive = true` guarantees that
-   every loaded tool has been explicitly classified relative to that group.
-   No tool escapes unreviewed.
+2. **Exhaustive validation**: a group marked `exhaustive = true` requires every
+   loaded tool to be classified as included or excluded, so no tool escapes
+   unreviewed.
 
 ## Design
 
@@ -59,19 +59,16 @@ git = {}
 cargo = {}
 ```
 
-A group definition contains:
+A group definition accepts one field:
 
-- **`exhaustive`** (optional, default `false`): whether every tool must be
-  classified relative to this group.
-  See [Exhaustive Validation](#exhaustive-validation).
+- **`exhaustive`** (optional, default `false`): requires every enabled tool to
+  be classified relative to this group (see [Exhaustive
+  Validation](#exhaustive-validation)).
 
-Groups do not list their members.
-Membership is declared on the tool side (see below).
-
-Group names must not collide with tool names.
+Groups do not list their members; tools declare their own membership.
+Group names must not start with `!` (reserved for the exclusion shorthand) or
+collide with tool names.
 If a group and a tool share a name, JP exits with a config error at startup.
-
-Group names must not start with `!` (reserved for the exclusion shorthand).
 
 ### Tool-Side Group Membership
 
@@ -85,14 +82,14 @@ groups = ["write"]
 groups = ["read", "!write"]
 ```
 
-Each entry in the array is either:
+Each entry in the array is one of:
 
-- A **string** — shorthand for included membership.
-- A **`!`-prefixed string** — shorthand for excluded membership.
-- A **structured entry** — `{ group = "NAME", membership = "include" |
-  "exclude" }` for when the long form is preferred.
+- A **string**: shorthand for included membership.
+- A **`!`-prefixed string**: shorthand for excluded membership.
+- A **structured entry**: `{ group = "NAME", membership = "include" | "exclude"
+  }` (`membership` defaults to `"include"`).
 
-The three forms are equivalent:
+These forms are equivalent:
 
 ```toml
 # These all mean "included in write":
@@ -107,12 +104,12 @@ groups = [{ group = "write", membership = "exclude" }]
 
 Referencing a group name that does not exist in `conversation.tools.groups` is a
 config error.
-
-Naming both `!write` and `write` is valid, last-defined wins.
+Naming both `!write` and `write` in the same array is valid; the last entry
+wins.
 
 #### Membership States
 
-For any (tool, group) pair, there are exactly three states:
+Each (tool, group) pair has one of three states:
 
 | State         | Meaning                         | How expressed                      |
 | ------------- | ------------------------------- | ---------------------------------- |
@@ -121,8 +118,8 @@ For any (tool, group) pair, there are exactly three states:
 |               |                                 | membership = "exclude" }`          |
 | **Undefined** | Tool has not been classified    | Group not mentioned in `groups`    |
 
-The distinction between excluded and undefined is what makes exhaustive
-validation meaningful.
+Exhaustive validation relies on the distinction between **Excluded** (classified
+as a non-member) and **Undefined** (not yet classified).
 
 ### Interaction with `*` Defaults
 
@@ -136,30 +133,23 @@ groups = ["write"]
 groups = ["!write", "read"]
 ```
 
-This establishes a fail-closed baseline: all tools default to the write group.
-A tool that is *not* a write tool must explicitly exclude itself.
-This means `--no-tools write` is safe by default — if a new tool is added and
-the author forgets to classify it, it lands in the write group and gets disabled
-when write tools are disabled.
-No tool silently escapes with write access.
+This establishes a fail-closed baseline where all tools belong to the `write`
+group unless they explicitly exclude themselves.
+That makes `--no-tools write` safe by default: if a new tool is added and its
+author forgets to classify it, it inherits `write` from `*` and is disabled
+whenever write tools are disabled.
 
 The `groups` field uses **merge-by-group-name** semantics at every merge
-boundary — between `*` defaults and tool-level config, and between config file
-layers (workspace config, `--cfg` overrides, etc.).
+boundary (between `*` defaults and tool-level config, and across config layers
+such as workspace config and `--cfg` overrides):
 
-The merge rule is the same at every boundary:
+1. Start with the lower-priority `groups` array.
+2. Remove any entry whose group name appears in the higher-priority array.
+3. Append the higher-priority entries in their declared order.
 
-1. Start with the lower-priority groups array.
-2. Remove any entries whose group name appears in the higher-priority array (the
-   higher-priority side overrides those).
-3. Append all higher-priority entries.
-
-Retained lower-priority entries come first.
-Higher-priority entries follow in their declared order.
-
-This means a `--cfg` override that sets `groups = ["!write"]` on a tool will
-override the `write` entry from the workspace config's `*` defaults, while
-retaining any other group entries that were already present.
+A `--cfg` override that sets `groups = ["!write"]` on a tool replaces the
+`write` entry from the workspace config's `*` defaults while retaining any other
+inherited group entries.
 
 **Example:**
 
@@ -185,16 +175,16 @@ groups = ["github"]
 # cargo_check:    ["write"]            (inherited from *)
 ```
 
-This merge behavior avoids the verbosity problem with exhaustive groups.
-Without it, every tool that sets its own `groups` would need to re-declare all
-exhaustive group memberships — exactly the kind of error-prone repetition that
-exhaustive validation is meant to prevent.
+Merging by group name avoids repeating exhaustive group memberships on every
+tool.
+Under replace semantics, any tool that sets `groups` would have to re-declare
+every exhaustive group inherited from `*`.
 
 ### Exhaustive Validation
 
-A group with `exhaustive = true` requires that every enabled tool has been
-classified relative to that group — either included or excluded.
-If any tool has the group in undefined state (not mentioned in the tool's
+A group with `exhaustive = true` requires every enabled tool to be classified
+relative to that group as either included or excluded.
+If any enabled tool leaves the group undefined (not mentioned in the tool's
 effective `groups` array after `*` merge), JP exits with a startup error.
 
 ```toml
@@ -212,17 +202,17 @@ source = "mcp.my_server"
 # inherits "write" from * → classified → OK
 ```
 
-Without the `*` baseline, every tool must explicitly mention the exhaustive
-group in its `groups` array.
-Both approaches are valid — the `*` baseline is a convenience for the common
-pattern where most tools share a default classification.
+Without a `*` baseline, every tool must explicitly list the exhaustive group in
+its `groups` array.
+Setting a baseline on `*` is a shorthand when most tools share a default
+classification.
 
 Exhaustive validation runs after all config layers are merged (config files,
-`--cfg`, CLI flags) but before the query starts.
+`--cfg`, CLI flags) and before the query starts.
 
 ### CLI Interaction
 
-`--tools` (`-t`) and `--no-tools` (`-T`) accept group names in addition to tool
+`--tools` (`-t`) and `--no-tools` (`-T`) accept group names alongside tool
 names:
 
 ```sh
@@ -236,15 +226,14 @@ jp query -t -T write "explain this code"
 jp query -T git "review this design"
 ```
 
-Since group names and tool names cannot collide, name resolution is unambiguous.
-
-`--tools GROUP` enables all tools with **included** membership in that group.
-`--no-tools GROUP` disables all tools with included membership in that group.
+`--tools GROUP` enables and `--no-tools GROUP` disables all tools with
+**included** membership in `GROUP`.
+Because group names and tool names cannot collide, name resolution is
+unambiguous.
 
 ### Interaction with Tool `enable` Field
 
-The existing `enable` field on tool config controls tool activation behavior.
-Groups interact with it as follows:
+Group flags respect each tool's `enable` setting:
 
 | `enable` value   | `--tools GROUP`   | `--no-tools GROUP` |
 | ---------------- | ----------------- | ------------------ |
@@ -254,36 +243,32 @@ Groups interact with it as follows:
 | `explicit`       | **Not enabled**   | Disabled           |
 | `always`         | (already enabled) | **Not disabled**   |
 
-- **`None` (default)**: the tool has no explicit enable setting.
-  Treated as enabled (consistent with `is_none_or(Enable::is_on)` in the current
-  implementation).
+- **`None` (default)**: treated as enabled, matching `is_none_or(Enable::is_on)`
+  in the current implementation.
 
-- **`explicit`**: not enabled by `--tools GROUP`, consistent with not being
-  enabled by bare `--tools`.
-  Requires being named directly: `--tools TOOL`.
+- **`explicit`**: not enabled by `--tools GROUP`, consistent with bare
+  `--tools`.
+  The tool must be named directly via `--tools TOOL`.
 
-- **`allow_toggle = "if_named_or_group"`** (RFD 081): like `if_named`, the tool
-  is not enabled by bare `--tools`.
-  But unlike `if_named`, it *is* enabled when a group it belongs to is activated
-  via `--tools GROUP`.
-  This allows tools that should not be swept up by blanket enable-all but should
-  respond to targeted group activation.
-  The variant already exists in the schema (RFD 081); tool groups only need the
-  `--tools GROUP` parser that produces `ToggleScope::NamedGroup`.
+- **`allow_toggle = "if_named_or_group"`** (RFD 081): ignored by bare `--tools`,
+  but enabled when one of its groups is passed to `--tools GROUP`.
+  This lets a tool opt out of blanket enable-all while still responding to
+  targeted group activation.
+  The variant is defined in RFD 081; tool groups only need the `--tools GROUP`
+  parser to produce `ToggleScope::NamedGroup`.
 
 - **`always`**: cannot be disabled by any mechanism, including `--no-tools
-  GROUP`.
-  Consistent with existing behavior for system-critical tools like
+  GROUP`, matching existing behavior for system-critical tools like
   `describe_tools`.
 
 ## Drawbacks
 
-**Merge-by-name is a special case.** The `groups` field uses merge-by-name
-semantics with `*` defaults, while scalar fields use replace semantics and other
-array fields use `MergeableVec`'s append/replace strategies.
-This must be documented clearly.
-The justification (avoiding re-declaration verbosity with exhaustive groups) is
-sound, but it adds a concept users must learn.
+**Merge-by-name is a special case.** The `groups` field merges by group name
+with `*` defaults, whereas scalar fields use replace semantics and other array
+fields use `MergeableVec`'s append or replace strategies.
+Avoiding re-declaration verbosity for exhaustive groups justifies the rule, but
+it adds a merge behavior that users must learn and that must be documented
+clearly.
 
 ## Alternatives
 
@@ -297,64 +282,61 @@ include = ["fs_create_file", "fs_modify_file"]
 exclude = ["fs_read_file", "cargo_check"]
 ```
 
-This was rejected because it creates dual membership paths — membership
-expressed both on the group and on the tool.
-Conflicts between the two require resolution rules.
-Tool-side declaration is the single source of truth.
+Rejected because expressing membership on both the group and the tool creates
+two places to declare the same relationship and requires conflict-resolution
+rules.
+Tool-side declaration keeps a single source of truth.
 
 ### Tags instead of groups
 
-Tools could declare tags (`tags = ["read", "write"]`) and the CLI could filter
-by tag (`--tools @read`).
-This is similar to the chosen design but does not support exhaustive validation
-or the include/exclude distinction.
+Tools could declare tags (`tags = ["read", "write"]`) filtered from the CLI via
+`--tools @read`.
+Tags do not support exhaustive validation or the include/exclude distinction.
 
 ### `exhaustive = "include" | "exclude"` variants
 
-Instead of just `true | false`, exhaustive could default unclassified tools to
-included or excluded.
-These were dropped because `"include"` is functionally equivalent to `false`
-(the check never fires — every tool auto-classifies) and `"exclude"` is already
-the natural behavior of the `*` defaults pattern (`'*'.groups = ["write"]` with
-per-tool `"!write"` overrides).
-The boolean is sufficient.
+Instead of a boolean, `exhaustive` could accept `"include"` or `"exclude"` to
+assign a default classification to unclassified tools.
+These variants were dropped because `"include"` is equivalent to `false` (every
+tool auto-classifies, so the check never fires) and `"exclude"` is already
+expressed by the `*` defaults pattern (`'*'.groups = ["write"]` with per-tool
+`"!write"` overrides).
+A boolean is sufficient.
 
 ## Non-Goals
 
-- **Group-level configuration.** Groups in this RFD are purely membership
-  containers for CLI shorthand and exhaustive validation.
+- **Group-level configuration.** Groups in this RFD are membership containers
+  for CLI shorthand and exhaustive validation.
   Allowing groups to carry config defaults or overrides (e.g., group-wide `run`
-  or `style` settings) is a natural extension but is deferred to a future RFD.
+  or `style` settings) is deferred to a future RFD.
 - **Recursive groups.** Groups cannot contain other groups.
-  The real-world taxonomy is shallow (read, write, git, cargo, github).
-  If deeper nesting is needed, it can be added in a future RFD.
+  Existing tool categories (read, write, git, cargo, github) are flat; nesting
+  can be added in a future RFD if needed.
 
 ## Risks and Open Questions
 
-**`*` merge semantics may surprise users.** The merge-by-name behavior for
-`groups` differs from other fields.
-If this causes confusion in practice, we could fall back to replace semantics
-and accept the verbosity cost for exhaustive groups.
+**`*` merge semantics may surprise users.** Merging `groups` by name differs
+from other config fields.
+If this causes confusion in practice, we can fall back to replace semantics and
+accept the verbosity cost for exhaustive groups.
 
 ## Implementation Notes
 
 ### `GroupMemberships` type
 
-The merge-by-group-name behavior is implemented as a dedicated
-`GroupMemberships` type rather than extending `MergeableVec` with a third
-strategy.
-The key extraction logic (parsing group names from strings, `!`-prefixed
-strings, and structured entries) is specific to the groups type and doesn't
-generalize to other vec fields.
+Merge-by-group-name is implemented on a dedicated `GroupMemberships` type rather
+than as a third `MergeableVec` strategy, because extracting group names from
+plain strings, `!`-prefixed strings, and structured entries is specific to
+`groups` and does not generalize to other vector fields.
 
 `GroupMemberships` wraps a `Vec<GroupEntry>` and provides:
 
-- `merge_from(&mut self, other: &GroupMemberships)` — the merge-by-name
-  operation.
-- `included(&self) -> impl Iterator<Item = &str>` — iterate included group
-  names in declaration order.
-- `is_classified(&self, group: &str) -> bool` — check if a group is mentioned
-  (included or excluded), for exhaustive validation.
+- `merge_from(&mut self, other: &GroupMemberships)`: merges entries by group
+  name.
+- `included(&self) -> impl Iterator<Item = &str>`: yields included group names
+  in declaration order.
+- `is_classified(&self, group: &str) -> bool`: reports whether a group is
+  explicitly included or excluded, for exhaustive validation.
 
 `GroupEntry` is an enum supporting string shorthand (`"write"`, `"!write"`) and
 structured form (`{ group, membership }`), with `group_name()` and
@@ -379,8 +361,8 @@ the config system.
    `GroupMemberships` type.
 5. Update `AssignKeyValue`, `PartialConfigDelta`, and `ToPartial`
    implementations for `PartialToolsConfig` to handle the new `groups` field.
-6. Validate at config load time: no group/tool name collisions, no references to
-   undefined groups.
+6. Validate at config load time that group and tool names do not collide and
+   that every referenced group is defined.
 
 ### Phase 2: Exhaustive validation
 
@@ -394,7 +376,7 @@ the config system.
 
 1. Extend `--tools` / `--no-tools` name resolution to check groups (unambiguous
    since group/tool name collisions are a config error).
-2. When a group name is matched, expand to enable/disable all tools with
+2. When a group name matches, expand it to enable or disable all tools with
    included membership in that group.
 3. Respect each tool's `allow_toggle` policy: `if_named` tools are not activated
    by group enable; locked (`never`) tools are not flipped by group directives.
@@ -405,14 +387,14 @@ the config system.
 
 ## References
 
-- [Configuration architecture] — progressive complexity design principles
-- `MergeableVec` (`crates/jp_config/src/types/vec.rs`) — existing array merge
+- [Configuration architecture]: progressive complexity design principles
+- `MergeableVec` (`crates/jp_config/src/types/vec.rs`): existing array merge
   strategies in the config system
-- `crates/jp_config/src/conversation/tool.rs` — `ToolConfig`, `ToolsConfig`,
+- `crates/jp_config/src/conversation/tool.rs`: `ToolConfig`, `ToolsConfig`,
   `ToolsDefaultsConfig`, `Enable`
-- `crates/jp_cli/src/cmd/query.rs` — `apply_enable_tools`, `--tools` /
+- `crates/jp_cli/src/cmd/query.rs`: `apply_enable_tools`, `--tools` /
   `--no-tools` handling
-- [RFD 042] — tool options (per-tool runtime configuration, complementary
+- [RFD 042]: tool options (per-tool runtime configuration, complementary
   feature)
 
 [Configuration architecture]: ../configuration.md

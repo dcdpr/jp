@@ -10,42 +10,40 @@
 
 ## Summary
 
-Tool enablement grows a third state: a tool can be permitted, but not offered to
-the model until the model asks for it.
-A `search_tools` builtin searches the permitted set and promotes matches to
-offered for the rest of the conversation.
-This keeps large tool catalogues out of the context window without hiding
-capability from the user.
+Tool enablement gains a third state, `discoverable`: a tool is permitted to run,
+but its schema is omitted from provider requests until the model searches for
+it.
+A built-in `search_tools` tool queries the permitted set and promotes matching
+tools to `on` for the rest of the conversation.
+This keeps large tool catalogues out of the context window without disabling
+tools the model may need.
 
 ## Motivation
 
 JP sends every enabled tool's definition on every request.
-That is correct while the catalogue is small, and it degrades in two ways as it
-grows:
+That works while the catalogue is small, but degrades in two ways as it grows:
 
 - **Context cost.** A multi-server MCP setup spends tens of thousands of tokens
-  on definitions before the model does any work.
+  on tool definitions before the model does any work.
 - **Selection accuracy.** Anthropic reports that model tool selection degrades
-  past roughly 30–50 available tools ([tool search][anthropic-tool-search],
+  past roughly 30-50 available tools ([tool search][anthropic-tool-search],
   [Advanced tool use][anthropic-advanced]).
-  That figure is theirs and unverified against JP's catalogue, but the direction
-  is not in dispute, and JP's catalogue grows every time someone adds an MCP
-  server.
+  That figure is unverified against JP's catalogue, but the direction is clear,
+  and JP's catalogue grows with every added MCP server.
 
 JP already has one tier of progressive disclosure:
 `ToolDocs::schema_description` puts `summary` in the tool schema, and the
-`describe_tools` builtin returns the full docs on request.
-This RFD adds the tier below it — the tool is not in the schema at all until
-the model finds it.
+`describe_tools` builtin returns the full documentation on request.
+This RFD adds a tier below that: the tool is omitted from the schema entirely
+until the model searches for it.
 
-Doing nothing means the ceiling on JP's tool catalogue is set by the context
-window rather than by what is useful.
+Without this tier, the context window sets the ceiling on JP's tool catalogue.
 
 ## Design
 
-### What the user sees
+### Configuration
 
-A third value for a tool's enablement:
+A tool's `enable` setting accepts a third value:
 
 ```toml
 # Offered up front, as today.
@@ -61,9 +59,9 @@ enable = "discoverable"
 enable = "off"
 ```
 
-`enable`'s string shorthands are presets over both of its fields, not values of
-one: `"always"` is locked-on and `"explicit"` is off-unless-named.
-`"discoverable"` joins them, expanding to both fields:
+The string shorthands on `enable` are presets across both of its fields:
+`"always"` sets locked-on and `"explicit"` sets off-unless-named.
+`"discoverable"` also expands to both fields:
 
 ```toml
 enable = "discoverable"
@@ -71,70 +69,68 @@ enable = "discoverable"
 enable = { availability = "discoverable", allow_toggle = "any" }
 ```
 
-The availability-only table form is **not** the same thing.
+The availability-only table form is different.
 An omitted table field stays unset and inherits from `[conversation.tools.'*']`
-([RFD 081]), so `enable = { availability = "discoverable" }` keeps whatever
-toggle policy the defaults layer supplies, while the shorthand overwrites it
-with `any`.
-Where a defaults layer sets `allow_toggle = "if_named"`, the two forms disagree
-about whether a bulk `-t` may promote the tool.
+([RFD 081]).
+Writing `enable = { availability = "discoverable" }` preserves the toggle policy
+from the defaults layer, whereas the `"discoverable"` shorthand overwrites
+`allow_toggle` with `"any"`.
+When the defaults layer sets `allow_toggle = "if_named"`, only the shorthand
+allows a bulk `-t` to enable the tool.
 
-A sensible default for a large MCP server is to mark the whole server
-discoverable in `[conversation.tools.'*']` and pull two or three tools up to
-`on` — with the same caveat, since a shorthand in the defaults layer sets both
-fields there too.
+For a large MCP server, a practical default is to mark
+`[conversation.tools.'*']` as discoverable and set two or three common tools to
+`on`.
+Using the string shorthand in `[conversation.tools.'*']` likewise sets both
+`availability` and `allow_toggle`.
 
-**`explicit` and `discoverable` are different, and the words are close enough to
-confuse.** Both mean "you have to ask for this first"; they differ in who asks.
-`explicit` withholds a tool until the *user* names it on the command line.
-`discoverable` withholds it until the *model* finds it by searching.
-They compose: `enable = { availability = "discoverable", allow_toggle =
-"if_named" }` is a tool the model can find and a bulk `-t` cannot sweep up.
+**`explicit` and `discoverable` differ in who asks for the tool.** `explicit`
+withholds a tool until the *user* names it on the command line.
+`discoverable` withholds it until the *model* finds it through search.
+The two compose: `enable = { availability = "discoverable", allow_toggle =
+"if_named" }` lets the model discover the tool while preventing a bulk `-t` from
+enabling it.
 
 ### CLI directives
 
-`allow_toggle` already decides which `--tool` / `--no-tool` directives may move
-a tool, at bulk, named, and named-group scope.
-That axis is unchanged and this RFD adds nothing to it.
-What needs stating is only what a permitted directive *means* against three
-values:
+`allow_toggle` still controls which `--tool` and `--no-tool` directives may
+change a tool at bulk, named, and named-group scope.
+When `allow_toggle` permits a directive, it transitions the three availability
+states as follows:
 
 | Directive          | `off`  | `discoverable` | `on`    |
 | ------------------ | ------ | -------------- | ------- |
 | `-t` / `--tool`    | → `on` | → `on`         | no-op   |
 | `-T` / `--no-tool` | no-op  | → `off`        | → `off` |
 
-A bulk `-t` therefore loads every discoverable tool into context, for every tool
-whose `allow_toggle` permits it.
-That is the correct default: `-t` means "give the model everything," and a user
-who wants a discoverable tool exempt from it has `allow_toggle = "if_named"`
-already.
+A bulk `-t` promotes every discoverable tool whose `allow_toggle` permits bulk
+toggling.
+`-t` means "give the model everything"; tools that should stay discoverable
+under a bulk `-t` can set `allow_toggle = "if_named"`.
 
-**Forced tool use is a separate axis and stays as it is.** `jp q -u NAME` binds
-a single turn: it is read from the flags at query time rather than layered into
-the conversation's config, and `tool_definitions` already keeps a forced tool in
-the definition set even when it is disabled, unless it is locked off.
-Forcing a discoverable tool therefore offers it for that invocation, emits no
-promotion delta, and leaves its stored availability untouched.
-A persisted `assistant.tool_choice` naming a function keeps its existing
-exemption, on every turn rather than one; this RFD does not change that
-precedence.
+**Forced tool use remains a separate axis.** `jp q -u NAME` applies to a single
+turn: JP reads it from CLI flags at query time rather than layering it into
+conversation config, and `tool_definitions` includes a forced tool in the
+definition set even when disabled (unless locked off).
+Forcing a discoverable tool offers it for that invocation without emitting a
+promotion delta or modifying its stored availability.
+A persisted `assistant.tool_choice` naming a function keeps the same exemption
+on every turn.
 
-The consequence matters for the next section: because forcing can put an `off`
-tool into the resolved definition set, that set is not a statement about
-availability and must not be used as the search surface.
+Because forcing can place an `off` tool into the resolved definition set, that
+set does not reflect availability alone and cannot serve as the search index.
 
-### The state
+### Availability state
 
-Two questions decide how a tool is presented:
+Two questions determine how JP presents a tool:
 
 1. May the model call it?
-2. Is its definition in context up front, or only after discovery?
+2. Is its definition included in context up front, or only after discovery?
 
-Question 2 has no meaning when the answer to question 1 is no, so three of the
-four combinations are valid.
-Encoding them as a three-valued enum rather than two booleans makes the invalid
-combination unrepresentable:
+Question 2 is meaningless when the answer to question 1 is no, leaving three
+valid states.
+Encoding them as a three-variant enum rather than two booleans makes the invalid
+state unrepresentable:
 
 ```rust
 pub enum Availability {
@@ -147,265 +143,248 @@ pub enum Availability {
 }
 ```
 
-This widens `Enable::state`, which is a `bool` today ([RFD 081]).
-`allow_toggle`, its sibling field, is untouched.
+This widens `Enable::state`, which is a `bool` in [RFD 081].
+Its sibling field, `allow_toggle`, is unchanged.
 
-### Two sets, not one
+### Permitted and offered tool sets
 
-Today a single `Vec<ToolDefinition>` does four jobs: it is the provider's tools
-array, the docs map handed to `describe_tools`, the lookup the executor consults
-to decide whether a call can run, and — through the same `is_enabled()`
-predicate — the reason an MCP server is started at all.
-One set cannot serve a discoverable tool, which has to be searchable,
-describable and callable-once-promoted while staying out of the provider's tools
-array.
+A single `Vec<ToolDefinition>` currently serves four roles: it populates the
+provider's `tools` array, builds the documentation map for `describe_tools`,
+gates tool execution in the executor, and determines (via `is_enabled()`)
+whether to start an MCP server.
+A single set cannot represent a discoverable tool, which must be searchable,
+describable, and callable once promoted while remaining out of the provider's
+`tools` array.
 
-The set splits in two, with the second a strict subset of the first:
+The tool set therefore splits into two sets, where the second is a strict subset
+of the first:
 
-- The **permitted set** is every tool the model may call on this invocation:
-  availability `discoverable` or `on`, plus any tool named by the forced-tool
-  exemption, minus anything locked off.
+- The **permitted set** contains every tool the model may call on this
+  invocation: tools with availability `discoverable` or `on`, plus any tool
+  named by the forced-tool exemption, minus any tool locked off.
   Every member is fully resolved, including the MCP round-trip that fetches a
-  server-side tool's schema and description.
-- The **offered set** is the subset whose definition goes to the provider:
-  availability `on`, plus the forced tool.
+  server tool's schema and description.
+- The **offered set** is the subset sent to the provider: tools with
+  availability `on`, plus any forced tool.
 
-The forced-tool exemption has to widen the permitted set rather than only the
-offered set.
-`jp q -u NAME` on an `off` tool is a supported operation, and an executor is
-built by looking the tool's definition up in the resolved set; a tool offered to
-the model but absent from that lookup is one the model can call and JP cannot
-run.
-The same applies one layer down: `configure_active_mcp_servers` already starts a
-forced tool's backing server regardless of its enable state, because a server
-that never starts leaves the tool unresolvable and the forced choice
-unsatisfiable.
+The forced-tool exemption must widen the permitted set, not just the offered
+set.
+Running `jp q -u NAME` on an `off` tool is supported, and JP builds a tool
+executor by looking up the tool's definition in the permitted set; offering a
+tool that is missing from the permitted set would let the model call a tool JP
+cannot execute.
+Similarly, `configure_active_mcp_servers` starts a forced tool's MCP server
+regardless of its enable state so its schema can be resolved.
 
-Consumers divide along those two sets:
+Each consumer reads from one of these sets:
 
 | Consumer               | Set                                        | Why                                                  |
 | ---------------------- | ------------------------------------------ | ---------------------------------------------------- |
-| Provider `tools` array | offered                                    | the context cost this RFD exists to avoid            |
+| Provider `tools` array | offered                                    | avoids sending schemas for undiscovered tools        |
 | `search_tools`         | availability `discoverable`, minus offered | an `off` tool never appears in search, forced or not |
 | `describe_tools`       | permitted                                  | a found tool must be explainable before it is called |
 | Executor eligibility   | permitted                                  | a promoted tool is callable in the same turn         |
 | MCP server startup     | permitted                                  | an unstarted server has no metadata to search        |
 
-The search row names an availability rather than a subtraction because it says
-what the set *is*, and because it stays correct if the permitted set later grows
-a member that is neither offered nor discoverable.
+The `search_tools` row filters by `discoverable` availability rather than
+subtracting offered from permitted so that forced `off` tools (and any future
+permitted-set additions) never appear in search results.
 
-**Discovery saves context, not startup.** A discoverable MCP tool's server
-starts with the conversation and its schema is fetched up front, exactly as an
-enabled tool's is today.
-Eager resolution is what makes the permitted set searchable, and it means the
-saving is measured in prompt tokens, not in latency or process count.
-A cheaper lazy scheme — resolving a server only once one of its tools is
-searched for — is possible later and is not required here.
+**Discovery saves context, not startup.** An MCP server with discoverable tools
+starts with the conversation and JP fetches its schemas up front, just like an
+`on` tool.
+Eager resolution makes the permitted set searchable, so the savings are in
+prompt tokens rather than startup latency or process count.
+Lazy server resolution (starting an MCP server only when `search_tools` queries
+it) can be added later if needed.
 
-A tool whose backing server is not running is dropped from the permitted set,
-the same treatment `tool_definitions` gives it today.
-It does not appear in search results as an unavailable entry: a result the model
-cannot act on costs tokens and invites a call that cannot succeed.
+If a tool's backing MCP server fails to start, JP drops the tool from the
+permitted set, matching `tool_definitions` behavior.
+Unavailable tools are excluded from search results so the model does not waste
+tokens calling a tool that cannot run.
 
-### Renaming `state`
+### Renaming `state` to `availability`
 
-`state` was an adequate name for a boolean and is a poor one for a three-valued
-enum — the state of *what* is not in the name, and it now sits next to a field
-called `allow_toggle` that governs it.
-The field becomes `availability`, and `state` stays as a deserialization alias
-mapping `true`/`false` onto `on`/`off`.
+`state` was passable for a boolean, but for a three-valued enum sitting next to
+`allow_toggle`, `availability` states what the field actually controls.
+The field is renamed to `availability`, and `state` remains as a permanent
+deserialization alias mapping `true` to `on` and `false` to `off`.
 
-The alias is permanent, not a migration window: `enable = { state = false }`
-appears in stored conversation configs and in `ConfigDelta` entries on existing
-streams, and those are read, not rewritten.
+The alias is permanent because `enable = { state = false }` appears in stored
+conversation configs and `ConfigDelta` entries in existing streams, which are
+read without being rewritten.
 
-The alias has to be written three times, because three separate paths reach the
-field:
+Three code paths read or write this field, so each must handle the alias:
 
-- **Deserialization.** The hand-written `Deserialize` on `PartialEnableConfig`
-  accepts `state` wherever it accepts `availability`, mapping `true` to `on` and
-  `false` to `off`.
+- **Deserialization.** The custom `Deserialize` implementation on
+  `PartialEnableConfig` accepts `state` alongside `availability`, mapping `true`
+  to `on` and `false` to `off`.
 - **Key assignment.** `--cfg conversation.tools.foo.enable.state=false` goes
-  through `AssignKeyValue`, which matches key strings directly and never sees
+  through `AssignKeyValue`, which matches key strings directly without invoking
   the deserializer.
-  Its `state` arm keeps working and gains an `availability` sibling.
-- **File editing.** See below.
+  Its `state` arm remains alongside the new `availability` arm.
+- **File editing.** Handled on write as described below.
 
-#### Editing a file that still says `state`
+#### Normalizing legacy `state` keys on write
 
-A read alias alone leaves `jp config set` producing a file with both spellings.
-`config set` serializes the delta and merges it into the existing document, and
-that merge only touches keys the delta contains: a nested key set against an
-inline table deep-merges the subfield instead of replacing the table.
-Serialization always emits the canonical name.
-So setting `availability` on a tool whose file says `enable = { state = false }`
-produces:
+A read-only alias would cause `jp config set` to produce tables containing both
+spellings.
+`config set` serializes the delta using the canonical key name and deep-merges
+it into the existing TOML document, updating only the keys present in the delta.
+Setting `availability` on a tool configured with `enable = { state = false }`
+would otherwise produce:
 
 ```toml
 enable = { state = false, availability = "discoverable" }
 ```
 
-Two keys for one field, disagreeing.
+**Writing to a tool's `enable` table removes any sibling `state` key.** This
+normalization is scoped to the single table being edited; every other `state`
+key in that file, in other config files, and in stored conversation streams
+remains untouched.
+Config files that JP never modifies are never rewritten.
 
-**A write that touches this setting normalizes the legacy key it touched.** When
-the edit targets a tool's `enable`, a sibling `state` in that same table is
-removed as the canonical name is written.
-The rule is deliberately narrow: it rewrites the one table the user is already
-editing, and leaves every other `state` in the file, in other files, and in
-stored conversation data exactly where it is.
-A config file JP never writes to never changes.
-
-**Both keys in one table is an error, not a precedence rule.** Normalization
-means JP cannot produce that shape, so it only arises from hand-editing.
-Giving one spelling precedence would silently discard the other, and the
-direction that gets discarded matters here: ignoring a `state = false` next to
-an `availability = "on"` hands the model a tool the user believed was off.
-The error names both keys and says which to keep.
+**Having both `state` and `availability` in the same table is an error.**
+Because write normalization prevents JP from generating both keys, their
+co-occurrence only happens through manual editing.
+Picking one key by precedence would silently ignore the other; for example,
+ignoring `state = false` next to `availability = "on"` would expose a tool the
+user intended to disable.
+Deserialization rejects tables containing both keys and names which key to keep.
 
 ### `search_tools`
 
-A builtin tool:
+`search_tools` is a builtin tool with the following signature:
 
 ```
 search_tools(query: string, limit?: integer = 10) -> [{ name, summary }]
 ```
 
-**Registration is monotone within a conversation.** `search_tools` is offered
-once any config position in the conversation's stream has held at least one tool
-at `discoverable`, and stays offered from there on.
-Like availability itself, that is derived from the stream ([RFD 054]) rather
-than latched in memory, so it survives the separate CLI invocations a
-conversation is made of.
+**Registration is monotone within a conversation.** JP offers `search_tools`
+once any config position in the conversation stream has at least one
+`discoverable` tool, and keeps offering it for the rest of the conversation.
+Like tool availability, registration is derived from the stream ([RFD 054])
+rather than held in memory, so it persists across separate CLI invocations.
 
-Both directions follow from the same rule.
-A user who adds `--cfg conversation.tools.deploy.enable=discoverable` to a
-running conversation gets the builtin on the next turn, because the delta puts a
-discoverable tool at a stream position.
-A conversation whose discoverable tools have all been promoted keeps it, because
-an earlier position still holds one.
+Both cases follow from this rule:
 
-Evaluating the current position instead would withdraw the builtin the moment
-the last discoverable tool is promoted — a second change to the tools array on
-top of the promotion, and a tool disappearing under the model for no reason it
-can see.
-The cost of monotonicity is the mirror case: a conversation that once had
-discoverable tools and no longer does keeps a builtin whose searches come back
-empty.
-That is a wasted definition, not a wrong answer.
+- Adding `--cfg conversation.tools.deploy.enable=discoverable` to an active
+  conversation exposes `search_tools` on the next turn because the delta records
+  a discoverable tool in the stream.
+- Promoting every discoverable tool in a conversation does not remove
+  `search_tools` because an earlier stream position still had one.
 
-**What it searches.** Tool names and parameter names come from the resolved
-schemas (`ToolDefinition.parameters`); summaries, descriptions and parameter
-descriptions come from `ToolDocs`.
-The split matters: `ToolDocs.parameters` holds only parameters that carry
-documentation, so building parameter-name search from it would silently miss
-`deployment_id` on a tool that never documented it.
-Ranking starts as case-insensitive substring matching over those fields.
-BM25 or embedding-backed ranking ([RFD 032]) is a later refinement behind the
-same signature.
+If registration depended only on the current stream position, promoting the last
+discoverable tool would simultaneously withdraw `search_tools`, mutating the
+`tools` array twice and removing a tool the model just called.
+The trade-off of monotonicity is that a conversation whose discoverable tools
+have all been promoted or disabled retains `search_tools`, which then returns
+empty results.
 
-**What it returns and what that commits.** The contract is narrow because each
-result is a durable config change, not just output:
+**Search fields.** `search_tools` matches against tool names and parameter names
+from the resolved schemas (`ToolDefinition.parameters`), plus summaries,
+descriptions, and parameter descriptions from `ToolDocs`.
+Reading parameter names from the schema rather than `ToolDocs.parameters`
+ensures undocumented parameters (such as an undocumented `deployment_id`) are
+still searchable.
+Ranking uses case-insensitive substring matching across these fields; BM25 or
+embedding-based ranking ([RFD 032]) can be added later behind the same
+signature.
 
-- `limit` defaults to 10 and is clamped to 1–50.
-  A search cannot load an unbounded slice of the permitted set into context on
-  one call.
-- Only the tools actually returned are promoted.
-  A query matching 200 tools returns `limit` of them and promotes exactly those.
-- Already-offered tools are excluded from results.
-  They are callable already, and including them would emit promotion deltas that
-  change nothing.
-- An empty query is an error, not "list everything".
-  Loading everything at once is what a bulk `-t` is for.
+**Result limits and promotion scope.** Because each returned match triggers a
+durable config change, the return contract is bounded:
 
-The result composes with the existing tiers: `search_tools` finds the tool,
-`describe_tools` explains it, the tool call runs it.
+- `limit` defaults to 10 and is clamped to `1-50`, preventing a single search
+  from loading an unbounded number of tool schemas into context.
+- Only returned tools are promoted.
+  If a query matches 200 tools, `search_tools` returns `limit` matches and
+  promotes only those.
+- Tools already in the offered set are excluded from results so `search_tools`
+  does not emit redundant promotion deltas.
+- An empty query returns an error rather than listing every tool; loading all
+  tools at once is the job of a bulk `-t`.
 
-### How a discovery takes effect
+This composes with the existing disclosure tiers: `search_tools` locates the
+tool, `describe_tools` returns its full documentation, and the model invokes the
+tool.
 
-A `search_tools` call promotes its matches from `discoverable` to `on` by
-emitting a `ConfigDelta`.
-The promotion is scoped to the conversation and durable in its stream.
+### Promoting discovered tools
 
-This is the decisive choice in the design, and it is a choice about sources of
-truth rather than about mechanism.
-Availability is already derived from config at a stream position ([RFD 054]);
-routing discovery through the same path means there is one answer to "which
-tools are offered here", not two that must be reconciled.
-Discovery then inherits everything config already does: it survives compaction,
-appears in `jp config` output, is visible in the stream, and is undone by an
-ordinary `--no-tool`.
+A `search_tools` call promotes its returned matches from `discoverable` to `on`
+by emitting a `ConfigDelta` into the conversation stream.
 
-**The promoted tool is callable in the model's very next reply.** [RFD 078]
-defines a *cycle* as one LLM response plus the execution of its tool calls, with
-a turn containing one or more cycles.
-A delta produced during a cycle's executing phase commits at cycle end, and the
-outer turn loop then re-resolves the derived values — provider, model, **tool
-definitions**, tool choice — before re-entering at `TurnPhase::Streaming`.
-So the request that carries the `search_tools` result also carries the promoted
-definitions, and the model can call them immediately.
-Discovery costs one tool call, not one turn.
+Recording discovery as a `ConfigDelta` keeps the conversation stream as the
+single source of truth for tool availability ([RFD 054]).
+Because promoted tools use the standard config path, promotions survive
+compaction, appear in `jp config` output, remain visible in the stream, and can
+be reversed with `--no-tool`.
 
-This is the reason the RFD extends [RFD 078]: not for its grant machinery, but
-for the between-cycle re-resolve that makes mid-turn tool changes take effect at
-all.
+**Promoted tools are callable on the model's next reply.** [RFD 078] defines a
+*cycle* as one LLM response plus the execution of its tool calls, with a turn
+comprising one or more cycles.
+A `ConfigDelta` emitted while executing tool calls commits at the end of the
+cycle, and the turn loop re-resolves derived state (provider, model, **tool
+definitions**, and tool choice) before entering `TurnPhase::Streaming` for the
+next cycle.
+The request that sends the `search_tools` result back to the model also carries
+the newly promoted tool definitions, so discovery costs one tool call rather
+than a full turn.
 
-### Who is allowed to promote
+This between-cycle re-resolution is why this RFD extends [RFD 078].
 
-`search_tools` is a **privileged builtin**, in the sense [RFD 094] uses for
-`describe_tools`: it reads tool metadata no other tool can see, and it writes
-one specific transition.
-It does not take a general `access.config` grant on `conversation.tools.*`.
+### Promotion privileges
 
-The write it performs is restricted by construction to `discoverable → on`.
-It cannot enable an `off` tool, cannot change `allow_toggle`, and cannot touch
-any other config path.
-A tool the user turned off is not in the permitted set, does not appear in
-search results, and cannot be promoted — model-initiated discovery never widens
-what the user permitted, only what the model can currently see.
+`search_tools` is a **privileged builtin**, in the same sense [RFD 094] uses for
+`describe_tools`: it reads tool metadata unavailable to standard tools and
+performs a single constrained config transition without a general
+`access.config` grant on `conversation.tools.*`.
 
-The alternative, granting the builtin `access.config` with `apply =
-"unattended"` on `conversation.tools`, is discussed below and rejected on
+By construction, `search_tools` can only transition a tool from `discoverable`
+to `on`.
+It cannot enable an `off` tool, modify `allow_toggle`, or write to any other
+config path.
+Because `off` tools are excluded from the permitted set, they never appear in
+search results and cannot be promoted; model-initiated discovery only exposes
+tools the user already permitted.
+
+Granting `search_tools` a general `access.config` permission with `apply =
+"unattended"` on `conversation.tools` is discussed below and rejected on
 least-privilege grounds.
 
-#### Crossing the boundary [RFD 078] closed
+#### Promotion channel from `execute_builtin`
 
-[RFD 078] deliberately shuts this door: if a builtin returns `Outcome::Success`
-carrying `config` or `unset`, `execute_builtin` drops those fields and logs a
-warning before the outcome reaches the coordinator, because the builtin
-execution path has no `Context` and no `access.config` plumbing.
-Adding config access to builtins is the follow-up 078 names in its Non-Goals.
-This is that follow-up, and it opens the door by exactly one inch rather than
-removing it.
+In [RFD 078], if a builtin returns `Outcome::Success` with `config` or `unset`
+populated, `execute_builtin` drops those fields and logs a warning before the
+outcome reaches the coordinator, because builtins run without a `Context` or
+`access.config` evaluation.
+[RFD 078] listed builtin config mutations as future work; this RFD adds only the
+narrow channel needed for tool promotion.
 
-That rejection stays in force for `config` and `unset`.
-Promotion does not travel through them.
-It leaves `execute_builtin` on a separate host-owned channel whose payload is a
-set of tool names and nothing else — no config paths, no values, no way to
-express a write the coordinator would have to authorize.
-The coordinator turns that set into the `discoverable → on` delta itself.
-A builtin that populates `config` still gets 078's drop-and-warn; the shape of
-what `search_tools` returns makes the general case unreachable rather than
-merely disallowed.
+`execute_builtin` continues to drop and warn on `config` and `unset`.
+Instead, `search_tools` returns the set of matched tool names on a dedicated
+host-owned channel.
+Because that channel carries only tool names (not config paths or arbitrary
+values), the builtin cannot express an arbitrary config write, and the
+coordinator constructs the `discoverable → on` `ConfigDelta` directly.
 
 #### Conflicting writes in one cycle
 
-[RFD 078] hands every tool in a cycle the config as of cycle start and folds the
-commit buffer by tool-call index at cycle end.
-So this is possible:
+Under [RFD 078], every tool in a cycle receives the config snapshot from the
+start of the cycle, and the coordinator folds the commit buffer in tool-call
+index order at the end of the cycle.
+A single cycle can therefore contain conflicting writes:
 
-1. A workflow tool at call index 0 proposes disabling `deploy`; the user
+1. A workflow tool at call index 0 proposes disabling `deploy`, and the user
    approves.
-2. `search_tools("deploy")` at index 1 matches `deploy`, which was still
-   `discoverable` in the cycle-start snapshot it was given.
+2. `search_tools("deploy")` at call index 1 matches `deploy`, which was still
+   `discoverable` in the cycle-start snapshot.
 
-Promoting unconditionally would fold the promotion over the approved disable and
-silently undo it.
+Applying the promotion unconditionally at index 1 would overwrite the approved
+disable from index 0.
 
-A promotion is therefore evaluated against the folded state **at its own
-position** in the buffer, not against the cycle-start snapshot.
-The folded state answers three ways, and the distinction between the last two is
-the whole point:
+The coordinator therefore evaluates each promotion against the folded config
+state **at that call's position** in the commit buffer rather than the
+cycle-start snapshot:
 
 | Folded state at this position | Promotion          | Reported as        |
 | ----------------------------- | ------------------ | ------------------ |
@@ -413,48 +392,48 @@ the whole point:
 | `on`                          | no-op, none needed | usable             |
 | `off`                         | skipped            | found, unavailable |
 
-The `on` row is not hypothetical.
-[RFD 078] folds by tool-call index because a cycle can carry several calls, and
-two searches with overlapping matches are ordinary model behaviour:
-`search_tools("deploy")` and `search_tools("staging")` both match a discoverable
-`deploy_staging`, and the second sees a tool the first already promoted.
-Collapsing `on` and `off` into one "not `discoverable`" case would tell the
-model a tool is unavailable in the same request that offers its definition.
+The `on` case occurs whenever a cycle contains multiple searches with
+overlapping matches.
+For example, if `search_tools("deploy")` and `search_tools("staging")` run in
+the same cycle and both match a discoverable `deploy_staging` tool, the first
+call promotes it to `on` and the second call sees it already `on`.
+Treating `on` the same as `off` would report `deploy_staging` as unavailable in
+the very request that includes its schema.
 
-The search response reports what committed rather than what was matched.
-A response that promised a tool the fold left `off` would put the model in a
-state where its next call fails for reasons the transcript does not explain, and
-a response that withheld a tool the fold left `on` would waste a capability the
-model just paid a call to find.
+The `search_tools` response reports the post-fold outcome rather than the raw
+match against the cycle-start snapshot.
+Reporting a tool as usable when an earlier call in the cycle disabled it would
+cause the model's next tool call to fail unexpectedly, whereas reporting an
+already-promoted tool as unavailable would hide a tool the model can now call.
 
 ### Provider behaviour
 
-Nothing in the mechanism is provider-specific.
-The offered set decides what the model can see; how that reaches the wire is the
-provider's business, and there are two shapes.
+Discovery itself is provider-agnostic.
+The offered set determines which tools the model can see; how each provider
+serializes that set on the wire takes one of two shapes:
 
-**Without tool directives, the offered set *is* the tools array**, and the array
-grows when a promotion lands.
-That buys the token saving and loses the prefix cache, which is the trade every
-provider except directive-enabled Anthropic makes.
+**Without tool directives, the offered set is the provider's `tools` array.**
+When a promotion lands, the `tools` array grows on the next request.
+This saves context tokens up front at the cost of invalidating the prompt prefix
+cache whenever a tool is promoted.
+Every provider except directive-enabled Anthropic uses this path.
 
-**With [RFD 105], the array is not the offered set at all.** [RFD 105] sends
-every tool it knows about in a fixed array, deferred behind one anchor tool, and
-expresses availability through `tool_addition` and `tool_removal` blocks so the
-prefix never changes.
-Under that model the offered set feeds directive derivation instead of the
-array: a promotion becomes a `tool_addition`, and the array stays
-byte-identical.
-The provider needs the full stable definitions to do this, so it reads [RFD
-105]'s array rather than this RFD's offered set.
+**With [RFD 105] tool directives, the `tools` array stays fixed.** [RFD 105]
+sends every known tool in a stable array (deferred behind a single anchor tool)
+and controls availability through `tool_addition` and `tool_removal` blocks so
+the request prefix never changes.
+Under [RFD 105], the offered set drives directive derivation instead of the
+`tools` array: promoting a tool emits a `tool_addition` block while the `tools`
+array stays byte-identical.
+To build that fixed array, the provider reads [RFD 105]'s full tool list rather
+than this RFD's offered set.
 
-**Two documents, two meanings of "catalogue".** [RFD 105]'s catalogue is every
-tool regardless of enablement, including `off` ones, because its array has to
-cover any tool a later directive might name.
-This RFD's permitted set is narrower by construction, since an `off` tool is
-never searchable or callable.
-The two compose — 105's array is a superset of this RFD's permitted set — but
-they are not the same set, which is why this RFD does not reuse the word.
+**Distinguishing [RFD 105]'s catalogue from the permitted set.** [RFD 105]'s
+catalogue includes every tool regardless of enablement, including `off` tools,
+so its fixed array covers any tool a later directive might enable.
+This RFD's permitted set is narrower because `off` tools are neither searchable
+nor callable.
+[RFD 105]'s array is therefore a superset of the permitted set.
 
 | Provider                                     | Fewer definitions in context | Cache preserved across a discovery  |
 | -------------------------------------------- | ---------------------------- | ----------------------------------- |
@@ -463,251 +442,240 @@ they are not the same set, which is why this RFD does not reuse the word.
 | OpenAI, Google, OpenRouter, Cerebras         | yes                          | no                                  |
 | Ollama, llama.cpp                            | yes                          | no                                  |
 
-Cache preservation is the only row that varies, and it varies on a mechanism
-[RFD 105] already owns.
-That first row carries a qualification worth reading, because it lands on the
-case this RFD exists for: [RFD 105] scopes its guarantee to local and builtin
-tool definitions, which are reproducible from the stream, and excludes MCP
-tools, which are fetched from the server each turn.
-A server that is offline, slow, or returns its tools in a different order
-perturbs the catalogue array and busts the cache regardless of what discovery
-does.
-Since the motivating case for marking tools discoverable is a large MCP
-catalogue, that exception is the common case rather than the corner.
+Cache preservation depends entirely on [RFD 105], and its stability guarantee
+carries an important caveat for discoverable tools: [RFD 105] guarantees cache
+stability only for local and builtin tool definitions, which are reproducible
+from the conversation stream, and excludes MCP tools, which are fetched from the
+server on each turn.
+An MCP server that is offline, slow, or returns its tools in a different order
+alters the catalogue array and invalidates the cache regardless of discovery.
+Because large MCP catalogues are the primary use case for `discoverable`, cache
+invalidation on MCP server changes remains the common case.
 
-For local runtimes JP has no lever at all.
-It sends an OpenAI-compatible `tools` array (`llamacpp.rs::convert_tools`) and
-the server renders it through the model's chat template; those templates place
-tool definitions ahead of the messages, so a change to the offered set is
-expected to invalidate the KV-cache prefix, and neither runtime has an additive
-equivalent of `tool_addition`.
-The templating claim is inferred from how current chat templates are written
-rather than measured, and it changes nothing in this design either way — the
-token saving in column one is the benefit local runtimes get.
+Local runtimes (Ollama and llama.cpp) have no cache-preserving mechanism for
+mid-conversation tool additions.
+JP sends an OpenAI-compatible `tools` array (`llamacpp.rs::convert_tools`),
+which the server renders through the model's chat template ahead of the message
+history.
+Changing the offered set therefore invalidates the KV-cache prefix, and neither
+runtime supports an additive directive like `tool_addition`.
+Even so, local runtimes still benefit from the smaller context footprint in the
+first column.
 
 ### Window accounting
 
-`estimate_overhead_chars` counts every `ToolDefinition` it is handed.
-It keeps doing exactly that; the caller hands it the offered set rather than the
-permitted set.
-Discoverable-but-undiscovered tools cost nothing because they are not sent.
+`estimate_overhead_chars` counts every `ToolDefinition` passed to it.
+Passing the offered set rather than the permitted set ensures undiscovered tools
+add zero overhead to context window estimates.
 
 ## Drawbacks
 
-**Discovery costs a tool call.** One extra round trip, plus the tokens of the
-search call and its result.
-Below roughly ten tools that costs more than the definitions it avoids.
-The default stays `on` everywhere; `discoverable` is opt-in per tool.
+**Discovery costs an extra tool call.** Finding a tool adds one round trip plus
+the tokens of the `search_tools` call and its response.
+Below roughly ten tools, that overhead exceeds the token cost of sending the
+definitions up front.
+The default remains `on` everywhere; `discoverable` is opt-in.
 
-**The model cannot use what it cannot see.** A tool nobody searches for is a
-tool that never runs, and the failure is silent — the model answers without it
-rather than reporting that it looked.
-Mitigations are a system prompt section naming the searchable categories, and
-keeping frequently-used tools `on`.
-Neither is a guarantee.
+**Undiscovered tools go unused.** If the model never searches for a discoverable
+tool, it answers without using the tool and gives no indication that a relevant
+tool existed.
+Listing searchable tool categories in the system prompt and keeping frequently
+used tools `on` reduces this risk, but does not eliminate it.
 
-**A widened `state` touches settled ground.** [RFD 081] decomposed enablement
-into `state` and `allow_toggle`, and every consumer of `Enable::is_enabled()`
-assumes a boolean.
-This re-opens that model.
+**Widening `state` changes a core config type.** [RFD 081] split tool enablement
+into `state` and `allow_toggle`, and existing callers of `Enable::is_enabled()`
+assume a boolean.
+Replacing that boolean with a three-valued enum touches every consumer of
+`Enable`.
 
-**The rename is not free, and its cost is permanent.** Keeping `state` readable
-forever means the alias lives in three places — the deserializer, the key
-assignment arm, and a normalization rule in the file writer — and every one of
-them is a place a future change can forget.
-Widening `state` in place, keeping the name and accepting `true`/`false` as
-values of the new enum, would have cost one site instead of three.
-The rename buys a field name that says what it holds, standing next to an
-`allow_toggle` that governs it; that is the whole return, and it is a judgement
-call rather than a forced one.
+**The `state` alias carries permanent maintenance cost.** Supporting `state`
+indefinitely requires maintaining the alias across three code paths: the
+deserializer, `AssignKeyValue`, and write-time TOML normalization.
+Widening `state` in place (keeping the field name and accepting `true` and
+`false` on the new enum) would have required only one custom deserializer.
+Renaming the field to `availability` makes its purpose clear alongside
+`allow_toggle`, at the cost of maintaining three alias sites.
 
-**A builtin gains a config write.** `search_tools` is the first builtin that
-mutates enablement, and the transition it is allowed to make is enforced in code
-rather than by [RFD 078]'s grant evaluation.
-That is the least-privilege choice, and the cost is that the restriction lives
-in one function instead of in the policy the user can read.
-It also puts a second write channel out of `execute_builtin` next to the one 078
-closed, and the two have to stay distinguishable for 078's drop-and-warn to keep
-meaning what it says.
+**A builtin mutates conversation config outside grant evaluation.**
+`search_tools` is the first builtin that modifies tool enablement, and its
+`discoverable → on` restriction is enforced in Rust code rather than through
+[RFD 078]'s user-visible grant policy.
+It also introduces a dedicated promotion channel out of `execute_builtin`
+alongside the `config` and `unset` fields that [RFD 078] drops and warns on.
 
-**Discoverable MCP servers still start eagerly.** The permitted set is resolved
-up front, so a workspace with six MCP servers boots six servers and fetches
-every schema whether or not the model searches.
-The saving is prompt tokens only.
-A workspace whose cost is startup latency rather than context gets nothing from
-this RFD.
+**MCP servers with discoverable tools still start eagerly.** Because JP resolves
+the permitted set up front, a workspace with six MCP servers starts all six
+processes and fetches every schema regardless of whether the model searches.
+This RFD reduces prompt token usage, not startup latency.
 
-**Search quality is now JP's problem.** Substring matching over summaries will
-miss tools whose description does not use the user's vocabulary, and the symptom
-is an absent capability rather than an error.
+**Substring search can miss relevant tools.** Case-insensitive substring
+matching over names and descriptions misses tools when the model's query uses
+different phrasing than the tool's documentation, resulting in a silent miss
+rather than an explicit error.
 
 ## Alternatives
 
-**Anthropic's server-side tool search.** `tool_search_tool_regex_20251119` and
-its BM25 sibling run the search on Anthropic's servers and need no search
-implementation from JP.
-Rejected: it requires persisting and replaying `server_tool_use` and
-`tool_search_tool_result` blocks verbatim in the durable conversation store,
-which commits JP's on-disk format to a provider's internal block shape, and it
-is unavailable to every other provider.
+**Anthropic's server-side tool search.** Anthropic's
+`tool_search_tool_regex_20251119` and its BM25 variant execute searches on
+Anthropic's servers without requiring a local search implementation.
+Rejected because they require persisting and replaying provider-specific
+`server_tool_use` and `tool_search_tool_result` blocks in the conversation
+stream, coupling JP's storage format to Anthropic's wire format, and they do not
+work with any other provider.
 
 **`tool_reference` blocks from a custom search tool.** The Anthropic API expands
-`tool_reference` blocks returned in a `tool_result`, which would let a discovery
-change the offered set without touching the tools array.
-Rejected as the primary mechanism: it is Anthropic-only, it introduces a second
-source of truth for availability alongside config, and the reference lives in
-replayed history — so window truncation or compaction dropping that turn
-silently unloads the tool.
-It remains available later as an Anthropic-specific *rendering* of a discovery
-that is still recorded as a delta.
+`tool_reference` blocks returned inside a `tool_result`, allowing a custom
+search tool to expose discovered tools without modifying the top-level `tools`
+array.
+Rejected as the primary mechanism because it is Anthropic-only, creates a second
+source of truth for availability outside config, and relies on replayed message
+history (so context window truncation or compaction dropping that turn would
+silently unload the tool).
+It remains a viable future optimization for rendering config-backed promotions
+on Anthropic.
 
-**Derive the offered set by scanning the stream for `search_tools` responses.**
-Avoids depending on [RFD 078].
-Rejected for the same reason: two sources of truth for one question.
+**Deriving the offered set by scanning the stream for `search_tools`
+responses.** Avoids depending on [RFD 078], but rejected because it creates a
+second source of truth for tool availability alongside config deltas.
 
-**Promote through a general `access.config` grant.** Ship `search_tools` with
-`path = "conversation.tools"`, `write = true`, `apply = "unattended"` and let
-[RFD 078]'s existing machinery carry it.
-Rejected on least privilege: that grant lets the builtin write any field of any
-tool's config, including `allow_toggle` and `command`, when the one operation it
-needs is `discoverable → on`.
-An unattended write grant over the tool tree is a large surface to hand a
-builtin to save a match arm.
+**Promoting via a general `access.config` grant.** Configuring `search_tools`
+with `path = "conversation.tools"`, `write = true`, and `apply = "unattended"`
+would reuse [RFD 078]'s grant machinery directly.
+Rejected on least-privilege grounds: that grant would allow the builtin to
+modify any field under `conversation.tools` (including `allow_toggle` and
+`command`), whereas a dedicated channel restricts it to `discoverable → on`.
 
-**A separate `discoverable: bool` beside `state`.** Rejected: it is meaningless
-when the tool is off, so it makes an invalid combination representable and
-pushes the validation into runtime.
+**Adding a separate `discoverable: bool` field beside `state`.** Rejected
+because `discoverable` has no meaning when `state = false`, making an invalid
+state representable and pushing validation to runtime.
 
-**Tool groups as the unit of discoverability.** [RFD 055] would let a whole
-group be marked discoverable in one line.
-Not rejected, just not required — per-tool and per-defaults settings cover the
-MCP-server case, and group support falls out for free once groups exist.
+**Tool groups as the unit of discoverability.** [RFD 055] would allow marking an
+entire tool group as discoverable at once.
+Per-tool and `[conversation.tools.'*']` settings already cover MCP servers, and
+group-level configuration will compose naturally once [RFD 055] lands.
 
 ## Non-Goals
 
-- **Cache preservation.** [RFD 105] owns that, through a mechanism this RFD does
-  not depend on and does not duplicate.
-- **Ranking quality.** Substring matching is the starting point.
-  BM25 and embedding-backed retrieval are refinements behind an unchanged
-  signature.
-- **Automatic deferral policies.** No "mark everything discoverable past N
-  tools".
-  Users decide.
-- **Withdrawing a tool the model discovered.** Once promoted, a tool stays
-  offered for the conversation unless the user disables it.
+- **Cache preservation.** [RFD 105] handles prompt cache stability across
+  mid-conversation tool changes.
+- **Ranking quality.** Substring matching is the initial implementation; BM25
+  and embedding-based retrieval can be added later behind the same signature.
+- **Automatic deferral policies.** JP does not automatically mark tools
+  discoverable past a threshold count; users configure `discoverable`
+  explicitly.
+- **Withdrawing discovered tools.** Once promoted, a tool stays `on` for the
+  rest of the conversation unless the user disables it.
 
 ## Risks and Open Questions
 
-**Will the model choose to search?** Discovery only pays off if the model calls
-`search_tools` when its offered set is insufficient, instead of answering
-without the capability.
-This is a tuning concern rather than a design gate — a user who marks a tool
-discoverable has opted into exactly this trade, and moving it back to `on` is
-one edit.
-It is still worth instrumenting: count searches against turns where a
-discoverable tool would have helped, and add a prompt section naming the
-searchable categories if the rate is poor.
+**Will the model choose to search?** Discovery only helps if the model calls
+`search_tools` when its offered set lacks a needed capability, rather than
+answering without it.
+Users who mark a tool `discoverable` opt into this trade-off and can switch the
+tool back to `on` with a single config change.
+Even so, JP should track how often the model searches on turns where a
+discoverable tool applies, and add a system prompt section listing searchable
+categories if recall is low.
 
-**Restart interaction.** [RFD 078]'s commit buffer is cleared on Restart, and
-deltas committed in prior cycles of the same turn survive.
-A promotion that lands and is then followed by a restart within the same turn
-needs a decided answer: the discovered tools presumably stay promoted, since the
-search result they came from is still in the stream, but this should be asserted
-in a test rather than assumed.
+**Restart interaction.** Under [RFD 078], a `Restart` clears the uncommitted
+cycle buffer while preserving deltas committed in earlier cycles of the same
+turn.
+If a promotion commits in one cycle and a later cycle in the same turn triggers
+a restart, the promoted tools should remain `on` because the `search_tools`
+result stays in the conversation stream.
+A test should assert this behaviour explicitly.
 
-**Search results and unapproved grants.** A discoverable tool carrying an
-unapproved access grant ([RFD 076]) surfaces in search results, so the model
-calls it and the user gets a permission prompt for a tool they never explicitly
-enabled.
-That may be fine — the prompt is the control point, and the user did mark the
-tool discoverable — or search results should be filtered by grant status.
-Unresolved.
+**Search results and unapproved grants.** If a discoverable tool requires an
+unapproved access grant ([RFD 076]) and appears in `search_tools` results, the
+model may call it and trigger a permission prompt for a tool the user never
+explicitly enabled.
+Whether to rely on the permission prompt or filter unapproved tools out of
+search results remains open.
 
-**Permitted-set size and search cost.** `search_tools` runs in-process over the
-permitted set, so cost scales with its size on every call.
-At JP's current scale this is irrelevant; it is worth a note only because the
-feature's premise is that catalogues grow.
+**Permitted-set size and search cost.** `search_tools` scans the permitted set
+in-process on every call, so search cost scales linearly with the permitted set.
+This is negligible at current catalogue sizes, though worth monitoring as MCP
+catalogues grow.
 
-**Is the `limit` clamp the right shape?** Capping a search at 50 results bounds
-how much context one call can commit, but a model searching a 500-tool catalogue
-with a broad query gets a truncated view and no signal that it was truncated.
-Returning a match count alongside the results would fix that and costs a few
-tokens; whether it changes model behaviour for the better is untested.
+**Signalling truncated search results.** Clamping `limit` to 50 bounds how many
+schemas a single call can promote, but a broad query against a 500-tool
+catalogue receives a truncated list without knowing additional matches exist.
+Returning the total match count alongside the results would expose the
+truncation at minimal token cost; whether that improves model follow-up queries
+is untested.
 
-**Is `discoverable` the right word?** It sits next to `explicit`, which means a
-nearly identical thing to a user skimming the config reference.
-If the pair reads as confusing in review, the fix is renaming one of them, and
-`explicit` is the one with an existing user base.
+**Naming collision between `discoverable` and `explicit`.** Both names suggest a
+tool that is available on demand, which may confuse users reading the config
+reference.
+If review shows the pair is too easy to conflate, one should be renamed before
+`discoverable` ships, since `explicit` already has an existing user base.
 
 ## Implementation Plan
 
-**Phase 1 — The state and its alias.** Widen `Enable::state` into
-`availability: Availability`, thread the third value through
-`PartialEnableConfig::effective`, `Enable::is_enabled`, and the `--tool` /
-`--no-tool` directive application, and land all three alias sites in the same
-change.
-The read alias is not separable: without it every stored `enable = { state =
-false }` stops deserializing the moment the field is renamed.
-The write-side normalization ships here too, so no version of JP can produce a
-table carrying both spellings.
-Three tests carry the phase: a stored `enable = { state = false }` round-trips,
-`--cfg ...enable.state=false` still resolves, and editing a legacy file leaves
-exactly one spelling behind.
-No `search_tools` yet, so `discoverable` resolves as not-offered and nothing
-changes for existing configs.
+**Phase 1: Availability state and `state` alias.** Widen `Enable::state` into
+`availability: Availability`, thread the third variant through
+`PartialEnableConfig::effective`, `Enable::is_enabled`, and `--tool` /
+`--no-tool` directive application, and implement all three `state` alias paths
+(deserialization, `AssignKeyValue`, and write-time TOML normalization) in the
+same change.
+Shipping the read alias and write normalization together ensures existing
+`enable = { state = false }` entries continue to deserialize and `jp config set`
+never writes both keys into one table.
+Tests cover round-tripping a stored `enable = { state = false }`, resolving
+`--cfg ...enable.state=false`, and normalizing a legacy table on edit.
+Because `search_tools` is not yet present, `discoverable` behaves as not-offered
+and existing configs are unaffected.
 Independently mergeable.
 
-**Phase 2 — Splitting the sets.** Separate permitted-set construction from
-provider exposure: `configure_active_mcp_servers` and `tool_definitions()` build
-the permitted set from `discoverable | on` plus the forced tool, the provider
-request takes the offered subset, and the `describe_tools` docs map and the
-executor's definition lookup take the permitted set.
-Still no `search_tools`, so a discoverable tool is resolvable and unreachable.
-Two tests carry the phase: a discoverable tool's definition is absent from the
-request while its docs are present in the map, and `jp q -u NAME` on an `off`
-MCP tool still starts its server and builds an executor.
-Depends on phase 1.
+**Phase 2: Splitting the permitted and offered sets.** Separate permitted-set
+resolution from provider tool exposure: `configure_active_mcp_servers` and
+`tool_definitions()` build the permitted set from `discoverable` and `on` tools
+plus any forced tool; the provider request receives only the offered subset; and
+the `describe_tools` documentation map and executor lookup use the permitted
+set.
+Tests verify that a discoverable tool is omitted from the provider request while
+remaining present in the `describe_tools` map, and that `jp q -u NAME` on an
+`off` MCP tool still starts its server and builds an executor.
+Depends on Phase 1.
 
-**Phase 3 — `search_tools`.** The builtin, its search over permitted-set names
-and schemas, the `limit` contract, and its stream-derived monotone registration.
-Returns matches as text; promotion is not wired up, so calling it is
-informational.
-Two tests carry the registration rule: a conversation that starts with no
-discoverable tool gains the builtin after a `--cfg` delta introduces one, and a
-conversation keeps it after every discoverable tool has been promoted.
-Depends on phase 2.
-
-**Phase 4 — Promotion.** The host-owned promotion channel out of
-`execute_builtin`, the coordinator turning it into a `ConfigDelta` restricted to
-`discoverable → on`, and position-aware folding against a conflicting write in
-the same cycle.
-Three tests carry the phase: after a `search_tools` call the promoted
-definitions appear in the very next request of the same turn alongside the
-search result; a promotion folded after an approved disable of the same tool
-leaves it `off` and says so in the search response; and two searches in one
-cycle matching the same tool report it usable both times, with one delta between
+**Phase 3: `search_tools` builtin.** Implement `search_tools`, substring
+matching over permitted-set names, schemas, and `ToolDocs`, the `limit` clamp,
+and stream-derived monotone registration.
+In this phase `search_tools` returns matching tool summaries without promoting
 them.
-Depends on phase 3 and on [RFD 078] being implemented.
+Tests verify that a conversation starting with no discoverable tools registers
+`search_tools` after a `--cfg` delta introduces one, and retains `search_tools`
+after all discoverable tools are promoted.
+Depends on Phase 2.
 
-**Phase 5 — Measurement.** Search-rate instrumentation against the first open
-question, and a prompt section naming searchable categories if the rate warrants
-one.
+**Phase 4: Tool promotion.** Add the host-owned promotion channel from
+`execute_builtin`, coordinator generation of `discoverable → on` `ConfigDelta`
+entries, and position-aware folding against earlier writes in the same cycle.
+Tests verify that promoted tool definitions appear in the next provider request
+of the same turn alongside the `search_tools` result, that a promotion folded
+after an approved disable in the same cycle leaves the tool `off` and reports it
+unavailable, and that two searches in the same cycle matching the same tool both
+report it usable while emitting a single delta.
+Depends on Phase 3 and [RFD 078].
+
+**Phase 5: Measurement.** Add search-rate instrumentation and, if needed, a
+system prompt section listing searchable tool categories.
 
 ## References
 
-- [RFD 032] — semantic search, a later ranking backend
-- [RFD 054] — config deltas positioned in the conversation stream
-- [RFD 055] — tool groups as a possible unit of discoverability
-- [RFD 076] — access grants, and their interaction with search results
-- [RFD 078] — the between-cycle re-resolve that makes promotion take effect,
-  and the builtin mutation boundary this RFD opens by one inch
-- [RFD 081] — the enablement model this RFD widens
-- [RFD 094] — privileged builtins
-- [RFD 105] — cache preservation for mid-conversation tool changes
-- [Tool search tool][anthropic-tool-search] — the server-side alternative, and
-  the source of the 30–50 tool figure
-- [Advanced tool use][anthropic-advanced] — Anthropic's write-up of the scaling
-  problem
+- [RFD 032]: semantic search, a potential ranking backend for `search_tools`
+- [RFD 054]: config deltas positioned in the conversation stream
+- [RFD 055]: tool groups as a future unit of discoverability
+- [RFD 076]: access grants and their interaction with search results
+- [RFD 078]: between-cycle re-resolution and the builtin config mutation
+  boundary
+- [RFD 081]: the `state` and `allow_toggle` enablement model widened here
+- [RFD 094]: privileged builtins
+- [RFD 105]: prompt cache preservation across mid-conversation tool changes
+- [Tool search tool][anthropic-tool-search]: Anthropic's server-side search tool
+  and the source of the 30-50 tool degradation figure
+- [Advanced tool use][anthropic-advanced]: Anthropic's overview of tool
+  catalogue scaling
 
 [RFD 032]: 032-grizzly-semantic-search.md
 [RFD 054]: 054-split-conversation-config-and-events.md

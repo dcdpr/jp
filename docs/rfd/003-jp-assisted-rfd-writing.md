@@ -9,116 +9,107 @@
 
 ## Summary
 
-This RFD proposes an `rfd` skill configuration for using JP to help write RFDs.
+This RFD proposes an `rfd` skill configuration for writing RFDs with JP.
 The skill attaches the RFD process document as reference material, enables
-read-only tools for codebase exploration, and provides guarded write access so
-JP acts as a drafting partner while the contributor remains the author.
+read-only tools for codebase exploration, and grants guarded write access so JP
+acts as a drafting partner while the contributor remains the author.
 
 ## Motivation
 
-Writing an RFD involves understanding the project's conventions ([RFD 001][]),
-reading existing code and documentation to inform the design, and structuring a
-proposal that is clear and well-reasoned.
-JP is already good at all of these tasks individually.
-A dedicated skill configuration can combine them into a single workflow: load
-the process guidelines, give the LLM read access to the codebase, and provide
-system prompt guidance on how to be a useful RFD collaborator.
+Writing an RFD requires following the project's conventions ([RFD 001]), reading
+existing code and documentation to inform the design, and structuring a clear
+proposal.
+JP handles each of these tasks individually; a dedicated skill configuration
+combines them into one workflow by loading the process guidelines, granting read
+access to the codebase, and instructing the LLM on how to collaborate on RFDs.
 
-The goal is not to have JP write the RFD for you.
-[RFD 002][] is clear on this point: prose that represents your thinking should
-be written in your own words, and you own what you ship.
-The goal is to have JP help you write a better RFD — by pointing out gaps in
-your reasoning, suggesting structure, finding relevant code to reference, and
-drafting sections you can then rewrite in your voice.
+Per [RFD 002], contributors write prose that represents their own thinking in
+their own words and own what they ship.
+Rather than writing the RFD for you, JP helps you write a better one: it points
+out gaps in your reasoning, suggests structure, finds relevant code to
+reference, and drafts sections for you to rewrite in your own voice.
 
 ## Design
 
 ### The `rfd` Skill
 
-A new skill configuration at `.jp/config/skill/rfd.toml` that can be loaded into
-any conversation:
+The skill lives at `.jp/config/skill/rfd.toml` and loads into any conversation:
 
 ```sh
 jp query --cfg skill/rfd "Help me draft an RFD about X"
 ```
 
-Or combined with other configs:
+It also composes with other configs:
 
 ```sh
 jp query -c personas/architect -c skill/rfd "Review my draft RFD"
 ```
 
-The skill consists of four parts:
+The skill has four parts:
 
-1. **Attachment** — RFD 001 (the process document) is loaded as a file
-   attachment, giving the LLM direct access to the project's RFD conventions,
-   templates, and writing style guidelines.
+1. **Attachment**: Attaches [RFD 001] so the LLM has the project's RFD
+   conventions, templates, and writing style guidelines in context.
 
-2. **System prompt sections** — focused prompt sections that establish the
-   LLM's role as an RFD collaborator (not author), describe the collaboration
-   workflow, and set quality checks and writing style reminders.
+2. **System prompt sections**: Establishes the LLM's role as collaborator rather
+   than author, defines the collaboration workflow, and sets quality checks and
+   writing style reminders.
 
-3. **Read-only tools** — file reading, listing, and searching tools run in
-   unattended mode, so the LLM can explore the codebase and existing
-   documentation without prompting the user for each call.
+3. **Read-only tools**: Runs file-reading, listing, and search tools in
+   unattended mode so the LLM can explore the codebase and documentation without
+   prompting on each call.
 
-4. **Guarded write access** — `fs_modify_file` and `rfd_draft` are enabled in
-   `ask` mode, so the LLM can create new RFD files and propose targeted edits,
-   but the user must confirm each action before it is applied.
+4. **Guarded write access**: Enables `rfd_draft` and `fs_modify_file` in `ask`
+   mode so the LLM can create RFD files and propose targeted edits that require
+   user confirmation before running.
 
 ### Why a Skill
 
-JP configs are composable — personas, skills, and knowledge configs can all be
-loaded and merged via `--cfg`.
-The question is which directory this config belongs in.
+JP loads and merges composable configs via `--cfg` across three categories:
 
-- **Knowledge** configs provide domain expertise (rules, conventions) but don't
-  enable tools or attach files.
-- **Skills** add capabilities: they enable tools, attach reference material, and
-  add focused system prompt sections.
-- **Personas** define complete assistant identities (name, model, core prompt).
-  They often extend skills and knowledge.
+- **Knowledge** configs provide domain rules and conventions without enabling
+  tools or attaching files.
+- **Skills** add capabilities by enabling tools, attaching reference material,
+  and adding focused system prompt sections.
+- **Personas** define complete assistant identities (name, model, core prompt)
+  and often extend skills and knowledge.
 
-This config enables tools (read-only via extension, `fs_modify_file` in ask
-mode), attaches a reference document, and adds behavioral instructions.
-That's a capability — a skill.
-It layers on top of whatever persona is already active: "the architect who can
-also help with RFDs," not "the RFD assistant."
+Because RFD assistance combines tools, a reference attachment, and behavioral
+instructions, it belongs in `skill/`.
+As a skill, it layers onto the active persona ("the architect who can also help
+with RFDs") rather than replacing it with a separate "RFD assistant" identity.
 
-### What the Skill Extends
+### Extended Skills and Tools
 
 The skill extends two existing skills:
 
-- **`read-files.toml`** — enables `fs_read_file`, `fs_list_files`,
+- **`read-files.toml`**: Enables `fs_read_file`, `fs_list_files`,
   `fs_grep_files`, and `fs_grep_user_docs` in unattended mode.
-- **`project-discourse.toml`** — enables `github_issues` and `github_pulls` in
+- **`project-discourse.toml`**: Enables `github_issues` and `github_pulls` in
   unattended mode.
 
-Additionally, the skill enables two tools in `ask` mode:
+It also enables two write tools in `ask` mode, which require user confirmation
+before execution:
 
-- **`rfd_draft`** — creates a new RFD from the appropriate template (rfd or
-  adr), assigning the next available number and filling in metadata.
-- **`fs_modify_file`** — proposes edits to existing files.
+- **`rfd_draft`**: Creates a new RFD from a template (rfd or adr), assigns the
+  next available number, and populates the metadata header.
+- **`fs_modify_file`**: Proposes targeted edits to existing files.
 
-Both require user confirmation before execution.
 No other write tools are enabled.
 
-### What Gets Attached
+### Attachments
 
 | Attachment                       | Purpose                                |
 | -------------------------------- | -------------------------------------- |
 | `docs/rfd/001-jp-rfd-process.md` | The RFD process: lifecycle, templates, |
 |                                  | sections, writing style, tooling.      |
 
-Only RFD 001 is attached.
-The skill's own behavioral guidance is encoded in the system prompt sections, so
-attaching the skill's source RFD (this document) would be redundant — the
-system prompt already contains everything the assistant needs to know about how
-to behave.
+Only [RFD 001] is attached.
+Because the system prompt sections already encode the assistant's behavioral
+guidance, attaching this RFD as well would be redundant.
 
-Loading the full content of RFD 001 as an attachment costs tokens but ensures
-the LLM has complete, accurate reference material for writing RFDs.
-The LLM can use `fs_read_file` to look up other specific RFDs when needed.
+Attaching the full text of [RFD 001] costs tokens, but gives the LLM complete,
+accurate reference material.
+When the LLM needs other RFDs, it can read them on demand with `fs_read_file`.
 
 ### System Prompt Sections
 
@@ -139,9 +130,8 @@ The skill adds four `system_prompt_sections`, all tagged `rfd_skill`:
 | **RFD Writing Style**          | The writing conventions from RFD 001 in  |
 |                                | condensed form.                          |
 
-The quality checks are framed as questions, not generators.
-"Does the Motivation explain why?" prompts the LLM to evaluate, not produce
-filler.
+Framing the quality checks as questions (such as "Does the Motivation explain
+why?") prompts the LLM to evaluate the draft rather than generate filler.
 
 ### Typical Usage
 
@@ -153,9 +143,8 @@ jp query --new --cfg skill/rfd \
    Help me think through the structure."
 ```
 
-The LLM can use the `rfd_draft` tool to create the initial file from the
-appropriate template, then use `fs_modify_file` to fill in sections as the
-conversation progresses.
+The LLM uses `rfd_draft` to create the initial file from the template and
+`fs_modify_file` to fill in sections as the conversation progresses.
 
 **Getting feedback on a draft:**
 
@@ -183,105 +172,98 @@ jp query --cfg skill/rfd \
    security benefits of sandboxed plugins."
 ```
 
-The LLM will propose an `fs_modify_file` call.
-The user reviews the diff and confirms or rejects it.
+The LLM proposes an `fs_modify_file` call, and the user reviews the diff before
+confirming or rejecting it.
 
 ### Relationship to RFD 002
 
-[RFD 002][] establishes that LLM-generated prose that represents your thinking
-should generally be written in your own words.
-This skill is designed to work within that guideline:
+[RFD 002] requires contributors to write prose that represents their thinking in
+their own words.
+The skill follows that guideline:
 
-- The system prompt explicitly frames JP as a **collaborator, not author**.
-  It assists with structure, research, and review — it does not produce the
-  finished document.
-- When JP drafts text on request, the expectation is that the contributor
-  rewrites it.
-  The draft is a starting point, not a submission.
-- The quality check sections focus on asking questions ("Does the Motivation
-  explain why?") rather than generating answers.
+- The system prompt frames JP as a **collaborator, not author**: it assists with
+  structure, research, and review rather than producing the finished document.
+- When JP drafts a section on request, the contributor rewrites it; the draft is
+  a starting point, not a submission.
+- The quality checks ask evaluative questions ("Does the Motivation explain
+  why?") rather than generating prose.
 
-This matches the "LLMs as editors" and "LLMs as researchers" patterns from RFD
-002, which are encouraged.
-It deliberately avoids the "LLMs as writers" pattern for substantive prose.
+This follows the "LLMs as editors" and "LLMs as researchers" patterns encouraged
+in [RFD 002], and avoids the "LLMs as writers" anti-pattern for substantive
+prose.
 
 ## Alternatives
 
-### No dedicated skill — use read-files and attach RFD 001 manually
+### Manual Flags Instead of a Dedicated Skill
 
-Contributors could load `-c skill/read-files` and `-a
+Contributors could pass `-c skill/read-files` and `-a
 docs/rfd/001-jp-rfd-process.md` each time they want help with an RFD.
 
-Rejected because: it is easy to forget the attachment, the LLM gets no
-behavioral guidance about its role as collaborator, and there are no quality
-check prompts.
-The skill encodes the right defaults.
+Rejected because contributors can easily forget the attachment, and the LLM
+receives no collaborator guidance or quality check prompts.
+A dedicated skill packages these defaults.
 
-### A persona instead of a skill
+### A Persona Instead of a Skill
 
-We could create an `rfd-writer` persona with a dedicated name, model, and full
-system prompt.
+An `rfd-writer` persona could define a dedicated name, model, and full system
+prompt.
 
-A persona would work, but a skill is a better fit.
-A persona sets an assistant identity — the persona *is* the assistant.
-The RFD capability is something you add *to* an assistant.
-You want "the architect who can also help with RFDs" or "the dev who can also
-help with RFDs," not a separate RFD-only identity.
-A skill composes naturally with any persona.
+Rejected because a persona replaces the active assistant identity, whereas RFD
+assistance is a capability added to an existing persona (such as an architect or
+developer persona).
+A skill composes with any persona.
 
-### A knowledge config instead of a skill
+### A Knowledge Config Instead of a Skill
 
-Knowledge configs provide domain expertise but don't enable tools or attach
+Knowledge configs provide domain conventions, but cannot enable tools or attach
 files.
-The RFD skill needs both (read-only tools for research, `fs_modify_file` for
-applying edits, and RFD 001 as an attachment), so knowledge alone is
-insufficient.
+Because RFD assistance requires research tools, `fs_modify_file` for edits, and
+[RFD 001] as an attachment, a knowledge config is insufficient.
 
 ## Non-Goals
 
-- **Automated RFD generation**: This skill does not aim to produce complete RFDs
-  from a one-line prompt.
-  That would undermine the purpose of writing one.
-- **RFD validation or linting**: Automated checks for metadata format, section
-  presence, etc. are a separate concern and could be a future RFD.
-- **Loading all existing RFDs as context**: Only RFD 001 is attached.
-  Loading the full RFD corpus would be token-expensive and mostly irrelevant.
-  The LLM can use `fs_read_file` to look up specific RFDs when needed.
+- **Automated RFD generation**: Producing complete RFDs from a one-line prompt
+  would defeat the purpose of writing an RFD.
+- **RFD validation or linting**: Automated checks for metadata format and
+  required sections are a separate concern left to a future RFD.
+- **Attaching all existing RFDs**: Attaching the full RFD corpus would waste
+  tokens on irrelevant context.
+  Only [RFD 001] is attached; the LLM reads other RFDs on demand with
+  `fs_read_file`.
 
 ## Risks and Open Questions
 
-- **Token cost of the attachment**: RFD 001 is ~4000 words.
-  This consumes a meaningful chunk of the context window.
-  If this becomes a problem, the key conventions could be summarized into a
-  system prompt section instead.
-  For now, full document attachment is preferred because it ensures accuracy.
-- **Skill composability**: The `extends` mechanism assumes extended skills don't
-  conflict with each other or with the active persona.
-  This is true today but could become an issue if tool configurations diverge.
-- **Should RFD 002 also be attached?** It contains relevant guidance on LLM use.
-  Omitted for now to reduce token cost — the system prompt captures the key
+- **Token cost of the attachment**: At roughly 4,000 words, [RFD 001] consumes a
+  significant share of the context window.
+  Attaching the full document is preferred for accuracy, but its core
+  conventions can be summarized into a system prompt section if token cost
+  becomes a problem.
+- **Skill composability**: The `extends` mechanism assumes extended skills do
+  not conflict with each other or with the active persona, which may break if
+  tool configurations diverge.
+- **Attaching RFD 002**: [RFD 002] contains relevant guidance on LLM use, but is
+  omitted to save tokens because the system prompt already captures its core
   principle (collaborator, not author).
-  Can be added later if needed.
+  It can be attached later if needed.
 
 ## Implementation Plan
 
 1. Create `.jp/config/skill/rfd.toml` with the configuration described above.
-2. Test with a few real RFD drafting sessions to validate that the system prompt
-   sections, tools, and attachment work as expected.
-   Verify that the LLM references RFD 001 conventions correctly, uses tools to
-   research context, and respects the collaborator role.
-3. Adjust guidance based on experience.
+2. Test the skill in real RFD drafting sessions to verify that the LLM follows
+   [RFD 001] conventions, uses read-only tools for research, and stays in the
+   collaborator role.
+3. Adjust the prompt guidance based on drafting experience.
 
 ## References
 
-- [RFD 001: The JP RFD Process][RFD 001] — the process this skill teaches JP to
-  follow.
-- [RFD 002: Using LLMs in the JP Project][RFD 002] — the guidelines on LLM use
-  that inform this skill's boundaries.
-- Skill: Read Files (`.jp/config/skill/read-files.toml`) — extended by this
-  skill for codebase exploration.
-- Skill: Project Discourse (`.jp/config/skill/project-discourse.toml`) —
-  extended by this skill for GitHub context.
+- [RFD 001: The JP RFD Process][RFD 001]: the RFD process this skill teaches JP
+  to follow.
+- [RFD 002: Using LLMs in the JP Project][RFD 002]: the LLM usage guidelines
+  that define this skill's boundaries.
+- Skill: Read Files (`.jp/config/skill/read-files.toml`): extended for codebase
+  exploration.
+- Skill: Project Discourse (`.jp/config/skill/project-discourse.toml`): extended
+  for GitHub issue and pull request context.
 
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 002]: 002-using-llms.md

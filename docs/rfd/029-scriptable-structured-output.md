@@ -18,7 +18,8 @@ without extra flags to suppress interactive chrome or persistence.
 ## Motivation
 
 JP is built for interactive pair-programming sessions.
-When used in scripts or pipelines, the experience degrades:
+In scripts or shell pipelines, extracting structured output requires too many
+flags:
 
 ```sh
 # Current: still too many flags for clean scripted output
@@ -27,59 +28,62 @@ jp -! query --format=json --no-tools --new --schema 'summary' \
   "summarize this document in two sentences"
 ```
 
-Two problems:
+Two problems make this awkward:
 
 1. **Too much output.** JSON format mode emits all conversation events as
    NDJSON, not just the structured result.
-   The `JsonEmitter` in `TurnCoordinator` unconditionally emits every event, and
-   then `query.rs` separately prints the structured data via `print_json`.
+   `JsonEmitter` in `TurnCoordinator` emits every event unconditionally, and
+   `query.rs` then prints the structured data separately via `print_json`.
 
-2. **Too many flags.** Most flags exist to turn off JP's interactive defaults
-   (tool calls, reasoning display, conversation persistence).
-   These are the wrong defaults for scripting but the right defaults for
-   interactive use.
+2. **Too many flags.** Most of the flags above disable JP's interactive defaults
+   (tool calls, reasoning display, and conversation persistence), which suit
+   interactive sessions but get in the way in scripts.
 
 ## Prior Art
 
 ### simonw/llm
 
-The closest precedent.
-Default behavior is script-friendly — `llm "prompt"` emits only the response
+`llm` is the closest precedent.
+Its default behavior is script-friendly: `llm "prompt"` writes only the response
 text to stdout.
 
-- `llm --schema 'name, age int, bio' "invent a dog"` – just the JSON object
-- Concise schema DSL: `name, age int, bio: a short bio` expands to JSON Schema
-- `--schema-multi` wraps in `{"items": [...]}` for arrays
-- `--no-log` disables persistence
-- Templates (`--save dog`, then `llm -t dog "prompt"`) for reuse
-- Schemas referenceable by hash ID or template name
+- `llm --schema 'name, age int, bio' "invent a dog"` emits only the JSON object.
+- A concise schema DSL (`name, age int, bio: a short bio`) expands to JSON
+  Schema, and `--schema-multi` wraps the schema in `{"items": [...]}` for
+  arrays.
+- `--no-log` disables persistence.
+- Templates (`--save dog`, then `llm -t dog "prompt"`) save prompts and schemas
+  for reuse, and schemas can be referenced by hash ID or template name.
 
 ### charmbracelet/mods (sunset, replaced by Crush)
 
-Pipe-oriented: `cat file | mods "explain"`.
+`mods` is designed for shell pipelines (`cat file | mods "explain"`):
 
-- `-q` quiet mode — only the response
-- `--no-cache` for no persistence
-- `-f json` asks the LLM to format as JSON (prompt-level, not schema-level)
+- `-q` enables quiet mode and emits only the response.
+- `--no-cache` disables persistence.
+- `-f json` instructs the LLM to format its response as JSON in the prompt
+  rather than enforcing a schema.
 
 ### sigoden/aichat
 
-- Single-shot CMD mode is the default; chat/REPL is opt-in
-- Roles (system prompts) for reuse
-- No native structured output / schema support
+- Single-shot CMD mode is the default; chat/REPL mode is opt-in.
+- Roles define reusable system prompts.
+- Structured output and schemas are not supported natively.
 
-### Key observation
+### Comparison
 
-`llm` and `mods` default to "script-friendly" — response to stdout, everything
-else to stderr or suppressed.
-JP defaults to "interactive-friendly."
-The challenge is bridging the gap without breaking the interactive experience.
+`llm` and `mods` default to script-friendly output: the response goes to stdout,
+and everything else goes to stderr or is suppressed.
+JP defaults to interactive output.
+The goal is to support scripted pipelines without degrading the interactive
+experience.
 
 ## Design
 
 ### Goals
 
-The target experience:
+The same command should work in a pipeline and at an interactive terminal
+without mode-switching flags:
 
 ```sh
 # Piped — clean JSON automatically
@@ -89,11 +93,9 @@ jp q -s 'summary' "summarize this" -a doc.md -m haiku | jq .summary
 jp q -s 'summary' "summarize this" -a doc.md -m haiku
 ```
 
-No special flags needed to switch between the two modes.
-The pipe triggers script-friendly behavior.
-The concise schema DSL keeps it short.
-
-If the user also doesn't want to persist:
+Piping stdout triggers script-friendly behavior, and the concise schema DSL
+keeps the invocation short.
+Pass `-!` to skip persistence as well:
 
 ```sh
 jp q -! -s 'summary' "summarize this" -a doc.md -m haiku | jq .
@@ -101,37 +103,31 @@ jp q -! -s 'summary' "summarize this" -a doc.md -m haiku | jq .
 
 ### Inference from `--schema`
 
-When `--schema` is present, JP can infer scripting-friendly defaults.
-These are defaults, not hard overrides — explicit flags always win.
+When `--schema` is set, JP infers script-friendly defaults.
+Explicit flags always take precedence: explicit flag > `--schema` inference >
+config file > hardcoded default.
 
-Precedence: explicit flag > `--schema` inference > config file > hardcoded
-default.
+| Inference                           | Condition                              | Rationale                           |
+| ----------------------------------- | -------------------------------------- | ----------------------------------- |
+| Emit only structured JSON to stdout | `--format json` or stdout is not a TTY | NDJSON event stream is noise        |
+| Suppress chrome on stderr           | stdout is not a TTY                    | Progress and tool headers clutter   |
+|                                     |                                        | scripted runs                       |
+| Hide reasoning display              | Always (unless `-r` is passed)         | Reasoning output is not part of the |
+|                                     |                                        | structured result                   |
 
-| Inference                           | Condition                              | Rationale                              |
-| ----------------------------------- | -------------------------------------- | -------------------------------------- |
-| Only emit structured JSON to stdout | `--format json` or stdout is not a TTY | NDJSON event stream is noise           |
-| Suppress chrome on stderr           | stdout is not a TTY                    | Progress and tool headers are noise in |
-|                                     |                                        | scripted contexts                      |
-| Hide reasoning display              | Always (unless `-r` is passed)         | Structured output; reasoning display   |
-|                                     |                                        | adds nothing                           |
+[RFD 048] routes chrome to stderr unconditionally, so piped stdout stays clean.
+When `--schema` is combined with non-TTY stdout, JP also silences stderr chrome
+so progress indicators and tool call headers do not clutter the terminal during
+`$(jp q -s ...)` subshell calls.
 
-[RFD 048] routes chrome to stderr unconditionally, so stdout is always clean for
-piping.
-The "suppress chrome on stderr" inference goes further: when the user is
-scripting (stdout is not a TTY), chrome on stderr is also noise — progress
-indicators and tool call headers appearing on the terminal alongside a `$(jp q
--s ...)` subshell add no value.
-This inference silences stderr chrome entirely in that case.
+`--schema` does not infer the following flags:
 
-What `--schema` should NOT imply:
-
-| Flag           | Why not infer                      |
-| -------------- | ---------------------------------- |
-| `--no-persist` | User might want a record of the    |
-|                | extraction                         |
-| `--new`        | Schema queries within an ongoing   |
-|                | conversation are valid             |
-| `--no-tools`   | Tool-assisted extraction is useful |
+| Flag           | Why not infer                                |
+| -------------- | -------------------------------------------- |
+| `--no-persist` | The user may want a record of the extraction |
+| `--new`        | Schema queries are valid within an ongoing   |
+|                | conversation                                 |
+| `--no-tools`   | Tool-assisted extraction is useful           |
 
 ### Concise Schema DSL
 
@@ -164,14 +160,14 @@ Full JSON Schema is accepted as a passthrough when the DSL is insufficient.
 
 ### Future: `--one-shot` / `-1`
 
-If the pattern `jp -! q -n -s 'schema' ...` becomes common enough, a `-1` /
-`--one-shot` flag could preset: `--no-persist`, `--new`, `--no-reasoning`, and
-`--format json` when `--schema` is present.
-Each can still be overridden.
+If the pattern `jp -! q -n -s 'schema' ...` remains common, a `-1` /
+`--one-shot` flag could preset `--no-persist`, `--new`, `--no-reasoning`, and
+(when `--schema` is set) `--format json`, with each setting still overridable by
+explicit flags.
 
-This is not planned for initial implementation.
-The inference from `--schema` combined with output channel separation ([RFD
-048]) covers the 90% case.
+This flag is deferred.
+`--schema` inference combined with output channel separation ([RFD 048]) covers
+most scripting use cases.
 
 ### Future: Schema in Named Templates
 
@@ -189,8 +185,7 @@ submit = "unattended"
 jp q -% summarize -a docs/rfd/005.md
 ```
 
-This would be a small addition to the RFD-013 schema (a `schema` field on
-`NamedTemplate`).
+This adds a `schema` field to `NamedTemplate` in RFD-013.
 
 ## Drawbacks
 
@@ -202,53 +197,50 @@ This would be a small addition to the RFD-013 schema (a `schema` field on
 
 ### Dedicated `jp gen` subcommand
 
-A separate subcommand with scripting-friendly defaults baked in.
-Rejected because supporting optional tool calls means `gen` needs the full turn
-loop infrastructure, making it effectively `query` with different defaults.
-A flag (`-1`) or inference from `--schema` achieves the same result without a
+A separate subcommand could bake in script-friendly defaults.
+However, supporting optional tool calls requires the full turn loop
+infrastructure, so `gen` would duplicate `query` with different defaults.
+`--schema` inference (or a future `-1` flag) achieves the same result without a
 new subcommand.
 
 ### `--quiet` flag to suppress non-data output
 
-Works but requires the user to remember to pass it every time.
-Inference from `--schema` + TTY detection is more ergonomic and matches how
-other CLI tools behave.
+A `--quiet` flag works, but users must remember to pass it on every scripted
+invocation.
+Inferring quiet output from `--schema` and TTY detection is more ergonomic and
+matches how other CLI tools behave.
 
 ## Non-Goals
 
-- **Multi-turn scripting.** This RFD focuses on single-turn structured
-  generation.
-  Multi-turn scripting (continuing conversations in scripts) is separate.
-- **Streaming structured output.** Structured responses are inherently
-  non-streamable (the JSON must be complete).
-  The streaming infrastructure still runs, but display is suppressed in script
-  mode.
+- **Multi-turn scripting.** This RFD covers single-turn structured generation;
+  continuing conversations across turns in scripts is out of scope.
+- **Streaming structured output.** Structured JSON must be complete before it
+  can be parsed, so responses cannot be streamed incrementally.
+  The streaming infrastructure still runs, but terminal display is suppressed in
+  script mode.
 
 ## Risks and Open Questions
 
-### Inference is the only thing left
+### Remaining scope
 
 This RFD originally opened with a phase implementing [RFD 048]'s output channel
-separation, because clean piped stdout is the precondition for everything else
-here.
-RFD 048 is Implemented, so what remains is the inference layer alone — a
+separation, because clean piped stdout is a precondition for scripted output.
+Because RFD 048 is now Implemented, only the inference layer remains, which is a
 narrower change than the document's framing suggests.
 
 ## Implementation Plan
 
-Single phase: schema output inference.
+Output channel separation ([RFD 048]) and the schema DSL ([RFD 030]) are both
+Implemented, so implementation consists of a single phase for schema output
+inference:
 
-- When `--schema` is present and stdout is not a TTY (or `--format json`): only
-  emit the structured JSON object to stdout.
-  Suppress `JsonEmitter` NDJSON event stream.
-- When `--schema` is present and stdout is not a TTY: suppress chrome on stderr
-  (progress indicators, tool call headers).
-  In scripted contexts these add no value.
-- When `--schema` is present: default reasoning display to `Hidden` unless the
+- When `--schema` is present and stdout is not a TTY (or `--format json`), emit
+  only the structured JSON object to stdout and suppress the `JsonEmitter`
+  NDJSON event stream.
+- When `--schema` is present and stdout is not a TTY, suppress chrome on stderr
+  (progress indicators and tool call headers).
+- When `--schema` is present, default reasoning display to `Hidden` unless the
   user explicitly passes `-r` / `--reasoning`.
-
-The channel separation this builds on ([RFD 048]) and the schema DSL that
-produces the JSON ([RFD 030]) are both Implemented, so this phase stands alone.
 
 ## References
 

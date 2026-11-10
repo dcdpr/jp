@@ -10,38 +10,34 @@
 
 ## Summary
 
-This RFD introduces a per-workspace `usage.json` file that records command
-invocations and flag usage atomically on each CLI run.
-The recorded data stays strictly local and is never shared with external
-services, providing a frequency and recency signal for adaptive CLI features.
+This RFD introduces a per-workspace `usage.json` file that atomically records
+command invocations and flag usage on each CLI run.
+The file stays on the local machine and is never shared with external services.
+Adaptive CLI features read this data for frequency and recency signals.
 
 ## Motivation
 
-JP currently has no memory of how users interact with the CLI across sessions.
-Every invocation starts from the same state: the same config, the same field
-ordering, the same defaults.
-But users develop patterns — they frequently use `--model=opus`, they always
-set `--reasoning=auto`, they reach for the same `--cfg` fields repeatedly.
+JP has no memory of how users interact with the CLI across sessions.
+Every invocation starts with the same config, field ordering, and defaults, even
+when a user passes `--model=opus`, sets `--reasoning=auto`, or overrides the
+same `--cfg` fields on nearly every run.
 
-Without usage data, features that want to adapt to these patterns have no signal
-to work with.
-Conversation state captures the stream of events during interactions with the
-assistant, but not how the user invoked the CLI to get there.
+Adaptive features need a record of those habits.
+Conversation state captures the event stream of an assistant interaction, but
+not the CLI arguments that started it.
 
-This RFD establishes the infrastructure for recording CLI usage.
-It defines the storage format, access patterns, write semantics, and integration
-points.
-The initial implementation records argument usage per command.
-Future RFDs can extend the schema to capture additional signals (query
-durations, token counts, etc.) without changing the infrastructure.
+This RFD defines the storage format, access patterns, write semantics, and CLI
+integration for usage tracking.
+The initial implementation records argument usage per command, and the schema
+can be extended to capture additional signals (such as query durations or token
+counts) without changing the underlying storage mechanism.
 
 ## Design
 
 ### What to track
 
-The usage file records data that **cannot be derived from existing state**.
-The guiding principle: if you can reconstruct it from conversation history, or
-config files, don't duplicate it here.
+The usage file records only data that **cannot be derived from existing state**.
+Anything reconstructible from conversation history or config files is omitted.
 
 Initial tracked data:
 
@@ -50,7 +46,7 @@ Initial tracked data:
 | Command invocations        | Which commands are used, how often, when     |
 | Argument usage per command | Which arguments are passed, with what values |
 
-Data explicitly **not** tracked (derivable from other sources):
+Excluded data (derivable from other sources):
 
 | Data                       | Derivable from                     |
 | -------------------------- | ---------------------------------- |
@@ -58,43 +54,36 @@ Data explicitly **not** tracked (derivable from other sources):
 | Model usage over time      | Conversation event streams         |
 | Config field values        | Config files + conversation deltas |
 
-Future extensions (not implemented in this RFD, but the schema accommodates
-them):
+Potential future extensions accommodated by the schema:
 
 | Data               | Potential use                           |
 | ------------------ | --------------------------------------- |
 | Error frequency    | Surfacing reliability issues            |
 | Interrupt patterns | UX decisions (streaming vs tool Ctrl+C) |
 
-Note that **query durations** and **token counts** are not tracked here.
-These are metadata that belong on conversation events here the infrastructure
-already exists.
-The usage file tracks CLI surface-level patterns, not conversation-level
+**Query durations** and **token counts** are not tracked here because they
+belong on conversation events, where the event stream infrastructure already
+exists.
+The usage file tracks CLI invocation patterns rather than conversation-level
 telemetry.
 
 ### Storage location
 
-Usage data is stored **per-workspace** because usage patterns vary across
-workspaces.
-A user working on a project that requires Google models will have different flag
-patterns than one using Anthropic.
-The workspace-local file provides the most relevant signal.
+Usage data is stored **per-workspace** because flag patterns vary by project.
+For example, a workspace that requires Google models sees different flag
+patterns than one using Anthropic, so a workspace-local file provides the most
+relevant signal.
 
 - **With workspace**: `$XDG_DATA_HOME/jp/workspace/<id>/usage.json`
 - **Without workspace** (fallback): `$XDG_DATA_HOME/jp/usage.json`
 
-The fallback applies when no workspace is available (e.g., future commands that
-operate outside a workspace context).
-
-The workspace user storage path (`Workspace::user_storage_path()`) already
-exists and is used for other per-user, per-workspace data (like the active
-conversation ID).
-Usage tracking follows the same pattern.
+The workspace path uses `Workspace::user_storage_path()`, which already stores
+per-user workspace data such as the active conversation ID.
+The global fallback applies when a command runs outside a workspace context.
 
 ### Schema
 
-The file is JSON.
-The top-level structure mirrors the CLI's subcommand tree:
+The JSON schema mirrors the CLI subcommand tree:
 
 ```json
 {
@@ -180,8 +169,7 @@ The top-level structure mirrors the CLI's subcommand tree:
 
 #### Uniform argument shape
 
-Every argument entry has the same structure — no argument gets special
-treatment:
+Every argument entry uses the same structure:
 
 ```rust
 struct ArgUsage {
@@ -196,27 +184,21 @@ struct ValueUsage {
 }
 ```
 
-Arguments are keyed by their **clap argument ID** — the Rust field name in the
-derive struct (e.g. `model`, `no_edit`, `reasoning`).
-This is the canonical identifier that is stable regardless of whether the user
-typed `-m`, `--model`, or `--model=opus`.
-Short flags, long flags, and positional arguments all share the same ID space.
+Arguments are keyed by their **clap argument ID**, which is the Rust field name
+on the derive struct (e.g. `model`, `no_edit`, `reasoning`).
+Short flags, long flags, and positional arguments share this ID space, so `-m`,
+`--model`, and `--model=opus` all record under `model`.
 
-The `values` key is always the raw string the user typed as the argument's
-value.
-For `model`, that's `opus`.
-For `reasoning`, that's `auto`.
-For `config` (`--cfg`), that's `assistant.tool_choice=auto` (the full
-`KEY=VALUE` string).
-
-This uniformity means consumers don't need to know which arguments are
-"special."
-Any argument-specific interpretation (like splitting `--cfg` values on `=` to
-group by field path) happens on the read side.
+The `values` map is keyed by the raw argument string from the command line:
+`opus` for `model`, `auto` for `reasoning`, and the full `KEY=VALUE` string
+(such as `assistant.tool_choice=auto`) for `config` (`--cfg`).
+Because every argument uses the same representation, argument-specific parsing
+(such as splitting `--cfg` values on `=` to group by field path) happens on the
+read side.
 
 #### Recursive command structure
 
-The `commands` object is recursive — subcommands nest naturally:
+The `commands` map is recursive so subcommands nest under their parent command:
 
 ```rust
 struct CommandUsage {
@@ -226,14 +208,13 @@ struct CommandUsage {
 }
 ```
 
-`jp config show --explain` records under `cli.commands.config.commands.show`.
-`jp query --model=opus` records under `cli.commands.query`.
+`jp config show --explain` records under `cli.commands.config.commands.show`,
+and `jp query --model=opus` records under `cli.commands.query`.
 
 ### Integration: `CliUsage` type
 
-A new `CliUsage` type in `jp_cli` manages loading, updating, and persisting
-usage data.
-It is added to `Ctx` so any command handler can record usage:
+A `CliUsage` type in `jp_cli` loads, updates, and persists usage data.
+It lives on `Ctx` so any command handler can access it:
 
 ```rust
 pub(crate) struct Ctx {
@@ -245,18 +226,11 @@ pub(crate) struct Ctx {
 
 #### Loading
 
-`CliUsage::load` reads the file from the workspace's user storage path (or the
-global fallback).
-If the file doesn't exist or fails to parse, it returns an empty `CliUsage` —
-corrupted or missing usage data is never an error.
-A warning is logged if the file exists but can't be parsed.
-
-Note: the `Cli::parse()` split into `Cli::command().get_matches()` +
-`Cli::from_arg_matches()` described below is shared infrastructure that [RFD
-060][] also builds on.
-RFD 060 uses the retained `ArgMatches` for config explain provenance; this RFD
-uses them for usage recording.
-Both operate on the same single parse result.
+`CliUsage::load` reads `usage.json` from the workspace user storage path or the
+global fallback.
+If the file is missing or fails to parse, it returns an empty `CliUsage` so
+corrupted or missing usage data never aborts a command.
+Parse failures on an existing file log a warning.
 
 ```rust
 impl CliUsage {
@@ -309,16 +283,14 @@ impl CliUsage {
 }
 ```
 
-The `command_path` is a slice like `&["query"]` or `&["config", "show"]`,
-derived from the command's position in the clap hierarchy.
+`command_path` is a slice such as `&["query"]` or `&["config", "show"]`,
+corresponding to the command's path in the clap hierarchy.
 
-#### Recording pattern: automatic via `ArgMatches`
+#### Automatic recording via `ArgMatches`
 
-Rather than manually adding `record_flag` calls in each command's `run` method,
-flag recording is automated using clap's `ArgMatches` API.
-
-The entry point in `run_inner()` splits `Cli::parse()` into two steps to retain
-access to the raw matches:
+Instead of adding manual `record_flag` calls in each command's `run` method,
+`run_inner()` splits `Cli::parse()` into two steps to retain the raw
+`ArgMatches`:
 
 ```rust
 // Before (current):
@@ -329,9 +301,11 @@ let matches = Cli::command().get_matches();
 let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 ```
 
-This is clap's canonical approach for mixing the derive and builder APIs.
-It performs a single parse — no value parsers run twice, no file-reading side
-effects from parsers like `string_or_path` are duplicated.
+This is clap's standard pattern for combining the derive and builder APIs.
+It parses the command line once, so value parsers (including file-reading
+parsers such as `string_or_path`) do not run twice.
+[RFD 060] shares this parse split, using the retained `ArgMatches` for config
+explain provenance while this RFD uses them for usage recording.
 
 A generic `record_from_matches` function walks the `ArgMatches` tree and records
 every argument whose `value_source()` is `ValueSource::CommandLine`:
@@ -373,39 +347,32 @@ fn record_from_matches(
 }
 ```
 
-This approach eliminates Phase 3 entirely — no per-command manual recording
-needed.
-Every flag on every command is automatically captured.
-New flags added to any command are tracked without any usage-tracking code
-changes.
-
-Global arguments (like `--cfg`, `--verbose`, `--persist`) are handled correctly:
-clap propagates them to subcommand matches, and `value_source()` accurately
-reports `CommandLine` only when the user explicitly passed them.
+Walking `ArgMatches` captures every flag on every command automatically, so new
+flags require no usage-tracking changes.
+Global arguments (such as `--cfg`, `--verbose`, and `--persist`) also need no
+special handling: clap propagates them to subcommand matches, and
+`value_source()` reports `CommandLine` only when the user passed them on the
+command line.
 
 #### Persisting
 
-Usage is saved at the end of `run_inner()`, after the command completes but
-before the process exits.
-This happens alongside the existing workspace persistence:
+Usage is saved at the end of `run_inner()`, after the command completes and
+alongside workspace persistence:
 
 ```rust
 // In run_inner(), after Commands::run() and task_handler.sync():
 ctx.usage.save();
 ```
 
-`save()` is fire-and-forget — it logs warnings on failure but never propagates
-errors.
-Usage tracking must never cause a command to fail.
+`save()` is fire-and-forget: it logs a warning on failure and never propagates
+errors, so usage tracking cannot cause a command to fail.
 
 ### Atomic writes
 
-The current `write_json` helper in `jp_storage` writes directly to the target
-path, which can corrupt the file if the process is interrupted mid-write.
-Usage tracking requires atomic writes because every command invocation writes to
-the same file.
-
-`CliUsage::save` writes atomically using temp-file-then-rename:
+The `write_json` helper in `jp_storage` writes directly to the target path,
+which can corrupt the file if the process is interrupted mid-write.
+Because every command invocation updates `usage.json`, `CliUsage::save` writes
+to a temporary file in the target directory and renames it into place:
 
 ```rust
 impl CliUsage {
@@ -437,136 +404,110 @@ impl CliUsage {
 }
 ```
 
-`tempfile::NamedTempFile::persist` uses `rename(2)` on POSIX, which is atomic
-within a filesystem.
-On Windows it uses `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING`.
+`tempfile::NamedTempFile::persist` uses `rename(2)` on POSIX (atomic within a
+single filesystem) and `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` on Windows.
 
 ### Concurrency
 
-Multiple JP processes can run concurrently (e.g., detached queries, parallel
-terminal sessions).
-Without locking, concurrent writes can race: both processes read the file, both
-update their in-memory copy, and the last writer wins — the first writer's
-updates are lost.
+Multiple JP processes can run concurrently, such as detached queries or parallel
+terminal sessions.
+Without locking, concurrent writes can race: both processes read `usage.json`,
+each updates its in-memory copy, and the last writer overwrites the first
+writer's updates.
 
-For the initial implementation, this is acceptable.
-The data is heuristic — a lost increment of a flag counter doesn't affect
-correctness.
-The atomic write ensures the file is never corrupted (partially written), only
-potentially stale.
-
-If this becomes a problem (e.g., detached queries become common and usage data
-diverges noticeably), a future improvement could use advisory file locking
-(`flock` on POSIX) with a read-modify-write cycle.
-This RFD does not implement locking.
+This race is acceptable for the initial implementation.
+Usage counts are heuristics, so a lost counter increment does not affect
+correctness, and atomic writes prevent partial writes from corrupting the file.
+If concurrent runs cause noticeable drift, a future change can guard the
+read-modify-write cycle with advisory file locking (`flock` on POSIX).
 
 ### Privacy
 
-The usage file is **local-only**.
-It is never transmitted to any external service.
-It exists solely to improve the local JP experience.
-This must be documented clearly in user-facing docs and the `jp init` output.
-
-The file contains no conversation content, prompts, or LLM responses — only
-structural metadata about CLI invocations (command names, argument IDs, argument
-values like model names or config field paths).
+The usage file is **local-only** and is never transmitted to external services.
+It contains only structural metadata about CLI invocations (command names,
+argument IDs, and argument values such as model names or config field paths),
+never conversation content, prompts, or LLM responses.
+User-facing documentation and `jp init` output must state this local-only
+guarantee clearly.
 
 ## Drawbacks
 
-- **Write on every invocation**: Every command run writes to `usage.json`.
-  This is a small I/O cost (~1-2ms for a JSON write + fsync + rename) but it's
-  unavoidable overhead even when no feature consumes the data yet.
+- **Write on every invocation**: Every command run writes to `usage.json`,
+  adding roughly 1-2ms of I/O (JSON serialization, flush, and rename) even when
+  no feature consumes the data.
 
-- **Stale data under concurrency**: Without locking, concurrent writes cause
-  last-writer-wins races.
-  Some usage increments will be silently lost.
-  This is acceptable for heuristic data but means the counts are approximate,
-  not exact.
+- **Stale data under concurrency**: Without locking, concurrent writes have
+  last-writer-wins races that silently drop increments, so usage counts are
+  approximate rather than exact.
 
-- **Schema evolution**: The JSON schema will grow as more data is tracked.
-  Old `usage.json` files need to be forward-compatible (ignore unknown fields)
-  and the code must handle missing fields gracefully (default to zero/empty).
+- **Schema evolution**: As the JSON schema grows, deserialization must remain
+  forward-compatible by ignoring unknown fields and defaulting missing fields to
+  zero or empty.
 
 ## Alternatives
 
 ### SQLite instead of JSON
 
-SQLite provides atomic writes, concurrent access, and efficient queries out of
-the box.
-However, it adds a non-trivial dependency, is harder to inspect manually, and is
-overkill for what is essentially a small counters file.
-JSON is human-readable, debuggable, and sufficient for the expected data size.
+SQLite provides atomic writes, concurrent access, and indexed queries out of the
+box, but adds a heavy dependency and stores data in a binary format that is
+harder to inspect by hand.
+For a small counters file, human-readable JSON is simpler to debug and fast
+enough.
 
-### No persistent tracking — session-only
+### Session-only tracking (in-memory)
 
-Track usage only within a single session (in-memory).
-This avoids all file I/O concerns but provides no cross-session signal.
-Features like wizard field ordering need historical data to be useful.
+Tracking usage only in memory within a single session avoids file I/O, but
+provides no cross-session signal for features like wizard field ordering.
 
 ### Append-only log instead of mutable JSON
 
-Write one line per invocation to a log file, aggregate on read.
-This avoids concurrent-write races (appends are atomic on POSIX for small
-writes) but makes reads expensive (must scan the full log) and requires periodic
-compaction.
-Not worth the complexity for counter data.
+Appending one line per invocation to a log file and aggregating on read avoids
+concurrent-write races (small appends are atomic on POSIX), but makes reads scan
+the full log and requires periodic compaction.
+Counter data does not justify that complexity.
 
 ## Non-Goals
 
-- **Analytics or telemetry**: This is not a telemetry system.
-  No data leaves the user's machine.
-  There is no aggregation server, no opt-in/opt-out toggle, no anonymization
+- **Analytics or telemetry**: No data leaves the user's machine.
+  There is no aggregation server, opt-in/opt-out toggle, or anonymization
   pipeline.
 
 - **Query performance tracking**: Tracking query durations, token counts, or
-  error rates is a natural extension of this infrastructure but is out of scope
-  for this RFD.
-  The schema is designed to accommodate it (additional top-level keys alongside
-  `cli`), but the recording logic is not implemented here.
+  error rates is out of scope for this RFD.
+  The schema leaves room for additional top-level keys alongside `cli`, but this
+  RFD only implements CLI argument recording.
 
-- **Cross-workspace aggregation**: Each workspace has its own `usage.json`.
-  There is no mechanism to merge or query across workspaces.
-  If a user wants global stats, that's a future feature.
+- **Cross-workspace aggregation**: Each workspace has its own `usage.json`, with
+  no mechanism to merge or query usage across workspaces.
 
 ## Risks and Open Questions
 
-- **Schema versioning**: The `usage.json` file has no version field in this
-  initial design.
-  If the schema changes in a breaking way, we'd need to detect the old format
-  and migrate or discard.
-  Adding a `"version": 1` field now is cheap insurance — worth considering
-  before this RFD is accepted.
+- **Schema versioning**: The initial `usage.json` schema has no version field,
+  so a breaking schema change would require detecting the old format to migrate
+  or discard it.
+  Adding `"version": 1` before accepting this RFD is a low-cost safeguard.
 
-- **Large value cardinality**: Flags like `--cfg` can have unbounded value
-  diversity (every unique `KEY=VALUE` string becomes an entry).
-  Over months of use, the `values` map could grow large.
-  A future RFD could add eviction (e.g., drop entries older than 90 days or with
-  count < 3), but this isn't needed initially.
+- **Large value cardinality**: Flags like `--cfg` accept arbitrary `KEY=VALUE`
+  strings, so the `values` map can grow large over months of use.
+  A future RFD can add eviction (for example, dropping entries older than 90
+  days or with count < 3).
 
-- **`--no-persist` interaction**: When the user passes `--no-persist` (or `-!`),
-  workspace persistence is disabled.
-  Should this also suppress usage tracking?
-  The argument for: consistency with the "leave no trace" intent.
-  The argument against: usage is user-local metadata, not workspace state.
-  Recommend: suppress usage writes when `--no-persist` is active, for
-  consistency.
+- **`--no-persist` interaction**: Passing `--no-persist` (or `-!`) disables
+  workspace persistence.
+  Although usage is user-local metadata rather than workspace state,
+  `--no-persist` signals a "leave no trace" invocation, so `run_inner()` should
+  also suppress `usage.json` writes when `--no-persist` is active.
 
-- **Field renames orphan usage data**: Clap's derive API assigns argument IDs
-  from the Rust field name, not from `long` or `short`.
+- **Field renames orphan usage data**: Clap's derive API derives each argument
+  ID from the Rust struct field name rather than `long` or `short`.
   Renaming a field (e.g. `model` → `model_id`) changes the clap ID from `model`
-  to `model-id` even if the CLI flags (`-m`, `--model`) are unchanged.
-  This orphans the old ID's counters and starts fresh under the new ID.
-  This is more likely than a CLI-breaking rename since the field name is an
-  internal detail.
-  Mitigations: orphaned entries age out via eviction (described above), and the
-  data is heuristic — a reset counter is a temporary accuracy loss, not a
-  failure.
-  The alternative — manual `record_arg` calls with hardcoded strings — would
-  survive a rename only if someone remembers to update the string, and silently
-  records under the wrong name if they forget.
-  If stability becomes important, explicit `#[arg(id = "model")]` attributes
-  could decouple the ID from the field name, but that adds boilerplate to every
-  arg definition and isn't worth it initially.
+  to `model-id` even if `-m` and `--model` are unchanged, orphaning the old ID's
+  counters.
+  Because usage data is heuristic, a reset counter is only a temporary loss of
+  accuracy, and orphaned entries would eventually age out under eviction.
+  Manual `record_arg` calls with hardcoded strings would survive a rename only
+  if someone remembers to update the string, and explicit `#[arg(id = "model")]`
+  attributes on every argument add boilerplate that is not needed initially.
 
 ## Implementation Plan
 
@@ -595,20 +536,20 @@ Not worth the complexity for counter data.
    `Cli::from_arg_matches()` in `run_inner()`.
 2. Call `record_from_matches` with the root `ArgMatches` after workspace
    initialization.
-3. All commands and flags are tracked automatically — no per-command changes.
+3. Track all commands and flags automatically without per-command changes.
 
 Phase 1 can be merged independently.
-Phase 2 depends on Phase 1.
-Phase 3 depends on Phase 2 and is a single PR touching only `run_inner()`.
+Phase 2 depends on Phase 1, and Phase 3 is a single PR touching only
+`run_inner()` on top of Phase 2.
 
 ## References
 
 - [RFD 061]: Interactive config (first consumer of usage data)
-- `Ctx` in `jp_cli/src/ctx.rs` — the CLI context struct
-- `Workspace::user_storage_path()` — per-user, per-workspace storage
-- `user_data_dir()` in `jp_workspace` — global user data directory
-- `write_json` in `jp_storage/src/value.rs` — current (non-atomic) JSON writer
-- `tempfile::NamedTempFile::persist` — atomic rename on POSIX/Windows
+- `Ctx` in `jp_cli/src/ctx.rs`: CLI context struct
+- `Workspace::user_storage_path()`: per-user, per-workspace storage
+- `user_data_dir()` in `jp_workspace`: global user data directory
+- `write_json` in `jp_storage/src/value.rs`: current (non-atomic) JSON writer
+- `tempfile::NamedTempFile::persist`: atomic rename on POSIX/Windows
 
 [RFD 060]: 060-config-explain.md
 [RFD 061]: 061-interactive-config.md

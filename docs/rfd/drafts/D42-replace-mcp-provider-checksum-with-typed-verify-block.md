@@ -10,22 +10,21 @@
 
 ## Summary
 
-This RFD replaces the `checksum` field on `[providers.mcp.*]` with a tagged-enum
-`verify` block that explicitly names the artifact being verified.
-Hashing `command` alone only protects static binaries, whereas launcher commands
-(`uvx`, `npx`, and `docker run`) resolve the actual tool at runtime and pin
-versions through `arguments`.
+This RFD replaces `[providers.mcp.*].checksum` with a tagged `verify` block that
+names the artifact to verify.
+Hashing `command` alone only protects static binaries; launcher commands (`uvx`,
+`npx`, and `docker run`) resolve the tool at runtime and pin versions through
+`arguments`.
 
 ## Motivation
 
-The current `[providers.mcp.<name>].checksum` field validates the SHA of
-`config.command` (see [`verify_file_checksum`][verify-impl]).
-The implicit claim is "this MCP server's binary won't change underneath you."
-The shape holds for static binaries; it breaks the moment `command` is a
-launcher that resolves the actual tool at runtime.
+`[providers.mcp.<name>].checksum` hashes `config.command` (see
+[`verify_file_checksum`][verify-impl]) to verify that the MCP server binary has
+not changed on disk.
+That works when `command` is a static binary, but breaks when `command` is a
+launcher that resolves the tool at runtime.
 
-Concrete example.
-A user pinned `kagimcp` like this:
+For example, a user configured `kagimcp` with a checksum:
 
 ```toml
 [providers.mcp.kagi]
@@ -37,45 +36,46 @@ type = "stdio"
 variables = ["KAGI_API_KEY"]
 ```
 
-Two problems compound:
+This configuration has two problems:
 
-1. `checksum.value` hashes `uvx`, not `kagimcp`.
-   The hash protects the runtime, not the tool the user actually cares about.
+1. `checksum.value` hashes the `uvx` runtime binary, not `kagimcp`.
 2. `uvx kagimcp` resolves to the latest PyPI release on each run.
-   When upstream shipped a breaking change, the user got it silently — the
-   config looked pinned but wasn't.
+   When upstream published a breaking change, `uvx` pulled it silently even
+   though the config looked pinned.
 
-The field conflates two concerns:
+`checksum` conflates two distinct concerns:
 
-- **Identity pinning** — "run this specific version of this tool."
-- **Content verification** — "refuse to run if the bytes differ from this
-  hash."
+- **Identity pinning**: running a specific version of a tool.
+- **Content verification**: refusing to run if a file's bytes do not match an
+  expected hash.
 
-They coincide only when `command` *is* the artifact (a static binary).
-For every launcher-style command they diverge, and the field today silently
-produces a false sense of pinning.
+The two coincide only when `command` is the artifact itself.
+For launcher commands they diverge, and `checksum` gives a false impression that
+the tool version is pinned.
 
-### Threat model
+### Threat Model
 
-Being explicit about what JP defends against shapes the answer:
+MCP server execution faces three distinct threats:
 
-| Threat                                                     | Who handles it                                                                                                 |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Supply-chain attack (malicious version published upstream) | The ecosystem's own integrity story: pinned versions + wheel hashes + `uv.lock`, npm integrity, image digests. |
-| Local tampering of an on-disk artifact                     | A real file hash, if the artifact has a stable path.                                                           |
-| Accidental upgrade to a broken upstream version            | Version pinning. Pure identity, not bytes. **The actual problem hit above.**                                   |
+| Threat                                                     | Mitigation                                                                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Supply-chain attack (malicious version published upstream) | Package-manager integrity checks: pinned versions, wheel hashes and `uv.lock`, npm integrity hashes, image digests |
+| Local tampering with an on-disk artifact                   | File hash verification, when the artifact has a stable path on disk                                                |
+| Accidental upgrade to a broken upstream version            | Version pinning in launcher arguments (identity, not bytes)                                                        |
 
-The field today partially addresses (2), pretends to address (1), and doesn't
-address (3) at all.
-Most of what users hit in practice is (3), and (3) is solved by *pinning the
-launcher arguments*, not by hashing anything.
+`checksum` partially addresses local tampering (only when `command` is the
+artifact), gives the illusion of addressing supply-chain attacks, and does
+nothing for accidental upgrades.
+In practice, users hit accidental upgrades, which are solved by pinning the
+version in the launcher's `arguments` rather than hashing a file.
 
 ## Design
 
-### User-facing
+### User-Facing Configuration
 
-The top-level shape is a tagged enum, with `type = "command"` preserving today's
-behavior:
+`[providers.mcp.<name>].verify` is a tagged enum with three variants.
+`type = "command"` hashes the `command` binary, preserving the behavior of
+`checksum`:
 
 ```toml
 # Equivalent to today's checksum field — hashes the `command` binary.
@@ -103,11 +103,10 @@ value = "..."
 type = "none"
 ```
 
-Omitting `verify` entirely remains valid and means the same as today: no
-verification is performed.
+Omitting `verify` performs no verification.
 
-For the kagimcp case, the recommended fix is **pinning in `arguments`**, not in
-`verify`:
+For the `kagimcp` example, the fix is pinning the version in `arguments` rather
+than configuring `verify`:
 
 ```toml
 [providers.mcp.kagi]
@@ -117,14 +116,14 @@ type = "stdio"
 variables = ["KAGI_API_KEY"]
 ```
 
-The `verify` block is for *bytes*; identity is the launcher's job.
+`verify` checks file bytes on disk; the launcher pins package identity.
 
-### Internal shape
+### Internal Representation
 
-`StdioConfig.checksum` becomes `verify: Option<VerifyConfig>`.
-`VerifyConfig` is a `#[derive(Config)]` tagged enum, following the same pattern
-as `McpProviderConfig` (`#[config(rename_all = "snake_case", serde(tag =
-"type"))]`):
+`StdioConfig.checksum` is replaced by `verify: Option<VerifyConfig>`.
+`VerifyConfig` is a `#[derive(Config)]` tagged enum using the same
+representation as `McpProviderConfig` (`#[config(rename_all = "snake_case",
+serde(tag = "type"))]`):
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Config)]
@@ -146,110 +145,109 @@ pub struct CommandVerify { algorithm: AlgorithmConfig, value: String }
 pub struct FileVerify    { path: PathBuf, algorithm: AlgorithmConfig, value: String }
 ```
 
-`AlgorithmConfig` (the existing `Sha256` / `Sha1` enum) is reused.
-`verify_file_checksum` already takes an arbitrary path; the enum dispatch
-chooses which path to feed it.
+`CommandVerify` and `FileVerify` reuse the existing `AlgorithmConfig` (`Sha256`
+/ `Sha1`) enum.
+`verify_file_checksum` already accepts an arbitrary path, so dispatching on
+`VerifyConfig` only selects which path to pass.
 
 ### Documentation
 
-The section preamble for `[providers.mcp.<name>]` gains a short note: identity
-pinning for launcher-style commands belongs in `arguments`, not `verify`, with
-examples for `uvx`, `npx`, and `docker run`.
+The `[providers.mcp.<name>]` section preamble will note that version pinning for
+launcher commands belongs in `arguments` rather than `verify`, with examples for
+`uvx`, `npx`, and `docker run`.
 
 ## Drawbacks
 
-- **One-way door on a user-facing config key.** `[providers.mcp.*.checksum]`
-  appears in user configs and personal dotfiles; renaming it is Hyrum's Law
-  territory.
-  A migration helper softens this but doesn't eliminate it.
+- **Breaking change to an existing config key.** `[providers.mcp.*.checksum]`
+  already appears in user configs and dotfiles (Hyrum's Law).
+  Accepting `checksum` as a deprecated alias softens the transition but does not
+  eliminate the migration cost.
 
-- **The user's actual problem is one step removed from this RFD.** Version
-  pinning isn't directly addressed by `verify`; it's redirected to `arguments`
+- **Version pinning still happens outside `verify`.** `verify` does not pin
+  launcher packages; users must pin versions in `arguments` using each
+  launcher's native syntax (such as `arguments = ["kagimcp@X.Y"]`).
+  Documentation must make this clear so users looking to pin a tool version do
+  not reach for `verify`.
 
-  - ecosystem-native syntax.
-    A reader who came in expecting "pin my kagimcp version" needs to be told
-    that the answer is `arguments = ["kagimcp@X.Y"]`, not anything inside
-    `verify`.
-    The documentation has to make this obvious; otherwise the next user trips on
-    the same trap.
-
-- **`type = "none"` is arguably redundant** with omitting the field.
-  Including it adds a variant for documentary intent only.
-  Reasonable people will disagree on whether that's worth the surface area.
+- **`type = "none"` duplicates omitting the field.** The variant exists only to
+  record an explicit opt-out in config files, which adds surface area without
+  new runtime behavior.
 
 ## Alternatives
 
-### A — Keep `checksum`, document its limits
+### Keep `checksum` and Document Its Limits
 
-Restrict `checksum` to its existing behavior, document that it only verifies the
-`command` binary, and point users at launcher-native version pinning for
-everything else.
+Keep `checksum` as-is, document that it only hashes the `command` binary, and
+direct users to launcher-native version pinning for everything else.
 
-Cheapest change.
-Doesn't fix the misleading name — `checksum` on a `uvx` command still *looks*
-like it pins the tool.
-The naming continues to lie even with documentation.
+This is the smallest change, but it leaves the misleading key name in place:
+`checksum` on a `uvx` provider still looks like it pins the tool, even when the
+documentation says otherwise.
 
-### C — Ecosystem-aware verify variants
+### Ecosystem-Aware `verify` Variants
 
-`type = "uv_package"`, `type = "npm_package"`, `type = "docker_image"`.
-Each variant knows its ecosystem's package identity and (optionally) its
-integrity-hash format.
-JP would parse `command + arguments`, confirm the named package/version matches,
-and verify the on-disk artifact through the ecosystem's own integrity story.
+Add variants such as `type = "uv_package"`, `type = "npm_package"`, and `type =
+"docker_image"` that understand each ecosystem's package identity and optional
+integrity hash format.
+JP would parse `command + arguments`, confirm that the named package and version
+match, and verify the on-disk artifact using the ecosystem's own integrity
+checks.
 
-Most capable.
-Rejected for now:
+This approach is the most capable, but is rejected for now:
 
-- **Cost of abstraction.** Each ecosystem is a maintenance contract — cache
-  layouts shift, hash formats evolve, the three ecosystems aren't aligned.
-  The variant list grows monotonically as new launchers appear (Cargo, Go, Bun,
-  …).
-- **Tesler's Law.** The complexity moves from JP-knows-package-managers to
-  user-knows-package-managers.
-  The latter is where users already are.
-- **Zawinski's Law.** JP is a CLI tool, not a binary distribution platform.
+- **Maintenance cost.** Supporting each ecosystem is an ongoing maintenance
+  contract: cache layouts shift, hash formats evolve, and ecosystems do not
+  share conventions.
+  The variant list would grow with every new launcher (Cargo, Go, Bun, and
+  others).
+- **Misplaced complexity (Tesler's Law).** Package-manager syntax is complexity
+  users already know; re-encoding it in JP's config moves that complexity into
+  JP without reducing it.
+- **Scope creep (Zawinski's Law).** JP is a CLI tool, not a binary distribution
+  platform.
 
-Deferred, with a condition for flipping (see Open Questions).
+This direction is deferred unless user confusion persists (see Risks and Open
+Questions).
 
 ## Non-Goals
 
-- **JP is not a package manager.** Verifying the content of artifacts that a
-  launcher resolves at runtime (PyPI wheels, npm tarballs, container layers) is
-  out of scope.
-  That's the launcher's job.
+- **Verifying launcher-resolved packages.** JP is not a package manager.
+  Verifying the contents of artifacts that a launcher resolves at runtime (PyPI
+  wheels, npm tarballs, container layers) is the launcher's job.
 
-- **No DSL for identity pinning.** `verify` describes bytes, not identity.
-  Version pinning happens in `arguments` using whatever the launcher accepts
-  (`uvx kagimcp@0.1.5`, `npx pkg@1.2.3`, `docker run image@sha256:…`).
+- **A custom DSL for identity pinning.** `verify` describes bytes, not package
+  identity.
+  Version pinning belongs in `arguments` using the launcher's native syntax
+  (`uvx kagimcp@0.1.5`, `npx pkg@1.2.3`, `docker run image@sha256:...`).
 
-- **No automatic resolution of "latest version" issues.** A user who writes
-  `arguments = ["kagimcp"]` with no version still gets latest.
-  `verify` does not paper over that.
+- **Preventing unpinned launcher arguments.** A user who writes `arguments =
+  ["kagimcp"]` without a version still gets the latest release on each run.
+  `verify` does not paper over unpinned arguments.
 
 ## Risks and Open Questions
 
-- **Migration churn.** `checksum` exists in user configs today.
-  Phase 1 accepts it as a deprecated alias with a `tracing::warn!`; Phase 2
+- **Deprecation window for `checksum`.** `checksum` is in active use in user
+  configs.
+  Phase 1 accepts it as a deprecated alias with a `tracing::warn!`, and Phase 2
   removes it.
-  Need to decide how long Phase 1 runs.
+  We need to decide how long Phase 1 runs before removal.
 
-- **`type = "none"` — keep or drop?** Worth a quick read by a fresh pair of
-  eyes.
-  Default position: keep, because it documents intent.
-  Reasonable counter-position: drop, because YAGNI and omitting the field is
+- **Whether to keep `type = "none"`.** The default position is to keep it so
+  users can document an explicit opt-out.
+  The counterargument is to drop it under YAGNI, since omitting `verify` is
   equivalent.
 
-- **When (if ever) do we move to alternative C?** Concrete condition: more than
-  one user reports the same identity-pinning confusion *for the same ecosystem*,
-  and the right recommendation each time is the same shape.
-  Until then, ecosystem-native pinning wins.
+- **When to revisit ecosystem-aware verification.** We should reconsider
+  ecosystem-aware variants only if multiple users report the same
+  identity-pinning confusion for the same ecosystem and the recommended fix has
+  the same shape each time.
+  Until then, ecosystem-native pinning in `arguments` is sufficient.
 
-- **Does `type = "file"` have stable paths to point at in practice?** For `uvx`
-  the cache layout is not part of `uv`'s contract; for `npx` similar.
-  This variant is most useful for self-managed installations (downloaded JAR,
-  `uv tool install`-ed entry point, etc.).
-  Documentation should be honest about that.
+- **Path stability for `type = "file"`.** Neither `uvx` nor `npx` guarantees a
+  stable cache layout across versions.
+  `type = "file"` is primarily useful for self-managed installations with fixed
+  paths (such as a downloaded JAR or a `uv tool install` entry point), and the
+  documentation should state this constraint.
 
 ## Implementation Plan
 
@@ -266,20 +264,20 @@ Deferred, with a condition for flipping (see Open Questions).
 - Update the configuration reference page with the new shape and a migration
   note.
 
-Mergeable independently.
+This phase can merge independently.
 
 ### Phase 2: Remove `checksum`
 
 - Remove the legacy field and its dispatch from `jp_mcp`.
-- Document the removal in the change-log.
+- Document the removal in the changelog.
 
-Depends on Phase 1 having shipped for at least one release.
+This phase depends on Phase 1 shipping in at least one release first.
 
 ## References
 
-- [`verify_file_checksum`][verify-impl] — current implementation
-- [`StdioConfig`][stdio-config] — current field shape
-- [`uv` tool spec syntax][uv-tool-spec] — version pinning for `uvx`
+- [`verify_file_checksum`][verify-impl]: current implementation
+- [`StdioConfig`][stdio-config]: current field shape
+- [`uv` tool spec syntax][uv-tool-spec]: version pinning for `uvx`
 
 [stdio-config]: ../../../crates/jp_config/src/providers/mcp.rs
 [uv-tool-spec]: https://docs.astral.sh/uv/concepts/tools/#package-specification

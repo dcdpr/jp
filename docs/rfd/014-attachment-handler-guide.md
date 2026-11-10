@@ -10,28 +10,24 @@
 
 ## Summary
 
-This document describes how the JP attachment system works from a handler
-author's perspective.
-It covers the `Handler` trait, URL conventions, and how handlers are registered
-and invoked.
+This guide describes the JP attachment system for handler authors, covering URL
+conventions, the `Handler` trait, and how handlers are registered and invoked.
 
 ## How Attachments Work
 
-Attachments let users provide additional context to a conversation — files,
-command output, web pages, notes, or anything else a handler can fetch.
-Each attachment is identified by a URL.
-The URL's scheme determines which handler processes it.
+Attachments let users add context to a conversation: files, command output, web
+pages, notes, or anything else a handler can fetch.
+Each attachment is identified by a URL, and the URL's scheme selects the handler
+that processes it.
 
-Users attach content through the CLI:
+Users attach content on the CLI with `-a` (`--attach` or `--attachment`):
 
 ```sh
 jp -a "scheme:some-value"
 jp -a "scheme://structured/url?with=params"
 ```
 
-*(also works: `--attachment` or `--attach`)*
-
-Or through configuration files:
+Attachments can also be declared in configuration files:
 
 ```toml
 # URL form
@@ -51,10 +47,10 @@ schemes:
 
 ### Hierarchical: `scheme://authority/path?query`
 
-The structured form.
-Has a host, path segments, and query parameters.
-Useful for machine-generated URLs, config files, and cases where individual
-fields matter.
+Hierarchical URLs are structured: they include a host, path segments, and query
+parameters.
+This form suits machine-generated URLs, config files, and inputs where
+individual fields matter.
 
 ```
 scheme://host/path?key=value&other=123
@@ -62,15 +58,14 @@ scheme://host/path?key=value&other=123
          host      query pairs
 ```
 
-Handlers access these parts through `Url::host_str()`, `Url::path()`,
-`Url::query_pairs()`, etc.
+Handlers read these components through `Url::host_str()`, `Url::path()`, and
+`Url::query_pairs()`.
 
 ### Opaque: `scheme:content`
 
-The human-friendly form.
-Everything after `scheme:` becomes the opaque path.
-No host, no structured query parsing.
-The handler interprets the path however it wants.
+Opaque URLs are human-friendly: everything after `scheme:` becomes a single
+opaque path, with no host or structured query parsing.
+The handler parses the path directly.
 
 ```
 scheme:any content the handler understands
@@ -78,13 +73,14 @@ scheme:any content the handler understands
        path (opaque)
 ```
 
-These URLs have `Url::cannot_be_a_base() == true` and `Url::host_str() == None`.
+Opaque URLs have `Url::cannot_be_a_base() == true` and `Url::host_str() ==
+None`.
 
-### Both forms are valid input
+### Supporting Both Forms
 
-A handler receives a `&Url` and must handle whatever the user provides.
-In practice this means checking whether the URL is hierarchical or opaque and
-parsing accordingly:
+A handler receives a `&Url`, which may use either form.
+Check `Url::cannot_be_a_base()` to distinguish opaque URLs from hierarchical
+ones and parse accordingly:
 
 ```rust
 fn parse(uri: &Url) -> Result<MyData, Box<dyn Error + Send + Sync>> {
@@ -100,7 +96,8 @@ fn parse(uri: &Url) -> Result<MyData, Box<dyn Error + Send + Sync>> {
 }
 ```
 
-Handlers that only support one form should return a clear error for the other.
+Handlers that support only one form should return a clear error when given the
+other.
 
 ## The Handler Trait
 
@@ -117,21 +114,19 @@ pub trait Handler: Debug + DynClone + DynHash + Send + Sync {
 }
 ```
 
-- **`scheme()`** — returns the URI scheme this handler owns (e.g. `"file"`,
-  `"http"`).
-  Must be unique across all handlers.
-- **`add(uri)`** — stores the attachment reference.
-  Called when the user adds an attachment.
-- **`remove(uri)`** — removes a previously added reference.
-- **`list()`** — returns all stored attachment URLs.
-  Used by `jp attachment ls`.
-  Should produce canonical (hierarchical) URLs for consistency.
-- **`get(cwd)`** — fetches and returns the actual attachment content.
-  This is where the handler does its real work: reading files, running commands,
-  making HTTP requests, etc.
+- **`scheme()`**: Returns the URI scheme this handler owns (for example,
+  `"file"` or `"http"`).
+  Each handler's scheme must be unique.
+- **`add(uri)`**: Stores an attachment reference when the user adds an
+  attachment.
+- **`remove(uri)`**: Removes a previously added reference.
+- **`list()`**: Returns all stored attachment URLs for `jp attachment ls`.
+  Implementations should return canonical (hierarchical) URLs for consistency.
+- **`get(cwd)`**: Fetches and returns the attachment content by reading files,
+  running commands, making HTTP requests, and so on.
 
-Each handler is a stateful collection.
-`add` accumulates references, `get` resolves them all at query time.
+Each handler is a stateful collection: `add` accumulates references, and `get`
+resolves them at query time.
 
 ## Registration
 
@@ -147,10 +142,9 @@ static HANDLER: fn() -> BoxedHandler = || {
 };
 ```
 
-The handler must also be annotated with `#[typetag::serde(name = "my_scheme")]`
-on its `Handler` impl for serialization.
-The crate must be imported (even if unused) in `jp_cli/src/cmd/attachment.rs` so
-the linker includes it.
+Annotate the `Handler` impl with `#[typetag::serde(name = "my_scheme")]` for
+serialization, and import the crate in `jp_cli/src/cmd/attachment.rs` (even if
+unused) so the linker includes it.
 
 ## The Attachment Struct
 
@@ -162,31 +156,30 @@ pub struct Attachment {
 }
 ```
 
-- **`source`** — human-readable origin (a file path, a command, a URL).
-- **`description`** — optional context about what this attachment is.
-- **`content`** — the actual data.
-  Can be plain text, XML, JSON, or any string representation the handler
-  produces.
+- **`source`**: Human-readable origin, such as a file path, command, or URL.
+- **`description`**: Optional context describing the attachment.
+- **`content`**: The resolved data, formatted as plain text, XML, JSON, or any
+  other string representation the handler produces.
 
 ## Conventions
 
-- **Accept both URL forms.** Users type opaque URLs on the CLI; config files may
-  use either form.
-  Handlers should handle both where practical.
+- **Accept both URL forms.** Users type opaque URLs on the CLI, while config
+  files may use either form.
+  Support both where practical.
 - **Produce hierarchical URLs from `list()`.** The canonical form is easier to
   inspect and manipulate programmatically.
-- **Fail clearly.** If a URL is malformed for your handler, return an error that
-  says what's wrong, not a generic "invalid URI."
-- **Use `cwd` for relative paths.** The `get` method receives the workspace root
-  — resolve any relative references against it.
+- **Fail clearly.** When a URL is malformed for your handler, return an error
+  that explains what is wrong rather than a generic "invalid URI."
+- **Use `cwd` for relative paths.** The `get` method receives the workspace
+  root; resolve any relative references against it.
 
 ## References
 
-- `jp_attachment` (`crates/jp_attachment/src/lib.rs`) — the `Handler` trait and
-  `Attachment` struct.
+- `jp_attachment` (`crates/jp_attachment/src/lib.rs`): Defines the `Handler`
+  trait and `Attachment` struct.
 - `jp_attachment_cmd_output` (`crates/jp_attachment_cmd_output/src/lib.rs`),
   `jp_attachment_file_content` (`crates/jp_attachment_file_content/src/lib.rs`),
-  `jp_attachment_http_content` (`crates/jp_attachment_http_content/src/lib.rs`)
-  — existing handler implementations.
+  `jp_attachment_http_content` (`crates/jp_attachment_http_content/src/lib.rs`):
+  Existing handler implementations.
 
 [RFD 015]: 015-simplified-attachment-handler-trait.md

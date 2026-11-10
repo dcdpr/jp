@@ -23,95 +23,92 @@
 This RFD lets the assistant read and modify files outside the workspace through
 user-created workspace symlinks.
 It extends [RFD 076] so tool arguments remain workspace-relative while `FsRule`
-gains an `external` scope that approves a symlink's canonical target via
-trust-on-first-use.
+gains an `external` scope field that approves a symlink's canonical target via
+trust-on-first-use (TOFU).
 A `--mount` flag on `jp query` creates the workspace symlink and records its
 access grant in one step.
 
 ## Motivation
 
 JP's workspace model is workspace-rooted by intent, but current code does not
-enforce confinement on local subprocess tools.
-`jp_llm::run_tool_command` only sets `current_dir = workspace root`; a
+confine local subprocess tools.
+`jp_llm::run_tool_command` only sets `current_dir = workspace root`, so a
 subprocess can still open `/etc/passwd` or `~/.ssh/id_rsa`.
 [RFD 076] introduces the cooperative `AccessPolicy` layer and [RFD 075]
-introduces OS-level sandboxing — both planned, neither shipped.
-This RFD extends those planned layers, not today's confined model.
+introduces OS-level sandboxing.
+Both are planned and unshipped; this RFD extends those planned layers.
 
-The friction this RFD addresses shows up regularly.
-A common case: working in JP workspace `W` on feature `F`, which depends on a
-forked crate at `~/code/forks/X`.
-For `F` to work end-to-end the assistant needs to (a) make a fix in
-`~/code/forks/X` and push it, and (b) update `W`'s `Cargo.toml` to point at the
-fork.
-Today (a) is manual — the assistant can guide the user but can't read or edit
-the fork.
-Running `jp init` inside the fork creates a separate workspace divorced from
-`F`'s conversation history, context, and tool configuration.
+Confining tools strictly to the workspace creates friction when a task spans
+repositories.
+Suppose a developer is working in workspace `W` on feature `F`, which depends on
+a forked crate at `~/code/forks/X`.
+To complete `F`, the assistant needs to fix `~/code/forks/X`, push the fix, and
+point `W`'s `Cargo.toml` at the fork.
+With strict workspace confinement, the assistant can guide the user through the
+fix in `~/code/forks/X` but cannot read or edit the fork itself.
+Running `jp init` inside the fork creates a separate workspace, splitting `F`'s
+conversation history, context, and tool configuration.
 
-We want the assistant to reach the fork while continuing the conversation in
-`W`, without (i) reintroducing absolute paths the LLM has to reason about, (ii)
-breaking the workspace-relative invariant that confines the LLM's expressible
-reach, or (iii) widening the access-policy or OS-sandbox layers for every tool
-by default.
+The assistant should be able to reach the fork from `W`'s conversation without:
 
-A workspace symlink solves this.
+1. Exposing absolute paths for the LLM to reason about.
+2. Breaking the workspace-relative invariant that bounds the paths the LLM can
+   express.
+3. Widening the access policy or OS sandbox for every tool by default.
+
+A workspace symlink satisfies all three constraints.
 The user creates `<W>/fork -> ~/code/forks/X` and grants the assistant explicit
 access.
-The assistant calls `fs_modify_file fork/src/lib.rs`.
-The path is workspace-relative; the canonical target is external; the explicit
-grant permits the resolution.
-Conversation events record `fork/src/lib.rs`, which is portable across machines
-— a teammate cloning the workspace either has their own `fork` (works) or
-doesn't (clean failure).
+When the assistant calls `fs_modify_file fork/src/lib.rs`, the input path is
+workspace-relative, the canonical target is external, and the explicit grant
+permits the resolution.
+Conversation events record `fork/src/lib.rs`, which stays portable across
+machines: a teammate cloning the workspace either has their own `fork` symlink
+or gets a clean failure.
 
 ## Design
 
 ### Field grouping in `FsRule`
 
-[RFD 076] defines an `FsRule` with two structurally distinct kinds of fields:
+[RFD 076] defines two kinds of fields on `FsRule`:
 
-- **Scope fields** answer *which paths the rule applies to*.
-  Today: `path`.
-- **Capability fields** answer *what the tool may do within that scope*: `read`,
-  `create`, `update`, `delete`, `execute` (plus the `write` alias).
+- **Scope fields** select which paths the rule applies to (`path`).
+- **Capability fields** grant what the tool may do within that scope (`read`,
+  `create`, `update`, `delete`, `execute`, and the `write` alias).
 
 This RFD adds a second scope field, `external`.
-The conceptual distinction matters for explaining where the field belongs and
-what it does.
 
 ### Pre-canonical workspace-relative invariant for tool calls
 
 Tool call arguments must be workspace-relative before canonicalisation.
-The check happens in `jp_tool::Context::check_*`:
+`jp_tool::Context::check_*` enforces this rule first:
 
 > Reject the call if the input path is absolute, or if its lexical resolution
 > (with `..` segments collapsed) escapes `ctx.root`.
 
-Today this rejection is an implicit consequence of canonicalisation: absolute
-paths and `..`-escapes happen to fail the post-canonical workspace check.
-Promoting it to an explicit pre-canonical step produces clearer error messages
-("absolute paths are not permitted" rather than "path escapes workspace") and
-decouples the LLM's expressible reach from the filesystem layout under the
-workspace.
+Under [RFD 076], absolute paths and `..`-escapes fail only after
+canonicalisation, when the resolved path falls outside the workspace.
+Checking the lexical path before canonicalisation produces specific error
+messages ("absolute paths are not permitted" rather than "path escapes
+workspace") and keeps the paths the LLM can express independent of the symlinks
+present in the workspace.
 
-`Context::check_*` accepts only the raw workspace-relative path the LLM
-supplied.
-Tools must not pre-resolve paths against `ctx.root` before calling `check_*`;
-the checker does the join + canonicalisation itself.
+`Context::check_*` accepts only the raw workspace-relative path supplied by the
+LLM.
+Tools must not join paths against `ctx.root` before calling `check_*`; the
+checker performs the join and canonicalisation itself.
 
-The invariant scopes to **tool calls only**.
-Attachments (`--attach`) operate under [RFD D03]'s permissive model — the user
-typing the path is the consent action, and D03's `external:` URI scheme handles
-privacy and dedup concerns.
-A tool can never reach external content directly: it either operates on a
-workspace-relative path (potentially via a symlink, governed by the next
-section), or receives an `external:` URI as conversation context that has no
-filesystem-path shape from the LLM's perspective.
+This invariant applies only to tool calls.
+Attachments (`--attach`) follow [RFD D03]'s permissive model: passing the path
+on the CLI is the user's consent action, and D03's `external:` URI scheme
+handles privacy and deduplication.
+A tool never addresses external paths directly; it either operates on a
+workspace-relative symlink governed by `FsRule.external`, or reads an
+`external:` URI from conversation context.
 
 ### `FsRule.external: bool`
 
-A new optional scope field on `FsRule` ([RFD 076]):
+`FsRule` ([RFD 076]) gains an optional boolean scope field:
 
 ```toml
 [[conversation.tools.fs_modify_file.access.fs]]
@@ -121,135 +118,123 @@ read = true
 write = true
 ```
 
-Default `false`.
-`external = true` is an *acknowledgement* by the user that the rule's `path` is
-permitted to resolve outside the workspace via symlink.
-It is not a capability grant — capabilities are still expressed by the
-capability fields below it.
+`external` defaults to `false`.
+Setting `external = true` permits the rule's `path` to resolve outside the
+workspace through a symlink; the capability fields still determine what the tool
+may do at the resolved target.
 
-To eliminate ambiguity, the policy compiler **rejects `external = true` during
-policy compilation if the rule's lexical path canonicalises inside the
-workspace**.
-The flag only makes sense on rules whose `path` is (or resolves through) a
-symlink to an external target.
-A configuration like:
+The policy compiler rejects `external = true` if the rule's lexical path
+canonicalises inside the workspace.
+The flag is valid only on rules whose `path` is, or resolves through, a symlink
+to an external target.
+For example, the compiler rejects:
 
 ```toml
 path = "."
 external = true
 ```
 
-is rejected because `.` canonicalises to the workspace root; the flag has no
-useful effect on it.
-The clear error tells the user to declare a specific rule pointing at the
-symlink instead.
-This forecloses the failure mode where `external = true` on a workspace-anchored
-rule could be misimplemented as "follow any symlink anywhere."
+Because `.` canonicalises to the workspace root, the compiler instructs the user
+to point the rule at a specific symlink instead.
+This check prevents `external = true` on a workspace-anchored rule from allowing
+arbitrary symlinks inside that directory to escape the workspace.
 
-With the field, [RFD 076]'s post-canonical rule becomes:
+With `external`, [RFD 076]'s post-canonical check becomes:
 
 > If the canonical path is outside `ctx.root`, reject as workspace-escape
 > **unless the matching rule has `external = true`**, in which case the target
 > is permitted subject to the approved-target boundary (see [Nested-escape
 > boundary](#nested-escape-boundary)).
 
-The capability check is orthogonal: `external = true` permits *resolution*; the
-capability fields decide what may be *done* at the resolved target.
-
-Existing rules without `external` behave exactly as today.
-The change is purely additive at the policy schema.
+Rules that omit `external` behave as defined in [RFD 076].
 
 ### Rule-path canonicalisation (amendment to RFD 076)
 
 [RFD 076] canonicalises rule paths at policy compilation time and rejects rules
 whose path canonicalises outside the workspace.
-Under that rule, a rule with `path = "fork"` where `fork` is a symlink to an
-external target would be rejected during policy compilation.
-This RFD amends that behaviour for rules with `external = true`.
+Under that check, a rule with `path = "fork"` where `fork` is a symlink to an
+external target would fail compilation.
+This RFD amends compilation for rules with `external = true`.
 
-The compiled form of `FsRule` carries:
+A compiled `FsRule` carries two paths:
 
 - `lexical_path`: the workspace-relative path the LLM sees and matches against,
-  normalised lexically (`..` collapsed) but with the rule's own symlink **not**
-  resolved.
+  normalised lexically (`..` collapsed) without resolving the rule's own
+  symlink.
 - `approved_target: Option<Utf8PathBuf>`: the canonical absolute path that
-  external resolution is permitted to land in.
-  `Some` only for rules with `external = true` whose target has been approved;
-  `None` for ordinary workspace-anchored rules.
+  external resolution may land in.
+  This is `Some` for approved `external = true` rules and `None` for
+  workspace-anchored rules.
 
-Policy compilation:
+Policy compilation processes each rule as follows:
 
-1. For each rule, canonicalise the path against `ctx.root`.
-2. If canonicalisation lands inside the workspace **and** the rule has `external
-   = true`, reject during policy compilation (see
-   [`FsRule.external`](#fsruleexternal-bool)).
-3. If canonicalisation lands inside the workspace and the rule has no `external`
-   field, the result is an ordinary rule: `lexical_path = canonicalised
-   workspace-relative form`, `approved_target = None`.
-   Behaviour unchanged from [RFD 076].
-4. If canonicalisation lands outside the workspace and the rule has `external =
-   false` (or absent), reject during policy compilation with the existing error.
-   Behaviour unchanged from [RFD 076].
-5. If canonicalisation lands outside the workspace and the rule has `external =
-   true`, the host runs the approval lifecycle (see below) before activation:
-   - Approved: `lexical_path = lexical workspace-relative form of the rule's
-     path`, `approved_target = the canonical absolute path`.
-     If the target contains the workspace, a deny-all rule is added where the
-     workspace reappears inside the mount (see [Targets that contain the
-     workspace](#targets-that-contain-the-workspace)).
-   - Not approved (and no interactive approval possible): the rule is dropped
-     from the compiled policy.
-     Tool calls matching its lexical prefix fall through to default-deny.
-6. Broken symlinks (target does not exist on this machine) cause the rule to be
-   dropped during policy compilation with a warning.
-   Tool calls matching the lexical prefix surface the broken-link error at I/O
-   time.
+1. Canonicalise the rule's path against `ctx.root`.
+2. If the canonical path is inside the workspace and `external = true`, reject
+   the policy (see [`FsRule.external`](#fsrule-external-bool)).
+3. If the canonical path is inside the workspace and `external` is `false` or
+   omitted, compile an ordinary rule with `lexical_path` set to the canonical
+   workspace-relative path and `approved_target = None`, matching [RFD 076].
+4. If the canonical path is outside the workspace and `external` is `false` or
+   omitted, reject the policy with the workspace-escape error from [RFD 076].
+5. If the canonical path is outside the workspace and `external = true`, run the
+   host approval lifecycle (see below):
+   - If approved, set `lexical_path` to the rule's lexical workspace-relative
+     path and `approved_target` to the canonical absolute path.
+     If the target is an ancestor of the workspace, also insert a deny-all rule
+     where the workspace reappears inside the mount (see [Targets that contain
+     the workspace](#targets-that-contain-the-workspace)).
+   - If rejected or unapproved without an interactive terminal, drop the rule
+     from the compiled policy so matching tool calls fall through to
+     default-deny.
+6. If the rule's symlink is broken (its target does not exist on this machine),
+   drop the rule with a warning.
+   Tool calls matching its lexical prefix then surface the broken-symlink error
+   at I/O time.
 
-Matching at tool-call time is unchanged in shape: longest lexical-prefix match
-on the workspace-relative target path.
-The post-canonicalisation verification adds the [Nested-escape
-boundary](#nested-escape-boundary) check for `external` rules.
+Tool-call matching still uses longest lexical-prefix match on the
+workspace-relative input path, followed by the [Nested-escape
+boundary](#nested-escape-boundary) check after canonicalisation for `external`
+rules.
 
 ### Approval lifecycle (host-side)
 
-Approval lives in the host (JP), not in the tool subprocess.
+Target approval runs in the JP host process, not in the tool subprocess.
 `jp_tool` is the wire boundary: tools deserialise an `AccessPolicy` and call
-`Context::check_*` against it, but they have no terminal, no user-local storage
-access, and no way to inquire.
-JP also cannot intercept tool calls — only the tool knows which of its
-arguments are paths.
-The host must therefore approve and bake external targets into the compiled
-`AccessPolicy` before the tool spawns; the tool's cooperative check is a pure
-lookup against pre-approved data.
+`Context::check_*`, but they have no terminal, no access to user-local storage,
+and no way to prompt the user.
+The host also cannot intercept filesystem checks mid-call because only the tool
+knows which of its arguments are paths.
+The host therefore approves external targets and bakes them into the compiled
+`AccessPolicy` before spawning the tool, leaving `Context::check_*` as a pure
+in-memory lookup.
 
 Mount approval prompts are user-local trust prompts owned by the host.
-They use the terminal prompting UI (e.g. `TerminalPromptBackend`) but are
-**not** recorded as `InquiryRequest` / `InquiryResponse` events in the
-conversation stream — the prompt contains the canonical external target path,
-which by design does not enter shared conversation state.
-The durable record is the user-local approval store only.
+They use the terminal prompting UI (such as `TerminalPromptBackend`) but are not
+recorded as `InquiryRequest` or `InquiryResponse` events in the conversation
+stream, keeping the canonical external target path out of shared conversation
+state.
+The user-local approval store is the only persistent record.
 
 Approval is **target-only**: the user approves that a specific
-workspace-relative rule path is permitted to resolve to a specific canonical
-absolute target.
-Capability changes to the same rule (e.g. adding write access through a config
-edit) do not re-prompt while the target is unchanged.
-Capability edits are config decisions visible in normal review channels (git
-diff, `jp config show`); silent retargeting is the threat TOFU exists to catch.
+workspace-relative `rule_path` may resolve to a specific `canonical_target`.
+Changing capabilities on the same rule (for example, adding `write = true` in
+config) does not re-prompt as long as the canonical target is unchanged.
+Capability changes are config edits visible in `git diff` and `jp config show`,
+whereas TOFU guards against silent symlink retargeting.
 
-The approval check runs during `AccessConfig -> AccessPolicy` conversion, in the
-`jp_cli` host's policy-compilation step.
+The approval check runs in `jp_cli` when converting `AccessConfig` into
+`AccessPolicy`.
 For each rule with `external = true`:
 
-1. Canonicalise the rule's path.
-   Capture the resolved target.
+1. Canonicalise the rule's path to obtain `canonical_target`.
 
-2. Consult the user-local approval store (see [Storage](#storage)).
+2. Look up `rule_path` in the user-local approval store (see
+   [Storage](#storage)).
 
-3. If a matching `(rule_path, canonical_target)` entry exists, proceed.
+3. If a matching `(rule_path, canonical_target)` entry exists, keep the rule.
 
-4. If no entry exists and a terminal is available, inquire with the full effect
-   visible:
+4. If no entry exists and a terminal is available, prompt the user with the
+   target and the current grants under the mount:
 
    ```
    Approve this target binding?
@@ -269,8 +254,8 @@ For each rule with `external = true`:
    On approval, store the entry.
    On rejection, drop the rule from the compiled policy.
 
-5. If an entry exists with a different `canonical_target`, re-prompt with both
-   old and new targets visible:
+5. If an entry exists for `rule_path` with a different `canonical_target`,
+   re-prompt with both targets visible:
 
    ```
    Symlink `fork` retargeted:
@@ -282,43 +267,39 @@ For each rule with `external = true`:
    On approval, replace the stored target.
    On rejection, drop the rule.
 
-6. If no terminal is available and no matching approval exists, the behaviour
-   depends on rule origin:
+6. If no terminal is available and no matching approval exists, handling depends
+   on how the rule was created:
 
-   - **Pre-existing rules** (hand-authored config, persisted from a prior
-     session) are dropped silently with a warning.
-     Users running JP non-interactively pre-seed the approval store by editing
-     the file directly.
-   - **Rules created by an explicit `--mount` in this invocation** bypass this
-     path: the symlink-creation step in `Query::run` seeds the approval store
-     directly (see [Effects of `--mount`](#effects-of---mount)), so the prompt
-     does not need to fire.
-     The CLI invocation typing the target is the consent action.
+   - **Pre-existing rules** (from config files or a prior session) are dropped
+     with a warning.
+     For unattended runs, users can pre-seed the approval store by editing
+     `approvals.json` directly.
+   - **Rules created by `--mount` in the current invocation** are already
+     approved: the symlink-creation step in `Query::run` seeds the approval
+     store directly (see [Effects of `--mount`](#effects-of-mount)) because
+     passing the target on the CLI is the user's consent action.
 
-The compiled `AccessPolicy` reaching the tool contains only approved rules.
-From the tool's perspective, a missing approval looks identical to a missing
-rule — default-deny applies, with the existing helpful-error message naming the
-configured grants.
+The compiled `AccessPolicy` passed to the tool contains only approved rules.
+To the tool, an unapproved rule is indistinguishable from an omitted rule:
+default-deny applies and the error message lists the active grants.
 
-Approval feeds the OS sandbox identically: post-[RFD 075] profile generation
-emits allow-entries for approved canonical targets.
-The cooperative policy and the OS sandbox see the same approved set.
+The OS sandbox consumes the same approvals: post-[RFD 075] profile generation
+emits allow-entries for each rule's `approved_target`.
 
 #### Storage
 
-Approvals live alongside the existing per-user, per-workspace storage entries
+Approvals are stored alongside the existing per-user, per-workspace files
 (`config/`, `conversations/`, `locks/`, `sessions/`, `storage`):
 
 ```
 <user-workspace-storage>/approvals.json
 ```
 
-The physical resolution of `<user-workspace-storage>` follows the existing
-storage backend convention (`FsStorageBackend::user_storage_with_path`); this
-RFD does not commit to a specific directory layout, which is governed by [RFD
-079] and any future durable-storage RFD.
+`<user-workspace-storage>` resolves through
+`FsStorageBackend::user_storage_with_path`, whose physical layout is governed by
+[RFD 079].
 
-File shape:
+The file is a JSON object with a `mounts` array:
 
 ```json
 {
@@ -337,90 +318,83 @@ File shape:
 }
 ```
 
-JSON matches the format used by `conversations/` and `sessions/`.
-The `mounts` key is the only approval category in v1; future categories (e.g.
-plugins, MCP servers) can join the same file as sibling fields.
+`mounts` is the only approval category in v1; future categories (such as plugins
+or MCP servers) can be added as sibling keys.
 
-**Ownership and write semantics.** The approval store is owned by `jp_cli`'s
-policy compiler.
-Writes go through atomic temp-file-and-rename to avoid corruption from
-interrupted writes.
-Corruption on read (malformed JSON) is treated as an empty store with a warning.
-Concurrent writes from two `jp q` processes resolve last-writer-wins; the file
-is rarely written, so contention is theoretical.
+**Ownership and write semantics.** `jp_cli`'s policy compiler owns the approval
+store.
+Writes use atomic temp-file-and-rename to prevent partial files on interruption.
+If `approvals.json` contains malformed JSON on read, the compiler logs a warning
+and treats the store as empty.
+Concurrent writes from multiple `jp q` processes resolve last-writer-wins.
 
 #### Nested-escape boundary
 
-Approving `fork -> /code/forks/x` does not implicitly authorise `fork/secrets ->
-/etc`.
-Without a boundary check, a nested symlink inside the approved target could
-exfiltrate arbitrary paths through the same rule.
+Approving `fork -> /code/forks/x` does not authorise a nested symlink inside
+`/code/forks/x` (such as `fork/secrets -> /etc`) to escape that directory tree.
 
-The `approved_target` on the compiled rule is the boundary.
-At tool-call time, after canonicalising the requested path, the post-canonical
-step verifies that the canonical target remains under the rule's
-`approved_target`:
+The compiled rule's `approved_target` defines the allowed boundary.
+After canonicalising the tool call's target path, `Context::check_*` verifies
+that the canonical path remains under `approved_target`:
 
-- Tool call: `fork/src/lib.rs`.
-  Canonicalises to `/code/forks/x/src/lib.rs`.
-  Under `/code/forks/x` (the approved target).
-- Tool call: `fork/secrets/passwd`.
-  Canonicalises to `/etc/passwd` (via the nested symlink).
-  Not under `/code/forks/x`. ✗ — reject.
+- `fork/src/lib.rs` canonicalises to `/code/forks/x/src/lib.rs`, which is under
+  `/code/forks/x` and is permitted.
+- `fork/secrets/passwd` canonicalises to `/etc/passwd` through the nested
+  symlink, which falls outside `/code/forks/x` and is rejected.
 
-The OS sandbox enforces the same boundary by only allowlisting the approved
-target.
-A nested escape that the cooperative checker missed would still be denied at the
-syscall layer.
+The OS sandbox enforces the same boundary by allowlisting only
+`approved_target`.
 
-Nested escapes do not trigger a separate inquiry in v1.
-They reject with a clear error.
-If the user genuinely needs the nested target, they create a second explicit
-symlink at the workspace level with its own rule and approval.
+In v1, a nested escape is rejected with an error rather than triggering an
+approval prompt.
+To grant access to the nested target, the user creates a separate workspace
+symlink with its own rule and approval.
 
 #### Targets that contain the workspace
 
-An approved target may be an ancestor of the workspace: from a workspace at
-`~/w/a/b`, `--mount up=..` approves `up -> ~/w/a` so the assistant can reach the
-rest of the repository the workspace sits in.
-The mount grants the target minus the workspace.
-Policy compilation adds a deny-all rule at the path where the workspace
-reappears inside the mount (`up/b`), next to the mount rule:
+An approved target may be an ancestor of the workspace.
+For example, from a workspace at `~/w/a/b`, running `jp q --mount up=..`
+approves `up -> ~/w/a` so the assistant can access sibling directories in the
+enclosing repository.
 
-- Tool call: `up/c/lib.rs`.
-  Canonicalises to `~/w/a/c/lib.rs`, outside the workspace.
-  Matched against `up` (the mount rule).
-- Tool call: `up/b/src/lib.rs`.
-  Canonicalises back into the workspace through the mount.
-  The cooperative checker rejects it and names `src/lib.rs` as the path to use,
-  so a workspace file is reached through its workspace path only.
-- Tool call: move or delete `up/b` (or `top/a`, for a mount `top=../..`).
-  Rejected: a mount cannot move, delete, or write as a whole any directory the
-  workspace lies inside.
-  The check is made on the canonical location, so an alias inside the target
-  (`up/current/...` with `current -> releases/v1`) is rejected the same way.
-  A symlink to such a directory can itself be moved or deleted, and files in
-  those directories stay reachable through the mount rule.
+An ancestor mount grants access to the target tree excluding the workspace
+itself.
+During policy compilation, the compiler inserts a deny-all rule at the lexical
+path where the workspace reappears inside the mount (`up/b`):
 
-The deny-all rule covers tools that match paths as typed, such as a walk over
-the mount, which would otherwise find workspace files under `up/b` and check
-them against `up`.
-Walks do not follow symlinks, so they reach the workspace only through its real
-path, which is where the rule sits.
-A tool that canonicalises paths itself and matches the canonical form lands on
-the workspace's own rules instead, which grants nothing the workspace does not.
-The OS sandbox builds the same exclusion (see [OS-sandbox
+- `up/c/lib.rs` canonicalises to `~/w/a/c/lib.rs` (outside the workspace) and
+  matches the mount rule `up`.
+- `up/b/src/lib.rs` canonicalises back into the workspace through the mount.
+  The cooperative checker rejects the call and directs the tool to use the
+  workspace-relative path `src/lib.rs` instead.
+- Moving, deleting, or overwriting `up/b` (or `top/a` for a mount `top=../..`)
+  is rejected: a tool cannot move, delete, or replace any ancestor directory of
+  the workspace through a mount.
+  This check runs against the canonical path, so accessing the ancestor through
+  an internal symlink (such as `up/current/...` where `current -> releases/v1`)
+  is also rejected.
+  The symlink `up/current` itself can still be moved or deleted, and sibling
+  files inside those ancestor directories remain accessible through the mount.
+
+The deny-all rule at `up/b` protects tools that evaluate rules against lexical
+paths, such as a directory walker traversing `up/` that would otherwise match
+files under `up/b` against `up`.
+Because directory walkers do not follow symlinks, `up/b` is the only path under
+`up/` that reaches the workspace.
+A tool that canonicalises paths before matching resolves `up/b/src/lib.rs` to
+`src/lib.rs` and evaluates it against the workspace's own rules.
+The OS sandbox enforces the same workspace exclusion (see [OS-sandbox
 integration](#os-sandbox-integration)).
 
-Targets that *equal* the workspace root, or lie inside it, are still rejected
-(see [Rule-path
+Mount targets that equal the workspace root or lie inside the workspace are
+rejected at policy compilation time (see [Rule-path
 canonicalisation](#rule-path-canonicalisation-amendment-to-rfd-076)).
 
 ### `--mount` and `--no-mount`
 
-A CLI shortcut on `jp q` creates the symlink and writes the access grant in one
-step.
-The `--mount` value has the form `[TOOL:][NAME=]PATH[:MODE]`:
+The `--mount` flag on `jp q` creates the workspace symlink and records the
+access grant in a single command.
+Its value has the form `[TOOL:][NAME=]PATH[:MODE]`:
 
 ```sh
 jp q --mount ~/code/forks/serde-yaml               # NAME defaults to serde-yaml
@@ -432,38 +406,39 @@ jp q --mount a=/p1 --mount b=/p2:ro                # repeated for multiple mount
 jp q --mount fs_read_file:fork=C:\code\forks\x:ro  # Windows
 ```
 
-Parsing rules:
+Parsing follows these rules:
 
 - Split on the first `=`.
-  The left side is `[TOOL:]NAME`; the right side is `PATH[:MODE]`.
-  Without an `=`, the value is `[TOOL:]PATH[:MODE]` and `PATH` must exist.
-  `NAME` is the final segment of `PATH`, normalized lexically against the
-  current directory, so `.` and `..` take the name of the directory they reach
-  and a symlinked `PATH` keeps the name as typed.
-  A `PATH` with no final segment (`/`) is an error.
-- A leading `TOOL:` without an `=` is ambiguous with a path containing `:`.
-  It is a tool prefix only if the rest of the value exists on disk and the whole
-  value does not; if both exist, the mount is rejected and the user writes
-  `NAME=PATH` or `TOOL:NAME=PATH` instead.
-  A single-letter prefix is never a tool prefix in this form: it is read as a
-  Windows drive letter, since `\code\x` resolves on the current drive just as
-  `c:\code\x` does.
-- On the left, if a `:` is present, the part before it is the tool name; the
-  part after is the mount name.
-  Without `:`, the entire left side is the mount name and the grant applies to
-  all enabled local tools (see [Tool-scope expansion](#tool-scope-expansion)).
-- On the right, peel a trailing `:ro` or `:rw`.
-  The remainder is the path.
+  The left side is `[TOOL:]NAME` and the right side is `PATH[:MODE]`.
+  When `=` is omitted, the value is `[TOOL:]PATH[:MODE]` and `PATH` must exist
+  on disk.
+  `NAME` defaults to the final segment of `PATH` after lexical normalisation
+  against the current working directory (without resolving symlinks), so `.` and
+  `..` use the name of the directory they resolve to while a symlinked `PATH`
+  keeps its symlink name.
+  A `PATH` with no final segment (such as `/`) is rejected.
+- Without `=`, a leading `TOOL:` prefix can collide with a path containing `:`.
+  The prefix is parsed as `TOOL:` only if the remainder of the path exists on
+  disk and the unsplit string does not.
+  If both exist on disk, `--mount` rejects the ambiguous argument and asks for
+  an explicit `NAME=PATH` or `TOOL:NAME=PATH`.
+  A single-letter prefix is always parsed as a Windows drive letter (`C:\...`),
+  never as a tool name.
+- On the left side of `=`, if `:` is present, the prefix before `:` is the tool
+  name and the remainder is `NAME`.
+  Without `:`, the entire left side is `NAME` and the grant applies to all
+  enabled local tools (see [Tool-scope expansion](#tool-scope-expansion)).
+- On the right side, strip a trailing `:ro` or `:rw` mode suffix; the remainder
+  is `PATH`.
 
-With an `=`, the optional `TOOL:` prefix is unambiguous: tool names are
-identifiers (`[a-z_][a-z0-9_]*`), and Windows drive letters (`C:`) appear only
-on the right side, where the mode is peeled from the tail rather than split from
-the head.
-Without an `=`, the disk settles the ambiguity as described above.
+When `=` is present, `TOOL:` is unambiguous: tool names match
+`[a-z_][a-z0-9_]*`, and Windows drive letters (`C:`) appear only on the right
+side of `=`, where the mode suffix is stripped from the end.
 
 #### Mode rules
 
-Least-privilege defaults at every step:
+Mode defaults to read-only (`:ro`), and write access (`:rw`) requires an
+explicit tool scope:
 
 | Form                        | Mode  | Behaviour                                                                                  |
 | --------------------------- | ----- | ------------------------------------------------------------------------------------------ |
@@ -473,21 +448,21 @@ Least-privilege defaults at every step:
 | `--mount TOOL:NAME=PATH`    | `:ro` | One tool, no prompt for tool scope (single scope is its own confirmation)                  |
 | `--mount TOOL:NAME=PATH:rw` | `:rw` | One tool, read-write                                                                       |
 
-The user opts into write access *twice*: by typing `:rw` explicitly and by
-naming the specific tool that may write.
+Granting write access requires two explicit choices: appending `:rw` and naming
+a single `TOOL`.
 
-Each form also accepts a bare `PATH` in place of `NAME=PATH`, under the same
-mode rules: `--mount PATH`, `--mount PATH:rw` (error), `--mount TOOL:PATH:rw`.
-`NAME` is then derived from `PATH`.
+Every form in the table also accepts a bare `PATH` without `NAME=` (`--mount
+PATH`, `--mount PATH:rw` as an error, and `--mount TOOL:PATH:rw`), deriving
+`NAME` from `PATH`.
 
 #### NAME grammar
 
-`NAME` is interpreted as a path relative to the current working directory,
-normalised lexically, and must resolve to a location under the workspace.
-Absolute paths and `..`-escapes that exit the workspace are rejected at parse
+`NAME` is resolved relative to the current working directory, normalised
+lexically, and must remain inside the workspace.
+Absolute paths and `..` segments that escape the workspace are rejected at parse
 time.
 
-Examples (workspace at `.`, with subdirectories `foo/bar/` and `qux/`):
+For a workspace at `.` with subdirectories `foo/bar/` and `qux/`:
 
 ```sh
 cd . && jp q --mount foo/bar/baz=~/code/forks/x       # symlink at <ws>/foo/bar/baz
@@ -497,78 +472,75 @@ cd ./foo && jp q --mount ../baz=~/code/forks/x        # symlink at <ws>/baz
 cd . && jp q --mount ../baz=~/code/forks/x            # error: escapes workspace
 ```
 
-`NAME` may not target a path under `.jp/` or other JP-managed storage.
-If the resolved path already exists as a non-symlink (regular file or
-directory), `--mount` errors before doing anything.
-Intermediate directories are created as needed.
+`NAME` cannot target `.jp/` or any other JP-managed storage directory.
+If the resolved `NAME` path already exists as a regular file or directory rather
+than a symlink, `--mount` fails before modifying the filesystem or config.
+Missing parent directories under the workspace are created automatically.
 
 #### Tool-scope expansion
 
-A `--mount` invocation without a `TOOL:` prefix expands at CLI time: the CLI
-enumerates enabled local tools in the current conversation's resolved config and
-writes one rule per tool.
-MCP and builtin tools are excluded (consistent with [RFD 076]'s validation that
-rejects `access` declared on those sources).
+When `--mount` is passed without a `TOOL:` prefix, the CLI expands the grant
+across all enabled local tools in the conversation's resolved config, writing
+one rule per tool.
+MCP and builtin tools are excluded, matching [RFD 076]'s rule that rejects
+`access` blocks on non-local tools.
 
-The grant is not written to `[conversation.tools.'*'.access]` even though that
-scope exists, because a `'*'` rule would reach tools the invocation never named
-and the scope applies whole rather than merging (see [RFD 076]).
-Writing one rule per tool keeps the mount scoped to the tools in play.
+`--mount` writes per-tool rules rather than a wildcard rule under
+`[conversation.tools.'*'.access]` because a `'*'` rule would also apply to tools
+enabled later, and per-tool `access` blocks replace rather than merge with `'*'`
+([RFD 076]).
 
-A tool that declared no rules of its own has its block seeded before the mount
-rule is appended — with the `'*'` rules when they exist, otherwise with a
-workspace-wide rule — so the mount does not change what the tool could already
-reach.
+If a tool has no `access.fs` rules of its own, `--mount` seeds its rule list
+before appending the mount rule (copying the `'*'` rules if present, or
+inserting a workspace-wide rule otherwise) so adding a mount does not revoke the
+tool's existing workspace access (see [Default-deny
+preservation](#default-deny-preservation)).
 
-Tools added to the configuration after the `--mount` invocation do not inherit
-the grant.
-Users who add new tools and want them to share the mount re-run `--mount`
-(idempotent on the symlink; appends the new tool's rule).
+Tools enabled after the `--mount` invocation do not inherit the grant.
+To extend an existing mount to a newly added tool, the user re-runs `--mount`,
+which leaves the symlink intact and appends the rule for the new tool.
 
 #### Pipeline stages
 
-Three stages happen at different points in the CLI pipeline:
+`--mount` executes across three stages in the CLI pipeline:
 
-1. **Config build / schema validation.** `apply_cli_config` (before final
-   `AppConfig` is built) mutates the partial to include the new `access.fs`
-   rule.
-   This is data manipulation — `external = true` is accepted syntactically
-   without checking whether the symlink exists.
-   The one filesystem read is for a bare `PATH`: the stage checks that `PATH`
-   exists, and uses that to settle a leading `TOOL:`.
-   The two runs of this stage and stage 2 each read the disk, so a `PATH`
-   created or removed between them can make stage 1 grant a different name than
-   stage 2 links.
-   That fails closed: the rule then names a path with no symlink behind it, and
-   stage 3 drops it.
-   The mutation is idempotent; `apply_cli_config` runs twice in the current
-   pipeline (default conversation resolution, then final config), and both runs
-   must produce the same partial.
-2. **Mount side effects.** `Query::run` (after the conversation lock is held)
-   creates the symlink at `<resolved-name-path> -> <PATH>`, seeds the approval
-   store with the canonical target, and records the mount delta into the
-   conversation stream so subsequent `jp q` invocations inherit the grant.
-3. **Host policy compilation.** Runs after the side-effect stage, also in
-   `Query::run`.
-   Canonicalises rule paths against the now-existing symlinks, runs the approval
-   lifecycle (which finds the seeded approval for the just-created mount), and
-   emits the compiled `AccessPolicy` for tool dispatch and (post-[RFD 075])
+1. **Config mutation and validation (`apply_cli_config`).** Before building the
+   resolved `AppConfig`, `apply_cli_config` inserts the new `access.fs` rules
+   into the partial config.
+   This stage does not check whether the workspace symlink exists yet.
+   It touches the filesystem only when `=` is omitted, checking whether `PATH`
+   exists on disk to disambiguate a leading `TOOL:` prefix.
+   Because `apply_cli_config` runs twice (once for default conversation
+   resolution and once for the final config) before stage 2 creates the symlink,
+   creating or deleting `PATH` on disk between those runs could cause stage 1
+   and stage 2 to derive different mount names.
+   That race fails closed: the config rule then references a path with no
+   symlink, and stage 3 drops the rule.
+   The config mutation itself is idempotent across both runs of
+   `apply_cli_config`.
+2. **Filesystem and store side effects (`Query::run`).** After acquiring the
+   conversation lock, `Query::run` creates the symlink at `<resolved-name-path>
+   -> <PATH>`, seeds the approval store with the canonical target, and records
+   the config delta in the conversation stream so subsequent `jp q` invocations
+   inherit the grant.
+3. **Host policy compilation (`Query::run`).** Immediately after stage 2, the
+   policy compiler canonicalises rule paths against the workspace symlinks, runs
+   the approval lifecycle (finding the seeded approval from stage 2), and
+   produces the compiled `AccessPolicy` for tool execution and post-[RFD 075]
    sandbox profile generation.
-   All "rejected" and "dropped" outcomes for `external` rules happen at this
-   stage, not at stage 1.
+   Invalid or unapproved `external` rules are rejected or dropped at this stage.
 
-For hand-authored rules without a `--mount` flag, stage 2's symlink-creation
-step is a no-op — the symlink either already exists on disk (placed there by
-the user) or doesn't (broken-link handling in stage 3).
+For hand-authored `external = true` rules without `--mount`, stage 2 is a no-op
+and stage 3 evaluates whatever symlink is on disk.
 
 #### Default-deny preservation
 
-[RFD 076] specifies that absent `access.fs` means unrestricted workspace access;
-declaring at least one rule shifts to default-deny.
-A naive `--mount` that appends only the mount rule would unintentionally
-restrict the affected tool's access to *only* the mounted path.
-The CLI prevents this by checking the post-merge state of `access.fs` for each
-tool before writing:
+In [RFD 076], an omitted `access.fs` grants unrestricted workspace access,
+whereas declaring any rule switches the tool to default-deny.
+Appending only the mount rule to a tool with no prior `access.fs` rules would
+therefore revoke its access to the rest of the workspace.
+To preserve the tool's existing workspace access, `--mount` inspects each tool's
+effective `access.fs` state before writing:
 
 | Initial state for tool `T`                                         | What `--mount` writes                                                                            |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
@@ -576,30 +548,30 @@ tool before writing:
 | `T` declared none, but `[conversation.tools.'*'.access]` has rules | The mount rule **plus** a copy of the `'*'` rules, which `T` was inheriting until now            |
 | No rule anywhere                                                   | The mount rule **plus** `path = "."` with read/write, preserving `T`'s implicit workspace access |
 
-The user does not need to think about this; the CLI handles it.
-The middle row matters because scope resolution is replace, not merge: writing
-into `T`'s own block detaches it from `'*'`, so the inherited rules have to come
-along or the mount would silently widen `T` back to whatever it had before the
-`'*'` block existed.
+The second row is required because per-tool `access.fs` replaces `'*'` rather
+than merging with it: writing a rule onto `T` detaches `T` from
+`[conversation.tools.'*'.access]`, so the inherited `'*'` rules must be copied
+into `T`'s block first.
 
 #### Effects of `--mount`
 
-1. Resolve `NAME` to a workspace-relative path.
-   Reject if outside.
+Running `jp q --mount` performs six steps:
 
-2. Create a symlink at `<resolved-name-path> -> <PATH>`.
-   If the symlink already exists with the same target, no-op.
-   If it exists with a different target, error before doing anything else.
+1. Resolve `NAME` to a workspace-relative path and reject it if it escapes the
+   workspace.
+
+2. Create the symlink `<resolved-name-path> -> <PATH>`.
+   If a symlink already exists with the same target, do nothing.
+   If a symlink with a different target or a non-symlink file exists at that
+   path, abort with an error.
 
 3. **Seed the approval store** with `(NAME, canonical_target)`, where
-   `canonical_target` is the resolved absolute path of the just-created symlink.
-   The CLI invocation typing the target is the consent action, so no separate
-   approval prompt fires for this mount on the current or any subsequent
-   invocation (until the target changes, at which point the standard re-prompt
-   logic applies).
+   `canonical_target` is the canonical absolute path of `<PATH>`.
+   Because passing `--mount` on the CLI is the user's consent action, no
+   interactive approval prompt fires unless the symlink is later retargeted.
 
-4. For each in-scope tool `T` (post-mode-rules and tool-scope expansion), inject
-   the mount rule into the conversation's config layer:
+4. For each target tool `T`, append the mount rule to the conversation's config
+   layer:
 
    ```toml
    [[conversation.tools.<T>.access.fs]]
@@ -609,19 +581,19 @@ along or the mount would silently widen `T` back to whatever it had before the
    write = true                       # only when :rw
    ```
 
-   And, if `T`'s `access.fs` was previously empty, also inject the
-   workspace-default rule (see [Default-deny
+   If `T` had no explicit `access.fs` rules, prepend the preserved workspace or
+   `'*'` rules first (see [Default-deny
    preservation](#default-deny-preservation)).
 
-5. Persist in the conversation's stored config so subsequent `jp q` invocations
-   on the same conversation inherit the grant.
+5. Record the config delta in the conversation stream so subsequent `jp q` turns
+   on the same conversation keep the grant.
 
-6. The next host-side policy compilation finds the seeded approval and compiles
-   the rule with `approved_target` set.
+6. Compile `AccessPolicy` on the host, matching the seeded approval and setting
+   `approved_target` on the compiled rule.
 
 #### `--no-mount`
 
-`--no-mount` removes mounts symmetrically:
+`--no-mount` removes mounts and their symlinks:
 
 ```sh
 jp q --no-mount             # remove all mounts (symlinks + access rules)
@@ -629,406 +601,391 @@ jp q --no-mount fork        # remove only `fork`
 jp q --no-mount ~/code/x    # remove the mount `--mount ~/code/x` created
 ```
 
-`--no-mount` accepts a `PATH` in place of a name and derives the name the same
-way `--mount` does, so a user who never typed `NAME` can still remove the mount.
-A value that names an existing mount is taken as that name first, so a nested
-name like `vendor/openssl` is not reduced to `openssl`.
+`--no-mount` accepts either a mount `NAME` or the target `PATH` passed to
+`--mount`.
+If the argument matches an existing mount's `path` directly, that mount is
+selected first so nested names such as `vendor/openssl` are not reduced to their
+final segment (`openssl`); otherwise `--no-mount` derives `NAME` from `PATH`
+using the same rules as `--mount`.
 
-A mount is identified by the marker `external = true` on its `access.fs` rule.
-`--no-mount` finds all such rules referencing the named path (or all such rules,
-with no name), unlinks the corresponding symlink at `<resolved-name-path>`, and
-writes a new `strategy = "replace"` config layer on `access.fs` for each
-affected tool, snapshotting the previous effective rule list minus the mount
-rules.
-The operation is positive-only and requires no negative-delta infrastructure
-([RFD 070]).
+Mounts are identified by `external = true` on their `access.fs` rules.
+`--no-mount` finds all `external = true` rules matching the target mount (or all
+`external = true` rules when no argument is given), removes the corresponding
+symlink at `<resolved-name-path>`, and writes a `strategy = "replace"` config
+layer on `access.fs` for each affected tool containing the previous effective
+rules minus the removed mount rules.
+Using `strategy = "replace"` avoids needing negative config deltas ([RFD 070]).
 
-Two known limitations of this approach:
+This approach has two v1 limitations:
 
-- A user who hand-authored an `access.fs` rule with `external = true` for
-  purposes other than `--mount` would see it removed by `--no-mount`.
-- The replace-snapshot disconnects the affected tools' `access.fs` from future
-  workspace-config changes; later additions to workspace `access.fs` do not
-  propagate into the conversation until the replace layer is rewritten or
-  removed.
+- Hand-authored `access.fs` rules with `external = true` are indistinguishable
+  from `--mount` rules and are also removed by `--no-mount`.
+- Writing a `strategy = "replace"` snapshot detaches the tool's `access.fs` list
+  from workspace-level config inheritance, so subsequent additions to workspace
+  `access.fs` rules do not take effect in the conversation until the replace
+  layer is updated or cleared.
 
-Both are accepted v1 trade-offs.
-[RFD 070]'s negative-delta model would replace the snapshot with a targeted
-removal that preserves inheritance.
+Once [RFD 070] lands, `--no-mount` can emit a negative delta instead of a
+replace snapshot, preserving config inheritance.
 
 ### OS-sandbox integration
 
-[RFD 075] generates `sandbox-exec` profiles (macOS) and Landlock rulesets
-(Linux) from `AccessPolicy`.
-With approved external rules, profile generation emits allow-entries for both
-the workspace-relative path (the symlink itself, harmless) and the rule's
-`approved_target` as a directory boundary.
+[RFD 075] generates `sandbox-exec` profiles on macOS and Landlock rulesets on
+Linux from `AccessPolicy`.
+For each approved external rule, profile generation emits allow-entries for both
+the workspace-relative symlink path and the rule's `approved_target` directory
+tree.
 
-When `approved_target` contains the workspace, the allow-entry must exclude the
-workspace, or a read-write mount of an ancestor would grant write access to the
-whole workspace at the syscall layer, whatever the workspace's own rules say.
+When `approved_target` is an ancestor of the workspace, the sandbox profile must
+exclude the workspace subtree; otherwise a read-write mount of `..` would grant
+write access to the workspace at the OS layer regardless of the workspace's own
+rules:
 
-- **macOS.** The profile follows the mount's allow with a deny for the workspace
-  path, then re-adds the workspace's own rules after it.
-  This relies on later `sandbox-exec` rules taking precedence over earlier ones,
-  which needs confirming when [RFD 075] is built.
-- **Linux.** Landlock can only add access, never carve it out.
-  The ruleset instead grants each entry along the way from the target down to
-  the workspace, except the next directory toward the workspace.
-  For `up -> ~/w/a` and a workspace at `~/w/a/b`, that is every entry of `~/w/a`
-  except `b`.
-  Two limits follow, and both fail closed: an entry created in `~/w/a` after the
-  tool starts is not reachable, and creating entries directly in `~/w/a` cannot
-  be granted, because a create right on a directory covers its whole subtree,
-  workspace included.
+- **macOS (`sandbox-exec`).** After the allow rule for `approved_target`, the
+  profile emits a deny rule for the workspace root followed by the workspace's
+  own allow rules.
+  This ordering relies on later `sandbox-exec` rules overriding earlier ones,
+  which must be verified when implementing [RFD 075].
+- **Linux (Landlock).** Landlock rulesets are strictly additive and cannot carve
+  out a denied subtree from an allowed parent directory.
+  Instead, at each ancestor directory from `approved_target` down to the
+  workspace, the ruleset grants access to every sibling entry except the child
+  directory containing the workspace.
+  For `up -> ~/w/a` and a workspace at `~/w/a/b`, Landlock grants every entry in
+  `~/w/a` except `b`.
+  This enumeration has two fail-closed limitations: new top-level entries
+  created directly inside `~/w/a` after the tool starts are unreachable, and
+  tools cannot be granted permission to create new top-level entries directly in
+  `~/w/a` because Landlock's directory-creation right applies to the entire
+  directory subtree, including `b`.
 
-Other external rules need no change to profile shape, only to the set of paths a
-profile contains.
+Non-ancestor external mounts require no structural change to [RFD 075]'s sandbox
+profiles beyond adding `approved_target` to the allowed path set.
 
-This section applies once [RFD 075] is implemented.
-The cooperative layer in this RFD ships independently and degrades cleanly on
-platforms or releases where OS-level enforcement is not yet available.
+The cooperative checks in this RFD ship independently of [RFD 075] and apply on
+all platforms regardless of whether OS sandboxing is available.
 
 ### Platform notes
 
 `std::fs::canonicalize`, `std::os::unix::fs::symlink`, and
-`std::os::windows::fs::{symlink_dir, symlink_file}` are all
-cross-platform-stable.
+`std::os::windows::fs::{symlink_dir, symlink_file}` are stable across supported
+platforms.
 
-On Windows, creating a symlink requires either Developer Mode (Windows 10 1703+)
-or administrator privileges.
-The `--mount` shortcut falls back to a junction point (via the `junction` crate)
-for directory targets when symlink creation fails with
-`ERROR_PRIVILEGE_NOT_HELD`.
-Junction points are directory-only and require absolute target paths, so file
-targets on Windows without Developer Mode produce a clear error from the
-`--mount` flow.
+On Windows, creating a symlink requires Developer Mode (Windows 10 1703+) or
+administrator privileges.
+When directory symlink creation in `--mount` fails with
+`ERROR_PRIVILEGE_NOT_HELD`, JP falls back to creating an NTFS junction point via
+the `junction` crate.
+Because junction points support only directories with absolute target paths,
+mounting a single file on Windows without Developer Mode fails with an explicit
+error.
 
-Reading and resolving symlinks works on Windows without any privilege.
-The `external` field itself is platform-independent.
+Reading and canonicalising existing symlinks on Windows requires no special
+privileges, and `FsRule.external` itself is platform-independent.
 
-OS-level enforcement remains platform-conditional, unchanged from [RFD 075]'s
-existing matrix: macOS via `sandbox-exec`, Linux via Landlock, Windows currently
-has no enforced layer and relies on the cooperative checker alone.
+OS-level sandbox enforcement follows [RFD 075]'s platform matrix: `sandbox-exec`
+on macOS, Landlock on Linux, and cooperative enforcement only on Windows.
 
 ## Drawbacks
 
-**Cross-conversation visibility.** Symlinks live in the workspace tree.
-Every conversation in the workspace sees them in directory listings, regardless
-of whether it has a matching `external` grant.
-A conversation without the grant that tries to access the path gets a clear
-denial, so there's no security exposure, but the noise grows linearly with the
-number of active mounts in the workspace.
+**Cross-conversation visibility.** Workspace symlinks sit in the workspace
+directory tree, so every conversation in the workspace sees them in directory
+listings even without a matching `external` grant.
+A conversation without the grant receives a clean access denial if it tries to
+read the symlink, so there is no security leak, but directory listings
+accumulate entries as mounts are added.
 
-**Windows symlink creation friction.** Without Developer Mode or admin, users
-can't create file symlinks via `--mount`.
-Junction points cover the directory case (which is the bulk of the use case —
-mounting a forked repo), but file mounts on default Windows configurations are
-an explicit, documented limitation.
+**Windows file-symlink privileges.** Without Developer Mode or administrator
+privileges, Windows users cannot mount individual files via `--mount`.
+NTFS junction points cover directory mounts (such as mounting a forked
+repository).
 
-**Initial approval prompts at session start.** A workspace with several
-hand-authored `external` rules prompts the user once per rule on first use.
-After approval the prompts disappear.
-Mounts created via `--mount` auto-seed the approval store at symlink-creation
-time and do not contribute to this.
+**Initial approval prompts for hand-authored rules.** A workspace with several
+hand-authored `external = true` rules prompts once per rule on first use.
+Subsequent runs reuse the stored approvals, and mounts created via `--mount`
+seed the approval store without prompting.
 
-**`--no-mount` marker collisions and inheritance freeze.** A user who
-hand-authored an `external = true` rule outside `--mount` would see it removed
-by `--no-mount`.
-The replace-snapshot also disconnects the affected tools from future
-workspace-config changes to `access.fs`.
-Both refine cleanly once [RFD 070] lands.
+**`--no-mount` marker collisions and inheritance freeze.** `--no-mount` removes
+any `external = true` rule matching the target name, including hand-authored
+rules, and its `strategy = "replace"` snapshot freezes `access.fs` inheritance
+for affected tools until [RFD 070] replaces snapshot writes with negative
+deltas.
 
-**Ancestor mounts create a symlink cycle.** A mount whose target contains the
-workspace makes the workspace reachable at `up/b`, `up/b/up/b`, and so on.
-Access checks are unaffected (a path through the cycle back into the workspace
-is rejected), and JP's own code never follows symlinks while walking the tree.
-A third-party tool that follows links during a walk sees the workspace again;
-most walkers detect the cycle or stop at the kernel's symlink limit (`ELOOP`),
-but one that steps a level at a time without cycle detection can run long.
-JP logs a warning-level trace when such a mount is created.
+**Ancestor mounts introduce a symlink cycle.** When a mount target contains the
+workspace, the workspace is reachable again at `up/b`, `up/b/up/b`, and so on.
+Access checks reject any path that re-enters the workspace through the mount,
+and JP's own file walkers do not follow symlinks.
+Third-party tools that follow symlinks during directory traversal will hit the
+cycle; most stop on loop detection or the kernel symlink limit (`ELOOP`), though
+naive walkers that resolve one level at a time may run slowly.
+JP logs a warning trace when creating an ancestor mount.
 
-**Symlinks tracked by VCS expose absolute targets.** If a user commits a
-workspace symlink to git (or any VCS), the target string is in the commit.
-JP is VCS-agnostic and does not interfere with VCS state; how the user manages
-this is their decision.
+**Version control exposure.** If a user commits a workspace symlink to Git or
+another VCS, the symlink's target path is recorded in the commit history.
+JP does not manage VCS state or `.gitignore` entries for mounts.
 
 ## Alternatives
 
 ### Named-mount table in conversation state
 
-Store mounts in conversation-level config (a `[[conversation.mounts]]` table),
-entirely separate from `access.fs`.
-Pure data, no filesystem manifestation; tools receive a separate `mounts` field
-in their context.
+Store mounts in conversation config (`[[conversation.mounts]]`) separately from
+`access.fs`, without creating workspace symlinks, and pass the mount table to
+tools in `jp_tool::Context`.
 
-Rejected because it duplicates the access-policy mechanism with a parallel one,
-requires a plugin-protocol extension to expose mounts to plugins, and stores
-absolute paths in conversation state (privacy and cross-machine portability
-problems).
-The symlink approach reuses existing infrastructure end to end.
+Rejected because it duplicates `access.fs` with a second path-mapping mechanism,
+requires extending the tool plugin protocol, and stores absolute host paths in
+shared conversation state.
+Workspace symlinks reuse normal filesystem paths and existing `FsRule` checks.
 
 ### Bounded targets via `follow_to = ["..."]`
 
-Instead of TOFU, let each rule declare allowed canonical targets explicitly.
+Allow each `FsRule` to list permitted canonical target paths directly in config
+instead of using TOFU approval.
 
-Rejected because it reintroduces absolute paths into the configuration surface
-— the privacy and portability problem the symlink design eliminates.
-TOFU provides equivalent protection against silent retargeting without
-committing target paths to shared config.
+Rejected because it puts machine-specific absolute paths into shared workspace
+config, reintroducing the privacy and portability issues that symlinks avoid.
+TOFU catches silent retargeting while keeping canonical paths in user-local
+storage.
 
 ### Approval inside `Context::check_*`
 
-Run the approval flow inside the tool's `Context::check_*` call rather than
-host-side.
+Run the approval prompt inside `jp_tool::Context::check_*` rather than on the
+host during policy compilation.
 
-Structurally impossible.
-`jp_tool::Context` runs inside the tool subprocess, which has no terminal, no
-access to JP's user-local approval store, and no way to inquire.
-The OS sandbox is also built before the tool spawns, so in-tool approval cannot
-inform the sandbox profile.
+Infeasible because `jp_tool::Context` executes inside the tool subprocess, which
+has no terminal access, no access to user-local storage, and no channel to emit
+an inquiry.
+In addition, the OS sandbox profile must be finalised before the tool subprocess
+spawns.
 
 ### Per-resolution TOFU at tool-call time
 
-Defer approval until the tool resolves a path that escapes the workspace,
-prompting via `Outcome::NeedsInput`.
+Defer approval until a tool call resolves a symlink outside the workspace, then
+pause the tool with `Outcome::NeedsInput` to prompt the user.
 
-Rejected because the OS sandbox is built at tool spawn from a fixed set of
-allowed paths.
-Per-resolution prompts cannot add paths to a running sandbox.
-Compile-time per-rule approval gives both the cooperative checker and the
-sandbox the same approved set to operate against.
+Rejected because the OS sandbox is configured at process spawn from a fixed list
+of allowed paths and cannot be widened mid-execution.
+Approving rules at policy compilation time gives both the cooperative checker
+and the OS sandbox the same approved target set before the tool starts.
 
 ### Mount overlay separate from `access.fs`
 
-Store mounts in a parallel namespace, compiled into `AccessPolicy` alongside
-user-declared `access.fs` rules.
-Adding a mount would not change whether `access.fs` was declared.
+Store `--mount` grants in a separate config namespace that compiles into
+`AccessPolicy` alongside `access.fs`, so adding a mount never switches a tool's
+`access.fs` from unset (unrestricted) to default-deny.
 
-Rejected for UX reasons: a mount is, in user terms, a filesystem access grant.
-Putting mounts and other filesystem grants in different sections asks the user
-to internalise an implementation distinction.
-The case-based default-deny preservation (see [Default-deny
-preservation](#default-deny-preservation)) solves the same problem inside
-`access.fs` without splitting the user-facing namespace.
+Rejected because a mount is a filesystem access grant, and splitting filesystem
+grants across two config sections forces users to reason about two overlapping
+models.
+Seeding the tool's existing workspace or `'*'` rules when `--mount` writes to an
+empty `access.fs` list (see [Default-deny
+preservation](#default-deny-preservation)) preserves workspace access within a
+single `access.fs` list.
 
-### Unified attachment + tool access policy
+### Unified attachment and tool access policy
 
-Have attachments go through `access.fs` too, so a single rule governs both
-LLM-driven tool access and user-initiated attachments.
+Govern `--attach` through `access.fs` so one policy controls both LLM tool calls
+and user attachments.
 
-Rejected because attachments are user-initiated (the `--attach` argument is the
-consent action) and one-shot (snapshot, not ongoing privilege).
-[RFD D03] covers the attachment case with the right semantics.
+Rejected because `--attach` is a one-shot, user-initiated snapshot where typing
+the CLI argument is itself the consent action, whereas `access.fs` governs
+ongoing, LLM-chosen tool operations.
+[RFD D03] handles external attachments directly.
 
 ### Absolute-path `access.fs` rules
 
-Allow rules to declare absolute paths directly, bypassing the workspace anchor.
+Allow `access.fs` rules to specify absolute paths directly without a workspace
+symlink.
 
-Rejected.
-Absolute paths in shared workspace config don't round-trip across machines, and
-they widen the LLM's expressible reach beyond the workspace.
+Rejected because absolute paths in shared workspace config are not portable
+across machines and require allowing the LLM to pass absolute paths in tool
+arguments.
 
 ## Non-Goals
 
-- **External attachments.** [RFD D03] is the design for `--attach` outside the
+- **External attachments.** [RFD D03] defines `--attach` for paths outside the
   workspace.
 
-- **Conversation-scoped mounts.** Symlinks live in the workspace and are shared
-  across all conversations.
-  Per-conversation isolation breaks the workspace-relative invariant.
-  Deferred until cross-conversation noise proves painful.
+- **Conversation-scoped mounts.** Mount symlinks live in the workspace tree and
+  are visible in directory listings across all conversations in that workspace.
+  Per-conversation filesystem isolation is deferred unless cross-conversation
+  symlink clutter proves problematic.
 
-- **Unattended-mode pre-approval CLI flag.** Users running JP non-interactively
-  pre-seed the approval store by editing the JSON file.
-  A flag is small but unnecessary in v1.
+- **CLI flag for unattended pre-approval.** Users running JP non-interactively
+  can pre-seed `<user-workspace-storage>/approvals.json` directly.
 
-- **Symlink creation for file targets on Windows without Developer Mode.**
-  Junction points cover directories; file targets either require Developer Mode
-  or fail clearly.
+- **File symlinks on Windows without Developer Mode.** Directory mounts fall
+  back to NTFS junction points; file mounts on Windows require Developer Mode or
+  administrator privileges.
 
-- **VCS handling.** JP is VCS-agnostic.
-  `--mount` creates a symlink; whether the user commits, ignores, or otherwise
-  manages it through their version control system is their decision.
+- **VCS ignore management.** `--mount` creates the workspace symlink; whether to
+  commit or ignore it in version control is left to the user.
 
-- **Group-level access defaults.** `--mount` without a `TOOL:` prefix expands at
-  CLI time to per-tool rules over the currently-enabled local tools.
-  True group defaults belong in a follow-up that extends [RFD 076].
+- **Group-level tool access defaults.** An unscoped `--mount` expands at CLI
+  time into individual rules on the currently enabled local tools.
+  First-class tool-group access defaults belong in an extension to [RFD 076].
 
-- **`external = true` with workspace-anchored rules.** Configurations like `path
-  = "." + external = true` are rejected during policy compilation.
-  External permission applies only to rules whose own path is (or resolves
-  through) a symlink with an external target.
+- **`external = true` on workspace-anchored rules.** Setting `external = true`
+  on a path that canonicalises inside the workspace (such as `path = "."`) is
+  rejected at policy compilation time.
 
 ## Risks and Open Questions
 
-**Symlink-retargeting attack surface.** A teammate committing a one-line symlink
-change (`fork -> /etc/passwd`) is easy to miss in a `git pull` diff.
-TOFU at policy-compile time is the mitigation: the next policy compilation
-re-prompts because the canonical target differs from the stored approval.
+**Symlink-retargeting attack surface.** A collaborator could commit a symlink
+change pointing an existing mount at a sensitive path (such as `fork ->
+/etc/passwd`), which is easy to miss in a `git pull` diff.
+TOFU mitigates this: policy compilation compares the symlink's current canonical
+target against `approvals.json` and prompts before allowing the new target.
 
-**Target-only approval scope.** Approvals bind only the lexical mount path to a
-canonical target.
-A teammate widening capabilities (e.g. adding `write = true`) on the same mount
-through a config edit does not re-prompt.
-This is a deliberate trust-model choice — capability changes are config edits
-visible in normal review channels (git diff, `jp config show`), while target
-retargeting is the silent vector TOFU is designed to catch.
+**Target-only approval scope.** Approvals bind `rule_path` to `canonical_target`
+without recording capabilities.
+If a config change widens capabilities on an already-approved mount (for
+example, adding `write = true`), JP does not re-prompt.
+This trade-off is deliberate: capability changes are visible in config diffs and
+`jp config show`, whereas TOFU is designed to catch filesystem retargeting
+outside config.
 
-**Cross-conversation noise.** Workspaces with many mounts give every
-conversation visibility into all of them.
-Conversation-scoped mounts are the follow-up if denials become a token-cost or
-UX problem.
+**Cross-conversation symlink clutter.** In workspaces with many mounts, every
+conversation sees all mount symlinks when listing the workspace root.
+If denied access attempts become noisy or waste tokens, conversation-scoped
+mounts can be revisited.
 
-**Marker collisions on `--no-mount`.** The v1 convention treats any rule with
-`external = true` as a mount.
-Refinement via stable mount-identity marker is straightforward if needed.
+**`--no-mount` marker collisions.** Identifying mounts solely by `external =
+true` means `--no-mount` also deletes hand-authored external rules.
+If users commonly mix hand-authored external rules with `--mount`, rules can
+gain an explicit mount-origin field.
 
-**Approval-store schema migration.** The JSON schema may need to grow
-(expiration timestamps, per-tool scope, additional approval categories).
-Plain JSON behind a single read site keeps migration cost bounded.
+**Approval-store schema evolution.** `approvals.json` may later need expiration
+timestamps, capability scopes, or new approval categories.
+Keeping a single reader/writer module in `jp_cli` bounds migration cost.
 
 ## Implementation Plan
 
 > [!NOTE]
 > **Current status (PR 727).** This first slice ships cooperative enforcement
-> for local filesystem tools.
-> What it does and does not cover:
+> for local filesystem tools:
 >
-> - Phase 1 (pre-canonical invariant): done.
-> - Phase 2 (`FsRule.external`, rule-path canonicalisation, approved-target
->   boundary): done.
->   In-workspace rules are matched on the canonical workspace-relative form, so
->   an in-workspace symlink cannot dodge a more specific rule; external rules
->   keep their lexical mount prefix plus the approved-target boundary.
-> - Phase 3 (approval lifecycle): partial.
->   The store, lookup, and `--mount`-seeded approvals are in place.
->   A hand-authored `external = true` rule does not yet get a trust-on-first-use
->   prompt: an unapproved or retargeted external rule is dropped with a warning,
->   never silently granted.
->   The interactive prompt is deferred.
-> - Phase 5 (`--mount`): done (parsing, symlink creation, approval seeding,
->   case-based default-deny preservation, expansion over the resolved
->   enabled-local tool set).
->   `--no-mount` is not implemented; cleanup of the symlink and the persisted
->   config is manual until it lands.
->   The broad-mount tool-scope confirmation prompt is also deferred: in this
->   slice the `--mount` invocation is the consent action, and `:rw` still
->   requires an explicit `TOOL:` scope.
-> - Phase 4 (OS sandbox, [RFD 075]) and Phase 6 (Windows junction fallback) are
->   not started; enforcement is cooperative only, and `net` / `env` rules are
->   not yet modelled in config.
+> - **Phase 1 (pre-canonical invariant):** Done.
+> - **Phase 2 (`FsRule.external`, rule-path canonicalisation, approved-target
+>   boundary):** Done.
+>   In-workspace rules match on their canonical workspace-relative path so an
+>   in-workspace symlink cannot bypass a more specific rule; external rules keep
+>   their lexical mount prefix and enforce `approved_target`.
+> - **Phase 3 (approval lifecycle):** Partial.
+>   The approval store, lookup, and `--mount` approval seeding are implemented.
+>   Interactive TOFU prompts for hand-authored `external = true` rules are
+>   deferred: unapproved or retargeted rules are dropped with a warning and
+>   never granted silently.
+> - **Phase 5 (`--mount`):** Done for `--mount` (parsing, symlink creation,
+>   approval seeding, default-deny preservation, and expansion across enabled
+>   local tools).
+>   `--no-mount` is not yet implemented; removing a symlink and its persisted
+>   config rules is manual until it lands.
+>   The confirmation prompt for unscoped `--mount` across all tools is also
+>   deferred: passing `--mount` on the CLI serves as consent, and `:rw` still
+>   requires an explicit `TOOL:` prefix.
+> - **Phase 4 (OS sandbox, [RFD 075]) and Phase 6 (Windows junction fallback):**
+>   Not started.
+>   Enforcement is cooperative only, and `net` and `env` rules are not yet
+>   modelled in config.
 >
-> Correctness guarantees in this slice: config validation rejects `access` on
-> tools whose finalised source is `builtin` or `mcp` ([RFD 076]); an `access`
-> config that fails to compile fails the tool invocation, and a declared policy
-> whose rules all drop (unapproved or broken external targets) stays
-> default-deny rather than degrading to unrestricted workspace access; and the
-> in-tree fs tools enforce capabilities against the resolved canonical path, so
-> an in-workspace symlink cannot reach a denied location.
+> **Guarantees in this slice:** Config validation rejects `access` on `builtin`
+> and `mcp` tools ([RFD 076]).
+> An `access` config that fails compilation fails the tool invocation, and a
+> policy whose rules are all dropped (due to unapproved or broken symlinks)
+> remains default-deny rather than falling back to unrestricted workspace
+> access.
+> The in-tree filesystem tools check capabilities against the canonical target
+> path, so an in-workspace symlink cannot bypass a deny rule.
 
 ### Phase 1: Pre-canonical invariant in `jp_tool`
 
-Add the explicit pre-canonicalisation check to `Context::check_*`.
-Reject absolute paths and `..`-escapes with a typed error before any filesystem
-I/O.
-Update `FsAccessError` to distinguish "out-of-workspace input" from
-"out-of-workspace canonical target."
-Document the contract that `check_*` accepts only raw workspace-relative paths.
-
-Independent.
-Mergeable on its own.
+Add the pre-canonicalisation check to `Context::check_*` to reject absolute
+paths and `..`-escapes with a typed error before any filesystem I/O.
+Update `FsAccessError` to distinguish out-of-workspace input paths from
+out-of-workspace canonical targets, and document that `check_*` accepts only raw
+workspace-relative paths.
+This phase is independent and can merge on its own.
 
 ### Phase 2: `FsRule.external` field and amended rule-path canonicalisation
 
-Add the field to `jp_tool::FsRule` and `jp_config::FsRuleConfig`.
-Modify [RFD 076]'s rule-path canonicalisation: rules with `external = true`
-whose path canonicalises outside the workspace are preserved with `lexical_path`
-and `approved_target`.
-Reject `external = true` on rules whose path canonicalises inside the workspace.
-Wire the `approved_target` boundary into the matching algorithm.
-Treat broken symlinks as policy-compilation drop+warn.
+Add `external` to `jp_tool::FsRule` and `jp_config::FsRuleConfig`.
+Amend [RFD 076]'s rule-path canonicalisation so rules with `external = true`
+whose path canonicalises outside the workspace retain their `lexical_path` and
+record `approved_target`.
+Reject `external = true` on rules whose path canonicalises inside the workspace,
+enforce the `approved_target` boundary during path matching, and drop broken
+symlinks with a warning during policy compilation.
 
 Depends on Phase 1.
-Includes the [RFD 076] modification.
 
 ### Phase 3: Host-side approval lifecycle
 
-Define the approval store format under `<user-workspace-storage>/approvals.json`
-with a `mounts` field.
-Implement read/write helpers in `jp_cli` with atomic temp-file-and-rename
-writes.
-Wire the approval check into `AccessConfig -> AccessPolicy` conversion at the
-host boundary.
-Use the terminal prompting UI from the existing inquiry infrastructure ([RFD
-005], [RFD 028]) for interactive prompts, but do not persist approval as inquiry
-events (the canonical target path stays out of conversation state).
-Implement the prompts with the affected tools and capabilities visible.
-Distinguish behaviour on missing terminal: pre-existing rules drop+warn; rules
-created by an explicit `--mount` in this invocation are seeded by the
-symlink-creation step instead.
+Define `<user-workspace-storage>/approvals.json` with its `mounts` array and
+implement atomic temp-file-and-rename read/write helpers in `jp_cli`.
+Run the approval check during `AccessConfig` to `AccessPolicy` conversion on the
+host.
+Reuse the terminal prompting UI from [RFD 005] and [RFD 028] to display affected
+tools and capabilities without recording `InquiryRequest` or `InquiryResponse`
+events in the conversation stream.
+When no terminal is available, drop pre-existing unapproved rules with a warning
+while allowing mounts seeded by `--mount` in the current invocation.
 
 Depends on Phase 2.
 
 ### Phase 4: OS-sandbox profile generator
 
-Update [RFD 075]'s profile generator to emit allow-entries for approved
-`approved_target` paths.
-Skip rules whose approval failed.
-Add tests for macOS and Linux profile output.
+Update [RFD 075]'s sandbox profile generator to emit allow-entries for each
+approved rule's `approved_target`, skipping unapproved rules, and add tests for
+macOS and Linux profile generation.
 
-Depends on Phase 3.
-Coordinates with [RFD 075]'s implementation phases.
+Depends on Phase 3 and coordinates with [RFD 075].
 
 ### Phase 5: `--mount` and `--no-mount` CLI
 
-Add the flags to `jp q`.
-Implement parsing for `[TOOL:][NAME=]PATH[:MODE]`, including the
-`--attach`-style `NAME` resolution, `NAME` derivation for a bare `PATH`, and the
-mode rules table.
-Split config mutation (in `apply_cli_config`, idempotent) from symlink creation
-and conversation persistence (in `Query::run`).
-Implement the case-based default-deny preservation.
-Implement the marker-based `--no-mount` cleanup using `strategy = "replace"`
-config layers.
+Add `--mount` and `--no-mount` to `jp q`.
+Implement `[TOOL:][NAME=]PATH[:MODE]` parsing, workspace-relative `NAME`
+resolution, `NAME` derivation from bare `PATH` arguments, and the mode
+restrictions.
+Keep config mutation in `apply_cli_config` idempotent and separate from symlink
+creation, approval seeding, and conversation persistence in `Query::run`.
+Implement default-deny preservation when seeding rules and `--no-mount` cleanup
+using `strategy = "replace"` config layers.
 
 Depends on Phase 3.
 
 ### Phase 6: Platform-specific symlink creation
 
-Implement the Windows fallback path (symlink → junction for directories).
-Add the `junction` crate as an optional `[target.'cfg(windows)'.dependencies]`
-entry in `jp_cli`.
-Surface a clear error for file targets on Windows when symlink creation fails.
+On Windows, fall back from directory symlink creation to NTFS junctions using an
+optional `[target.'cfg(windows)'.dependencies]` dependency on `junction` in
+`jp_cli`, and return a clear error when mounting a file without symlink
+privileges.
 
-Depends on Phase 5.
-Mergeable in parallel with Phase 4.
+Depends on Phase 5 and can merge in parallel with Phase 4.
 
 ## References
 
-- [RFD 005] — First-class inquiry events.
-  Provides the terminal prompting UI used by host-side approval.
-  Approval prompts use the UI but are not persisted as `InquiryRequest` /
-  `InquiryResponse` events (see [Approval
+- [RFD 005]: First-class inquiry events.
+  Provides the terminal prompting UI used for host-side mount approval without
+  persisting `InquiryRequest` or `InquiryResponse` events (see [Approval
   lifecycle](#approval-lifecycle-host-side)).
-- [RFD 028] — Structured inquiry system for tool questions.
-  Same UI-yes/event-no distinction as RFD 005.
-- [RFD 070] — Negative config deltas.
-  Not required by this RFD; `--no-mount` uses positive `strategy = "replace"`
-  writes instead.
-- [RFD 075] — Tool sandbox and access policy.
-  OS-level enforcement consumes approved external rules; this RFD does not
-  modify 075's profile shape, only the set of paths a profile contains.
-- [RFD 076] — Tool access grants.
-  This RFD extends and amends 076's `FsRule`, its rule-path canonicalisation,
-  and its path-evaluation steps.
-- [RFD 079] — Config sources and load order.
-  Governs the physical layout of user-workspace storage; this RFD references the
-  logical location only.
-- [RFD D03] — External attachment URI scheme.
-  Covers the attachment counterpart; the two compose without overlapping.
+- [RFD 028]: Structured inquiry system for tool questions.
+  Shares the terminal prompting infrastructure with [RFD 005].
+- [RFD 070]: Negative config deltas.
+  Not required for v1; `--no-mount` uses `strategy = "replace"` snapshots
+  instead.
+- [RFD 075]: Tool sandbox and access policy.
+  Consumes approved external mount rules when generating OS sandbox profiles.
+- [RFD 076]: Tool access grants.
+  Defines `FsRule`, rule-path canonicalisation, and path evaluation, which this
+  RFD extends.
+- [RFD 079]: Config sources and load order.
+  Governs the physical layout of `<user-workspace-storage>`.
+- [RFD D03]: External attachment URI scheme.
+  Covers user-initiated external attachments (`--attach`), complementing tool
+  mounts.
 - Plugin path-and-hash approval (`crates/jp_cli/src/cmd/plugin/dispatch.rs`,
-  `crates/jp_cli/src/cmd/plugin/registry.rs`) — existing precedent for the
+  `crates/jp_cli/src/cmd/plugin/registry.rs`): Existing precedent for the
   TOFU-with-re-approval pattern used here.
 
 [RFD 005]: ../005-first-class-inquiry-events.md

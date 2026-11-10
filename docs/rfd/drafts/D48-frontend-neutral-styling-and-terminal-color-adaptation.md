@@ -10,55 +10,55 @@
 
 ## Summary
 
-This RFD introduces a frontend-neutral style model for JP and a
-terminal-specific color adapter for the CLI.
-Renderers resolve semantic styles into their own target's native representation,
-while `jp_printer` adapts terminal color bytes to the active terminal profile.
+This RFD introduces a frontend-neutral semantic style model for JP and a
+terminal color adapter for the CLI.
+Each frontend resolves semantic styles into its native representation, and
+`jp_printer` adapts ANSI color sequences to the active terminal profile.
 
 ## Motivation
 
-JP currently mixes three concerns that need separate homes:
+JP conflates three distinct concerns:
 
-1. **Semantic style**: inline code, tool names, role headers, progress labels,
-   markdown headings, and other UI concepts have meaning before they have a
-   color.
-2. **Frontend rendering**: the CLI renders ANSI, a web UI renders CSS, a TUI
-   renders widget styles, and a native app renders platform text attributes.
-3. **Terminal capability**: Apple Terminal may expose `TERM=xterm-256color` and
-   reject truecolor even though JP currently emits truecolor unconditionally.
+1. **Semantic style**: UI elements such as inline code, tool names, role
+   headers, progress labels, and markdown headings have semantic meaning
+   independent of how they are colored.
+2. **Frontend rendering**: the CLI emits ANSI escape sequences, a web UI uses
+   CSS, a TUI uses widget styles, and a native app uses platform text
+   attributes.
+3. **Terminal capability**: a terminal may support only 256 or 16 colors (for
+   example, Apple Terminal advertises `TERM=xterm-256color` and rejects
+   truecolor), yet JP emits 24-bit truecolor sequences unconditionally.
 
-Two user-visible failures fall out of that entanglement:
+Conflating these concerns causes two user-visible bugs:
 
-- Inline code can render as black text on a near-black background on light
-  terminals.
-  `jp_md` sets a background for inline code but leaves the foreground inherited
-  from the terminal.
-- Syntax-highlighted output can render incorrectly in 256-color terminals.
-  JP emits `38;2;r;g;b` and `48;2;r;g;b` truecolor sequences from multiple
-  places without a terminal capability check.
+- Inline code is unreadable on light terminals.
+  `jp_md` sets a dark background for inline code while inheriting the terminal's
+  black foreground, producing black text on a near-black background.
+- Syntax-highlighted output breaks in 256-color terminals.
+  Multiple components emit `38;2;r;g;b` and `48;2;r;g;b` truecolor sequences
+  without checking what the terminal supports.
 
-If JP fixes these locally at each call site, every new styled element repeats
-the same failure mode.
-If JP puts semantic scope resolution in the terminal sink, the sink receives
-only bytes and cannot tell whether `\x1b[38;2;...]` came from inline code, a
-tool name, a progress line, or relayed tool output.
+Fixing these bugs at individual call sites would leave every new styled element
+prone to the same mistakes.
+Conversely, the terminal sink cannot resolve semantic scopes itself: it receives
+raw byte streams and cannot tell whether `\x1b[38;2;...]` came from inline code,
+a tool name, a progress line, or relayed tool output.
 
-The design needs one clean rule:
+Separating these responsibilities establishes a clear boundary:
 
 > Renderers resolve semantic scopes into their frontend's native style
 > representation.
-> Terminal byte adaptation is a CLI sink concern.
+> Terminal byte adaptation happens in the CLI sink.
 
 ## Design
 
-### What users see
+### User-facing behavior
 
-JP becomes readable on light terminals and correct on 256-color terminals by
-default.
-A user in Apple Terminal with `TERM=xterm-256color` gets 256-color output
-instead of raw truecolor.
-A user on a light terminal does not get inline code rendered as
-dark-background-only text that depends on a dark foreground.
+By default, JP adapts to both light backgrounds and 256-color terminals.
+In Apple Terminal (`TERM=xterm-256color`), JP downgrades colors to the 256-color
+palette instead of emitting raw truecolor sequences.
+On a light terminal, inline code uses a readable foreground and background pair
+instead of setting a dark background over the terminal's default text color.
 
 Users can override terminal capability and theme selection:
 
@@ -73,8 +73,7 @@ dark = "gruvbox-dark"
 light = "gruvbox-light"
 ```
 
-Visual styling lives under element trees.
-Behavioral settings stay where they already belong.
+Visual styles are configured under `elements` tables by semantic scope:
 
 ```toml
 [style.markdown.elements.inline_code.body]
@@ -88,10 +87,10 @@ fg = "base0D"
 intensity = "bold"
 ```
 
-This RFD does not move `conversation.tools.*.style.parameters` to
-`style.tool_call.parameters`.
-That setting controls how a specific tool's arguments are displayed; it is not a
-visual style scope.
+Behavioral settings remain at their existing paths:
+`conversation.tools.*.style.parameters` does not move to
+`style.tool_call.parameters`, because it controls how a specific tool's
+arguments are formatted rather than a visual style scope.
 
 ### Architecture
 
@@ -110,52 +109,47 @@ A new pure `jp_style` crate owns the frontend-neutral vocabulary:
   `tool_call.function_name`.
 - Stylesheet resolution from scope plus theme to a `Style` value.
 
-`jp_style` does not depend on `syntect`, does not detect terminals, and does not
-emit ANSI.
-It may convert to and from `anstyle` color values, but it is not a terminal
-rendering crate.
+`jp_style` has no `syntect` dependency, performs no terminal detection, and
+emits no ANSI sequences.
+It can convert to and from `anstyle` color types, but it is not a terminal
+renderer.
 
 #### 2. Frontend renderers
 
-Each frontend resolves semantic style while it still has semantic context.
+Each frontend resolves semantic scopes while the underlying structure is still
+known:
 
-- The CLI markdown renderer in `jp_md` maps markdown nodes to markdown scopes.
-  It owns or receives the `syntect::Theme` used for code highlighting because
-  syntax highlighting belongs to markdown/code rendering, not to `jp_style`.
-- CLI chrome renderers in `jp_cli` map tool call headers, role headers, progress
-  labels, and similar concepts to chrome scopes.
-- A web frontend maps the same scopes to CSS classes, CSS variables, or inline
-  style objects.
-- A TUI frontend maps the same scopes to widget styles.
-- A native app maps the same scopes to platform text attributes.
+- The CLI markdown renderer in `jp_md` maps markdown AST nodes to markdown
+  scopes.
+  It also owns or receives the `syntect::Theme` for syntax highlighting, which
+  is a code-rendering concern rather than part of `jp_style`.
+- CLI chrome renderers in `jp_cli` map UI elements such as tool call headers,
+  role headers, and progress labels to chrome scopes.
+- Web, TUI, and native frontends map the same scopes to CSS classes or
+  variables, widget styles, and platform text attributes.
 
-Non-CLI frontends do not use `jp_printer` and do not receive ANSI strings from
-`jp_cli`.
-If frontend sharing becomes necessary, JP extracts a target-neutral view model
-or styled-span representation; it does not route other frontends through
-terminal bytes.
+Non-CLI frontends do not use `jp_printer` or consume ANSI strings from `jp_cli`.
+When multiple frontends need to share rendering logic, JP will extract a
+target-neutral view model or styled-span representation rather than routing
+non-CLI frontends through terminal bytes.
 
 #### 3. Terminal sink
 
-`jp_printer` remains CLI-specific.
-It receives bytes and adapts them to the terminal target.
+`jp_printer` is CLI-specific: it receives formatted byte streams and adapts them
+to each output target.
 
-The sink owns:
+The sink is responsible for:
 
-- per-target color enablement,
-- SGR color downgrading,
-- stripping color when disabled,
-- stripping unsafe control sequences from normal content,
-- preserving safe text attributes where allowed,
-- correct handling of escape sequences split across writes.
+- enabling or disabling color per output target,
+- downgrading SGR colors to the target's color depth, or stripping them when
+  color is disabled,
+- stripping unsafe control sequences from normal content while preserving
+  allowed text attributes,
+- reassembling escape sequences split across writes.
 
-The sink does not own:
-
-- scope resolution,
-- markdown semantics,
-- tool-call semantics,
-- syntect theme selection,
-- web/TUI/native rendering decisions.
+The sink does not resolve style scopes, interpret markdown or tool-call
+semantics, select a `syntect` theme, or participate in web, TUI, or native
+rendering.
 
 ### Terminal profile
 
@@ -180,9 +174,9 @@ pub enum ColorScheme {
 }
 ```
 
-Color capability is terminal-wide.
-Color emission is per target.
-A redirected stdout must not disable styled stderr or `/dev/tty` prompt output.
+Color capability (`ColorProfile`) is detected once for the terminal, whereas
+color emission is decided per output target so that redirecting stdout does not
+disable color on stderr or `/dev/tty` prompts:
 
 ```rust
 pub struct TargetColorProfile {
@@ -192,64 +186,63 @@ pub struct TargetColorProfile {
 ```
 
 `PrintTarget::Out`, `PrintTarget::Err`, and `PrintTarget::Tty` each receive
-their own target profile.
+their own `TargetColorProfile`.
 
 ### Environment and config precedence
 
-Color enablement for each target is resolved in this order:
+Per-target color enablement resolves in this order:
 
 1. Explicit JP config or CLI override.
-2. `NO_COLOR` disables foreground and background color.
-3. `CLICOLOR_FORCE` enables color even when the target is not a TTY, unless
+2. `NO_COLOR`: disables foreground and background color.
+3. `CLICOLOR_FORCE`: enables color even when the target is not a TTY, unless
    `NO_COLOR` is set.
-4. `CLICOLOR=0` disables color.
-5. The target's own TTY state enables color.
-6. Color is disabled.
+4. `CLICOLOR=0`: disables color.
+5. Target TTY state: enabled when the target is a TTY, disabled otherwise.
 
-Color depth is resolved terminal-wide in this order:
+Terminal-wide color depth resolves in this order:
 
-1. Explicit `style.terminal.color_depth`.
-2. `COLORTERM=truecolor` or `COLORTERM=24bit` selects truecolor.
-3. `TERM` containing `256color` selects ANSI 256.
-4. Other color-capable `TERM` values select ANSI 16.
-5. Otherwise, no color.
+1. Explicit `style.terminal.color_depth` setting.
+2. `COLORTERM=truecolor` or `COLORTERM=24bit`: selects `Truecolor`.
+3. `TERM` containing `256color`: selects `Ansi256`.
+4. Any other color-capable `TERM` value: selects `Ansi16`.
+5. Fallback: `None` (no color).
 
-Background scheme is resolved terminal-wide in this order:
+Terminal-wide background scheme resolves in this order:
 
-1. Explicit `style.terminal.background`.
+1. Explicit `style.terminal.background` setting.
 2. `COLORFGBG`, when present and parseable.
 3. A short-timeout query against the controlling terminal, when available.
-4. `None`.
+4. Fallback: `None` (unknown).
 
-`None` is not dark.
-If the scheme is unknown, any default style that sets a background must either
-set a matching foreground or skip the background.
-This is the readability rule that prevents dark inline-code backgrounds from
-inheriting black terminal text.
+An unknown scheme (`None`) does not default to dark.
+When the background scheme is `None`, any default style that sets a background
+color must also set a contrasting foreground color, or omit the background
+entirely.
+This prevents a dark inline-code background from pairing with a light terminal's
+black default text.
 
 ### Startup order
 
-The configured printer cannot be fully constructed before config is loaded, but
-JP still needs sane behavior for bootstrap errors.
+Because `Printer` depends on the loaded configuration, JP initializes terminal
+styling in stages so early startup errors can still be printed:
 
-Startup proceeds as follows:
+1. Emit any pre-config bootstrap output as plain text or minimal unthemed ANSI.
+2. Load configuration.
+3. Detect TTY state for stdout, stderr, and the controlling terminal.
+4. Resolve `ColorProfile` from configuration, environment variables, and
+   terminal queries.
+5. Configure `Printer` with the resolved per-target profiles.
+6. Run the command.
 
-1. Early bootstrap output uses plain text or minimal unthemed ANSI only.
-2. Load config.
-3. Detect per-target TTY state for stdout, stderr, and the controlling terminal.
-4. Resolve `ColorProfile` from config, environment, and terminal detection.
-5. Construct or update `Printer` with per-target profiles.
-6. Run command rendering.
-
-Background scheme detection queries the controlling terminal when available.
-It does not blindly query stdout, because stdout may be redirected while
-`/dev/tty` still exists for prompts.
+To detect the background scheme, JP queries the controlling terminal
+(`/dev/tty`) rather than stdout, which may be redirected to a pipe or file even
+in an interactive session.
 
 ### Terminal byte adaptation
 
-`jp_printer` extends the current `AnsiStripper` model into an ANSI adapter.
-The adapter keeps a persistent `vte::Parser` per sink so split escape sequences
-are handled correctly.
+`jp_printer` extends the `AnsiStripper` model into an ANSI adapter with a
+persistent `vte::Parser` per sink so escape sequences split across writes are
+handled intact.
 
 For normal content writes:
 
@@ -260,107 +253,109 @@ For normal content writes:
 | OSC 8 hyperlinks                              | Preserve for terminal text output | Strip                       |
 | Cursor movement, erase, title, clipboard, etc | Strip from normal content         | Strip                       |
 
-JP-owned cursor and erase controls, such as progress-line redraws, use a trusted
-control path on the printer rather than being written as normal content.
-The safe failure mode is losing a progress redraw, not leaking relayed control
-sequences from tool output.
+Cursor and erase sequences emitted by JP itself, such as progress-line redraws,
+go through a dedicated control method on `Printer` rather than normal content
+writes.
+Stripping cursor controls from normal content ensures that relayed tool output
+cannot manipulate the terminal; if JP accidentally writes a control sequence
+through the normal path, it simply loses the redraw.
 
 ### Relationship to RFD 084
 
 [RFD 084] defines configurable markdown element coloring inside `jp_md`.
-This RFD keeps that direction but changes the boundary:
+This RFD preserves that model while adjusting the crate boundaries:
 
-- Markdown element scopes resolve in `jp_md`, where markdown context exists.
-- `jp_md` may emit canonical terminal styles for the CLI, but terminal depth
-  adaptation happens in `jp_printer`.
-- `jp_style` owns shared style values and palettes, not `syntect::Theme`.
-- The deprecated `style.inline_code.background` key maps to
-  `style.markdown.elements.inline_code.body.bg` during config loading.
+- `jp_md` resolves markdown element scopes, where the markdown AST context is
+  available.
+- `jp_md` emits canonical terminal styles for the CLI, while `jp_printer` adapts
+  color depth to the target terminal.
+- `jp_style` owns shared style types and palettes, whereas `syntect::Theme`
+  stays in `jp_md`.
+- Config loading maps the deprecated `style.inline_code.background` key to
+  `style.markdown.elements.inline_code.body.bg`.
 
 ## Drawbacks
 
-- The scope taxonomy becomes user-facing config API.
-  Scope names must be stable once shipped.
-- The terminal sink parses output that it writes.
-  This adds runtime overhead, especially for syntax-highlighted code with many
-  color changes.
-- The implementation crosses several crates: `jp_style`, `jp_term`,
+- **Public scope taxonomy**: Scope names become part of the user-facing
+  configuration schema and must remain stable once shipped.
+- **Sink parsing overhead**: `jp_printer` parses all terminal output with
+  `vte::Parser`, adding runtime cost on output with frequent color changes such
+  as syntax-highlighted code.
+- **Cross-crate footprint**: The change spans `jp_style`, `jp_term`,
   `jp_printer`, `jp_md`, `jp_cli`, and `jp_config`.
-- Light and dark default themes require curation.
-  Automatic downgrade alone does not guarantee pleasant colors.
-- Configuration migration touches persisted conversation config and deltas, not
-  only user TOML files.
+- **Theme curation**: Automatic color-depth downgrading does not make a dark
+  palette readable on a light background; both light and dark default themes
+  must be curated.
+- **Conversation config migration**: Renaming config keys affects persisted
+  conversation configs and config deltas in addition to user TOML files.
 
 ## Alternatives
 
 ### Set an inline-code foreground only
 
-JP could fix the reported inline-code failure by setting a foreground whenever
-inline code sets a background.
-This is a useful emergency patch, but it does not fix truecolor output in
-256-color terminals and leaves the one-off style plumbing in place.
+Setting an explicit foreground color whenever inline code sets a background
+would fix the immediate readability bug on light terminals, but it leaves
+256-color terminals broken and keeps one-off style configuration in place.
 
 ### Emit ANSI 256 colors everywhere
 
-JP could avoid truecolor and use ANSI 256 by default.
-This fixes Apple Terminal at the cost of worse output on terminals that support
-truecolor.
-It also does not solve light/dark readability or frontend-neutral styling.
+Emitting only ANSI 256 colors by default would fix Apple Terminal at the expense
+of color fidelity on truecolor terminals, while doing nothing for light-terminal
+readability or frontend-neutral styling.
 
 ### Put scope resolution in `jp_printer`
 
-The printer receives bytes, not semantic nodes.
-By the time output reaches the sink, `markdown.inline_code.body` and
-`tool_call.function_name` have both become SGR sequences plus text.
-Putting scope resolution there would require callers to annotate every print
-with provenance, which makes correctness depend on every call site remembering
-to classify output.
+`jp_printer` receives raw bytes rather than semantic nodes; by the time output
+reaches the sink, `markdown.inline_code.body` and `tool_call.function_name` are
+indistinguishable SGR sequences.
+Resolving scopes in the sink would require every caller to tag each write with
+its scope, making correctness depend on call-site discipline.
 
 ### Build a generic frontend abstraction now
 
-A web UI, TUI, and native app can share `jp_style`, but they should not share a
-terminal printer.
-A generic view-model layer can be extracted when a second frontend needs shared
-rendering.
-Defining it before that creates abstraction without a second implementation to
-validate it.
+While web, TUI, and native frontends can share `jp_style`, extracting a shared
+view-model layer before a second frontend exists would force us to design the
+abstraction without a concrete implementation to validate it.
 
 ### Generate or set the terminal's 256-color palette
 
-The [color256] writeup shows how a terminal can generate its 256-color palette
-from base16 colors.
-JP adopts the base16 role vocabulary as a style model, but it must not reprogram
-a user's terminal palette as part of normal output.
+The [color256] writeup demonstrates how to derive a terminal's 256-color palette
+from a base16 theme.
+JP adopts base16 palette roles in `jp_style`, but reprogramming the user's
+terminal palette via escape sequences would alter their terminal state outside
+JP.
 
 ## Non-Goals
 
-- Build the web, TUI, or native frontend.
-- Route non-CLI frontends through `jp_cli` or `jp_printer`.
-- Define a generic frontend view-model abstraction before a second frontend
-  needs it.
-- Move `conversation.tools.*.style.parameters` into `style.tool_call`.
-- Replace `syntect` or move `syntect::Theme` into `jp_style`.
-- Reprogram the terminal's 256-color palette.
-- Define the full trust policy for tool-emitted terminal controls.
-  This RFD sets the CLI sink default; the broader tool trust model belongs with
-  [RFD 075].
+- Building a web, TUI, or native frontend, or defining a generic frontend
+  view-model abstraction before a second frontend exists.
+- Routing non-CLI frontends through `jp_cli` or `jp_printer`.
+- Moving `conversation.tools.*.style.parameters` into `style.tool_call`.
+- Replacing `syntect` or moving `syntect::Theme` into `jp_style`.
+- Reprogramming the terminal's 256-color palette.
+- Defining the full trust policy for terminal control sequences emitted by
+  tools.
+  This RFD specifies the default filtering in `jp_printer`; the broader tool
+  sandbox and trust model belongs to [RFD 075].
 
 ## Risks and Open Questions
 
-- **Performance:** parsing and adapting ANSI in the sink costs CPU.
+- **Performance**: Parsing and adapting ANSI sequences in `jp_printer` adds CPU
+  overhead.
   The adapter should cache RGB-to-ANSI conversions per `ColorProfile`.
-- **Scheme detection reliability:** terminal background queries can fail or time
+- **Scheme detection reliability**: Terminal background queries can fail or time
   out.
-  `None` remains a first-class result with a readability fallback.
-- **Migration timing:** `style.inline_code.background` and
-  `style.markdown.theme` are already serialized in configs and conversation
-  deltas.
-  They need explicit aliases before any field is removed from the schema.
-- **Scope naming:** markdown scopes can follow [RFD 084], but chrome scopes need
-  a smaller first set based on existing rendered elements.
-- **Bootstrap output:** errors before config loading stay unthemed.
-  The user experience must remain readable but does not need the full style
-  system.
+  `ColorScheme` detection treats `None` as a first-class outcome and falls back
+  to styles that remain readable on any background.
+- **Migration timing**: `style.inline_code.background` and
+  `style.markdown.theme` already appear in user config files and persisted
+  conversation deltas.
+  Both keys must remain supported as aliases before being removed from the
+  schema.
+- **Scope naming**: Markdown scopes follow [RFD 084], whereas CLI chrome scopes
+  should start with a minimal set covering elements JP already renders.
+- **Bootstrap output**: Errors emitted before configuration loads remain
+  unthemed, using plain text or minimal ANSI that is readable on any terminal.
 
 ## Implementation Plan
 
@@ -370,10 +365,11 @@ a user's terminal palette as part of normal output.
   `jp_term`.
 - Add `style.terminal.color_depth` and `style.terminal.background` to
   `jp_config`.
-- Extend `jp_printer` from raw-or-strip sinks to per-target ANSI adapters.
-- Downgrade SGR colors to truecolor, ANSI 256, ANSI 16, or no color based on the
-  target profile.
-- Preserve split-escape correctness with a persistent parser per sink.
+- Replace the raw-or-strip sinks in `jp_printer` with per-target ANSI adapters
+  that use a persistent `vte::Parser` to handle escape sequences split across
+  writes.
+- Downgrade SGR colors to `Truecolor`, `Ansi256`, `Ansi16`, or `None` based on
+  the target profile.
 - Add tests for split CSI sequences, typewriter output, stdout redirection with
   styled stderr, and Apple Terminal-style `TERM=xterm-256color` detection.
 
@@ -382,10 +378,10 @@ This phase fixes truecolor output in 256-color terminals and can merge before
 
 ### Phase 2: Inline-code readability
 
-- Teach the CLI markdown renderer about the resolved `ColorScheme`.
-- Apply the rule that unknown-scheme background-bearing defaults must set both
-  foreground and background or set neither.
-- Add light-scheme and unknown-scheme snapshot tests for inline code.
+- Pass the resolved `ColorScheme` to the CLI markdown renderer in `jp_md`.
+- Ensure default styles that set a background color also set a foreground color
+  (or omit the background) when `ColorScheme` is unknown.
+- Add snapshot tests for inline code under light and unknown color schemes.
 
 This phase fixes the black-on-dark inline-code failure.
 
@@ -394,9 +390,9 @@ This phase fixes the black-on-dark inline-code failure.
 - Add `jp_style` with `Style`, `Color`, `Palette`, `Scope`, and stylesheet
   resolution.
 - Align [RFD 084]'s markdown element tree with `jp_style`.
-- Keep `syntect::Theme` selection in `jp_md` or the CLI formatter construction
-  path, not in `jp_style`.
-- Replace one-off inline-code background plumbing with
+- Keep `syntect::Theme` selection in `jp_md` or CLI formatter construction
+  rather than `jp_style`.
+- Replace the standalone inline-code background setting with
   `style.markdown.elements.inline_code.body.bg`.
 - Add config aliases for `style.inline_code.background` and
   `style.markdown.theme`.
@@ -405,22 +401,19 @@ This phase depends on Phase 2.
 
 ### Phase 4: CLI chrome scopes
 
-- Add a small first set of chrome scopes where semantic context is still
-  present: role header label, role header suffix, tool call function name,
-  progress label, and progress timer.
-- Resolve those scopes in `jp_cli` render modules before writing to the printer.
-- Keep behavioral settings such as `style.tool_call.show`,
-  `style.tool_call.progress.*`, and `conversation.tools.*.style.parameters` in
-  their current config homes.
+- Define the initial CLI chrome scopes: role header label, role header suffix,
+  tool call function name, progress label, and progress timer.
+- Resolve these scopes in `jp_cli` render modules before writing to `Printer`.
+- Leave behavioral settings (`style.tool_call.show`,
+  `style.tool_call.progress.*`, and `conversation.tools.*.style.parameters`) at
+  their existing config paths.
 
 This phase depends on Phase 3.
 
 ### Phase 5: Follow-on frontend sharing
 
-When a second frontend needs shared rendering, extract a target-neutral view
-model or styled-span layer.
-This phase is intentionally deferred until the web, TUI, or native frontend
-exercises the shared boundary.
+Extract a target-neutral view model or styled-span layer once a web, TUI, or
+native frontend requires shared rendering.
 
 ## References
 
@@ -432,10 +425,9 @@ exercises the shared boundary.
 - [RFD 084]: configurable markdown element coloring.
   This RFD reuses the markdown scope direction and moves shared style values
   into `jp_style`.
-- [RFD 096]: terminal output sanitization for untrusted content.
-  Its sanitizer neutralizes untrusted content at render-pipeline ingress,
-  upstream of any formatter this RFD proposes; this RFD's design owes it no
-  changes.
+- [RFD 096]: terminal output sanitization for untrusted content, which sanitizes
+  untrusted input at render-pipeline ingress upstream of the formatters and sink
+  adapters described here.
 - [color256]: an informative writeup on generating 256-color palettes from
   base16 themes.
 

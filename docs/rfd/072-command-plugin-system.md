@@ -10,7 +10,7 @@
 
 ## Summary
 
-This RFD introduces a command plugin system in which standalone binaries
+This RFD introduces a command plugin system where standalone binaries
 (`jp-<name>`) extend JP with new subcommands over a JSON-lines protocol on stdin
 and stdout.
 JP handles workspace discovery, configuration loading, conversation locking,
@@ -21,45 +21,43 @@ processes that own subcommand execution.
 
 ## Motivation
 
-JP's functionality is growing beyond its core query loop.
-An ongoing experiment with a web UI is the first example: a long-running server
-that reads (and will soon write) conversation data.
-Possible future candidates include HTTP APIs, TUI dashboards, import/export
-tools, and IDE integrations.
+JP is growing beyond its core query loop.
+The web UI experiment is the first example: a long-running server that reads
+(and will soon write) conversation data.
+Future candidates include HTTP APIs, TUI dashboards, import/export tools, and
+IDE integrations.
 
-Today, adding any of these means compiling them into the `jp` binary.
-This has costs:
+Compiling these extensions into the `jp` binary has three costs:
 
 - **Binary size**: The web server pulls in axum, hyper, tower, and maud.
   Every user pays this cost whether they use the web UI or not.
-- **Coupling**: Every extension must be Rust, must link against JP's internal
-  crates, and must be wired into the `Commands` enum and startup pipeline.
+- **Coupling**: Every extension must be written in Rust, link against JP's
+  internal crates, and wire into the `Commands` enum and startup pipeline.
 - **Release cadence**: A bug fix in the web UI requires a full JP release.
 
-A plugin system solves these problems.
-But the design must handle a tension that cargo-style "just exec the binary"
-dispatch does not face: JP's startup pipeline provides services (workspace
-discovery, config loading, conversation locking, structured output) that plugins
-need.
-If we push all of that into the plugin, every plugin author re-implements JP's
-bootstrap — and gets it wrong (we already hit this with the web server missing
-`.with_local_storage()`).
+A plugin system avoids these costs, but it cannot use Cargo's "exec the binary"
+dispatch.
+Plugins need services from JP's startup pipeline: workspace discovery, config
+loading, conversation locking, and structured output.
+Pushing those responsibilities into plugins forces every plugin author to
+re-implement JP's bootstrap, which is error-prone (the web server already hit
+this by omitting `.with_local_storage()`).
 
 The goal is a plugin system where:
 
-1. JP remains the orchestrator — it finds the workspace, loads config, manages
+1. JP remains the orchestrator: it finds the workspace, loads config, manages
    locks, and formats output.
-2. Plugins are standalone executables that can be written in any language.
-3. A shell script can be a useful plugin.
-4. A plugin that starts read-only (web viewer) can gain write access (chat)
-   without changing its architecture.
+2. Plugins are standalone executables written in any language, including shell
+   scripts.
+3. A plugin that starts read-only (such as a web viewer) can gain write access
+   (such as chat) without changing its architecture.
 
 ## Design
 
 ### User Experience
 
-Plugins are invoked as JP subcommands, at the root or under a command group a
-plugin or the registry provides:
+Plugins are invoked as JP subcommands, either at the root or under a command
+group provided by a plugin or the registry:
 
 ```txt
 jp serve                        # runs jp-serve plugin
@@ -68,27 +66,26 @@ jp export --format html         # runs jp-export plugin
 jp dashboard                    # runs jp-dashboard plugin
 ```
 
-No built-in command group accepts plugin children yet: `jp conversation export`
-is a built-in group's unknown subcommand, not a plugin.
-Opening a built-in group to plugins is future work (see
-[Non-Goals](#non-goals)).
+Built-in command groups do not accept plugin subcommands: `jp conversation
+export` is an unknown subcommand on a built-in group, not a plugin.
+Opening built-in groups to plugins is future work (see [Non-Goals](#non-goals)).
 
-Each plugin declares the command path it provides in its manifest, a line of
-JSON embedded in the binary that the host reads without running it (see [Plugin
-Manifest](#plugin-manifest)).
+Each plugin embeds a manifest in its binary: a single line of JSON that declares
+the command path the plugin provides, which the host reads without running the
+binary (see [Plugin Manifest](#plugin-manifest)).
 A plugin whose manifest claims `["serve", "web"]` handles `jp serve web`
 regardless of its binary name.
-The binary name marks a file as a plugin, through its `jp-` prefix, and names
-the plugin's configuration (see [Plugin Identity](#plugin-identity)).
+The `jp-` prefix on the binary name marks the file as a plugin, and the name
+after `jp-` keys the plugin's configuration (see [Plugin
+Identity](#plugin-identity)).
 
-A plugin cannot shadow a built-in command at any level — JP checks built-in
-commands first.
+JP checks built-in commands first, so a plugin cannot shadow a built-in command
+at any level.
 
-Official plugins, the ones the JP project publishes, behave as if they were part
-of the `jp` binary but ship separately: typing an official command installs its
-plugin on first use.
-Third-party plugins are installed only when the user asks, the way `cargo
-install` puts a `cargo-*` subcommand in place:
+Official plugins (published by the JP project) ship separately from `jp` but
+install automatically the first time the user runs their command.
+Third-party plugins are installed only on request, similar to `cargo install`
+for `cargo-*` subcommands:
 
 ```txt
 $ jp foo bar
@@ -104,43 +101,41 @@ Install it? [y/N] y
 $ jp foo bar
 ```
 
-Placing a `jp-<name>` binary that carries a manifest on `$PATH` installs a
-plugin as well; its first run asks before running it ([RFD 077]).
+Users can also install a plugin by placing a `jp-<name>` binary with a manifest
+on `$PATH`; JP prompts for approval before the first run ([RFD 077]).
 
 When JP encounters an unknown subcommand, it:
 
-1. Collects the claims: the manifests of the `jp-*` binaries in the user-local
-   install directory (`$XDG_DATA_HOME/jp/plugins/command/`) and on `$PATH`, the
-   claims approvals recorded for binaries without a readable manifest, and the
-   official entries of the cached registry.
-   When nothing claims the command and the cache is missing or more than a day
-   old, it fetches the registry once and collects again.
-2. Picks the longest claimed path the arguments start with, under the rules in
-   [Phase 5](#implementation-plan).
-   The remaining arguments go to that plugin.
-3. If the claim is an official plugin that is not installed, downloads it and
-   checks it against the registry's checksum.
-4. Admits the binary: the `run` policy, any pinned checksum, and the approval
-   store ([RFD 077]).
+1. Collects command claims from three sources: manifests in `jp-*` binaries in
+   the user-local install directory (`$XDG_DATA_HOME/jp/plugins/command/`) and
+   on `$PATH`, approval records for binaries without a readable manifest, and
+   official entries in the cached registry.
+   If no source claims the command and the registry cache is missing or older
+   than a day, JP fetches the registry once and collects claims again.
+2. Selects the longest claimed command path that matches the CLI arguments,
+   following the precedence rules in [Phase 5](#implementation-plan).
+   The remaining arguments are passed to the selected plugin.
+3. Downloads the binary and verifies its checksum against the registry if the
+   winning claim is an uninstalled official plugin.
+4. Admits the binary against the `run` policy, any pinned checksum, and the
+   approval store ([RFD 077]).
 5. Spawns the plugin binary and communicates over the protocol.
 
-A third-party registry entry claims no command.
-It is a catalog entry for `jp plugin list` and `jp plugin install`, and the
-source of the hint above.
+Third-party registry entries do not claim commands during routing.
+They serve as catalog entries for `jp plugin list`, `jp plugin install`, and the
+unrecognized-subcommand install hint.
 
-`JP_NO_PLUGIN_DOWNLOAD=1` turns off every network request JP makes for plugins
-without being asked: fetching the registry, and downloading an official plugin
-on first use.
-`jp plugin list`, `install`, and `update` still reach the network, because
-running them asks for it.
-A packager that ships official plugins, such as a system package manager, puts
-their binaries on `$PATH`, and JP uses those instead of downloading.
+Setting `JP_NO_PLUGIN_DOWNLOAD=1` disables automatic network requests for
+plugins, including registry fetches and first-use downloads of official plugins.
+Explicit commands (`jp plugin list`, `install`, and `update`) still use the
+network.
+System package managers can ship official plugins by placing their binaries on
+`$PATH`, which JP uses instead of downloading.
 
 Plugin management commands (`jp plugin list`, `install`, `uninstall`, `update`,
-`approve`, and `revoke`) are a built-in subcommand group, not external plugins.
-They need no workspace and work from any directory, including outside a
-workspace.
-The `jp plugin` subcommand takes priority over any external `jp-plugin` binary
+`approve`, and `revoke`) form a built-in subcommand group that runs from any
+directory without a workspace.
+Because `jp plugin` is built in, it takes priority over any `jp-plugin` binary
 on `$PATH`.
 
 ### Channel Model
@@ -154,61 +149,54 @@ JP spawns the plugin as a child process with three channels:
 | **stderr** | plugin → JP | Captured and forwarded to JP's tracing  |
 |            |             | subsystem at `trace` level              |
 
-The plugin never writes directly to the user's terminal.
-All user-facing output goes through the protocol as `print` commands, which JP
-routes through its printer, so a plugin's output follows the host's `--quiet`
-and `--format` the way the rules in [Output](#output) describe.
+The plugin never writes directly to the terminal.
+All user-facing output is sent as `print` protocol messages, which JP routes
+through its printer so `--quiet` and `--format` apply consistently (see
+[Output](#output)).
 
-Stderr is captured line-by-line and emitted as `trace`-level tracing events
+JP captures stderr line by line and emits each line as a `trace`-level event
 attributed to the plugin.
-This provides a zero-effort debugging channel for plugin authors —
-`fprintf(stderr, ...)` in C, `eprintln!()` in Rust, or `echo >&2` in shell —
-without polluting user output.
+Plugin authors can write diagnostics to stderr (`fprintf(stderr, ...)` in C,
+`eprintln!()` in Rust, or `echo >&2` in shell) without corrupting the protocol
+stream or polluting user output.
 
 ### Protocol
 
-JSON-lines over stdin/stdout.
-One JSON object per line, no framing beyond newlines.
-Each message has a `type` field.
+The protocol uses JSON-lines over stdin and stdout: one JSON object per line,
+delimited by newlines, with a `type` field on every message.
 
 #### Stdout Hygiene
 
-Using stdout for protocol framing means any non-protocol output from the plugin
-(a stray `printf` in a C library, an uncaught panic message) corrupts the
-JSON-lines stream.
-This is a known trade-off shared with LSP, MCP, and git remote helpers, all of
-which use stdin/stdout successfully.
+Because stdout carries protocol messages, any stray output on stdout (such as a
+`printf` in a C library or an uncaught panic message) corrupts the JSON-lines
+stream.
+LSP, MCP, and git remote helpers share this trade-off.
 
-The mitigation is straightforward: stderr is the designated escape valve.
-Plugin authors use stderr for all debugging output (`eprintln!()` in Rust, `echo
+To avoid corrupting stdout, plugins write all diagnostic output to stderr
+(`eprintln!()` in Rust, `echo >&2` in shell, `fprintf(stderr, ...)` in C), which
+JP forwards to tracing.
+Stdout is reserved exclusively for protocol messages.
 
-> &2`in shell,`fprintf(stderr, ...)` in C), and JP forwards it to tracing.
-> The protocol contract is simple: stdout is exclusively for protocol messages.
-
-Stdin/stdout is chosen because it is the simplest cross-language, cross-platform
-transport — no socket setup, no file descriptor passing, and it works in shell
-scripts with `echo` and `read`.
-An alternative transport (FD 3/4, domain sockets) could be explored in a future
-protocol version if stdout pollution proves to be a recurring problem in
-practice, but the added complexity is not justified given the current design
-goal of shell-script accessibility.
+Stdin and stdout need no socket setup or file descriptor passing, and shell
+scripts can speak the protocol with `echo` and `read`.
+Future protocol versions could add an alternative transport (such as FD 3/4 or
+domain sockets) if stdout pollution becomes a problem in practice.
 
 #### Request IDs
 
-Plugin-to-JP messages may include an optional `id` field (string).
-When present, JP echoes the same `id` in the corresponding response.
-This allows multi-threaded plugins to issue concurrent requests and match
-responses to the originating request.
+Plugin-to-JP requests may include an optional string `id` field, which JP echoes
+in the corresponding response.
+Multi-threaded plugins use `id` to correlate responses with concurrent requests.
 
-For synchronous plugins (shell scripts, single-threaded tools), `id` can be
-omitted entirely.
-JP processes requests in order, and a request answered immediately is answered
-in that order, so correlation is implicit.
+Synchronous plugins (such as shell scripts and single-threaded tools) can omit
+`id` on synchronous requests.
+JP processes requests in order and replies to immediate requests in that same
+order, so correlation is implicit.
 
-`query` and `interrupt` are answered later, from the turn they act on, and their
-replies can arrive between replies to requests sent after them.
-A plugin that sends either must set `id`: an `interrupt` without one is
-performed and never answered.
+`query` and `interrupt` complete asynchronously on the turn they target, so
+their responses can arrive out of order relative to later requests.
+A plugin sending `query` or `interrupt` must set `id`; JP executes an
+`interrupt` without an `id` but sends no response.
 
 ```json
 {
@@ -293,16 +281,16 @@ message that the host displays through its normal error rendering pipeline:
 }
 ```
 
-JP then waits for any turn the plugin delegated to finish, and exits with the
-given code.
-If the plugin process exits without sending `exit` (crash, signal), JP detects
-the EOF, waits the same way, and exits with code 1.
+JP waits for any turn the plugin delegated to finish, then exits with the given
+code.
+If the plugin process exits without sending `exit` (for example, on a crash or
+signal), JP detects EOF on stdout, waits for any delegated turn to finish, and
+exits with code 1.
 
-A delegated turn outlives the plugin that asked for it.
+A delegated turn outlives the plugin that requested it.
 Its conversation stays locked until the turn ends, and the host waits for it
-without a time limit, because the work is the user's.
-A run that has to end sooner goes through the interrupt ladder, which stops the
-turn.
+without a timeout because the turn performs user work.
+The user can stop a running turn early through the interrupt ladder.
 
 #### Shutdown
 
@@ -314,112 +302,113 @@ When JP receives a signal (SIGINT, SIGTERM), it sends:
 }
 ```
 
-The plugin should begin graceful shutdown and eventually send `exit`.
-If the plugin does not exit within a grace period (configurable, default 5
+The plugin begins graceful shutdown and sends `exit` when done.
+If the plugin does not exit within a configurable grace period (default 5
 seconds), JP terminates it.
 
-JP owns the plugin's process tree for the lifetime of the invocation, not only
-the process it spawned.
+JP owns the plugin's entire process tree for the lifetime of the invocation, not
+just the spawned child process.
 Termination kills the plugin's process group on Unix and its job object on
-Windows, so a worker a shell-script plugin started cannot outlive it, keep a
-port bound, or hold the pipes JP waits on.
-A descendant that deliberately detaches from the group is unsupported.
+Windows, so background workers started by a shell-script plugin cannot outlive
+the plugin, hold a port open, or keep the stdout pipe open.
+Descendants that deliberately detach from the process group are unsupported.
 
-To ensure the plugin receives `Shutdown` via the protocol rather than being
-killed directly by the OS signal, JP spawns the child in its own process group
-(`process_group(0)` on Unix).
-This prevents SIGINT/SIGTERM from reaching the child directly — only the host
-receives the signal and relays it through the protocol.
+JP spawns the plugin in its own process group (`process_group(0)` on Unix) so OS
+signals (SIGINT, SIGTERM) reach only the host, which relays them as `shutdown`
+protocol messages rather than letting the OS kill the child directly.
 
 #### Plugin Manifest
 
-Every plugin binary carries a manifest: one line of JSON, embedded in the file,
-that the host reads without running the binary.
+Every plugin binary embeds a manifest: a single line of JSON that the host reads
+without executing the binary.
 
 ```txt
 jp-plugin/v1 {"protocol":1,"description":"Read-only web UI for browsing conversations","command":["serve","web"]}
 ```
 
-The host searches the file for `jp-plugin/v` followed by a version number and a
-space, and parses the JSON after it, up to the first newline or NUL byte.
-Where the line sits is up to the plugin:
+The host scans the binary for `jp-plugin/v` followed by a version number and a
+space, then parses the JSON up to the first newline or NUL byte.
+Where the line sits in the file depends on how the plugin is built:
 
-- A compiled plugin carries it as a string constant its code references, so the
-  linker keeps it.
-  In Rust, `jp_plugin` builds the constant and the matching `describe` answer
-  from one declaration.
-- A script carries it in a comment on any line after the shebang, such as `#
-  jp-plugin/v1 {...}`.
-  Anything before the marker on that line is ignored.
+- Compiled plugins embed the manifest as a referenced string constant so the
+  linker retains it.
+  In Rust, a single `jp_plugin` declaration generates both the manifest constant
+  and the matching `describe` response.
+- Scripts place the manifest in a comment on any line after the shebang, such as
+  `# jp-plugin/v1 {...}`.
+  The host ignores any text before the `jp-plugin/v` marker on that line.
 
-The manifest holds only what the host needs before it has decided to run the
-plugin:
+The manifest contains only the metadata the host needs before deciding to run
+the plugin:
 
-- **`protocol`** (required): The lowest host protocol version the plugin needs,
-  the same number it states in `ready`.
-  A host that speaks less refuses the plugin before spawning it.
-- **`description`** (required): One line, shown in `jp -h` and in the approval
-  prompt.
-- **`command`** (required): The claimed command path.
-  `["serve", "web"]` claims `jp serve web`, whatever the binary is named, and a
-  segment may contain dashes.
+- **`protocol`** (required): The minimum host protocol version the plugin
+  requires, matching the version it reports in `ready`.
+  A host that supports only an older protocol version rejects the plugin before
+  spawning it.
+- **`description`** (required): A one-line summary shown in `jp -h` and in the
+  approval prompt.
+- **`command`** (required): The command path the plugin claims.
+  `["serve", "web"]` claims `jp serve web` regardless of the binary's filename,
+  and path segments may contain hyphens.
 
-The claims a manifest can make grow with the protocol.
-A claim an older host can safely ignore is added as an optional key, and a host
-ignores keys it does not know.
-A claim an older host must not ignore, such as [RFD 114]'s `workspace_scope:
-"multi"`, comes with a higher `protocol`, so an older host refuses the plugin
-rather than misreading it.
-The `v1` in the marker changes only when the framing changes, or when a field is
-removed or changes meaning; a host that finds a version it does not know reports
-the plugin as built for a newer `jp`.
+New manifest claims are added as the protocol evolves.
+Claims that older hosts can safely ignore are added as optional JSON keys, and
+hosts ignore unrecognized keys.
+Claims that change host dispatch semantics, such as [RFD 114]'s
+`workspace_scope: "multi"`, require a higher `protocol` version so older hosts
+reject the plugin instead of misinterpreting it.
+The `v1` marker version changes only if the framing changes or an existing field
+is removed or redefined; a host that encounters an unknown marker version
+reports that the plugin requires a newer `jp`.
 
 A manifest is valid when:
 
-- The marker occurs exactly once in the file.
-  Two could disagree, and the host would have to pick one.
-- The JSON after it is at most 64 KiB, is UTF-8, and parses.
-- No string in it holds a control character other than `\n` and `\t`.
-  The description reaches the terminal from a binary nobody has approved yet,
-  and an escape sequence in it would reach the terminal with it.
+- The marker appears exactly once in the file, preventing conflicting manifests
+  within the same binary.
+- The JSON payload is at most 64 KiB, is valid UTF-8, and parses as JSON.
+- No string value contains control characters other than `\n` and `\t`,
+  preventing terminal escape injection when `jp -h` or the approval prompt
+  prints the description of an unapproved binary.
 
-A binary without a valid manifest claims nothing.
-`jp -h` and `jp plugin list` show it by file name, with the reason, and the only
-way to route to it is `jp plugin approve <path>` ([RFD 077]), which records the
-manifest fields from its `describe` answer in the approval.
-That is also the path for a binary whose file hides the manifest, such as one
-compressed with UPX.
+A binary without a valid manifest claims no commands.
+`jp -h` and `jp plugin list` list it by filename along with the validation
+error.
+To route commands to a binary without a readable manifest (such as a binary
+compressed with UPX), the user runs `jp plugin approve <path>` ([RFD 077]),
+which runs `describe` and stores the returned manifest fields in the approval
+record.
 
 #### Plugin Identity
 
-A plugin's name is its file name without the `jp-` prefix, and without `.exe` on
-Windows.
-A plugin installed from the registry is written as `jp-{id}`, so its name is its
-registry `id`.
-The name keys its configuration (`plugins.command.<name>`), its approval, `jp
-plugin uninstall <name>`, and `jp plugin revoke <name>`.
-The claimed command path never does: it is asserted by the plugin, can change
-between versions, and a plugin may later claim more than one command.
+A plugin's name is its filename without the `jp-` prefix (and without `.exe` on
+Windows).
+Plugins installed from the registry are written as `jp-{id}`, so their plugin
+name matches their registry `id`.
+The plugin name keys configuration (`plugins.command.<name>`), approval records,
+`jp plugin uninstall <name>`, and `jp plugin revoke <name>`.
+The claimed command path is never used as an identity key: the plugin asserts it
+in its manifest, it can change across versions, and a single plugin may claim
+multiple commands in the future.
 
-A plugin is official when its name is the `id` of an official registry entry:
-the binary JP downloaded for that entry, or a copy of it that a packager put on
+A plugin is official when its name matches the `id` of an official registry
+entry, whether JP downloaded the binary or a system package manager placed it on
 `$PATH`.
-Every other binary is third-party, whatever it claims.
+Every other binary is third-party, regardless of the command path it claims.
 
-Two binaries with the same name conflict, whatever they claim.
-They would share one `run` policy, one pinned checksum, one set of options, and
-one approval, so approving one would approve the other.
-The host names both paths and runs neither.
-Renaming one resolves it, because the manifest, not the file name, decides what
-a plugin handles; when one is a copy JP installed, `jp plugin uninstall` removes
-it.
-Paths that resolve to the same file, such as two symlinks into one package
-store, are one binary.
+Two binaries with the same plugin name conflict regardless of what commands they
+claim, because they would share the same `run` policy, pinned checksum, options,
+and approval record.
+When a name conflict occurs, the host reports both paths and runs neither.
+Renaming one of the files resolves the conflict because routing uses the
+manifest rather than the filename; if one of the copies was installed by JP, `jp
+plugin uninstall` removes it.
+Multiple paths that resolve to the same underlying file (such as symlinks into a
+package store) count as a single binary.
 
 #### Tool Calls
 
-A plugin can serve tools to the assistant.
-The tool names the plugin as its source:
+A command plugin can also provide tools to the assistant.
+The tool configuration references the plugin in `source`:
 
 ```toml
 [conversation.tools.ticket_create]
@@ -431,14 +420,15 @@ type = "string"
 required = true
 ```
 
-`plugin.command.<plugin>` uses the configured tool name;
-`plugin.command.<plugin>.<tool>` names the tool the plugin knows it by.
-The `command` segment names the plugin kind, the same one that keys
-`plugins.command.<plugin>`.
-Parameters come from configuration, as they do for a `local` tool.
+`plugin.command.<plugin>` uses the configured tool name as the tool identifier,
+whereas `plugin.command.<plugin>.<tool>` specifies the tool name the plugin
+expects.
+The `command` segment identifies the plugin kind, matching the
+`plugins.command.<plugin>` configuration path.
+Tool parameters are declared in configuration, just as for `local` tools.
 
-For each attempt, JP starts the plugin and sends an `init` that carries a `tool`
-and no `args`:
+For each tool execution attempt, JP spawns the plugin and sends an `init`
+message with a `tool` payload and an empty `args` list:
 
 ```json
 {
@@ -462,74 +452,74 @@ and no `args`:
 }
 ```
 
-`config` and `options` are the query's resolved configuration, not the workspace
-root's: nested `.jp.toml` files, conversation config, and `--cfg` overrides all
-reach the plugin.
-`tool.options` is the tool's own `conversation.tools.<name>.options`.
+`config` and `options` contain the query's resolved configuration (including
+nested `.jp.toml` files, conversation config, and `--cfg` overrides), not the
+workspace root's base config.
+`tool.options` contains `conversation.tools.<name>.options`.
 
-`tool.action` is `run`, or `format_arguments` for a tool styled
-`style.parameters = "tool"`.
-A `format_arguments` call asks the plugin to describe the call for the user
-without acting on it; the content of its `success` outcome is shown verbatim
-above the call.
-It runs under the same admission, options, and access policy as the run, and the
-tool's `format` setting decides whether it runs before or after the user
-approves the call, as for a formatter command.
+`tool.action` is either `run` or, when the tool uses `style.parameters =
+"tool"`, `format_arguments`.
+A `format_arguments` call asks the plugin to render the tool call for display
+without executing it; JP prints the `content` of a `success` outcome verbatim
+above the tool call.
+`format_arguments` runs under the same admission, options, and access policy as
+`run`, and the tool's `format` setting controls whether it runs before or after
+user approval, matching custom formatter commands.
 
-The plugin answers with one `tool_outcome`, then `exit`:
+The plugin responds with a single `tool_outcome` message followed by `exit`:
 
 ```json
 { "type": "tool_outcome", "outcome": { "type": "success", "content": "Created T-0abc123" } }
 ```
 
-`outcome` has the shape a local tool prints on stdout: `success`, `error`, or
-`needs_input`.
-The call is finished by the `exit`: an outcome not followed by `exit` fails the
-call, as a plugin that answered and then crashed has not finished it.
-A question ends the attempt.
-JP runs the plugin again once it has an answer, with the answers so far in
-`tool.answers`.
+`outcome` uses the same schema that a `local` tool writes to stdout: `success`,
+`error`, or `needs_input`.
+The plugin must follow `tool_outcome` with `exit`; if the plugin exits without
+sending `exit`, the call fails so a post-outcome crash is not treated as a clean
+completion.
+Returning `needs_input` ends the current attempt.
+Once JP collects the user's answer, it spawns the plugin again with the
+accumulated answers in `tool.answers`.
 
-A tool call runs once, like a `local` tool's command.
-The plugin's stdin carries the `init` and is then closed, so a request the
-plugin sends during a tool call gets no answer: everything it needs is in
-`init`, and the turn owns the terminal.
-`print` output is dropped; the result is the outcome.
-A cancelled call kills the plugin, and on Unix every process it started, as it
-does a `local` tool's command.
-Tool calls need protocol 12.
+Each tool attempt is a one-shot invocation, like a `local` tool command.
+JP writes `init` to the plugin's stdin and closes the stream, so the plugin
+cannot send host requests during a tool call; `init` carries all required
+context, and the active turn owns the terminal.
+JP ignores `print` messages during tool execution and uses only `tool_outcome`.
+Cancelling a tool call kills the plugin and (on Unix) its process group,
+matching `local` tool cancellation.
+Tool calls require protocol version 12.
 
-A plugin tool runs under the same rules as a `local` tool.
-The tool's `run`, `result`, and `format` settings decide whether a call is asked
-about, edited, or skipped, exactly as for any other source.
-Its `access` grants, including those inherited from
-`conversation.tools.'*'.access` and added by `--mount`, are compiled by the host
-and sent as `tool.access`; the plugin enforces them, as a local tool binary
-does.
+Plugin tools follow the same execution policies as `local` tools.
+The tool's `run`, `result`, and `format` settings control whether JP prompts for
+approval, allows result editing, or skips execution.
+The host compiles the tool's `access` grants (including grants inherited from
+`conversation.tools.'*'.access` and added by `--mount`) into `tool.access`, and
+the plugin enforces them just as a local tool binary does.
 
-The plugin binary itself is admitted under `plugins.command.<plugin>.run`, the
-same way `jp <plugin>` admits it.
-Admission happens once per plugin when the turn starts, before any tool runs, so
-the user is never asked about a binary in the middle of a tool call.
-Answering "run this time" admits the binary for that turn.
-Without a terminal, a binary that would be asked about is refused, as `jp
-<plugin>` refuses it.
-Nothing is installed at turn start: an official plugin that is missing is
-refused, and `jp plugin install` or one `jp <plugin>` run fetches it.
+Before any tool runs, JP admits the plugin binary under
+`plugins.command.<plugin>.run`, using the same admission rules as `jp <plugin>`.
+Admission runs once per plugin at the start of a turn so the user is never
+prompted to approve a binary mid-turn.
+Selecting "run this time" admits the binary for the duration of the turn.
+When no terminal is attached, any binary that requires an approval prompt is
+rejected, matching `jp <plugin>`.
+Turn start never downloads plugins: if an official plugin binary is missing, JP
+rejects it until the user installs it with `jp plugin install` or runs `jp
+<plugin>` once.
 
-Admission decides on the binary's contents.
-Before each call the host hashes the binary again, and refuses the call if it
-changed since the turn started.
+Admission is bound to the binary's SHA-256 digest at turn start.
+Before each tool invocation, the host re-hashes the binary and rejects the call
+if the file changed on disk since the turn started.
 
-A plugin that is not admitted has its tools left out of the turn, and the turn
-names them and the reason on stderr; naming one of them with `--tool` fails the
-query instead.
+If a plugin is not admitted, JP omits its tools from the turn and prints the
+omitted tool names and reason to stderr; explicitly requesting one of those
+tools with `--tool` fails the query.
 
 #### Plugin Self-Description
 
-An admitted plugin describes itself in full over the protocol.
-This is used for `jp <plugin> -h` (showing plugin help) and for `jp plugin
-approve`.
+An admitted plugin can describe its full metadata over the protocol for `jp
+<plugin> -h` and `jp plugin approve`.
 
 Instead of `init`, JP sends:
 
@@ -558,54 +548,54 @@ The plugin responds with its metadata and exits:
 }
 ```
 
-The answer carries every manifest field, with the same meaning, and adds:
+The response includes every manifest field with the same meaning, plus:
 
 - **`name`**, **`version`** (required).
-- **`help`** (required): Shown for `jp <plugin> -h`.
-  It is computed when the plugin runs, so it can come from the same definition
-  the plugin parses its arguments with.
+- **`help`** (required): Rendered for `jp <plugin> -h`.
+  Because the plugin computes `help` at runtime, it can generate the text from
+  its own CLI parser definition.
 - **`author`**, **`repository`** (optional).
 
-The manifest and the answer come from one binary and must agree.
-The host compares them whenever it has both, and a `protocol` or claim that
-differs is an error naming the plugin, not a choice between the two.
-For a binary without a manifest, the answer is compared with the manifest fields
-its approval recorded.
+The embedded manifest and the `describe` response must agree.
+Whenever the host has both, it compares them and reports any mismatch in
+`protocol` or `command` as an error naming the plugin.
+For a binary without an embedded manifest, the host compares the `describe`
+response against the manifest fields stored in its approval record.
 
-A future RFD can introduce structured help text that enables the host to render
-plugin help through clap for consistent formatting.
+A future RFD can add structured help metadata so the host can format plugin help
+through `clap`.
 
-When a plugin binary is invoked directly (not through `jp`), it should detect
-that stdin is a TTY and print its own help to stderr before exiting.
+When a user invokes a plugin binary directly from the shell rather than through
+`jp`, the binary should detect that stdin is a TTY, print its help text to
+stderr, and exit.
 
-Admission — the `run` policy, a pinned checksum, approval of a `$PATH` binary
-([RFD 077]) — precedes every spawn of a plugin binary, including one that only
-answers `describe`.
-Sending `describe` does not make running an unapproved executable safe: it can
-do anything before it reads its first message.
+JP admits a plugin binary (checking the `run` policy, any pinned checksum, and
+`$PATH` binary approval per [RFD 077]) before every spawn, including `describe`.
+Spawning an unapproved binary just to send `describe` is unsafe because the
+executable can run arbitrary code before reading stdin.
 
-`jp -h` reads manifests and spawns nothing.
-Each plugin is listed under its claimed command path with its manifest's
-description, in a "Plugins:" section after the built-in commands.
-A binary without a valid manifest is listed under the manifest fields its
-approval recorded, or by its file name when it has no approval.
-Official commands whose plugin is not installed yet are listed from the registry
-cache, so they read as part of `jp` from the first run; `jp -h` fetches the
-registry when there is no cache, unless `JP_NO_PLUGIN_DOWNLOAD` is set.
-`jp <plugin> -h` goes through ordinary admission, prompting where the policy is
-`ask`, and shows the `help` from a fresh `describe`.
+`jp -h` reads manifests from disk and never spawns plugin binaries.
+It lists each plugin under its claimed command path with its manifest
+description in a "Plugins:" section below the built-in commands.
+Binaries without a valid manifest are listed using the metadata stored in their
+approval record, or by filename if unapproved.
+Uninstalled official plugins are listed from the registry cache so they appear
+in `jp -h` on a fresh installation; if no cache exists, `jp -h` fetches the
+registry unless `JP_NO_PLUGIN_DOWNLOAD` is set.
+Running `jp <plugin> -h` performs normal admission (prompting when the policy is
+`ask`) and spawns the plugin with `describe` to retrieve its full `help` text.
 
 #### Help Aggregation for Command Groups
 
-The registry supports `command_group` entries — command namespaces with no
+The registry supports `command_group` entries: command namespaces that have no
 binary.
-A group provides help text and lists sub-plugins, but does not execute any code.
-When the user runs `jp serve -h` and `serve` is a group:
+A group provides help text and lists sub-plugins without executing any code.
+When the user runs `jp serve -h` and `serve` is a command group, JP:
 
-1. JP reads the group's `description` and `suggests` list from the registry.
-2. Checks for local plugins whose manifest claims a path under `["serve", ...]`.
-3. Checks the registry for plugins under the same prefix that are not installed.
-4. Merges everything into the help output:
+1. Reads the group's `description` and `suggests` list from the registry.
+2. Scans local plugin manifests for claims under `["serve", ...]`.
+3. Checks the registry for uninstalled plugins under the same prefix.
+4. Merges the results into the help output:
 
 <!-- end list -->
 
@@ -622,33 +612,31 @@ Commands:
 Run `jp serve <command> -h` for more information.
 ```
 
-The "(not installed)" marker signals that an official subcommand is available
-but not yet downloaded; running `jp serve http-api` installs it.
-A third-party subcommand is listed with the command that installs it.
+The `(not installed)` marker indicates that an official subcommand is available
+in the registry and will be downloaded when the user runs `jp serve http-api`.
+Third-party subcommands show the `jp plugin install` command needed to install
+them.
 
-When a group is invoked without a subcommand (`jp serve`), JP prints the help
-text and exits with code 2, matching the behavior of built-in command groups
-like `jp conversation`.
+Invoking a command group without a subcommand (`jp serve`) prints the help text
+and exits with code 2, matching built-in command groups such as `jp
+conversation`.
 
-A real plugin can also have sub-plugins beneath it.
-When `jp serve -h` is requested and a plugin claims `serve`, JP admits it, sends
-`describe` to it, *and* checks local manifests and the registry for plugins
-whose command path extends `["serve", ...]`.
-Both the plugin's own help text and the discovered sub-plugins are merged into
-the output.
+An executable plugin can also have sub-plugins beneath it.
+When the user runs `jp serve -h` and a binary claims `serve`, JP admits the
+binary, sends `describe` to retrieve its help text, and merges in any local or
+registry sub-plugins whose command path extends `["serve", ...]`.
 
 #### Plugin Tracing
 
-Plugins can send structured log messages at any level through the protocol.
-JP re-emits these as tracing events under the `plugin` target at the specified
-level, making them visible in `jp -v` output and the trace log file.
+Plugins can send structured log messages at any level over the protocol.
+JP re-emits them as `tracing` events under the `plugin` target at the requested
+level, so they appear in `jp -v` output and the trace log file.
 
-For Rust plugins, this is best implemented as a custom `tracing::Layer` that
-serializes events as `PluginToHost::Log` messages on stdout.
-The layer can buffer events during startup and flush them once the protocol
-writer is available.
-Use `try_lock` on the shared stdout writer to avoid deadlocking when a tracing
-event fires while the writer is already held.
+Rust plugins can implement a `tracing::Layer` that serializes events as
+`PluginToHost::Log` messages on stdout, buffering startup events until the
+protocol writer is initialized.
+The layer should acquire the shared stdout writer with `try_lock` to avoid
+deadlocking if a tracing event fires while the writer lock is already held.
 
 #### Workspace Queries
 
@@ -771,13 +759,13 @@ Response:
 }
 ```
 
-The `path` syntax uses the same dot-separated keys as the `--cfg` CLI flag
-(e.g., `assistant.model`, `server.web.port`, `conversation.tools`).
+The `path` syntax uses the same dot-separated keys as the `--cfg` CLI flag (for
+example, `assistant.model`, `server.web.port`, `conversation.tools`).
 An invalid path returns an error.
 
-The host answers from the configuration it read at startup.
-A plugin that runs long enough to outlive a config edit sets `reload` to have
-the host read it again first:
+By default, the host serves the configuration it loaded at startup.
+A long-running plugin can set `reload: true` to have the host reload
+configuration from disk before responding:
 
 ```json
 {
@@ -786,19 +774,20 @@ the host read it again first:
 }
 ```
 
-The host repeats its startup load: every config file and its `extends` chain,
-the environment, and the invocation's `--cfg` arguments.
-The fresh result answers this request and every later `read_config`, so a plugin
-polls and compares without knowing where configuration lives.
-A configuration that fails to load is reported as an `error`, and the last one
-that loaded stays in place.
-`reload` needs protocol 10.
+Reloading repeats the startup configuration pass across every config file, its
+`extends` chain, environment variables, and the invocation's `--cfg` arguments.
+The newly loaded configuration is cached and used for this response and all
+subsequent `read_config` requests, so plugins can poll for config changes
+without knowing how configuration files are laid out.
+If reloading fails, the host returns an `error` and retains the previous
+configuration.
+`reload` requires protocol version 10.
 
 #### Workspace Mutations
 
-A plugin changes a workspace through task-level operations.
-The host takes the conversation's lock itself for each one, so a plugin never
-holds a lock and never appends events to a stream directly.
+Plugins mutate workspace state through task-level operations.
+The host acquires the conversation lock inside each operation, so a plugin never
+holds a lock across messages or appends raw events to a stream.
 
 | Request                | Reply                                                                | Lock held                        |
 | ---------------------- | -------------------------------------------------------------------- | -------------------------------- |
@@ -808,34 +797,34 @@ holds a lock and never appends events to a stream directly.
 | `query`                | `created` (new conversations only), then `query_complete` or `error` | until the turn ends              |
 | `interrupt`            | `done` or `error`, once the turn has acted, when it carries an `id`  | the turn's own                   |
 
-`query` asks the host to run a turn: it locks the conversation, appends the
-request, calls the provider, runs the tools the assistant asks for, and persists
-the result — the same turn `jp query` runs.
-A plugin doing this itself would need the user's credentials, the tool registry,
-and the MCP servers.
+`query` delegates a turn to the host: JP locks the conversation, appends the
+request, calls the LLM provider, executes requested tools, and persists the
+resulting events, running the same turn pipeline as `jp query`.
+Delegating the turn keeps provider credentials, the tool registry, and MCP
+server connections inside the host.
 
-The turn runs beside the message loop, which keeps answering other requests
-while it does.
-When the request starts a conversation, `created` arrives as soon as it exists,
-carrying the id the host assigned.
-`query_complete` arrives when the turn ends; an `error` arrives instead if it
-could not start or failed.
-The conversation stays locked in between, so a second `query` for it is refused
-as already locked, and a message meant for the running turn goes through
-`interrupt`.
+The turn runs concurrently with the protocol message loop, which continues
+serving other requests while the turn is active.
+When `query` creates a new conversation, the host sends `created` with the new
+conversation ID as soon as the conversation exists.
+When the turn finishes, the host sends `query_complete` (or `error` if the turn
+could not start or failed).
+Because the conversation remains locked for the duration of the turn, a second
+`query` on the same conversation is rejected as already locked; plugins interact
+with an active turn through `interrupt`.
 
-A `query` carrying a `schema` asks for structured output, as `jp query --schema`
-does, and its `query_complete` carries the parsed response in `data`.
-One with `new` can also set `expires_in` (`5m`, `1h`), making the conversation
-it creates temporary, as `jp query --tmp` does.
-Both need protocol 11.
+A `query` with a `schema` field requests structured output (matching `jp query
+--schema`) and returns the parsed JSON value in `query_complete.data`.
+A `query` with `new` can also set `expires_in` (such as `5m` or `1h`) to create
+a temporary conversation, matching `jp query --tmp`.
+Both features require protocol version 11.
 
-What happens to a running turn when the plugin exits is described under
-[Lifecycle](#lifecycle).
+See [Lifecycle](#lifecycle) for how JP handles an active turn when the plugin
+exits.
 
 #### Output
 
-All user-facing output goes through the protocol, and JP routes it through the
+All user-facing output is sent over the protocol and routed through JP's
 `Printer`.
 
 **Print command:**
@@ -849,10 +838,8 @@ All user-facing output goes through the protocol, and JP routes it through the
 }
 ```
 
-The `channel` field specifies the output category, controlling filtering and
-semantic treatment.
-The `format` field specifies how JP should render the text.
-Both are optional.
+The optional `channel` field selects the output stream and filtering behavior,
+and the optional `format` field selects how JP renders `text`.
 
 **Channels** (default: `content`):
 
@@ -886,22 +873,22 @@ For `code`, a `language` hint can be provided:
 }
 ```
 
-The simplest case remains simple — a shell script can send
-`{"type":"print","text":"hello\n"}` and it works.
+In the simplest case, a shell script can send
+`{"type":"print","text":"hello\n"}`.
 
-**Output modes.** The host's output rules ([RFD 048]) decide where a `print`
-lands and how it is shaped:
+**Output modes.** The host's output rules ([RFD 048]) determine where `print`
+messages are written and how they are formatted:
 
-- `content` goes to stdout.
-  `chrome`, `tool_call`, `tool_result`, and `reasoning` are chrome on stderr,
-  which `--quiet` suppresses.
-  `error` goes to stderr and is never suppressed.
-- In terminal output, `format` decides the rendering in the table above.
-- Under `--format json`, rendering is off.
-  A `print` with `format: "json"` is emitted as the JSON value its `text` holds;
-  every other format is wrapped in the printer's message record.
-  A plugin that wants its own structure reads `init.output_format` and sends
-  `json`.
+- `content` writes to stdout.
+  `chrome`, `tool_call`, `tool_result`, and `reasoning` write to stderr and are
+  suppressed by `--quiet`.
+  `error` writes to stderr and is never suppressed.
+- In terminal output mode, `format` selects the renderer from the table above.
+- Under `--format json`, terminal rendering is disabled.
+  A `print` message with `format: "json"` is emitted as the raw JSON value in
+  `text`; all other formats are wrapped in a `{"message": ...}` JSON object.
+  Plugins that want to emit custom JSON under `--format json` can inspect
+  `init.output_format` and set `format: "json"`.
 
 For `jp --format json titles`:
 
@@ -930,9 +917,9 @@ emits on stdout:
 }
 ```
 
-JP emits this as a tracing event at the specified level, attributed to the
+JP emits this as a `tracing` event at the specified level, attributed to the
 plugin.
-Valid levels: `trace`, `debug`, `info`, `warn`, `error`.
+Valid levels are `trace`, `debug`, `info`, `warn`, and `error`.
 
 #### Error Handling
 
@@ -946,7 +933,7 @@ Any request can return an error:
 }
 ```
 
-The `request` field echoes the type of the failed request so the plugin can
+The `request` field echoes the `type` of the failed request so the plugin can
 correlate errors with requests.
 
 ### Shell Script Example
@@ -985,20 +972,20 @@ echo '{"type":"exit","code":0}'
 
 ### Web Server Example
 
-The web server plugin (`jp-serve`) uses the protocol for data access but manages
-its own HTTP listener:
+The web server plugin (`jp-serve`) uses the protocol for workspace data access
+while managing its own HTTP listener:
 
-1. Receives `init`, extracts config for bind address and port.
+1. Receives `init` and reads the bind address and port from `config`.
 2. Sends `ready`.
-3. Starts an HTTP server (axum, actix, whatever).
-4. On each page request, sends `list_conversations` or `read_events` over the
+3. Starts an HTTP server (such as `axum` or `actix-web`).
+4. On each HTTP request, sends `list_conversations` or `read_events` over the
    protocol and renders the response as HTML.
-5. On `shutdown`, stops accepting connections, finishes in-flight requests,
-   sends `exit`.
+5. On `shutdown`, stops accepting new connections, finishes in-flight HTTP
+   requests, and sends `exit`.
 
-A chat interface adds `query` and `interrupt` to this, and polls `read_events`
-while a turn runs; pushing events to it as they happen needs the subscriptions
-listed under Non-Goals.
+An interactive chat UI builds on this flow by sending `query` and `interrupt`
+and polling `read_events` while a turn runs; streaming live events to the plugin
+requires the event subscriptions deferred in [Non-Goals](#non-goals).
 
 ### Plugin Registry
 
@@ -1037,12 +1024,12 @@ The registry is a JSON file served from `https://jp.computer/plugins.json`:
 }
 ```
 
-Registry keys are space-separated command paths.
-`"serve web"` corresponds to `jp serve web`.
-Each key is unique by construction (JSON object keys), so no two registry
-entries can claim the same subcommand.
-That says nothing about installed binaries outside the registry; how the host
-chooses between claims is part of [Phase 5](#implementation-plan).
+Registry keys are space-separated command paths (`"serve web"` corresponds to
+`jp serve web`).
+Because JSON object keys are unique, no two registry entries can claim the same
+command path.
+Installed binaries outside the registry can still claim overlapping paths; the
+host resolves conflicts using the rules in [Phase 5](#implementation-plan).
 
 The `type` field identifies the entry's kind:
 
@@ -1055,405 +1042,388 @@ The `type` field identifies the entry's kind:
 |                 | and lists sub-plugins via `suggests`. `jp <group>`     |
 |                 | prints help and exits with code 2.                     |
 
-Future plugin types (e.g. `"wasm"` from [RFD 016]) will use additional values.
-JP ignores an entry with an unrecognized `type`, or one that does not parse, and
-reads the rest of the registry.
+Future plugin types (such as `"wasm"` from [RFD 016]) will add new `type`
+values.
+JP ignores individual registry entries that fail to parse or have an
+unrecognized `type`, and loads the remaining entries.
 
-**`id`** (required) — Stable identifier used for binary naming, config keys,
-and install paths.
-The binary is `jp-{id}`, config lives at `plugins.command.{id}`, and the install
-path is `$XDG_DATA_HOME/jp/plugins/command/jp-{id}`.
-The `id` must be unique across all registry entries.
+- **`id`** (required): Unique identifier across all registry entries, used for
+  binary naming (`jp-{id}`), configuration keys (`plugins.command.{id}`), and
+  install paths (`$XDG_DATA_HOME/jp/plugins/command/jp-{id}`).
+- **`official`**: Whether the JP project publishes this plugin.
+  Official entries claim their command path for automatic installation on first
+  use and are updated by `jp plugin update`.
+  Third-party entries do not claim commands during routing and are installed
+  only via `jp plugin install`.
+- **`requires`**: Command paths (registry keys) of plugins that must be
+  installed for this plugin to run.
+  Installing a plugin installs all of its required dependencies first.
+  Official plugins may depend only on other official plugins, so first-use
+  installation never pulls in third-party code.
+  For third-party plugins, `jp plugin install` lists all required third-party
+  dependencies in a single confirmation prompt and installs nothing if the user
+  declines.
+- **`suggests`**: Command paths (registry keys) of plugins that extend this
+  entry.
+  Used for help aggregation: `jp serve -h` lists suggested sub-plugins as
+  available subcommands, marking uninstalled official plugins with `(not
+  installed)`.
+  Suggested plugins are not installed automatically.
 
-**`official`** — Whether the JP project publishes this plugin.
-An official entry claims its command path: JP installs it the first time the
-command is typed, and updates it as below.
-A third-party entry claims nothing, and is installed only by `jp plugin
-install`.
-
-**`requires`** — Command paths (registry keys) of plugins that must be
-installed for this one to work.
-When JP installs a plugin, it first installs all required dependencies.
-An official plugin may require only official ones, so installing it on first use
-never brings third-party code with it.
-`jp plugin install` lists a third-party plugin's third-party dependencies in the
-same confirmation, and installs none of them if the user declines.
-
-**`suggests`** — Command paths (registry keys) of plugins that extend this one.
-Used for help aggregation: `jp serve -h` shows suggested sub-plugins as
-available subcommands, with an "(not installed)" marker for those not yet
-downloaded.
-Suggested plugins are not installed automatically.
-
-JP keeps the registry it last fetched at `$XDG_DATA_HOME/jp/registry.json`, as
-served, so a newer `jp` sharing the directory still finds the entries an older
-one ignores.
-Running a plugin installed on this machine never reaches the network, and
-neither does any built-in command.
+JP caches the raw registry JSON at `$XDG_DATA_HOME/jp/registry.json` as served,
+so a newer `jp` binary sharing the data directory can still read entries that an
+older `jp` binary ignored.
+Running an already-installed plugin or a built-in command never makes a network
+request.
 JP fetches the registry:
 
-- For `jp plugin list`, `install`, and `update`, every time; `list` and
-  `install` fall back to the stored copy when the fetch fails, and say so.
-- On its own, for a command nothing installed claims, when the stored copy is
-  missing or more than a day old.
-- For `jp -h`, when there is no stored copy.
+- On every `jp plugin list`, `install`, and `update` invocation (`list` and
+  `install` fall back to the cached copy with a warning if the fetch fails).
+- Automatically when an unknown command is not claimed by any installed plugin
+  and the cached registry is missing or older than a day.
+- On `jp -h` when no cached registry exists.
 
-Every fetch gives up after two seconds, so a network that stalls rather than
-fails costs a moment, not a hang.
-A failed fetch leaves the stored copy as it was.
+Registry fetches time out after two seconds so a stalled network connection does
+not hang the CLI, and a failed fetch leaves any cached registry untouched.
 
-Binary checksums are validated after download before the binary is made
-executable.
-Installed binaries are stored at `$XDG_DATA_HOME/jp/plugins/command/jp-{id}`,
-keeping them separate from `$PATH` and leaving room for other plugin types.
+After downloading a plugin binary, JP verifies its SHA-256 checksum before
+marking the file executable.
+Downloaded binaries are stored in `$XDG_DATA_HOME/jp/plugins/command/jp-{id}`,
+separate from `$PATH` and scoped to command plugins.
 
-`jp plugin update` updates the official plugins JP installed.
-When the registry lists a different checksum for one, and the installed binary
-is still the one JP wrote, which the approval store records ([RFD 077]), JP
-downloads the new one, verifies it, and replaces the old one.
-It leaves a binary in place, and says why, when that binary has been changed on
-this machine, when something other than JP put it there, or when a pinned
-checksum ([RFD 077]) says which binary to run.
-A download that fails is reported and the others still run; the command then
-exits non-zero, naming the plugins it could not update.
-Third-party plugins are never updated automatically.
-Updating is left to `jp plugin update` rather than done before a plugin runs, so
-running an installed plugin costs no request on a slow network.
+`jp plugin update` updates official plugins that JP installed.
+When the registry lists a new checksum for an installed official plugin, JP
+checks the approval store ([RFD 077]) to verify that the on-disk binary still
+matches the hash JP originally installed; if so, JP downloads, verifies, and
+replaces the binary.
+JP skips the update and explains why if the binary was modified locally, was
+installed by another tool, or is pinned to a specific checksum in configuration
+([RFD 077]).
+If a download fails, JP reports the error, continues updating the remaining
+plugins, and exits non-zero listing the failed plugins.
+Third-party plugins are never updated automatically, and JP never checks for
+updates before running an installed plugin.
 
 ### Plugin Trust and Configuration
 
-Execution policy, checksum pinning, and per-plugin options are controlled
-through the `[plugins]` section of `AppConfig`, defined in [RFD 077].
-Installing is not configured: official plugins install on first use, and
-third-party plugins when the user runs `jp plugin install`.
+Execution policy, checksum pinning, and per-plugin options are configured under
+the `[plugins]` section of `AppConfig`, defined in [RFD 077].
+Installation behavior is not configurable: official plugins install on first
+use, and third-party plugins install only via `jp plugin install`.
 
 In summary:
 
-- Each plugin has a `run` policy: `ask` (prompt), `allow` (run without asking),
-  or `deny` (never run).
-  `ask` is the default for every plugin.
-- Under `ask`, two things answer without a prompt.
-  An official binary whose SHA-256 matches its registry entry is verified by the
-  registry.
-  Any other binary needs an approval: `jp plugin install` records one, as do
-  answering `Y` at the prompt and running `jp plugin approve <path>`.
-  An approval holds the binary's path and SHA-256 in a user-local approval
-  store, which never enters config or a conversation.
-  `jp plugin revoke <name>` removes it, and `jp plugin uninstall <name>` removes
-  it with the binary JP installed.
-- A `checksum` field pins the binary to a specific hash.
-  JP refuses to run a binary whose checksum doesn't match the pinned value.
-- An `options` field passes opaque configuration to the plugin via the `init`
-  message.
-- All plugin config participates in the standard config inheritance chain
-  (global → workspace → local → CLI overrides).
+- Each plugin has a `run` policy: `ask` (prompt before running), `allow` (run
+  without prompting), or `deny` (never run).
+  The default policy for every plugin is `ask`.
+- Under `ask`, a binary runs without prompting in two cases:
+  1. It is an official plugin whose SHA-256 matches its registry entry.
+  2. It has a matching record in the user-local approval store, created by `jp
+     plugin install`, answering `Y` at the approval prompt, or running `jp
+     plugin approve <path>`.
+     Each approval record binds the binary's path and SHA-256 digest and is
+     never stored in workspace config or conversation history.
+     `jp plugin revoke <name>` removes the approval record, and `jp plugin
+     uninstall <name>` removes both the approval record and the JP-installed
+     binary.
+- The `checksum` setting pins a plugin binary to a specific SHA-256 digest; JP
+  refuses to run a binary whose digest does not match.
+- The `options` setting passes plugin-specific configuration to the plugin in
+  the `init` message.
+- All plugin settings participate in standard configuration inheritance (global
+  → workspace → local → CLI overrides).
 
 ## Drawbacks
 
 - **Latency**: Every workspace operation requires a JSON round-trip over a pipe.
-  For human-interactive use cases (web pages, CLI output) this is negligible.
-  For batch processing of thousands of conversations, it would be noticeable.
-  This can be mitigated later with bulk operations or a binary protocol.
+  For interactive use (web pages, CLI output), this overhead is negligible; for
+  batch processing across thousands of conversations, it would be noticeable and
+  could require bulk protocol operations.
 
-- **Protocol maintenance**: The protocol is a public API surface that must be
-  versioned and maintained.
-  Adding new operations is straightforward (additive change), but changing
-  existing message formats requires care.
+- **Protocol maintenance**: The protocol is a versioned public API.
+  Adding new messages or optional fields is straightforward, but changing
+  existing message schemas requires migration care.
 
 - **No shared memory**: Plugins cannot access JP's in-memory data structures
-  directly.
-  Every piece of data must be serialized and sent over the pipe.
-  For the conversation events that are already stored as JSON, this is natural.
-  For complex types like `AppConfig`, the serialization must be complete and
-  stable.
+  directly; every payload must be serialized over the pipe.
+  Conversation events are already stored as JSON, making them cheap to forward,
+  whereas complex types like `AppConfig` require complete, stable serialization.
 
-- **Two binaries for the web server**: Users who previously had a single `jp`
-  binary now need `jp` plus `jp-serve`.
-  The auto-install mechanism mitigates this, but it adds moving parts.
+- **Two binaries for the web server**: Running the web server requires both `jp`
+  and `jp-serve` rather than a single `jp` binary.
+  Automatic installation of official plugins hides this during normal use, but
+  deployment has more moving parts.
 
 ## Alternatives
 
 ### Cargo-style thin dispatch (exec and forget)
 
 JP sets environment variables (`JP_WORKSPACE_ROOT`, `JP_STORAGE_DIR`, etc.) and
-execs the plugin.
-The plugin opens the workspace itself using `jp_workspace` as a library
-dependency.
+execs the plugin, which opens the workspace itself using `jp_workspace` as a
+library dependency.
 
 Rejected because:
 
-- Plugins must be Rust (or FFI into Rust crates) to use the workspace safely.
-- Every plugin re-implements bootstrap logic and gets it wrong.
-- No way for a shell script to access conversations.
-- No lock management — plugins hold flocks directly, making crash recovery
-  harder.
-- Switching from read-only to read-write requires architectural changes in the
+- Plugins must be written in Rust (or FFI into Rust crates) to access the
+  workspace safely.
+- Every plugin must re-implement JP's bootstrap logic.
+- Shell scripts cannot read or write conversations.
+- Plugins hold file locks directly, complicating crash recovery.
+- Evolving a plugin from read-only to read-write requires re-architecting the
   plugin.
 
 ### Feature-gated built-in commands
 
-Keep plugins as built-in commands behind cargo feature flags.
-Users compile with `--features web` to include the web server.
+Keep extensions as built-in commands behind Cargo feature flags (for example,
+compiling with `--features web` to include the web server).
 
 Rejected because:
 
-- Not extensible at runtime.
-  Third parties cannot add commands.
-- Users must compile from source to choose features.
-- Does not establish a plugin pattern for the ecosystem.
+- Not extensible at runtime; third parties cannot add commands.
+- Users must compile from source to select features.
+- Does not establish a plugin model for external tools.
 
 ### Lock-and-push writes
 
-The plugin locks a conversation, pushes events into it, and unlocks it, with the
-host validating each batch.
+Allow plugins to acquire a conversation lock, push raw events, and release the
+lock, with the host validating each batch.
 
 Rejected in favor of task-level operations.
-A plugin holding a lock across messages needs the host to track it and release
-it when the plugin crashes, and events written from outside have to be validated
-against the stream's invariants, which the host otherwise upholds by
-construction.
-The cost of the task-level surface is that it is closed: a new kind of write
-needs a new message.
+Allowing a plugin to hold a lock across protocol messages requires the host to
+track locks and release orphaned locks when a plugin crashes.
+It also forces the host to validate externally constructed events against stream
+invariants that the host otherwise guarantees by construction.
+The trade-off is that the write surface is closed: each new write operation
+requires a new protocol message.
 
 ### Routing by binary name
 
-`jp-serve-web` answers `jp serve web`, the way git, cargo, and kubectl route.
-Nothing runs before admission, since the host reads only the file name.
+Route `jp serve web` directly to `jp-serve-web` by filename, matching `git`,
+`cargo`, and `kubectl`, so the host inspects only filenames before admission.
 
-Rejected because a file name carries one command path and nothing else.
-[RFD 114]'s workspace scope, and any later claim such as a flag on a built-in
-command, has to be known before the plugin runs, and needs somewhere to live.
-The file name would also be both the route and the identity, so two plugins that
-happen to share a name could not be told apart by renaming one without changing
-the command it answers.
+Rejected because a filename encodes only a single command path.
+Pre-spawn metadata such as [RFD 114]'s workspace scope (or future claims like
+flags on built-in commands) still needs a place to live before the binary runs.
+Coupling routing and identity in the filename also means two plugins with the
+same name cannot be disambiguated by renaming one file without changing the
+subcommand it serves.
 
 ### Asking the binary
 
-Spawn each `jp-*` binary with `describe` and route by its answer, as Docker does
-for binaries in its plugin directories.
+Spawn each `jp-*` binary with `describe` to discover what command it claims,
+matching Docker's CLI plugin discovery.
 
-Rejected because it runs a binary to decide whether to run it.
-With admission first, a user typing a documented command for a plugin they have
-not approved finds nothing to route to, and cannot tell which of the unapproved
-binaries on `$PATH` to approve.
+Rejected because it executes an unapproved binary just to decide how to route a
+command.
+If the host enforces admission before spawning `describe`, a user running an
+unapproved plugin's command gets an "unrecognized subcommand" error and cannot
+tell which binary on `$PATH` needs approval.
 
-### Metadata at a fixed position or in a linker section
+### Metadata at a fixed offset or in a linker section
 
-Put the manifest in the first bytes of the file, at its end, or in a named
-section of the executable.
+Store the manifest at the start of the file, at the end of the file, or in an
+executable linker section.
 
-Rejected because the first bytes belong to the header the operating system loads
-a native executable by, and data appended at the end breaks macOS code signing,
-which expects `__LINKEDIT` to cover the end of the file.
-A named section needs a parser for each executable format, and has no equivalent
-in a script.
-A marker anywhere in the file works for all of them, at the cost of reading each
-plugin binary to find it.
+Rejected because the start of an executable is reserved for the OS binary header
+(ELF, Mach-O, PE), and appending data to the end of a Mach-O binary invalidates
+macOS code signatures (which require `__LINKEDIT` to extend to EOF).
+Reading a named linker section requires format-specific binary parsers and has
+no equivalent for scripts.
+Scanning the file for a marker prefix works uniformly across native binaries and
+scripts, at the cost of reading each plugin binary during discovery.
 
 ### Wasm plugin model ([RFD 016])
 
 Use the Wasm component model for command plugins.
 
-Not rejected, but not suitable for this use case.
-Wasm plugins are sandboxed in-process components for capability extensions
-(attachment handlers, tools).
-External command plugins are long-running processes that need direct network
-access (web servers), filesystem access (exporters), or terminal control (TUI
-dashboards).
-The two systems are complementary: Wasm for fine-grained capabilities, external
-commands for coarse-grained extensions.
+Wasm plugins and command plugins solve different problems.
+Wasm plugins are sandboxed, in-process components suited for fine-grained
+capability extensions (attachment handlers, tools).
+Command plugins are standalone processes that may run indefinitely and require
+direct network access (web servers), filesystem access (exporters), or terminal
+control (TUI dashboards).
 
 ## Non-Goals
 
-- **In-process plugin loading**: Shared library (`.so`/`.dylib`) plugins are not
-  in scope.
-  The process boundary provides isolation and language independence.
-- **Plugin authoring SDK**: A Rust crate that wraps the protocol into a
-  convenient API is future work.
-  The protocol is simple enough that early plugins can be written against it
-  directly.
-- **Event subscriptions**: Live event streaming and forwarding interactive
-  events (tool approval, inquiries) to a plugin will be defined in a future
-  extending RFD.
-  Delegating a turn is in scope; see [Workspace
-  Mutations](#workspace-mutations).
-- **Plugin-to-plugin communication**: Plugins communicate with JP, not with each
-  other.
-- **Plugin children of built-in command groups**: `jp conversation export` as a
-  plugin.
-  Opening a built-in group needs it to accept unknown subcommands, and a rule
-  for its aliases so `jp c export` resolves too; a later RFD can do both.
+- **In-process native plugins**: Shared library (`.so`/`.dylib`) plugins are out
+  of scope; the process boundary provides fault isolation and language
+  independence.
+- **Plugin authoring SDK**: A high-level Rust SDK wrapping the protocol is left
+  for future work; early plugins can use the protocol types directly.
+- **Event subscriptions**: Streaming live turn events and forwarding interactive
+  prompts (tool approvals, inquiries) to plugins are deferred to a future RFD.
+  Delegating a turn via `query` is in scope (see [Workspace
+  Mutations](#workspace-mutations)).
+- **Plugin-to-plugin communication**: Plugins communicate only with the JP host,
+  never directly with each other.
+- **Plugin subcommands under built-in command groups**: Supporting plugins like
+  `jp conversation export` requires allowing unknown subcommands on built-in
+  groups and resolving group aliases (such as `jp c export`), which is left to a
+  future RFD.
 
 ## Risks and Open Questions
 
 - **Config serialization completeness**: `AppConfig` contains custom types
-  (`ModelIdConfig`, `ToolConfig`, etc.) with complex serialization.
-  The protocol sends the full config as JSON, which must faithfully represent
-  all fields a plugin might need.
-  The existing `serde` implementations should cover this, but edge cases (e.g.,
-  enum variants with custom serializers) need testing.
+  (`ModelIdConfig`, `ToolConfig`, etc.) with custom `serde` implementations.
+  Because `init` and `read_config` serialize the resolved `AppConfig` to JSON,
+  any serialization edge cases must be tested so plugins receive complete
+  configuration data.
 
-- **Event format stability**: The protocol exposes `ConversationEvent` JSON as a
-  public API.
-  Changes to the event schema (new fields, renamed types) become breaking
-  changes for plugins.
-  This is already partially true for on-disk compatibility, but the plugin
-  protocol makes it explicit.
+- **Event format stability**: Exposing `ConversationEvent` JSON over the
+  protocol makes the on-disk event schema a public plugin API.
+  Schema changes (renamed variants, altered fields) become breaking changes for
+  plugins as well as stored conversations.
 
-- **Protocol evolution**: A plugin states in its manifest, and again in `ready`,
-  the lowest protocol version it needs, and the host refuses one that needs more
-  than it speaks before spawning it.
-  Nothing lets the host refuse a plugin too old for it, so removing a message or
-  a field means answering the old form with an error rather than relying on the
-  version check.
+- **Protocol evolution**: A plugin declares its minimum required `protocol`
+  version in both its manifest and `ready`, allowing the host to reject plugins
+  that require a newer host before spawning them.
+  Because there is no minimum-plugin-version check on the host, deprecating or
+  removing a protocol message requires returning an explicit `error` response to
+  older plugins rather than rejecting them at startup.
 
-- **Manifest discovery cost**: Routing and `jp -h` read every `jp-*` binary in
-  the install directory and on `$PATH`.
-  How long that takes has not been measured; a cache is added once it has been,
-  and only if the measurement asks for one.
-  A claim the host needs on every invocation, such as a flag on a built-in
-  command, puts that reading on every `jp` run, and needs measuring before it
-  ships.
+- **Manifest discovery cost**: Command routing and `jp -h` scan every `jp-*`
+  binary in the install directory and on `$PATH`.
+  If scanning binaries on `$PATH` proves slow in practice, or if future claims
+  require scanning manifests on every `jp` invocation, the host can cache parsed
+  manifests keyed by file path and modification time.
 
-- **Claims are asserted by the plugin**: A manifest can claim any command path,
-  as a file name could.
-  Two third-party claimants of one path are reported rather than resolved by
-  `$PATH` order, and whichever binary a claim selects is still admitted before
-  it runs.
-  A third-party binary can replace an official command, which is how a user
-  swaps in a web server of their own for `jp serve web`; the same rule lets
-  anything that can write to a directory on `$PATH` try it.
-  The admission prompt is the guard: it marks the binary as third-party, names
-  the official command it replaces, and shows the binary's path.
-  Config that sets `run = "allow"` for that plugin's name skips the prompt, as
-  it does for any plugin.
+- **Unverified manifest claims**: Any binary on `$PATH` can claim any command
+  path in its manifest.
+  If two third-party binaries claim the same command path, JP reports the
+  conflict rather than picking whichever appears first on `$PATH`.
+  A third-party binary can intentionally override an official command (for
+  example, replacing `jp serve web` with a custom server), which also means an
+  untrusted binary written to `$PATH` could claim an official command.
+  Admission guards against silent hijacking: unless `run = "allow"` is
+  configured for that plugin name, JP prompts for approval, labels the binary as
+  third-party, names the official command it overrides, and displays the binary
+  path.
 
-- **Network use on an unknown command**: A typo on a machine whose registry
-  cache is missing or stale costs one registry fetch, at most once a day.
+- **Network fetch on command typos**: Typing an unknown command when the
+  registry cache is missing or older than 24 hours triggers a single registry
+  fetch (bounded by the two-second timeout) at most once per day.
 
-- **Registry trust model**: Auto-installing official plugins requires trusting
-  the registry file and the download URLs.
-  The checksum validation protects against tampering in transit.
-  The registry itself is served from `https://jp.computer/plugins.json` over
-  HTTPS.
-  The registry URL is hardcoded in the JP binary.
+- **Registry trust model**: Auto-installing official plugins relies on the
+  hardcoded HTTPS registry URL (`https://jp.computer/plugins.json`) and SHA-256
+  checksum verification of downloaded binaries.
 
 ## Implementation Plan
 
 - [x] **Phase 1: Protocol core and dispatcher**
 
   - Define the protocol message types in a new `jp_plugin` crate.
-  - Implement the parent-side message loop in JP: spawn child, send `init`,
-        relay requests to `Workspace` methods, capture stderr to tracing.
-  - Implement unknown-subcommand dispatch: search `$PATH` for `jp-<name>`.
-  - Test with a minimal shell script plugin.
+  - Implement the host-side message loop in JP: spawn the child process,
+        send `init`, dispatch requests to `Workspace` methods, and forward
+        stderr to tracing.
+  - Implement unknown-subcommand dispatch by searching `$PATH` for
+        `jp-<name>`.
+  - Test with a minimal shell-script plugin.
   - Can be merged independently.
 
 - [x] **Phase 2: Web server as external plugin**
 
   - Extract the web server into a standalone binary crate
         (`crates/plugins/command/serve-web/`).
-  - Implement the plugin-side protocol client (reads init, sends requests,
-        renders responses).
-  - Remove `jp serve` as a built-in command; it becomes a plugin dispatch.
+  - Implement the plugin-side protocol client (read `init`, send requests,
+        render responses).
+  - Remove `jp serve` as a built-in command so it dispatches as a plugin.
   - Remove the `jp_web` dependency from `jp_cli`.
   - Depends on Phase 1.
 
 - [x] **Phase 3: Plugin registry and auto-install**
 
-  - Define the registry JSON format.
-  - Implement registry fetch, caching, and binary download with checksum
-        validation.
-  - Implement the install flow (silent for official, prompted for
-        third-party).
-  - Add `jp plugin list`, `jp plugin install`, `jp plugin update`
+  - Define the registry JSON schema.
+  - Implement registry fetching, caching, and binary downloads with SHA-256
+        checksum verification.
+  - Implement the installation flow (automatic for official plugins,
+        prompted for third-party plugins).
+  - Add the `jp plugin list`, `jp plugin install`, and `jp plugin update`
         subcommands.
-  - Depends on Phase 1.
-        Independent of Phase 2.
+  - Depends on Phase 1; independent of Phase 2.
 
 - [x] **Phase 4: Write operations**
 
-  Shipped as task-level operations rather than the lock-and-push primitives
-      originally proposed: `ArchiveConversation`, `SetTitle`, `WriteDraft`, and
-      `Query` (with a `Created` response), each performing its own locking
-      inside the host.
-      A plugin therefore never holds a lock across protocol messages, which
-      removes the lock-tracking and orphan-release problem the original phase
-      carried, and removes the need to validate externally pushed events — no
-      plugin appends to an event stream directly.
-      The cost is that the write surface is closed rather than general: a new
-      write operation needs a new protocol message.
+  Implemented as task-level host operations (`ArchiveConversation`,
+      `SetTitle`, `WriteDraft`, and `Query` with a `Created` response) rather
+      than low-level lock-and-push primitives.
+      Each operation acquires and releases the conversation lock inside the
+      host, so plugins never hold locks across protocol messages or append raw
+      events to a stream.
+      This avoids orphan-lock recovery and external event validation, at the
+      cost of requiring a new protocol message for each new write operation.
 
   - Depends on Phase 1.
 
 - [x] **Phase 5: Command routing and plugin dependencies**
 
-  Once manifests route, several sources can claim one path, and the host
-      chooses by these rules:
+  When multiple sources claim a command path, the host resolves them using
+      these rules:
 
-  1. A built-in command path wins.
-  2. The longest claimed path wins, and the unmatched arguments go to that
-         plugin: with plugins claiming `serve` and `serve web` both installed,
-         `jp serve web` runs the second.
-  3. A third-party binary claiming an official command wins over the
-         official plugin, and replaces it until the binary is removed.
-         Admission labels it third-party and names the official command it
-         replaces ([RFD 077]).
-  4. Two third-party binaries claiming the same path produce a diagnostic
-         naming both, never a silent choice.
-  5. An official binary must claim the path its registry key names; a
-         mismatch is an error, not a reroute.
-  6. `plugins.command.<name>` is keyed by the plugin's name, never by the
-         command path, and two binaries with the same name conflict ([Plugin
-         Identity](#plugin-identity)).
+  1. Built-in commands always win.
+  2. The longest matching claimed command path wins, and any remaining CLI
+         arguments are passed to that plugin (if both `serve` and `serve web`
+         are claimed, `jp serve web` dispatches to `serve web`).
+  3. A third-party binary claiming an official command path overrides the
+         official plugin until the binary is removed; the admission prompt
+         labels it third-party and names the overridden official command ([RFD
+         077]).
+  4. Two third-party binaries claiming the same path fail with a diagnostic
+         naming both paths.
+  5. An official binary's manifest claim must match its registry key; a
+         mismatch is reported as an error rather than rerouted.
+  6. `plugins.command.<name>` is keyed by the plugin name rather than the
+         claimed command path, and two binaries with the same plugin name
+         conflict (see [Plugin Identity](#plugin-identity)).
 
   <!-- end list -->
 
-  - Define the manifest and its validation, and a `jp_plugin` declaration
-        that builds both the manifest and the `describe` answer.
-  - Add `protocol` and a required `help` to the `describe` answer.
-  - Read manifests from the install directory and `$PATH`.
-  - Route by manifest claims and official registry entries under the rules
-        above; a binary without a valid manifest claims nothing.
-  - Fetch the registry when nothing claims a command and the cache is
-        missing or more than a day old, and for `jp -h` when there is no cache;
-        honor `JP_NO_PLUGIN_DOWNLOAD`.
-  - Install official plugins on first use and third-party ones only through
-        `jp plugin install`, which asks first; remove `plugins.auto_install` and
+  - Define the binary manifest format, its validation rules, and a
+        `jp_plugin` declaration that generates both the manifest constant and
+        the `describe` response.
+  - Add `protocol` and a required `help` field to the `describe` response.
+  - Scan manifests from the user-local install directory and `$PATH`.
+  - Route commands using manifest claims and official registry entries under
+        the precedence rules above; ignore binaries without a valid manifest
+        unless approved.
+  - Fetch the registry when no installed plugin claims a command and the
+        cache is missing or older than a day, and on `jp -h` when no cache
+        exists, respecting `JP_NO_PLUGIN_DOWNLOAD`.
+  - Install official plugins on first use and third-party plugins only via
+        `jp plugin install` with confirmation; remove `plugins.auto_install` and
         `plugins.command.<name>.install` ([RFD 077]).
-  - Hint at `jp plugin install` for a command a third-party registry entry
-        names.
-  - Run the `jp plugin` management commands without a workspace.
-  - List plugins in `jp -h` from their manifests and the registry cache,
-        spawning nothing.
-  - Give `jp-gui`, `jp-path`, `jp-serve-web`, and `jp-ticket` manifests.
-  - Update `jp plugin install` to resolve and install required dependencies.
-  - Implement `command_group` help aggregation.
-  - Update help rendering to merge suggested sub-plugins (installed and
-        uninstalled) into parent plugin help output.
+  - Print a `jp plugin install` hint when an unknown command matches a
+        third-party registry entry.
+  - Run `jp plugin` management commands without requiring a workspace.
+  - Populate the "Plugins:" section of `jp -h` from local manifests and the
+        registry cache without spawning any binaries.
+  - Embed manifests in `jp-gui`, `jp-path`, `jp-serve-web`, and `jp-ticket`.
+  - Update `jp plugin install` to resolve and install `requires`
+        dependencies.
+  - Implement `command_group` help aggregation and merge `suggests`
+        sub-plugins into parent plugin help output.
   - Depends on Phase 3 (registry).
 
 - [x] **Phase 6: Admission, containment, and output**
 
-  - Admit a plugin before every spawn, including `describe` for help, in the
-        order [RFD 077] gives, with `ask` as the default `run` policy for every
-        plugin.
-  - Record approvals as [RFD 077]'s approval store describes, from `jp
-        plugin install`, a `Y` answer, and `jp plugin approve`.
-  - Say in the prompt when the binary changed, when another path is the
-        approved one, and when a third-party binary replaces an official
-        command.
+  - Enforce plugin admission before every spawn (including `describe`) in
+        the order defined by [RFD 077], with `ask` as the default `run` policy.
+  - Record approvals in [RFD 077]'s approval store from `jp plugin install`,
+        interactive `Y` confirmations, and `jp plugin approve`.
+  - Include context in the approval prompt when a binary's digest has
+        changed, when a different path is already approved, or when a
+        third-party binary overrides an official command.
   - Add `jp plugin approve <path>`, `jp plugin revoke <name>`, and `jp
-        plugin uninstall <name>`, and route a binary without a manifest by the
-        manifest fields its approval recorded.
-  - Have `jp plugin update` update an official plugin JP installed when the
-        registry lists a new checksum for it.
-  - Refuse a `describe` answer that disagrees with the manifest.
-  - Terminate the plugin's process group (Unix) or job object (Windows)
-        after the shutdown grace period.
-  - Route `print` through the printer by channel and format, as
-        [Output](#output) describes; today the host writes `text` to stdout
-        unrendered, so `--quiet` and `--format json` do not reach it.
+        plugin uninstall <name>`, and route manifestless binaries using the
+        manifest fields recorded in their approval.
+  - Update `jp plugin update` to replace unmodified JP-installed official
+        binaries when the registry publishes a new checksum.
+  - Reject any `describe` response whose fields disagree with the binary's
+        manifest.
+  - Terminate the plugin's process group (Unix) or job object (Windows) when
+        the shutdown grace period expires.
+  - Route `print` messages through the host `Printer` by channel and format
+        as specified in [Output](#output), so `--quiet` and `--format json`
+        apply to plugin output.
   - Depends on Phase 5.
 
 ## References

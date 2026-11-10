@@ -10,15 +10,15 @@
 
 ## Summary
 
-This RFD extends `jp_tool` into a Rust tool authoring SDK backed by `schemars`.
+This RFD extends `jp_tool` into a Rust tool-authoring SDK backed by `schemars`.
 Tool authors define arguments as Rust structs with `#[derive(Deserialize,
-JsonSchema)]`, and the SDK generates the tool's parameter schema and
+JsonSchema)]`, and `jp_tool` generates the tool's parameter schema and
 deserializes typed arguments directly.
 
 ## Motivation
 
-Writing a JP tool in Rust today requires maintaining the schema in two
-disconnected places:
+Writing a JP tool in Rust requires maintaining the parameter schema in two
+places:
 
 **TOML config** (what the LLM sees):
 
@@ -34,29 +34,24 @@ summary = "Package to check."
 let package: Option<String> = t.opt("package")?;
 ```
 
-If the parameter name changes in one place but not the other, the result is a
-runtime error.
-Types, required-ness, and descriptions are all specified twice with no
-compile-time link between them.
+Renaming a parameter in one place without updating the other causes a runtime
+error.
+Parameter types, descriptions, and whether each parameter is required are
+specified twice with no compile-time check between them.
 
-MCP tools and rmcp (the official Rust MCP SDK) solve this with schemars:
-argument types derive `JsonSchema`, and the schema is generated from the type
-definition.
-Doc comments become descriptions.
-`Option<T>` means optional.
-The code *is* the schema.
+MCP tools and `rmcp` (the official Rust MCP SDK) solve this with `schemars`:
+argument types derive `JsonSchema`, doc comments become parameter descriptions,
+and `Option<T>` marks optional parameters.
+The Rust type definition is the schema.
 
-JP should offer the same experience for local tool authors.
+JP should provide the same workflow for local Rust tools.
 
 ## Design
 
-### Approach: schemars + Conversion Function
+### Schema Generation with `schemars`
 
-Add `schemars` as a dependency of `jp_tool`.
-Tool authors derive `JsonSchema` on their argument structs.
-`jp_tool` provides a function to convert the schemars-generated JSON Schema into
-JP's schema response format (as defined in the `Action::Schema` protocol from
-RFD D06).
+`jp_tool` depends on `schemars`.
+Tool authors derive `Deserialize` and `JsonSchema` on their argument structs:
 
 ```rust
 use serde::Deserialize;
@@ -70,7 +65,7 @@ struct CargoCheckArgs {
 }
 ```
 
-From this struct, schemars generates:
+From `CargoCheckArgs`, `schemars` generates a JSON Schema:
 
 ```json
 {
@@ -84,7 +79,8 @@ From this struct, schemars generates:
 }
 ```
 
-`jp_tool` provides a conversion function:
+`jp_tool::schema_for_args` converts that JSON Schema into JP's parameter schema
+format, as defined by the `Action::Schema` protocol in [RFD D06]:
 
 ```rust
 /// Convert a schemars-generated JSON Schema for type T into JP's
@@ -94,14 +90,14 @@ pub fn schema_for_args<T: JsonSchema>() -> Vec<(String, ToolParameterSchema)> {
 }
 ```
 
-This function extracts `properties`, `required`, `description`, and `default`
-from the JSON Schema and maps them to the fields JP uses in its schema response
-and `ToolParameterConfig`.
+`schema_for_args` extracts `properties`, `required`, `description`, and
+`default` from the JSON Schema and maps them to the fields used in JP's schema
+response and `ToolParameterConfig`.
 
 ### Typed Argument Deserialization
 
-Instead of extracting arguments from a `Map<String, Value>` via `t.req()` /
-`t.opt()`, tool functions receive a deserialized struct:
+Tool functions receive a deserialized struct instead of extracting arguments
+from a `Map<String, Value>` with `t.req()` and `t.opt()`:
 
 ```rust
 // Before
@@ -115,130 +111,127 @@ pub async fn cargo_check(ctx: &Context, args: CargoCheckArgs) -> ToolResult {
 }
 ```
 
-The dispatch layer (`run()` in each tool module) deserializes the `Tool`
-arguments map into the typed struct using `serde_json::from_value`.
+Each tool module's `run()` dispatcher deserializes the `Tool` arguments map into
+the typed struct using `serde_json::from_value`.
 
 ### Doc Comment Mapping
 
-Schemars extracts `///` doc comments as `description` in the generated schema.
-JP's tool system distinguishes `summary` (sent to the LLM in every request) from
-`description` (loaded on demand via `describe_tools`).
+`schemars` extracts `///` doc comments into the `description` field of the
+generated schema.
+JP's tool configuration separates `summary` (sent to the LLM in every request)
+from `description` (loaded on demand via `describe_tools`).
 
-For the initial implementation, doc comments map to `summary`.
-Authors who need the two-tier split can use `#[schemars(description = "longer
-text")]` for the detailed description.
+In the initial implementation, doc comments map to `summary`.
+Authors who need both tiers can provide the detailed description with
+`#[schemars(description = "longer text")]`.
 
-### What `jp_tool` Becomes
+### `jp_tool` API Surface
 
-After this RFD, `jp_tool` provides:
+With these additions, `jp_tool` provides:
 
-1. **Protocol types** (existing): `Context`, `Action`, `Outcome`, `Question`
-2. **Tool call types** (migrated from workspace tools, per RFD D06): `Tool`
-   struct
-3. **Schema generation** (new): `schema_for_args::<T>()`, re-exported schemars
-4. **Schema response builder** (new): helpers to construct the `Action::Schema`
-   response JSON from typed args structs
+1. **Protocol types** (existing): `Context`, `Action`, `Outcome`, and
+   `Question`.
+2. **Tool call types** (from [RFD D06]): the `Tool` struct, migrated from
+   workspace tools.
+3. **Schema generation** (new): `schema_for_args::<T>()` and a re-exported
+   `schemars`.
+4. **Schema response builder** (new): helpers to build the `Action::Schema` JSON
+   response from typed argument structs.
 
-### Future: Proc Macro
+### Deferred: Proc Macro
 
-A `#[jp_tool]` proc macro could automate the dispatch boilerplate — handling
-`Action::Schema` vs `Action::Run`, deserializing arguments, routing by tool
-name.
-This is explicitly deferred: start with library functions and promote to a macro
-when the boilerplate across many tools justifies the complexity.
+A `#[jp_tool]` proc macro could generate the dispatch boilerplate for
+`Action::Schema` and `Action::Run`, deserialize arguments, and route calls by
+tool name.
+This RFD defers a macro in favor of library functions until boilerplate across
+tools justifies maintaining a proc macro.
 
-The rmcp crate's `#[tool]` / `#[tool_router]` macros validate this pattern in
-practice but are tightly coupled to MCP's `ServerHandler` trait.
-JP would need its own macro targeting JP's protocol.
+The `rmcp` crate's `#[tool]` and `#[tool_router]` macros validate this pattern,
+but they are coupled to MCP's `ServerHandler` trait.
+JP will need its own macro targeting the `jp_tool` protocol.
 
 ## Drawbacks
 
-- **New dependency.** schemars adds to compile time and binary size for tool
-  binaries.
-  It's a well-maintained crate (~920 stars, serde-compatible), but it's still a
-  dependency.
-  Tool authors who don't want it can continue using the manual TOML approach.
-- **Schema fidelity gap.** schemars generates standard JSON Schema (draft
-  2020-12).
-  JP's `ToolParameterConfig` has JP-specific fields (`summary` vs `description`,
-  `examples`).
-  The conversion function bridges this, but some JP features (like the
-  `examples` field) can't be expressed via schemars attributes alone.
-- **Migration cost.** Existing workspace tools would need to be updated to use
-  typed args structs.
-  This can be done incrementally — the old `t.req()` / `t.opt()` API remains
-  available.
+- **New dependency**: `schemars` is well maintained (~920 GitHub stars) and
+  compatible with `serde`, but it increases compile time and binary size for
+  tool binaries.
+  Tool authors who do not want the dependency can continue writing schemas in
+  TOML.
+- **Schema fidelity gap**: `schemars` generates standard JSON Schema (draft
+  2020-12), while JP's `ToolParameterConfig` has JP-specific fields (`summary`,
+  `description`, and `examples`).
+  `schema_for_args` bridges the two formats, but fields such as `examples`
+  cannot be expressed with `schemars` attributes alone.
+- **Migration effort**: Existing workspace tools must be updated to use typed
+  argument structs.
+  Because `t.req()` and `t.opt()` remain available, tools can migrate
+  incrementally.
 
 ## Alternatives
 
-**Custom derive macro instead of schemars.** A `#[derive(ToolSchema)]` in
-`jp_macro` that generates `ToolParameterConfig` directly with JP-specific
-attributes.
-More control over the output format, but requires maintaining a proc macro and
-duplicates what schemars already does well. schemars is the pragmatic choice —
-it gets 90% of the way there, and the 10% gap (summary vs description, examples)
-can be bridged with a thin conversion layer.
-
-**Use rmcp's `#[tool]` macro directly.** rmcp already has the macro we'd want,
-but it's coupled to the MCP `ServerHandler` trait and pulls in the entire MCP
-SDK (tokio, tower, hyper, transport layer).
-JP tools are simple binaries, not MCP servers.
-The dependency cost is not justified.
+- **Custom `#[derive(ToolSchema)]` macro in `jp_macro`**: Generating
+  `ToolParameterConfig` directly with JP-specific attributes would give full
+  control over the output format, but it requires maintaining a custom proc
+  macro that duplicates `schemars`.
+  `schemars` covers most of the schema generation work, and a thin conversion
+  layer bridges the remaining JP-specific fields (`summary` vs `description`,
+  and `examples`).
+- **Use `rmcp`'s `#[tool]` macro directly**: `rmcp` already provides the macro
+  ergonomics we want, but it is coupled to MCP's `ServerHandler` trait and pulls
+  in the full MCP SDK (`tokio`, `tower`, `hyper`, and transport layers).
+  JP tools are standalone binaries rather than MCP servers, so the dependency
+  cost is not justified.
 
 ## Non-Goals
 
-- **Changing how tools are registered in config.** This RFD is about how tool
-  authors *implement* tools in Rust.
-  TOML config, tool sources, and the resolution pipeline are unaffected (except
-  for leveraging `Action::Schema` from RFD D06).
-- **Supporting non-Rust tool authoring.** The typed SDK is Rust-specific.
+- **Changing tool registration in config**: This RFD covers how tool authors
+  implement tools in Rust.
+  TOML config, tool sources, and the resolution pipeline are unaffected beyond
+  using the `Action::Schema` protocol from [RFD D06].
+- **Supporting non-Rust tool authoring**: The typed SDK is specific to Rust.
   Tools in other languages can implement the `Action::Schema` protocol directly
   by returning the expected JSON.
 
 ## Risks and Open Questions
 
-- **schemars version.** schemars v1.0 was released recently with breaking
-  changes from 0.8.
-  Need to evaluate which version to target and whether it conflicts with any
+- **`schemars` version**: `schemars` v1.0 introduces breaking changes from v0.8.
+  We need to evaluate which version to target and check for conflicts with
   existing workspace dependencies.
-- **Nested types.** schemars handles nested structs, enums, and generics.
-  JP's `ToolParameterConfig` supports nested `properties` and `items` for
-  objects and arrays.
-  The conversion function needs to handle recursive schema structures.
-  Need to verify this works for the existing tool parameter shapes.
-- **Incremental migration.** Existing tools should be migratable one at a time.
-  The old `t.req()` / `t.opt()` API must remain functional alongside the new
-  typed approach.
+- **Nested types**: `schemars` generates recursive schemas for nested structs,
+  enums, and generics, which `schema_for_args` must map onto the nested
+  `properties` and `items` fields of `ToolParameterConfig`.
+  We need to verify that this conversion covers every parameter shape used by
+  existing tools.
+- **Incremental migration**: The `t.req()` and `t.opt()` helpers must remain
+  functional alongside typed argument structs so existing tools can migrate one
+  at a time.
 
 ## Implementation Plan
 
-### Phase 1: Add schemars to `jp_tool`
+### Phase 1: Add `schemars` to `jp_tool`
 
-Add schemars as an optional feature of `jp_tool`.
-Implement `schema_for_args::<T>()` and the conversion from JSON Schema to JP's
-parameter format.
-Write tests against the existing tool parameter shapes.
+Add `schemars` as an optional feature of `jp_tool`, implement
+`schema_for_args::<T>()` to convert JSON Schema into JP's parameter format, and
+write tests against existing tool parameter shapes.
 
-### Phase 2: Schema response builder
+### Phase 2: Schema Response Builder
 
-Add helpers to construct the `Action::Schema` JSON response from one or more
-typed args structs.
-This connects the SDK to the protocol defined in RFD D06.
+Add helpers that construct the `Action::Schema` JSON response from one or more
+typed argument structs, connecting the SDK to the protocol defined in [RFD D06].
 
-### Phase 3: Migrate workspace tools (incremental)
+### Phase 3: Migrate Workspace Tools
 
-Convert existing workspace tools one at a time from `t.req()` / `t.opt()` to
-typed args structs.
-Start with simple tools (e.g. `cargo_check`) and work toward complex ones (e.g.
-`fs_modify_file`).
-Each migration is independently mergeable.
+Incrementally convert existing workspace tools from `t.req()` and `t.opt()` to
+typed argument structs, starting with simple tools (such as `cargo_check`) and
+working toward complex ones (such as `fs_modify_file`).
+Each tool migration is independently mergeable.
 
 ## References
 
-- RFD D06: Self-Describing Local Tools (defines the `Action::Schema` protocol)
-- `crates/jp_tool/src/lib.rs` — current `jp_tool` crate
-- [schemars crate] — JSON Schema generation
-- [rmcp crate] — MCP SDK with `#[tool]` macro (pattern inspiration, not a
+- [RFD D06]: Self-Describing Local Tools (defines the `Action::Schema` protocol)
+- `crates/jp_tool/src/lib.rs`: current `jp_tool` crate
+- [schemars crate]: JSON Schema generation
+- [rmcp crate]: MCP SDK with `#[tool]` macro (pattern inspiration, not a
   dependency)
 
 [RFD D06]: D06-self-describing-local-tools.md

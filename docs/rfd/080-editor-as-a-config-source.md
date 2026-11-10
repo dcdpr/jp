@@ -18,20 +18,20 @@ the final immutable `AppConfig` for the turn.
 
 ## Motivation
 
-In `Query::run`, `ctx.config()` is captured once.
-The editor opens later in the same function via `build_conversation` →
-`edit_message` → `editor::edit_query`.
+`Query::run` captures `ctx.config()` at the start of the function, before
+opening the editor via `build_conversation` → `edit_message` →
+`editor::edit_query`.
 The editor's `PartialAppConfig` output is recorded as a `config_delta` event on
 the conversation, but every subsequent read in the same turn
-(`cfg.conversation.tools`, `cfg.conversation.attachments`, `cfg.assistant.*` in
-`handle_turn`) uses the *pre-editor* `cfg`.
-The recorded delta is folded into the resolved config only on the *next*
-invocation, when `Query::apply_conversation_config` reads the events stream.
+(`cfg.conversation.tools`, `cfg.conversation.attachments`, and `cfg.assistant.*`
+in `handle_turn`) still uses the pre-editor `cfg`.
+The recorded delta takes effect only on the next invocation, when
+`Query::apply_conversation_config` replays the event stream.
 
-The editor is a config source; treating it as anything else produces tech debt.
-This RFD folds it through the same pipeline as every other source.
-Lighter-weight patches that don't restructure the pipeline are discussed in
-[Alternatives](#alternatives) and rejected.
+The editor is a configuration source and belongs in the same startup pipeline as
+every other source.
+[Alternatives](#alternatives) covers smaller patches that leave the pipeline
+unchanged and why they fall short.
 
 ## Design
 
@@ -76,92 +76,88 @@ implicit base (files + env)
   < editor delta            ← top (current turn)
 ```
 
-The editor sits at the top of the stack for the current turn — that's where the
-user just expressed their intent.
-After the turn, the same delta is recorded as a `config_delta` event in the
-conversation.
-On a subsequent run, `apply_conversation_config` folds it into the
-per-conversation layer along with all other events; the new invocation's `--cfg`
-and CLI flags override it.
-The rule "the user's most recent action wins" applies in both cases — the
-editor delta's relative precedence shifts only because the *user's most recent
-action* shifts (current turn: the editor; next turn: the new command line).
+The editor sits at the top of the stack for the current turn, where it is the
+user's most recent action.
+The delta is also recorded as a `config_delta` event on the conversation.
+On subsequent invocations, `apply_conversation_config` folds that event into the
+per-conversation layer, where new `--cfg` and CLI flags override it.
+In both cases, the user's most recent action wins: the editor on the current
+turn, and the command line on the next turn.
 
-### Resolution split
+### Splitting config resolution
 
-Today's `resolve_config` in `jp_cli` ends with `build(partial)`.
-The split:
+`resolve_config` in `jp_cli` currently loads all sources and ends with
+`build(partial)`.
+This RFD splits that work into two steps:
 
-- `resolve_partial` — same body, returns `(PartialAppConfig,
+- `resolve_partial` keeps the existing body (including
+  `partial.conversation.default_id.take()`) and returns `(PartialAppConfig,
   Vec<ConversationHandle>)`.
-  The `partial.conversation.default_id.take()` line stays here.
-  **Source loading (files + env + `--cfg` files) happens here, exactly once per
-  invocation.**
-- `build(partial)` — moves into `run_inner`.
-  `build` is a pure schematic validation + defaults pass with no I/O.
+  All source loading (files, environment variables, and `--cfg` files) happens
+  here, once per invocation.
+- `build(partial)` moves into `run_inner`.
+  `build` is a pure schematic validation and defaults pass with no I/O, so
+  calling it more than once does not reload sources.
 
-Build count per invocation:
+How many times `build` runs depends on the command path:
 
-- non-editable command: 1 `build` (the final cfg).
-- editable command, `EditorOutcome::Run`: 2 `build`s — `pre_editor_cfg`
-  (validates partial, resolves aliases) and `candidate_cfg` (validates partial +
-  editor delta).
-  The candidate becomes the final cfg, reused by `Ctx::new`.
-- editable command, `EditorOutcome::Abort` (pre-open abort, currently unused by
-  Query): 1 `build` — `pre_editor_cfg`, reused as the final cfg.
+- **Non-editable commands** call `build` once (`resolve_partial` → `build` →
+  `Ctx::new`), which is behaviorally identical to today.
+- **Editable commands (`EditorOutcome::Run`)** call `build` twice: first for
+  `pre_editor_cfg` (validating the partial and resolving aliases) and then for
+  `candidate_cfg` (validating the partial merged with the editor delta).
+  `Ctx::new` reuses `candidate_cfg` as the final config.
+- **Editable commands (`EditorOutcome::Abort`)** call `build` once for
+  `pre_editor_cfg`, which `Ctx::new` reuses as the final config.
+  (`Query` does not currently emit pre-open aborts.)
 
-Source loading does not repeat across multiple `build` calls.
-
-The editor flow consumes the partial directly:
+The editor flow consumes `PartialAppConfig` directly:
 
 - `editor::edit_query` and `Query::build_conversation` take `&PartialAppConfig`
   instead of `&AppConfig`.
-  The `[config]` preamble already constructs a partial internally via
-  `to_partial()` (see `build_config_text`); with a partial input it reads the
-  relevant fields directly.
-- New method `PartialEditorConfig::command()` mirrors `EditorConfig::command()`,
-  reading `self.cmd: Option<String>` and `self.envs: Option<Vec<String>>`
-  directly.
+  `build_config_text` already converts its input via `to_partial()` to render
+  the `[config]` preamble; with a partial input, it reads the fields directly.
+- A new `PartialEditorConfig::command()` method mirrors
+  `EditorConfig::command()`, reading `self.cmd: Option<String>` and `self.envs:
+  Option<Vec<String>>` directly.
   The dispatch site passes `pre_editor_cfg.to_partial()` (already
   defaults-filled by `build`) so `PartialEditorConfig::command()` sees the
   resolved `envs`.
 
-For non-editable commands the flow is `resolve_partial` → `build` →
-`Ctx::new`, behaviourally identical to today.
-
 ### Computing the editor delta
 
-The editor preamble is *seeded* with values from the resolved partial: the
-*config seed*.
+The editor preamble is pre-filled with values from the resolved partial, called
+the *config seed* (`seed_partial`).
 An unchanged preamble reproduces those values, so recording the parsed preamble
-as-is would persist seeded fields as if the user had typed them (e.g., a
-`--model` CLI flag would re-appear as an editor-authored `config_delta` event).
+directly would persist seeded fields as if the user had edited them (for
+example, a `--model` CLI flag would be recorded again as an editor-authored
+`config_delta` event).
 
-The extraction:
+Instead, `Query::parse_editor_output` diffs the parsed preamble against the
+config seed using `PartialConfigDelta::delta`:
 
 ```txt
 editor_delta = seed_partial.delta(parsed_partial)
 ```
 
-`seed_partial` is this invocation's config seed.
-`PartialConfigDelta::delta` is the existing primitive used elsewhere for this
-kind of diff.
-Only `editor_delta` is folded into the partial and persisted.
-Today's `editor::edit_query` skips this step and exhibits a phantom-delta bug;
-the extraction fixes it as part of moving editor invocation pre-dispatch.
+Only `editor_delta` is merged into the partial and persisted.
+`editor::edit_query` currently skips this diff and records phantom deltas;
+extracting `editor_delta` fixes that bug as part of moving the editor before
+command dispatch.
 
-**Kept drafts.** `QUERY_MESSAGE.md` outlives the invocation that wrote it: it is
-kept after an empty query, an interrupt, or a failed turn.
-Its preamble then holds that earlier invocation's config seed, which can differ
-from this one's: the earlier run may have used a model this run's `--cfg`
-replaced.
-Diffing that preamble against this invocation's config seed reads every stale
-pre-filled value as a user edit, and records it.
+**Kept drafts.** `QUERY_MESSAGE.md` is preserved across runs after an empty
+query, an interrupt, or a failed turn.
+When reopened, its preamble still contains the earlier invocation's config seed,
+which may differ from the current invocation's seed (for example, when `--cfg`
+selects a different model on the new run).
+Diffing that stale preamble against the new `seed_partial` would treat every
+unchanged pre-filled value from the earlier run as a user edit and record it.
 
-The draft therefore stores its config seed in a hidden comment below the
-preamble, `<!-- CONFIG_SEED: ... -->`, and the preamble is reconciled before the
-editor opens.
-Only the pre-filled fields are reconciled:
+To distinguish user edits from stale pre-filled values, the draft stores its
+config seed in a hidden HTML comment below the preamble (`<!-- CONFIG_SEED: ...
+-->`).
+Before the editor opens, pre-filled fields in the preamble are reconciled
+against the stored seed:
 
 ```txt
 for field in pre-filled fields:
@@ -170,36 +166,43 @@ for field in pre-filled fields:
 stored_seed := seed_partial                      // both written to the file
 ```
 
-Every other field in the preamble was added by the user and is kept as written,
-merge strategy included.
-Diffing such a field against a config seed that never held it reads it as a
-change from nothing and drops its strategy: an `[assistant.instructions]`
-override with `strategy = "replace"` and an empty list would vanish, and a
-non-empty one would append instead of replace.
-The extraction above follows the same split:
-`seed_partial.delta(parsed_partial)` is taken over the pre-filled fields, and
-every other field of `parsed_partial` enters `editor_delta` as written.
+Reconciliation updates untouched pre-filled fields to the current invocation's
+`seed_partial` while preserving any pre-filled fields the user modified.
+The user sees the current invocation's config with their earlier edits layered
+on top.
 
-The user sees this invocation's config with their earlier edits on top.
+Fields outside the pre-filled set were added by the user and are kept verbatim,
+including their merge strategy.
+Running `seed_partial.delta(parsed_partial)` on those fields would diff them
+against an empty seed and strip their merge strategy: an
+`[assistant.instructions]` override with `strategy = "replace"` would be dropped
+when empty, or converted to an append when non-empty.
+Delta extraction therefore uses the same split as reconciliation: it computes
+`seed_partial.delta(parsed_partial)` only over the pre-filled fields, and copies
+every other field from `parsed_partial` into `editor_delta` as written.
 
-- In a draft without a stored config seed, every pre-filled field takes
-  `seed_partial`'s value: nothing tells an edit apart from a pre-filled value.
-  Fields the user added are kept.
-- A preamble that is not valid TOML is left as it is, with its stored config
-  seed; its parse error reopens the editor through `ParseOutcome::Retry`.
-  Once the repaired preamble parses, its pre-filled fields are reconciled
-  against that stored config seed, so an untouched stale value is not recorded.
+Two edge cases apply when opening a kept draft:
+
+- **Missing stored seed**: If a draft has no `<!-- CONFIG_SEED: ... -->`
+  comment, pre-filled fields cannot be distinguished from user edits, so every
+  pre-filled field is overwritten with `seed_partial` while user-added fields
+  are kept.
+- **Malformed TOML**: If the preamble is not valid TOML, it is left untouched
+  along with its stored config seed, and the parse error reopens the editor via
+  `ParseOutcome::Retry`.
+  Once the user repairs the TOML, its pre-filled fields are reconciled against
+  that stored seed so untouched values from the earlier run are not recorded.
 
 **Limitations.** `seed.delta(parsed)` is additions-only:
 
-- Deleting a seeded scalar field from the preamble produces "no delta" (per
-  `delta_opt` semantics), not an unset directive.
-- List-like fields (e.g., `conversation.attachments`, `conversation.tools`) are
-  additions-only too: reordering or removing seeded list items does not persist
-  as a delta.
-  The editor preamble is not a lossless config editor for collections.
+- Deleting a seeded scalar field from the preamble produces no delta (per
+  `delta_opt` semantics) rather than an unset directive.
+- List-like fields (such as `conversation.attachments` and `conversation.tools`)
+  are also additions-only: reordering or removing seeded list items does not
+  produce a delta.
+  The editor preamble cannot remove or reorder existing collection items.
 
-Real removals and reorderings require RFD 070's unset semantics.
+Supporting removals and reorderings requires RFD 070's unset semantics.
 
 ### The `EditableCommand` trait
 
@@ -265,20 +268,19 @@ pub(crate) enum EditorOutcome<O> {
 }
 ```
 
-Today only `Query` implements `EditableCommand`, with `EditorOutput =
-PreparedQuery` (a struct wrapping `ChatRequest` plus editor-flow state — see
-"Trimmed `Query::run`" below).
-The trait isn't there to share code across consumers — `editor_input` and
-`parse_editor_output` are entirely bespoke per command.
-It keeps the editor protocol contract free of command-specific types:
-`run_editor_protocol` is generic, and the trait method signatures mention only
-`PartialAppConfig` and `Self::EditorOutput`.
-The `Commands::Query(q)` match in `run_inner` itself isn't hidden — that's the
-natural shape of enum-based command dispatch — but query domain types
-(`ChatRequest`, the `[config]/[history]` document shape) stay inside `Query`'s
-module.
+Only `Query` implements `EditableCommand` today, with `EditorOutput =
+PreparedQuery` (which wraps `ChatRequest` and editor-flow state; see "Trimmed
+`Query::run`" below).
+The trait decouples the editor protocol from command-specific types rather than
+sharing implementation code across commands, since `editor_input` and
+`parse_editor_output` are specific to each command.
+`run_editor_protocol` is generic over `EditableCommand`, and the trait
+signatures reference only `PartialAppConfig` and `Self::EditorOutput`.
+`run_inner` still matches on `Commands::Query(q)` for enum dispatch, while query
+domain types (`ChatRequest` and the `[config]/[history]` document format) remain
+encapsulated in the `query` module.
 
-The generic helper:
+`run_editor_protocol` drives the editor loop:
 
 ```rust
 async fn run_editor_protocol<C: EditableCommand>(
@@ -306,11 +308,11 @@ async fn run_editor_protocol<C: EditableCommand>(
 }
 ```
 
-The retry loop preserves today's behaviour: invalid TOML in the `[config]` block
+The retry loop preserves existing behavior: invalid TOML in the `[config]` block
 re-renders the preamble with an inline error message and reopens the editor with
 the user's edits intact.
 
-Dispatch in `run_inner`:
+`run_inner` dispatches editable commands before constructing `Ctx`:
 
 ```rust
 // Query consumes its handle (move-only); the lock replaces it for Query::run.
@@ -375,11 +377,11 @@ let result = rt.block_on(cli.command.run(&mut ctx, handles, lock_for_query, prep
 // route through reduced finalization — see "Finalization" below.
 ```
 
-For `Query`, `command.run` always invokes `Query::run` — the empty/abort case
-is no longer special-cased at dispatch.
+For `Query`, `command.run` always invokes `Query::run` without special-casing
+empty or aborted queries at dispatch.
 `Query::run` handles `prepared = None` internally (see "Trimmed `Query::run`").
 
-`drive_editor` is the existing `editor::open` plumbing, taking a structured
+`drive_editor` wraps the existing `editor::open` plumbing and takes a structured
 `EditorInput`:
 
 ```rust
@@ -390,69 +392,74 @@ struct EditorInput {
 }
 ```
 
-The existing `RevertFileGuard` semantics carry through: `drive_editor` creates
-the file (or reuses an existing one, its preamble reconciled as described in
-[Computing the editor delta](#computing-the-editor-delta)) with the seed
-content, the guard restores original content if not disarmed, successful parsing
-disarms before returning.
-On `ParseOutcome::Retry`, the protocol must preserve the edited file contents
-for the next editor invocation — either by disarming the guard before
-re-driving the editor, or by carrying the edited raw content into the next
+`RevertFileGuard` semantics remain unchanged: `drive_editor` writes the seed
+content to `path` (creating `QUERY_MESSAGE.md` or reusing an existing draft
+after reconciling its preamble as described in [Computing the editor
+delta](#computing-the-editor-delta)), the guard restores the original file
+content unless disarmed, and successful parsing disarms the guard before
+returning.
+On `ParseOutcome::Retry`, the protocol must preserve the user's edited file
+contents for the next editor invocation, either by disarming the guard before
+re-running the editor or by carrying the edited raw content into the next
 `EditorInput`.
-Reusing the same `path` alone is not sufficient if the guard restores between
-invocations.
+Reusing `path` alone is not enough if the guard restores the file between
+attempts.
 
-The body of today's `editor::edit_query` splits cleanly: the `QueryDocument`
-construction and seed-content logic, including preamble reconciliation, moves
-into `Query::editor_input`; the `QueryDocument::try_from(content)` reparse,
-seed-vs-parsed delta extraction (see "Computing the editor delta" above), and
-TOML parse-error retry logic move into `Query::parse_editor_output`.
+The existing `editor::edit_query` implementation splits across the two trait
+methods:
 
-The early-return paths in today's `Query::edit_message` (no-edit + replay,
-query-as-argv, missing editor) translate to `EditorRequest::Skip` (with the
-chat_request built from argv/stdin/replay) or propagate as errors (e.g.,
-`MissingEditor` when no editor is configured and no chat_request is available).
-`EditorRequest::Abort` is reserved for hypothetical future commands and is not
-produced by `Query` today.
+- `Query::editor_input` builds `QueryDocument`, prepares the seed content, and
+  reconciles kept drafts.
+  The early-return paths in `Query::edit_message` (`--no-edit` with `--replay`,
+  query passed via argv, or missing editor) either return `EditorRequest::Skip`
+  with a `ChatRequest` built from argv, stdin, or replay, or return an error
+  (such as `MissingEditor` when no editor is configured and no `ChatRequest` is
+  available).
+  `EditorRequest::Abort` is reserved for future commands and is not produced by
+  `Query`.
+- `Query::parse_editor_output` reparses the file via
+  `QueryDocument::try_from(content)`, extracts `editor_delta` against the seed
+  (see "Computing the editor delta" above), and returns `ParseOutcome::Retry`
+  when the TOML preamble fails to parse.
 
-The associated-type non-object-safety is intentional.
-Dispatch matches on the concrete enum variant, so static dispatch is the natural
-shape; we don't need `Box<dyn EditableCommand>`.
+Because command dispatch matches on the concrete `Commands` enum variant,
+`EditableCommand` uses an associated `EditorOutput` type and static dispatch
+rather than `Box<dyn EditableCommand>`.
 
 ### Pre-dispatch lock acquisition
 
-The editor needs a stable conversation root to write `QUERY_MESSAGE.md` and the
-events stream for the history preamble — both come from the lock.
-Acquiring the lock pre-`Ctx` requires:
+The editor needs a conversation lock before opening: the lock provides both the
+conversation directory for `QUERY_MESSAGE.md` and the event stream for rendering
+the `[history]` preamble.
+Acquiring the lock before constructing `Ctx` requires four adjustments:
 
-- `LockRequest` already takes individual borrows (`workspace`, `handle`,
-  `is_tty`, `session`, `printer`, `signals`, `lock_wait`).
-  All other fields are available pre-`Ctx`; `signals` is currently constructed
-  inside `Ctx::new` and must move out — `SignalPair::new(&runtime)` becomes a
-  step in `run_inner` between `build_runtime` and lock acquisition, then is
-  handed to both `LockRequest` and `Ctx::new`.
-- `acquire_lock` is async, so we need the runtime.
-  `build_runtime` runs before `Ctx::new` today, so we can `rt.block_on(...)`
-  here.
-- `Query::acquire_lock` calls `create_new_conversation(ctx)` and
-  `fork_conversation(ctx, ...)`.
-  Both take `&mut Ctx` today.
-  They need refactoring to take individual deps:
-  - `create_new_conversation` reads `ctx.config()`, `ctx.workspace`,
-    `ctx.session` — straightforward to pass directly.
-  - `fork_conversation` (the shared helper in `conversation/fork`) reads
-    `ctx.now()`, `ctx.workspace`, `ctx.session` — straightforward to pass
-    directly.
-- The `--new` path requires a built `AppConfig`: it seeds the new conversation's
-  base config via `Workspace::create_and_lock_conversation`.
-  We satisfy this by calling `build(partial.clone())` once for new-conversation
-  creation.
-  The clone is pure in-memory work and `build` is pure validation/defaults;
-  source loading does not repeat.
+- **`SignalPair` initialization**: `LockRequest` already accepts individual
+  borrows (`workspace`, `handle`, `is_tty`, `session`, `printer`, `signals`, and
+  `lock_wait`).
+  Every dependency except `signals` already exists before `Ctx::new`.
+  Moving `SignalPair::new(&runtime)` into `run_inner` (between `build_runtime`
+  and lock acquisition) makes `signals` available to both `LockRequest` and
+  `Ctx::new`.
+- **Async execution**: `acquire_lock` is async and runs via `rt.block_on(...)`
+  using the runtime created by `build_runtime`.
+- **Decoupling helper functions from `Ctx`**: `Query::acquire_lock` calls
+  `create_new_conversation(ctx)` and `fork_conversation(ctx, ...)` (the shared
+  helper in `conversation/fork`), which both take `&mut Ctx`.
+  Refactoring them to take their dependencies directly requires passing
+  `(ctx.config(), ctx.workspace, ctx.session)` to `create_new_conversation` and
+  `(ctx.now(), ctx.workspace, ctx.session)` to `fork_conversation`.
+- **Seeding `--new` conversations**: `Workspace::create_and_lock_conversation`
+  needs a resolved `AppConfig` to seed the new conversation's base config.
+  `run_inner` passes `pre_editor_cfg` (from `build(partial.clone())`), avoiding
+  any extra source loading.
 
 ### Trimmed `Query::run`
 
-`Query::run` receives the lock and `Option<PreparedQuery>`:
+Editor invocation, `acquire_lock`, alias resolution, editor-delta recording, and
+invocation-delta computation (`get_config_delta_from_cli`) all move from
+`Query::run` into `run_inner`.
+`Query::run` receives the acquired lock and `Option<PreparedQuery>`, and reads
+the post-editor config from `ctx.config()`:
 
 ```rust
 struct PreparedQuery {
@@ -462,276 +469,260 @@ struct PreparedQuery {
 }
 ```
 
-- `prepared = Some(pq)` is the normal Query path.
-  `pq.request: Some(_)` is a usable chat request; `pq.request: None` is a
-  post-edit empty query (editor opened, body left blank, possibly with config
-  edits in the preamble).
-  `query_file` is `QUERY_MESSAGE.md`'s path for echoing and cleanup;
-  `opened_editor` distinguishes editor-produced requests from CLI/stdin-only
-  ones.
-- `prepared = None` covers the pre-open `EditorRequest::Abort` path
-  (precondition not met before opening the editor).
-  Query's `editor_input` doesn't currently return `Abort`, so this branch is
-  unused in practice but kept for trait completeness; if reached, `Query::run`
-  returns `Ok(())` immediately without running any side effects.
+- `prepared = None` represents a pre-open `EditorRequest::Abort`.
+  `Query::editor_input` does not emit `Abort` today, but if reached,
+  `Query::run` returns `Ok(())` immediately without side effects.
+- `prepared = Some(pq)` is the normal `Query` path.
+  `pq.request` holds `Some(ChatRequest)` when a query is ready to send, or
+  `None` when the user left the editor body blank (possibly after editing the
+  `[config]` preamble).
+  `query_file` holds the `QUERY_MESSAGE.md` path for echoing and cleanup, and
+  `opened_editor` distinguishes editor-produced requests from CLI or stdin
+  queries.
 
-For `prepared = Some(pq)`, `Query::run` always runs:
+When `prepared` is `Some(pq)`, `Query::run` always performs:
 
 - `--title` metadata update
 - session activation
 - pre-query compaction (when `--compact` is set)
 
-Additional steps when `pq.request.is_some()`:
+If `pq.request` is `None`, `Query::run` prints "Query is empty, ignoring.",
+removes `pq.query_file`, and returns without starting MCP servers (see Risks).
+
+If `pq.request` is `Some(_)`, `Query::run` proceeds with the turn:
 
 - `configure_active_mcp_servers`
 - title task spawn
-- tool definitions / attachment loading
-- thread building, `handle_turn`
+- tool definition and attachment loading
+- thread construction and `handle_turn`
 
-When `pq.request.is_none()`: print "Query is empty, ignoring." and clean up
-`pq.query_file`.
-MCP servers do not boot for an empty edited query — a small intentional
-behaviour change from today (see Risks).
-
-`query_file` cleanup matches today's behaviour: removed on a successful turn,
-removed on post-edit empty query, **preserved on turn error** so the user can
-recover their composed text from `QUERY_MESSAGE.md`.
-
-The editor invocation, `acquire_lock`, alias resolution, editor-delta recording,
-and the invocation-delta computation (today's `get_config_delta_from_cli`) all
-leave `Query::run` for `run_inner`.
-The steps that stay read from `ctx.config()` (the post-editor cfg), so
-editor-provided values take effect.
+`query_file` cleanup matches existing behavior: the file is removed after a
+successful turn or an empty edited query, and **preserved on turn error** so the
+user can recover their draft from `QUERY_MESSAGE.md`.
 
 ### Finalization for pre-`Ctx` errors
 
-Today's `run_inner` finalization runs after `command.run` and uses `ctx`:
-printer flush, `task_handler.sync(...)`, `remove_ephemeral_conversations`,
-`cleanup_stale_files`.
-Under this RFD, errors can occur pre-`Ctx` (`build(partial)?`, lock acquisition,
-editor failure).
-They cannot run the post-`Ctx` block as-is.
+`run_inner` currently finalizes execution after `command.run` using `ctx`: it
+flushes the printer, syncs `task_handler`, calls
+`remove_ephemeral_conversations`, and runs `cleanup_stale_files`.
+With editor invocation moved before `Ctx::new`, errors can occur before `Ctx`
+exists (during `build(partial)`, lock acquisition, or editor execution).
 
-Reduced pre-`Ctx` finalization runs printer flush + workspace cleanup (both
-available from locals already in scope) and skips task-handler sync.
-The skip is intentional: no tasks have been spawned at that point, so sync would
-be a no-op anyway.
-The `task_handler` itself is owned by `Ctx`, so calling sync without `Ctx` isn't
-structurally possible.
+To handle both stages, `run_inner` splits finalization into two helpers:
 
-Implementation: extract today's finalization block into `post_ctx_finalize(&mut
-ctx)`; add `pre_ctx_finalize(&mut workspace, &printer, fs_backend)`.
-Pre-`Ctx` `?` errors in `run_inner` route through the latter (e.g., via a small
-RAII guard or explicit `map_err` + cleanup); post-`Ctx` paths use the former.
+- `post_ctx_finalize(&mut ctx)` runs the full finalization sequence after
+  `Ctx::new`.
+- `pre_ctx_finalize(&mut workspace, &printer, fs_backend)` flushes the printer
+  and runs workspace cleanup (`remove_ephemeral_conversations` and
+  `cleanup_stale_files`) using locals already in scope, skipping
+  `task_handler.sync(...)` because `Ctx` (which owns `task_handler`) has not
+  been created and no background tasks have been spawned.
+
+Pre-`Ctx` error paths in `run_inner` route through `pre_ctx_finalize` (via an
+RAII guard or `map_err`), while post-`Ctx` paths call `post_ctx_finalize`.
 
 ### MCP server activation timing
 
-Today `configure_active_mcp_servers` runs *before* the editor and starts MCP
-boot in parallel with user typing.
-After this RFD it runs *after* the editor, so we lose that overlap (typically
-1–2s of added latency for long edit sessions).
+`configure_active_mcp_servers` currently runs before the editor opens, booting
+MCP servers while the user types.
+Moving the editor before `Ctx::new` delays MCP activation until after the editor
+closes, which adds 1 to 2 seconds of startup latency after long edit sessions.
 
-A correctness improvement falls out: editor changes to `[providers.mcp.*]` and
-`[conversation.tools.*]` *do* take effect for the current turn, since
-`mcp_client` and the active-tool list are derived from the post-editor cfg.
-Today silently drops these; the RFD fixes it.
+Running MCP activation after the editor also fixes a bug: because `mcp_client`
+and the active tool list are now built from the post-editor `AppConfig`, editor
+changes to `[providers.mcp.*]` and `[conversation.tools.*]` take effect on the
+current turn instead of being ignored until the next invocation.
 
 ## Non-Goals
 
 - Relaxing `Ctx::config` immutability.
-  Preserving it is the point.
 - Changing the `config_delta` event schema or how deltas are stored.
-- Generalizing "mid-run config sources" beyond the editor.
-- Restoring the parallel MCP-startup-with-editor optimization.
-  If it matters, a follow-up can build `mcp_client` pre-`Ctx` from the partial
-  and pass it into `Ctx::new`.
+- Generalizing mid-run configuration sources beyond the editor.
+- Booting MCP servers in parallel with the editor.
+  If startup latency becomes noticeable, a follow-up can construct `mcp_client`
+  before `Ctx::new` from the pre-editor partial and pass it into `Ctx::new`.
 
 ## Alternatives
 
-Two patches that don't restructure the resolution pipeline were considered and
-rejected:
+We considered and rejected two smaller changes that avoid restructuring the
+configuration pipeline:
 
-- **Local rebind** of `cfg` in `Query::run` after the editor — fixes the
-  visible failure but leaves `ctx.config()` returning the stale snapshot.
-  Future `ctx.config()` callers in the post-editor path silently regress.
-- **`Ctx::refine_config` setter** — qualifies the documented "immutable
-  post-init" rule, and would leave `mcp_client` (built once in `Ctx::new` from
-  `config.providers.mcp`) tied to the pre-editor cfg, recreating the same
-  split-source-of-truth problem in a different field.
+- **Rebinding `cfg` locally in `Query::run` after the editor**: Fixes the
+  immediate bug for local reads in `Query::run`, but leaves `ctx.config()`
+  returning the stale pre-editor snapshot.
+  Any post-editor code that reads `ctx.config()` would silently use outdated
+  values.
+- **Adding a `Ctx::refine_config` setter**: Breaks the invariant that `Ctx`
+  configuration is immutable after initialization, and leaves `mcp_client`
+  (constructed once in `Ctx::new` from `config.providers.mcp`) bound to the
+  pre-editor config.
 
-Both leave the editor as a special case rather than a config source.
-The pre-dispatch flow this RFD proposes treats it uniformly, at the cost of
-restructuring `run_inner` and the lock acquisition path.
+Both approaches treat the editor as a special case rather than a configuration
+source.
+Running the editor before `Ctx::new` folds it into the standard resolution
+pipeline, at the cost of restructuring `run_inner` and lock acquisition.
 
 ## Risks
 
-- **`fork_conversation` / `create_new_conversation` refactor.** Both currently
-  couple lock acquisition to `&mut Ctx`.
-  Moving them pre-`Ctx` changes their call sites in `query` and the conversation
-  subcommands (`archive`, `compact`, `edit`, `rm`).
-  Most of those don't fork or create — they only need `LockRequest::from_ctx`,
-  which keeps working.
-- **Trait surface stability.** `EditableCommand` is designed against one
-  consumer; its shape may shift when a second implementor lands.
-  The `EditorRequest` enum keeps the dispatch-layer commitment minimal.
-- **`Commands::run` signature for Query.** Query's `run` needs to receive
-  `(lock, PreparedQuery)` from the dispatch layer; other variants don't.
-  The `Commands::run` match already dispatches per-variant, so this is a
-  localized signature change in the Query arm, not a trait generalization.
-- **MCP startup timing.** Today MCP boot runs in parallel with the editor (saves
-  1–2s on long edit sessions).
-  Under this RFD it runs after the editor, adding that latency.
-  Additionally, MCP startup is skipped entirely for empty queries — today boots
-  MCP even when no query is sent.
-  Both are acceptable trade-offs for first cut; revisit if measured.
-- **Error-reporting paths.** Editor errors used to flow through `cmd::Error`
-  from `Query::run`; they now abort in `run_inner`.
-  Printer and error machinery are available pre-`Ctx`, so user-visible output
-  should be equivalent.
-  Verify with `MissingEditor`.
-- **Template rendering.** Stays in the pre-dispatch flow against the partial's
-  `template.values`.
-  Editor-supplied template values do not affect the current turn (same as
-  today's behaviour).
-  Template rendering must happen on both the `Skip` and `Run` paths (see
-  Implementation Plan step 6); today the same `if self.template` block runs
-  unconditionally after `edit_message`.
-- **Pre-editor failure side effects.** Today, `MissingEditor` (and any other
-  failure during `edit_message`) occurs inside `Query::run` after session
-  activation, `--title` metadata update, `--compact` compaction, and
-  `configure_active_mcp_servers`.
-  Under this RFD, `MissingEditor` and similar pre-`Ctx` failures abort before
-  `Query::run`, so those side effects don't run.
-  The change is benign for `MissingEditor` (no turn happens; activating
-  session/title/MCP for a failed editor lookup is wasted work) but is a
-  behaviour change worth noting.
+- **`fork_conversation` and `create_new_conversation` signature changes**: Both
+  functions currently take `&mut Ctx`.
+  Decoupling them from `Ctx` updates their call sites in `query` and the
+  conversation subcommands (`archive`, `compact`, `edit`, and `rm`).
+  Subcommands that neither fork nor create conversations continue to use
+  `LockRequest::from_ctx` unchanged.
+- **`EditableCommand` trait stability**: `EditableCommand` has a single
+  implementor (`Query`), so its shape may change when a second command adopts
+  it.
+  `EditorRequest` keeps the dispatch contract narrow.
+- **`Commands::run` signature for `Query`**: `Query::run` takes `(lock,
+  Option<PreparedQuery>)` from the dispatch layer while other command variants
+  do not.
+  Because `Commands::run` dispatches via a `match` on each variant, this change
+  is confined to the `Commands::Query` arm.
+- **MCP startup timing**: Running MCP activation after the editor closes removes
+  the 1 to 2 second overlap with user typing on long edit sessions, and skips
+  MCP startup altogether when an edited query is empty (whereas today's pipeline
+  boots MCP servers even when no query is sent).
+  Both trade-offs are acceptable initially and can be revisited if startup
+  latency becomes an issue.
+- **Pre-`Ctx` error reporting**: Editor errors now return from `run_inner`
+  instead of flowing through `cmd::Error` from `Query::run`.
+  Because the printer and error formatting machinery are initialized before
+  `Ctx::new`, user-visible error output remains the same; the test suite will
+  verify this with `MissingEditor`.
+- **Template rendering on both editor paths**: Template rendering continues to
+  use `template.values` from the pre-editor partial, so template values added in
+  the editor preamble do not apply to the current turn (matching existing
+  behavior).
+  Because `build_conversation` currently runs `if self.template` unconditionally
+  after `edit_message`, both `EditorRequest::Skip` and `ParseOutcome::Run` must
+  render templates before returning (see Implementation Plan step 6).
+- **Pre-editor failure side effects**: Failures during `edit_message` (such as
+  `MissingEditor`) currently occur inside `Query::run` after session activation,
+  `--title` updates, `--compact` compaction, and `configure_active_mcp_servers`.
+  Moving the editor before `Query::run` means those side effects no longer run
+  when the editor fails to open.
+  Skipping session, title, and MCP setup when no turn can proceed is desirable,
+  but it is a behavioral change.
 
 ## Implementation Plan
 
-1. Fix `jp_config::delta::delta_opt_vec` for Vec fields that rely on it: it
-   currently returns `None` when every element of `prev` is contained in `next`,
-   even if `next` has additional elements — silently dropping additions (e.g.,
-   `prev.len() == next.len()` check).
-   Note that `conversation.attachments` uses separate additions-only logic in
+1. Fix `jp_config::delta::delta_opt_vec` for `Vec` fields that rely on it.
+   It currently returns `None` whenever every element of `prev` is contained in
+   `next`, even if `next` has additional elements (missing a `prev.len() ==
+   next.len()` check), which silently drops additions.
+   `conversation.attachments` uses separate additions-only logic in
    `PartialConversationConfig::delta` and is unaffected by `delta_opt_vec`, but
-   should be covered by the same seed-vs-parsed tests since editor-added
+   should be covered by the same seed-vs-parsed tests because editor-added
    attachments are the motivating case for this RFD.
-2. Split `resolve_config` into `resolve_partial` (returns `(PartialAppConfig,
+2. Split `resolve_config` into `resolve_partial` (returning `(PartialAppConfig,
    Vec<ConversationHandle>)`) and a `build(partial)` call in `run_inner`.
-3. Add `PartialEditorConfig::command()` mirroring `EditorConfig::command()`;
-   unit-test parity.
-4. Move `SignalPair::new(&runtime)` from `Ctx::new` into `run_inner`; pass into
-   both pre-dispatch helpers and `Ctx::new`.
+3. Add `PartialEditorConfig::command()` mirroring `EditorConfig::command()`,
+   with unit tests verifying parity.
+4. Move `SignalPair::new(&runtime)` from `Ctx::new` into `run_inner` and pass it
+   to both the pre-dispatch helpers and `Ctx::new`.
 5. Refactor `fork_conversation` and `create_new_conversation` to take individual
-   deps instead of `&mut Ctx`.
-   Existing fork tests should still pass.
+   dependencies instead of `&mut Ctx`, keeping existing fork tests passing.
 6. Define `EditableCommand`, `EditorRequest`, `ParseOutcome`, and
-   `EditorOutcome`.
-   Implement for `Query`: `editor_input` relocates `build_conversation`'s
-   stdin/argv/replay/seed-build logic and returns `EditorRequest<PreparedQuery>`
-   (`Skip` for the query-as-argv / `--no-edit` paths — with template rendering
-   applied to the final output before returning, since `Skip` bypasses
-   `parse_editor_output`; `Abort` is reserved and unused by `Query`) and
-   reconciles a kept draft's preamble against the stored config seed;
-   `parse_editor_output` parses the saved preamble, computes `editor_delta =
-   seed.delta(parsed)`, runs template rendering on the edited content, and
-   returns `ParseOutcome::Run { delta, output }` or
-   `ParseOutcome::Retry(EditorInput)` for TOML parse errors with inline error
-   annotation.
-   Empty edited queries are encoded as `Run` with `output.request: None`
-   (preserving `query_file` for cleanup).
-   Behaviour-preserving relocation.
-   Both paths must render templates before returning so that today's
-   unconditional `if self.template { ... }` block in `build_conversation` is
-   preserved.
-7. Add `run_editor_protocol` (with internal retry loop on
-   `ParseOutcome::Retry`).
-   In `run_inner`, after `resolve_partial` and signal init: extract the query's
-   `ConversationHandle` from `handles` (move-only).
-   For editable commands: build `pre_editor_cfg` early, acquire the lock (using
-   `pre_editor_cfg` for `--new`'s seed), compute the invocation delta from
-   `pre_editor_cfg.to_partial()`, **record `invocation_delta` immediately** (so
-   a subsequent editor failure still persists CLI intent).
-   Run the editor protocol.
-   On `EditorOutcome::Run`: build a candidate, resolve editor-delta aliases
-   against the candidate's alias map, record `editor_delta` if non-empty; the
-   candidate becomes the final cfg.
-   On `EditorOutcome::Abort`: `pre_editor_cfg` becomes the final cfg (no
-   rebuild).
-   Then `Ctx::new` and `command.run` (always invoked — `Query::run` handles the
-   empty case internally).
-   Pre-`Ctx` errors route through `pre_ctx_finalize`.
-8. Change `Query::run` to accept `(lock, Option<PreparedQuery>)`; remove the
+   `EditorOutcome`, and implement `EditableCommand` for `Query`:
+   - `editor_input` relocates `build_conversation`'s stdin, argv, replay, and
+     seed-building logic, reconciles any kept draft's preamble against its
+     stored config seed, and returns `EditorRequest<PreparedQuery>`.
+     The query-as-argv and `--no-edit` paths return `Skip` after rendering
+     templates on the output; `Abort` is unused by `Query`.
+   - `parse_editor_output` parses the saved preamble, computes `editor_delta =
+     seed.delta(parsed)`, renders templates on the edited content, and returns
+     `ParseOutcome::Run { delta, output }` (or
+     `ParseOutcome::Retry(EditorInput)` with an inline error annotation when
+     TOML parsing fails).
+     Empty edited queries return `Run` with `output.request: None` so
+     `query_file` is preserved for cleanup.
+     Rendering templates in both `editor_input` (`Skip`) and
+     `parse_editor_output` (`Run`) preserves the unconditional `if self.template
+     { ... }` pass in `build_conversation`.
+7. Add `run_editor_protocol` with an internal retry loop on
+   `ParseOutcome::Retry`, and wire editable commands into `run_inner` after
+   `resolve_partial` and signal initialization:
+   - Extract the query's move-only `ConversationHandle` from `handles`.
+   - Build `pre_editor_cfg`, acquire the lock (using `pre_editor_cfg` to seed
+     `--new` conversations), compute `invocation_delta` from
+     `pre_editor_cfg.to_partial()`, and **record `invocation_delta`
+     immediately** so a subsequent editor failure still persists CLI intent.
+   - Run the editor protocol.
+     On `EditorOutcome::Run`, build `candidate_cfg`, resolve `editor_delta`
+     aliases against `candidate_cfg`'s alias map, record `editor_delta` if
+     non-empty, and use `candidate_cfg` as the final config.
+     On `EditorOutcome::Abort`, reuse `pre_editor_cfg` as the final config.
+   - Construct `Ctx::new` and invoke `command.run` unconditionally (`Query::run`
+     handles empty queries internally).
+   - Route pre-`Ctx` errors through `pre_ctx_finalize`.
+8. Update `Query::run` to accept `(lock, Option<PreparedQuery>)` and remove
    editor invocation, `acquire_lock`, alias resolution, editor-delta recording,
-   and `get_config_delta_from_cli` (all now in `run_inner`).
-   On `prepared = None` (pre-open abort, unused for Query): return `Ok(())`
-   immediately.
-   On `Some(pq)` with `pq.request.is_none()` (post-edit empty): run `--title`,
-   session activation, `--compact`; print "Query is empty, ignoring."; clean up
-   `pq.query_file`; return.
-   On `Some(pq)` with `pq.request.is_some()`: full turn (current behaviour with
-   `query_file` removed only on success, preserved on error).
+   and `get_config_delta_from_cli` (all handled in `run_inner`):
+   - On `prepared = None` (pre-open abort, unused by `Query`), return `Ok(())`
+     immediately.
+   - On `Some(pq)` with `pq.request.is_none()` (post-edit empty query), run
+     `--title`, session activation, and `--compact`, print "Query is empty,
+     ignoring.", remove `pq.query_file`, and return.
+   - On `Some(pq)` with `pq.request.is_some()`, run the full turn, removing
+     `query_file` on success and preserving it on error.
 9. Verify end-to-end:
    - All existing query paths (`jp q`, `jp q "msg"`, `jp q --new`, `jp q
-     --fork`, `jp q --replay`, `jp q --no-edit`) keep current behaviour, except
-     for the documented MCP-startup-skip on empty edited queries.
-   - Editor-added `conversation.attachments` are visible to the same query turn
+     --fork`, `jp q --replay`, and `jp q --no-edit`) preserve current behavior,
+     except that empty edited queries skip MCP startup.
+   - Editor-added `conversation.attachments` take effect on the same query turn
      (the regression motivating this RFD).
-   - CLI `--attachment` plus editor-added attachment preserves intended order on
-     the *next* invocation (validates persisted event order: invocation delta
-     before editor delta).
-   - `jp q --new` with an editor-provided model uses that model the same turn
-     (covers the `--new` two-build path).
-   - Unchanged editor preamble after `--model X` produces no phantom
-     `config_delta` event (covers seed-vs-parsed extraction).
-   - A draft kept after a failed turn and reopened under a different config
-     shows this invocation's config with only the user's earlier edits on top,
-     and records only those edits (covers preamble reconciliation).
-   - `jp q --model alias` persists a concrete model ID (resolved alias) in the
-     invocation delta event, not the alias name (covers invocation-delta alias
+   - Combining CLI `--attachment` with an editor-added attachment preserves the
+     expected order on the next invocation (verifying that `invocation_delta` is
+     recorded before `editor_delta`).
+   - `jp q --new` with an editor-provided model uses that model on the same turn
+     (covering the `--new` two-build path).
+   - Leaving the editor preamble unchanged after `--model X` produces no phantom
+     `config_delta` event (covering seed-vs-parsed delta extraction).
+   - Reopening a draft kept after a failed turn under a different config shows
+     the current invocation's config with only the user's earlier edits on top,
+     and records only those edits (covering preamble reconciliation).
+   - `jp q --model alias` persists the resolved model ID in the invocation delta
+     event rather than the alias name (covering invocation-delta alias
      resolution).
-   - Semantically-invalid editor config (e.g., unknown provider, unresolved
-     alias) leaves the editor delta unrecorded.
-     If `invocation_delta` was non-empty, only `invocation_delta` persists —
-     the validate-before-persist rule applies to the editor delta, not the
-     (already-recorded) invocation delta.
-   - Editor preamble that defines and uses a new model alias resolves correctly
-     for the current turn and persists with the alias resolved.
+   - Semantically invalid editor config (such as an unknown provider or
+     unresolved alias) leaves the editor delta unrecorded while keeping any
+     non-empty `invocation_delta` that was already recorded before the editor
+     opened.
+   - Defining and using a new model alias in the same editor preamble resolves
+     the alias for the current turn and persists the resolved model ID.
    - Deleting a seeded field from the editor preamble is a no-op.
-   - `jp q --template "..." "message"` (the `Skip` path, no editor opens) still
-     renders templates against `template.values` and rejects undefined variables
-     — same as today's `build_conversation` behaviour.
-   - Post-edit empty query (`PreparedQuery` with `request: None`) cleans up
-     `QUERY_MESSAGE.md`, releases the lock, and runs the standard `run_inner`
-     finalization (printer flush, task sync, ephemeral cleanup).
-   - Turn error after a non-empty editor-produced query *preserves*
-     `QUERY_MESSAGE.md` so the user can recover their composed text (matches
-     today's behaviour).
+   - `jp q --template "..." "message"` (the `Skip` path, where no editor opens)
+     still renders templates against `template.values` and rejects undefined
+     variables, matching `build_conversation`.
+   - A post-edit empty query (`PreparedQuery` with `request: None`) removes
+     `QUERY_MESSAGE.md`, releases the lock, and runs standard `run_inner`
+     finalization (printer flush, task sync, and ephemeral cleanup).
+   - A turn error after a non-empty editor query preserves `QUERY_MESSAGE.md` so
+     the user can recover their composed text.
    - Invalid TOML in the editor's `[config]` block reopens the editor with the
-     user's edited content preserved AND the parse error annotated inline
-     (covers `ParseOutcome::Retry` plus the `RevertFileGuard` lifecycle on
-     retry).
-   - Pre-`Ctx` error (e.g., `MissingEditor`) runs `pre_ctx_finalize`: printer
-     flushes, workspace stale-file cleanup runs.
-   - Missing editor renders the same user-facing error as today, but pre-`Ctx`.
+     user's edits preserved and the parse error annotated inline (covering
+     `ParseOutcome::Retry` and the `RevertFileGuard` lifecycle on retry).
+   - A pre-`Ctx` error (such as `MissingEditor`) runs `pre_ctx_finalize` to
+     flush the printer and clean up stale workspace files, and renders the same
+     user-facing error message as before.
 
-Phases 1–6 are independently mergeable refactors.
-Phases 7–8 land the behaviour change.
-Phase 9 is verification.
+Steps 1 through 6 are independently mergeable refactors.
+Steps 7 and 8 land the behavior change, and step 9 verifies it end-to-end.
 
 ## References
 
-- RFD 054 — `config_delta` event semantics reused here.
-- RFD 070 — source-tagged claims.
-  If 070 lands first: the editor delta is emitted as `ApplyDelta` with source
-  `editor:query`; the invocation delta uses `cli:flag` / `cli:cfg` per
-  directive; for `--new`, the tentative `AppConfig` build is validation-only —
-  conversation creation uses RFD 070's `base + init` partition with these deltas
-  as init entries.
-  If this RFD lands first: events have no claims, and 070 must treat them as
-  legacy.
-- RFD 079 — source/precedence model this RFD extends.
-- Issue #217 — original `QUERY_MESSAGE.md` config-surface proposal.
-- Issue #91 — broader query-editor protocol concerns.
+- RFD 054: `config_delta` event semantics reused here.
+- RFD 070: Source-tagged claims.
+  If RFD 070 lands first, the editor delta is emitted as `ApplyDelta` with
+  source `editor:query`, the invocation delta uses `cli:flag` or `cli:cfg` per
+  directive, and for `--new` the tentative `AppConfig` build is validation-only
+  while conversation creation uses RFD 070's `base + init` partition with these
+  deltas as init entries.
+  If this RFD lands first, events carry no claims and RFD 070 treats them as
+  legacy events.
+- RFD 079: Configuration source and precedence model that this RFD extends.
+- Issue #217: Original `QUERY_MESSAGE.md` configuration surface proposal.
+- Issue #91: Broader query-editor protocol discussion.
 
 [RFD 079]: 079-config-sources-and-load-order.md

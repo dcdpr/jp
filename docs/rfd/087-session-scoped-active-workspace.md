@@ -12,38 +12,36 @@
 
 ## Summary
 
-Each terminal session can select an active workspace with `jp w use`, after
-which `jp q` runs against it from anywhere without `--workspace`, the same way
-[RFD 020] gives each session an active conversation.
-This also decides which checkout a command acts on when [RFD 031] maps one
-workspace ID to several git worktrees.
+Each terminal session can select an active workspace with `jp w use`, letting
+`jp q` run against that workspace from any directory without `--workspace`.
+This extends [RFD 020]'s per-session active conversation model to workspaces and
+resolves which checkout a command targets when [RFD 031] maps one workspace ID
+to multiple git worktrees.
 
 ## Motivation
 
 [RFD 031] makes every git worktree of a repository share one user-local store
-keyed by workspace ID, which fixes durability and the directory-collision crash.
-It leaves one question unanswered: when a workspace ID resolves to several
-checkouts on disk, which one does a command act on?
+keyed by workspace ID, fixing durability and directory-collision crashes.
+However, when a workspace ID maps to multiple checkouts on disk, JP has no way
+to know which checkout a command should act on.
 
-Today there is no good answer.
-`--workspace=<id>` is ambiguous across checkouts, and nothing targets a
-workspace from outside its directory at all, so running `jp` always means first
-`cd`-ing into the right tree.
-Do nothing and that stays true: worktree users keep navigating by hand, and the
-multi-checkout case has no defined behavior.
+`--workspace=<id>` is ambiguous across checkouts, and JP cannot target a
+workspace from outside its directory without it.
+Users must `cd` into the target worktree before running `jp`, and multi-checkout
+workspaces have no defined resolution behavior.
 
-[RFD 020] already solved the same shape of problem for conversations: each tab
-tracks its own active conversation, and the feature is widely relied on.
+[RFD 020] solved the same problem for conversations by giving each terminal tab
+its own active conversation.
 Applying that model one level up gives each tab an active workspace, so `jp q`
-works from anywhere and the multi-checkout ambiguity becomes an explicit,
+works from anywhere and multi-checkout resolution becomes an explicit,
 per-session choice.
 
 ## Design
 
 ### Workflow
 
-A fresh terminal has no active workspace, so `jp` behaves exactly as it does
-today: it operates on the workspace you are standing in.
+A fresh terminal has no active workspace, so `jp` operates on the workspace in
+the current working directory.
 
 To drive a workspace from anywhere, select one for the session:
 
@@ -57,29 +55,27 @@ $ jp w use ?
 $ jp q "summarize the last commit"   # runs in ~/Projects/jp.git/my-feature
 ```
 
-The choice is scoped to this tab, exactly like the active conversation in [RFD
-020]: another tab can select a different workspace, and the two never interfere.
-`jp w show` reports the current selection and `jp w use cwd` drops it, falling
+The selection is scoped to the current tab, just like the active conversation in
+[RFD 020]; another tab can select a different workspace without interference.
+`jp w show` reports the current selection, and `jp w use cwd` clears it to fall
 back to cwd resolution.
-
-The rest of this section describes how that resolution works.
 
 ### Two-layer session model
 
-- Session identity is reused unchanged from [RFD 020] (workspace-independent:
+- Session identity is unchanged from [RFD 020] (workspace-independent:
   `$JP_SESSION`, `getsid(0)` / console HWND, per-pane terminal vars).
 
-- New **global layer**: session to active workspace, stored in a user-global
+- New **global layer**: maps a session to its active workspace in a user-global
   session store at `~/.local/share/jp/sessions/<source-key>.json`, above any
   `<id>`.
-  This store mirrors [RFD 020]'s session mapping shape: a most-recent-first
+  This store mirrors [RFD 020]'s session mapping structure: a most-recent-first
   `history` of selected workspaces (each entry records the workspace `<id>`, its
-  resolved checkout root, and a timestamp), plus a session-level `sticky` flag.
-  The active workspace is `history[0]`; the previous one is `history[1]` (the
-  `session` / `s` target — see [The `jp workspace` command
+  resolved checkout root, and a timestamp) and a session-level `sticky` flag.
+  The active workspace is `history[0]`; the previous workspace is `history[1]`
+  (the `session` / `s` target; see [The `jp workspace` command
   surface](#the-jp-workspace-command-surface)).
-  Recording the `<id>` (not just the root) is what makes recovery work after the
-  root is deleted (see [Reprompt on a missing active
+  Recording the `<id>` alongside the root allows recovery after the root is
+  deleted (see [Reprompt on a missing active
   workspace](#reprompt-on-a-missing-active-workspace)).
   The filename encodes the full session *source*, not just its value:
 
@@ -89,32 +85,33 @@ The rest of this section describes how that resolution works.
   env-<KEY>-<hash(value)>.json   # e.g. env-JP_SESSION-9f86d0….json
   ```
 
-  An automatic `getsid` / `Hwnd` session can never alias an `Env` session that
-  shares the same numeric value, and two different env vars (`$JP_SESSION`,
-  `$TMUX_PANE`) holding the same value get distinct files.
-  Hashing the opaque env value also keeps unsafe characters out of the filename.
-  This is the same source-encoding scheme [RFD 020]'s per-workspace session
-  store now uses (`Session::storage_key`); this RFD reuses that one encoder
-  rather than defining a second so the two stores stay consistent.
-  The blast radius of a collision at this layer is which workspace a command
-  runs against, so the keys are kept disjoint by construction.
-  Two tabs that deliberately set the same `$JP_SESSION` still share a record
-  (same source, same key, same value), which stays the supported way to link
-  sessions.
+  An automatic `getsid` or `Hwnd` session never aliases an `Env` session with
+  the same numeric value, and distinct environment variables (`$JP_SESSION`,
+  `$TMUX_PANE`) holding the same value map to separate files.
+  Hashing the opaque environment variable value also keeps unsafe characters out
+  of the filename.
+  This reuses the `Session::storage_key` encoder from [RFD 020]'s per-workspace
+  session store so both stores stay consistent and key collisions cannot route a
+  command to the wrong workspace.
+  Two tabs that set the same `$JP_SESSION` still share a record (same source,
+  key, and value), which remains the supported way to link sessions.
 
-- Existing **per-workspace layer** is unchanged: session to active conversation
-  at `<id>/sessions/<session-key>.json`.
+- Existing **per-workspace layer**: maps a session to its active conversation at
+  `<id>/sessions/<session-key>.json`, unchanged.
 
-- Composition for `jp q` from anywhere: resolve session to active workspace
-  (global), enter it (see Execution context below), resolve session to active
-  conversation (per-workspace), run.
+- **Composition**: to run `jp q` from anywhere, JP resolves the session to its
+  active workspace (global), enters that workspace (see [Execution context:
+  launch cwd, workspace root, and child
+  cwd](#execution-context-launch-cwd-workspace-root-and-child-cwd)), resolves
+  the session to its active conversation (per-workspace), and executes the
+  command.
 
 ### Startup ordering
 
-Selecting a workspace by ID happens *before* a `Workspace` exists, which inverts
-today's startup: `run_inner` loads the workspace first, then resolves session
-identity.
-A dedicated bootstrap step in `jp_cli` owns the pre-workspace resolution:
+Selecting a workspace by ID happens *before* a `Workspace` exists, inverting the
+prior startup sequence where `run_inner` loaded the workspace before resolving
+session identity.
+A dedicated bootstrap step in `jp_cli` runs before workspace construction:
 
 1. Resolve session identity (`session::resolve`).
 2. Inspect cwd for a workspace, if any.
@@ -122,153 +119,143 @@ A dedicated bootstrap step in `jp_cli` owns the pre-workspace resolution:
 4. Read the per-workspace roots registries under the user data directory.
 5. Choose a concrete checkout root (see
    [Precedence](#precedence-and-the-cwd-vs-active-conflict)).
-6. Only then construct `Workspace`, load config, load the conversation index,
-   and run the command.
+6. Construct `Workspace`, load config, load the conversation index, and run the
+   command.
 
-User-data scanning and root selection stay in this `jp_cli` step.
-`jp_workspace::Workspace` keeps managing an already-selected workspace and gains
-no awareness of how the root was chosen.
+User-data scanning and root selection stay in this `jp_cli` bootstrap step.
+`jp_workspace::Workspace` continues to manage an already-selected workspace and
+does not know how the root was chosen.
 
-The bootstrap step resolves the selection once — launch cwd, selected workspace
-root, child cwd, resolution source, and the session (if any) — and passes those
-values explicitly to its consumers (workspace construction, config loading, MCP
+The bootstrap step resolves the selection once (launch cwd, selected workspace
+root, child cwd, resolution source, and session) and passes those values
+explicitly to downstream consumers (workspace construction, config loading, MCP
 and plugin spawns, local tools, and user-typed path parsing).
-They are not re-derived from the process cwd at each call site, which is what
-keeps the launch-cwd / root / child-cwd distinction from collapsing again.
+Consumers do not re-derive paths from the process cwd at each call site, keeping
+launch cwd, workspace root, and child cwd distinct.
 
 ### Workspace bootstrap requirement
 
-Not every command needs a workspace selected, so each command declares its
-requirement — the workspace-level analog of today's per-command
-`conversation_load_request` (`jp_cli::cmd`).
-The declaration drives the startup dispatch, so a command reaches exactly the
-pre-workspace work it asked for:
+Not every command needs a selected workspace.
+Each command declares its workspace bootstrap requirement, analogous to the
+per-command `conversation_load_request` (`jp_cli::cmd`):
 
-- **none** — no workspace is bootstrapped.
-  `jp init` creates the workspace another command would need selected.
-- **subject** — the workspace is the command's *subject* rather than its
-  context.
-  `jp w` resolves its own target against the pre-workspace environment, from
-  outside every workspace and possibly to no workspace at all, so the bootstrap
+- **none**: no workspace is bootstrapped.
+  `jp init` creates the workspace that other commands select.
+- **subject**: the workspace is the command's *subject* rather than its context.
+  `jp w` resolves its own target against the pre-workspace environment from
+  outside any workspace (and possibly to no workspace at all), so bootstrap
   selects no root on its behalf.
   `jp w show <id>` reports *on* a workspace instead of running *inside* one; `jp
-  w use <id>` records a selection for later runs to resolve; `jp w ls` reads the
-  user-global registries only.
-- **load** — run the resolution ladder, construct `Workspace`, and load the
+  w use <id>` records a selection for subsequent runs; `jp w ls` reads only the
+  user-global registries.
+- **load**: run the resolution ladder, construct `Workspace`, and load the
   conversation index.
-  `jp q` and every other existing command.
+  Used by `jp q` and all other workspace-consuming commands.
 
-A fourth *resolve* mode — a validated root without the conversation index —
-was specified for `jp w use` and has no client: a subject command resolves its
-own target, and nothing else wants a root it will not read conversations from.
-It is omitted rather than kept for a hypothetical caller.
+A fourth *resolve* mode (resolving a validated root without loading the
+conversation index) was considered for `jp w use` but has no caller: a `subject`
+command resolves its own target, and no other command needs a validated root
+without conversations.
 
-The bootstrap handoff therefore has a *no workspace selected* form.
-For `none` and `subject` commands — including `jp w show` from outside any
-workspace with nothing active — the downstream consumers that assume a root
-(config loading, MCP / plugin child cwd, path parsing) simply do not run.
-This makes "absence of a selected workspace" a first-class bootstrap outcome
-rather than something each command has to fake.
+The bootstrap output therefore includes a *no workspace selected* state.
+For `none` and `subject` commands (including `jp w show` run outside any
+workspace with no active selection), downstream consumers that require a root
+(config loading, MCP and plugin child cwd, path parsing) do not run.
 
 ### Bootstrap storage ownership
 
-The two new stores are owned by this `jp_cli` bootstrap step, not by
-`Workspace`.
-Today `Workspace::cleanup_stale_files` requires an `FsStorageBackend` bound to
-the selected workspace, only touches that workspace's lock files and
-conversation session mappings, and runs at the *end* of a command once a
-workspace exists.
-That owner cannot reach a user-global record before any workspace is selected,
-and it never sees roots for workspace IDs that were not selected this run, so it
-cannot own the new stores.
+The `jp_cli` bootstrap step, not `Workspace`, owns the global session store and
+the roots registries.
+`Workspace::cleanup_stale_files` requires an `FsStorageBackend` bound to the
+selected workspace, touches only that workspace's lock files and conversation
+session mappings, and runs at the *end* of a command after a workspace exists.
+It cannot access user-global records before workspace selection or inspect roots
+for unselected workspace IDs.
 
-Ownership therefore splits:
+Cleanup responsibilities split accordingly:
 
-- **Workspace cleanup (unchanged):** conversation locks and per-workspace
-  conversation session mappings, for the selected workspace.
-- **Bootstrap cleanup (new):** the user-global active-workspace session records
-  and roots-registry pruning.
-  It runs before workspace selection (read the active workspace, validate the
-  candidate roots, prune dead ones) and after the command (upsert the current
-  root, drop the global session record when its source is dead).
+- **Workspace cleanup (unchanged):** prunes conversation locks and per-workspace
+  conversation session mappings for the selected workspace.
+- **Bootstrap cleanup (new):** manages user-global active-workspace session
+  records and roots-registry pruning.
+  Before workspace selection, it reads the active workspace, validates candidate
+  roots, and prunes dead entries.
+  After the command completes, it upserts the current root and removes the
+  global session record if its session source is dead.
 
-Pruning dead roots is opportunistic: the bootstrap prunes the roots it inspects
-while resolving a selection, rather than scanning every known workspace on every
+Dead-root pruning is opportunistic: bootstrap prunes only the roots it inspects
+while resolving a selection, rather than scanning every known workspace on each
 run.
 
 ### Execution context: launch cwd, workspace root, and child cwd
 
-A from-anywhere run has to keep three directories distinct, which coincide today
-only because JP normally runs from inside the workspace it operates on:
+Running from anywhere requires distinguishing three directories that coincide
+only when JP runs inside the target workspace:
 
-- **launch cwd** — where the user invoked `jp`; the shell completed any
-  relative path argument against this.
-- **workspace root** — the selected checkout root.
-- **child cwd** — the working directory spawned MCP servers, plugins, and local
-  tools inherit.
+- **launch cwd**: the directory where the user invoked `jp`, against which the
+  shell completes relative path arguments.
+- **workspace root**: the selected checkout root.
+- **child cwd**: the working directory inherited by spawned MCP servers,
+  plugins, and local tools.
 
-Whenever JP operates on a workspace whose root is not the launch cwd's own
-workspace — a session-active pick, an explicit `-w <path>` or `-w <id>`, or the
-fallback picker — the **child cwd** becomes the selected workspace root: config
-loading, MCP servers, plugins, and local tools all run as if launched from
-there.
-Today these use inconsistent bases (config and MCP/plugin spawns inherit the
-process cwd; local tools use `workspace.root()`), so without this invariant a
-from-anywhere run would mix contexts.
+Whenever JP operates on a workspace whose root differs from the launch cwd's
+workspace (via a session-active selection, an explicit `-w <path>` or `-w <id>`,
+or the fallback picker), **child cwd** is set to the selected workspace root.
+Config loading, MCP servers, plugins, and local tools all run as if launched
+from that root.
+Without this rule, from-anywhere runs would mix bases, since config loading and
+MCP/plugin spawns otherwise inherit the process cwd while local tools use
+`workspace.root()`.
 
 **User-typed relative path arguments resolve against the launch cwd, not the
-workspace root.** A user standing in `~/scratch` who types `jp q --attach
-./foo.txt` had the shell complete `./foo.txt` against `~/scratch`; silently
-re-rooting it at the workspace would surprise the user and, once shipped, become
-a contract nobody chose.
+workspace root.** When a user in `~/scratch` runs `jp q --attach ./foo.txt`, the
+shell completes `./foo.txt` against `~/scratch`; re-rooting that path to the
+workspace root would break shell completion expectations.
 
-When JP is launched from *inside* a workspace, the child cwd is left unchanged,
-so a subdirectory's `.jp.toml` chain still loads as it does today.
+When JP is launched from *inside* the target workspace, child cwd remains the
+launch cwd so subdirectory `.jp.toml` files continue to load as usual.
 
-**Minimum path behavior for this RFD.** Resolving against the launch cwd does
-not relax the existing workspace-containment rule: a user-typed relative path
-that resolves outside the selected workspace errors exactly as it does today.
-This RFD adds no new handling — mounting, snapshotting, or external `file://`
-resources — for outside-workspace paths; that is left to the deferred path RFD.
-The from-anywhere flows this RFD targets (`jp q "…"`, attachments that live
-inside the selected workspace) are unaffected; only attaching a path outside the
-selected workspace is deferred, and it fails closed.
-
-The full per-input-class resolution model — exactly how every relative path,
-mount spec, and cwd-targeted config edit resolves, plus the containment policy
-for paths outside the workspace — is broader than this RFD and is deferred (see
+**Minimum path behavior for this RFD.** Resolving relative paths against the
+launch cwd preserves the existing workspace-containment rule: a relative path
+that resolves outside the selected workspace returns an error.
+This RFD adds no mounting, snapshotting, or external `file://` resource handling
+for outside-workspace paths; those are deferred to a dedicated path RFD (see
 [Non-Goals](#non-goals)).
+From-anywhere queries (`jp q "…"`) and attachments inside the selected
+workspace work immediately, while outside-workspace attachments fail closed.
+
+The full per-input-class resolution model (covering relative paths, mount specs,
+cwd-targeted config edits, and containment policy for outside-workspace paths)
+is deferred (see [Non-Goals](#non-goals)).
 
 ### Roots registry (one workspace ID, many checkouts)
 
-The single `storage` symlink is replaced by a roots registry that maps one
-workspace ID to its checkouts on disk.
-A shared read-modify-write file would have a lost-update race that can silently
-drop a checkout from the set, so the registry is instead a *directory of
-per-root files*, one per checkout, mirroring how sessions and locks already
-work:
+A roots registry replaces the single `storage` symlink, mapping one workspace ID
+to all of its checkouts on disk.
+Because a single shared file updated via read-modify-write could lose concurrent
+updates and drop a checkout, the registry is a *directory of per-root files*,
+one per checkout, matching the layout used for sessions and locks:
 
 ```text
 ~/.local/share/jp/workspace/<id>/roots/<root-key>.json
 ```
 
 - `<root-key>` is a stable hash of the checkout's canonical path, so each
-  checkout owns exactly one file and writes never contend.
-- Each run upserts only its own file, recording the canonical path and a
-  `last_used` timestamp.
-  The rewrite is debounced: an entry refreshed within the last few minutes is
-  left untouched, since recency only feeds display ordering and `recent`
-  targeting — a per-run rewrite would churn the user data directory on every
-  invocation and re-trigger any external file watcher observing it.
-  No file is read-modified-written by more than one checkout.
-- Liveness is **derived**, not stored: a root is live when JP workspace
-  discovery from that path resolves a workspace whose loaded ID equals `<id>`
-  (in today's colocated layout, that means `<root>/.jp/.id`).
-  A path that was deleted, or recreated as a different workspace, is not live,
-  and its file is pruned by the bootstrap cleanup (see [Bootstrap storage
+  checkout owns one file and writes never contend.
+- Each run upserts only its own file with the canonical path and a `last_used`
+  timestamp, and no file is modified by more than one checkout.
+  Updates are debounced: an entry refreshed within the last few minutes is left
+  untouched, because `last_used` only drives display ordering and `recent`
+  targeting, and rewriting on every invocation would churn the user data
+  directory and trigger external file watchers.
+- Liveness is **derived**, not stored: a root is live when workspace discovery
+  from that path resolves a workspace whose loaded ID equals `<id>` (in the
+  colocated layout, `<root>/.jp/.id`).
+  A path that was deleted or recreated as a different workspace is not live, and
+  bootstrap cleanup prunes its file (see [Bootstrap storage
   ownership](#bootstrap-storage-ownership)).
-- These are plain files, so the Windows symlink-privilege requirement that the
-  old `storage` symlink imposed does not arise.
+- Because entries are plain files, they avoid the Windows symlink privilege
+  required by the legacy `storage` symlink.
 
 <!-- end list -->
 
@@ -277,117 +264,102 @@ work:
 { "path": "/Users/jean/Projects/jp.git/my-feature", "last_used": "2026-06-01T18:25:00Z" }
 ```
 
-The roots registry is workspace-scoped, living under the workspace's
-user-workspace directory (`<slug>-<id>`, located by ID suffix per [RFD 031]; the
-`<id>` shorthand in the paths above stands for that directory).
-The session store is user-global (under `sessions/`, mapping a session to its
-active workspace).
-These are deliberately separate, not one store doing two jobs.
+The roots registry is workspace-scoped under the user-workspace directory
+(`<slug>-<id>`, located by ID suffix per [RFD 031]; `<id>` in the paths above
+denotes that directory), whereas the global session store lives under
+`sessions/` and maps a session to its active workspace.
 
 ### Migration from the `storage` symlink
 
-Today the user-local back-pointer to a checkout is a single `storage` symlink
-(`<id>/storage` → the checkout's `.jp`), and that symlink is how `-w <id>`
-resolves a root today.
-[RFD 031] Phase 1 renames the user-local directory to `<id>` but does not touch
-this symlink, so RFD 087 owns its transition to the roots registry.
+Previously, the user-local back-pointer to a checkout was a single `storage`
+symlink (`<id>/storage` → the checkout's `.jp`), which `-w <id>` used to
+resolve a workspace root.
+[RFD 031] Phase 1 renames the user-local directory to `<id>` without changing
+that symlink, so RFD 087 replaces it with the roots registry.
 
-Migration is best-effort, not load-bearing.
-On first bootstrap for an `<id>`, if a legacy `storage` symlink exists, JP
-canonicalizes its target, verifies it still resolves to a workspace whose loaded
-ID equals `<id>`, and seeds `roots/<root-key>.json` from it; the symlink is then
-left in place (ignored) or removed.
-A dead or mismatched target is pruned.
-Beyond this one-time seed, roots are discovered organically — each checkout
-upserts its own file on every run — so a user who never re-enters a given
-checkout only loses `-w <id>` access to *that* checkout until they next run from
-it.
+Migration is best-effort and not required for correctness.
+On the first bootstrap for an `<id>`, if a legacy `storage` symlink exists, JP
+canonicalizes its target, verifies that it resolves to a workspace with ID
+`<id>`, and seeds `roots/<root-key>.json` from it before ignoring or removing
+the symlink.
+Dead or mismatched symlink targets are pruned.
+Beyond this one-time seed, each checkout upserts its own registry entry whenever
+a command runs inside it, so an unseeded checkout is unavailable to `-w <id>`
+only until the user next runs JP from that checkout.
 
-This migration depends on [RFD 031] Phase 1 being *implemented*, not merely
+This migration requires [RFD 031] Phase 1 to be *implemented*, not merely
 accepted (see [Implementation Plan](#implementation-plan)).
 
 ### The `jp workspace` command surface
 
-`jp workspace` is the canonical command; `jp w` is the visible short alias,
-mirroring `jp conversation` / `jp c`.
-Examples below use `jp w` for brevity.
+`jp workspace` is the canonical command and `jp w` is its short alias, mirroring
+`jp conversation` / `jp c`.
+The examples below use `jp w`.
 
-- `jp w use <target>`: select the session's active workspace, using the
-  targeting grammar below.
-  `jp w use ?` opens the picker (list known workspaces, expand each through the
-  roots registry to its live checkouts, pick one).
-  Bare `jp w use` returns to `s`, falling back to `?` when the session has no
+- `jp w use <target>`: select the session's active workspace using the targeting
+  grammar below.
+  `jp w use ?` opens the picker, which lists known workspaces, expands each
+  through the roots registry to its live checkouts, and prompts for one.
+  Bare `jp w use` switches to `s`, falling back to `?` when the session has no
   live previous workspace, mirroring bare `jp c use`.
-  `jp w use` is interactive-only in all forms — including `cwd` — because it
-  mutates session state; scripts target with `jp -w` instead (see
-  [Non-interactive mode](#precedence-and-the-cwd-vs-active-conflict)).
-  Selecting a checkout also registers it in the roots registry, so a workspace
-  selected by path before any command has run inside it is immediately reachable
-  by `<id>` from anywhere — which is what a session-scoped selection promises.
-- `jp w use <target> --always`: select the workspace *and* make the session
-  **sticky** to it, so the selection outranks the cwd from then on and the
-  conflict prompt stops firing.
-  This is the up-front form of the prompt's `A` choice, statable before the
-  question is asked.
-  Every `jp w use` states the session's whole intent, so one *without*
-  `--always` releases the flag, including when an earlier invocation set it.
-  `--always` with `cwd` is rejected: that target drops the record the flag lives
-  on.
-- `jp w use cwd` (short `.`): drop the session's active workspace and fall back
-  to cwd resolution.
-  This replaces a `--clear` flag — clearing is just selecting the cwd-derived
-  workspace.
+  `jp w use` is interactive-only in all forms (including `cwd`) because it
+  mutates session state; scripts use `jp -w` instead (see [Non-interactive
+  mode](#precedence-and-the-cwd-vs-active-conflict)).
+  Selecting a checkout also registers it in the roots registry, making a
+  workspace selected by path immediately reachable by `<id>` from anywhere, even
+  before any command has run inside it.
+- `jp w use <target> --always`: select the workspace *and* mark the session
+  **sticky** to it, so the selection takes precedence over cwd and suppresses
+  the conflict prompt.
+  This sets the same state up front as choosing `A` at the conflict prompt.
+  Every `jp w use` sets the session's full sticky state, so running `jp w use`
+  *without* `--always` clears an existing sticky flag.
+  Combining `--always` with `cwd` is rejected because `cwd` removes the session
+  record that holds the flag.
+- `jp w use cwd` (short `.`): clear the session's active workspace and return to
+  cwd resolution, replacing a separate `--clear` flag.
 - `jp w ls`: list known workspaces and their checkouts, mirroring `jp c ls`.
-- `jp w show [<target>]`: with no target, report the session's active workspace;
-  with `<target>` (e.g. `jp w show <id>`), report that workspace — mirroring
-  `jp c show`.
-  The readout covers how it was resolved, whether the session is **sticky** to
-  it, whether cwd is overriding it, the conversation count, and the active
-  conversation (if any).
-  The active conversation is per-`<id>` (the session mapping), shown once.
-  The conversation count is the union by conversation ID across the user-local
-  durable store and every live root's workspace `.jp/conversations/`, so it
-  includes external (`ext`) conversations that live only in one checkout (see
-  [RFD 031]).
-  `jp w show <id>` therefore loads the conversation index (index only, not event
-  contents) for one live root — which already merges the user-local store —
-  and scans each sibling root's conversation directory for the IDs that live
-  there alone, deduplicating by ID: the one place `show` does a multi-root read,
-  accurate without paying a full workspace load per root.
-  When the target resolves to a single concrete root — a path, or an `<id>`
-  with one live root — the readout shows that root.
-  When the target names a checkout the roots registry has not seen yet, the
-  readout still lists it: resolution reached it directly, and reporting "no live
-  checkouts" for the path the user just named would contradict the target.
-  Such a checkout has no `last_used`, because `show` reports without
-  registering.
-  When an `<id>` has several live roots, `jp w show` lists every live root and
-  marks the session-active one (if any); it does not prompt, so `show` stays
+- `jp w show [<target>]`: report the session's active workspace when called
+  without arguments, or report `<target>` (e.g. `jp w show <id>`), mirroring `jp
+  c show`.
+  The output shows how the workspace was resolved, whether the session is
+  **sticky** to it, whether cwd overrides it, the conversation count, and the
+  active conversation (if any, shown once per `<id>`).
+  The conversation count is the union of conversation IDs across the user-local
+  durable store and every live root's `.jp/conversations/` directory, including
+  external (`ext`) conversations present in only one checkout (see [RFD 031]).
+  To compute this without a full workspace load per root, `jp w show <id>` loads
+  the conversation index (metadata only, not event contents) for one live root,
+  which already merges the user-local store, and scans sibling roots'
+  conversation directories to deduplicate any remaining IDs.
+  When the target resolves to a single root (a path, or an `<id>` with one live
+  root), the output shows that root.
+  If a path target names a checkout not yet in the roots registry, `show` still
+  lists it without a `last_used` timestamp rather than reporting "no live
+  checkouts" for the path just queried.
+  When an `<id>` has multiple live roots, `jp w show` lists all of them and
+  marks the session-active root (if any) without prompting, keeping `show`
   read-only and script-friendly.
-  Read-only is literal: inspecting a workspace creates no user-workspace
-  directory, runs no migration or import, writes no registry entry, and leaves
-  recency untouched, so `jp w show` can never change what `r` / `recent`
-  resolves to.
-- `jp -w <target>`: a per-command workspace override using the same targeting
-  grammar.
-  It selects the workspace for this invocation only — it does not change the
-  session's active workspace.
-  On `jp w use` and `jp w show` the flag instead names the workspace the
-  subcommand acts on, so `jp -w foo w show` and `jp w show foo` are the same
-  command; giving both spellings at once is an error rather than a silent
-  precedence rule, and `jp w ls` rejects the flag outright since it lists every
-  workspace.
-  A bare `<target>` is treated as a path if it resolves to an existing path,
-  otherwise parsed as a workspace ID, so a local directory whose name matches a
-  workspace ID shadows the ID.
-  When an ID has one live root, JP uses it; when it has several, interactive
-  runs prompt and non-interactive runs fail with the candidate roots listed.
+  `jp w show` performs no writes: it creates no user-workspace directory, runs
+  no migration or import, writes no registry entry, and leaves `last_used`
+  untouched so `r` / `recent` resolution never changes.
+- `jp -w <target>`: override the workspace for a single invocation using the
+  same targeting grammar, without changing the session's active workspace.
+  On `jp w use` and `jp w show`, `-w` specifies the subcommand's target, making
+  `jp -w foo w show` equivalent to `jp w show foo`; passing both is an error,
+  and `jp w ls` rejects `-w` because it always lists all workspaces.
+  A bare `<target>` is resolved as a filesystem path if that path exists, and
+  otherwise parsed as a workspace ID (so a local directory with the same name
+  shadows the ID).
+  When an ID has one live root, JP uses it; when it has multiple live roots,
+  interactive runs prompt and non-interactive runs fail with a list of candidate
+  roots.
 
 #### Workspace targeting grammar
 
 `jp w use` and `jp -w` share a `WorkspaceTarget` grammar modeled on
 `ConversationTarget` (`jp_cli::cmd::target`), reusing the same keywords and
-single-letter aliases for the concepts that carry over:
+single-letter aliases where applicable:
 
 | Target           | Meaning                                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -403,67 +375,67 @@ single-letter aliases for the concepts that carry over:
 
 > [!WARNING]
 > **`.` is already taken in `ConversationTarget`.** It is the short form of
-> `active`: the session's active conversation.
-> Mapping it to `cwd` here gives one character two meanings that are *opposite*
-> on the session axis — the conversation target is "whatever my session
-> picked", while `cwd` explicitly **clears** the session selection.
-> A user who learns one grammar will predict the wrong behavior in the other,
-> which is the failure the shared grammar exists to prevent.
+> `active`, the session's active conversation.
+> Mapping `.` to `cwd` here gives one character opposite meanings across the two
+> grammars: in `ConversationTarget` it selects the session's active item, while
+> in `WorkspaceTarget` it **clears** the session selection.
+> A user who learns one grammar will predict the wrong behavior in the other.
 >
 > Suggested resolution: drop the `.` alias here and keep `cwd` as the only
 > spelling.
-> `cwd` is already unambiguous on its own, whereas the conversation grammar has
-> no alternative short form available (`a` is `archived`).
+> `cwd` is already short and unambiguous, whereas `ConversationTarget` has no
+> alternative short alias for `active` (`a` is taken by `archived`).
 
-Keywords with no workspace meaning are intentionally omitted: `newest` / `n`
-(workspaces have no creation timeline), the `pinned` / `p` family (workspaces
-have no listing-pin — see [Relationship to `jp
+Keywords that do not apply to workspaces are omitted: `newest` / `n` (workspaces
+have no creation timeline), the `pinned` / `p` family (workspaces have no
+listing pin; see [Relationship to `jp
 conversation`](#relationship-to-jp-conversation)), and the archive keywords.
-The multi-target keywords (`+session`, `+pinned`, `+archived`) are omitted
-because both `jp w use` and `jp -w` select exactly one workspace; they can be
-added later under the same grammar if a multi-workspace command appears.
+The multi-target keywords (`+session`, `+pinned`, `+archived`) are also omitted
+because `jp w use` and `jp -w` each select a single workspace; they can be added
+later if a multi-workspace command is introduced.
 
-Session-history targets (`s`, `?s`) operate on concrete history entries —
-workspace ID *plus* checkout root — not on the workspace ID alone.
-`s` restores the exact previously active checkout (`cd -` semantics), not the
-previous workspace re-resolved against its roots; multiple roots of the same ID
-are distinct history entries.
-When that exact checkout is gone, `s` fails rather than substituting a sibling,
-and points at the full picker (`?`) — not `?s`, which filters this session's
-history by the same exact-root rule and can therefore offer nothing.
+Session-history targets (`s`, `?s`) operate on concrete history entries
+(workspace ID *plus* checkout root), not on the workspace ID alone.
+`s` restores the exact previously active checkout (`cd -` semantics) rather than
+re-resolving the previous workspace ID against its current roots, and multiple
+checkouts of the same ID are distinct history entries.
+If that exact checkout no longer exists, `s` fails instead of substituting a
+sibling checkout and directs the user to the full picker (`?`) rather than `?s`,
+which filters session history by the same exact-root rule.
 
-The picker and fuzzy free-text match display each workspace by its **slug** —
-the `<slug>` in the user-workspace directory `<slug>-<id>` (see [RFD 031]), the
-workspace directory name captured when the directory was first created.
-The slug is cosmetic: it may be absent (a bare `<id>` directory, in which case
-the `<id>` is shown), is never renamed, and is not unique across workspaces.
-Fuzzy free-text matches over slug, path, and ID, but resolution is always by ID
-and concrete root — never by slug — so a shared or stale slug affects only
-display and search, never which workspace a command runs against.
+The picker and fuzzy free-text matcher display each workspace by its **slug**:
+the `<slug>` prefix of the `<slug>-<id>` user-workspace directory (see [RFD
+031]), captured from the workspace directory name when first created.
+The slug is cosmetic: if absent (a bare `<id>` directory), the `<id>` is
+displayed instead; it is never renamed and need not be unique.
+Fuzzy matching searches across slug, path, and ID, but resolution always uses
+the workspace ID and concrete root, so a shared or stale slug affects only
+display and search.
 
 ### Precedence and the cwd-vs-active conflict
 
-Interactive ladder, in order:
+Interactive resolution order:
 
 1. Explicit `-w` wins.
-2. Else, if the session is **sticky** to its active workspace (`A`, below) and
-   that workspace is still live, use it — even when cwd resolves to a different
-   workspace.
-3. Else, if a session-active workspace is set and cwd resolves a *different*
-   workspace (or a different checkout of the same ID), prompt.
-4. Else cwd wins when present.
-5. Else use the session-active workspace when live.
-6. Else picker.
+2. Otherwise, if the session is **sticky** to its active workspace (`A`, below)
+   and that workspace is still live, use it even when cwd resolves to a
+   different workspace.
+3. Otherwise, if a session-active workspace is set and cwd resolves to a
+   *different* workspace (or a different checkout of the same ID), prompt.
+4. Otherwise, cwd wins when present.
+5. Otherwise, use the session-active workspace when live.
+6. Otherwise, open the picker.
 
-The picker at step 6 resolves the run only; it does not record a selection.
-Resolution may **repair** a recorded selection whose checkout is gone, but never
-creates one — attaching a workspace to a session is `jp w use`'s job, or the
-`C` / `A` answers below.
-A session that never selected one is asked again on the next run, mirroring the
-conversation picker, which likewise leaves the session mapping untouched.
+The step-6 picker resolves only the current run and does not record a session
+selection.
+Resolution may **repair** an existing session selection whose checkout was
+removed, but it never creates a new selection; binding a workspace to a session
+requires `jp w use` or choosing `C` or `A` at the conflict prompt.
+A session with no recorded selection prompts again on the next run, matching the
+conversation picker's behavior.
 
-The conflict prompt fires on any difference (different workspace ID *or* a
-different checkout of the same ID):
+The conflict prompt appears whenever cwd and the active selection differ (by
+workspace ID *or* by checkout root of the same ID):
 
 ```text
 How to proceed? [c/C/a/A/q]
@@ -474,72 +446,67 @@ A - use active workspace and keep the session sticky to it
 q - quit without running command
 ```
 
-`A` persists on the session record and makes the session **sticky** to the
-active workspace, the same state `jp w use <target> --always` sets up front.
-It is interactive-only state, released by any `jp w use` without `--always` and
-dropped along with the record by `jp w use cwd` (see [Session store and
-cleanup](#session-store-and-cleanup)).
+Choosing `A` sets the `sticky` flag on the session record, matching `jp w use
+<target> --always`.
+Stickiness applies only in interactive mode; running `jp w use` without
+`--always` clears the flag, and `jp w use cwd` removes the session record
+entirely (see [Session store and cleanup](#session-store-and-cleanup)).
 
-**Non-interactive mode ignores the session-active workspace entirely.** Here
-"non-interactive" means JP cannot prompt the user, determined by the same
-promptability signal JP already uses elsewhere (plugin install, lock-timeout
-handling, tool-call prompts).
-This RFD does not pin that signal to a specific mechanism: [RFD 049] is the
-eventual canonical definition (controlling-terminal availability rather than
-stdout being a TTY), and RFD 087 inherits whatever the shared signal resolves to
-as it evolves.
-Non-interactively, a workspace-consuming command (bootstrap `load`) runs from
-inside a workspace or with an explicit `-w`, and errors otherwise.
-The explicit `-w` accepts only concrete targets — a workspace `<id>`, a path,
+**Non-interactive mode ignores the session-active workspace.** Here
+"non-interactive" means JP cannot prompt the user, using the same promptability
+check as plugin installation, lock-timeout handling, and tool-call prompts.
+[RFD 049] defines the canonical promptability signal (controlling-terminal
+availability rather than a TTY on stdout), and RFD 087 uses that shared check.
+In non-interactive mode, a command with bootstrap requirement `load` must run
+inside a workspace or pass an explicit `-w`, and errors otherwise.
+Non-interactive `-w` accepts only concrete targets: a workspace `<id>`, a path,
 `cwd` / `.` (resolve from the invocation directory), or `-` (read an ID from
 stdin).
 Session-derived targets (`s` / `session`, `?s` / `?session`) and pickers (`?`,
-fuzzy free-text) are interactive-only: they resolve against hidden per-session
-state or need a prompt, so they error non-interactively.
-The read-only `jp w ls` and `jp w show` run non-interactively unchanged, since
-they report registry and resolved/stored state without prompting.
-`jp w use` is interactive-only in every form: it mutates session state, and a
-script returns to cwd behavior by not setting `$JP_SESSION` rather than by
-running `jp w use cwd`.
-This keeps scripts deterministic: they never depend on hidden per-session state.
+fuzzy free-text) require session state or a prompt and therefore fail
+non-interactively.
+Read-only commands (`jp w ls` and `jp w show`) work non-interactively because
+they report registry and session state without prompting.
+`jp w use` always fails non-interactively because it mutates session state;
+scripts use cwd resolution by omitting `$JP_SESSION` rather than running `jp w
+use cwd`.
+This keeps scripts deterministic and independent of hidden session state.
 
 ### No session identity
 
-A session-active workspace is per-session state, so it needs a session identity
-(`$JP_SESSION`, `getsid` / `Hwnd`, or a per-tab terminal var; see [RFD 020]).
-Having no session identity is distinct from having no active workspace:
+A session-active workspace requires a session identity (`$JP_SESSION`, `getsid`
+/ `Hwnd`, or a per-tab terminal variable; see [RFD 020]).
+Lacking a session identity is distinct from having no active workspace:
 
-- `jp w use` without a session identity errors, mirroring `jp c use` ("No
-  session identity available.
-  Set `$JP_SESSION` or run in a terminal with automatic session detection.").
-  There is nothing to persist the selection against.
-- `jp q` launched interactively from outside a workspace without a session
-  identity skips the steps that read a session record (2, 3, and 5) and reaches
-  the step-6 picker, which resolves the run only.
-  That is the same picker a session with no selection gets: it records nothing,
-  so it needs no identity to record against.
-  Non-interactively it errors with guidance to pass `-w`, so scripts stay
-  deterministic.
+- `jp w use` fails without a session identity, matching `jp c use` ("No session
+  identity available.
+  Set `$JP_SESSION` or run in a terminal with automatic session detection."),
+  because there is no session record to persist the selection in.
+- `jp q` run interactively outside a workspace without a session identity skips
+  the session-record steps (2, 3, and 5) and falls through to the step-6 picker
+  for that run only.
+  Non-interactively, it fails with a message directing the caller to pass `-w`.
 
 ### Reprompt on a missing active workspace
 
-- If the recorded root no longer exists (worktree removed), recovery uses the
-  `workspace_id` stored alongside it: read the `<id>`, expand
-  `workspace/<id>/roots/` to its live checkouts, prune dead ones, and re-prompt
-  among the remainder (one live root may be used directly).
-  This is why the session record stores the `<id>` and not only the root — once
-  the root is gone, the `<id>` cannot be recovered from `<root>/.jp/.id`.
-  It mirrors how `session_active_conversation` returns `None` and falls back to
-  the picker when the active conversation is gone.
+If the recorded checkout root no longer exists (for example, after a worktree is
+removed), recovery uses the `workspace_id` stored alongside it in the session
+record: JP reads `<id>`, expands `workspace/<id>/roots/` to its live checkouts,
+prunes dead entries, and prompts the user to choose among the remaining roots
+(or uses the sole remaining root directly).
+Storing `<id>` in the session record makes this possible because `<id>` can no
+longer be read from `<root>/.jp/.id` once `<root>` is deleted.
+This mirrors `session_active_conversation`, which returns `None` and falls back
+to the picker when the active conversation has been deleted.
 
 ### Session store and cleanup
 
 The global session store mirrors [RFD 020]'s session mapping: a
 most-recent-first `history` of selected workspaces (active = `history[0]`,
-previous = `history[1]`), plus a session-level `sticky` flag and the session
+previous = `history[1]`), a session-level `sticky` flag, and the session
 `source`.
-It is longer-lived than the per-workspace conversation mapping, so cleanup
-splits by session source:
+Because global session records outlive any single workspace, cleanup depends on
+the session source:
 
 ```json
 // ~/.local/share/jp/sessions/getsid-12057.json
@@ -556,179 +523,173 @@ splits by session source:
 }
 ```
 
-The `sticky` field is the persisted `A` state from the precedence ladder.
+The `sticky` field stores the `A` choice from the conflict prompt (or
+`--always`).
 
-- **`getsid` / `Hwnd`**: reuse RFD 020's process-liveness check.
-  The mapping is removed when the originating process is confirmed dead.
+- **`getsid` / `Hwnd`**: reuses [RFD 020]'s process-liveness check and removes
+  the session record when the originating process is dead.
 - **`Env` (including `$JP_SESSION`)**: process liveness is unknown, so cleanup
-  is existence-based across the whole history, mirroring RFD 020's `Env` rule
-  (which keeps a mapping while *any* referenced conversation still exists).
-  A history entry is pruned only when nothing it names is live: neither its own
-  recorded checkout, nor any registered checkout of its `workspace_id`.
-  The whole mapping is removed only when no entry survives that test.
-  Keying cleanup off the workspace ID rather than the single active root is what
-  lets the missing-root recovery flow run: when the active root is gone but its
-  `<id>` still has other live checkouts, the mapping survives so recovery can
-  re-prompt among them (see [Reprompt on a missing active
+  checks resource existence across the full history, mirroring [RFD 020]'s `Env`
+  rule (which retains a mapping while *any* referenced conversation exists).
+  A history entry is pruned only when neither its recorded checkout root nor any
+  registered root for its `workspace_id` is live; the session file is removed
+  only when no history entry remains.
+  Keying cleanup on `workspace_id` rather than only the active root preserves
+  the session record when the active root is deleted but sibling checkouts of
+  that `<id>` remain, allowing missing-root recovery to prompt among them (see
+  [Reprompt on a missing active
   workspace](#reprompt-on-a-missing-active-workspace)).
-  Accepting the recorded checkout as evidence in its own right covers the
-  opposite case: a checkout that holds the workspace but has not reached the
-  roots registry yet is live regardless of what the registry knows, so a
-  just-recorded selection cannot be pruned by the same run that wrote it.
-- A sticky `A` choice has no process bound for `Env` sources, so it persists
-  until its `workspace_id` has no live root — not merely until the active root
-  dies.
+  Checking the recorded checkout path directly also protects a newly selected
+  checkout that has not yet been written to the roots registry, preventing the
+  same run from pruning a selection it just recorded.
+- For `Env` sources, a `sticky` flag has no process lifetime and therefore
+  persists until its `workspace_id` has no live roots.
   If the active root is removed while a sibling checkout survives, recovery
-  re-prompts among the remaining roots rather than dropping the sticky
-  selection.
+  prompts among the remaining roots rather than clearing the sticky selection.
 
 ### Relationship to `jp conversation`
 
-`jp workspace` deliberately mirrors `jp conversation` so the two share a mental
-model.
-The session store reuses [RFD 020]'s mapping shape (a most-recent-first history,
-active = `history[0]`); session identity, the `getsid` / `Hwnd` / `Env` source
-split, and the stale-cleanup rules are the same machinery; `jp w use` / `ls` /
-`show` mirror `jp c use` / `ls` / `show`; and the targeting grammar reuses
-`ConversationTarget`'s keywords and single-letter aliases for the concepts that
-carry over (`?`, `?s`, `s` / `session`, `r` / `recent`, `-`, `help`).
+`jp workspace` mirrors `jp conversation` so both commands share the same model:
+the global session store uses [RFD 020]'s history structure (`history[0]` is
+active), session identity detection (`getsid` / `Hwnd` / `Env`), and stale
+cleanup rules; `jp w use`, `ls`, and `show` parallel `jp c use`, `ls`, and
+`show`; and `WorkspaceTarget` reuses `ConversationTarget`'s keywords and aliases
+(`?`, `?s`, `s` / `session`, `r` / `recent`, `-`, `help`).
 
-Two things genuinely diverge, by necessity:
+Two behaviors differ because workspaces are rooted in the filesystem:
 
 - **The cwd-vs-active conflict and the `sticky` flag have no conversation
-  analog.** A conversation has no ambient, location-derived candidate competing
-  with the session-active one; a workspace does (the tree you are standing in).
-  The conflict prompt, the precedence ladder, and the `sticky` pin exist only
-  because workspaces are filesystem-rooted.
-  **Sticky** here means "this session keeps using its active workspace even when
-  cwd points elsewhere" — distinct from a **Pinned Conversation**, which marks
-  a conversation as important in listings.
-  They are different concepts and use different words on purpose.
+  equivalent.** Conversations have no ambient directory-derived candidate
+  competing with the session's active conversation, whereas workspaces have the
+  current working directory.
+  The conflict prompt, precedence ladder, and `sticky` flag exist to resolve
+  that ambiguity.
+  **Sticky** means the session continues using its active workspace even when
+  cwd points to another workspace, which is distinct from a **Pinned
+  Conversation** (an importance marker on a conversation in listings).
 - **`cwd` is a workspace-only target.** `jp w use cwd` clears the session
-  selection and returns to cwd resolution; conversations have no cwd fallback,
-  so the keyword (and its clearing behavior) is workspace-specific.
+  selection and restores cwd resolution; conversations have no cwd fallback.
 
-Conversely, the multi-target keywords (`+session`, `+pinned`, `+archived`) and
-the listing-pin / archive keywords from `jp c` are absent here because the
-underlying concepts do not exist for workspaces; they are not a divergence to
-reconcile.
+Conversely, `ConversationTarget`'s multi-target keywords (`+session`, `+pinned`,
+`+archived`) and pin/archive keywords are omitted because workspaces cannot be
+pinned in listings or archived.
 
 ## Drawbacks
 
-- A new user-global session store and its cleanup pass.
-  It reuses RFD 020's process-liveness check for `getsid` / `Hwnd` sources but
-  needs a distinct rule for `Env` sources (see [Session store and
+- Adds a user-global session store and cleanup pass, including an
+  existence-based cleanup rule for `Env` session sources (see [Session store and
   cleanup](#session-store-and-cleanup)).
-- Cold-start double prompt: a fresh session run from nowhere prompts for a
-  workspace, then a conversation.
-  Acceptable for v1; optimization deferred.
-- The conflict prompt adds a decision point, though only for users who have set
-  a session-active workspace.
+- Cold-start double prompt: running `jp q` from outside any workspace in a fresh
+  session prompts first for a workspace and then for a conversation.
+  This is acceptable for the initial implementation.
+- The conflict prompt adds an interaction step when cwd and the active workspace
+  differ, though only for users who have selected a session-active workspace.
 
 ## Alternatives
 
-- **Always cwd-wins, no session-active workspace.** Rejected: never lets you run
-  `jp` from outside a workspace directory, the core goal.
-- **Always session-active-wins over cwd.** Rejected: silently runs against the
-  wrong place when you `cd` elsewhere.
-- **A single global active workspace, not per-session.** Rejected: breaks
-  parallel tabs, the property [RFD 020] users rely on.
-- **Multi-target symlink for the back-pointer.** Not a filesystem primitive; the
-  registry file models one-to-many natively.
+- **Always prefer cwd, with no session-active workspace.** Rejected: prevents
+  running `jp` from outside a workspace directory, which is the primary goal of
+  this RFD.
+- **Always prefer the session-active workspace over cwd.** Rejected: silently
+  targets the wrong workspace when the user `cd`s into another project.
+- **Store a single global active workspace instead of per-session state.**
+  Rejected: breaks independent parallel terminal tabs ([RFD 020]).
+- **Use a multi-target symlink for the checkout back-pointer.** Rejected:
+  symlinks are single-target filesystem primitives, whereas a per-root registry
+  directory models one-to-many mappings directly.
 
 ## Non-Goals
 
-- **Git awareness.** Consistent with [RFD 031], JP does not inspect worktree
+- **Git awareness.** Consistent with [RFD 031], JP does not inspect git worktree
   topology.
-- **Attachment portability across checkouts.** Continuing a conversation in a
-  different checkout can break path-relative attachments.
-  Once [RFD 065]'s snapshot-at-attach model lands it will capture attachment
-  content at attach time and stop re-resolving it on later runs, which would
-  remove most of this risk.
-  Until then, continuing a conversation from a different checkout can re-resolve
-  path-relative attachments against the selected checkout.
-  Either way, the precedence ladder and conflict prompt above are a guardrail,
-  not a guarantee; [RFD 065] is not a prerequisite for this RFD.
-- **Re-embedding the workspace ID in conversation IDs.** That regression fix is
-  a separate, smaller change.
-  It is complementary (visible IDs make `jp w` and `jp -w` discoverable) but not
-  required for this design to function.
-- **A global-local workspace for use outside any project.** Issue #144 asks for
-  JP to work anywhere by falling back to a "global local" workspace when the
-  user is outside every project workspace.
-  This RFD does not implement that — it only lets commands launched outside a
-  workspace target an *existing* workspace selected by session state, the
-  picker, or `-w`.
-- **A unified path-resolution model.** Defining, per input class, how every
-  relative path argument, mount spec, and cwd-targeted config edit resolves
-  across launch cwd / workspace root / child cwd is broader than this RFD and
-  intersects the "use JP outside a workspace" work (issue #144).
-  This RFD commits only to two rules: child processes run with the workspace
+- **Attachment portability across checkouts.** Continuing a conversation from a
+  different checkout can re-resolve workspace-relative attachments against that
+  checkout.
+  Once [RFD 065]'s snapshot-at-attach model is implemented, attachment content
+  will be captured at attach time rather than re-resolved on later turns.
+  Until then, the precedence ladder and conflict prompt serve as a guardrail,
+  and [RFD 065] is not a prerequisite for this RFD.
+- **Re-embedding the workspace ID in conversation IDs.** Surfacing workspace IDs
+  in conversation IDs helps users discover IDs for `jp w` and `jp -w`, but is an
+  independent change.
+- **A global fallback workspace outside any project.** Issue #144 proposes a
+  "global local" workspace when running outside any project workspace.
+  This RFD only allows commands launched outside a workspace to target an
+  *existing* workspace via session state, the picker, or `-w`.
+- **A unified path-resolution model.** Defining how every input class (relative
+  path arguments, mount specs, cwd-targeted config edits) resolves across launch
+  cwd, workspace root, and child cwd, along with containment policy for
+  outside-workspace paths, is deferred to a dedicated RFD (and intersects issue
+  #144).
+  This RFD establishes only two rules: child processes run with the workspace
   root as their cwd, and user-typed relative path arguments resolve against the
   launch cwd.
-  The rest belongs in a dedicated RFD.
-- **Cross-machine sync.**
+- **Cross-machine synchronization.**
 
 ## Risks and Open Questions
 
-- A workspace ID with no live checkouts (every worktree removed) cannot be
-  entered by `jp -w <id>` or `jp w use`.
-  The intended behavior is an error pointing the user at a checkout; confirm
-  that is sufficient.
-- Root-key derivation must be stable across runs and collision-resistant for
-  distinct canonical paths.
-  A hash of the canonical path is the intended approach.
+- A workspace ID with no live checkouts (all worktrees deleted) cannot be
+  selected by `jp -w <id>` or `jp w use`.
+  Returning an error that asks the user to run JP from an existing checkout
+  should be sufficient.
+- `<root-key>` derivation must be deterministic across runs and
+  collision-resistant across distinct canonical paths; hashing the canonical
+  path satisfies both requirements.
 
 ## Implementation Plan
 
 ### Phase 1: Roots registry and `-w <id>` resolution
 
 Replace the `storage` symlink with the per-root registry directory and resolve
-`-w <id>` against it: one live root, use it; many, picker/error; none, error.
-Derive liveness via the same-ID check.
+`-w <id>` against it (using the sole live root, prompting or failing when
+multiple roots exist, and failing when none exist).
+Derive root liveness by verifying that the checkout's workspace ID matches
+`<id>`.
 Seed the registry from any legacy `storage` symlink on first bootstrap (see
 [Migration from the `storage` symlink](#migration-from-the-storage-symlink)).
 
 Depends on: [RFD 031] Phase 1 *implemented* (not merely accepted).
-This phase only adds ID-to-root resolution and changes no session state, so it
-can be merged independently of the session layer.
+This phase only adds ID-to-root resolution and modifies no session state, so it
+can merge independently of the session layer.
 
 ### Phase 2: Startup boundary and execution context
 
 Move session resolution ahead of workspace construction and add the `jp_cli`
-bootstrap step that selects the root.
-Establish the root-as-working-directory invariant for from-anywhere runs.
-Add the per-command workspace bootstrap requirement (none / subject / load), the
-analog of `conversation_load_request`.
+bootstrap step that selects the checkout root.
+Set child cwd to the workspace root for from-anywhere runs, and add the
+per-command workspace bootstrap requirement (`none`, `subject`, `load`)
+analogous to `conversation_load_request`.
 
 Depends on: Phase 1.
 
 ### Phase 3: User-global session store and `jp w` surface
 
-Add the user-global session store (history-shaped, mirroring [RFD 020]) and the
-`jp w` commands (`use ?`, `use cwd`, `ls`, `show`) with the shared workspace
-targeting grammar, plus `jp q`-from-anywhere resolution and the source-split
-cleanup rules.
+Add the user-global session store (mirroring [RFD 020]'s history layout), the
+`jp w` subcommands (`use ?`, `use cwd`, `ls`, `show`) with the shared
+`WorkspaceTarget` grammar, from-anywhere `jp q` resolution, and source-specific
+session cleanup.
 
 Depends on: Phase 2.
 
 ### Phase 4: Precedence ladder, conflict prompt, and reprompt
 
-Implement the interactive ladder, the cwd-vs-active prompt, the persisted `A`
-sticky state, the non-interactive rule, and reprompt-on-missing-root.
+Implement the interactive precedence ladder, the cwd-vs-active conflict prompt,
+the persisted `sticky` (`A`) state, non-interactive workspace resolution, and
+reprompting when the active checkout root is missing.
 
 Depends on: Phase 3.
 
 ## References
 
-- [RFD 020]: Parallel Conversations, the session identity and history model this
-  RFD extends.
-- [RFD 031]: Durable Conversation Storage with Workspace Projection, the shared
-  user-local store and migration this RFD requires.
+- [RFD 020]: Parallel Conversations, which defines the session identity and
+  history model extended by this RFD.
+- [RFD 031]: Durable Conversation Storage with Workspace Projection, which
+  defines the shared user-local store and directory layout required by this RFD.
 - [RFD 065]: Typed Resource Model for Attachments, whose snapshot-at-attach
-  model bounds the attachment-portability concern noted in Non-Goals.
-- [RFD 049]: Non-Interactive Mode and Detached Prompt Policy, the eventual
-  canonical definition of "interactive" this RFD's local rule defers to.
+  model addresses the attachment-portability limitation noted in
+  [Non-Goals](#non-goals).
+- [RFD 049]: Non-Interactive Mode and Detached Prompt Policy, which defines the
+  canonical promptability check used by this RFD.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md

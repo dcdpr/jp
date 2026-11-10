@@ -11,48 +11,47 @@
 ## Summary
 
 This RFD introduces incremental persistence of tool call results during
-execution, an `IncompleteTurn` type that captures residual events from turns
-that were interrupted mid-execution, and a `--continue-turn` flag on `jp query`
-that resumes incomplete turns from persisted state.
+execution, an `IncompleteTurn` type that captures residual events from
+interrupted turns, and a `--continue-turn` flag on `jp query` that resumes
+incomplete turns from persisted state.
 
-This RFD depends on [RFD 005] (First-Class Inquiry Events) for persisting
+This RFD depends on [RFD 005] (First-Class Inquiry Events), which persists
 `InquiryRequest` and `InquiryResponse` events in the conversation stream.
-Without those events on disk, incomplete turns that involve inquiries cannot be
-detected or resumed.
+Without those events on disk, JP cannot detect or resume incomplete turns that
+involve inquiries.
 
 ## Motivation
 
-Today, a conversation turn runs to completion or it doesn't.
-If the process exits mid-turn — the LLM provider was unreachable after the
-`ChatRequest` was written, the user hit Ctrl+C during tool execution, or the
-process crashed — the persisted stream is left in an inconsistent state.
-The `sanitize()` method patches this up on next load by injecting synthetic
-error responses for orphaned tool call requests and removing unpaired inquiry
-events.
-The incomplete turn's real state is lost.
+If the process exits mid-turn (for example, the LLM provider is unreachable
+after writing the `ChatRequest`, the user presses Ctrl+C during tool execution,
+or the process crashes), the persisted stream is left in an inconsistent state.
+On the next load, `sanitize()` repairs the stream by injecting synthetic error
+responses for orphaned tool call requests and removing unpaired inquiry events,
+discarding the incomplete turn's state.
 
 This creates two problems:
 
-**Lost work.** If three tools were running and two completed before the process
-died, those results are discarded.
+**Lost work.** If three tools are running and two complete before the process
+exits, their results are discarded because tool responses are only persisted
+after the entire batch finishes.
 On retry, all three tools run again.
-For tools with side effects (file modifications, git operations), re-execution
-may produce different results or fail.
+Re-running tools with side effects (file modifications, git operations) may
+produce different results or fail.
 
-**No retry path.** When the LLM provider is down and the `ChatRequest` is
-already persisted, the user works around this with `jp query -E` (no-edit),
-which pops the last `ChatRequest` and re-sends it.
-This works but is a workaround — the user needs to know about `-E` and
-understand why their query appears to have vanished from the stream.
+**No retry path.** When the LLM provider fails after the `ChatRequest` is
+persisted, the user must run `jp query -E` (no-edit) to pop the last
+`ChatRequest` and re-send it.
+This workaround requires the user to know about `-E` and understand why their
+query appears to have vanished from the stream.
 
 ## Design
 
 ### `IncompleteTurn`
 
-When a conversation is loaded from disk, the event stream may contain a turn
-that didn't finish.
-Rather than sanitizing away the evidence, JP splits the stream at the last
-complete turn boundary and returns the residual events separately:
+When loading a conversation from disk, the event stream may end with an
+unfinished turn.
+Rather than sanitizing those events away, JP splits the stream at the last
+complete turn boundary and returns the trailing events in an `IncompleteTurn`:
 
 ```rust
 pub struct IncompleteTurn {
@@ -71,14 +70,11 @@ fn load_conversation(
 ) -> Result<(ConversationStream, Option<IncompleteTurn>)>
 ```
 
-`ConversationStream` contains only complete turns.
-All existing consumers — `Thread::into_parts()`, provider conversion,
-`conversation fork`, `conversation grep` — work unchanged.
-They never see incomplete state.
-
-`IncompleteTurn` is only consumed by the turn loop (via `--continue-turn`) and
-by display commands that choose to show it (`conversation print`, `conversation
-ls`).
+`ConversationStream` contains only complete turns, so existing consumers
+(`Thread::into_parts()`, provider conversion, `conversation fork`, `conversation
+grep`) work unchanged and never see incomplete state.
+Only the turn loop (via `--continue-turn`) and display commands (`conversation
+print`, `conversation ls`) consume `IncompleteTurn`.
 
 #### Detecting an incomplete turn
 
@@ -89,80 +85,66 @@ between a `TurnStart` and the next `TurnStart` (or end-of-stream):
 2. Every `ToolCallRequest` has a matching `ToolCallResponse` (matched by
    `tool_call_id`).
 3. If `ToolCallResponse` events exist, at least one `ChatResponse` appears after
-   the last `ToolCallResponse` — confirming the LLM processed the tool results.
+   the last `ToolCallResponse`, confirming that the LLM processed the tool
+   results.
 
-The detection scans the events from the last `TurnStart` to the end of the
-stream and checks these conditions.
-Events that are not part of the conversation protocol (e.g., future
-`TurnStatistics` or `TurnMetadata` events) do not affect completeness — the
-check is based on structural properties of the request/response protocol, not on
-the identity of the last event.
+On load, JP scans the events from the last `TurnStart` to the end of the stream.
+If any condition is not met, all events from that `TurnStart` onward form the
+`IncompleteTurn`.
+Because completeness depends on request/response structure rather than on the
+identity of the last event, non-protocol events (such as future `TurnStatistics`
+or `TurnMetadata` events) do not affect the check.
 
-If these conditions are not met, all events from the last `TurnStart` onward
-form the `IncompleteTurn`.
+Which condition is unmet determines the resume phase:
 
-The resume phase is determined by *what's missing* from the structural
-conditions:
-
-- No `ChatResponse` after `ChatRequest` → resume at `Streaming` (retry LLM).
-- Unmatched `ToolCallRequest`s → resume at `Executing` (run remaining tools).
-- All tools matched but no follow-up `ChatResponse` → resume at `Streaming`
-  (send tool results to LLM).
+- No `ChatResponse` after `ChatRequest`: resume at `Streaming` (retry the LLM
+  call).
+- Unmatched `ToolCallRequest`s: resume at `Executing` (run the remaining tools).
+- All tools matched without a follow-up `ChatResponse`: resume at `Streaming`
+  (send the tool results to the LLM).
 
 #### Relationship to `sanitize()`
 
-`ConversationStream::sanitize()` currently repairs structural invariants on load
-— injecting synthetic error responses for orphaned `ToolCallRequest`s, removing
-unpaired `InquiryRequest`s and `InquiryResponse`s.
+On load, JP extracts any trailing `IncompleteTurn` before running
+`ConversationStream::sanitize()`.
+Because the incomplete tail is already separated out, `sanitize()` no longer
+treats the last turn's orphaned `ToolCallRequest`s or unpaired `InquiryRequest`
+and `InquiryResponse` events as corruption.
+Instead, `sanitize()` only enforces structural invariants across the completed
+turns in `ConversationStream`:
 
-With the `IncompleteTurn` split, `sanitize()` no longer needs to handle the
-incomplete tail of the stream — that's the `IncompleteTurn`'s job.
-But `sanitize()` still enforces structural invariants on the complete turns:
+- The stream begins with a `TurnStart`.
+- A `ChatRequest` follows each `TurnStart`.
+- Every turn satisfies the structural completeness conditions above, with
+  matched request/response pairs.
 
-- `TurnStart` at the start of the stream
-- `ChatRequest` follows each `TurnStart`
-- All complete turns satisfy the structural completeness conditions above
-- Request/response pairs are matched within complete turns
-
-The `IncompleteTurn` split happens first: residual events from the last
-(incomplete) turn are extracted.
-Then `sanitize()` runs on the remaining `ConversationStream` to enforce the
-invariants above.
-What `sanitize()` stops doing is treating the incomplete tail as corruption —
-no more injecting synthetic error responses for the last turn's orphaned tool
-calls, no more removing unpaired inquiry events that belong to the incomplete
-turn.
-
-For `conversation fork` with `--from`/`--until` filters, the same pattern
-applies: if the slice point falls mid-turn, fork produces `(ConversationStream,
+The same split applies to `conversation fork` with `--from`/`--until` filters:
+if the slice point falls mid-turn, fork produces `(ConversationStream,
 IncompleteTurn)` where the stream satisfies the structural invariants and the
-incomplete turn is the valid residual.
+`IncompleteTurn` holds the trailing events.
 
 > [!NOTE]
 > `conversation fork` no longer has a slice point that can fall mid-turn.
 > Its range flags are `--from`/`--to` (the shared turn selector; `--until` is
-> gone), and every bound — including the time-based ones — resolves to a whole
-> turn.
-> A fork therefore never produces a residual partial turn from range filtering,
-> so this section applies only to forking a conversation whose *latest* turn is
-> already incomplete (the case described just above).
+> gone), and every bound, including time-based bounds, resolves to a whole turn.
+> Range filtering therefore never produces a partial turn, so this behavior
+> applies only when forking a conversation whose latest turn is already
+> incomplete.
 > See [Indexing and Counting Conventions].
 
 ### Incremental Persistence
 
-Today, tool call responses are persisted as a batch.
-The turn loop collects all `ToolCallResponse` events in memory, writes them to
-the stream, and calls `workspace.persist_active_conversation()` after the entire
-execution phase completes.
+Today, the turn loop collects all `ToolCallResponse` events in memory and calls
+`workspace.persist_active_conversation()` only after the entire execution phase
+finishes.
 If the process exits mid-batch, completed tool results are lost.
 
-This RFD changes the persistence boundary: each `ToolCallResponse` is written to
-the stream and persisted individually as each tool completes.
+With incremental persistence, the turn loop appends each `ToolCallResponse` to
+the stream and persists it as soon as the tool completes.
 
-The stream ordering remains correct.
-`ToolCallRequest` events are already persisted during the streaming phase
-(before tool execution begins).
-During execution, `ToolCallResponse` events append after the requests:
+Stream ordering remains valid.
+`ToolCallRequest` events are persisted at the end of the streaming phase, before
+tool execution begins, so `ToolCallResponse` events always follow the requests:
 
 ```
 TurnStart
@@ -178,34 +160,31 @@ InquiryRequest (tool 2)   ← persisted when tool 2 hits inquiry
 --- process exits ---
 ```
 
-All requests precede all responses, satisfying provider ordering constraints
-(e.g. Gemini requires function calls grouped before function responses).
-Responses may arrive out of request order (tool 3 before tool 2), but providers
-match responses to requests by `tool_call_id`, not by position.
+Because all requests precede all responses, the stream satisfies provider
+ordering constraints (for example, Gemini requires function calls to be grouped
+before function responses).
+Responses may arrive out of request order (tool 3 before tool 2), which
+providers allow because they match responses to requests by `tool_call_id`
+rather than position.
 
 #### What gets persisted incrementally
 
-| Event              | When persisted                          |
-| ------------------ | --------------------------------------- |
-| `ToolCallResponse` | Immediately when the tool completes     |
-| `InquiryRequest`   | When the tool returns `NeedsInput` with |
-|                    | user target                             |
-| `InquiryResponse`  | When the user (or inquiry backend)      |
-|                    | answers                                 |
+| Event              | When persisted                            |
+| ------------------ | ----------------------------------------- |
+| `ToolCallResponse` | When the tool completes                   |
+| `InquiryRequest`   | When the tool returns `NeedsInput` with a |
+|                    | user target                               |
+| `InquiryResponse`  | When the user or inquiry backend answers  |
 
-`ChatResponse` and `ToolCallRequest` events are already persisted during the
-streaming phase (end of `TurnPhase::Streaming`).
-No change there.
+`ChatResponse` and `ToolCallRequest` events continue to be persisted at the end
+of `TurnPhase::Streaming`.
 
 #### Persistence mechanism
 
-The existing `workspace.persist_active_conversation()` rewrites the entire
-conversation stream to disk.
-For incremental persistence, we call this same method after each tool
-completion.
-This is simple and correct — the full rewrite ensures consistency.
-
-The call pattern in the turn loop changes from:
+`workspace.persist_active_conversation()` rewrites the entire conversation file,
+writing the completed turns in `ConversationStream` followed by any
+`IncompleteTurn` events (which are split apart again on load).
+Incremental persistence calls this same method after each tool completion:
 
 ```rust
 // Before: persist once after all tools complete
@@ -225,23 +204,21 @@ for response in responses {
 }
 ```
 
-The `IncompleteTurn` events are persisted alongside the stream.
-The workspace persist method writes the stream (complete turns) followed by the
-incomplete turn events to the same file.
-On load, they are split apart.
-
-If the full-rewrite cost becomes a concern for large conversations, an
-append-only optimization can be added later without changing the API.
+A full rewrite keeps the on-disk file consistent without changing the storage
+format.
+If rewrite cost becomes a bottleneck for large conversations, an append-only
+optimization can be added later without changing the API.
 
 ### Incomplete Turn Prompt
 
-When a conversation has an incomplete turn and the user runs `jp query`
-*without* `--continue-turn`, the behavior depends on whether a TTY is available.
+When a conversation has an incomplete turn and the user runs `jp query` without
+`--continue-turn` or `--discard-turn`, the behavior depends on whether a TTY is
+available.
 
 #### Interactive mode (TTY)
 
-JP displays context about the incomplete turn and offers an inline select prompt
-with context-dependent options:
+JP summarizes the incomplete turn and prompts the user with `InlineSelect` from
+`jp_inquire`:
 
 ```
 $ jp query
@@ -257,32 +234,25 @@ $ jp query
   (?) Help
 ```
 
-The prompt uses the existing `InlineSelect` infrastructure from `jp_inquire`.
-
-Additional context-dependent options appear based on the incomplete turn's
-state:
+Additional options appear depending on where the turn stopped:
 
 | Last significant state               | Extra options                     |
 | ------------------------------------ | --------------------------------- |
 | `ChatRequest` (pending LLM response) | `(e) Edit pending query`          |
 | `InquiryRequest` (waiting for input) | Shows the pending question inline |
 
-The `(e)` edit option opens the pending `ChatRequest` content in the user's
-editor (same as `jp query -E` today).
-On save, the edited query replaces the original and the turn resumes from
-`Streaming`.
+Selecting `(e)` opens the pending `ChatRequest` in `$EDITOR` (matching `jp query
+-E`).
+Saving replaces the original query and resumes the turn from `Streaming`.
 
 > [!NOTE]
-> A future enhancement could add a `(s) Select which tools to execute` option
-> when tool calls are pending, letting the user toggle individual tools on/off.
-> Deselected tools would receive synthetic skip responses.
-> This is deferred until the prompt infrastructure proves itself in this
-> context.
+> A future enhancement could add `(s) Select which tools to execute` when tool
+> calls are pending, letting the user toggle individual tools on or off and
+> injecting synthetic skip responses for deselected tools.
 
 #### Non-interactive mode (no TTY)
 
-Without a TTY, JP falls back to an error with guidance, since interactive
-prompts aren't possible:
+Without a TTY, JP exits with an error that lists the recovery flags:
 
 ```
 $ jp query --id=abc
@@ -304,62 +274,51 @@ jp query --discard-turn
 jp query --discard-turn --id=<cid>
 ```
 
-`--continue-turn` and `--discard-turn` are explicit flags for scripting, CI, and
-users who prefer flags over interactive prompts.
-When either flag is passed, the interactive prompt is skipped entirely.
+`--continue-turn` and `--discard-turn` bypass the interactive prompt for
+scripting, CI, and non-interactive use:
 
-`--continue-turn` signals "resume an incomplete turn if one exists."
-If the target conversation has an incomplete turn, JP resumes it.
-If there is no incomplete turn, `--continue-turn` is a no-op and `jp query`
-proceeds normally (open the editor, send the query, etc.).
-
-`--discard-turn` drops the `IncompleteTurn` events.
-The `ConversationStream` is saved without them.
-If there is no incomplete turn, `--discard-turn` is a no-op.
+- `--continue-turn` resumes the target conversation's incomplete turn.
+  If the conversation has no incomplete turn, the flag is a no-op and `jp query`
+  proceeds normally.
+- `--discard-turn` drops the `IncompleteTurn` events and persists the
+  `ConversationStream` without them.
+  If there is no incomplete turn, the flag is a no-op.
 
 #### Relationship to `--no-edit`
 
-Today, `jp query -E` (no-edit) with no query pops the last `ChatRequest` from
-the stream and re-sends it.
-This is used as a retry mechanism when the LLM provider fails after the
-`ChatRequest` is persisted.
+Running `jp query -E` (`--no-edit`) without a query pops the last `ChatRequest`
+from the stream and re-sends it, which previously served as the retry mechanism
+when an LLM call failed after persisting the `ChatRequest`.
 
-`--continue-turn` handles this case naturally.
-An incomplete turn where the last event is a `ChatRequest` (LLM call never
-succeeded) is resumed by `--continue-turn`: the turn loop detects the incomplete
-state, rebuilds the thread, and retries the LLM call.
-
-`--no-edit` continues to work as it does today.
-It's less useful for the retry case now that `--continue-turn` exists, but its
-primary purpose ("don't open the editor, use the query as-is") is unchanged.
+`--continue-turn` handles that failure directly: when a turn ends at
+`ChatRequest`, the turn loop detects the missing `ChatResponse`, rebuilds the
+thread, and retries the LLM call.
+`--no-edit` remains unchanged for its primary purpose of sending a query without
+opening `$EDITOR`.
 
 ### Turn Loop Resumption
 
-When `--continue-turn` is used (or the user selects "Resume" from the
-interactive prompt) with an `IncompleteTurn`, the incomplete turn's events are
-pushed into the in-memory `ConversationStream` before entering the turn loop.
-From that point, the turn loop works the same as it does today — events are in
-the stream, `build_thread` reads from the stream, tools execute and persist
-results.
-No special dual-source thread building is needed.
+When resuming an `IncompleteTurn` (via `--continue-turn` or the interactive
+prompt), `run_turn_loop` accepts `Option<IncompleteTurn>`, pushes the incomplete
+turn's events back into the in-memory `ConversationStream`, and skips
+`TurnPhase::Idle`.
+Once the events are in the stream, `build_thread`, tool execution, and
+incremental persistence operate on `ConversationStream` as usual without a
+separate thread-building path.
 
-The turn loop skips `TurnPhase::Idle` and enters at the appropriate phase based
-on what's missing from the structural completeness conditions (see [Detecting an
-incomplete turn](#detecting-an-incomplete-turn)):
+The initial `TurnPhase` depends on which structural completeness condition is
+unmet (see [Detecting an incomplete turn](#detecting-an-incomplete-turn)):
 
-| Missing condition                        | Resume at   | What happens                         |
-| ---------------------------------------- | ----------- | ------------------------------------ |
-| No `ChatResponse` after `ChatRequest`    | `Streaming` | Retry the LLM call                   |
-| Unmatched `ToolCallRequest`s             | `Executing` | Execute remaining tools              |
-| Unanswered `InquiryRequest`              | `Executing` | Prompt user, execute remaining tools |
-| All tools matched, no follow-up response | `Streaming` | Send tool results to LLM             |
+| Missing condition                        | Resume at   | Action                                      |
+| ---------------------------------------- | ----------- | ------------------------------------------- |
+| No `ChatResponse` after `ChatRequest`    | `Streaming` | Retry the LLM call                          |
+| Unmatched `ToolCallRequest`s             | `Executing` | Execute remaining tools                     |
+| Unanswered `InquiryRequest`              | `Executing` | Prompt the user and execute remaining tools |
+| All tools matched, no follow-up response | `Streaming` | Send tool results to the LLM                |
 
-Determining the resume phase and reconstructing the turn state (pending tool
-calls, persisted inquiry responses, etc.) from the incomplete turn's events is a
-`jp_cli` concern — `IncompleteTurn` itself lives in `jp_conversation` and only
-stores events.
-The analysis functions live in `jp_cli`, either as free functions or as a
-wrapper type:
+`IncompleteTurn` lives in `jp_conversation` and only stores events.
+Determining the resume phase and reconstructing turn state (pending tool calls,
+persisted inquiry responses) belongs in `jp_cli`:
 
 ```rust
 // In jp_cli
@@ -368,41 +327,34 @@ fn pending_inquiry(incomplete: &IncompleteTurn) -> Option<&InquiryRequest>;
 fn reconstruct_turn_state(incomplete: &IncompleteTurn) -> TurnState;
 ```
 
-`run_turn_loop` gains an `Option<IncompleteTurn>` parameter.
-When present, the events are merged into the stream and the initial phase is
-determined by the analysis functions above.
-
 #### Promotion on completion
 
-When the resumed turn completes (satisfies all structural completeness
-conditions), the turn is now a complete turn within the stream.
-The `IncompleteTurn` was already merged at resume time, so the stream is
-persisted as usual.
-On next load, no `IncompleteTurn` is detected.
+Because the `IncompleteTurn` events are merged into `ConversationStream` when
+resumption starts, finishing the turn requires no separate promotion step.
+Once the turn satisfies all structural completeness conditions and is persisted,
+the next load sees it as a complete turn.
 
 ### Partial `ChatResponse` Persistence
 
-The existing Ctrl+C → "Stop" handler already persists partial `ChatResponse`
-content and marks the turn as complete.
-This handles the graceful interruption case during LLM streaming.
+During LLM streaming, the existing Ctrl+C → "Stop" handler flushes the partial
+`ChatResponse` to the stream and marks the turn as complete.
+A `ChatResponse` persisted from a partial stream satisfies the completeness
+check even though generation stopped early, so the user sees the partial output
+and can follow up with a new query.
 
-For ungraceful exits during streaming (crash, SIGKILL), the `EventBuilder` may
-hold partial chunks that were never flushed to the stream.
-These are lost.
-However, any events that *were* flushed (complete `ChatResponse` chunks,
-`ToolCallRequest` events) are persisted and appear in the `IncompleteTurn`.
-
-A `ChatResponse` stored from a partial stream marks the turn as complete, even
-though the LLM didn't finish generating.
-This is the same behavior as Ctrl+C -> Stop today.
-The user sees what was generated and can choose to continue the conversation
-with a follow-up query.
+On an ungraceful exit during streaming (such as a crash or `SIGKILL`), any
+partial chunks still buffered in `EventBuilder` have not been flushed to the
+stream and are lost.
+Events already flushed and persisted (complete `ChatResponse` chunks,
+`ToolCallRequest` events) remain on disk and are loaded as part of the
+`IncompleteTurn`.
 
 ### Display Commands
 
 #### `conversation ls`
 
-Shows incomplete turn state based on the last event in the stream:
+`conversation ls` reports incomplete turn state from the last event in the
+stream, using the existing last-event reader without parsing the full stream:
 
 | Last event                           | Status                                 |
 | ------------------------------------ | -------------------------------------- |
@@ -412,13 +364,11 @@ Shows incomplete turn state based on the last event in the stream:
 | `ChatRequest` (no `ChatResponse`)    | `interrupted (pending LLM response)`   |
 | `ChatResponse` (terminal)            | (no special status)                    |
 
-This uses the existing optimized last-event access — no full stream parse
-needed.
-
 #### `conversation print`
 
-Renders the `IncompleteTurn` events after the complete stream, with a visual
-marker:
+`conversation print` accepts both `ConversationStream` and
+`Option<IncompleteTurn>`, rendering any incomplete turn after the completed
+turns with a status marker:
 
 ```
 [assistant] I'll modify those files for you.
@@ -429,224 +379,191 @@ marker:
   ⏸ fs_modify_file — waiting for input: "Overwrite existing file?"
 ```
 
-`conversation print` accepts both `ConversationStream` and
-`Option<IncompleteTurn>`.
-
 ## Drawbacks
 
-**Turn resumption complexity.** Teaching the turn loop to enter at a non-Idle
-phase requires careful handling of state reconstruction.
-The `TurnCoordinator`, `ToolCoordinator`, and `TurnState` all need to be
-initialized from persisted events rather than from scratch.
-This is a new code path that existing tests don't cover.
+**Turn resumption complexity.** Entering the turn loop at a non-`Idle` phase
+requires initializing `TurnCoordinator`, `ToolCoordinator`, and `TurnState` from
+persisted events rather than from scratch, introducing a code path not covered
+by existing tests.
 
-**Incremental persistence adds disk I/O.** Each tool completion triggers a full
-conversation rewrite.
-For a batch of 10 tool calls, that's 10 writes instead of one.
-In practice, conversation files are small (tens to hundreds of KB) and the OS
-buffers writes.
-But it's a change in the I/O profile that could be optimized later with
-append-only writes.
+**Incremental persistence adds disk I/O.** Each tool completion rewrites the
+full conversation file, turning a batch of 10 tool calls from one write into 10.
+Conversation files are small (tens to hundreds of KB) and buffered by the OS,
+and append-only writes can reduce this overhead later if needed.
 
-**Re-execution of tools with side effects.** If a tool completed and its result
-was persisted, but the tool also wrote to the filesystem, the conversation
-reflects a state that includes those side effects.
-On resume, other tools in the batch execute against the modified filesystem.
-This is correct behavior (the side effects happened), but it means resume is not
-identical to a fresh run.
-This is inherent to any system that persists partial progress.
+**Side effects across resumed tool batches.** When a completed tool modifies the
+filesystem before its result is persisted, the remaining tools in the batch run
+against that modified filesystem on resume.
+Although preserving those side effects is the intended behavior, a resumed turn
+does not run against the same initial state as a fresh execution.
 
 ## Alternatives
 
 ### Keep batch persistence, rely on sanitize
 
-Status quo.
-Tool results are persisted as a batch.
-If the process dies mid-batch, `sanitize()` injects synthetic error responses
-and removes orphaned inquiries on next load.
-The user re-runs the query.
-
-Rejected because it loses completed work and provides no path to answer pending
-inquiries after a process exits.
+Under the status quo, tool results are persisted as a batch.
+If the process exits mid-batch, `sanitize()` injects synthetic error responses
+and removes orphaned inquiries on the next load, forcing the user to re-run the
+query.
+We rejected this because it discards completed tool results and provides no way
+to answer pending inquiries after the process exits.
 
 ### Marker file for incomplete state
 
-Write a `.incomplete` marker file when a turn starts, delete it when the turn
-completes.
-`conversation ls` checks for the marker instead of parsing events.
-
-Rejected because it duplicates information already derivable from the event
-stream (the last event type), adds a file that can get out of sync, and doesn't
-help with the core problem (resuming the turn).
+Write a `.incomplete` marker file when a turn starts and delete it when the turn
+completes, so `conversation ls` can check for the marker instead of inspecting
+events.
+We rejected this because the last event in the stream already indicates whether
+a turn is incomplete; a separate file can drift out of sync with the stream and
+does nothing to support resuming the turn.
 
 ### `TurnEnd` event
 
-Introduce an explicit `TurnEnd` event.
-Absence of `TurnEnd` after a `TurnStart` signals an incomplete turn.
-
-Rejected because `TurnStart` already serves as the forward boundary marker
-(useful for `--tail`, forking, and the `IncompleteTurn` split).
-`TurnEnd` is redundant with "the next `TurnStart` or end-of-stream" and adds an
-event that must be written (and handled when missing, which defeats the
-purpose).
+Write a `TurnEnd` event when a turn finishes, treating any `TurnStart` without a
+matching `TurnEnd` as incomplete.
+We rejected this because `TurnStart` already marks turn boundaries for `--tail`,
+forking, and `IncompleteTurn` splitting.
+`TurnEnd` duplicates the boundary already implied by the next `TurnStart` (or
+end-of-stream) and introduces another event that must be written and repaired
+when missing.
 
 ### Implicit resume (no `--continue-turn` flag)
 
-`jp query` with no arguments automatically resumes if there's an incomplete
-turn, otherwise opens the editor.
-
-Rejected because the same command having two very different behaviors based on
-hidden state is confusing.
-The interactive prompt approach addresses this by making the incomplete state
-visible and letting the user choose, while `--continue-turn` provides the
-explicit flag for non-interactive use.
+Have `jp query` with no arguments automatically resume an incomplete turn if one
+exists, and open `$EDITOR` otherwise.
+We rejected this because giving the same command two different behaviors based
+on hidden state is surprising.
+The interactive prompt surfaces the incomplete turn explicitly and lets the user
+choose, while `--continue-turn` provides a deterministic flag for scripts.
 
 ## Non-Goals
 
-- **Background execution.** Detaching queries to run in the background is a
-  separate concern.
-  This RFD provides the persistence and resumption foundation that background
-  execution would depend on.
+- **Background execution.** This RFD provides the persistence and resumption
+  foundation that detached background queries require, but does not implement
+  background execution itself.
 
-- **Live attachment to running processes.** IPC for connecting to a running
-  query process is a separate concern.
-  This RFD addresses resumption from persisted state after a process has exited.
+- **Live attachment to running processes.** This RFD covers resuming from
+  persisted state after a process exits, not IPC for attaching to a running
+  query process.
 
 > [!TIP]
 > [RFD 027] addresses both background execution and live re-attachment under a
 > single client-server model, building on the incomplete turn persistence
 > defined here.
 
-- **`--continue-turn` with a new message.** `jp query --continue-turn "extra
-  context"` is not proposed.
-  `--continue-turn` resumes without modification.
-  If a user wants to add context, they can `--discard-turn` and re-query.
+- **`--continue-turn` with a new message.** `--continue-turn` resumes the
+  existing turn without modification; `jp query --continue-turn "extra context"`
+  is not supported.
+  To add context, the user can discard the turn with `--discard-turn` and send a
+  new query.
 
 ## Risks and Open Questions
 
 ### Tool re-execution correctness
 
-When resuming, some tools in the batch may have already completed.
-Their `ToolCallResponse` events are in the `IncompleteTurn`.
-The remaining tools need execution.
-For tools that hit an inquiry, the tool is re-executed with the user's answer.
+When a turn resumes during tool execution, tools whose `ToolCallResponse` is
+already in `IncompleteTurn` are skipped, and only the remaining tools run.
 
-One-shot tools that already exited with `NeedsInput` are re-executed from
-scratch with accumulated answers (the existing `NeedsInput` retry pattern).
-This works because one-shot tools are stateless between executions.
+One-shot tools that exited with `NeedsInput` are stateless between runs, so JP
+re-executes them from scratch with the accumulated inquiry answers (the existing
+`NeedsInput` retry pattern).
 
-Stateful tools ([RFD 009]) that hit an inquiry while running are a different
-case — the process that held the tool handle is dead.
-On resume, the stateful tool would need to be re-spawned.
-This RFD does not address stateful tool resumption; it's deferred to when [RFD
-009] is implemented.
+Stateful tools ([RFD 009]) that hit an inquiry while running cannot be resumed
+the same way because the process holding the tool handle has exited.
+Re-spawning and resuming stateful tools is deferred to [RFD 009].
 
 ### Concurrent access during incremental persistence
 
 If `jp --no-persist query --id=<cid>` reads a conversation while another process
-is incrementally persisting, the reader sees a consistent state as of the last
-full write.
-The conversation lock ([RFD 020]) prevents concurrent write access.
+is persisting incrementally, the reader sees a consistent snapshot from the most
+recent full write.
+The conversation lock ([RFD 020]) prevents concurrent writes.
 
 ### Interaction with `conversation fork`
 
-Forking a conversation with an incomplete turn should include the
-`IncompleteTurn` in the fork.
-This allows the user to answer a pending inquiry differently in the fork — a
-valid workflow when exploring alternative approaches.
-Both the original and the fork can be independently resumed with
-`--continue-turn`.
+Forking a conversation with an incomplete turn copies the `IncompleteTurn` into
+the fork.
+Both the original conversation and the fork can then be resumed independently
+with `--continue-turn`, allowing the user to answer a pending inquiry
+differently in each branch.
 
-Similarly, `conversation fork --until=<event>` that slices mid-turn should
-produce a fork with an `IncompleteTurn` rather than sanitizing away the residual
-events.
-The fork is valid — it just has an incomplete turn that can be resumed or
+Similarly, a `conversation fork --until=<event>` command that slices mid-turn
+produces a fork with an `IncompleteTurn` rather than sanitizing away the
+trailing events, leaving a valid fork whose incomplete turn can be resumed or
 discarded.
 
 > [!NOTE]
-> This paragraph is obsolete: fork's range bounds are turn-granular, so no fork
-> range can slice mid-turn.
-> The preceding paragraph — forking a conversation that already carries an
-> incomplete trailing turn — is the live case.
+> This second case is obsolete: fork's range bounds are turn-granular, so no
+> fork range can slice mid-turn.
+> Forking a conversation that already ends with an incomplete turn remains
+> valid.
 
 ### ConfigDelta events in incomplete turns
 
-The `IncompleteTurn` may contain `ConfigDelta` events that were applied during
-the incomplete turn.
-When merging the incomplete turn's events back into the stream on resume, these
-deltas must be included so that the turn's configuration state is correct.
-The existing `ConversationStream::push` and config delta handling should work
-as-is — the events are pushed in order and config merging applies naturally.
+An `IncompleteTurn` may contain `ConfigDelta` events applied before the turn was
+interrupted.
+Pushing the `IncompleteTurn` events back into `ConversationStream` in order on
+resume preserves those deltas and reconstructs the turn's configuration state
+via `ConversationStream::push`.
 
 ## Implementation Plan
 
 ### Phase 1: IncompleteTurn Type and Stream Splitting
 
-Add the `IncompleteTurn` type to `jp_conversation`.
-Implement the stream loading logic that splits events at the last complete turn
-boundary.
-Return `(ConversationStream, Option<IncompleteTurn>)` from the load path.
+Add `IncompleteTurn` to `jp_conversation`, split trailing incomplete events at
+the last complete turn boundary on load, and return `(ConversationStream,
+Option<IncompleteTurn>)` from the loader.
+Run `sanitize()` only on the completed turns in `ConversationStream`, and update
+`conversation fork` to return `(ConversationStream, Option<IncompleteTurn>)`
+when slicing mid-turn.
 
-Adjust `sanitize()` to not touch the incomplete tail (which is now split into
-`IncompleteTurn` before sanitize runs).
-Update `conversation fork` to produce `(ConversationStream,
-Option<IncompleteTurn>)` when slicing mid-turn.
-
-No behavioral changes to `jp query` — the `IncompleteTurn` is detected but not
-acted on.
-
-Can be merged independently.
+`jp query` behavior is unchanged in this phase: `IncompleteTurn` is detected on
+load but not yet acted on.
+This phase can be merged independently.
 
 ### Phase 2: Incremental Persistence
 
-Modify the tool execution phase in `run_turn_loop` to persist after each
-`ToolCallResponse` is added to the stream.
-The batch persist at the end of the execution phase remains as a final
-consistency checkpoint.
+Update the tool execution phase in `run_turn_loop` to persist the conversation
+after each `ToolCallResponse` is pushed to the stream, keeping the batch persist
+at the end of the execution phase as a final checkpoint.
 
-Can be merged independently of Phase 1 (improves crash resilience immediately).
+This phase can be merged independently of Phase 1 and improves crash resilience
+on its own.
 
 ### Phase 3: Interactive Prompt and Turn Loop Resumption
 
-Implement the interactive incomplete-turn prompt using `InlineSelect` from
-`jp_inquire`.
-Add `--continue-turn` and `--discard-turn` flags to `jp query` for
-non-interactive use.
+Implement the interactive incomplete-turn prompt with `InlineSelect` from
+`jp_inquire`, add `--continue-turn` and `--discard-turn` to `jp query`, and
+return a guided error when `jp query` runs without a TTY on a conversation with
+an incomplete turn.
+Add the `jp_cli` analysis functions that determine the resume phase and
+reconstruct turn state from `IncompleteTurn` events, and update `run_turn_loop`
+to accept `Option<IncompleteTurn>` and enter at the corresponding phase.
 
-Implement the analysis functions in `jp_cli` for determining resume phase and
-reconstructing turn state from `IncompleteTurn` events.
-Modify `run_turn_loop` to accept `Option<IncompleteTurn>` and enter at the
-appropriate phase.
-
-Non-interactive fallback: `jp query` without `--continue-turn` on a conversation
-with an incomplete turn and no TTY produces a clear error with guidance.
-
-Depends on Phase 1 and Phase 2.
+Depends on Phases 1 and 2.
 
 ### Phase 4: Display Integration
 
-Update `conversation ls` to show incomplete turn status from last-event
-detection.
-Update `conversation print` to render `IncompleteTurn` events with visual
+Update `conversation ls` to report incomplete turn status from the last event,
+and update `conversation print` to render `IncompleteTurn` events with status
 markers.
 
 Depends on Phase 1.
 
 ## References
 
-- [RFD 005: First-Class Inquiry Events][RFD 005] — prerequisite for persisting
-  `InquiryRequest`/`InquiryResponse` events that this RFD depends on for
-  detecting and resuming incomplete turns.
-- [RFD 020: Parallel Conversations][RFD 020] — conversation locks that protect
-  concurrent write access during incremental persistence.
-- [RFD 009: Stateful Tool Protocol][RFD 009] — stateful tools introduce
-  process-bound handles that cannot be resumed after exit; noted as a
-  limitation.
-- `ConversationStream::sanitize()` (`crates/jp_conversation/src/stream.rs`) —
-  existing structural repair logic; scope narrowed by this RFD to only cover
-  complete turns.
-- [Indexing and Counting Conventions] — why fork's range bounds resolve to
-  whole turns and never slice one.
+- [RFD 005: First-Class Inquiry Events][RFD 005]: persists `InquiryRequest` and
+  `InquiryResponse` events, which this RFD requires to detect and resume
+  incomplete turns.
+- [RFD 020: Parallel Conversations][RFD 020]: defines the conversation locks
+  that prevent concurrent writes during incremental persistence.
+- [RFD 009: Stateful Tool Protocol][RFD 009]: introduces process-bound tool
+  handles that cannot be resumed after process exit.
+- `ConversationStream::sanitize()` (`crates/jp_conversation/src/stream.rs`):
+  structural repair logic whose scope is narrowed by this RFD to completed
+  turns.
+- [Indexing and Counting Conventions]: explains why `conversation fork` range
+  bounds resolve to whole turns and never slice mid-turn.
 
 [Indexing and Counting Conventions]: ../wiki/00dxyba-indexing-and-counting-conventions.md
 [RFD 005]: 005-first-class-inquiry-events.md

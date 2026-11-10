@@ -20,55 +20,51 @@ Plumbing `&mut LiveWorkspace<'_>` through the plugin runner makes cached
 
 ## Motivation
 
-The `jp-serve-web` plugin from [PR #546] shows stale conversations to the
-browser even after refresh.
-The user runs `jp query` in another terminal to add a turn, refreshes the web
-page, and the new turn is invisible until `jp serve` is restarted.
-The bug reproduces with any sequence of disk-changing operations from a separate
-`jp` process.
+The `jp-serve-web` plugin from [PR #546] shows stale conversations in the
+browser even after a refresh.
+When a user runs `jp query` in another terminal to add a turn and refreshes the
+page, the new turn remains invisible until `jp serve` restarts.
+Any disk write from a separate `jp` process triggers the same bug.
 
 The cause is in the host, not the plugin.
-Plugin handlers ask the host fresh on every protocol message —
-`PluginToHost::ListConversations` and `PluginToHost::ReadEvents`.
-The host's dispatch handlers in `crates/jp_cli/src/cmd/plugin/dispatch.rs`
-answer them by calling `workspace.conversations()` and
-`workspace.events(&handle)`, both of which read from
-`OnceLock<Arc<RwLock<...>>>` cells in `state::State`.
-These cells are populated on first access and never re-read from disk.
+The plugin requests fresh data from the host on every
+`PluginToHost::ListConversations` and `PluginToHost::ReadEvents` message.
+The dispatch handlers in `crates/jp_cli/src/cmd/plugin/dispatch.rs` serve those
+requests by calling `workspace.conversations()` and `workspace.events(&handle)`.
+Both methods read from `OnceLock<Arc<RwLock<...>>>` cells in `state::State` that
+are populated on first access and never reloaded from disk.
 
-The cache is load-bearing for `jp query`.
-The query loop reads events many times per turn, and reads need to see in-memory
-writes from `ConversationMut` before they are flushed to disk (see [RFD 069]).
-The cache is the in-process synchronization mechanism for read-your-writes; we
-cannot simply remove it.
+`jp query` depends on this cache.
+The query loop reads events many times per turn and must see in-memory writes
+from `ConversationMut` before they are flushed to disk (see [RFD 069]).
+Because the cache provides this in-process read-your-writes synchronization,
+removing it is not an option.
 
-The deeper architectural fact: `Workspace` serves two roles.
-As a mutable session for `jp query`, it provides read-your-writes through its
-cache.
-As a read API for any caller, it provides whatever was on disk at first access.
-These roles want different freshness semantics, and the current API conflates
-them.
-Any long-running plugin reader — not just `jp-serve-web`, but a future TUI
-dashboard, metrics collector, or chat interface — hits the same bug under the
-current shape.
+`Workspace` conflates two roles that require different freshness semantics.
+As a mutable session for `jp query`, it serves cached in-memory state for
+read-your-writes.
+As a read API for other callers, it serves whatever was on disk at first access.
+Any long-running plugin reader (such as `jp-serve-web`, or a future TUI
+dashboard, metrics collector, or chat interface) hits the same staleness bug.
 
 ## Design
 
 ### Goals
 
-- **Plugin handlers cannot return stale data.** Type-system enforced; no
-  per-call discipline.
-- **`jp query`'s hot path is unchanged.** Cache, read-your-writes, and lock
-  semantics are all preserved exactly.
-- **API parity.** Plugin host code uses the same `acquire_conversation` →
-  handle → read pattern as built-in commands.
-- **No new traits, no async runtime, no platform-specific code.** Correctness
-  fix without committing to file-watcher infrastructure.
+- **Plugin handlers cannot return stale data.** Enforce freshness in the type
+  system rather than relying on per-call discipline.
+- **`jp query`'s hot path is unchanged.** Preserve existing cache,
+  read-your-writes, and lock semantics.
+- **API parity.** Keep the `acquire_conversation` → handle → read pattern used
+  by built-in commands.
+- **No new traits, async runtime, or platform-specific code.** Fix the
+  correctness bug without introducing file-watcher infrastructure.
 
 ### `LiveWorkspace<'a>`
 
-A view type that borrows `&mut Workspace` and exposes the same
-conversation-reading API as `Workspace`, but with method-level freshness:
+`LiveWorkspace<'a>` borrows `&mut Workspace` and exposes the same
+conversation-reading API as `Workspace`, but revalidates on-disk state on each
+call:
 
 ```rust
 pub struct LiveWorkspace<'a> {
@@ -109,18 +105,18 @@ impl LiveWorkspace<'_> {
 }
 ```
 
-The handle type is unchanged.
-`ConversationHandle` proves "this id was known to the index at acquire time";
-freshness is the receiver's responsibility:
+`ConversationHandle` is unchanged.
+It proves only that the conversation ID existed in the index when acquired;
+freshness depends on the receiver:
 
-- `Workspace::events(handle)` returns cached data (today's behavior).
-- `LiveWorkspace::events(handle)` revalidates the index and force-reloads the
-  cell from disk, then returns through the same `RwLockReadGuard` shape.
-
-Same handle, same return type, different freshness semantics by virtue of which
-type's method you call.
+- `Workspace::events(handle)` returns the cached stream.
+- `LiveWorkspace::events(handle)` revalidates the index, reloads the cell from
+  disk, and returns the same `RwLockReadGuard` type.
 
 ### Shared private helpers on `Workspace`
+
+`Workspace` provides three private helpers for index reconciliation, cell
+reloading, and lock acquisition:
 
 ```rust
 impl Workspace {
@@ -181,15 +177,15 @@ impl LiveWorkspace<'_> {
 }
 ```
 
-The `Workspace::events` call after `force_reload_conversation` returns a guard
-whose contents were freshly loaded from disk.
-Same `Arc<RwLock<_>>`, replaced contents.
+`force_reload_conversation` replaces the contents of the existing
+`Arc<RwLock<_>>` in place, so the subsequent `Workspace::events` call returns a
+guard over the freshly loaded data.
 
 ### `lock_conversation` flow
 
-The locking path is the load-bearing piece for the future chat-UI write path.
-It preserves `jp query`-style read-your-writes inside the locked operation by
-revalidating *while the flock is held*:
+`LiveWorkspace::lock_conversation` supports a future chat-UI write path.
+It preserves `jp query`'s read-your-writes semantics inside the locked operation
+by reloading from disk while holding the cross-process `flock`:
 
 ```
 1. refresh_index()
@@ -202,23 +198,25 @@ revalidating *while the flock is held*:
 6. return the ConversationLock
 ```
 
-Steps 3 and 5 are atomic with respect to other processes (we hold the flock).
-Steps 1–5 are serial within this process.
-Constructing the lock at step 4 before the force-reload at step 5 is intentional
-and safe: the lock holds the same `Arc<RwLock<_>>` instances that step 5 mutates
-through, so by the time the lock is returned at step 6 its cells reflect disk at
-the moment of acquisition.
-Any subsequent `Workspace::events()` call by code holding the lock — including
-a future chat-UI write handler running its query loop through `ConversationMut`
-— sees the fresh state and behaves identically to today's `jp query` flow.
+Steps 1 through 5 execute serially within this process, and steps 3 through 5
+are atomic across processes because the `flock` is held.
+Constructing `ConversationLock` in step 4 before reloading in step 5 is safe
+because the lock shares the `Arc<RwLock<_>>` cells that
+`force_reload_conversation` updates in place.
+When step 6 returns the lock, its cells hold the on-disk state as of lock
+acquisition.
+Any subsequent `Workspace::events()` call while the lock is held, such as a
+chat-UI write handler running a query loop through `ConversationMut`, reads that
+fresh state and sees its own writes just as `jp query` does.
 
-If step 5 fails, the lock constructed in step 4 is dropped (releasing the flock
-cleanly) and the loader error propagates to the caller.
-No partially-handed-out lock; no panic.
+If step 5 fails, dropping the lock from step 4 releases the `flock` and
+propagates the loader error to the caller without panicking or returning a
+partially initialized lock.
 
 ### Plugin runner integration
 
-`run_plugin` constructs the live view at entry and passes it through:
+`run_plugin` constructs `LiveWorkspace` at entry and threads it through the
+dispatch loop:
 
 ```rust
 pub(crate) fn run_plugin(
@@ -244,15 +242,14 @@ fn handle_read_events(
 ) -> HostToPlugin { ... }
 ```
 
-Plugin handlers receive `&mut LiveWorkspace<'_>` only.
-`&Workspace` is not in scope anywhere in plugin-host code.
-New protocol message handlers added later inherit the freshness guarantee
-structurally; no per-handler discipline is required.
+Plugin handlers receive only `&mut LiveWorkspace<'_>`; `&Workspace` is never in
+scope in plugin-host code.
+New protocol message handlers inherit this freshness guarantee automatically.
 
-### No persistent cache field
+### No internal request cache
 
 `LiveWorkspace` does not hold an internal request cache.
-Each method call revalidates the index and force-reloads the relevant cell.
+Each method call revalidates the index and reloads the target cell.
 
 If repeated reads inside one IPC operation become measurably expensive, an
 opt-in scoped cache can be added later as a closure-based wrapper:
@@ -261,243 +258,231 @@ opt-in scoped cache can be added later as a closure-based wrapper:
 live.with_operation_cache(|live| handle_message(msg, live))
 ```
 
-The closure scope bounds the cache lifetime.
-**Forgetting `with_operation_cache` makes a handler do extra disk reads but does
-not return stale data.** The cache is purely a performance optimization;
-correctness must not depend on it.
+The closure bounds the cache lifetime to a single operation.
+Omitting `with_operation_cache` causes extra disk reads but never returns stale
+data, keeping caching a pure performance optimization.
 
-For v1, even the closure version is YAGNI.
-Personal-workspace `events.json` reloads are sub-millisecond.
-The cache lands when measurement shows it pays for itself.
+Reloading `events.json` in a personal workspace takes under a millisecond, so
+`v1` omits even the closure-scoped cache until profiling justifies it.
 
 ## Drawbacks
 
-- **One new public type and one new public method on `Workspace`.** Modest API
-  surface growth.
-  The type is small (5 methods); the method is a one-liner.
+- **Larger `Workspace` API surface.** Adds `LiveWorkspace` (five methods) and
+  the one-line `Workspace::live` constructor.
 
-- **Per-call disk reads.** Every `LiveWorkspace::events()` call reads
-  `events.json` from disk and parses it.
-  At personal-workspace scale this is sub-millisecond per file.
-  For workspaces with very large conversations or very high request rates, the
-  cost grows; the deferred closure-scoped cache is the response.
+- **Per-call disk reads.** Every `LiveWorkspace::events()` call reads and parses
+  `events.json` from disk.
+  This takes under a millisecond per file in personal workspaces, but the cost
+  grows with large conversations or high request rates.
+  The deferred `with_operation_cache` wrapper addresses this if needed.
 
 - **`&mut LiveWorkspace<'_>` serializes plugin host operations.** The dispatch
-  loop processes messages serially today, so this is not a current constraint.
-  If the host ever moves to concurrent message handling, the `&mut` borrow
-  becomes a bottleneck — but the same redesign would be required regardless of
-  how freshness is implemented (the dirty-state hazard described under
-  [Risks](#risks-and-open-questions) only arises under concurrent handling).
+  loop already processes messages serially, so the exclusive borrow imposes no
+  extra constraint.
+  Supporting concurrent message handling would require redesigning
+  synchronization regardless, since concurrent access also introduces the
+  dirty-state hazard described in [Risks and Open
+  Questions](#risks-and-open-questions).
 
 ## Alternatives
 
 ### `WorkspaceReader` (read-only sibling type)
 
-A separate type holding `Arc<dyn LoadBackend>` directly, read-only API, used by
-plugin host code instead of `Workspace`.
+Introduce a separate read-only type that holds `Arc<dyn LoadBackend>` directly
+and replaces `Workspace` in the plugin host.
 
-Rejected because the type becomes useless (or requires an awkward escape hatch
-back to `Workspace`) when chat UI introduces write operations through the same
-plugin host.
-`LiveWorkspace<'a>` borrows the workspace, so it can expose the locking path
-naturally.
+Rejected because a read-only type cannot support write operations when the chat
+UI adds them to the plugin host, without an awkward escape hatch back to
+`Workspace`.
+Because `LiveWorkspace<'a>` borrows `Workspace`, it can expose
+`lock_conversation` directly.
 
 ### Mtime-on-read auto-invalidation
 
-Cache cells gain a `loaded_mtime` field; each `Workspace::events()` call does a
-`stat()` and reloads if the file is newer.
-Single API, single type, no caller discipline.
+Add a `loaded_mtime` field to each cache cell so `Workspace::events()` runs
+`stat()` on every call and reloads when the file on disk is newer.
+This keeps a single `Workspace` type and requires no caller changes.
 
-Rejected because every read on the `jp query` hot path pays the `stat()` cost
-(~1–5 µs per call) for no benefit — `jp query` is the only writer of its
-conversation, so its cache is always trustworthy.
-The architectural seam is wrong: freshness shouldn't be a per-read property of
-the cache; it should be a property of the caller's role.
+Rejected because every read on the `jp query` hot path would pay the `stat()`
+cost (roughly 1 to 5 µs per call) for no benefit: `jp query` is the sole writer
+of its conversation, so its in-memory cache is already authoritative.
+Freshness is a property of the caller's role, not of individual cache reads.
 
 ### File-watcher push notifications (`notify` crate)
 
-A background task watches the storage tree and invalidates cells on filesystem
-events.
-Cache becomes self-maintaining; reads are cache hits.
+Run a background task that watches the storage directory and invalidates cache
+cells on filesystem events, keeping reads as in-memory cache hits.
 
-Strictly more powerful than `LiveWorkspace`, since the same event source could
-later drive SSE-style live updates without browser refresh.
-Rejected for v1 because:
+A file watcher is more capable than `LiveWorkspace` because the same event
+stream could drive Server-Sent Events (SSE) for live browser updates without
+page refreshes.
+It is rejected for `v1` because it requires:
 
-- Materially more implementation: new `WatchBackend` trait, `notify` dependency,
-  tokio task lifecycle, debouncing, error/restart handling.
-- Platform-specific quirks: inotify watch limits on Linux, FSEvents coalescing
-  on macOS, no events on NFS.
-- Coordination with `ConversationMut` requires a dirty-flag mechanism on cells.
+- A new `WatchBackend` trait, the `notify` dependency, a background task
+  lifecycle, event debouncing, and error recovery.
+- Handling platform-specific behavior: `inotify` watch limits on Linux, FSEvents
+  coalescing on macOS, and missing events on network filesystems (NFS).
+- Dirty-state tracking on cache cells to coordinate with active
+  `ConversationMut` guards.
 
-The watcher is the right answer if/when [RFD D16]'s "no live updates" Non-Goal
-becomes a real requirement (real-time updates without browser refresh).
-It composes orthogonally with `LiveWorkspace`: the watcher would drive
-`force_reload_conversation` from outside the request path.
-Building it now is YAGNI for the in-scope problem.
+A watcher is the right choice if real-time browser updates (explicitly deferred
+in [RFD D16]) become a requirement, and it composes cleanly with this design by
+calling `force_reload_conversation` when filesystem events arrive.
 
 ### Polling background worker
 
-A scheduled task (~1 Hz) reloads cells periodically.
-Single API, no `notify` dependency, eventually-consistent.
+Run a background task (for example, at 1 Hz) that periodically reloads cache
+cells.
+This preserves a single `Workspace` API without adding a `notify` dependency.
 
-Rejected because polling is a probabilistic fix to a synchronous correctness
-problem — a browser refresh may or may not see fresh data depending on
-poll-cycle timing.
-Less predictable than today's "always stale until restart."
-The watcher (above) is the push-based version of the same idea and is strictly
-better; if push-based reload is wanted, build the watcher.
+Rejected because periodic polling cannot guarantee synchronous freshness:
+whether a browser refresh sees new data depends on poll timing, which is less
+predictable than deterministic staleness.
+If background invalidation is needed, a filesystem watcher is strictly better
+than polling.
 
 ### `reload_*` methods on `Workspace`
 
-Add `reload_metadata`/`reload_events`/`reload_index` on `Workspace`; callers opt
-in by calling them before reading.
+Add explicit `reload_metadata`, `reload_events`, and `reload_index` methods to
+`Workspace` for callers to invoke before reading.
 
-Rejected because correctness depends on every call site remembering to call
-`reload_*`.
-New plugin handlers added later have no compile-time signal that they need to
-opt in.
-The hazard is exactly the bug class this RFD aims to eliminate.
+Rejected because correctness would depend on every call site remembering to
+reload first.
+Future plugin handlers would receive no compile-time error if they called
+`workspace.events()` without reloading.
 
 ## Non-Goals
 
-- **Real-time live updates.** The browser still has to refresh to see new data.
-  SSE / WebSocket-driven updates are deferred to a future RFD that introduces a
-  watcher or push channel.
+- **Real-time live updates.** The browser still requires a refresh to show new
+  data.
+  Push updates over SSE or WebSockets are deferred to a future RFD.
 
-- **Dirty-state tracking on cells.** Today's dispatch loop processes protocol
-  messages serially (one stdin line at a time), so a `force_reload_conversation`
-  call cannot race with a live `ConversationMut` in the same host process.
-  If we ever introduce concurrent message handling in the host, or expose
-  plugin-side `lock`/`unlock` as separate protocol messages so a plugin can hold
-  a lock across IPC boundaries, the dirty-state hazard becomes real and we need
-  to add tracking.
-  Until then, deferred.
+- **Dirty-state tracking on cells.** The dispatch loop processes protocol
+  messages serially (one `stdin` line at a time), so `force_reload_conversation`
+  cannot race with an active `ConversationMut` in the same host process.
+  Dirty-state tracking is only needed if the host adopts concurrent message
+  handling or exposes separate `lock` and `unlock` protocol messages that let
+  plugins hold locks across IPC boundaries.
 
-- **Changing `jp query`'s behavior.** `Workspace`'s public API is unchanged; the
-  query loop is untouched.
+- **Changing `jp query` behavior.** `Workspace`'s existing public methods and
+  the query loop remain unchanged.
 
-- **Fixing every long-running scenario.** This RFD covers plugin hosts.
-  Long-running CLI commands that read conversation data without going through
-  the plugin protocol are not affected (none currently exist).
+- **Non-plugin long-running commands.** This RFD scopes revalidation to plugin
+  hosts.
+  No built-in long-running CLI commands currently read conversation data outside
+  the plugin protocol.
 
-- **The chat-UI write path itself.** This RFD makes the plugin host's write path
-  *possible* via `LiveWorkspace::lock_conversation`, but the chat-UI feature
-  itself is out of scope.
+- **The chat-UI write path.** `LiveWorkspace::lock_conversation` enables writes
+  from plugin hosts, but implementing the chat UI's write handlers is out of
+  scope.
 
 ## Risks and Open Questions
 
-- **Naming.** `LiveWorkspace` reads as "real-time / push-based" in a UI context,
-  which is the opposite of what this type does.
-  Alternatives considered: `WorkspaceSession`, `FreshWorkspace`,
+- **Naming.** In a UI context, `LiveWorkspace` can suggest real-time push
+  updates rather than on-demand revalidation.
+  Candidate names include `WorkspaceSession`, `FreshWorkspace`, and
   `RevalidatingWorkspace`.
-  Bikeshed; pick a name that doesn't promise features the type doesn't have.
 
 - **Dirty-state invariant in rustdoc.** `force_reload_conversation` assumes no
-  live `ConversationMut` exists for the same conversation in this process.
-  Document this as a `# Invariants` section on `LiveWorkspace`'s rustdoc and as
-  `// Invariant:` comments on the helper (not `// SAFETY:`, which is reserved
-  for `unsafe` code by Rust convention).
-  The invariants to spell out:
+  active `ConversationMut` exists for the target conversation in the same
+  process.
+  Document this under `# Invariants` in `LiveWorkspace`'s rustdoc and in `//
+  Invariant:` comments on the helper (`// SAFETY:` is reserved for `unsafe`
+  code):
 
-  - Plugin message handling is serial; one handler runs at a time.
-  - Plugin-held locks are not exposed across IPC messages.
-  - Within a single handler, callers must not invoke `LiveWorkspace`
-    revalidating reads for a conversation while holding a dirty
-    `ConversationMut` for that same conversation.
-    Once a handler holds a `ConversationLock`, reads must go through
-    `ConversationLock` or `ConversationMut`, not through `LiveWorkspace`.
-  - If the runner ever moves to concurrent message handling, or exposes explicit
-    plugin-side `lock`/`unlock` protocol messages that span IPC boundaries,
-    these invariants are broken and the design must be revisited (likely by
-    adding dirty-state tracking on cells).
+  - Plugin message handling is serial, running one handler at a time.
+  - Plugin-held locks cannot span IPC messages.
+  - Within a single handler, callers must not call `LiveWorkspace` read methods
+    on a conversation while holding a dirty `ConversationMut` for it.
+    Once a handler acquires a `ConversationLock`, reads must go through
+    `ConversationLock` or `ConversationMut`.
+  - Concurrent message handling or cross-message `lock`/`unlock` requests would
+    violate these invariants and require dirty-state tracking on cache cells.
 
-  The serial loop covers the cross-message hazard automatically.
-  The same-handler hazard is not enforced by Rust's borrow checker (a handler
-  could hold a `ConversationLock` and still call `live.events(handle)`), so the
-  rustdoc has to state the rule explicitly.
+  Serial dispatch prevents cross-message races automatically, but Rust's borrow
+  checker does not prevent a single handler from holding a `ConversationLock`
+  and still calling `live.events(handle)`.
+  The rustdoc must state that restriction explicitly.
 
-- **Race: conversation deleted between refresh and lock.**
-  `LiveWorkspace::lock_conversation`'s sequence (refresh → acquire → flock →
-  force_reload) can fail at step 4 if another process removes the conversation
-  directory between steps 1 and 4.
-  The error propagates as `not_found`.
-  Caller handles it.
-  Worth a regression test.
+- **Conversation deleted between index refresh and reload.** In
+  `LiveWorkspace::lock_conversation` (`refresh_index` → `acquire_conversation`
+  → `try_lock_without_reload` → `force_reload_conversation`), another process
+  can delete the conversation directory after `refresh_index` succeeds but
+  before `force_reload_conversation` reads from disk.
+  In that case, `force_reload_conversation` returns a `not_found` error to the
+  caller after releasing the lock; Phase 2 includes a regression test for this
+  race.
 
-- **Lifetime ergonomics.** `LiveWorkspace<'a>` exclusively borrows `&'a mut
-  Workspace`.
-  Code holding `LiveWorkspace` cannot also access `Workspace` directly during
-  that scope.
-  For the plugin runner this is the desired behavior.
-  For any future caller that wants to switch back and forth, they will need to
-  drop `LiveWorkspace` and re-call `Workspace::live()` — cheap (one struct
-  construction), but worth noting in the rustdoc.
+- **Borrow scope ergonomics.** Because `LiveWorkspace<'a>` holds `&'a mut
+  Workspace`, callers cannot access `Workspace` directly while `LiveWorkspace`
+  is alive.
+  That exclusivity is intentional in the plugin runner; callers that need to
+  alternate between cached and revalidating access can drop `LiveWorkspace` and
+  call `Workspace::live()` again, which only constructs a single-pointer
+  wrapper.
 
 ## Implementation Plan
 
 ### Phase 1: Implementation
 
-- Add private helpers to `Workspace`: `refresh_index`,
-  `force_reload_conversation`, `try_lock_without_reload`.
-  Refactor existing `load_conversation_index` to share `refresh_index`'s logic
-  where appropriate (preserve existing cells, diff against disk).
+- Add private helpers `refresh_index`, `force_reload_conversation`, and
+  `try_lock_without_reload` to `Workspace`.
+  Refactor `load_conversation_index` to share diff-based reconciliation logic
+  with `refresh_index`.
 - Add `LiveWorkspace<'a>` and `Workspace::live(&mut self)`.
-- Implement `LiveWorkspace::acquire_conversation`, `conversations`, `metadata`,
-  `events`, `lock_conversation`.
+- Implement `acquire_conversation`, `conversations`, `metadata`, `events`, and
+  `lock_conversation` on `LiveWorkspace`.
 - Update `crates/jp_cli/src/cmd/plugin/dispatch.rs`:
   - `run_plugin` calls `workspace.live()` and passes `&mut LiveWorkspace<'_>` to
     `message_loop`.
-  - `message_loop` and dispatch handlers (`handle_list_conversations`,
+  - `message_loop` and the dispatch handlers (`handle_list_conversations` and
     `handle_read_events`) take `&mut LiveWorkspace<'_>`.
 
 ### Phase 2: Tests
 
-Six regression tests, each running two `jp` host processes against a shared
-workspace unless noted otherwise:
+Add six regression tests, each running two `jp` host processes against a shared
+workspace unless noted:
 
-1. **Creation drift.** Writer creates a new conversation; reader sees it via
-   `LiveWorkspace::conversations()` on the next protocol message, and can
-   `acquire_conversation` it.
-2. **Deletion drift.** Writer removes a conversation; reader's next
-   `LiveWorkspace::conversations()` no longer lists it.
-   (This test fails if `refresh_index` only adds IDs without removing vanished
-   ones.)
-3. **Stale handle after deletion.** Reader holds a `ConversationHandle` acquired
-   before deletion; after the writer removes the conversation, the reader's next
-   `LiveWorkspace::events(&handle)` returns a clean `not_found` error rather
-   than serving stale cached data.
-4. **Event drift.** Writer appends a turn to an existing conversation; reader
-   sees the new turn via `LiveWorkspace::events(handle)` on the next protocol
-   message.
-5. **Lock force-reload.** Single-process test.
-   Writer-A holds a lock, appends events, releases.
-   Reader (same process, separate `LiveWorkspace` scope) acquires a lock via
-   `LiveWorkspace::lock_conversation` and verifies the resulting
-   `ConversationLock::events()` reflects the appended turn, confirming step 5 of
-   the lock flow ran.
-6. **Delete-during-lock-acquisition race.** Writer removes a conversation
-   between the reader's `refresh_index` and `force_reload_conversation`; reader
-   gets a clean `not_found` error and the flock is released, not a panic or a
-   partially-handed-out lock.
+1. **Creation drift.** The writer creates a conversation; on the next protocol
+   message, the reader sees it via `LiveWorkspace::conversations()` and can pass
+   its ID to `acquire_conversation`.
+2. **Deletion drift.** The writer removes a conversation; the reader's next
+   `LiveWorkspace::conversations()` call omits it, verifying that
+   `refresh_index` removes deleted IDs as well as inserting new ones.
+3. **Stale handle after deletion.** The reader acquires a `ConversationHandle`
+   before the writer removes the conversation; the reader's next
+   `LiveWorkspace::events(&handle)` call returns `not_found` instead of cached
+   data.
+4. **Event drift.** The writer appends a turn to an existing conversation; the
+   reader sees the new turn via `LiveWorkspace::events(handle)` on the next
+   protocol message.
+5. **Lock reload.** In a single process, writer A locks a conversation, appends
+   events, and releases the lock.
+   A reader in a separate `LiveWorkspace` scope calls
+   `LiveWorkspace::lock_conversation` and verifies that
+   `ConversationLock::events()` includes the appended turn, confirming step 5 of
+   the lock sequence.
+6. **Deletion during lock acquisition.** The writer removes a conversation
+   between the reader's `refresh_index` and `force_reload_conversation` calls;
+   the reader receives a `not_found` error and releases the `flock` cleanly.
 
-### Phase 3 (deferred): operation-scoped cache
+### Phase 3: Operation-scoped cache (deferred)
 
-If measurements show redundant in-handler disk reads becoming expensive, add the
-closure-scoped `with_operation_cache`.
-Not part of v1.
+If profiling shows that repeated disk reads within a single handler are
+expensive, add the closure-scoped `with_operation_cache` helper.
+Deferred from `v1`.
 
 ## References
 
-- [PR #546] — `jp-serve-web` plugin (the reporting context).
-- [RFD 069] — Guard-scoped persistence; defines the `OnceLock<Arc<RwLock<_>>>`
-  cell structure that this RFD reaches into via `force_reload_conversation`.
-- [RFD 072] — Command plugin system; defines the JSON-lines protocol that
-  `jp-serve-web` uses.
-- [RFD 073] — Layered storage backend; defines the `LoadBackend` trait that
-  `force_reload_conversation` calls through.
-- [RFD D16] — Original read-only web UI draft (predates the plugin extraction
-  in [PR #546]).
+- [PR #546]: `jp-serve-web` plugin where the staleness bug was reported.
+- [RFD 069]: Guard-scoped persistence; defines the `OnceLock<Arc<RwLock<_>>>`
+  cell structure updated by `force_reload_conversation`.
+- [RFD 072]: Command plugin system; defines the JSON-lines protocol used by
+  `jp-serve-web`.
+- [RFD 073]: Layered storage backend; defines the `LoadBackend` trait called by
+  `force_reload_conversation`.
+- [RFD D16]: Original read-only web UI draft, written before plugin extraction
+  in [PR #546].
 
 [PR #546]: https://github.com/dcdpr/jp/pull/546
 [RFD 069]: ../069-guard-scoped-persistence-for-conversations.md

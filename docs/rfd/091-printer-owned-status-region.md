@@ -23,8 +23,8 @@ output for MCP server startup and tool execution, share this single primitive.
 
 ### Nine hand-rolled mechanisms
 
-JP renders ephemeral chrome — a single self-overwriting line on stderr — in
-nine places, each with its own hand-rolled draw, tick, and clear logic:
+JP renders ephemeral chrome (a single self-overwriting line on stderr) in nine
+places, each with its own draw, tick, and clear logic:
 
 | Site                                                      | Mechanism                                         |
 | --------------------------------------------------------- | ------------------------------------------------- |
@@ -37,63 +37,58 @@ nine places, each with its own hand-rolled draw, tick, and clear logic:
 | Tool execution progress (`cmd/query/tool/coordinator.rs`) | `spawn_tick_sender`                               |
 | Stream-retry notice (`cmd/query/stream/retry.rs`)         | manual `\r\x1b[K` write + `clear_line`            |
 
-All of them fight over the same invariant: **ephemeral chrome must be erased
-before any persistent write, and must not disappear before the persistent write
-arrives**.
-Today that invariant is enforced by per-site discipline, and the codebase
-carries the scars of getting it wrong: `clear_temp_line()` before the interrupt
-menu, `cancel_reasoning_timer()` inside `flush_on_transition`, the "don't
-pre-clear `line_active`" warning in `ToolRenderer::reset`, and the waiting
-indicator's `finish().await` ordering dance in the turn loop.
-Each was a bug fixed at one site; none of the fixes protects the next site.
+All nine must uphold the same invariant: **erase ephemeral chrome before any
+persistent write, and keep it visible until that write arrives**.
+Today each call site enforces this invariant by hand, which has produced a trail
+of point fixes: `clear_temp_line()` before the interrupt menu,
+`cancel_reasoning_timer()` inside `flush_on_transition`, the warning against
+pre-clearing `line_active` in `ToolRenderer::reset`, and the waiting indicator's
+`finish().await` ordering in the turn loop.
+Each fix repaired one call site without protecting the others.
 
-The most user-visible instance was the waiting-indicator gap: the indicator was
-torn down by the first provider event of any kind — including an SSE keep-alive
-ping that renders nothing — leaving the user staring at a blank terminal for
-many seconds while the model produced no visible output.
-A user who sees a progress indicator vanish and *then* nothing happen reasonably
-concludes the program crashed.
-That instance is fixed: `LineTimer` (in `jp_cli::timer`) carries a status
-channel, and the turn loop finishes the indicator only on events that render.
-But the fix is one client-side patch on the missing abstraction; the bug class
-remains open at every other site, and every future chrome feature reopens it.
+The most visible failure was the waiting-indicator gap.
+The first provider event of any kind tore down the indicator, including SSE
+keep-alive pings that render nothing.
+That left the terminal blank for seconds while the model produced no visible
+output, making JP look hung.
+`LineTimer` (in `jp_cli::timer`) fixes that one site by carrying a status
+channel so the turn loop finishes the indicator only on events that render.
+The underlying bug class remains open at every other site.
 
-The retry notice shows how far the discipline spreads.
-`StreamRetryState::notify` parks a `\r\x1b[K` line on the cursor row and four
-separate call sites are responsible for retiring it — on the first rendering
-event, on a fatal error, on an interrupt, and on a refused rebuild.
-It outlives the indicator that preceded it and is silently overwritten by the
-next attempt's indicator, on the same row, by luck of ordering rather than by
-any rule.
+The retry notice shows how far this manual coordination spreads.
+`StreamRetryState::notify` writes a `\r\x1b[K` line on the cursor row, and four
+separate call sites must clear it: on the first rendering event, on a fatal
+error, on an interrupt, and on a refused rebuild.
+It outlives the preceding indicator and is overwritten on the same row by the
+next attempt's indicator only because of call ordering.
 
-### Invisible long-running work
+### Invisible long-running subprocesses
 
-A single row is not enough for the two sites that wait on a child process.
+A single status row is also not enough when waiting on a child process.
 
-`jp query` with an MCP server that builds from source on spawn renders `⏱
-Starting MCP server bookworm… 300s` and nothing else, for five minutes.
-The server is compiling; the compiler is reporting progress on its stderr; JP
-discards it unless the user knew in advance to pass `-v`.
-A user watching a number climb toward a `startup_timeout_secs` they did not set
-cannot tell a slow build from a hang.
+When an MCP server builds from source on spawn, `jp query` renders `⏱ Starting
+MCP server bookworm… 300s` and nothing else for five minutes.
+The compiler reports progress on stderr, but JP discards those lines unless the
+user passed `-v`.
+As the timer climbs toward a `startup_timeout_secs` threshold the user did not
+configure, a slow build is indistinguishable from a hang.
 
-The same gap applies to tool execution.
-`⏱ Running tool shell… 90s` says nothing about a tool that shells out to a
-build, a test run, or a deploy.
+Tool execution has the same blind spot.
+`⏱ Running tool shell… 90s` shows nothing while a tool runs a build, test
+suite, or deploy.
 
-The output already exists in both cases and is already read line by line.
+JP already reads both stderr streams line by line.
 `jp_mcp::client::spawn_stderr_forwarder` forwards each MCP server stderr line to
-tracing and retains the last 100 in a ring buffer for error reporting;
+tracing and retains the last 100 lines in a ring buffer for error reporting.
 `jp_llm::tool::forward_stderr` does the same for local command tools under
 `tool::stderr`.
-What is missing is a display surface: somewhere to show the last few lines while
-the work runs, and a guarantee they are gone afterwards so the transcript is not
-polluted with build noise.
+What is missing is a display surface that shows the latest lines while the
+process runs and erases them afterward so build output does not pollute the
+transcript.
 
-Doing nothing means each new indicator re-implements draw/tick/clear, each new
-combination of chrome and content is a fresh opportunity for a stale row, a
-clobbered row, or a premature disappearance, and long-running child processes
-stay opaque.
+Without a shared primitive, every new indicator re-implements draw, tick, and
+clear logic, every combination of chrome and content risks stale or clobbered
+rows, and long-running child processes remain opaque.
 
 ## Design
 
@@ -107,8 +102,7 @@ It has two parts:
   detail.
   Always present.
 - An **output window**: zero to N rows showing the most recent lines pushed by
-  the region's **sources**.
-  Sized by configuration and terminal height.
+  the region's **sources**, sized by configuration and terminal height.
 
 <!-- end list -->
 
@@ -119,28 +113,27 @@ It has two parts:
 ⏱ Starting MCP server bookworm… 47.2s     ─ status row
 ```
 
-The output window sits above the status row, so the status row stays adjacent to
+The output window sits above the status row, keeping the status row adjacent to
 where persistent content appears next.
 
-The two counts are separate and this document keeps them apart, because erase
-correctness depends on the physical one.
-A **zero-window region** has no output rows and is therefore one physical row —
-the status line as it exists today, and what every current client becomes.
-A region is never zero physical rows.
+Window rows and physical rows are tracked separately because erase correctness
+depends on the physical row count.
+A **zero-window region** has zero output rows and one physical row: the status
+line as it exists today, which is what every existing timer becomes.
+A region never has zero physical rows.
 
-A **source** is one named producer of lines feeding a region: an MCP server
-starting up, a tool executing.
-Several sources can feed one region concurrently; the region holds a single
-rolling window across all of them, not one window per source.
+A **source** is a named line producer feeding a region, such as an MCP server
+starting up or a tool executing.
+Multiple sources can feed one region concurrently; the region maintains a single
+rolling window across all of them rather than one window per source.
 
-The region is chrome in the [RFD 048] sense — written to stderr, never part of
-the persistent transcript — with one added contract: the printer guarantees it
-is erased before any printer-managed write, on any channel, reaches the
-terminal.
-One stderr writer lives outside the printer: the optional tracing layer (`-v`,
-`--log`, `--log-file=-`), which [RFD 048] deliberately keeps out of the printer.
-The worker cannot erase before writes it never sees, so the enabling predicate
-below disables regions while that layer is active.
+In [RFD 048] terms, the region is chrome (written to stderr, never part of the
+persistent transcript) with one added contract: the printer erases the region
+before any printer-managed write on any channel reaches the terminal.
+Only one stderr writer lives outside the printer: the optional tracing layer
+(`-v`, `--log`, `--log-file=-`), which [RFD 048] keeps separate.
+Because the printer worker cannot erase before writes it never sees, the
+enabling predicate below disables status regions while stderr tracing is active.
 
 ### API
 
@@ -170,72 +163,72 @@ sink.push("   Compiling bookworm v0.1.0");
 drop(region);
 ```
 
-General callers holding a full `Printer` — the turn loop, lock acquisition, the
-shutdown drain, the MCP startup wait — acquire from `Printer` as above;
-chrome-only renderers acquire through `ErrChannel::status_region` (below),
-keeping the stderr-only boundary.
+Callers holding a full `Printer` (the turn loop, lock acquisition, the shutdown
+drain, and the MCP startup wait) call `Printer::status_region` as shown above.
+Chrome-only renderers acquire a region through `ErrChannel::status_region`
+(below), preserving the stderr-only boundary.
 
-The handle is `Send` and requires no async runtime: there is no
-`finish().await`, because the caller no longer owns the clear-before-write
-ordering — the printer does.
-A client that renders content simply writes through the printer as it always
-has; the worker erases the region first.
+The handle is `Send` and needs no async runtime.
+There is no `finish().await` because the printer, not the caller, orders region
+erasure before persistent writes.
+A client rendering content writes through the printer as usual, and the worker
+erases the region first.
 
-The owning handle is not `Clone`; it releases the region on drop.
-Three cloneable capabilities split off it, so shared use never blurs who
-releases:
+The owning `StatusRegion` handle is not `Clone` and releases the region on drop.
+Three cloneable handles split off from it so shared access never obscures
+ownership:
 
-- `StatusDetail` — updates the status row's detail.
-  Used by the turn loop's status transitions.
-- `RowBackground` — sets the background the worker draws every row against.
-  Used by the tool renderer to keep the reasoning shading (see "Region
+- `StatusDetail`: updates the status row's detail text (used by the turn loop's
+  status transitions).
+- `RowBackground`: sets the background color the worker applies to every row
+  (used by the tool renderer to preserve reasoning shading; see "Region
   background").
-- `LineSink` — pushes lines for one source.
-  Dropping every clone of a sink closes that source; the lines it already pushed
-  stay in the window, labelled, until they are evicted.
+- `LineSink`: pushes lines for a single source.
+  Dropping all clones of a sink closes that source; lines it already pushed
+  remain in the window with their label until evicted.
 
-The format closure (rather than a fixed template) is required by existing
-clients: the lock-wait and drain timers render a *countdown*, not an elapsed
-time.
+`RegionStyle` takes a `format` closure rather than a fixed template because the
+lock-wait and drain timers render a countdown instead of elapsed time.
 
 ### Source lifetime is the client's, not the producer's
 
-A source is open from the moment the client asks for a sink until the client
-drops it.
-It is not tied to the lifetime of whatever process produces the lines, and the
+A source is open from the moment the client creates a `LineSink` until the
+client drops it.
+Source lifetime is not tied to the child process producing the lines, and the
 region never infers one from the other.
 
-The distinction is invisible for tool execution, where the two coincide:
-`jp_llm::tool::forward_stderr` returns when the tool's pipe closes, which is
-when the tool call ends.
-It is load-bearing for MCP.
-`spawn_stderr_forwarder` runs until the *server* exits, but a server is only
-interesting to the region until it finishes *starting* — and
-`StartupSet::joins` completes at the `initialize` handshake, with the child
-still alive and still logging.
-A sink owned by the forwarder would keep a started server open in the region for
-the rest of the process, letting its operational logging evict the output of the
-server still compiling.
+For tool execution the two lifetimes coincide: `jp_llm::tool::forward_stderr`
+returns when the tool's stderr pipe closes at the end of the tool call.
+For MCP startup they diverge.
+`spawn_stderr_forwarder` runs until the server process exits, whereas the
+startup region only cares about the server until `StartupSet::joins` completes
+at the `initialize` handshake.
+After initialization, the server process stays alive and continues logging.
+If the forwarder owned the sink, an initialized server would remain an active
+source for the rest of the session, and its operational logs would evict output
+from servers still compiling.
 
-So the client owns the sink:
+The client therefore owns the sink:
 
-- `jp_mcp` sends `(McpServerId, String)` on the channel `StartupSet` carries and
-  knows nothing else.
-- `await_mcp_servers` holds one sink per pending server, routes each received
+- `jp_mcp` sends `(McpServerId, String)` on the channel carried by `StartupSet`
+  and knows nothing about status regions.
+- `await_mcp_servers` holds one sink per pending server, routes each incoming
   line to the matching sink, and drops that sink when the server's join
   completes.
-- The forwarder keeps draining for tracing and the ring buffer, unchanged.
+- `spawn_stderr_forwarder` continues draining stderr for tracing and the error
+  ring buffer unchanged.
 
-**The status row's subject is also the client's.** Closing a source does not
-rewrite it: the format closure receives elapsed time and `detail`, never the
-open-source set, so a client that names its pending work in the status row keeps
-naming it through `StatusDetail`.
-`await_mcp_servers` already does exactly this — `mcp_startup_status(&pending)`
-feeding `set_status` — and that call becomes `set_detail` unchanged.
+**The client also owns the status row's subject.** Closing a source does not
+rewrite the status row: the format closure receives only elapsed time and
+`detail`, never the set of open sources.
+A client that lists pending work in the status row updates it through
+`StatusDetail`.
+`await_mcp_servers` already passes `mcp_startup_status(&pending)` to
+`set_status`; that call becomes `set_detail`.
 
-Chrome renderers hold an [`ErrChannel`], not a `Printer` — the stderr-only view
-exists precisely so tool chrome cannot reach stdout.
-Regions are chrome, so acquisition is part of the chrome-facing surface:
+Chrome renderers hold an [`ErrChannel`] rather than a `Printer` so tool chrome
+cannot write to stdout.
+Because status regions are chrome, [`ErrChannel`] exposes the same entry point:
 
 ```rust
 impl ErrChannel {
@@ -243,73 +236,68 @@ impl ErrChannel {
 }
 ```
 
-`ToolRenderer` migrates through this method and keeps its `ErrChannel`; it does
-not regain full-printer access.
+`ToolRenderer` acquires its region through `ErrChannel::status_region` without
+gaining access to the full `Printer`.
 
 ### What may enter the output window
 
-Region content is untrusted by construction — it comes from a child process JP
-did not write.
-Three rules constrain it, all enforced by the primitive rather than by each
-client.
+Region content comes from child processes JP does not control and is untrusted
+by construction.
+The status-region primitive enforces three constraints on behalf of all clients.
 
 **Only stderr, never stdout.** For both child-process clients, stdout is the
-machine channel: MCP servers speak JSON-RPC on it, and local tools return a
-`jp_tool::Outcome` payload on it.
+machine channel: MCP servers send JSON-RPC messages on stdout, and local tools
+return a `jp_tool::Outcome` payload on stdout.
 Stderr is the human channel.
-A client pushing stdout into a region would be rendering a wire protocol; the
-primitive does not prevent it, but no client does it and the distinction is
-named here because it is the reason the feature is safe to enable by default.
+Pushing stdout into a region would render a wire protocol; no client does so,
+and this separation is why the output window is safe to enable by default.
 
-**Styling passes, control does not.** Each pushed line is filtered to an SGR
-allowlist: `\x1b[…m` sequences (colors, bold, italic, underline) are forwarded,
-except conceal (`SGR 8`), which hides text from the reader and has no place in a
-preview; every other escape family — CSI cursor movement and erasure, OSC, DCS
-— and every bare control byte other than the line terminator is dropped.
-A line that leaves an attribute open is terminated with a reset, so child state
-cannot bleed into JP's own chrome below it.
+**Styling passes, control sequences do not.** Each pushed line passes through an
+SGR allowlist.
+`\x1b[…m` sequences (colors, bold, italic, underline) are forwarded except
+conceal (`SGR 8`), which hides text and has no place in a preview.
+Every other escape family (CSI cursor movement and erasure, OSC, DCS) and every
+bare control byte other than the line terminator is dropped.
+Lines that leave an SGR attribute open end with a reset sequence so child
+styling cannot bleed into JP's chrome below.
 
-This is the policy `jp_md::table` already applies when truncating cells (retain
-SGR, drop the rest, close with a reset), and `jp_term::ansi::is_sgr` is the same
-predicate.
-In `jp_printer` it is a second policy over the existing `vte` parser that backs
-`AnsiStripper` — same crate, same parser, no new dependency.
-Without the filter a child emitting `\x1b[2J` erases the screen and a child
-emitting cursor movement corrupts the region's own row accounting; [RFD 096]
-covers the same class of problem for conversation content and subsumes this
-narrow case when it lands.
+`jp_md::table` already applies this policy when truncating table cells (retain
+SGR, drop other escapes, close with a reset), and `jp_term::ansi::is_sgr`
+provides the same predicate.
+In `jp_printer`, this filter is a second policy over the `vte` parser that backs
+`AnsiStripper`, requiring no new dependency.
+Without the filter, a child emitting `\x1b[2J` would clear the screen and cursor
+movement sequences would corrupt the region's row count.
+[RFD 096] addresses the same class of problem for conversation content and
+subsumes this narrow filter once it lands.
 
 **Every row is truncated to the terminal width.** A row wider than the terminal
-soft-wraps, and a wrapped row puts the worker's count out of step with the
-screen: the erase then walks up through content that was never part of the
-region.
-The rule covers every physical row the worker emits — the status row and its
-detail as much as a pushed line — rather than being left to each format
-closure, which is the per-caller discipline this RFD exists to remove.
-(`mcp_startup_line` does its own bounding today, and is the only status line
-that does.)
+soft-wraps, putting the worker's row count out of step with the screen and
+causing erasure to walk up into persistent content above the region.
+The worker truncates every physical row it emits, including the status row and
+its detail, rather than relying on each format closure to bound its own output
+(today, only `mcp_startup_line` bounds its width).
 
-Truncation measures visible columns, keeps SGR sequences whole, and closes any
-state it cut through.
-`jp_term::width::truncate_to_width` is not that function: it documents that its
-input carries no escapes, because escape bytes otherwise consume the budget and
-can be split mid-sequence — which would leave a half-written sequence to style
-whatever follows.
-A filtered line, by construction, carries escapes.
-`jp_md::table::truncate_to_visual_width` demonstrates the behavior needed,
-privately and in the wrong crate; the primitive needs an equivalent reachable
-from `jp_printer`.
+Truncation measures visible columns, keeps SGR sequences intact, and resets any
+SGR state open at the truncation point.
+`jp_term::width::truncate_to_width` cannot be used here: it assumes plain text
+without escape sequences, so escape bytes would count against the column budget
+and could be split mid-sequence.
+Because filtered lines still carry SGR escapes, `jp_printer` needs a
+visual-width truncation helper equivalent to
+`jp_md::table::truncate_to_visual_width`.
 
-The order per row is fixed: filter controls, apply the source label, truncate by
-visible columns, close any open SGR state, then draw.
-[RFD 096] step 5 carries the same ordering requirement for its own
-width-budgeted paths.
+Each row is processed in a fixed order: filter control sequences, prepend the
+source label, truncate by visible column width, close any open SGR state, and
+draw.
+[RFD 096] step 5 specifies the same ordering for its width-budgeted paths.
 
 ### Source labelling
 
-When the window holds lines from a single source, they render verbatim.
-When it holds lines from two or more, every line is prefixed with its source
-label:
+When the window contains lines from a single source, they render without a
+prefix.
+When it contains lines from two or more sources, every line is prefixed with its
+source label:
 
 ```
 [bookworm]    Compiling serde v1.0.219
@@ -318,186 +306,174 @@ label:
 ⏱ Starting 2 MCP servers (bookworm, grizzly)… 47.2s
 ```
 
-Interleaved unlabelled lines from concurrent sources are worse than no lines:
-they misattribute progress.
-The label is applied even when the window is one row tall, where it costs most
-of the width — a single unlabelled row alternating between two sources is
-actively misleading, and the status row above already names which sources are
-pending.
+Interleaved unlabelled lines from concurrent sources misattribute progress.
+Labels apply even in a single-row window: an unlabelled row alternating between
+two sources is misleading, even when the status row names the pending sources.
 
-The rule keys on the sources represented in the window, not on the set of open
-ones.
-A source that finishes drops out of the status row's subject while its lines are
-still on screen; keying on open sources would strip the labels at that moment
-and hand the finished server's output to the one still running.
-Retained lines keep their label until they are evicted.
+Labelling depends on the sources currently represented in the window, not the
+set of open sources.
+When a source finishes, it leaves the status row's subject while its lines are
+still visible in the window; keying on open sources would strip the labels from
+those remaining lines and attribute the finished server's output to the server
+still running.
+Retained lines keep their label until evicted.
 
 ### Region background
 
-A *reasoning* region ([RFD 095]) is a different thing from the status region
-this RFD defines — a span of an assistant turn, not a block of terminal rows —
-and they meet at exactly one point: the background.
+A *reasoning* region ([RFD 095]) is a span of an assistant turn rather than a
+block of terminal rows, and it intersects the status region at one point: the
+row background.
 
-RFD 095 extends the reasoning background across tool chrome and names the tool
-temp and progress rows as part of it: while a reasoning region with background
-`B` is active, every visual row shows `B` to the right edge — including rows
-produced by cursor-relative rewrites, and including the `\x1b[K` that erases
-them, which fills with whatever background is active when it runs.
-`ToolRenderer` holds that invariant today by routing its writes through
+[RFD 095] extends the reasoning background across tool chrome, including the
+tool temporary and progress rows.
+While a reasoning region with background `B` is active, every visual row must
+show `B` to the right edge of the terminal, including cursor-relative rewrites
+and the `\x1b[K` erase sequence (which fills with the active background).
+`ToolRenderer` upholds that invariant today by writing through
 `jp_term::shade::ShadedWriter`.
-A worker that draws and erases those rows itself, knowing nothing about the
-reasoning region, would punch an unshaded hole in the middle of a shaded one —
-the exact gap RFD 095 closed.
+If the printer worker drew and erased those rows without the reasoning
+background, it would leave unshaded gaps inside a shaded reasoning block.
 
-A status region therefore carries an optional row background.
-The worker applies it to every row it draws, asserts it before its own erase,
-and clears it at row end so it never leaks below the region.
+A status region therefore accepts an optional row background via the cloneable
+`RowBackground` handle.
+The worker applies the background to every row it draws, re-applies it before
+erasing, and resets it at the end of each row so it never leaks below the
+region.
+Because the tool progress line aggregates currently pending tools, the client
+updates `RowBackground` dynamically as tool calls enter and leave a reasoning
+region.
 
-The background is a cloneable capability like `StatusDetail`, not a claim-time
-constant: the temp/progress line is a live aggregate over the tools pending now,
-so it follows whichever region is active, and the client updates it as tool
-calls enter and leave the reasoning region.
-
-The region takes the background as an opaque SGR parameter — the pre-built
-string `DefaultBackground` already wraps — which keeps `jp_printer` free of a
-`jp_md` dependency, as the SGR filter does.
-If [RFD 084] lands first and `DefaultBackground` becomes a logical color, the
-client renders it to a parameter at the boundary.
+The region receives the background as an opaque SGR parameter string (the value
+`DefaultBackground` already wraps), keeping `jp_printer` free of a `jp_md`
+dependency.
+If [RFD 084] lands first and turns `DefaultBackground` into a logical color, the
+client converts it to an SGR parameter at the boundary.
 
 ### Erasure and durability
 
 **The region is always erased on release**, whether the client succeeded or
 failed.
-A client never has to reason about whether prior rows survived, and code running
-after a release never has to account for two possible screen states.
+Callers never have to check whether prior rows survived, and subsequent code
+never has to handle two possible screen states.
 
-This is sound because a region is additive: it shows content that is recorded
-elsewhere, or content that is recorded nowhere and would otherwise never be
-seen.
-What it may never do is take a record away.
-That is the precondition on becoming a client:
+Unconditional erasure is safe because a region is purely additive: it previews
+output that is either recorded elsewhere or not worth keeping once the wait
+completes.
+A region must never replace durable error reporting:
 
 > Feeding a region must not reduce what survives the erase.
 > A region may be the only place output appears live; it may never be the reason
 > output stops being recorded.
 
-The scope is deliberate.
-A successful build's progress lines are worth watching and not worth keeping;
-neither client retains them, and neither should.
+Progress output from a successful build is useful while waiting and disposable
+afterward; neither client retains it today.
 
-Both clients preserve their existing records untouched.
-MCP server stderr stays in the 100-line ring buffer that `jp_mcp::client`
-attaches to `InitializeError` and `InitializeTimeout`, so a failed *required*
-startup still reports the build output that explains it.
-Tool stderr is still accumulated in full by `jp_llm::tool::forward_stderr` and
-— for tools that do not emit an `Outcome` payload — still reaches the model as
-part of `CommandResult::RawOutput`.
-Both remain on the `mcp::stderr` and `tool::stderr` tracing targets, though that
-log goes to a delete-on-drop temp file unless the run itself fails: a
-post-mortem aid, not a record the user will find.
+On failure, both clients keep their existing records intact.
+MCP server stderr remains in the 100-line ring buffer that `jp_mcp::client`
+attaches to `InitializeError` and `InitializeTimeout`, so a failed required
+server still reports its build output.
+`jp_llm::tool::forward_stderr` still accumulates full tool stderr and, for tools
+that do not emit an `Outcome` payload, includes it in `CommandResult::RawOutput`
+for the model.
+Both streams also continue logging to the `mcp::stderr` and `tool::stderr`
+tracing targets (written to a temporary file that is deleted on drop unless the
+run fails).
 
-Two paths carry output that is already recorded nowhere the user will see: an
-optional MCP server that fails to start, and a tool that emits a valid
-`Outcome::Error` with the detail on stderr.
-Rendering those in a region and erasing them leaves the user no worse off than
-today and briefly better informed, so the precondition permits it.
-Neither is thereby fixed — the first is closed by phase 5, the second is
-recorded under Risks — but neither blocks a client.
+Two failure paths currently discard stderr before the user can see it: an
+optional MCP server that fails to start, and a tool that returns a valid
+`Outcome::Error` on stdout while writing the failure details to stderr.
+Showing those lines in the region and erasing them on completion leaves durable
+output unchanged while making the failure visible while it runs.
+Phase 5 adds persistent reporting for failed optional MCP servers, and the Risks
+section covers the `Outcome::Error` stderr gap.
 
 ### The push path is lossy
 
-A tool shelling out to a verbose test run emits stderr faster than a terminal
-can usefully show it, and the rolling window bounds only what has already
-reached the worker.
+A verbose test suite can emit stderr much faster than a terminal can render it,
+and the rolling window only bounds lines that have already reached the printer
+worker.
 
-The path from child to window is more than one hop.
-For MCP it is four:
+For MCP startup, each line crosses four hops from the child process to the
+worker:
 
 ```text
 spawn_stderr_forwarder → tagged channel → await_mcp_servers → LineSink → worker
 ```
 
-The rules below hold at **every** hop, not just at `LineSink`.
-A bound enforced only at the last one is no bound at all: the queue simply backs
-up in front of it.
+Every hop in this pipeline must obey three rules; bounding only the final hop
+would let earlier queues back up in front of it.
 
 **Child drainage never waits on rendering.** `forward_stderr` and
-`spawn_stderr_forwarder` have to keep reading, or the child blocks on a full OS
-pipe and the tool call or the MCP handshake hangs.
-`run_tool_command` makes this concrete — it joins `forward_stderr` with
-`child.wait()`, so a forwarder parked on a send never lets the invocation
-complete.
-No send on any hop awaits display capacity.
+`spawn_stderr_forwarder` must keep reading from the child's stderr pipe so the
+child never blocks on a full OS pipe buffer during a tool call or MCP handshake.
+In `run_tool_command`, which joins `forward_stderr` with `child.wait()`, a
+forwarder blocked on a channel send would prevent the tool invocation from
+completing.
+No send at any hop awaits display capacity.
 
-**Pressure is absorbed by dropping, not by queueing.** Every hop is bounded and
-drops its oldest entries when full, which is invisible: the window shows the
-most recent lines by definition.
-A push into the worker raises at most one pending redraw command, so a burst of
-a thousand lines costs one wakeup rather than a thousand commands sitting in
-front of the next persistent write.
-The concrete channel type is an implementation choice; bounded, non-blocking,
-and drop-oldest are not.
+**Backpressure drops the oldest lines rather than queueing.** Every hop is
+bounded and overwrites its oldest entries when full, matching the rolling
+window's newest-last display.
+Pushing a line into the worker queues at most one pending redraw command, so a
+burst of a thousand lines triggers one wakeup rather than a thousand redraws
+ahead of the next persistent write.
+The exact channel type is an implementation detail, provided it is bounded,
+non-blocking, and drop-oldest.
 
-**The channel is the only backlog.** A server can spend minutes compiling before
-anyone drains it: `configure_active_mcp_servers` spawns the startups, and
-`await_mcp_servers` — which holds the receiver — is not reached until later in
-the same command, with `delay_secs` on top of that before the region is visible.
-Whatever is queued when the region opens *is* the backlog, drained in order, and
-the drop-oldest bound is what keeps it to the last few lines rather than the
-whole build.
-The diagnostic ring buffer in `jp_mcp::client` is not a second source: it keeps
-doing its existing job of attaching stderr to initialization errors, and the
-region never reads it.
-Seeding from both would render the same lines twice.
+**The channel is the only backlog.** An MCP server can compile for minutes
+before `await_mcp_servers` begins waiting on it: `configure_active_mcp_servers`
+spawns the server tasks early, `await_mcp_servers` is called later in the
+command, and `delay_secs` elapses before the region first renders.
+Lines queued in the bounded channel when the region opens form the initial
+backlog and drain in order.
+The diagnostic ring buffer in `jp_mcp::client` remains dedicated to
+initialization errors; the region never reads from it, avoiding duplicate lines.
 
-With regions disabled by the predicate below, the sink is a no-op and the
-producer side is never created, so nothing is left holding a receiver that no
-one drains.
+When the enabling predicate disables status regions, `LineSink` is a no-op and
+the producer channel is not created, leaving no undrained receiver.
 
 ### Release contract
 
-- Releasing (dropping the owner) *enqueues* a release command.
-  Commands enqueued from one thread stay ordered: a release followed by a print
-  from the same thread is processed in that order.
-- Every `Print` with non-empty content erases a drawn region before writing,
-  whether or not a pending release has been processed.
-  A stale region can never sit above content.
-  "Non-empty" is byte-level, not glyph-level: newline-only and
-  control-sequence-only writes erase too.
-  Empty-content tasks are no-ops (no erase, no redraw), and the region's own
-  draw and erase writes are exempt — the worker does not recurse.
-- A released entry is never redrawn once its release command is processed.
-- Across threads, drop is eventual cleanup only: a released entry may be redrawn
-  once more if another thread's print is processed before the release command
-  drains.
-  The stale window is bounded by the queue, and the second rule keeps the stale
-  region below content.
-- Pushing a line is not a `Print`: it mutates region state and raises at most
-  one coalesced redraw, never a persistent write.
-  Pushes on a released region are dropped.
-- The worker erases before it exits.
-  Processing `Shutdown`, or finding the command channel disconnected, erases any
-  drawn region first and does not redraw the entry below it.
-  `Ctx::drop` calls `Printer::shutdown`, so any exit that runs destructors —
-  including one that ends a turn with a region still drawn — leaves the
-  terminal clean; hard termination stays best effort.
+- Dropping the owning `StatusRegion` handle enqueues a release command.
+  Commands from a single thread are processed in FIFO order, so a release
+  followed by a print on the same thread always erases before printing.
+- Every `Print` task with non-empty byte content erases a drawn region before
+  writing, even if a release command is still queued.
+  A stale region can never remain above persistent content.
+  Newline-only and control-sequence-only writes count as non-empty; zero-byte
+  writes are no-ops, and the worker's own region draw and erase writes do not
+  recurse.
+- Once a release command is processed, that region entry is never redrawn.
+- Across threads, dropping a handle is eventual cleanup: if thread A drops its
+  handle while thread B enqueues a `Print`, the worker may process B's `Print`
+  (erasing and redrawing the region once) before draining A's release command.
+  The queue bounds that window, and the erase-before-write rule keeps the region
+  below persistent output.
+- Pushing a line to `LineSink` is not a `Print`: it updates the region's line
+  buffer and schedules at most one coalesced redraw.
+  Pushes to a released region are dropped.
+- The worker erases any drawn region before exiting.
+  When processing `Shutdown` or observing a closed command channel, the worker
+  erases the active region without redrawing lower entries on the stack.
+  Because `Ctx::drop` calls `Printer::shutdown`, any clean exit leaves the
+  terminal clear; hard termination remains best-effort.
 
-The design deliberately provides no blocking release.
-Same-thread ordering covers the release-then-render pattern used by every
-current client, and a blocking release would reintroduce the async ordering
-surface (`finish().await`) this design removes.
+Releasing a region does not block the caller.
+Same-thread command ordering already guarantees that releasing a handle and then
+printing on the same thread erases the region first, without reintroducing an
+async `finish().await` step.
 
-Suspension is the exception, and for a reason that does not apply to release:
-its whole purpose is to hand the terminal to a writer that is *not* in the
-queue, so there is no ordering to inherit (see "Interactive sessions").
+Terminal suspension is the one exception because it hands the terminal to an
+external process that writes outside the printer queue (see "Interactive
+sessions").
 
 ### Enabling predicate
 
-A region renders iff:
+A region renders if and only if:
 
 1. the resolved output format permits terminal control (`text-pretty`),
 2. the chrome channel (stderr) is an interactive terminal, and
-3. no tracing layer writes to stderr (`-v`, `--log`, or `--log-file=-`, absent
+3. no tracing layer writes to stderr (`-v`, `--log`, or `--log-file=-` without
    `--quiet`).
 
 | Situation                                     | Region                                                                                              |
@@ -508,133 +484,121 @@ A region renders iff:
 | stderr is not a terminal                      | off, regardless of format                                                                           |
 | `-v` / `--log` / `--log-file=-` on a terminal | off (stderr carries live logs, a persistent stream outside the printer)                             |
 
-The output window has one further condition: it renders only when the terminal
-height is known.
-With an unknown height the region falls back to a bare status row, since the
-worker cannot bound a window it cannot size.
+The output window requires one additional condition: a known terminal height.
+When the terminal height is unknown, the region falls back to a single status
+row because the worker cannot bound the window size.
 
-Condition 2 changes the tty *source* for this chrome from stdout to stderr:
-today chrome gating keys off stdout (`ctx.term.is_tty`), so `jp query 2>file`
-with stdout on a terminal writes `\r\x1b[K` bytes into the file — under this
-predicate it does not.
-`--format auto` continues to resolve by stdout tty-ness per [RFD 048]; this RFD
-does not change format resolution.
+Condition 2 checks whether stderr is a terminal rather than stdout.
+Today chrome gating checks stdout (`ctx.term.is_tty`), so `jp query 2>file` with
+stdout on a terminal writes `\r\x1b[K` sequences into `file`.
+Under condition 2 it does not.
+`--format auto` still resolves from stdout per [RFD 048]; this RFD does not
+change format resolution.
 
-Condition 3 mirrors the guarantee's scope: tracing writes to stderr directly,
-behind the worker's back, and a user opting into live logs has chosen stderr as
-a persistent stream where an ephemeral line cannot survive.
-The shell knows this at logging setup, before the printer is constructed, so it
-feeds the same constructor input as condition 2.
+Condition 3 disables status regions when tracing writes directly to stderr
+outside the printer worker.
+Logging setup runs before printer construction and passes this flag into the
+printer constructor alongside condition 2.
 
-To make condition 2 explicit and testable, terminal capability is a constructor
-input: `Printer::terminal` captures stderr's tty-ness *and the terminal's row
-and column count* at construction, and the memory constructor accepts an
-explicit capability override so tests can exercise draw, erase, and redraw at
-any geometry without a real terminal.
-The exact constructor shape is an implementation detail.
+To make condition 2 explicit and testable, `Printer::terminal` captures stderr
+tty status and the terminal's row and column counts at construction.
+`Printer::memory` accepts an explicit capability override so tests can exercise
+draw, erase, and redraw at arbitrary terminal dimensions without a real PTY.
 
-Both dimensions are capabilities of the chrome channel, so they belong next to
-tty-ness in the printer rather than in `jp_cli::ctx::Term`, which carries
-`width` for layout and nothing else.
-The existing `OutputWidth` cannot serve: it describes stdout, and
-`detect_output_width` returns `Unknown` as soon as stdout is not a terminal,
-before it ever measures one.
-`jp --format text-pretty query > answer.txt` satisfies the predicate above —
-the format is pinned rather than resolved, and stderr is still a terminal —
-while stdout's width is `Unknown`.
-A region drawn against that width would be drawn against no width at all, and a
-wrapped row is exactly what the erase cannot survive.
+Terminal width and height belong in `jp_printer` alongside stderr tty status
+rather than in `jp_cli::ctx::Term`, which tracks only stdout `width` for layout.
+The existing `OutputWidth` type cannot be reused here because it describes
+stdout and returns `Unknown` whenever stdout is redirected.
+For example, `jp --format text-pretty query > answer.txt` satisfies all three
+enabling conditions because the format is pinned to `text-pretty` and stderr is
+still a terminal, even though stdout's `OutputWidth` is `Unknown`.
+Using `OutputWidth` there would leave region rows untruncated, allowing soft
+wraps that break multi-row erasure.
 (Plain `jp query > answer.txt` resolves `auto` to `text` and disables the region
-outright, so it is not the case that exposes this.)
+outright.)
 
 ### Worker integration
 
-The printer already serializes every write — stdout, stderr, and `/dev/tty` —
-through one background worker thread (`Worker::run` in `jp_printer::printer`).
-That choke point is the entire architectural argument for this design: it is the
-only place in the process where "clear chrome, then write content" can be made
-atomic with respect to all three channels.
+The printer serializes every write to stdout, stderr, and `/dev/tty` through a
+single background worker thread (`Worker::run` in `jp_printer::printer`).
+That single serialization point is what makes "erase chrome, then write content"
+atomic across all three channels.
 
-Four changes to the worker:
+The worker changes in four places:
 
-1. **State.** The worker holds a stack of active region entries (claim
-   `Instant`, format closure, current detail, resolved window budget, the set of
-   open sources, and a rolling `VecDeque` of filtered lines capped at the
-   budget).
-   The top entry is the one rendered.
-   Claim, detail-update, background-update, source-close, and release arrive as
-   new `Command` variants; line pushes go to the bounded buffer above and raise
-   a single coalesced redraw.
-2. **Ticking.** The worker's `rx.recv()` becomes `rx.recv_timeout(interval)`
-   while a region is active; on timeout it redraws the top entry with updated
-   elapsed time.
-   With no active entry, it blocks as today.
-   This removes the tokio timer tasks entirely — timing moves to the thread
-   that owns the terminal.
-3. **Erase-before-write, redraw-after.** Before processing any `Print` task with
+1. **State.** The worker maintains a stack of active region entries.
+   Each entry holds its claim `Instant`, format closure, current detail,
+   resolved window budget, open source set, and a rolling `VecDeque` of filtered
+   lines capped at the window budget.
+   Only the top entry on the stack is rendered.
+   Claim, detail update, background update, source close, and release arrive as
+   `Command` variants; line pushes append to the bounded buffer and schedule a
+   single coalesced redraw.
+2. **Ticking.** While a region is active, the worker calls
+   `rx.recv_timeout(interval)` instead of `rx.recv()`, redrawing the top entry
+   with the updated elapsed time on each timeout.
+   When the stack is empty, `rx.recv()` blocks as before.
+   Moving ticking into the printer worker removes the separate tokio timer
+   tasks.
+3. **Erase-before-write, redraw-after.** Before executing any `Print` task with
    non-empty content, the worker erases the drawn region; after the task
-   completes, it redraws it.
-   Coexistence with streaming content is therefore at *task* granularity: the
-   region redraws between print tasks, and a long typewriter task — one
-   blocking loop inside the worker — hides it until the task completes.
-   For instant prints (tool chrome, block-at-a-time streaming) this approximates
-   the cargo/indicatif model.
-   Clients that want disappear-on-content behavior (the waiting indicator)
-   simply release the handle at that moment, as they already do.
-4. **Row accounting.** The worker tracks how many rows it last drew and moves
-   only in relative terms — it never queries the terminal for the cursor
-   position and never uses absolute positioning.
-   Drawing a region taller than one row first emits that many newlines to force
-   the terminal to scroll and reserve the space, then moves back up to fill it;
-   otherwise a region claimed while the cursor sits on the last row scrolls the
-   content it is about to overwrite and every subsequent cursor-up is off by the
-   scrolled amount.
-   Erasing walks the same count back up, clearing each row.
-   This is the mechanism `indicatif` uses for multi-row progress, and it is the
-   part of the design most likely to need a spike before the code lands.
+   completes, it redraws the region.
+   Coexistence with streaming content therefore operates at task granularity:
+   the region redraws between `Print` tasks, while a multi-batch typewriter task
+   hides the region until that task finishes.
+   For instant prints (tool chrome and block-buffered output), this matches the
+   `cargo` / `indicatif` model.
+   Callers that want the indicator to disappear permanently on first content
+   (such as the waiting indicator) drop their handle before printing.
+4. **Row accounting.** The worker records how many physical rows it last drew
+   and moves the cursor using only relative CSI sequences, never querying cursor
+   position or using absolute coordinates.
+   To draw a region of N rows (for N > 1), the worker first emits N newlines to
+   scroll the terminal if the cursor is at the bottom, then moves up N rows to
+   write each line.
+   Without that initial scroll reservation, claiming a multi-row region on the
+   bottom row would scroll the screen mid-draw and offset every subsequent
+   upward cursor move.
+   Erasing walks back up the recorded row count, clearing each row.
+   This is the same multi-row technique `indicatif` uses, and phase 4 validates
+   it with a terminal spike before implementation.
 
 ### Concurrent claimants
 
-Claims form a stack (LIFO): the most recent claim is rendered; releasing it
-re-exposes the one below; releasing a non-top entry removes it from the middle.
-A stack matches the actual nesting in the code — a tool "preparing" line
-claimed during a streaming cycle sits on top of nothing today, but the moment
-two indicators overlap (e.g. reasoning timer active when a tool call starts
-streaming), LIFO produces the intuitive result without either site knowing about
-the other.
+Active regions form a LIFO stack: the worker renders only the most recent claim,
+exposes the previous entry when the top entry is released, and removes non-top
+entries in place if they are released early.
+A stack matches how indicators nest in practice: if a reasoning timer is active
+when a tool call begins streaming and claims a "preparing" region, the tool
+region takes over the status area and yields back to the reasoning timer on
+release without either call site coordinating with the other.
 
 ### Interactive sessions
 
-JP's prompts do not bypass the printer: prompt output flows through
-`Printer::prompt_writer()` / `owned_prompt_writer()` as `PrintTarget::Tty`
-tasks, serialized by the same worker.
-The erase-before-write rule covers prompts exactly as it covers stdout and
-stderr.
+Interactive prompts write through `Printer::prompt_writer()` and
+`owned_prompt_writer()` as `PrintTarget::Tty` tasks serialized by the worker, so
+the erase-before-write rule applies to them automatically.
 
-Erase-before-write is not sufficient for them, though.
-A prompt session is a sequence of small `Tty` writes with the widget owning the
-cursor in between; a region redraw landing between those writes corrupts the
-widget.
-Suspension is therefore tied to the prompt-writer boundary, not to call sites:
-acquiring a prompt writer (`prompt_writer()` or `owned_prompt_writer()`)
-suspends region rendering — the rows are erased and redraws are blocked — for
-the writer's lifetime.
-Prompt code carries no guard obligation; the prompt sites spread across `jp_cli`
-(`ToolPrompter`, the interrupt handler, `cmd/init.rs`, `cmd/target.rs`, the
-`conversation` subcommands) need no changes.
+Per-write erasure is not enough for interactive prompts, however.
+A prompt session issues a sequence of small `Tty` writes while the prompt widget
+manages cursor position between them; redrawing the status region between those
+writes would corrupt the prompt display.
+Acquiring a prompt writer (`prompt_writer()` or `owned_prompt_writer()`)
+therefore suspends status regions for the writer's lifetime, erasing any drawn
+rows and blocking redraws until the writer is dropped.
+Individual prompt call sites (`ToolPrompter`, the interrupt menu, `cmd/init.rs`,
+`cmd/target.rs`, and the `conversation` subcommands) require no changes.
 
-Two consequences for the implementation:
+This design has two implementation consequences:
 
-- `PrinterWriter` is currently `Copy`; a suspension-carrying writer needs a
-  guard type.
-  The concrete shape is an implementation detail.
-- The lock-contention prompt renders via `err_writer()` today, outside the
-  boundary; it migrates to `prompt_writer()` alongside the lock-wait countdown
-  (phase 3).
+- `PrinterWriter` is currently `Copy`; carrying suspension lifetime requires a
+  drop guard type.
+- The lock-contention prompt currently writes via `err_writer()` and moves to
+  `prompt_writer()` alongside the lock-wait countdown in phase 3.
 
-One explicit guard remains, for the single writer genuinely outside the printer:
-the external `$EDITOR`, which takes over the terminal as a child process and
-touches no prompt writer.
+One explicit suspension guard is still needed for external `$EDITOR` sessions,
+which spawn a child process that writes directly to the terminal without
+acquiring a prompt writer:
 
 ```rust
 let _pause = printer.suspend_status(); // erases the region, blocks redraws
@@ -642,33 +606,30 @@ let _pause = printer.suspend_status(); // erases the region, blocks redraws
 // guard drop: redraw resumes
 ```
 
-**Acquiring the guard blocks.** `suspend_status` returns only once the worker
-has erased any drawn region, entered the suspended state, and flushed the chrome
-writer.
-Prompt writers can settle for an enqueued suspension because their writes are
-`Tty` tasks behind it in the same queue; `TerminalEditorBackend` spawns a child
-that writes straight to the terminal, so an enqueued suspension races it — the
-editor paints, then the worker's pending redraw lands inside the editor's
-screen.
-The printer already blocks on an acknowledgement for `flush`, `flush_instant`,
-and `shutdown`; this is the same barrier.
+**Acquiring `suspend_status` blocks.** The call returns only after the worker
+erases any drawn region, enters the suspended state, and flushes stderr.
+Prompt writers can rely on an asynchronous queued command because their `Tty`
+writes sit behind that command in the same worker queue.
+`TerminalEditorBackend`, by contrast, spawns a child process that writes
+directly to the terminal; an asynchronous suspend would race the editor's
+initial paint.
+`suspend_status` uses the same acknowledgement barrier as `flush`,
+`flush_instant`, and `shutdown`.
 
-Guard drop stays asynchronous: whatever the caller renders next is a printer
-write, and the queue orders it behind the resume.
+Dropping the suspension guard is asynchronous: any subsequent printer write is
+queued after the resume command.
 
 ### Configuration
 
-The four config blocks that gate today's timers — `style.mcp_startup`,
-`style.lock_wait`, `style.tool_call.progress`, `style.streaming.progress` —
-keep their `show`, `delay_secs`, and `interval_ms` keys and their current
-defaults.
-They map onto `RegionStyle` unchanged.
+The four config blocks that gate existing timers (`style.mcp_startup`,
+`style.lock_wait`, `style.tool_call.progress`, and `style.streaming.progress`)
+keep their `show`, `delay_secs`, and `interval_ms` keys and defaults.
+They map directly onto `RegionStyle`.
 
-`delay_secs` gains a second meaning rather than a sibling key: it is the point
-at which the region becomes visible, output window included.
-One threshold, one concept — "this has taken long enough to be worth showing".
+`delay_secs` governs when the entire region becomes visible, output window
+included, rather than introducing a separate delay key for the window.
 
-The two blocks whose subject is a child process gain one key:
+The two config blocks that wait on a child process gain a `stderr_rows` key:
 
 ```toml
 [style.mcp_startup]
@@ -676,39 +637,36 @@ delay_secs = 4
 stderr_rows = true # false | true | N
 ```
 
-- `false` or `0` — no output window.
-  Today's behavior.
-- `true` — window sized from the terminal height (height / 10, so a 40-row
-  terminal shows 4 rows), and at least one row whenever the terminal has a row
-  to spare above the status row.
-- `N` — window of exactly `N` rows, capped by the same height budget.
+- `false` or `0`: no output window (single status row only).
+- `true`: window height scaled to terminal height (`height / 10`, so a 40-row
+  terminal shows 4 rows), with a minimum of 1 row whenever the terminal has at
+  least one row above the status row.
+- `N`: window of `N` rows, capped at `height / 10`.
 
-The count is total, not per source: `stderr_rows = 1` is a single row that every
-source swaps for its latest line.
-An unknown terminal height falls back to a bare status row whatever the value
-is, per the enabling predicate.
+The row count is shared across all sources: `stderr_rows = 1` allocates a single
+output row that displays the latest line from any source.
+When the terminal height is unknown, the region falls back to a single status
+row regardless of `stderr_rows`.
 
-This is the shape [`InlineResults`] already uses for
-`conversation.tools.*.style.inline_results` (`off` / `full` / a number, with a
-bool accepted as a synonym for the outer two), including the hand-written
-`Deserialize` visitor and the `#[variant(fallback)]` numeric case.
-Following it keeps one idiom for "off, automatic, or a count" across the config
-tree, and gives both keys the same accepted values by construction.
+`stderr_rows` uses the same schema pattern as [`InlineResults`] on
+`conversation.tools.*.style.inline_results` (`off` / `full` / a line count, with
+booleans accepted as aliases for `off` and `full`), including the custom
+`Deserialize` visitor and `#[variant(fallback)]` numeric variant.
 
-Both default to `true`, for the same reason: `delay_secs` has already decided
-the wait is long enough to be worth explaining, and the only thing left to say
-about it is what the child is doing.
+Both keys default to `true`.
+Once a wait exceeds `delay_secs`, showing the child process's stderr is the most
+useful context JP can provide:
 
 | Key                                    | Default | Why                                                                                                                      |
 | -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `style.mcp_startup.stderr_rows`        | `true`  | The wait owns the screen: nothing else is streaming, and a silent five-minute build is the case that motivates this RFD. |
 | `style.tool_call.progress.stderr_rows` | `true`  | A tool that outlives `delay_secs` is exactly the one whose output the user wants; the delay is the filter.               |
 
-**Rows are screen space; membership is not.** `stderr_rows` sizes one window
-shared by every source feeding it, so it cannot answer "show tool A but not tool
-B" — a per-tool row count would mean one tool rendering five lines into a
-ten-row window another tool asked for.
-So the window has two gates, and both must allow a line through:
+**Window size and source membership are configured separately.** Because
+`stderr_rows` sizes a single shared window, it cannot express per-tool opt-out;
+a per-tool row count would leave ambiguous how two concurrent tools with
+different counts share one window.
+Instead, tool output passes through two gates:
 
 ```toml
 [style.tool_call.progress]
@@ -721,241 +679,223 @@ print_stderr = true # does this tool feed it
 print_stderr = false # … this one does not
 ```
 
-This is the shape `style.tool_call.show` and
-`conversation.tools.<name>.style.hidden` already use for tool chrome: a global
-switch and a per-tool exemption, ANDed.
-The per-tool key inherits field-by-field from the `'*'` block like every other
-`style` field, and a tool that opts out is handed no sink at all, so a tool that
-floods costs nothing rather than pushing into a window that discards it.
+This matches how `style.tool_call.show` and
+`conversation.tools.<name>.style.hidden` gate tool chrome: a global setting
+combined with a per-tool override.
+`print_stderr` inherits from `conversation.tools.'*'.style` like every other
+tool `style` field.
+A tool with `print_stderr = false` receives no `LineSink`, avoiding channel
+overhead when a noisy tool opts out.
 
-MCP startup has no equivalent per-server key: every server starting at once is
-part of the same wait, which is the case the window exists for.
+MCP startup has no per-server toggle because all servers starting concurrently
+belong to the same startup wait.
 
 **A tool region never coexists with streaming assistant output.** The turn loop
-runs streaming and executing as separate phases: the provider stream is drained
-and closed before any tool is spawned, and the next request is not made until
-every tool has answered.
-What a tool region does share the screen with is *other tool chrome* — a second
-tool's result rendering while the first still runs.
-That is a coexistence the primitive has to handle correctly rather than a reason
-to keep the window off: a default that exists to avoid a rendering defect hides
-the defect instead of fixing it.
+separates streaming from tool execution: it drains and closes the provider
+stream before spawning any tools, and waits for all tools in the batch to finish
+before starting the next turn.
+A tool region only shares the screen with other tool chrome (for example, one
+tool rendering its result while a sibling tool continues running), which the
+erase-before-write rule handles directly.
 
-Defaulting both to `true` is a deliberate compatibility change: a user with no
-config sees a preview where a one-row timer stood.
-Setting either to `false` restores the one-row timer for that wait.
+Defaulting both `stderr_rows` keys to `true` changes default behavior: users
+with no custom config see an output window where a single-row timer previously
+appeared.
+Setting either key to `false` restores the single-row timer.
 
-The key belongs only on the two blocks that have a child process.
+Only `style.mcp_startup` and `style.tool_call.progress` carry `stderr_rows`.
 `style.lock_wait` waits on a file lock and `style.streaming.progress` waits on
-an HTTP response; neither has a stderr to show.
-That matters because `ProgressConfig` is currently shared — `style.streaming`
-imports it from `style::tool_call` — so `style.tool_call.progress` needs its
-own type to carry the key without leaking a meaningless
-`style.streaming.progress.stderr_rows` into the schema.
-The two blocks were identical by coincidence, not by design, and this is where
-they diverge.
+an HTTP response; neither has child stderr to display.
+Because `style.streaming` currently reuses `ProgressConfig` from
+`style::tool_call`, `style.tool_call.progress` gets its own config struct so
+`style.streaming.progress.stderr_rows` does not appear in the schema.
 
 ### Migration
 
-All nine sites become clients, seven of them as zero-window regions.
-`jp_cli::timer` (`LineTimer`, `spawn_line_timer`, `spawn_tick_sender`) is
-deleted once the last client migrates.
-The tool "preparing" temp line keeps its separator bookkeeping and its
-temp-to-permanent header conversion in `ToolRenderer`; only the draw, tick, and
-erase mechanics move to the printer.
+All nine existing sites migrate to status regions, seven of them as zero-window
+regions.
+Once the last site migrates, `jp_cli::timer` (`LineTimer`, `spawn_line_timer`,
+and `spawn_tick_sender`) is deleted.
+`ToolRenderer` retains its separator tracking and temporary-to-permanent header
+promotion for the tool "preparing" line; only the draw, tick, and erase
+mechanics move to `jp_printer`.
 
-The stream-retry notice becomes a zero-window region whose owner spans the
-backoff and is released on the first rendering event, an interrupt, or a fatal
-error; `clear_line` and its four call sites go with it.
-Its non-terminal behavior is unchanged: with regions disabled the client prints
-each notice as a persistent line, which is what its `is_tty` branch does today.
+The stream-retry notice becomes a zero-window region held across the retry
+backoff and released on the first rendering event, an interrupt, or a fatal
+error, eliminating `clear_line` and its four call sites.
+When status regions are disabled, `StreamRetryState` prints each retry notice as
+a persistent line, matching its existing non-TTY branch.
 
 [RFD 092] replaces both background-drain timers with a single shutdown watchdog
-and says its countdown absorbs their line.
-If it lands first, that countdown is the client and the two drain-timer rows are
-already gone; if this RFD lands first, the watchdog claims a region instead of
-spawning a timer.
+countdown.
+If [RFD 092] lands first, that watchdog countdown migrates to a status region;
+if this RFD lands first, the two drain timers migrate first and the watchdog
+later claims a region in their place.
 
-Two clients gain an output window, and each needs a line channel out of the
-crate that owns the child:
+The two child-process clients gain a line channel from the crate that spawns the
+child:
 
-- **MCP startup.** `jp_mcp::client::spawn_stderr_forwarder` gains a channel
-  alongside tracing and the ring buffer, tagging each line with its
-  `McpServerId`.
-  `StartupSet` — already the handoff type between `run_services` and
-  `await_mcp_servers` — carries the receiving end.
-  `await_mcp_servers` owns the sinks and their lifetimes, per "Source lifetime
-  is the client's, not the producer's".
-- **Tool execution.** `jp_llm::tool::forward_stderr` gains the same channel.
-  It already reads line by line and accumulates in full, so the captured bytes
-  are unaffected.
+- **MCP startup.** `jp_mcp::client::spawn_stderr_forwarder` sends `(McpServerId,
+  String)` lines on a bounded channel alongside tracing and the error ring
+  buffer.
+  `StartupSet`, which already hands startup state from `run_services` to
+  `await_mcp_servers`, carries the receiver.
+  `await_mcp_servers` owns the per-server sinks and drops each sink when its
+  server finishes initializing (see "Source lifetime is the client's, not the
+  producer's").
+- **Tool execution.** `jp_llm::tool::forward_stderr` gains an equivalent bounded
+  line channel while continuing to accumulate full stderr for the tool result.
 
-Neither producer filters, truncates, labels, or decides when a source closes;
-all four are the region's or the client's job.
+Neither producer filters, truncates, labels, or closes sources; those
+responsibilities belong to the status region and the client.
 
 ## Drawbacks
 
-- **The printer becomes stateful across writes.** Today each `Print` task is
-  independent; with this change the worker carries cross-task state (the claim
-  stack, drawn/not-drawn) that every write path implicitly interacts with.
-  Complexity is conserved ([Tesler]): it moves out of nine call sites into one
-  primitive — but bugs in that primitive now affect all chrome at once.
-- **`jp_printer` is foundational.** Every crate that prints depends on it; its
-  API surface grows, and per Hyrum's Law the rendered chrome format becomes
-  something users' scripts may match on.
-- **The worker gains a timing loop.** `recv_timeout` polling is cheap but makes
-  the worker's behavior time-dependent, which is harder to test than the current
-  pure command-processing loop.
-- **Multi-row erasure is strictly riskier than one-row erasure.** A single line
-  is corrected by `\r\x1b[K` from wherever the cursor happens to be; an N-row
-  block depends on the worker's own row count being right.
-  When it is wrong the failure is visible and ugly — duplicated rows, eaten
-  content — rather than a subtly stale line.
-- **The printer learns about terminal geometry.** Rows and columns join tty-ness
-  as constructor inputs, which is two more things that can be stale after a
-  resize.
-- **The printer carries a styling decision it cannot read.** The row background
-  exists only so that an assistant-output setting (`style.reasoning.background`)
-  survives across chrome the printer now draws.
-  `jp_printer` gains a parameter it forwards without interpreting, and the
-  invariant that makes it correct is documented in another RFD.
-- **Two crates gain a chrome-shaped output.** `jp_mcp` and `jp_llm` grow a line
-  channel whose only consumer is the terminal.
-  It keeps them ignorant of rendering, but the plumbing exists for a display
-  concern, and a crate that previously only logged now also feeds a UI.
-- **Child output reaches the screen without the user asking for it.** With
-  `style.mcp_startup.stderr_rows` defaulting to `true`, a startup wrapper that
-  echoes a resolved token or an expanded environment variable puts it on the
-  terminal and in scrollback — during a screen share, a recording, or a
-  captured support session.
-  The SGR filter neutralizes control sequences; it does not and cannot identify
-  secrets.
-  The same bytes already reach the terminal on the failure path, where
-  `render_stderr_tail` embeds up to 100 lines of child stderr in
-  `InitializeError`, so this widens an existing surface rather than opening one.
-  Users running sensitive startup wrappers set `stderr_rows = false`.
+- **The printer worker becomes stateful across writes.** Today each `Print` task
+  is independent; with status regions, the worker maintains cross-task state
+  (the claim stack and drawn row count) that every write path interacts with.
+  Complexity is conserved ([Tesler]): moving it out of nine call sites into one
+  primitive means a bug in that primitive affects all ephemeral chrome at once.
+- **`jp_printer` grows in scope.** Every crate that prints depends on
+  `jp_printer`; its API surface expands, and per Hyrum's Law scripts may come to
+  depend on the rendered chrome format.
+- **The worker loop becomes time-dependent.** Polling with `recv_timeout` is
+  inexpensive, but time-driven redraws are harder to test deterministically than
+  a pure command-processing loop.
+- **Multi-row erasure is more fragile than single-row erasure.** A single line
+  can be cleared with `\r\x1b[K` from the current row, whereas erasing an N-row
+  block requires the worker's tracked row count to match the terminal screen.
+  Any mismatch leaves duplicated rows or erases persistent content above the
+  region.
+- **The printer must track terminal dimensions.** Row and column counts join
+  stderr tty status as constructor inputs and can become stale if the terminal
+  is resized while a region is drawn.
+- **The printer forwards a styling parameter it does not interpret.** The
+  optional row background exists solely so `style.reasoning.background` ([RFD
+  095]) is preserved across tool chrome drawn by the worker.
+- **Two non-UI crates gain display plumbing.** `jp_mcp` and `jp_llm` expose line
+  channels consumed only by the terminal status region.
+- **Child stderr is displayed by default.** With `style.mcp_startup.stderr_rows`
+  defaulting to `true`, a startup wrapper that echoes a secret or environment
+  variable to stderr displays it on screen and in scrollback during screen
+  shares or recordings.
+  The SGR filter strips control sequences but cannot redact secrets.
+  Because `render_stderr_tail` already includes up to 100 lines of child stderr
+  in `InitializeError` on failure, this change widens an existing exposure
+  surface rather than creating a new one; users with sensitive wrappers can set
+  `stderr_rows = false`.
 
 ## Alternatives
 
-- **Keep the status quo (`LineTimer` + per-site discipline).** The
-  waiting-indicator fix shipped this way and works.
-  Rejected as the end state: it fixes one site per bug, the clear-ordering
-  guarantee needs an async context (`finish().await`) that synchronous renderers
-  don't have (see `cancel_reasoning_timer`'s workaround), and the tool temp-line
-  machinery remains bespoke.
-- **A region actor outside the printer.** A separate task owning the rows, with
-  renderers notifying it before writes.
-  Rejected: it recreates the ordering problem it is meant to solve —
-  notifications race with writes unless every write goes through the actor, at
-  which point it *is* the printer.
-- **Last-writer-wins instead of a claim stack.** Simpler, but a released
-  claimant would leave the screen blank even when an earlier claimant is still
-  logically active.
-- **The alternate screen for the output window.** Switching to the alternate
-  buffer for the duration of a wait gives an unbounded scrolling log and a free
-  erase, since the alternate buffer has no scrollback.
-  Rejected on three counts.
-  It hides content the user is already reading — `jp query` echoes the user's
-  request before the MCP startup wait, so the prompt would vanish for the
-  duration.
-  It discards anything written to the real terminal outside the printer during
-  the window, including a panic message or a `warn!` from an optional server
-  that failed, which is precisely the output worth keeping.
-  And it introduces a restore invariant that has to hold across Ctrl-C, SIGTERM,
-  and panic; JP installs no panic hook today, so the guarantee would be new
-  machinery in the interrupt path rather than a rendering detail.
-  A bounded region on the primary screen needs none of it.
-- **A per-source window instead of one shared window.** Giving each source its
-  own rows keeps concurrent output separated without labels, but the row budget
-  then scales with the number of sources, and a wait on six servers would own
-  the whole screen.
-  A shared window with labels keeps the budget fixed.
+- **Keep `LineTimer` and per-site discipline.** The waiting-indicator fix
+  shipped this way and works for that single site.
+  Rejected because each bug fix protects only one site, clear-before-write
+  ordering requires an async call (`finish().await`) unavailable to synchronous
+  renderers (forcing workarounds such as `cancel_reasoning_timer`), and
+  `ToolRenderer`'s temporary-line rewrites remain bespoke.
+- **Run a separate region actor outside the printer.** A dedicated task could
+  own the status rows and receive notifications from renderers before writes.
+  Rejected because notifications race with writes unless every write passes
+  through the actor, at which point the actor duplicates the printer worker.
+- **Use last-writer-wins instead of a claim stack.** Replacing the active region
+  without a stack is simpler, but releasing an inner indicator would leave the
+  status area blank even when an outer indicator is still active.
+- **Render the output window on the alternate screen.** Switching to the
+  alternate screen buffer during a wait provides an unbounded scrolling log and
+  instant cleanup on exit.
+  Rejected for three reasons:
+  1. It hides the conversation transcript (`jp query` echoes the user's prompt
+     before waiting on MCP servers, so the prompt would disappear).
+  2. It discards output written directly to the terminal during the wait,
+     including panic messages and warnings from failed optional servers.
+  3. It requires restoring the primary screen on `Ctrl-C`, `SIGTERM`, and panic,
+     requiring a panic hook and extra signal-path cleanup that a bounded region
+     on the primary screen avoids.
+- **Allocate one output window per source.** Separate windows avoid per-line
+  source labels, but total row usage scales with the number of concurrent
+  sources; waiting on six MCP servers would consume most of the terminal.
+  A single shared window with source labels keeps height bounded.
 
 ## Non-Goals
 
-- **Rendering stdout.** Stdout is the machine channel for both child-process
-  clients — JSON-RPC for MCP servers, `Outcome` payloads for local tools — and
-  is never region content.
-- **Progress bars, spinner groups, or per-source rows.** The output window shows
-  the last N lines a source emitted, verbatim modulo the SGR filter.
-  JP does not parse child output to derive progress.
-- **A general-purpose TUI.** The region is one block of rows at the bottom of
-  the screen, owned by the printer worker, with no input handling and no layout.
-  Anything needing more belongs behind a different abstraction.
-- **Changing what any indicator says or when clients claim/release.** Reasoning
-  display modes, waiting-indicator status wording, and lock-wait countdown
-  semantics are unchanged; only the mechanics move.
-- **Regions during interactive sessions.** A prompt session suspends the region
-  rather than coexisting with it; rendering chrome alongside an active prompt
-  widget is out of scope.
+- **Rendering child stdout.** Stdout carries machine-readable payloads (JSON-RPC
+  for MCP servers and `Outcome` JSON for local tools) and never enters a status
+  region.
+- **Progress bars, spinner groups, or per-source status rows.** The output
+  window displays the last N lines emitted by its sources after SGR filtering;
+  JP does not parse child output to estimate progress.
+- **A general-purpose TUI.** The status region is a single block of rows at the
+  bottom of the terminal with no input handling or layout engine.
+- **Changing indicator wording or claim lifetimes.** Reasoning display modes,
+  waiting-indicator messages, and lock-wait countdown behavior remain unchanged;
+  only the rendering mechanism moves.
+- **Rendering regions alongside interactive prompts.** Acquiring a prompt writer
+  suspends the status region rather than sharing the terminal with an active
+  prompt widget.
 
 ## Risks and Open Questions
 
-- **Row accounting under resize.** The window budget is resolved from a height
-  captured at construction.
-  If the terminal shrinks below the drawn row count mid-region, the erase walks
-  back further than the rows that are still on screen and eats content above.
-  The cheap mitigation is a conservative budget and re-resolving it on each
-  redraw; the correct one is reacting to a resize event.
-  Which of the two is needed is the largest open question in this design, and
-  the reason phase 4 carries a spike.
+- **Row accounting under resize.** The window budget is computed from the
+  terminal height captured at construction.
+  If the terminal shrinks below the drawn row count while a region is visible,
+  erasing walks past the remaining region rows and clears persistent content
+  above them.
+  A conservative height budget re-evaluated on each redraw is the simpler
+  mitigation; reacting to terminal resize events is the exact fix.
+  Choosing between the two is the main open question for the phase 4 spike.
 
-  Either way the second one costs more than it looks: geometry is a constructor
-  input above, and a printer that reacts to resize has to hold it as mutable
-  state that something outside `jp_printer` updates through a command.
-  The sources differ by platform — `SignalRouter` handles SIGINT, SIGTERM, and
-  SIGQUIT under `#[cfg(unix)]` and would gain SIGWINCH, while Windows has no
-  such signal and would poll.
-  If the spike settles on the conservative budget, none of that is needed and
-  geometry stays immutable.
+  Reacting to resize events requires mutable terminal geometry in `jp_printer`,
+  updated via a worker command from outside the crate.
+  Resize notification also differs by platform: Unix can subscribe to `SIGWINCH`
+  in `SignalRouter` alongside `SIGINT`, `SIGTERM`, and `SIGQUIT`, whereas
+  Windows has no equivalent signal and requires polling.
+  If the conservative budget suffices in the spike, terminal geometry remains
+  immutable.
 
-- **Typewriter granularity.** Under the task-boundary coexistence contract, a
-  long typewriter print hides the region (and freezes its elapsed display) for
-  the task's duration.
-  Accepted as a limitation: regions rarely coexist with typewriter output.
-  The known refinement, if it matters in practice, is yielding redraws between
-  typewriter batches inside the worker loop.
+- **Typewriter granularity.** Because coexistence with streaming output happens
+  at `Print` task boundaries, a long typewriter task hides the status region and
+  pauses its elapsed timer until the task finishes.
+  Regions rarely coexist with typewriter output, so this limitation is accepted.
+  If needed later, the worker loop can yield redraws between typewriter batches.
 
-- **Flicker scales with row count.** Erase-redraw around every write could
-  flicker on slow terminals, and an N-row region is N times the bytes of a
-  status line.
-  Tool execution is the exposed case, not because assistant output streams
-  alongside it — it does not — but because a batch of parallel tools renders
-  each result as the tool answers, while the others keep running.
-  Mitigation if observed: skip the redraw when another write is already queued,
-  coalescing to one redraw per batch.
+- **Flicker scales with row count.** Erasing and redrawing around every `Print`
+  task can flicker on slow terminals, and an N-row region writes N times as many
+  bytes as a single status line.
+  Parallel tool execution is the main exposure: assistant output does not stream
+  during tool execution, but each completing tool renders its result while
+  sibling tools continue running.
+  If flicker is noticeable, the worker can skip redrawing when another `Print`
+  command is already queued, coalescing redraws across a burst of writes.
 
-- **Window sizing is a guess.** `height / 10` is chosen to stay unobtrusive
-  beneath the tool results that render while a region is up.
-  Whether the same divisor suits MCP startup — which runs before any tool
-  chrome and could afford more rows — is worth revisiting once both clients
-  exist.
+- **Window height heuristic.** Sizing the output window to `height / 10` keeps
+  it compact beneath tool results that render while a region is active.
+  MCP startup runs before any tool chrome and may benefit from a larger fraction
+  once both clients are in use.
 
-- **Windows console.** `\r\x1b[K` handling, relative cursor movement across N
-  rows, and the worker's `recv_timeout` resolution (~15.6ms scheduler tick) need
-  verification on Windows, same as the existing typewriter batching did.
+- **Windows console behavior.** `\r\x1b[K` erasure, relative cursor movement
+  across N rows, and `recv_timeout` tick resolution (~15.6 ms scheduler quantum)
+  require verification on Windows, just as typewriter batching did.
 
-- **Tool errors can lose the stderr that explains them.** `parse_command_output`
-  carries stderr only on `CommandResult::RawOutput`; a tool that emits a valid
-  `Outcome::Error` on stdout with its detail on stderr has that detail dropped
-  before the result reaches the model, and the trace log holding it is discarded
-  unless the run itself fails.
-  The region would show that detail and then erase it, leaving the user where
-  they already are today — the precondition permits that, but it is a poor
-  outcome for the case where a tool fails and the reason was on screen a moment
-  ago.
-  The gap predates this RFD and the fix — carrying bounded stderr on the tool
-  error variants — changes tool-result semantics rather than the printer, so it
-  belongs in its own change.
+- **Tool errors can lose explanatory stderr.** `parse_command_output` attaches
+  stderr only to `CommandResult::RawOutput`.
+  When a tool emits a valid `Outcome::Error` on stdout and writes the failure
+  details to stderr, `parse_command_output` drops stderr before the result
+  reaches the model, and the trace log is deleted on drop unless the JP command
+  itself fails.
+  The output window shows those stderr lines while the tool runs and erases them
+  when it finishes, matching current durable behavior while still losing the
+  error context afterward.
+  Attaching bounded stderr to `Outcome::Error` changes tool-result semantics
+  rather than the printer and belongs in a separate change.
 
-- **Overlap with [RFD 096].** The SGR allowlist here and 096's content
-  sanitization are the same policy at two boundaries, down to the conceal
-  exclusion.
-  This RFD does not depend on 096: the filter is scoped to region input and
-  lives in `jp_printer`, so both can land in either order.
-  If 096 lands first, the region reuses its filter — which 096 places in
-  `jp_term` — instead of defining one; if this RFD lands first, its narrow
-  filter is a candidate for replacement once that shared owner exists.
+- **Overlap with [RFD 096].** The SGR allowlist here and the content sanitizer
+  in [RFD 096] enforce the same policy at two boundaries, including dropping
+  conceal (`SGR 8`).
+  This RFD does not depend on [RFD 096]: the filter is scoped to status-region
+  input inside `jp_printer`, so the two RFDs can land in either order.
+  If [RFD 096] lands first, the status region can reuse its filter in `jp_term`;
+  if this RFD lands first, its filter can move to `jp_term` when [RFD 096]
+  lands.
 
   > [!TIP]
   > [RFD 096] keeps this filter separate from its content sanitizer: status rows
@@ -965,121 +905,115 @@ all four are the region's or the client's job.
 ## Implementation Plan
 
 Each phase is independently reviewable and mergeable.
-Phases 1–3 ship a zero-window region — one physical row, the status line as it
-behaves today — and leave every current indicator looking unchanged.
-The output window arrives in phase 4.
+Phases 1 through 3 ship a zero-window region (a single physical status row) and
+keep all existing indicators visually unchanged.
+Phase 4 adds the multi-row output window.
 
-The two halves are one RFD because the primitive's shape — relative row
-accounting, terminal geometry as a capability, exact erasure — is justified
-only by the window phase 4 adds; designing the one-row primitive alone would
-settle an API that phase 4 immediately reopens.
-The split is in the phases instead.
-Phases 1–3 depend on nothing in "What may enter the output window", "The push
-path is lossy", or "Configuration", and stand on their own if the phase-4 spike
-finds relative row accounting unworkable; phases 4–6 are what accepting those
-contracts commits to.
+Both halves belong in one RFD because the output window in phase 4 shapes the
+core primitive: relative row accounting, terminal geometry as a constructor
+capability, and unconditional erasure on release.
+Designing a single-row API in isolation would force phase 4 to redesign it.
+Splitting the work across phases still isolates risk: phases 1 through 3 do not
+depend on "What may enter the output window", "The push path is lossy", or
+"Configuration", and stand on their own if the phase 4 spike requires adjusting
+multi-row cursor movement; phases 4 through 6 implement the output window
+contracts.
 
 1. **Printer primitive.** Add the claim stack, `Command` variants,
-   `recv_timeout` ticking, erase-before-write/redraw-after, the enabling
-   predicate, the row background, erasure on shutdown, prompt-writer suspension,
-   and the explicit `suspend_status` guard to `jp_printer`.
-   Regions are one row, truncated to the captured column count; the window
-   budget is fixed at zero.
-   Unit tests against `Printer::memory` with an explicit terminal-capability
+   `recv_timeout` ticking, erase-before-write and redraw-after-write, the
+   enabling predicate, the row background, erasure on shutdown, prompt-writer
+   suspension, and the explicit `suspend_status` guard to `jp_printer`.
+   Regions are a single row truncated to the captured column count, with the
+   window budget fixed at zero.
+   Add unit tests against `Printer::memory` with an explicit terminal-capability
    override.
 
-2. **Waiting indicator.** Migrate the turn loop's indicator (including its
-   status transitions) from `LineTimer` to the printer handle.
-   The `turn_loop_tests` waiting-indicator suite carries over as the
-   characterization tests.
+2. **Waiting indicator.** Migrate the turn loop's waiting indicator and its
+   status transitions from `LineTimer` to `StatusRegion`.
+   Keep the `turn_loop_tests` waiting-indicator suite as characterization tests.
 
 3. **Simple timers.** Migrate the reasoning timer, lock-wait countdown, MCP
-   startup timer, both drain timers, and the stream-retry notice; move the
-   lock-contention prompt from `err_writer()` to `prompt_writer()`.
+   startup timer, both background-drain timers, and the stream-retry notice.
+   Move the lock-contention prompt from `err_writer()` to `prompt_writer()`.
    Delete `spawn_line_timer` and `LineTimer`.
-   The retry notice keeps its non-terminal branch, so its `retry_tests` coverage
-   carries over unchanged.
+   Preserve the retry notice's non-terminal branch and its `retry_tests`
+   coverage.
 
-4. **Output window.** Add the bounded line buffer and its coalesced redraw,
-   source registration and labelling, the SGR filter, ANSI-aware truncation,
-   terminal height as a capability input, multi-row draw and erase with relative
-   row accounting, and the `stderr_rows` config shape (including splitting
-   `ProgressConfig`), plus the per-tool `print_stderr` gate.
+4. **Output window.** Add the bounded line buffer and coalesced redraws, source
+   registration and labelling, the SGR allowlist filter, ANSI-aware visual-width
+   truncation, terminal height as a capability input, multi-row draw and erase
+   with relative cursor movement, the `stderr_rows` config option (splitting
+   `ProgressConfig`), and the per-tool `print_stderr` toggle.
 
-   Opens with a spike against a real terminal, because that is the only place
-   scrolling, deferred wrap, and resize exist — `Printer::memory` records
-   emitted bytes and models none of them, and JP has no PTY harness ([issue
-   392]).
-   The spike settles four cases: claiming while the cursor sits on the last row,
-   a persistent write landing while the region is drawn, the terminal shrinking
-   below the drawn row count, and the same on Windows.
-   Its output is the draw/erase sequence; once that is fixed, `Printer::memory`
-   at a declared height pins those bytes as the regression tests.
-   No client uses a non-zero window yet, so nothing outside `jp_printer` moves
-   in this phase.
+   Begin with a spike against a real terminal, where scrolling, deferred wrap,
+   and resize actually occur (`Printer::memory` records raw bytes without a
+   terminal emulator, and JP has no PTY test harness; see [issue 392]).
+   The spike validates four cases: claiming a region when the cursor is on the
+   bottom row, printing persistent content while a multi-row region is drawn,
+   shrinking the terminal below the drawn row count, and running the same
+   sequences on Windows.
+   Once the spike settles the draw and erase sequences, pin those byte sequences
+   in `Printer::memory` regression tests at a fixed terminal height.
+   No client enables a non-zero window in this phase, keeping all changes inside
+   `jp_printer` and `jp_config`.
 
-5. **MCP startup client.** Add the tagged line channel to
-   `jp_mcp::client::spawn_stderr_forwarder` and the receiver to `StartupSet`;
-   own one sink per pending server in `await_mcp_servers`, and drop it when that
-   server's join completes.
-   The channel carries the pre-open backlog, so nothing seeds from the
-   diagnostic ring buffer.
-   First client with a visible window.
+5. **MCP startup client.** Add the tagged stderr line channel to
+   `jp_mcp::client::spawn_stderr_forwarder` and its receiver to `StartupSet`.
+   In `await_mcp_servers`, create one `LineSink` per pending server and drop it
+   when that server's join completes.
+   Drain the pre-open backlog from the channel without reading the diagnostic
+   ring buffer.
 
-   Also report optional-server failures.
-   `SpawnOutcome::OptionalFailed` completes as `Ok` and the `warn!` explaining
-   it dies with the trace file, so a query silently loses tools with no account
-   of why.
-   The phase adds one persistent line per failed optional server, naming the
-   server and the tools that become unavailable, with the retained stderr
-   reachable through `-v` (`mcp::stderr`) rather than dumped inline.
-   It is persistent stderr chrome and follows [RFD 048]'s format rules like any
-   other chrome, including the NDJSON form under `--format json`.
-   It is emitted regardless of `show` and `stderr_rows`: those gate progress
-   display, and gating a failure report behind them would reproduce the silent
-   failure this closes.
+   Also report failed optional MCP servers.
+   Today `SpawnOutcome::OptionalFailed` returns `Ok` and logs a `warn!` that is
+   discarded with the temporary trace file, so queries silently lose tools
+   without explanation.
+   Emit one persistent stderr chrome line per failed optional server naming the
+   server and the unavailable tools, and point the user to `-v` (`mcp::stderr`)
+   for the captured stderr output.
+   Follow [RFD 048] formatting rules (including NDJSON under `--format json`),
+   and emit the notice regardless of `show` and `stderr_rows`.
 
-6. **Tool temp line and tool output.** Migrate `ToolRenderer`'s preparing line
-   and the execution-progress ticker; delete `spawn_tick_sender` and the manual
-   rewrite/clear paths (`clear_temp_line`, `rewrite_temp_line`, the
-   `line_active` bookkeeping).
-   Add the line channel to `jp_llm::tool::forward_stderr`; the coordinator owns
-   one sink per executing tool and drops it when that tool call ends.
-   Carry the [RFD 095] reasoning-region background onto the migrated rows: the
-   phase is not done until a tool called from a reasoning block still shows the
-   background across its temp and progress rows, the worker's own erases
-   included.
-   Largest phase; depends on phases 1–4 only for the primitive's API having
-   settled.
+6. **Tool temporary line and tool output.** Migrate `ToolRenderer`'s "preparing"
+   line and the tool execution progress ticker to status regions, and delete
+   `spawn_tick_sender` along with the manual rewrite and clear helpers
+   (`clear_temp_line`, `rewrite_temp_line`, and `line_active`).
+   Add the bounded line channel to `jp_llm::tool::forward_stderr` so the tool
+   coordinator owns one `LineSink` per running tool and drops it when the tool
+   call completes.
+   Thread the [RFD 095] reasoning-region background through `RowBackground` so
+   tools called inside a reasoning block preserve the shaded background across
+   their temporary, progress, and erased rows.
 
 ## References
 
-- [RFD 048] — the four-channel output model; defines "chrome" and the printer's
-  ownership of stdout/stderr/tty.
-- [RFD 088] — the unified editor service and inline reply widget; its
-  cursor-owning prompt sessions are what prompt-writer suspension protects, and
-  its open widget/printer coordination risk overlaps with the problem addressed
+- [RFD 048]: the four-channel output model; defines "chrome" and the printer's
+  ownership of stdout, stderr, and tty.
+- [RFD 088]: the unified editor service and inline reply widget; its
+  cursor-owning prompt sessions are protected by prompt-writer suspension, and
+  its open widget/printer coordination risk overlaps with the problem solved
   here.
-- [RFD 092] — the interrupt escalation ladder; its shutdown watchdog absorbs
-  the two background-drain timers this RFD migrates.
-- [RFD 095] — reasoning-region shading across tool calls; the background
-  invariant the migrated tool rows have to keep.
-- [RFD 096] — terminal output sanitization for untrusted content; the same
-  escape-filtering problem at the conversation-content boundary.
-- `crates/jp_cli/src/timer.rs` — the `LineTimer` interim solution this RFD
-  replaces.
-- `crates/jp_cli/src/cmd/query/stream/retry.rs` — `notify` and `clear_line`,
-  the ninth hand-rolled mechanism.
-- `crates/jp_term/src/shade.rs` — `ShadedWriter`, which holds the background
+- [RFD 092]: the interrupt escalation ladder; its shutdown watchdog absorbs the
+  two background-drain timers migrated here.
+- [RFD 095]: reasoning-region shading across tool calls; defines the background
+  invariant that migrated tool rows must preserve.
+- [RFD 096]: terminal output sanitization for untrusted content; addresses the
+  same escape-filtering problem at the conversation-content boundary.
+- `crates/jp_cli/src/timer.rs`: the `LineTimer` interim implementation replaced
+  by this RFD.
+- `crates/jp_cli/src/cmd/query/stream/retry.rs`: `notify` and `clear_line`, the
+  ninth hand-rolled ephemeral line mechanism.
+- `crates/jp_term/src/shade.rs`: `ShadedWriter`, which maintains the background
   invariant for tool chrome today.
-- `crates/jp_printer/src/printer.rs` — the worker loop this RFD extends.
-- `crates/jp_printer/src/ansi.rs` — the `vte`-based `AnsiStripper` the SGR
-  allowlist extends.
-- `crates/jp_term/src/ansi.rs` — `is_sgr`, the predicate the allowlist reuses,
-  and the retain-SGR-drop-the-rest precedent in `jp_md/src/table.rs`.
-- `crates/jp_mcp/src/client.rs` — `spawn_stderr_forwarder`, the stderr ring
+- `crates/jp_printer/src/printer.rs`: the printer worker loop extended by this
+  RFD.
+- `crates/jp_printer/src/ansi.rs`: the `vte`-based `AnsiStripper` extended by
+  the SGR allowlist.
+- `crates/jp_term/src/ansi.rs`: `is_sgr`, reused by the SGR allowlist, and the
+  retain-SGR-drop-the-rest precedent in `jp_md/src/table.rs`.
+- `crates/jp_mcp/src/client.rs`: `spawn_stderr_forwarder`, the stderr ring
   buffer, and `StartupSet`.
-- `crates/jp_llm/src/tool.rs` — `forward_stderr` and the stdout/stderr split in
+- `crates/jp_llm/src/tool.rs`: `forward_stderr` and the stdout/stderr split in
   `parse_command_output`.
 
 [RFD 048]: 048-four-channel-output-model.md

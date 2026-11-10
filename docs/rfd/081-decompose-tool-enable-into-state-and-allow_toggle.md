@@ -12,78 +12,70 @@
 ## Summary
 
 This RFD replaces the flat `Enable` enum on tool configuration with a struct
-that separates the tool's active `state` (`bool`) from `allow_toggle` (the
-policy governing which CLI directives may flip that state).
+that separates a tool's active `state` (`bool`) from its `allow_toggle` policy,
+which governs which CLI directives can flip that state.
 Separating state from toggle policy fixes directive-erasure bugs in the flat
-enum and covers the toggle rules required by [RFD 055] and [RFD 083] without
+enum and supports the toggle rules required by [RFD 055] and [RFD 083] without
 adding combinatorial enum variants.
 
 ## Motivation
 
-The current `Enable` enum carries two orthogonal concerns in a single mutable
-field: the tool's enabled state, and the policy that controls how that state may
-change.
-Two bugs follow from this conflation, and a third variant proliferation problem
-follows from the same root cause.
+The `Enable` enum combines two orthogonal concerns in a single mutable field:
+whether the tool is enabled, and which CLI directives can change that state.
+Conflating the two causes two bugs and forces new enum variants for every
+state-and-policy combination.
 
-### Bug 1: `Enable::Always` is filtered out of the LLM-visible tool list
+### Bug 1: `Enable::Always` is excluded from the LLM tool list
 
 `ToolConfigWithDefaults::enable()` returns
 `self.tool.enable.or(self.defaults.enable).is_none_or(Enable::is_on)`.
-`Enable::is_on` matches only `Enable::On`, so `Enable::Always` resolves to
+Because `Enable::is_on` matches only `Enable::On`, `Enable::Always` resolves to
 `false`.
-`tool_definitions()` filters on this predicate, which means the only builtin
-currently registered with `Enable::Always` — `describe_tools` — has never been
-sent to the LLM in practice.
-Its executor is registered but unreachable.
-The same `Enable::is_on` assumption also drives
-`Ctx::configure_active_mcp_servers` and the `--tool-use NAME` validation in
-`apply_tool_use` — the latter applied directly on the raw partial config, which
-compounds the problem.
-Any future MCP tool or user config using `Enable::Always` would silently break
-in the same way.
+`tool_definitions()` filters on this predicate, so `describe_tools`, the only
+built-in tool registered with `Enable::Always`, is never sent to the LLM.
+Its executor is registered, but the model never sees the tool definition.
+`Ctx::configure_active_mcp_servers` and the `--tool-use NAME` check in
+`apply_tool_use` rely on the same `Enable::is_on` predicate, and
+`apply_tool_use` runs directly against the raw partial config before defaults
+are applied.
+Any MCP tool or user config using `Enable::Always` fails the same way.
 
-### Bug 2: bare directives erase tool classifications
+### Bug 2: Bare directives erase tool policies
 
-[RFD 008] made CLI directives state-mutating: `apply_enable_tools` rewrites the
-`enable` field to `On` / `Off` in place.
-The filter in `EnableAll` skips `Explicit`; the filter in `DisableAll` skips
-`Always`.
-The asymmetry means `-t -T` on an `Always` tool runs `EnableAll` first, which
-rewrites `Always` to `On` (`Always` is not `Explicit`), after which `DisableAll`
-rewrites `On` to `Off` (the value is no longer `Always`).
-Net result: a bare `-t -T` disables `describe_tools`, contradicting its
-documented "cannot be disabled" contract.
+[RFD 008] made CLI directives mutate configuration state in place:
+`apply_enable_tools` rewrites the `enable` field to `On` or `Off`.
+The filter in `EnableAll` skips `Explicit`, while the filter in `DisableAll`
+skips `Always`.
+Because of this asymmetry, running `-t -T` on an `Always` tool runs `EnableAll`
+first, rewriting `Always` to `On` (since `Always` is not `Explicit`), and then
+runs `DisableAll`, rewriting `On` to `Off` (since the value is no longer
+`Always`).
+A bare `-t -T` therefore disables `describe_tools`, violating its contract that
+it cannot be disabled.
 
-The equivalent erasure for `Explicit` (`-T -t` flips it to `On`) is the behavior
-the existing `test_interleaved_disable_all_then_enable_all` documents as
-intentional.
-Both arise from the same conflation of state and policy in a single mutable
-field.
+The reverse sequence (`-T -t`) erases `Explicit` by flipping it to `Off` and
+then `On`, which `test_interleaved_disable_all_then_enable_all` codifies as
+expected behavior.
+Both erasures happen because a directive cannot flip a tool's state without
+overwriting its toggle policy.
 
-### Variant proliferation for future features
+### Variant proliferation
 
-[RFD 083] originally proposed a `Sticky` variant: "the disable-side mirror of
-`Explicit`" — on by default, requires a named directive to disable.
-Under the flat-enum shape this would require a new variant, new `is_sticky()`
-predicate, new filter arms in the directive engine, and another conditional
-branch in every `match Enable { ... }` site.
+[RFD 083] originally proposed a `Sticky` variant as the disable-side mirror of
+`Explicit`: enabled by default, and disabled only by a named directive.
+[RFD 055] proposed `ExplicitOrGroup`: disabled by default, and enabled only by a
+named tool or named group directive.
 
-[RFD 055] proposes `ExplicitOrGroup`: "off by default; enabled by named tool or
-named group."
-Same pattern — another variant, more predicates, more match arms.
-
-A new variant per (default state × directive sensitivity) combination scales
-poorly.
-The orthogonal axes — "what state does the tool start in?" and "which
-directives may flip that state?" — are not naturally expressible as a single
-flat enum.
+In a flat enum, every combination of initial state and directive sensitivity
+requires a new variant, a new predicate method, new filter arms in the directive
+engine, and another branch in every `match Enable` expression.
+A tool's initial state and the directives permitted to flip it are independent
+axes and should be represented as separate fields.
 
 ## Design
 
-Replace `Enable` (currently a flat enum) with a pair of types that splits the
-two concerns into two roles `Enable` plays today — stored configuration vs.
-value consumers reason about:
+This RFD replaces the flat `Enable` enum with two types that separate stored
+configuration from the resolved value that consumers inspect:
 
 ```rust
 /// Stored form. Lives in `ToolConfig.enable` and
@@ -121,21 +113,22 @@ pub enum AllowToggle {
 }
 ```
 
-Directives only ever mutate `state`.
-`allow_toggle` is the user's persistent assertion about which directives may do
-so, and is never rewritten by the directive engine.
+CLI directives mutate only `state`.
+`allow_toggle` declares which directives can change `state`, and the directive
+engine never rewrites it.
 
-For most `(state, allow_toggle)` combinations `allow_toggle` governs
-*config-time directive behavior only* — once `state` is resolved, the runtime
-does not consult `allow_toggle` again.
-The one exception is the locked-off case (`state = false, allow_toggle =
-Never`), which is enforced at runtime so the terminology stays honest; see
-[Locked-off means hidden](#locked-off-means-hidden).
+For most `(state, allow_toggle)` combinations, `allow_toggle` governs only
+config-time directive evaluation; once `state` is resolved, the runtime ignores
+`allow_toggle`.
+The sole exception is a locked-off tool (`state = false, allow_toggle = Never`),
+which the runtime also enforces (see [Locked-off means
+hidden](#locked-off-means-hidden)).
 
 ### TOML surface
 
-The common case keeps a bool shorthand.
-Tools that need a non-default toggle policy use the explicit struct form:
+A boolean shorthand covers the common case where `allow_toggle` defaults to
+`Always`.
+Tools that need a non-default toggle policy use the table form:
 
 ```toml
 # Bool shorthand — common case (allow_toggle defaults to Always).
@@ -163,31 +156,42 @@ enable = { state = false, allow_toggle = "if_named_or_group" }
 enable = { state = false, allow_toggle = "never" }
 ```
 
-`"if_named_or_group"` is accepted today and behaves identically to `"if_named"`
-until [RFD 055] lands the `-t GROUP` / `-T GROUP` parser.
-The schema accepts the value now to avoid a later additive change.
+`"if_named_or_group"` is accepted by the schema and behaves identically to
+`"if_named"` until [RFD 055] adds the `-t GROUP` and `-T GROUP` parser.
+Including the variant now avoids a later schema change.
 
 ### Serde
 
-`EnableConfig` is a plain `#[derive(Config)]` struct with
-`#[config(no_deserialize_derive)]`, exactly like `ModelIdConfig`: only
-`Deserialize` is hand-written (on the generated `PartialEnableConfig`, the form
-config files / `base_config.json` / `config_delta` events load into); the
-`Serialize`, `Schematic`, per-field merge, and delta machinery are the standard
-macro-generated implementations.
-This keeps `enable` uniform with every other nested config field and requires no
-`schematic` macro changes.
-`Enable` is the resolved form, produced by the resolver, not deserialized
+`EnableConfig` is a `#[derive(Config)]` struct with
+`#[config(no_deserialize_derive)]`, following the same pattern as
+`ModelIdConfig`.
+Only `Deserialize` is hand-written on the generated `PartialEnableConfig` (the
+type that config files, `base_config.json`, and `config_delta` events load
+into).
+`Serialize`, `Schematic`, per-field merge, and delta generation use the standard
+macro-derived implementations, keeping `enable` consistent with other nested
+config fields and requiring no `schematic` macro changes.
+`Enable` is the resolved form produced by the resolver and is not deserialized
 directly.
-The deserializer accepts a bool, a string, or a map.
-Within the map form, the `allow_toggle` field accepts the strings `"any"` (=
-`Always`), `"never"` (= `Never`), `"if_named"`, or `"if_named_or_group"`.
-Omitted map fields stay `None` so they participate in per-field merging — see
-[Defaults and merge](#defaults-and-merge).
 
-The table below describes the form a TOML input produces when deserialized into
-`PartialEnableConfig` and then passed through the resolver with no defaults
-layer (so any `None` field falls through to the hardcoded fallback):
+The deserializer accepts a boolean, a legacy string (`"on"`, `"off"`,
+`"always"`, `"explicit"`, preserved for [backward
+compatibility](#backward-compatibility)), or a table.
+Within a table, `allow_toggle` accepts `"any"` (`Always`), `"never"` (`Never`),
+`"if_named"`, or `"if_named_or_group"`.
+
+Boolean and legacy-string inputs populate both `state` and `allow_toggle` on
+`PartialEnableConfig`, so `enable = true` in a higher layer or delta overrides
+both fields from lower layers.
+Table inputs preserve omitted fields as `None`: `{ state = true }` deserializes
+to `PartialEnableConfig { state: Some(true), allow_toggle: None }`, allowing
+`allow_toggle` to inherit from a lower layer or defaults (see [Defaults and
+merge](#defaults-and-merge)).
+If no layer sets `enable`, the resolver falls back to `{ state: true,
+allow_toggle: Always }`.
+
+The table below shows how each TOML input resolves when no defaults layer is
+present:
 
 | Input                              | Resolver output, no defaults layer        |
 | ---------------------------------- | ----------------------------------------- |
@@ -200,25 +204,16 @@ layer (so any `None` field falls through to the hardcoded fallback):
 | `{ state, allow_toggle }`          | as written                                |
 | `{ state }` (allow_toggle omitted) | `allow_toggle` fills to `Always`          |
 
-In `PartialEnableConfig`, the same `{ state }` map leaves `allow_toggle` as
-`None`, preserving any value inherited from a defaults layer.
-
-The string forms (`"on"`, `"off"`, `"always"`, `"explicit"`) are the legacy
-flat-enum variants.
-They are preserved for backward compatibility — see [Backward
-compatibility](#backward-compatibility).
-
-`Serialize` is the macro-generated implementation: **output is always the table
-form**, never a bool shorthand — mirroring how `ModelIdConfig` accepts a
-`provider/name` string on input but writes a `{ provider, name }` table.
-Each partial field carries `skip_serializing_if = "Option::is_none"`, so a
-partial that sets just one half writes just that half, preserving inheritance
-from lower layers.
-This matters because `jp config set` and `config_delta` events write partial
-deltas that may set only one field — e.g. `jp config set
-conversation.tools.foo.enable.allow_toggle if_named` produces `{ allow_toggle =
-"if_named" }`, leaving `state` to inherit.
-Serialization operates on the stored optional fields, never on
+`Serialize` uses the macro-generated implementation and **always writes the
+table form**, never the boolean shorthand, matching how `ModelIdConfig` accepts
+a `provider/name` string on input but serializes a `{ provider, name }` table.
+Each field on `PartialEnableConfig` carries `skip_serializing_if =
+"Option::is_none"`, so a partial that sets only one field serializes only that
+field.
+For example, `jp config set conversation.tools.foo.enable.allow_toggle if_named`
+writes `{ allow_toggle = "if_named" }`, leaving `state` to inherit from lower
+layers.
+Serialization reads the stored optional fields directly, never
 `effective_enable()`.
 
 | Partial input                                        | Serialized output                         |
@@ -230,37 +225,17 @@ Serialization operates on the stored optional fields, never on
 | `{ state: None, allow_toggle: Some(_) }`             | `{ allow_toggle }`                        |
 | `{ state: None, allow_toggle: None }`                | `{}` (empty; omitted by the parent map)   |
 
-Round-trip is exact for the table form.
-The bool / legacy-string shorthands are one-way-normalized to the table form on
-the first write-back — `enable = true` becomes `enable = { state = true,
-allow_toggle = "any" }`, the same shorthand normalization `model.id =
-"anthropic/claude"` already undergoes.
-
-On the deserialize side, bool and legacy-string inputs to a
-`PartialEnableConfig` fill *both* fields (so `enable = true` in a delta
-overrides both halves of any underlying value).
-The map form preserves omission: `{ state = true }` deserializes to
-`PartialEnableConfig { state: Some(true), allow_toggle: None }`, which is what
-lets per-field merge (see [Defaults and merge](#defaults-and-merge)) inherit
-`allow_toggle` from a lower layer.
-
-For partial overrides at the layered-config level (set `state` and inherit
-`allow_toggle` from a defaults layer), use the explicit map form with only the
-field you want to set: `enable = { state = true }`.
-The bool and string shorthand forms fully specify both fields.
-See [Defaults and merge](#defaults-and-merge).
-
-If no layer sets `enable` at all, the implicit default is `{ state: true,
-allow_toggle: Always }` — enabled, freely toggleable.
-This matches today's "absence means On" behavior.
+The table form round-trips unchanged.
+Boolean and legacy-string shorthands normalize to the table form on the first
+write-back (for example, `enable = true` becomes `enable = { state = true,
+allow_toggle = "any" }`), just as `model.id = "anthropic/claude"` normalizes to
+a table.
 
 ### Defaults and merge
 
-`ToolsDefaultsConfig.enable` is the same `Enable` field as a per-tool entry —
-same TOML shape (bool / string / map), same compat deserializer, same
-serialization rules.
-There is no separate defaults schema; the same value type appears at every
-layer.
+`ToolsDefaultsConfig.enable` uses the same `Option<EnableConfig>` type as a
+per-tool entry, sharing the same TOML syntax, compatibility deserializer, and
+serialization rules:
 
 ```toml
 [conversation.tools.'*']
@@ -272,50 +247,45 @@ enable = { state = true } # foo overrides only state, inherits allow_toggle.
 # (Same shape as today's Sticky.)
 ```
 
-Two distinct merges produce this result, at different layers of the config
+Two distinct merges produce this result at different stages of the config
 pipeline:
 
-1. **Cross-layer merge** (between config files setting the same path — e.g.
-   user-level config layered onto project-level config, both writing
+1. **Cross-layer merge** combines config files that set the same path (for
+   example, a user config layered over a workspace config, both setting
    `conversation.tools.foo.enable`).
-   Happens in the partial layer.
-   `PartialEnableConfig` exposes `state: Option<bool>` and `allow_toggle:
-   Option<AllowToggle>`, so a partial that mentions only `state` does not erase
-   `allow_toggle` set in a lower layer.
-   This is the standard `PartialConfig::merge` path that composes layered config
-   in `load_partial` (`crates/jp_config/src/fs.rs`); see [RFD 079] for the
-   source/precedence model.
-   `PartialEnableConfig` must therefore be a nested partial (derived through
-   schematic so `merge` recurses into its fields), not a leaf
-   `Option<EnableConfig>` — otherwise the higher-priority layer would replace
-   the entire value and erase `allow_toggle` from below.
-   `FillDefaults` is unrelated to this path; it only seeds schema defaults at
-   finalization.
+   This merge runs on partials via `PartialConfig::merge` in `load_partial`
+   (`crates/jp_config/src/fs.rs`; see [RFD 079] for precedence rules).
+   Because `PartialEnableConfig` is a schematic-derived nested partial with
+   `state: Option<bool>` and `allow_toggle: Option<AllowToggle>`, `merge`
+   recurses into its fields instead of replacing the struct as a leaf
+   `Option<EnableConfig>`.
+   A layer that sets only `state` preserves `allow_toggle` from lower layers.
+   (`FillDefaults` is unrelated; it only seeds schema defaults during
+   finalization.)
 
-2. **Cross-key merge** (from `conversation.tools.*.enable` defaults into
-   per-tool entries like `conversation.tools.foo.enable`).
-   Happens at runtime, against the *final* config —
-   `PartialToolsConfig::fill_from` does not field-merge defaults into individual
-   tool entries, and there is no plan to add that.
-   This is why final `ToolConfig.enable` and `ToolsDefaultsConfig.enable` store
-   `Option<EnableConfig>` (the optional-field form) rather than the filled
-   `Enable`: if `enable` were filled at finalization time, "the user wrote only
-   `state`" would be indistinguishable from "the user wrote both fields with
-   `allow_toggle = Always`", and the cross-key merge would silently shadow the
-   defaults' `allow_toggle`.
-   The runtime resolver in `ToolConfigWithDefaults` (see [Effective enable
-   resolution](#effective-enable-resolution)) reads the stored `EnableConfig`
-   field by field and falls through to defaults exactly when a field is `None`.
+2. **Cross-key merge** combines `conversation.tools.*.enable` defaults into
+   per-tool entries such as `conversation.tools.foo.enable`.
+   Because `PartialToolsConfig::fill_from` does not merge defaults into
+   individual tool entries, this merge runs at runtime on the resolved config.
+   `ToolConfig.enable` and `ToolsDefaultsConfig.enable` therefore store
+   `Option<EnableConfig>` (with optional fields) rather than a resolved
+   `Enable`.
+   Filling defaults during finalization would make `{ state = true }`
+   indistinguishable from `{ state = true, allow_toggle = "any" }`, causing the
+   per-tool entry to shadow `defaults.enable.allow_toggle`.
+   Instead, the resolver on `ToolConfigWithDefaults` (see [Effective enable
+   resolution](#effective-enable-resolution)) inspects each field of
+   `EnableConfig` and falls back to `defaults.enable` only when a field is
+   `None`.
 
-Users never write `state` / `allow_toggle` as top-level fields — the
-field-optional split is an internal mechanism for cross-layer overrides and
-cross-key defaults inheritance.
+`state` and `allow_toggle` are always nested under `enable`, never top-level
+fields on a tool configuration.
 
 ### Effective enable resolution
 
 `apply_tool_use`, `apply_enable_tools`, `tool_definitions`, and
-`Ctx::configure_active_mcp_servers` all consume the same *effective* enable
-value, resolved per-field from per-tool config, then defaults, then the
+`Ctx::configure_active_mcp_servers` all consume the same effective `Enable`
+value, resolved per field from the per-tool config, the defaults config, and the
 hardcoded fallback:
 
 ```text
@@ -323,11 +293,12 @@ effective.state        = tool.enable.state        ?? defaults.enable.state      
 effective.allow_toggle = tool.enable.allow_toggle ?? defaults.enable.allow_toggle ?? Always
 ```
 
-Two seams expose this fallback, one per consumer type.
-Both produce the same filled `Enable` for the same `(tool, defaults)` pair.
+Two entry points expose this resolution, one for resolved configs and one for
+partials.
+Both return the same `Enable` value for a given `(tool, defaults)` pair:
 
-1. **Final-config seam** — for consumers operating on a built `AppConfig`
-   (`tool_definitions()`, `Ctx::configure_active_mcp_servers`):
+1. **Resolved config** (`tool_definitions()`,
+   `Ctx::configure_active_mcp_servers`):
 
    ```rust
    impl ToolConfigWithDefaults {
@@ -336,14 +307,12 @@ Both produce the same filled `Enable` for the same `(tool, defaults)` pair.
    }
    ```
 
-   Both run the per-field fallback above against the stored `EnableConfig`s in
-   `self.tool` and `self.defaults`.
-   `is_enabled()` is the convenience wrapper for `effective_enable().state` and
-   replaces today's `enable()` at every call site.
+   Both methods resolve `self.tool` and `self.defaults` field by field.
+   `is_enabled()` returns `effective_enable().state` and replaces `enable()` at
+   every call site.
 
-2. **Partial-config seam** — for CLI directive consumers operating on
-   `PartialAppConfig` *before* `from_partial_with_defaults` runs
-   (`apply_enable_tools`, `apply_tool_use`):
+2. **Partial config** (`apply_enable_tools`, `apply_tool_use`, which run on
+   `PartialAppConfig` before `from_partial_with_defaults`):
 
    ```rust
    impl PartialEnableConfig {
@@ -351,37 +320,30 @@ Both produce the same filled `Enable` for the same `(tool, defaults)` pair.
    }
    ```
 
-   The CLI path reads the per-tool partial at
-   `partial.conversation.tools.tools.<name>.enable` and the defaults partial at
+   The CLI path reads `partial.conversation.tools.tools.<name>.enable` and
    `partial.conversation.tools.defaults.enable`, then calls `effective` to
-   obtain the same filled `Enable` the final-config seam would produce.
-   Resolving at the partial layer avoids building a temporary final config
-   purely for the directive check.
+   produce the same `Enable` value as the resolved-config path without building
+   a temporary `AppConfig`.
 
-Today this is inconsistent: `tool_definitions()` goes through
-`ToolConfigWithDefaults::enable()` and sees defaults-merged values, but
-`apply_tool_use` filters partial config directly with
-`cfg.enable.is_some_and(Enable::is_on)`, which fails for tools that rely on the
-default-on fallback.
-Under this RFD every consumer routes through the same resolver, so `--tool-use
-NAME` works for builtins (e.g. `describe_tools`) and for user tools that leave
-`enable` unset.
+Without this shared resolver, `tool_definitions()` reads defaults-merged values
+through `ToolConfigWithDefaults::enable()`, whereas `apply_tool_use` checks the
+raw partial directly with `cfg.enable.is_some_and(Enable::is_on)` and rejects
+tools that rely on the default-on fallback.
+Routing every consumer through the same resolver lets `--tool-use NAME` accept
+built-in tools such as `describe_tools` as well as user tools that omit
+`enable`.
 
-If [RFD 056] / [RFD 057] land, the same per-field resolution extends across
-their group-default and group-override layers in the order those RFDs define —
-this RFD does not constrain that ordering.
-[RFD 057] also separately commits to "CLI flags always win over group
-overrides."
-A group override that sets `allow_toggle = Never` would, under this RFD's
-directive engine, block a named CLI directive — which conflicts with that
-commitment.
-This RFD takes no position on the resolution; [RFD 057] must decide whether
-group-sourced `allow_toggle` blocks CLI directives or whether CLI directives
-bypass it.
+When [RFD 056] and [RFD 057] land, per-field resolution will extend across their
+group-default and group-override layers in the order those RFDs define.
+[RFD 057] states that CLI flags always win over group overrides, whereas under
+this RFD a group override setting `allow_toggle = Never` would block a named CLI
+directive.
+[RFD 057] must decide whether group-sourced `allow_toggle` values block CLI
+directives or CLI directives bypass them.
 
 ### Directive engine
 
-Directives are classified by *scope*:
+Directives are classified by scope:
 
 ```rust
 pub enum ToggleScope {
@@ -391,18 +353,17 @@ pub enum ToggleScope {
 }
 ```
 
-The directive engine asks two questions per (directive, tool) pair:
+For each `(directive, tool)` pair, the directive engine checks two conditions:
 
-1. Does `allow_toggle` permit this directive scope?
-   (`Enable::accepts(scope)`)
-2. Would applying the directive flip `state`?
+1. Does `allow_toggle` permit the directive's scope (`Enable::accepts(scope)`)?
+2. Would the directive change `state`?
 
 | `accepts(scope)` | `state` already matches intent | `state` would flip                 |
 | ---------------- | ------------------------------ | ---------------------------------- |
-| `true`           | trivially OK — no work         | apply: flip `state`                |
-| `false`          | trivially OK — no work         | error (named) or skip (bulk/group) |
+| `true`           | no-op                          | flip `state`                       |
+| `false`          | no-op                          | error (named) or skip (bulk/group) |
 
-The `accepts` predicate:
+`Enable::accepts` matches the policy against the directive scope:
 
 ```rust
 impl Enable {
@@ -419,73 +380,59 @@ impl Enable {
 }
 ```
 
-Under this rule, `-t -T` and `-T -t` preserve the policy of any tool with
-`allow_toggle ≠ Always`.
-The two bugs in [Motivation](#motivation) become unrepresentable.
+Under this rule, `-t -T` and `-T -t` preserve `allow_toggle` on every tool and
+never flip a tool whose policy rejects bulk directives, eliminating both bugs in
+[Motivation](#motivation).
 
 ### `--tool-use NAME` validation
 
-`apply_tool_use` validates that the named target is configured and effectively
-enabled (`state == true`).
-The filter switches from "only `Enable::On`" to "`state == true`," regardless of
-`allow_toggle`.
-`jp -u describe_tools` becomes valid because `describe_tools.state` is `true`.
+`apply_tool_use` validates that the target tool is configured and its effective
+`state` is `true`, regardless of `allow_toggle`.
+Replacing the `Enable::is_on` check with `state == true` makes `jp -u
+describe_tools` valid because `describe_tools` has `state = true`.
 
-This is a config-eligibility check, not a delivery guarantee: it runs on the
-partial config before MCP servers start, so it cannot promise the tool reaches
-the LLM.
+Because `apply_tool_use` runs on `PartialAppConfig` before MCP servers start, it
+checks config eligibility rather than runtime availability.
 A tool backed by an optional MCP server that fails to start is still dropped
 later by `tool_definitions()`.
-Reconciling that runtime mismatch — a forced tool absent from the resolved list
-— is a pre-existing concern orthogonal to this RFD and is left to the runtime
-access-control track.
+Handling a forced tool that is absent from the resolved tool list is a separate
+runtime concern outside the scope of this RFD.
 
 ### Locked-off means hidden
 
-A tool with `state = false, allow_toggle = Never` (the canonical locked-off
-case) is treated as **truly off**, not just immune to CLI directives.
-Three rules implement this:
+A locked-off tool (`state = false, allow_toggle = Never`) is completely excluded
+at runtime, not merely immune to CLI directives:
 
-1. **`tool_definitions()` always drops locked-off tools**, regardless of the
-   `forced_tool` exemption that today protects an `assistant.tool_choice` match.
-   The current short-circuit in `crates/jp_llm/src/tool.rs` includes a forced
-   tool even when its enable check returns `false`; under this RFD that
-   exemption no longer applies when the tool is locked-off.
-2. **`assistant.tool_choice = "foo"` is rejected during final `AppConfig`
-   validation** when `foo` resolves to a locked-off tool.
-   The check lives at the `AppConfig` level (the only validator that sees both
+1. **`tool_definitions()` always excludes locked-off tools.** The `forced_tool`
+   exemption in `crates/jp_llm/src/tool.rs` normally includes the tool named by
+   `assistant.tool_choice` even when disabled, but does not apply when the tool
+   is locked-off.
+2. **`AppConfig::validate` rejects `assistant.tool_choice = "foo"`** when `foo`
+   resolves to a locked-off tool.
+   This check lives on `AppConfig` (the only validator with access to both
    `assistant.tool_choice` and `conversation.tools`), not in
    `ToolsConfig::validate`.
-   The error names both config paths — `assistant.tool_choice` and
-   `conversation.tools.<name>.enable` — rather than silently coercing, or
-   passing through to a provider that will reject the request anyway
-   (Google/Gemini does).
-   This mirrors the existing `--tool-use NAME` validation against the enabled
-   set.
-3. **`Ctx::configure_active_mcp_servers` already drops locked-off MCP tools**,
-   since it filters on `is_enabled()` before consulting any forced name.
-   No additional change is needed there beyond the `is_enabled()` rewrite
-   covered in Phase 2.
+   The error names both `assistant.tool_choice` and
+   `conversation.tools.<name>.enable` rather than silently ignoring the setting
+   or sending an invalid tool choice to a provider such as Google/Gemini.
+3. **`Ctx::configure_active_mcp_servers` skips locked-off MCP tools** because it
+   filters on `is_enabled()` before checking any forced tool name.
 
-The asymmetry is intentional: only `(state = false, allow_toggle = Never)` gets
-the stronger treatment.
-`(state = true, allow_toggle = Never)` is locked-on — the tool is always
-present, no semantic conflict.
-The other locked combinations don't exist: `Never` only pairs meaningfully with
-these two `state` values.
+Only `(state = false, allow_toggle = Never)` needs this runtime check; a
+locked-on tool (`state = true, allow_toggle = Never`) is already enabled and
+creates no conflict with `assistant.tool_choice`.
 
-This pulls one specific case out of the runtime access-control track ([RFD 075]
-/ [RFD 076] / [RFD 077]).
-The justification is honesty: if the terminology says "locked off" and the
-schema lets users declare it, the runtime must back it up.
-Broader runtime enforcement — argument-level policy, tool-call sandboxing,
-plugin trust — remains out of scope and stays with the access-policy track.
+Enforcing locked-off tools at runtime keeps the configuration contract accurate
+when a user sets `state = false, allow_toggle = "never"`.
+Broader runtime enforcement (argument-level policy, tool-call sandboxing, and
+plugin trust) belongs to [RFD 075], [RFD 076], and [RFD 077].
 
 ### Behavior matrix
 
-Behavior under bulk and named directives (group parsing lands in [RFD 055]).
-Until then, `IfNamedOrGroup` behaves identically to `IfNamed` for both `-t` and
-`-T`:
+The table below shows how each `(state, allow_toggle)` combination responds to
+named and bulk directives.
+`IfNamedOrGroup` is omitted because it behaves identically to `IfNamed` until
+[RFD 055] adds `-t GROUP` and `-T GROUP` parsing:
 
 | Tool config            | `-t name` | `-T name` | `-t` bulk | `-T` bulk |
 | ---------------------- | --------- | --------- | --------- | --------- |
@@ -496,12 +443,9 @@ Until then, `IfNamedOrGroup` behaves identically to `IfNamed` for both `-t` and
 | `state=false, Never`   | **error** | no-op     | skip      | skip      |
 | `state=false, IfNamed` | flips on  | no-op     | skip      | skip      |
 
-`IfNamedOrGroup` rows are intentionally omitted: until [RFD 055] introduces `-t
-GROUP` parsing, they collapse to the `IfNamed` rows above.
-
-Errors carry an `allow_toggle`-aware message ("cannot disable `describe_tools`:
-this tool is configured as locked-on") rather than the legacy "system tool
-cannot be disabled" framing.
+Directive errors report the tool's `allow_toggle` policy (for example, "cannot
+disable `describe_tools`: this tool is configured as locked-on") instead of the
+legacy "system tool cannot be disabled" message.
 
 ### Predicates and helpers
 
@@ -542,8 +486,8 @@ Some(PartialEnableConfig::LOCKED_ON)`.
 
 ## Backward compatibility
 
-The deserializer accepts the legacy string forms — `"on"`, `"off"`, `"always"`,
-`"explicit"` — and rewrites each to its canonical struct form at parse time:
+The deserializer accepts the legacy string values (`"on"`, `"off"`, `"always"`,
+`"explicit"`) and converts each to its canonical struct form at parse time:
 
 | Legacy input          | Canonical form                            |
 | --------------------- | ----------------------------------------- |
@@ -552,328 +496,251 @@ The deserializer accepts the legacy string forms — `"on"`, `"off"`, `"always"`
 | `enable = "always"`   | `{ state: true, allow_toggle: Never }`    |
 | `enable = "explicit"` | `{ state: false, allow_toggle: IfNamed }` |
 
-The new `allow_toggle` field is a string enum: `"any"` (freely toggleable, the
-default), `"never"` (locked), `"if_named"`, or `"if_named_or_group"`.
-The freely-toggleable variant is deliberately spelled `"any"` rather than
-`"always"`, so it cannot be confused with the legacy `enable = "always"`
-shorthand — which means the opposite (locked-on).
-The legacy string forms stay on the outer `enable` value only; `allow_toggle`
-never accepts them.
+The `allow_toggle` field accepts `"any"` (freely toggleable, the default),
+`"never"` (locked), `"if_named"`, or `"if_named_or_group"`.
+The freely toggleable variant is named `"any"` rather than `"always"` to avoid
+confusion with the legacy `enable = "always"` shorthand, which means locked-on.
+Legacy strings are accepted only on `enable`, never on `allow_toggle`.
 
-This is required for **conversation persistence**.
-The compat deserializer (`jp_conversation::compat::deserialize_partial_config`)
-is consumed by both the base config snapshot (`base_config.json`) and
-`config_delta` events in the event stream, so any conversation created before
-this RFD landed may carry legacy `enable` values on either surface.
-Without compat-aware parsing, the affected stored config layer (base snapshot or
-`config_delta` event) would fail typed deserialization and be replaced with an
-empty partial after a warning (see
-`jp_conversation::compat::deserialize_partial_config`).
-The conversation would still open, but legacy `enable` values would be silently
-lost, changing tool availability for old conversations.
+Compatibility parsing is required for persisted conversations.
+Both the base config snapshot (`base_config.json`) and `config_delta` events use
+`jp_conversation::compat::deserialize_partial_config`, so conversations created
+before this change may contain legacy `enable` strings in either place.
+Without compatibility parsing, `deserialize_partial_config` would log a warning
+and replace the failing layer with an empty partial, silently dropping legacy
+`enable` settings in existing conversations.
 
-Output is always canonical.
-The compat path is read-only — no new code emits legacy strings.
-On the first re-serialization after this RFD lands (e.g. a subsequent
-`config_delta` write, or a `jp config set` against the user's config file), the
-bool and legacy-string shorthands normalize to the table form.
+The compatibility path is read-only; serialization always emits the canonical
+table form.
+On the first write-back (such as a `config_delta` event or `jp config set`),
+boolean and legacy-string shorthands normalize to the table form.
 
-In-code builtin registrations (currently `Enable::Always` for `describe_tools`)
-are updated to `PartialEnableConfig::LOCKED_ON` as part of the same change.
+Built-in tool registrations (such as `describe_tools`, previously registered
+with `Enable::Always`) switch to `PartialEnableConfig::LOCKED_ON`.
 
-RFD updates accompany the code change:
+Related RFDs are updated alongside the code change:
 
-- [RFD 008] gets a TIP under "Design" noting that directive state-mutation is
-  now gated by `allow_toggle`.
-  The existing `test_interleaved_disable_all_then_enable_all` is replaced by
-  tests asserting policy preservation.
-- [RFD 055] is amended to remove `Enable::ExplicitOrGroup` from its
-  Implementation Plan, the `explicit_or_group` row from the "Interaction with
-  Tool `enable` Field" table, the related Drawbacks entry ("New `Enable`
-  variant"), and the Risks/Open Questions entry on `Enable` enum growth.
-  Tool groups land with `AllowToggle::IfNamedOrGroup` already in the schema and
-  just need the `ToggleScope::NamedGroup` parser.
-- [RFD 056] is updated to refer to the stored `EnableConfig` shape and per-field
-  resolution, replacing the `Enable` field type and the `enable()` /
-  `enable_mode()` accessor names with `is_enabled()` / `effective_enable()`.
-- [RFD 057]'s `apply_enable_tools` wording is updated to route through the
-  partial-config resolver seam (`PartialEnableConfig::effective`).
-  The existing note that [RFD 057] must decide whether group-sourced
-  `allow_toggle = Never` blocks CLI directives is preserved.
-- [RFD 083] is updated to fix stale `allow_toggle` wording: the bool-shorthand
-  note that "resets `allow_toggle` to `always`" becomes `any`, and the builtin
-  registration examples change from the resolved `Enable { ... }` to the stored
-  `EnableConfig { ... }` form.
-  The `Requires: [RFD 081]` relationship is unchanged.
+- [RFD 008] gains a `TIP` note under "Design" explaining that directive state
+  mutation is gated by `allow_toggle`, and
+  `test_interleaved_disable_all_then_enable_all` is replaced by policy
+  preservation tests.
+- [RFD 055] drops `Enable::ExplicitOrGroup` from its Implementation Plan, the
+  `explicit_or_group` row from the "Interaction with Tool `enable` Field" table,
+  the "New `Enable` variant" drawback, and the `Enable` enum growth risk.
+  Tool groups use `AllowToggle::IfNamedOrGroup` and only need the
+  `ToggleScope::NamedGroup` parser.
+- [RFD 056] refers to `EnableConfig` and per-field resolution, replacing the
+  `Enable` field type and the `enable()` / `enable_mode()` accessors with
+  `is_enabled()` and `effective_enable()`.
+- [RFD 057] routes `apply_enable_tools` through `PartialEnableConfig::effective`
+  while keeping the open question on whether group-sourced `allow_toggle =
+  Never` blocks CLI directives.
+- [RFD 083] updates the bool-shorthand note from "resets `allow_toggle` to
+  `always`" to `any`, and changes its built-in registration examples from
+  `Enable { ... }` to `EnableConfig { ... }`.
+  Its `Requires: [RFD 081]` metadata is unchanged.
 
 ## Drawbacks
 
-**One-way serde normalization.** The bool and legacy-string inputs (`true`,
-`false`, `"on"`, `"off"`, `"always"`, `"explicit"`) serialize back as the table
-form (e.g. `enable = true` becomes `enable = { state = true, allow_toggle =
-"any" }`).
-The shape is stable from the first write-back onward.
-This is the same shorthand-to-table normalization `ModelIdConfig` already
-performs (`model.id = "anthropic/claude"` writes back as a `{ provider, name }`
-table), so `enable` stays uniform with the rest of the config rather than
-carrying a bespoke serializer.
+**One-way serde normalization.** Boolean and legacy-string inputs (`true`,
+`false`, `"on"`, `"off"`, `"always"`, `"explicit"`) serialize as tables (for
+example, `enable = true` writes back as `enable = { state = true, allow_toggle =
+"any" }`) and remain stable on subsequent writes.
+This matches the shorthand-to-table normalization on `ModelIdConfig` (`model.id
+= "anthropic/claude"` writes back as `{ provider, name }`), keeping `enable`
+consistent with the rest of `jp_config` without a custom serializer.
 
-**Slightly more TOML for non-default cases.** Non-default `allow_toggle` values
-require the map form: `enable = { state = true, allow_toggle = "never" }` in new
-configs is more verbose than the legacy `enable = "always"`.
-The map form is more discoverable in exchange — each field states exactly one
-fact.
+**More verbose TOML for non-default policies.** Non-default `allow_toggle`
+policies require a table: `enable = { state = true, allow_toggle = "never" }` is
+longer than `enable = "always"`, though each field states its role explicitly.
 
-**`AllowToggle::IfNamedOrGroup` is unreachable until [RFD 055] lands.** The
-variant is in the schema and the `accepts` predicate handles it, but no
-directive parser produces `ToggleScope::NamedGroup` until tool groups ship.
-A user who writes `allow_toggle = "if_named_or_group"` today gets `if_named`
-behavior until group parsing arrives, matching the user-facing note in [TOML
-surface](#toml-surface).
-The unreachable code is a deliberate forward-compat investment to avoid a schema
-change when [RFD 055] lands.
+**`AllowToggle::IfNamedOrGroup` is equivalent to `IfNamed` until [RFD 055]
+lands.** The variant is in the schema and handled by `Enable::accepts`, but no
+parser produces `ToggleScope::NamedGroup` until tool groups ship.
+Until then, `allow_toggle = "if_named_or_group"` behaves identically to
+`"if_named"`, as noted in [TOML surface](#toml-surface).
+Adding the variant now avoids a schema change when [RFD 055] lands.
 
 ## Alternatives
 
-Four alternatives were considered before this shape was chosen.
-Each is rejected for the reason given.
+**Fix `enable()` without changing the directive engine.** Updating `enable()` to
+treat `Enable::Always` as enabled fixes Bug 1, but leaves Bug 2 and variant
+proliferation unresolved.
 
-**Patch the predicate, leave the directive engine alone.** Update `enable()` to
-recognize `Enable::Always` as enabled.
-Fixes Bug 1, leaves Bug 2 and the variant proliferation problem in place.
-Rejected as a half-fix.
+**Split into two top-level fields (`enabled: Option<bool>` and `policy:
+Option<Policy>`).** Rejected for two reasons.
+First, placing both fields directly on `ToolConfig` mixes them with unrelated
+settings (`run`, `result`, `command`), obscures that they jointly control tool
+activation, and makes the `enable = true` boolean shorthand awkward to preserve.
+Second, the name `policy` collides with `AccessPolicy`, `RunPolicy`, and
+`TrustPolicy` in [RFD 075], [RFD 076], and [RFD 077].
 
-**Two top-level fields, `enabled: Option<bool>` + `policy: Option<Policy>`.**
-Clean per-field separation.
-Rejected for two reasons.
-First, two top-level fields flatten the (state, policy) pair into the tool's
-namespace where they mingle with unrelated fields like `run`, `result`, and
-`command`, and lose the visual grouping that signals these two values jointly
-define activation behavior.
-Bool shorthand is also harder to preserve when the policy field is a sibling
-rather than a sub-field — `enable = true` has no natural counterpart for the
-policy half.
-Second, the field name `policy` clashes with [RFD 075] / [RFD 076] / [RFD 077]
-(`AccessPolicy`, `RunPolicy`, `TrustPolicy`).
+**Use a single enum with nested `Enable::State | Enable::Policy` variants.**
+This has the same semantics as the struct design, but requires nested pattern
+matching (`Enable::State(EnableState::On)`) at every call site.
+`Enable { state, allow_toggle }` expresses the same model with flatter types.
 
-**Single field with nested `Enable::State | Enable::Policy` variants.** Same
-architectural properties as the chosen shape, but introduces a deep nested type
-(`Enable::State(EnableState::On)`) that propagates through every match site.
-The chosen `Enable { state, allow_toggle }` struct expresses the same
-distinction with less syntactic weight.
-
-**Flat enum with exhaustive `is_enabled()` / `is_policy()` methods.** The
-minimal-invasive alternative: keep `Enable` as a flat enum, fix the predicates
-to enumerate variants exhaustively.
-Smallest diff, but each new policy concept (`Sticky`, `ExplicitOrGroup`) still
-requires a new variant, new match arm, and new test surface.
-Doesn't address the variant proliferation problem.
+**Keep the flat enum and make `is_enabled()` / `is_policy()` exhaustive.** This
+minimizes the initial diff, but every new policy (`Sticky`, `ExplicitOrGroup`)
+still requires a new enum variant, new match arms, and additional tests.
 
 ## Non-Goals
 
-**Tool group directive parsing.** [RFD 055] introduces `-t GROUP` / `-T GROUP`
+**Tool group directive parsing.** [RFD 055] introduces `-t GROUP` and `-T GROUP`
 directive parsing.
-This RFD reserves `ToggleScope::NamedGroup` and includes
-`AllowToggle::IfNamedOrGroup` so that group parsing becomes a parser-only
-change, but does not implement group parsing itself.
+This RFD defines `ToggleScope::NamedGroup` and `AllowToggle::IfNamedOrGroup` so
+that [RFD 055] only needs to update the parser.
 
-**Runtime access control.** [RFD 075] / [RFD 076] / [RFD 077] govern what a tool
-may *do* at runtime (filesystem, network, subprocess).
-`allow_toggle` governs what may *change the tool's enable state at config time*.
-The two are orthogonal concepts that share no fields.
+**Runtime access control.** [RFD 075], [RFD 076], and [RFD 077] govern what a
+tool may do at runtime (filesystem, network, subprocess).
+`allow_toggle` governs which CLI directives may change a tool's `state` at
+config time.
 
-**Runtime tool-choice enforcement beyond the locked-off case.** `allow_toggle`
-does not validate `assistant.tool_choice` in general.
-A persisted `tool_choice = "foo"` where `foo` has `state = true, allow_toggle =
-Always` is still forced into the request payload even after a CLI `-T foo`
-directive flipped `state` to `false`, because that flip happens on a
-freely-toggleable tool.
-The narrow case of a locked-off tool (`state = false, allow_toggle = Never`)
-**is** enforced — see [Locked-off means hidden](#locked-off-means-hidden) — to
-keep the terminology honest.
-Broader runtime enforcement (argument-level policy, tool-call sandboxing, plugin
-trust) remains with the access-policy track ([RFD 075] / [RFD 076] / [RFD 077]).
+**General runtime `tool_choice` enforcement.** Beyond the locked-off case (see
+[Locked-off means hidden](#locked-off-means-hidden)), `allow_toggle` does not
+constrain `assistant.tool_choice`.
+A persisted `tool_choice = "foo"` on a tool with `state = true, allow_toggle =
+Always` is still forced into the request payload even after `-T foo` flips
+`state` to `false`.
+Broader runtime enforcement belongs to [RFD 075], [RFD 076], and [RFD 077].
 
 ## Risks and Open Questions
 
-**Persona-layer composition.** Per-field defaults inheritance is the right
-composition rule for layered config, but the existing persona system has not
-been exercised against this kind of split field.
-Verify during implementation that the partial-config delta machinery handles
-`PartialEnableConfig` correctly when only one of `state` / `allow_toggle` is set
-in a layer.
+**Persona-layer composition.** Per-field inheritance is the standard composition
+rule for layered config, but existing personas have not been tested with a split
+`enable` table.
+Implementation must verify that partial-config deltas handle
+`PartialEnableConfig` when a layer sets only `state` or only `allow_toggle`.
 
-**Round-trip fidelity in `jp config set`.** Verify that `jp config set` against
-a TOML containing `enable = { state = true, allow_toggle = "never" }`
-round-trips without mutation.
-Verify that `jp config set` against a TOML containing legacy `enable = "always"`
-produces `enable = { state = true, allow_toggle = "never" }` on the first
-write-back and then stays stable.
-This depends on the inline-table merge fix in Phase 1: the format-preserving
-TOML merge (`deep_merge_toml` in `crates/jp_config/src/fs.rs`) recurses only
-through standard tables today, so without the fix a nested `jp config set
-conversation.tools.foo.enable.state ...` against an inline-table `enable` would
-replace the whole value and drop `allow_toggle`.
+**Round-trip behavior in `jp config set`.** `jp config set` on a file containing
+`enable = { state = true, allow_toggle = "never" }` must round-trip without
+losing fields, and `jp config set` on legacy `enable = "always"` must normalize
+to `enable = { state = true, allow_toggle = "never" }` on the first write-back.
+This requires `deep_merge_toml` (`crates/jp_config/src/fs.rs`) to recurse into
+inline tables; because it currently recurses only into standard tables, running
+`jp config set conversation.tools.foo.enable.state ...` against an inline table
+would otherwise overwrite the whole table and drop `allow_toggle`.
 
-**Legacy strings in persisted conversation data.** Conversations created before
-this RFD landed may contain legacy `enable = "..."` strings in both their
-`base_config.json` snapshot and their stored `config_delta` events.
-The compat deserializer must accept these on load on both surfaces;
-re-serialization (e.g. via a subsequent `config_delta` write) normalizes them.
-Add regression tests that load a conversation with legacy `enable` values in its
-base config and in its event stream, and assert the merged config exposes the
-correct `state` / `allow_toggle`.
+**Legacy strings in persisted conversations.** Conversations created before this
+RFD may store legacy `enable = "..."` strings in `base_config.json` or
+`config_delta` events.
+The compatibility deserializer must accept them on both surfaces, and regression
+tests must verify that loading a conversation with legacy values produces the
+expected `state` and `allow_toggle`.
 
-**Impact on tool config mutation grants.** [RFD 078] (Accepted, not yet
-implemented) lets tools write to paths under `conversation.tools.*` via the
-`access.config` grant model.
-Existing payloads that write a bool or legacy string (`true`, `"on"`,
-`"always"`, …) to `conversation.tools.*.enable` remain valid — the
-deserializer accepts them unchanged, so no migration is forced.
-A tool only needs the map form (`{ state, allow_toggle }`) when it wants to set
-one subfield while preserving the other from a lower layer.
-When [RFD 078] is implemented, confirm grant payloads and any built-in
-config-mutating tools handle the map form; whole-value writes need no grant-path
-change.
+**Tool config mutation grants.** [RFD 078] lets tools write to
+`conversation.tools.*` paths via `access.config` grants.
+Existing payloads that write a boolean or legacy string (`true`, `"on"`,
+`"always"`) to `conversation.tools.*.enable` remain valid because the
+deserializer accepts them unchanged.
+A tool needs the table form (`{ state, allow_toggle }`) only to set one subfield
+while preserving the other from a lower layer.
+When [RFD 078] is implemented, grant validation and built-in config-mutating
+tools must support the table form.
 
 ## Implementation Plan
 
-### Phase 1: type and serde
+### Phase 1: Types and serde
 
-- Replace `Enable` (currently a flat enum) with the stored/resolved pair in
-  `jp_config/src/conversation/tool.rs`: `EnableConfig` for the stored form (with
-  `Option<bool>` and `Option<AllowToggle>` fields; lives in `ToolConfig.enable`
-  and `ToolsDefaultsConfig.enable` as `Option<EnableConfig>`), and `Enable` for
-  the resolved form returned by the effective-enable resolver.
-- Add `AllowToggle` enum and `ToggleScope` enum.
-  `ToggleScope` lives in `jp_config` alongside `Enable` because
-  `Enable::accepts` consumes it; the CLI directive parser in `jp_cli` produces
-  values of this type rather than defining its own.
-- Hand-write `Deserialize` on `PartialEnableConfig` to accept the bool /
-  legacy-string / table inputs (`#[config(no_deserialize_derive)]`); let the
-  macro auto-derive `Serialize` (table output) and `Schematic`, the same way
-  `ModelIdConfig` does.
-  No `schematic` macro change is needed.
-- Add the `PartialEnableConfig::ON` / `OFF` / `LOCKED_ON` / `LOCKED_OFF`
-  constants (builtins and the directive engine work on partials) and the
-  `Enable::is_enabled`, `Enable::is_locked`, and `Enable::accepts` predicates.
-- Update the partial-config infrastructure (`PartialEnableConfig`, `ToPartial`,
-  `PartialConfigDelta`, `AssignKeyValue`) for the new struct shape.
-- Implement compat-aware deserialization: accept `true` / `false` / `"on"` /
-  `"off"` / `"always"` / `"explicit"` as input and rewrite each to the canonical
-  struct form at parse time.
-  Output is always canonical — the compat path is read-only.
-- Make the format-preserving TOML merge recurse into inline tables.
-  `deep_merge_toml` in `crates/jp_config/src/fs.rs` recurses only through
-  standard tables today (`as_table_mut` / `as_table`), so a nested `jp config
-  set conversation.tools.foo.enable.state ...` against an `enable = { state =
-  true, allow_toggle = "never" }` inline table would replace the whole value and
-  drop `allow_toggle`.
-  Switch the recursion to table-likes (`as_table_like_mut` / `as_table_like`) so
-  inline and standard tables both deep-merge.
+- In `jp_config/src/conversation/tool.rs`, replace the flat `Enable` enum with
+  `EnableConfig` (`state: Option<bool>`, `allow_toggle: Option<AllowToggle>`,
+  stored as `Option<EnableConfig>` on `ToolConfig.enable` and
+  `ToolsDefaultsConfig.enable`) and `Enable` (the resolved struct returned by
+  the effective-enable resolver).
+- Add `AllowToggle` and `ToggleScope` in `jp_config` alongside `Enable` so
+  `Enable::accepts` and the CLI directive parser in `jp_cli` share the same
+  scope type.
+- Derive `Config` on `EnableConfig` with `#[config(no_deserialize_derive)]` so
+  `Serialize` and `Schematic` are macro-generated, and implement `Deserialize`
+  on `PartialEnableConfig` for booleans, legacy strings (`"on"`, `"off"`,
+  `"always"`, `"explicit"`), and tables.
+- Add `PartialEnableConfig::{ON, OFF, LOCKED_ON, LOCKED_OFF}` and
+  `Enable::{is_enabled, is_locked, accepts}`.
+- Update `ToPartial`, `PartialConfigDelta`, and `AssignKeyValue` for
+  `EnableConfig` and `PartialEnableConfig`.
+- Update `deep_merge_toml` in `crates/jp_config/src/fs.rs` to use
+  `as_table_like_mut` and `as_table_like` instead of `as_table_mut` and
+  `as_table`, so `jp config set conversation.tools.foo.enable.state ...` merges
+  into inline tables without dropping `allow_toggle`.
 
-### Phase 2: predicates and ctx
+### Phase 2: Predicates and `Ctx`
 
 - Add `ToolConfigWithDefaults::effective_enable() -> Enable` and
-  `ToolConfigWithDefaults::is_enabled() -> bool`, both performing the per-field
-  fallback against the stored `EnableConfig`s.
-  Replace today's `ToolConfigWithDefaults::enable()` with `is_enabled()` at
-  consumer sites.
+  `ToolConfigWithDefaults::is_enabled() -> bool`, and replace calls to
+  `ToolConfigWithDefaults::enable()` with `is_enabled()`.
 - Add `PartialEnableConfig::effective(&self, defaults: &PartialEnableConfig) ->
-  Enable` for the partial-config consumers exercised in Phase 3.
-- Verify `Ctx::configure_active_mcp_servers` works against `is_enabled()`.
-- Update `tool_definitions()` to use `is_enabled()`, and remove the
-  `forced_tool` exemption for locked-off tools (`state == false && allow_toggle
-  == Never`).
-  Locked-off tools are filtered out regardless of `assistant.tool_choice`.
-  See [Locked-off means hidden](#locked-off-means-hidden).
-- Update the builtin registration of `describe_tools` to
-  `PartialEnableConfig::LOCKED_ON`.
+  Enable` for partial-config consumers.
+- Verify that `Ctx::configure_active_mcp_servers` uses `is_enabled()`.
+- Update `tool_definitions()` to use `is_enabled()` and drop the `forced_tool`
+  exemption for locked-off tools (`state == false && allow_toggle == Never`; see
+  [Locked-off means hidden](#locked-off-means-hidden)).
+- Register `describe_tools` with `PartialEnableConfig::LOCKED_ON`.
 
-### Phase 3: directive engine
+### Phase 3: Directive engine
 
-- Rewrite `apply_enable_tools` to use the scope-vs-policy model.
-  The bulk-only filters (`is_explicit`, `is_always`) are removed.
-  The named-disable guard is generalized to the named directive case.
-- `ToggleScope::NamedGroup` is added but no parser produces it (parking spot for
-  [RFD 055]).
-- Route `apply_tool_use` and `apply_enable_tools` through the partial-config
-  resolver seam (`PartialEnableConfig::effective`; see [Effective enable
+- Rewrite `apply_enable_tools` around `ToggleScope` and `Enable::accepts`,
+  removing `is_explicit` and `is_always` and generalizing the named-disable
+  guard to all named directives.
+- Reserve `ToggleScope::NamedGroup` for [RFD 055].
+- Route `apply_tool_use` and `apply_enable_tools` through
+  `PartialEnableConfig::effective` (see [Effective enable
   resolution](#effective-enable-resolution)) instead of inspecting raw partial
   fields.
-- Add an `AppConfig`-level validation check (in `AppConfig::validate`, which
-  sees both `assistant` and `conversation.tools`) that rejects
-  `assistant.tool_choice = Function(name)` when `name` resolves to a locked-off
-  tool.
-  The error names both `assistant.tool_choice` and
-  `conversation.tools.<name>.enable`, matching how `--tool-use NAME` validates
-  against the enabled set today.
+- In `AppConfig::validate`, reject `assistant.tool_choice = Function(name)` when
+  `name` resolves to a locked-off tool, naming both `assistant.tool_choice` and
+  `conversation.tools.<name>.enable` in the error.
 
-### Phase 4: tests and RFD updates
+### Phase 4: Tests and RFD updates
 
-- Replace `test_interleaved_disable_all_then_enable_all` with tests asserting
-  (a) `allow_toggle` is preserved across all interleaved directive sequences for
-  every policy, and (b) `state` changes only when `accepts(scope)` is true and
-  the directive intent differs from the current state.
-- Add tests for the named-directive error paths and silent no-op paths.
+- Replace `test_interleaved_disable_all_then_enable_all` with tests verifying
+  that `allow_toggle` is preserved across interleaved directive sequences and
+  that `state` flips only when `accepts(scope)` is `true` and the target state
+  differs.
+- Add tests for named-directive errors and no-op cases.
 - Add tests for `tool_definitions()` and `Ctx::configure_active_mcp_servers`
-  against `PartialEnableConfig::LOCKED_ON`.
+  with `PartialEnableConfig::LOCKED_ON`.
 - Add layered-merge tests:
   - `enable = { state = true }` on a tool inherits `allow_toggle` from
     `[conversation.tools.'*']`.
-  - `enable = true` (bool shorthand) fully specifies both fields, overriding any
-    inherited `allow_toggle`.
-  - omitted `enable` resolves to the default-on, freely-toggleable pair.
-- Add `--tool-use NAME` tests:
-  - accepts a tool whose effective `state` is true via defaults only (no
-    per-tool `enable` set).
-  - accepts `describe_tools` (locked-on builtin).
-- Add compat tests for legacy `"always"` / `"explicit"` strings appearing in
-  both `base_config.json` snapshots and `config_delta` events.
+  - `enable = true` sets both fields and overrides any inherited `allow_toggle`.
+  - An omitted `enable` resolves to `{ state: true, allow_toggle: Always }`.
+- Add `--tool-use NAME` tests for a tool enabled via defaults only and for
+  `describe_tools`.
+- Add compatibility tests for legacy `"always"` and `"explicit"` strings in
+  `base_config.json` snapshots and `config_delta` events.
 - Add `jp config set` round-trip tests for `conversation.tools.foo.enable.state`
   and `conversation.tools.foo.enable.allow_toggle`.
 - Add locked-off enforcement tests:
-  - `tool_definitions()` excludes a locked-off tool even when
-    `assistant.tool_choice` names it.
-  - `assistant.tool_choice = "foo"` is rejected at config resolution when `foo`
-    is locked-off.
-  - `Ctx::configure_active_mcp_servers` does not start the MCP server backing a
-    locked-off MCP tool.
-- Update [RFD 008] with a TIP describing the new gating.
-- Update [RFD 055] to drop `Enable::ExplicitOrGroup` and the surrounding
-  interaction table row, drawbacks, and risks entries.
-- Update [RFD 056] to refer to the stored `EnableConfig` shape and per-field
-  resolution, replacing the `Enable` field type and `enable()` / `enable_mode()`
-  accessor names with `is_enabled()` / `effective_enable()`.
-- Update [RFD 057]'s `apply_enable_tools` wording to route through
-  `PartialEnableConfig::effective`, preserving the existing CLI-vs-group
-  `allow_toggle = Never` open question.
-- Update [RFD 083] to fix the stale "resets `allow_toggle` to `always`" wording
-  (now `any`) and convert its builtin registration examples from `Enable { ...
-  }` to the stored `EnableConfig { ... }` form.
+  - `tool_definitions()` excludes a locked-off tool even when named by
+    `assistant.tool_choice`.
+  - `AppConfig::validate` rejects `assistant.tool_choice = "foo"` when `foo` is
+    locked-off.
+  - `Ctx::configure_active_mcp_servers` does not start an MCP server whose only
+    configured tool is locked-off.
+- Update [RFD 008], [RFD 055], [RFD 056], [RFD 057], and [RFD 083] as listed in
+  [Backward compatibility](#backward-compatibility).
 
-Phases 1–3 are interdependent and ship as one change.
-Phase 4 (tests and RFD updates) lands in the same PR.
+Phases 1 through 3 are interdependent and ship together with Phase 4 in a single
+PR.
 
 ## References
 
-- [RFD 008] — Ordered tool directives (directive evaluation semantics).
-- [RFD 055] — Tool groups (consumer of `AllowToggle::IfNamedOrGroup`).
-- [RFD 056] — Group configuration defaults (group-level `enable` inheritance).
-- [RFD 057] — Group configuration overrides (group-level `enable` enforcement).
-- [RFD 075] — Tool sandbox and access policy (`AccessPolicy`, naming context).
-- [RFD 076] — Tool access grants (`AccessPolicy`).
-- [RFD 077] — Plugin configuration and trust policy (`RunPolicy`,
-  `TrustPolicy`).
-- [RFD 078] — Tool config mutation (writes to `conversation.tools.*.enable`).
-- [RFD 079] — Config sources and load order (the source/precedence model this
+- [RFD 008]: Ordered tool directives (directive evaluation semantics).
+- [RFD 055]: Tool groups (consumer of `AllowToggle::IfNamedOrGroup`).
+- [RFD 056]: Group configuration defaults (group-level `enable` inheritance).
+- [RFD 057]: Group configuration overrides (group-level `enable` enforcement).
+- [RFD 075]: Tool sandbox and access policy (`AccessPolicy`, naming context).
+- [RFD 076]: Tool access grants (`AccessPolicy`).
+- [RFD 077]: Plugin configuration and trust policy (`RunPolicy`, `TrustPolicy`).
+- [RFD 078]: Tool config mutation (writes to `conversation.tools.*.enable`).
+- [RFD 079]: Config sources and load order (the source/precedence model this
   RFD's cross-layer merge participates in).
-- [RFD 083] — `ask_user` tool (originally introduced `Enable::Sticky`).
-- `crates/jp_config/src/conversation/tool.rs` — `Enable`, `ToolConfig`,
+- [RFD 083]: `ask_user` tool (originally introduced `Enable::Sticky`).
+- `crates/jp_config/src/conversation/tool.rs`: `Enable`, `ToolConfig`,
   `ToolConfigWithDefaults`.
-- `crates/jp_cli/src/cmd/query.rs` — `apply_enable_tools`, `apply_tool_use`.
-- `crates/jp_cli/src/cmd/query/tool/builtins.rs` — builtin tool registration.
-- `crates/jp_llm/src/tool.rs` — `tool_definitions()`.
+- `crates/jp_cli/src/cmd/query.rs`: `apply_enable_tools`, `apply_tool_use`.
+- `crates/jp_cli/src/cmd/query/tool/builtins.rs`: built-in tool registration.
+- `crates/jp_llm/src/tool.rs`: `tool_definitions()`.
 
 [RFD 008]: 008-ordered-tool-directives.md
 [RFD 055]: 055-tool-groups.md

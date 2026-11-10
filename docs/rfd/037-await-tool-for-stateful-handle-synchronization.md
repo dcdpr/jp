@@ -10,52 +10,41 @@
 
 ## Summary
 
-This RFD introduces an `await` built-in tool that allows the assistant to
-synchronize on stateful tool handles from [RFD 009].
-The assistant spawns tools in the background, then calls `await` with handle IDs
-grouped by completion mode (`any` and/or `all`).
-JP blocks the tool call until the condition is met and returns the state of all
-referenced handles.
+This RFD introduces a built-in `await` tool for synchronizing on stateful tool
+handles ([RFD 009]).
+After spawning tools in the background, the assistant calls `await` with handle
+IDs grouped by completion mode (`any`, `all`, or both).
+JP blocks until the completion condition is met and returns the state of every
+referenced handle.
 
 ## Motivation
 
-[RFD 009] introduces stateful tools — the assistant can spawn a tool, get a
-handle ID back, and later fetch or apply input to that handle.
-But it has no synchronization primitive.
-If the assistant spawns `cargo_check` and `cargo_test` in parallel, it must poll
-each handle individually with `fetch` to discover when they finish.
-This has two problems:
+[RFD 009] introduces stateful tools: the assistant can spawn a tool, receive a
+handle ID, and later `fetch` output or `apply` input to that handle.
+However, [RFD 009] leaves "parallel stateful tools" as a non-goal and "proactive
+delivery of stopped handles" as an open question, relying instead on
+assistant-driven polling.
 
-1. **Busy-waiting.** The assistant must guess when to poll.
-   Poll too early and the tool is still running, wasting a tool call round-trip
-   (and tokens).
-   Poll too late and the assistant sits idle.
+When the assistant spawns `cargo_check` and `cargo_test` in parallel, polling
+each handle individually with `fetch` has two problems:
 
-2. **No cross-tool coordination.** The assistant can't express "wait for both of
-   these to finish" or "wait for whichever finishes first."
-   It can only ask about one handle at a time, through each tool's own `fetch`
-   action.
+1. **Busy-waiting.** Each `fetch` costs a full LLM round-trip and tokens.
+   A 5-second build might take 10 `fetch` calls to catch completion.
+   Polling too early wastes round-trips; polling too late leaves the assistant
+   idle; doing other work and checking later risks acting on stale state or
+   missing errors.
+2. **No cross-tool coordination.** Each tool's `fetch` action queries a single
+   handle.
+   The assistant cannot express "wait for both handles to finish" or "wait for
+   whichever finishes first," short of giving up on parallelism and running
+   tools sequentially.
 
-[RFD 009] explicitly lists "parallel stateful tools" as a non-goal and
-identifies "proactive delivery of stopped handles" as an open question.
-The recommended approach there is assistant-driven polling.
-This RFD replaces polling with a purpose-built synchronization tool.
+`await` replaces polling with an explicit synchronization point across handles.
 
-Without `await`, the assistant's only options are:
+### Examples
 
-- **Poll in a loop.** Each `fetch` is a full LLM round-trip.
-  A 5-second build might need 10 fetch calls before it catches the completion.
-- **Guess and hope.** The assistant does other work and checks later, risking
-  stale results or missed errors.
-- **Give up on parallelism.** Run tools sequentially, which defeats the purpose
-  of stateful handles.
-
-`await` gives the assistant an explicit, efficient synchronization point.
-
-### Concrete example
-
-The assistant runs `cargo check` and `cargo test` concurrently, then acts on the
-combined results — all in a single tool call batch:
+The assistant can spawn `cargo_check` and `cargo_test` and wait for both in a
+single tool call batch:
 
 ```txt
 A: [
@@ -77,11 +66,11 @@ A: [
 ```
 
 Because the assistant chooses the handle IDs (see [Model-chosen handle
-IDs](#model-chosen-handle-ids)), it can reference them in the `await` call
-within the same batch.
-No extra round-trip.
+IDs](#model-chosen-handle-ids)), it can pass them to `await` in the same batch
+without an extra round-trip.
 
-Or a race pattern — try two search approaches, take whichever returns first:
+With `any`, the assistant can race two searches and take whichever finishes
+first:
 
 ```txt
 A: [
@@ -108,7 +97,7 @@ A: [
 ### The `await` tool
 
 `await` is a built-in tool, like `describe_tools`.
-It is not part of any individual tool's action schema — it operates on the
+Rather than belonging to an individual tool's action schema, it operates on the
 handle registry across all stateful tools.
 
 #### Schema
@@ -155,22 +144,18 @@ handle registry across all stateful tools.
 }
 ```
 
-At least one of `any` or `all` must be provided.
-Both may be provided simultaneously.
+A call must provide `any`, `all`, or both.
 
 #### Completion condition
 
-`await` blocks until:
+`await` blocks until both conditions hold:
 
-- Every handle in `all` has reached `Stopped`, **AND**
-- At least one handle in `any` has reached `Stopped` (if `any` is provided)
+- Every handle in `all` (when provided) has reached `Stopped`.
+- At least one handle in `any` (when provided) has reached `Stopped`.
 
-If only `any` is provided, the `all` condition is trivially satisfied.
-If only `all` is provided, the `any` condition is trivially satisfied.
-
-A handle that is already `Stopped` when `await` is called counts immediately
-toward the condition.
-If the condition is already met at call time, `await` returns without blocking.
+Handles that are already `Stopped` when `await` is called count immediately.
+If the completion condition is already satisfied at call time, `await` returns
+without blocking.
 
 #### Response format
 
@@ -197,29 +182,23 @@ If the condition is already met at call time, `await` returns without blocking.
 }
 ```
 
-`completed` contains all handles that have reached `Stopped` at the time of
-return.
-`pending` contains handles still in `Running` or `Waiting` state.
-Both arrays include handles from `any` and `all` — the grouping is by state,
-not by which parameter they came from.
+`completed` lists all referenced handles in the `Stopped` state when `await`
+returns, and `pending` lists handles still in `Running` or `Waiting`.
+Handles from `any` and `all` are grouped together by state rather than by input
+parameter.
 
-For stopped handles, `result` contains the tool's output (success) or error
-message (failure).
-The assistant inspects the result to determine success or failure, same as with
-a regular `ToolCallResponse`.
-
-For pending handles (only present in `any` mode when the condition was met by a
-subset), the response includes the current state so the assistant can decide
-whether to await again, fetch individually, or abort.
+Each stopped handle includes `result`, which holds the tool's output on success
+or error message on failure, matching a standard `ToolCallResponse`.
+Each pending handle (present in `any` mode when a subset of handles satisfies
+the condition) reports its current state so the assistant can decide whether to
+await again, `fetch` individually, or abort.
 
 #### Timeout behavior
 
-When `timeout_secs` is specified and the timeout expires before the completion
-condition is met, `await` returns with whatever states are current.
-The `completed` array contains any handles that did finish; `pending` contains
-the rest.
-The response includes a `"timed_out": true` field so the assistant can
-distinguish a timeout from a normal return.
+If `timeout_secs` is omitted, `await` waits without a time limit.
+When `timeout_secs` expires before the completion condition is met, `await`
+returns the current handle states across `completed` and `pending` with
+`"timed_out": true`:
 
 ```json
 {
@@ -240,11 +219,10 @@ distinguish a timeout from a normal return.
 }
 ```
 
-No timeout is the default.
-Handles are not aborted on timeout — they continue running and can be awaited
+Timing out does not abort pending handles; they keep running and can be awaited
 again or fetched individually.
 
-#### Error cases
+#### Errors and edge cases
 
 | Condition                         | Behavior                                 |
 | --------------------------------- | ---------------------------------------- |
@@ -258,25 +236,21 @@ again or fetched individually.
 |                                   | finishes.                                |
 | All handles already stopped       | Immediate return, no blocking.           |
 
-An unknown handle ID is an error, not a silent skip.
-This catches typos and stale IDs early.
+An unknown handle ID returns an error rather than being silently skipped,
+surfacing typos and stale IDs immediately.
 
 ### Integration with the handle registry
 
-`await` operates on the `HandleRegistry` from RFD 009.
-When called, it:
+`await` operates on the `HandleRegistry` from [RFD 009]:
 
-1. Validates all referenced handle IDs exist in the registry.
-2. Checks if the completion condition is already met.
-   If so, returns immediately.
-3. Subscribes to state-change notifications from the referenced handles.
-4. Blocks (async) until the condition is met or the timeout expires.
-5. Collects current states from the registry and returns.
+1. Validate that all referenced handle IDs exist in the registry.
+2. Return immediately if the completion condition is already met.
+3. Subscribe to state-change notifications for the referenced handles.
+4. Block asynchronously until the condition is met or `timeout_secs` expires.
+5. Collect the current handle states from the registry and return.
 
-Step 3 requires the handle registry to support notification — when a handle
-transitions to `Stopped`, waiters are notified.
-This is a natural extension: the registry already tracks handle state, and
-adding a `tokio::sync::Notify` or channel per handle is straightforward.
+To support step 3, each entry in `HandleRegistry` carries a
+`tokio::sync::Notify` that fires when the handle reaches `Stopped`:
 
 ```rust
 struct HandleEntry {
@@ -286,12 +260,12 @@ struct HandleEntry {
 }
 ```
 
-Multiple `await` calls can reference the same handle concurrently.
-`Notify` supports multiple waiters natively.
+`Notify` supports multiple concurrent waiters, so multiple `await` calls can
+watch the same handle.
 
 ### Extending `BuiltinTool` with an execution context
 
-The current `BuiltinTool` trait is stateless:
+`BuiltinTool` is stateless:
 
 ```rust
 pub trait BuiltinTool: Send + Sync {
@@ -299,37 +273,17 @@ pub trait BuiltinTool: Send + Sync {
 }
 ```
 
-`await` needs per-execution state that this signature can't provide:
+`await` requires two pieces of per-execution state that this signature cannot
+provide:
 
-1. **Handle registry access** — to look up handles and subscribe to state
-   change notifications.
-2. **Cancellation token** — to abort on turn end or user interrupt.
+1. **Handle registry access**: to look up handles and subscribe to state-change
+   notifications.
+   The `HandleRegistry` ([RFD 009]) is shared state managed by the coordinator.
+2. **Cancellation token**: to abort on turn end or user interrupt.
+   `ToolExecutor.execute()` already holds a cancellation token and passes it to
+   `execute_local` and `execute_mcp`, but drops it before `execute_builtin`.
 
-The cancellation token already exists at the `ToolExecutor.execute()` level but
-is never threaded down to `execute_builtin`.
-The handle registry (from [RFD 009]) would be shared state managed by the
-coordinator.
-
-Three approaches were considered:
-
-**Constructor injection (no trait change).** The `AwaitTool` struct holds an
-`Arc<HandleRegistry>` injected at construction time.
-This works for the registry but not the cancellation token, which changes
-per-execution.
-The trait has no way to receive per-call state, so cancellation would require a
-workaround (e.g., the coordinator pre-setting a token on the struct before each
-call).
-Fragile.
-
-**Coordinator interception (no trait change).** The coordinator checks for
-`tool_name == "await"` and handles it directly, bypassing the builtin trait
-entirely.
-Simplest to implement but doesn't generalize.
-Every future stateful builtin would need its own special case in the
-coordinator.
-
-**Execution context parameter (trait change).** Add a `BuiltinContext` struct to
-the `execute` method:
+This RFD adds a `BuiltinContext` parameter to `BuiltinTool::execute`:
 
 ```rust
 pub struct BuiltinContext {
@@ -348,30 +302,39 @@ pub trait BuiltinTool: Send + Sync {
 }
 ```
 
-**This RFD recommends the execution context approach.** The ripple effects are
-small:
+`BuiltinContext` lives alongside `BuiltinTool` in `jp_llm::tool::builtin`.
+Because the trait is internal to the workspace, the signature change is
+contained:
 
-- `DescribeTools::execute` adds an unused `_ctx: &BuiltinContext` parameter.
-- `ToolDefinition::execute_builtin` constructs a `BuiltinContext` from state
-  already in scope (the cancellation token is passed to `execute_local` and
-  `execute_mcp` but currently dropped for builtins).
-- `BuiltinContext` is defined in `jp_llm::tool::builtin`, alongside the trait.
+- `DescribeTools::execute` accepts an unused `_ctx: &BuiltinContext` parameter.
+- `ToolDefinition::execute_builtin` constructs `BuiltinContext` from state
+  already in scope.
+- Future built-in tools (such as sub-agents or tools inspecting conversation
+  state) can extend `BuiltinContext` without changing the trait signature again.
 
-The context struct starts small and grows as future builtins need more
-capabilities (sub-agents, conversation state, etc.).
-The trait is internal and not public, so the breaking change is confined to our
-codebase.
+Two alternatives that avoid changing the trait were considered and rejected:
+
+- **Constructor injection.** Storing `Arc<HandleRegistry>` on `AwaitTool` at
+  construction time works for the registry, but not for the per-call
+  cancellation token.
+  Passing the token would require the coordinator to mutate `AwaitTool` before
+  each call.
+- **Coordinator interception.** Special-casing `tool_name == "await"` in the
+  coordinator bypasses `BuiltinTool` entirely, but every future stateful
+  built-in tool would require its own special case.
 
 ### Model-chosen handle IDs
 
-In [RFD 009]'s original design, JP assigns handle IDs (`h_1`, `h_2`) and returns
-them to the assistant.
-This forces a round-trip: spawn in one batch, get IDs back, then use them in the
-next batch.
+In [RFD 009], JP generates handle IDs (`h_1`, `h_2`) and returns them to the
+assistant, forcing an extra round-trip before the assistant can reference a
+spawned handle.
+Reusing the LLM provider's tool call ID is not feasible either, because most
+providers assign tool call IDs at the API layer rather than letting the model
+choose them.
 
-This RFD requires the assistant to choose handle IDs via a required `id`
-parameter on the `spawn` action.
-This is a change to RFD 009's spawn schema:
+This RFD instead requires the assistant to pass a descriptive `id` (`check`,
+`test`, `build_release`) on the `spawn` action, replacing [RFD 009]'s generated
+IDs:
 
 ```json
 {
@@ -391,8 +354,8 @@ This is a change to RFD 009's spawn schema:
 }
 ```
 
-Because the assistant chooses the ID, it can reference handles in the same
-batch:
+Choosing the ID up front lets the assistant spawn and await handles in a single
+batch, and keeps handle references readable in conversation history:
 
 ```txt
 A: [
@@ -402,125 +365,42 @@ A: [
 ]
 ```
 
-All three tool calls execute concurrently.
-The spawns register their handles; the `await` blocks until both reach
-`Stopped`.
-Zero extra round-trips.
-
-JP validates that the chosen ID doesn't collide with an existing active handle.
-If it does, the spawn returns an error.
-The assistant picks descriptive names (`check`, `test`, `build_release`) rather
-than opaque tokens — these appear in the conversation history and should be
-readable.
-
-Most LLM providers assign tool call IDs at the API level (not model-chosen), so
-using provider-assigned IDs as handle IDs is not feasible.
-Model-chosen IDs sidestep this entirely.
+All three calls execute concurrently: the spawns register their handles and
+`await` blocks until both reach `Stopped`.
+JP validates that each `id` is unique among active handles and returns an error
+on collision.
 
 ### `await` in parallel tool call batches
 
-LLMs can request multiple tool calls in a single response.
-The `ToolCoordinator` already runs these in parallel.
-The spawn+await-in-one-batch pattern works because the coordinator pre-registers
-handle IDs before dispatching any tool in the batch.
+`ToolCoordinator` executes tool calls in a single LLM response concurrently.
+To make same-batch `spawn` and `await` calls race-free, the coordinator
+pre-registers handle IDs before dispatching the batch:
 
-When the coordinator receives a batch of tool calls, it:
+1. Scan the batch for `spawn` actions.
+2. Pre-register each spawn's `id` in the handle registry as a placeholder entry
+   in the `Pending` state (with no running process yet).
+3. Dispatch all tool calls in the batch concurrently.
 
-1. Scans the batch for `spawn` actions.
-2. Pre-registers each spawn's `id` in the handle registry as a placeholder entry
-   (state: `Pending`, no running process yet).
-3. Dispatches all tool calls concurrently.
+When `await` looks up a handle ID, the placeholder entry already exists even if
+the corresponding `spawn` task has not started running.
+`await` subscribes to the entry's `Notify` and waits for the handle to
+transition through `Running` to `Stopped`.
 
-This guarantees that when `await` looks up a handle ID, the entry exists — even
-if the corresponding `spawn` hasn't started executing yet.
-The `await` tool subscribes to the handle's `Notify` and blocks until it
-transitions through `Running` to `Stopped`.
-
-Pre-registration also catches ID collisions early: if two spawns in the same
-batch use the same `id`, or if a spawn's `id` collides with an already-active
-handle from a previous batch, the coordinator rejects the batch before any tool
-runs.
+Pre-registration also catches ID collisions before any tool in the batch runs:
+if two spawns in the batch share an `id`, or if a spawn reuses an active `id`
+from an earlier batch, the coordinator rejects the entire batch immediately.
 
 ### Schema availability
 
-`await` is always included in the tool list when the stateful tool protocol is
-active (i.e., when at least one stateful tool is configured).
-If no stateful tools are available, `await` is not exposed — there's nothing to
-await.
-
-This mirrors how `describe_tools` is conditionally included based on whether
-tool documentation exists.
-
-## Drawbacks
-
-**Token cost of a blocking tool call.** Each `await` is a full LLM tool call
-round-trip.
-In the simple case where the assistant spawns two tools and immediately awaits
-them, the `await` call adds one extra round-trip compared to JP running the
-tools in parallel internally (which the current one-shot model already does).
-The benefit only materializes when the assistant does useful work between spawn
-and await.
-
-**Complexity in the coordinator.** Adding a third dispatch path (`await` /
-stateful / one-shot) increases the coordinator's branching.
-The coordinator is already the most complex module in the query pipeline.
-
-**LLM comprehension.** The assistant must understand the spawn → await pattern
-and use it correctly.
-Current LLMs handle simple tool calls well, but multi-step async patterns
-require more sophisticated planning.
-System prompt instructions will help, but some models may struggle.
-
-## Alternatives
-
-### Rely on the system message queue (RFD 011)
-
-Instead of `await`, let the system message queue notify the assistant when
-handles finish.
-The assistant spawns tools and continues; JP delivers "tool stopped"
-notifications piggybacked on the next message.
-
-**Not sufficient because:** The system message queue is fire-and-forget — the
-assistant can't choose when or how to synchronize.
-It also can't express "wait for all of these" or "wait for any of these."
-The message queue is complementary: it handles cases where the assistant forgets
-to await or where delivery timing isn't critical.
-`await` handles cases where the assistant explicitly wants to synchronize.
-
-### Extend `fetch` to accept multiple handle IDs
-
-Instead of a new tool, extend each stateful tool's `fetch` action to accept an
-array of IDs and block until completion.
-
-**Rejected because:** `fetch` is per-tool — it's part of each tool's action
-schema.
-`await` is cross-tool: it synchronizes handles from different tools.
-Making `fetch` cross-tool would break the per-tool schema model from RFD 009.
-
-### Implicit parallelism — JP runs all spawned tools and collects results automatically
-
-Instead of explicit spawn/await, JP detects independent tool calls and
-parallelizes them internally, returning all results at once.
-
-**Already exists for one-shot tools.** The `ToolCoordinator` runs all tool calls
-in a batch concurrently.
-The stateful protocol exists for cases where implicit parallelism isn't enough:
-long-running tools, interactive sessions, and cases where the assistant wants to
-interleave work between spawn and result collection.
-
-### `select` / `race` as a separate tool alongside `await_all`
-
-Split into two tools: `await_all` and `await_any` (or `select`).
-
-**Rejected because:** A single `await` tool with `any`/`all` parameters is
-simpler for the assistant and avoids schema proliferation.
-The combined form also supports the (admittedly niche) case of waiting for a mix
-of conditions.
+JP exposes `await` in the tool list only when at least one stateful tool is
+configured, mirroring how `describe_tools` is included only when tool
+documentation exists.
+When no stateful tools are active, `await` is omitted.
 
 ### Spawn configuration
 
-This RFD introduces per-tool configuration for stateful handle behavior, nested
-under `[conversation.tools.<name>.spawn]`:
+Per-tool stateful handle behavior is configured under
+`[conversation.tools.<name>.spawn]`:
 
 ```toml
 [conversation.tools.cargo_check.spawn]
@@ -542,7 +422,7 @@ on_turn_end = "inquire" # "inquire" | "await" | "abort"
 #### Notifications
 
 Notifications are delivered via the system message queue ([RFD 011]).
-Each flag controls whether a specific state change triggers a notification:
+Each flag controls whether a handle state change queues a notification:
 
 | Flag         | Triggers when                         | Default |
 | ------------ | ------------------------------------- | ------- |
@@ -554,25 +434,24 @@ Each flag controls whether a specific state change triggers a notification:
 | `on_content` | Handle produces new output while      | `false` |
 |              | `Running`                             |         |
 
-`on_content` is `false` by default because it can be very noisy — every line of
-build output would trigger a notification.
-It’s useful for tools where incremental output matters (test runners, log
-tailers) but not for most build tools.
+`on_content` defaults to `false` because build tools would otherwise queue a
+notification for every line of output; enable it for tools where incremental
+output matters, such as test runners or log tailers.
 
-Notifications only apply to handles that the assistant hasn’t explicitly polled
-(`fetch`) or awaited.
-If the assistant is already watching a handle, notifications for that handle are
+Notifications are sent only for handles the assistant has not explicitly polled
+with `fetch` or awaited.
+While the assistant is actively watching a handle, its notifications are
 suppressed.
 
 #### Turn-end behavior
 
-[RFD 009] aborts all outstanding handles when a turn ends.
-This RFD extends that with a configurable `on_turn_end` policy:
+[RFD 009] aborts all running handles when a turn ends.
+This RFD makes turn-end handling configurable via `on_turn_end`:
 
 **`inquire`** (default): JP sends an `InquiryRequest` to the assistant with a
-dynamically built schema listing each outstanding handle, its current state, and
-trimmed output.
-The assistant chooses per-handle whether to wait or abort:
+dynamically generated schema listing each active handle, its state, and a
+trimmed output preview.
+The assistant decides per handle whether to wait or abort:
 
 ```json
 {
@@ -597,165 +476,188 @@ The assistant chooses per-handle whether to wait or abort:
 }
 ```
 
-The inquiry target is configurable via `AssistantOverrideConfig` (same pattern
-as [RFD 034]), allowing the turn-end inquiry to be routed to a cheaper model
-since it’s a simple classification task.
+The inquiry target can be overridden via `AssistantOverrideConfig` ([RFD 034])
+to route this classification step to a smaller, cheaper model.
+For handles set to `wait`, JP blocks until they reach `Stopped` (up to a
+configurable timeout), delivers the results as `ToolCallResponse` events, and
+resumes the turn so the assistant can respond.
+For handles set to `abort`, JP terminates them immediately.
 
-If the assistant chooses to wait, JP blocks until the handle reaches `Stopped`
-(subject to a configurable timeout), then delivers the result as a
-`ToolCallResponse` and lets the assistant respond again.
-If the assistant chooses to abort, JP terminates the handle immediately.
+**`await`**: JP waits for all active handles up to a configurable timeout
+without an extra LLM round-trip.
+Completed results are queued on the system message queue for the next turn;
+handles still running when the timeout expires are aborted.
 
-**`await`**: JP automatically waits for all outstanding handles up to a
-configurable timeout.
-No LLM round-trip.
-Results are delivered via the system message queue at the start of the next
-turn.
-If the timeout is exceeded, remaining handles are aborted.
+**`abort`**: JP terminates all active handles immediately and discards their
+output, matching [RFD 009].
+Use this for tools where results are no longer useful once the turn ends.
 
-**`abort`**: JP terminates all outstanding handles immediately.
-Results are lost.
-This is the simplest option and appropriate for tools where partial results have
-no value.
-This is the current behavior from RFD 009.
+## Drawbacks
+
+- **Token and round-trip overhead.** Each `await` call is an additional tool
+  call.
+  When the assistant spawns two tools and awaits them without doing intervening
+  work, `await` adds overhead compared to running one-shot tools in parallel.
+  The stateful pattern pays off only when the assistant interleaves work between
+  spawning and awaiting, or races alternatives with `any`.
+- **Coordinator complexity.** `ToolCoordinator` is already the most complex
+  module in the query pipeline, and supporting `await` alongside stateful and
+  one-shot tool dispatch adds another execution path.
+- **Model planning burden.** Multi-step asynchronous workflows are harder for
+  models to plan than one-shot tool calls.
+  Even with system prompt guidance, weaker models may misuse or underuse the
+  `spawn` and `await` pattern.
+
+## Alternatives
+
+### Rely on the system message queue ([RFD 011])
+
+Let the assistant spawn tools and continue working while JP delivers "tool
+stopped" notifications on subsequent messages via the system message queue.
+
+Rejected as a sole mechanism because the system message queue is passive: the
+assistant cannot block until a result is ready or express `any` and `all`
+conditions across handles.
+The two mechanisms are complementary: the message queue covers background
+handles whose completion timing is not critical, while `await` provides explicit
+synchronization.
+
+### Extend `fetch` to accept multiple handle IDs
+
+Extend each stateful tool's `fetch` action to take an array of handle IDs and
+block until they complete.
+
+Rejected because `fetch` belongs to an individual tool's action schema ([RFD
+009]), whereas synchronization often spans handles from different tools (for
+example, `cargo_check` and `cargo_test`).
+
+### Implicit parallelism
+
+Run independent tool calls in parallel automatically and return all results at
+once, without explicit `spawn` and `await` calls.
+
+`ToolCoordinator` already executes one-shot tool calls in a batch concurrently.
+The stateful protocol targets workflows that one-shot batching cannot express:
+long-running processes, interactive sessions, racing alternative tools, and
+interleaving work between spawning a tool and collecting its result.
+
+### Separate `await_all` and `await_any` tools
+
+Expose two tools (`await_all` and `await_any` or `select`) instead of a single
+`await` tool.
+
+Rejected because a single `await` tool with `any` and `all` parameters keeps the
+tool surface smaller and supports combining both conditions in one call.
 
 ## Non-Goals
 
-- **Inter-handle communication.** Piping output from one handle to another
-  (e.g., feeding `cargo check` output into a formatter).
-  This is a different kind of coordination.
-- **Automatic abort on `any` completion.** When an `any` condition is met, the
-  remaining handles continue running.
-  The assistant can abort them explicitly if desired.
-  Auto-abort would be surprising.
-- **Priority or ordering.** All handles are treated equally.
-  No mechanism for "prefer this handle over that one if both complete
-  simultaneously."
-- **Recursive await.** The `await` tool itself is not a stateful tool — it
-  cannot be spawned and awaited.
-  It runs synchronously within the tool call batch (blocking from the
-  coordinator's perspective, async internally).
+- **Inter-handle pipelines.** Piping output from one handle into another (such
+  as feeding `cargo check` output into a formatter) is out of scope.
+- **Automatic abort on `any` completion.** When an `any` condition is met,
+  remaining handles keep running unless the assistant aborts them explicitly.
+- **Handle priority or ordering.** All handles are treated equally; there is no
+  tie-breaking preference when multiple handles complete simultaneously.
+- **Spawning `await` itself.** `await` is not a stateful tool and cannot be
+  spawned or awaited recursively.
+  It executes directly within the tool call batch.
 
 ## Risks and Open Questions
 
 ### Handle ID collisions
 
-The assistant chooses handle IDs, so collisions are possible — either within a
-batch (two spawns with the same `id`) or across batches (reusing an ID from a
-still-active handle).
-Pre-registration catches both cases before any tool in the batch executes.
-The batch is rejected with an error identifying the conflicting ID, and the
-assistant must retry with a different name.
+Because the assistant chooses handle IDs, a `spawn` call can collide with
+another `spawn` in the same batch or with a handle still active from an earlier
+batch.
+Batch pre-registration detects both cases before any tool executes and rejects
+the batch with an error naming the conflicting `id` so the assistant can retry.
 
-### Provider support for the `anyOf` required constraint
+### Provider support for `anyOf` in tool schemas
 
-The schema uses `anyOf` on the `required` field to express "at least one of
-`any` or `all` must be present."
-Some providers may not support this.
-Fallback: make both optional in the schema and validate at runtime, returning a
-clear error if neither is provided.
+The `await` parameter schema uses top-level `anyOf` with `required` to enforce
+that at least one of `any` or `all` is provided.
+If an LLM provider rejects top-level `anyOf`, JP can mark both properties as
+optional in the schema and validate that at least one is present at runtime.
 
 ### `Waiting` handles and the inquiry system
 
-A handle in `Waiting` state has a pending question — either routed to the user
-(interactive prompt) or to the inquiry system (secondary LLM call).
-The `await` tool does not treat `Waiting` as a completion condition.
-It continues blocking while JP's existing machinery resolves the question:
+A handle in the `Waiting` state is blocked on a question routed either to the
+user via an interactive terminal prompt or to the inquiry backend via a
+structured LLM call ([RFD 028]).
+`await` treats `Waiting` as a non-terminal state alongside `Running` and
+continues blocking while JP resolves the question:
 
-- **User-targeted questions:** The prompt appears in the terminal.
-  The user answers.
-  The tool continues and eventually reaches `Stopped`.
-- **Assistant-targeted questions:** The inquiry backend makes a structured LLM
-  call (per [RFD 028]).
-  The answer is delivered, the tool continues.
+- **User-targeted questions:** JP prompts the user in the terminal, delivers the
+  answer to the tool, and waits for the handle to reach `Stopped`.
+- **Assistant-targeted questions:** The inquiry backend runs a structured LLM
+  call ([RFD 028]) and feeds the answer back to the tool.
 
-From `await`'s perspective, `Waiting` is just another non-terminal state, like
-`Running`.
-The handle will transition to `Stopped` once the question is resolved and the
-tool completes.
-If the inquiry itself fails or the user cancels the prompt, the tool still
-reaches `Stopped` (with an error result).
+If the inquiry fails or the user cancels the prompt, the handle still
+transitions to `Stopped` with an error result.
+If an interactive prompt blocks indefinitely because the user is away from the
+terminal, `timeout_secs` bounds how long `await` waits.
 
-The only risk is a question that blocks indefinitely (e.g., the user walks away
-from a prompt).
-The `timeout_secs` parameter covers this case.
+### Tool permission prompts (`RunMode::Ask`)
 
-### Interaction with tool permission prompts
-
-If the assistant spawns a tool that requires permission (`RunMode::Ask`) and
-immediately awaits it, the permission prompt blocks the spawn.
-The `await` call sees the handle in a pre-running state.
-This is fine — the handle doesn't reach `Stopped` until the user approves and
-the tool completes.
-But it could be confusing if the user takes a long time to approve.
+When the assistant spawns a tool configured with `RunMode::Ask` and awaits it in
+the same batch, the permission prompt blocks the `spawn` task before the process
+starts.
+`await` waits on the pre-registered `Pending` handle until the user approves the
+prompt and the tool runs to `Stopped`, though a slow approval can make `await`
+appear stuck unless `timeout_secs` is set.
 
 ## Implementation Plan
 
 ### Phase 0: `BuiltinContext` and trait change
 
-Add `BuiltinContext` to `jp_llm::tool::builtin` with a single field:
-`cancellation_token: CancellationToken`.
-Change `BuiltinTool::execute` to accept `&BuiltinContext`.
-Update `DescribeTools` to accept and ignore the new parameter.
-Thread the cancellation token from `ToolDefinition::execute` through
-`execute_builtin` into the context.
+Add `BuiltinContext` (initially containing `cancellation_token:
+CancellationToken`) to `jp_llm::tool::builtin` and pass `&BuiltinContext` to
+`BuiltinTool::execute`.
+Update `DescribeTools` to accept the new parameter, and thread the cancellation
+token from `ToolDefinition::execute` through `execute_builtin`.
 
-This is a standalone improvement — builtins currently can't be cancelled, and
-the token is already available one call frame up.
-No dependency on [RFD 009] or the handle registry.
-The `handle_registry` field is added in Phase 1.
-
-Can be merged independently.
-No behavioral change beyond making builtin cancellation possible.
+This phase has no dependency on [RFD 009] and can be merged independently to
+make built-in tools cancellable.
 
 ### Phase 1: Handle notification infrastructure
 
-Extend the `HandleRegistry` (from [RFD 009] Phase 2) with per-handle `Notify`
-channels.
-When a handle transitions to `Stopped`, all waiters are notified.
-Add `handle_registry: Option<Arc<HandleRegistry>>` to `BuiltinContext`.
+Extend `HandleRegistry` ([RFD 009] Phase 2) with per-handle `Notify` instances
+that wake waiters when a handle reaches `Stopped`, and add `handle_registry:
+Option<Arc<HandleRegistry>>` to `BuiltinContext`.
 
-Can be merged independently.
-No behavioral change — notifications are emitted but nothing listens yet.
+Depends on Phase 0 and [RFD 009] Phase 2.
+Can be merged independently with no user-visible behavior change.
 
-Depends on: Phase 0, RFD 009 Phase 2 (handle registry exists).
+### Phase 2: `await` execution and coordinator dispatch
 
-### Phase 2: `await` dispatch in the coordinator
+Implement the `await` tool and wire it into `ToolCoordinator`: validate handle
+IDs, check the completion condition, subscribe to handle notifications, wait for
+completion or timeout, and return the structured JSON `ToolCallResponse`.
 
-Add the `await` interception path to the `ToolCoordinator`.
-Implement the blocking logic: validate handle IDs, check completion condition,
-subscribe to notifications, block until condition met or timeout.
-
-Return the response as a formatted `ToolCallResponse` with the JSON structure
-described above.
-
-Depends on: Phase 1, RFD 009 Phase 4 (stateful tool dispatch).
+Depends on Phase 1 and [RFD 009] Phase 4 (stateful tool dispatch).
 
 ### Phase 3: Schema and conditional exposure
 
-Register `await` in the tool list when stateful tools are active.
-Generate the schema.
-Add system prompt guidance for the spawn/await pattern.
+Expose `await` and its parameter schema in the tool list whenever stateful tools
+are configured, and add system prompt instructions for the `spawn` and `await`
+workflow.
 
-Depends on: Phase 2.
+Depends on Phase 2.
 
-### Phase 4: Same-batch spawn + await
+### Phase 4: Same-batch `spawn` and `await`
 
-Implement pre-registration of handle IDs in the coordinator: scan each tool call
-batch for `spawn` actions, register placeholder entries in the handle registry
-before dispatching any tool.
-This guarantees `await` calls in the same batch always find their handles.
+Pre-register handle IDs in `ToolCoordinator` by scanning each tool call batch
+for `spawn` actions and inserting `Pending` placeholder entries in
+`HandleRegistry` before dispatching the batch.
 
-Depends on: Phase 2.
-Can be merged independently.
+Depends on Phase 2 and can be merged independently of Phase 3.
 
 ## References
 
-- [RFD 009: Stateful Tool Protocol][RFD 009] — the handle registry and stateful
+- [RFD 009: Stateful Tool Protocol][RFD 009]: the handle registry and stateful
   tool model that `await` builds on.
-- [RFD 011: System Notification Queue][RFD 011] — complementary notification
+- [RFD 011: System Notification Queue][RFD 011]: complementary notification
   mechanism for handles that finish without being awaited.
-- [Query Stream Pipeline] — the turn loop and tool coordinator where `await` is
+- [Query Stream Pipeline]: the turn loop and tool coordinator where `await` is
   dispatched.
 
 [Query Stream Pipeline]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md

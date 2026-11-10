@@ -20,31 +20,28 @@
 
 ## Summary
 
-This RFD introduces `jp query --detach` for running conversations in the
-background, a process registry for visibility into running queries, and the
-`queue` detached policy that persists an incomplete turn and exits when an
-inquiry requires user input.
-Resumption after exit uses `--continue` from [RFD 023].
+This RFD introduces `jp query --detach` for running queries in the background, a
+process registry for tracking active queries, and the `queue` detached policy.
+When a detached query hits an inquiry that requires user input, `queue` persists
+the incomplete turn and exits so the user can resume it later with `--continue`.
 
-This RFD depends on [RFD 023] (Resumable Conversation Turns) for incomplete turn
-persistence and the `--continue` flag, on [RFD 020] (Parallel Conversations) for
-conversation locks and the `--id` flag, and on [RFD 019] (Non-Interactive Mode)
-for detached prompt policies.
+This design builds on [RFD 023] (Resumable Conversation Turns) for incomplete
+turn persistence and `--continue`, [RFD 020] (Parallel Conversations) for
+conversation locks and `--id`, and [RFD 019] (Non-Interactive Mode) for detached
+prompt policies.
 
 ## Motivation
 
-Each `jp query` invocation occupies a terminal for its entire duration.
-A long-running query with multiple tool call cycles keeps a terminal tab busy
-until it completes.
-If the user closes the terminal, the query dies.
+Every `jp query` invocation occupies a terminal until the turn finishes.
+A long-running query with multiple tool call cycles ties up the terminal tab,
+and closing the terminal kills the query.
 
-With per-session conversation tracking ([RFD 020]) and resumable turns ([RFD
-023]), the foundations exist for a query to run independently of a terminal
-session: conversations can be targeted by ID, locks prevent concurrent
-mutations, and incomplete turns can be persisted and resumed.
-
-What's missing is the ability to say "run this in the background" and the policy
-for what happens when a backgrounded query needs user input.
+Per-session conversation tracking ([RFD 020]) and resumable turns ([RFD 023])
+provide the foundations to run queries independently of a terminal session:
+conversations can be targeted by ID, locks prevent concurrent mutations, and
+incomplete turns can be persisted and resumed.
+What is missing is a flag to run a query in the background and a policy for what
+happens when that query needs user input.
 
 ## Design
 
@@ -52,9 +49,8 @@ for what happens when a backgrounded query needs user input.
 
 `jp query --detach` spawns a background process for the conversation and exits
 immediately.
-The background process runs the query to completion — streaming the LLM
-response, executing tool calls, and cycling through follow-up rounds — without
-a terminal.
+The background process streams the LLM response, executes tool calls, and cycles
+through follow-up rounds without a terminal.
 
 ```sh
 jp query --detach "Refactor the auth module"
@@ -62,15 +58,14 @@ jp query --detach --id=jp-c17528832001 "Continue in the background"
 jp query --detach --new "Start something new in the background"
 ```
 
-All conversation targeting flags from [RFD 020] combine with `--detach`.
-All lock errors apply — if the conversation is locked, `--detach` fails the
-same way a foreground query would.
+All conversation targeting flags from [RFD 020] work with `--detach`, and the
+same lock checks apply: if the conversation is locked, `--detach` fails just
+like a foreground query.
 
-`--detach` is an explicit opt-in.
-Piped execution (`echo foo | jp query | cat`) is **not** detached — the process
-runs in the foreground, owned by the pipeline.
-`--detach` means "spawn a background process and exit."
-The absence of a TTY does not imply detachment.
+Detachment requires `--detach` explicitly; the absence of a TTY does not imply
+it.
+A piped command such as `echo foo | jp query | cat` still runs in the foreground
+as part of the pipeline.
 
 ### Stopping Points
 
@@ -85,10 +80,10 @@ A detached process runs until it reaches a **stopping point**:
 | Unrecoverable error      | Process persists what it can and exits |
 |                          | with an error.                         |
 
-The key insight: a detached process never idles.
-It either does useful work (streaming, executing tools) or it exits.
-There is no "paused waiting for input" state — that state is represented by the
-persisted `IncompleteTurn` on disk, not by a running process.
+A detached process never idles.
+It either does active work (streaming responses, executing tools) or exits.
+The "waiting for input" state lives on disk as a persisted `IncompleteTurn`, not
+in a paused process.
 
 ### The `queue` Detached Policy
 
@@ -110,22 +105,21 @@ When `queue` is active and an inquiry arrives:
 3. The `InquiryRequest` for the tool that needs input is persisted.
 4. The process exits cleanly.
 
-The conversation is now in an incomplete turn state.
-The user resumes it later with `jp query --continue --id=<cid>`, which prompts
-for the inquiry answer and continues the turn ([RFD 023]).
+The user can then resume the incomplete turn with `jp query --continue
+--id=<cid>`, which prompts for the inquiry answer and continues execution ([RFD
+023]).
 
-With `queue` available, it becomes the **default detached policy** — replacing
-`deny` from [RFD 019] as the default for detached processes.
-Nothing runs unattended unless explicitly configured.
-Users who want automation set `detached = "auto"` in their config.
+`queue` is the **default detached policy** for processes started with
+`--detach`, replacing `deny` from [RFD 019].
+Nothing runs unattended unless the user explicitly sets `detached = "auto"` in
+their config.
+Non-interactive commands without `--detach` (such as piped execution) keep
+`deny` as their default.
 
-The default for non-detached non-interactive contexts (piped execution without
-`--detach`) remains `deny` as defined in [RFD 019].
-`queue` only applies when the process was started with `--detach`.
+#### Prompt Routing
 
-#### Integration with prompt routing
-
-The `route_prompt` function from [RFD 019] is extended:
+The `route_prompt` function from [RFD 019] maps `DetachedMode::Queue` to
+`PromptAction::PersistAndExit`:
 
 ```rust
 fn route_prompt(
@@ -167,8 +161,8 @@ Running detached processes register in the user-local data directory:
 ```
 
 The workspace ID scopes the registry to avoid collisions between projects.
-The conversation ID is the key — at most one running process per conversation,
-enforced by the conversation lock ([RFD 020]).
+The conversation ID is the key, since the conversation lock ([RFD 020]) allows
+at most one running process per conversation.
 
 #### Process Entry Format
 
@@ -180,41 +174,34 @@ enforced by the conversation lock ([RFD 020]).
 }
 ```
 
-The entry is minimal: it records that a process is running and which
-conversation it operates on.
-There is no `status` or `pending_inquiry` field — the "waiting for input" state
-lives in the conversation's `IncompleteTurn` on disk, not in the process
-registry.
-By the time an inquiry is pending, the process has already exited.
-
-The registry entry is written when the detached process starts and deleted when
-it exits.
+The detached process writes its registry entry on start and deletes it on exit.
+The entry records only the conversation ID, PID, and start time; it has no
+`status` or `pending_inquiry` field because the process exits as soon as an
+inquiry is persisted to `IncompleteTurn` on disk.
 
 #### Stale Entry Cleanup
 
-`jp conversation ls` checks PID liveness for each entry.
-If the process is dead, the entry is removed.
-This handles crashes, SIGKILL, and machine reboots.
-PID liveness is checked via `kill(pid, 0)` on Unix.
-
-This uses the same background task cleanup approach as [RFD 020]'s lock and
-session file cleanup.
+`jp conversation ls` checks each entry's PID liveness via `kill(pid, 0)` on Unix
+and removes entries for dead processes, recovering from crashes, `SIGKILL`, and
+machine reboots.
+Cleanup runs as a background task, matching the lock and session file cleanup in
+[RFD 020].
 
 ### CLI Interface
 
 #### `jp query --detach`
 
-Spawns a background process and exits immediately.
-Prints the conversation ID so the user can target it later:
+Spawns a background process, prints the conversation ID for later targeting, and
+exits immediately:
 
 ```sh
 $ jp query --detach "Refactor the auth module"
 Detached: jp-c17528832001
 ```
 
-#### `jp conversation ls` (extended)
+#### `jp conversation ls`
 
-Shows process status alongside conversation metadata:
+Displays process and turn status alongside conversation metadata:
 
 | Status                          | Meaning                                  |
 | ------------------------------- | ---------------------------------------- |
@@ -225,7 +212,7 @@ Shows process status alongside conversation metadata:
 |                                 | pending inquiry                          |
 | (no status)                     | Idle, last turn complete                 |
 
-The `running` status comes from the process registry (PID liveness check).
+The `running` status comes from the process registry after a PID liveness check.
 The `waiting-for-input` and `interrupted` statuses come from the conversation's
 last event ([RFD 023]).
 
@@ -239,40 +226,39 @@ jp-c17528831000   Debug service    idle
 
 #### `jp conversation kill <cid>`
 
-Sends SIGTERM to the detached process, cleans up the registry entry.
-The conversation data remains intact — this only terminates the process, which
-releases the conversation lock ([RFD 020]).
+Sends `SIGTERM` to the detached process and removes its registry entry.
+Terminating the process releases the conversation lock ([RFD 020]) while leaving
+the persisted conversation data intact.
 
 ```sh
 $ jp conversation kill jp-c17528831500
 Killed process 12345 for conversation jp-c17528831500.
 ```
 
-If the process has already exited (stale entry), the entry is cleaned up
+If the process has already exited, `kill` removes the stale registry entry
 silently.
 
 ### Daemonization
 
-`--detach` needs to create a process that outlives the parent terminal.
-The re-exec strategy is cleanest:
+`--detach` re-executes the `jp` binary so the child process outlives the parent
+terminal:
 
 1. `jp query --detach "message"` validates arguments, resolves the conversation,
-   acquires the lock.
+   and acquires the conversation lock.
 2. It re-executes itself with an internal flag (`--_detached`) and the resolved
-   conversation ID, redirecting stdout/stderr to `/dev/null` (or a log file if
-   `-v` is set).
+   conversation ID, redirecting stdout and stderr to `/dev/null` (or a log file
+   if `-v` is set).
 3. The child process starts in a new process group (`setsid`), writes its PID to
    the process registry, and runs the query.
 4. The parent confirms the child started, prints the conversation ID, and exits.
 
-The internal `--_detached` flag is hidden from `--help`.
-It signals that the process is already detached and should not attempt to
-daemonize again.
+The internal `--_detached` flag is hidden from `--help` and tells the child
+process not to daemonize again.
 
-#### Output handling
+#### Output Handling
 
-A detached process has no terminal.
-Output channels:
+Because a detached process has no terminal, its output channels are routed as
+follows:
 
 | Channel    | Destination                          |
 | ---------- | ------------------------------------ |
@@ -284,16 +270,16 @@ Output channels:
 |            | original command)                    |
 
 The `Printer` is initialized with sink writers.
-Renderers still run (they maintain state for event building) but their output is
-discarded.
+Renderers still run because they maintain state for event building, but their
+rendered output is discarded.
 
-### Relationship to Conversation Locks
+### Conversation Locks
 
 A detached process holds the conversation lock ([RFD 020]) for its entire
-execution.
-This prevents other sessions from writing to the same conversation.
+execution, preventing other sessions from mutating the conversation.
 
-Lock contention from a detached process produces a clear error:
+Targeting a conversation locked by a detached process reports the PID and
+recovery options:
 
 ```sh
 $ jp query --id=jp-c17528832001 "follow-up"
@@ -305,13 +291,13 @@ Error: Conversation jp-c17528832001 is locked by pid 12345 (detached).
     --new                   Start a new conversation.
 ```
 
-When the detached process exits (turn complete or inquiry hit), it releases the
-lock.
-The conversation is then available for `--continue` or a new query.
+When the detached process exits, whether the turn completed or paused at an
+inquiry, it releases the lock so `--continue` or a new query can acquire it.
 
 ### End-to-End Workflow
 
-A typical detached workflow:
+In a typical detached workflow, the user starts a query in the background,
+checks its status, and resumes it when an inquiry needs input:
 
 ```sh
 # 1. Start a detached query
@@ -353,192 +339,178 @@ $ jp conversation print --id=jp-c17528832001 --last
 
 ## Drawbacks
 
-**Process lifecycle management.** Daemonization (re-exec, setsid, signal
-handling, output redirection) is non-trivial to implement correctly on Unix.
-Edge cases around process groups, controlling terminals, and signal inheritance
-require careful handling.
+**Process lifecycle management.** Daemonization on Unix (re-exec, `setsid`,
+signal handling, and output redirection) has subtle edge cases around process
+groups, controlling terminals, and signal inheritance.
 
 **Platform constraints.** `setsid`, `/dev/null`, and `kill(pid, 0)` are
 Unix-specific.
-Windows support requires different daemonization and PID liveness mechanisms.
-The initial implementation targets macOS and Linux only.
+Supporting Windows requires separate daemonization and PID liveness mechanisms,
+so the initial implementation targets macOS and Linux only.
 
 **No live output.** A detached process discards all rendered output.
-If the user wants to see what's happening, they must wait for completion and use
+To inspect the response, the user must wait for the process to stop and run
 `conversation print`.
 Live re-attachment to a running process is deferred to a separate RFD.
 
-**Two-step for inquiries.** When a detached query hits an inquiry, the user must
-run a separate command (`--continue`) to answer it.
-This is more friction than an interactive terminal where the prompt appears
-immediately.
-The trade-off is intentional: the terminal is freed for other work.
+**Two-step inquiry handling.** Answering an inquiry from a detached query
+requires running `jp query --continue` as a separate step.
+This adds friction compared to an inline terminal prompt, in exchange for
+freeing the terminal while the query runs.
 
 ## Alternatives
 
-### Keep the process alive at inquiries (original RFD 022 design)
+### Keep the Process Alive at Inquiries (Original RFD 022 Design)
 
-When a detached process hits an inquiry, keep the process running and use IPC
-(Unix domain sockets) to deliver the answer when the user attaches.
+When a detached process hits an inquiry, keep it running and use IPC (Unix
+domain sockets) to deliver the answer when the user attaches.
 
-Rejected because keeping a process alive to wait for input is wasteful.
-The conversation state is already persisted.
-The `IncompleteTurn` from [RFD 023] captures everything needed to resume.
-Exiting and resuming via `--continue` is simpler, uses no IPC, requires no
-socket infrastructure, and works across machine reboots.
+Rejected because keeping an idle process alive to wait for input is unnecessary
+once `IncompleteTurn` ([RFD 023]) persists everything needed to resume.
+Exiting and resuming via `--continue` avoids IPC and socket infrastructure and
+works across machine reboots.
 
-### `nohup` wrapper instead of re-exec
+### `nohup` Wrapper Instead of Re-Exec
 
 Tell users to run `nohup jp query "..." &` instead of building daemonization
 into JP.
 
-Rejected because it's fragile (output handling, signal masking, lock cleanup
-depend on the user's shell configuration), undiscoverable, and doesn't integrate
-with the process registry or `conversation ls`.
+Rejected because shell backgrounding is fragile (output handling, signal
+masking, and lock cleanup depend on the user's shell configuration),
+undiscoverable, and invisible to the process registry and `conversation ls`.
 
-### Tmux/screen session instead of daemonization
+### `tmux` or `screen` Session Instead of Daemonization
 
-Spawn the query inside a tmux session for detachment.
+Spawn the query inside a `tmux` session for detachment.
 
-Rejected because it adds a hard dependency on an external tool, doesn't
-integrate with `conversation ls`, and requires the user to know tmux.
+Rejected because it adds a hard dependency on an external multiplexer, does not
+integrate with `conversation ls`, and requires the user to know `tmux`.
 
-### Store process registry in `.jp/`
+### Store Process Registry in `.jp/`
 
 Put process entries in `.jp/processes/` alongside conversations.
 
-Rejected because `.jp/` is typically committed to version control.
-Process state is ephemeral, machine-local, and user-local.
-The user data directory (`~/.local/share/jp/workspace/`) is the correct
+Rejected because `.jp/` is typically committed to version control, whereas
+process state is ephemeral and local to the user and machine.
+The user data directory (`~/.local/share/jp/workspace/`) is the appropriate
 location.
 
 ## Non-Goals
 
-- **Live re-attachment.** Connecting to a still-running detached process to see
-  live output and answer inquiries interactively is a separate concern.
-  This RFD covers detaching and running to a stopping point; re-attachment is
-  deferred to a future RFD.
+- **Live re-attachment.** Connecting to a running detached process to view live
+  output and answer inquiries interactively is deferred to a future RFD.
+  This RFD covers detaching and running until a stopping point.
 
-- **Sub-agent support.** The process model is compatible with future sub-agents
+- **Sub-agent support.** The process model is compatible with future sub-agents,
   but this RFD does not propose agent infrastructure.
 
-- **Cross-machine visibility.** Process registry is local.
-  No network protocol.
+- **Cross-machine visibility.** The process registry is local to the machine and
+  defines no network protocol.
 
 - **Non-query commands.** Only `jp query` creates detached processes.
 
 ## Risks and Open Questions
 
-### Lock handoff timing
+### Lock Handoff Timing
 
-The re-exec daemonization strategy has a timing question: who holds the
-conversation lock?
+Re-exec daemonization raises the question of how the conversation lock transfers
+from parent to child:
 
-Option A: The parent acquires the lock, passes the lock file descriptor to the
-child via fd inheritance, and the child holds it for the duration.
-The parent exits after confirming the child started.
-The lock is never released between parent and child.
+- **Option A**: The parent acquires the lock and passes the lock file descriptor
+  to the child via fd inheritance.
+  The parent exits after confirming the child started, so the lock is never
+  released between parent and child.
+- **Option B**: The parent does not acquire the lock; the child acquires it
+  after starting.
+  This leaves a window where neither process holds the lock and another session
+  could acquire it.
 
-Option B: The parent does not acquire the lock.
-The child acquires it after starting.
-There is a window where no process holds the lock — another session could sneak
-in.
-This is unlikely but possible.
+Option A is safer because `flock` file descriptors survive `exec`.
 
-Option A is safer.
-`flock` file descriptors survive `exec`, so the child inherits the lock.
+### Multiple Inquiries in One Batch
 
-### Multiple inquiries in one batch
-
-If two tools in the same batch both need user input while in `queue` mode, both
-`InquiryRequest` events are persisted.
-On `--continue`, the user answers both sequentially before any tool re-executes.
-The turn state reconstruction in [RFD 023] handles this — it finds all pending
-inquiries and prompts for each.
+If two tools in the same batch both need user input under the `queue` policy,
+both `InquiryRequest` events are persisted.
+On `--continue`, turn state reconstruction ([RFD 023]) finds all pending
+inquiries and prompts the user for each one sequentially before re-executing any
+tool.
 
 ### Interaction with `--non-interactive`
 
-`--detach` implies `--non-interactive` ([RFD 019]).
-A detached process has no TTY and cannot prompt.
-The detached policy (`queue` by default) governs what happens at inquiries.
+Because a detached process has no TTY and cannot prompt interactively,
+`--detach` implies `--non-interactive` ([RFD 019]) and uses the detached policy
+(`queue` by default) to handle inquiries.
+Passing `--detach --non-interactive` explicitly is redundant but not an error.
 
-`--detach --non-interactive` is redundant but not an error.
+### Process Registry Race Conditions
 
-### Process registry race conditions
+Two terminals running `jp query --detach --new` simultaneously create separate
+conversations and write separate registry entries keyed by conversation ID, so
+they do not race.
+For an existing conversation, the conversation lock prevents two detached
+processes from running concurrently.
 
-Two terminals running `jp query --detach --new` simultaneously create two
-conversations with two processes.
-Each writes its own registry entry (keyed by conversation ID).
-No race — different conversations, different entries.
+### Detached Process Logging
 
-The conversation lock prevents two detached processes on the *same*
-conversation.
-
-### Detached process logging
-
-When a detached process encounters errors (LLM provider down, tool failure), the
-errors are lost if no log file is configured.
-Consider defaulting to a log file when `--detach` is used, even without `-v`:
+When a detached process encounters an error (such as an unavailable LLM provider
+or a tool failure), the error is lost if no log file is configured.
+`--detach` could default to writing a per-conversation log file, even without
+`-v`:
 
 ```txt
 ~/.local/share/jp/workspace/<workspace-id>/processes/<conversation-id>.log
 ```
 
-This log would be cleaned up alongside the registry entry on process exit.
+This log file would be cleaned up alongside the registry entry on process exit.
 
 ## Implementation Plan
 
 ### Phase 1: Process Registry
 
-Every `jp query` writes a process entry on start and removes it on exit.
-`jp conversation ls` reads the registry and displays `running (pid NNN)`
-alongside conversation metadata.
-Stale entries are cleaned up via PID liveness checks.
+Every `jp query` invocation writes a process entry on start and removes it on
+exit.
+`jp conversation ls` reads the registry, displays `running (pid NNN)` alongside
+conversation metadata, and cleans up stale entries via PID liveness checks.
 
-No `--detach` yet.
-Just visibility into running foreground queries.
-
-Can be merged independently.
+This phase provides visibility into running foreground queries before `--detach`
+exists and can be merged independently.
 
 ### Phase 2: `queue` Detached Policy
 
-Add `DetachedMode::Queue` and `PromptAction::PersistAndExit` to the prompt
-routing ([RFD 019]).
-When the tool coordinator receives `PersistAndExit`, it waits for other tools to
-finish, persists the incomplete turn, and initiates shutdown.
+Add `DetachedMode::Queue` and `PromptAction::PersistAndExit` to prompt routing
+([RFD 019]).
+When the tool coordinator receives `PersistAndExit`, it waits for other tools in
+the batch to finish, persists the incomplete turn, and initiates shutdown.
 
-`queue` is not yet the default — it requires `--detach` (Phase 3) to be useful.
-For now it can be activated via config (`detached = "queue"`) for testing with
-`--non-interactive`.
+`queue` does not become the default until Phase 3 adds `--detach`, but it can be
+enabled via config (`detached = "queue"`) for testing with `--non-interactive`.
 
 Depends on [RFD 023] Phase 2 (incremental persistence) and [RFD 019] Phase 2
 (routing integration).
 
 ### Phase 3: `--detach` Flag and Daemonization
 
-Implement `jp query --detach`.
-Re-exec daemonization with `setsid`, lock handoff via fd inheritance, output
-redirection to sink/log.
-
-Implement `jp conversation kill <cid>`.
-
-Set `queue` as the default detached policy for `--detach`.
+Implement `jp query --detach` using re-exec daemonization with `setsid`, lock
+handoff via fd inheritance, and output redirection to sink writers or a log
+file.
+Implement `jp conversation kill <cid>`, and set `queue` as the default detached
+policy for `--detach`.
 
 Depends on Phase 1 and Phase 2.
-Unix-only initially.
+Targets Unix only initially.
 
 ## References
 
-- [RFD 023: Resumable Conversation Turns][RFD 023] — incomplete turn
-  persistence and `--continue` flag; prerequisite for the exit-and-resume model.
-- [RFD 020: Parallel Conversations][RFD 020] — conversation locks and
-  per-session targeting; prerequisite for detached execution.
-- [RFD 019: Non-Interactive Mode][RFD 019] — detached prompt policies (`auto`,
-  `defaults`, `deny`); this RFD adds `queue`.
-- [RFD 018: Typed Inquiry System][RFD 018] — the `Inquiry` enum used in prompt
+- [RFD 023: Resumable Conversation Turns][RFD 023]: Incomplete turn persistence
+  and the `--continue` flag, required for the exit-and-resume model.
+- [RFD 020: Parallel Conversations][RFD 020]: Conversation locks and per-session
+  targeting, required for detached execution.
+- [RFD 019: Non-Interactive Mode][RFD 019]: Detached prompt policies (`auto`,
+  `defaults`, `deny`), extended here with `queue`.
+- [RFD 018: Typed Inquiry System][RFD 018]: The `Inquiry` enum used in prompt
   routing.
-- [RFD 005: First-Class Inquiry Events][RFD 005] — persisted inquiry events
-  that appear in the incomplete turn.
+- [RFD 005: First-Class Inquiry Events][RFD 005]: Persisted inquiry events
+  recorded in incomplete turns.
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 018]: 018-typed-prompt-routing-enum.md

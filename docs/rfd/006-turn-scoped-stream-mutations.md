@@ -9,34 +9,33 @@
 
 ## Summary
 
-This RFD restricts `ConversationStream` mutations to turn-scoped accessors
-(`start_turn` and `current_turn_mut`) so callers cannot construct a stream
-without valid turn boundaries through the public API.
+This RFD restricts public `ConversationStream` mutations to turn-scoped
+accessors (`start_turn` and `current_turn_mut`) so callers cannot construct a
+stream without valid turn boundaries.
 
 ## Motivation
 
-`ConversationStream` currently exposes raw `push`, `add_chat_request`,
-`add_chat_response`, and similar methods that allow callers to add events in any
+`ConversationStream` exposes raw `push`, `add_chat_request`,
+`add_chat_response`, and similar methods that let callers append events in any
 order.
-Nothing prevents creating a stream without a `TurnStart`, adding a
+Nothing prevents a caller from creating a stream without a `TurnStart`, adding a
 `ChatResponse` before a `ChatRequest`, or pushing events outside a turn
 boundary.
 
-This has caused real bugs:
+This has caused bugs in practice:
 
-- Fork with `--from`/`--until` can produce streams that start with assistant
-  responses, causing provider API errors (Anthropic rejects streams where the
-  first message isn't from the user).
-  (Fork's range flags are now `--from`/`--to` and resolve to whole turns, so
-  this particular shape no longer arises from range filtering; the invariant the
-  builder API enforces still matters for every other caller.)
-- Streams without `TurnStart` markers break `--last` (which counts turn
-  boundaries).
-- `sanitize()` exists specifically to repair these invariant violations after
-  the fact.
+- Forking with `--from`/`--until` can produce a stream that starts with an
+  assistant response, which fails on providers like Anthropic that require the
+  first message to come from the user.
+  Fork's range flags (`--from`/`--to`) resolve to whole turns, so range
+  filtering no longer produces this shape, but the invariant still matters for
+  every other caller.
+- Streams without `TurnStart` markers break `--last`, which counts turn
+  boundaries.
 
-We added `sanitize()` as a caller-side guard, but it's a patch — callers must
-remember to call it, and the raw methods remain available for anyone to misuse.
+`sanitize()` repairs these invariant violations after the fact, but it is a
+caller-side patch: callers must remember to invoke it, and the raw mutation
+methods remain open to misuse.
 
 ## Design
 
@@ -56,53 +55,52 @@ turn.add_chat_response(response)
     .build()?;
 ```
 
-`current_turn_mut()` is infallible — if the stream has no turns yet, it injects
+`current_turn_mut()` is infallible: if the stream has no turns yet, it injects
 an empty `TurnStart` and returns a handle to it.
-This avoids forcing every call site to handle a `None`/`Err` for a case that
-shouldn't happen in practice.
+This avoids forcing every call site to handle `None` or `Err` for a case that
+should not occur in practice.
 
 ### `TurnMut<'_>`
 
-`TurnMut` wraps `&mut ConversationStream` and buffers events internally.
-Events are validated, sanitized, and flushed to the stream when `build()` is
-called.
-This keeps the stream in a consistent state at all times — partial or invalid
-events never appear on the stream.
+`TurnMut` wraps `&mut ConversationStream` and buffers events until `build()`
+validates, sanitizes, and flushes them to the stream.
+Partial or invalid event sequences never appear on the stream itself.
 
-The turn loop works naturally with this model because `TurnMut` is short-lived:
-grab a handle, add events, `build()`, release.
-Code that reads the stream (e.g., `build_thread` cloning the stream for each LLM
-cycle) always runs between `build()` calls, never while a `TurnMut` is held.
+Because `TurnMut` is short-lived, this model fits the turn loop: callers acquire
+a handle, append events, and call `build()` to release the borrow.
+Code that reads the stream (such as `build_thread` cloning the stream for each
+LLM cycle) always runs between `build()` calls, never while a `TurnMut` is held.
 
-Two method styles for ergonomics:
+`TurnMut` provides two chaining styles and a terminal `build()` method:
 
-- **`with_xxx(&mut self, x: X) -> &mut TurnMut`** — borrowed, for chaining on
-  an existing binding.
-- **`add_xxx(mut self, x: X) -> TurnMut`** — owned, for fluent builder chains.
-- **`build(self) -> Result<()>`** — validates the buffered events, sanitizes
-  them, flushes to the stream, and releases the borrow.
+- **`with_xxx(&mut self, x: X) -> &mut TurnMut`**: Borrowed receiver for
+  mutating an existing binding.
+- **`add_xxx(mut self, x: X) -> TurnMut`**: Owned receiver for fluent builder
+  chains.
+- **`build(self) -> Result<()>`**: Validates, sanitizes, and flushes the
+  buffered events, releasing the mutable borrow.
 
 All methods are `#[must_use]` to prevent silently dropping a `TurnMut` without
 calling `build()`.
 There is no custom `Drop` implementation.
 
-Exposes:
+`TurnMut` exposes the following methods:
 
-- `add_chat_request` / `with_chat_request` — for interrupt replies within a
-  turn
+- `add_chat_request` / `with_chat_request`: Appends an interrupt reply within an
+  existing turn.
 - `add_chat_response` / `with_chat_response`
 - `add_tool_call_request` / `with_tool_call_request`
 - `add_tool_call_response` / `with_tool_call_response`
 - `add_inquiry_request` / `with_inquiry_request`
 - `add_inquiry_response` / `with_inquiry_response`
-- `build` — validate and commit
+- `build`: Validates and commits the buffered events.
 
-Does **not** expose:
+It omits two `ConversationStream` methods:
 
-- `add_turn_start` — only `start_turn()` can create turn boundaries
-- `push` — raw event insertion is internal-only
+- `add_turn_start`: Only `start_turn()` can create turn boundaries.
+- `push`: Raw event insertion is restricted to crate-internal code.
 
-### Visibility changes
+### Visibility Changes
 
 | Method                 | Current   | Proposed          |
 | ---------------------- | --------- | ----------------- |
@@ -117,118 +115,96 @@ Does **not** expose:
 | `sanitize`             | `pub`     | `pub` (unchanged) |
 | `retain`, `iter`, etc. | `pub`     | `pub` (unchanged) |
 
-Internal code (`sanitize`, `trim_trailing_empty_turn`) continues to access
-`self.events` directly.
-The builder guards the public API, not internal repair logic.
+Internal methods (`sanitize`, `trim_trailing_empty_turn`) continue to mutate
+`self.events` directly; `TurnMut` guards the public API rather than internal
+repair logic.
 
-### Caller migration
+### Caller Migration
 
-**`TurnCoordinator::start_turn`** — currently calls `add_turn_start` +
-`add_chat_request`.
-Becomes `stream.start_turn(request)`.
-
-**`TurnCoordinator` event handlers** — currently call
-`stream.add_chat_response`, `stream.add_tool_call_response`, etc. Become
-`stream.current_turn_mut().with_chat_response(...).build()?`.
-The `TurnMut` is grabbed and consumed within each synchronous block, avoiding
-borrow conflicts across async boundaries.
-
-**`InterruptAction::Reply`** — adds a `ChatRequest` mid-turn via
-`stream.add_chat_request(...)`.
-Becomes `stream.current_turn_mut().with_chat_request(...).build()?`.
-This is valid — a reply within a turn is a `ChatRequest` that doesn't start a
-new turn.
-
-**Fork** — uses `extend` and `retain` on the stream.
-These are internal operations that don't go through the turn API.
-No change needed.
-
-**Tests** — `push` and `add_*` methods remain accessible as `pub(crate)` within
-`jp_conversation`.
-Tests in other crates can use `start_turn` + `current_turn_mut`, or a test
-helper.
+- **`TurnCoordinator::start_turn`**: Replaces `add_turn_start` followed by
+  `add_chat_request` with `stream.start_turn(request)`.
+- **`TurnCoordinator` event handlers**: Replace direct calls to
+  `stream.add_chat_response`, `stream.add_tool_call_response`, and sibling
+  methods with `stream.current_turn_mut().with_chat_response(...).build()?`.
+  Each handler acquires and consumes `TurnMut` within a synchronous block,
+  avoiding borrow conflicts across async boundaries.
+- **`InterruptAction::Reply`**: Replaces `stream.add_chat_request(...)` with
+  `stream.current_turn_mut().with_chat_request(...).build()?`, since an in-turn
+  interrupt reply appends a `ChatRequest` without starting a new turn.
+- **Fork**: Uses `extend` and `retain` directly on the stream and requires no
+  changes.
+- **Tests**: `push` and `add_*` remain `pub(crate)` within `jp_conversation`.
+  Tests in other crates use `start_turn` and `current_turn_mut`, or a test
+  helper.
 
 ## Drawbacks
 
-- **Moderate refactor scope.** Every caller of `add_*` methods in `jp_cli` needs
-  updating.
-  The turn loop and coordinator are the main touchpoints.
-- **Test verbosity.** Constructing test streams requires going through
-  `start_turn` + `current_turn_mut` instead of raw `push`.
-  Mitigated by keeping `push` as `pub(crate)`.
+- **Moderate refactor scope**: Every `add_*` caller in `jp_cli`, primarily in
+  the turn loop and `TurnCoordinator`, must be updated.
+- **Test verbosity**: Constructing test streams outside `jp_conversation`
+  requires `start_turn` and `current_turn_mut` instead of raw `push` calls,
+  though keeping `push` as `pub(crate)` avoids this cost for unit tests within
+  `jp_conversation`.
 
 ## Alternatives
 
-**Do nothing.** Keep `sanitize()` as the guard.
-This works today but relies on callers remembering to sanitize.
-The gap between "what the API allows" and "what produces a valid stream"
-remains.
-
-**Make `push` validate invariants.** Each `push` call checks the stream state
-and rejects invalid sequences.
-Rejected because it moves runtime checks into a hot path and makes the error
-handling awkward — `push` would need to return `Result`, changing every call
-site anyway.
-
-**Builder that buffers a complete turn.** `start_turn` returns a builder that
-collects events and flushes on drop.
-Rejected because the turn loop needs to read intermediate stream state during a
-turn (e.g., `build_thread` clones the stream mid-turn for each LLM cycle).
-A buffering builder would hide in-progress events.
+- **Do nothing**: Keep `sanitize()` as the sole guard.
+  Callers must still remember to invoke it, and the public API remains able to
+  construct invalid streams.
+- **Validate invariants in `push`**: Have each `push` call inspect stream state
+  and reject invalid event sequences.
+  Rejected because it adds runtime checks to a hot path and forces `push` to
+  return `Result`, which still requires updating every call site.
+- **Buffer a complete turn**: Have `start_turn` return a builder that collects
+  events and flushes them on drop.
+  Rejected because the turn loop reads intermediate stream state mid-turn (for
+  example, `build_thread` clones the stream for each LLM cycle), and a buffering
+  builder would hide in-progress events.
 
 ## Non-Goals
 
-- Enforcing event ordering *within* a turn (e.g., ChatResponse must follow
-  ChatRequest).
-  The turn loop's state machine handles this; the stream doesn't need to
-  duplicate that logic.
-- Removing `sanitize()`.
-  It remains necessary for repairing streams loaded from disk or produced by
-  fork filtering.
+- **Enforcing event ordering within a turn**: The turn loop's state machine
+  already ensures that `ChatResponse` follows `ChatRequest`, so
+  `ConversationStream` does not duplicate that logic.
+- **Removing `sanitize()`**: Streams loaded from disk or produced by fork
+  filtering still require post-hoc repair.
 
 ## Risks and Open Questions
 
-- **What should `build()` validate?** At minimum: the turn contains at least one
-  `ChatRequest`.
+- **Validation scope in `build()`**: At minimum, `build()` must verify that the
+  turn contains at least one `ChatRequest`.
   Should it also check for orphaned tool call pairs, or leave that to
   `sanitize()`?
-- **Should `start_turn` take ownership of `ChatRequest` or accept `impl
-  Into<ChatRequest>`?** The current `add_chat_request` uses `impl
-  Into<ChatRequest>`.
-  Consistency suggests the same pattern.
-- **Config delta handling.** `push_with_config_delta` currently exists as a
-  public method.
-  It should likely move to `TurnMut` or become `pub(crate)`.
-- **Forgetting to call `build`.** `#[must_use]` on `TurnMut` warns at compile
-  time if the handle is dropped without calling `build()`.
-  But it's a warning, not an error.
-  Is this sufficient, or do we need a lint-level enforcement?
+- **`start_turn` parameter type**: Should `start_turn` take ownership of
+  `ChatRequest` or accept `impl Into<ChatRequest>` to match `add_chat_request`?
+- **Config delta handling**: `push_with_config_delta` is a public method on
+  `ConversationStream` and should move to `TurnMut` or become `pub(crate)`.
+- **Forgetting to call `build()`**: `#[must_use]` on `TurnMut` emits a
+  compile-time warning if a handle is dropped without calling `build()`.
+  Is a warning sufficient, or do we need lint-level enforcement?
 
 ## Implementation Plan
 
 ### Phase 1: Add the new API alongside the old one
 
-Add `start_turn` and `current_turn_mut` / `TurnMut` to `ConversationStream`.
-Keep existing `add_*` methods as `pub`.
-Migrate `TurnCoordinator` to use the new API.
-This can be merged independently.
+Add `start_turn`, `current_turn_mut`, and `TurnMut` to `ConversationStream`
+while keeping the existing `add_*` methods `pub`, and migrate `TurnCoordinator`
+to the new API.
+This phase can be merged independently.
 
 ### Phase 2: Migrate remaining callers
 
-Update the turn loop, interrupt handling, and tool coordinator to use
+Update the turn loop, interrupt handling, tool coordinator, and tests to use
 `current_turn_mut`.
-Update tests.
-This is mechanical but touches many files.
 
 ### Phase 3: Restrict visibility
 
-Change `add_*` and `push` to `pub(crate)`.
-This is the breaking change that enforces the invariant.
-Any external code still using the old API will fail to compile.
+Change `add_*` and `push` to `pub(crate)` so external callers can no longer
+bypass turn boundaries.
 
 ## References
 
-- `crates/jp_conversation/src/stream.rs` — `ConversationStream`
-- `crates/jp_cli/src/cmd/query/turn/coordinator.rs` — `TurnCoordinator`
-- `crates/jp_cli/src/cmd/query/turn_loop.rs` — turn loop
-- `crates/jp_conversation/src/event/turn.rs` — `TurnStart`
+- `crates/jp_conversation/src/stream.rs`: `ConversationStream`
+- `crates/jp_cli/src/cmd/query/turn/coordinator.rs`: `TurnCoordinator`
+- `crates/jp_cli/src/cmd/query/turn_loop.rs`: turn loop
+- `crates/jp_conversation/src/event/turn.rs`: `TurnStart`

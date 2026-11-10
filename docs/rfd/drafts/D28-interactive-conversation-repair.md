@@ -11,50 +11,37 @@
 ## Summary
 
 This RFD replaces all-or-nothing conversation trashing during workspace
-sanitization with a per-file recovery and interactive repair flow.
+sanitization with per-file automatic recovery and interactive repair.
 `metadata.json` and `base_config.json` are reconstructed automatically,
-`init_config.json` can be rebuilt from user-supplied CLI flags, and corrupt
-`events.json` files can be opened in `$EDITOR` before falling back to `.trash/`.
+`init_config.json` is rebuilt from user-supplied CLI flags, and corrupt
+`events.json` files open in `$EDITOR` before falling back to `.trash/`.
 
 ## Motivation
 
-The current sanitize phase ([RFD 052]) treats all validation failures
-identically: the conversation directory is moved to `.trash/`.
-This is disproportionate for failures that are repairable.
+The sanitize phase ([RFD 052]) treats every validation failure identically: it
+moves the conversation directory to `.trash/`.
+A missing `metadata.json` trashes a conversation whose `events.json` is intact,
+and a trailing comma introduced while inspecting `events.json` trashes a
+conversation that takes seconds to fix.
 
-The files in a conversation directory have different recoverability:
+With [RFD 070], `base_config.json` stores only the workspace config snapshot
+(files + env), while initial `--cfg` overrides live in a separate
+`init_config.json`.
+Each file in a conversation directory has a different recovery path:
 
-| File               | Content                                          | Reconstructible                                                           |
-| ------------------ | ------------------------------------------------ | ------------------------------------------------------------------------- |
-| `metadata.json`    | Title, timestamps, pinned status                 | Yes — defaults are fine, no behavioral impact                             |
-| `base_config.json` | Workspace config snapshot (files + env)          | Yes — rebuild from current workspace config pipeline                      |
-| `init_config.json` | Initial `--cfg` overrides as a `ConfigDelta`     | Partially — user-prompted rebuild from original CLI flags                 |
-| `events.json`      | Conversation history + subsequent `ConfigDelta`s | Not automatically — user can manually fix in `$EDITOR`, otherwise trashed |
-
-A conversation with a missing `metadata.json` but perfectly valid `events.json`
-is trashed today — the user loses access to a conversation whose content is
-intact.
-A conversation where the user introduced a trailing comma in `events.json` while
-inspecting it is also trashed, despite being fixable in seconds.
-
-With [RFD 070] in place, `base_config.json` contains only the workspace config
-snapshot (files + env) and is fully reconstructible.
-The initial `--cfg` overrides live in a separate `init_config.json` and can be
-rebuilt by prompting the user for the original CLI flags.
-Corrupt `events.json` cannot be rebuilt automatically, but the user can be
-offered a chance to fix it in `$EDITOR` before it is trashed.
+| File               | Content                                          | Reconstructible                                         |
+| ------------------ | ------------------------------------------------ | ------------------------------------------------------- |
+| `metadata.json`    | Title, timestamps, pinned status                 | Yes: defaults have no behavioral impact                 |
+| `base_config.json` | Workspace config snapshot (files + env)          | Yes: rebuild from the current workspace config pipeline |
+| `init_config.json` | Initial `--cfg` overrides as a `ConfigDelta`     | Partially: rebuild from user-supplied CLI flags         |
+| `events.json`      | Conversation history + subsequent `ConfigDelta`s | No: fix manually in `$EDITOR`, otherwise trash          |
 
 ## Design
 
 ### Conversation repair during sanitize
 
-The sanitize phase becomes an interactive repair session for conversations with
-corrupt files.
-Each file type has a different set of recovery options available.
-The sanitize phase processes each corrupt conversation in turn, applying
-automatic repairs where possible and prompting the user where not.
-
-The repair options per file are:
+During sanitization, JP processes each corrupt conversation in turn, applying
+automatic repairs where possible and prompting the user when a TTY is available:
 
 | File                       | Repair options                                  | Non-interactive fallback            |
 | -------------------------- | ----------------------------------------------- | ----------------------------------- |
@@ -68,35 +55,34 @@ The repair options per file are:
 
 #### Automatic repairs
 
-These require no user input and run in both interactive and non-interactive
-mode:
+Automatic repairs require no user input and run in both interactive and
+non-interactive modes:
 
-**`metadata.json`** — Missing or corrupt metadata is replaced with
-`Conversation::default()`, with `last_activated_at` set from the conversation ID
-timestamp.
-The only loss is the conversation title and activation timestamp, neither of
-which affects behavior.
-Corrupt files are renamed to `metadata.corrupted.{timestamp}.json` before
-replacement.
+**`metadata.json`**: Corrupt files are renamed to
+`metadata.corrupted.{timestamp}.json`, and missing or corrupt metadata is
+replaced with `Conversation::default()` using the conversation ID timestamp for
+`last_activated_at`.
+Only the conversation title and activation timestamp are lost, neither of which
+affects behavior.
 
-**`base_config.json`** — With [RFD 070] in place, this file contains only the
-workspace config snapshot (files + env).
-A corrupt file is renamed to `base_config.corrupted.{timestamp}.json` and
-rebuilt from the current workspace config pipeline.
-The only loss is if the workspace config has changed since the conversation was
-created.
-Missing `base_config.json` is already handled by the existing legacy fallback
-path.
+**`base_config.json`**: Corrupt files are renamed to
+`base_config.corrupted.{timestamp}.json` and rebuilt from the current workspace
+config pipeline ([RFD 070]).
+Rebuilding diverges from the original snapshot only if the workspace config has
+changed since the conversation was created.
+Missing `base_config.json` files continue to use the legacy fallback path.
 
 #### Interactive repairs
 
-These require user input and only run when a TTY is available.
-In non-interactive mode, each has a defined fallback.
+Interactive repairs require a TTY; non-interactive mode uses each file's
+fallback behavior.
 
-**`init_config.json`** — Contains the `ConfigDelta` from the first invocation's
+**`init_config.json`**: Stores the `ConfigDelta` from the first invocation's
 `--cfg` arguments (e.g., `-cdev -carchitect -mgoogle`).
-Corrupt files are renamed to `init_config.corrupted.{timestamp}.json`.
-The user is prompted to enter the original CLI flags:
+Missing `init_config.json` is normal for conversations created without `--cfg`
+arguments.
+When the file is corrupt, JP renames it to
+`init_config.corrupted.{timestamp}.json` and prompts for the original CLI flags:
 
 ```
 Conversation 17636257526-my-chat has a corrupt init_config.json.
@@ -104,32 +90,26 @@ Enter the original flags to rebuild (or press Enter to skip):
 > -cdev -carchitect -mgoogle
 ```
 
-The input is parsed through clap's actual argument parser (as if appended to `jp
-query`), producing a real command struct with all normal config resolution
-applied.
-The resolved overrides are written to a new `init_config.json`.
-If the user presses Enter, the conversation loads without initial overrides.
-Missing `init_config.json` is normal for conversations created without `--cfg`
-arguments.
+JP parses the input through clap's argument parser as if appended to `jp query`,
+applies normal config resolution, and writes the resolved overrides to a new
+`init_config.json`.
+Pressing Enter skips recovery and loads the conversation without initial
+overrides.
 
-A future improvement could store the original config arguments in
-`metadata.json` to pre-populate the prompt or auto-rebuild.
+**`events.json`**: JSON parse errors in `events.json` often come from a trailing
+comma, missing bracket, or truncated write.
+A missing `events.json` cannot be repaired and is always trashed.
+When the file is corrupt, JP prompts the user to choose:
 
-**`events.json`** — Corrupt `events.json` may be fixable: a trailing comma,
-missing bracket, or truncated write are common causes of JSON parse errors.
-The user is presented with a choice:
-
-1. **Open in `$EDITOR`** — The parse error is shown, then the file opens in the
+1. **Open in `$EDITOR`**: Show the parse error and open `events.json` in the
    editor.
-   If the saved file still fails validation, the error is shown and the menu is
-   presented again.
-2. **Trash conversation** — Move to `.trash/` as today.
-
-Missing `events.json` is non-repairable and always trashed.
+   If the saved file still fails validation, JP shows the new error and presents
+   the menu again.
+2. **Trash conversation**: Move the conversation directory to `.trash/`.
 
 ### Sanitize report
 
-The `SanitizeReport` captures what happened during the repair session:
+`SanitizeReport` records the outcome of the repair session:
 
 ```rust
 pub struct SanitizeReport {
@@ -159,70 +139,63 @@ WARN Trashed corrupt conversation 17636257526-my-chat: events.json: expected arr
 
 **Interactive sanitize blocks startup.** If multiple conversations are corrupt,
 the user must work through each one before the command runs.
-For non-interactive mode this is a non-issue (automatic repairs + fallbacks run
-instantly), but an interactive session with several corrupt conversations could
-be tedious.
+Non-interactive mode runs automatic repairs and fallbacks immediately, but an
+interactive session across several corrupt conversations can be tedious.
 
-**Automatic base_config rebuild may not match original.** If the workspace
+**Automatic `base_config` rebuild may not match the original.** If the workspace
 config has changed since the conversation was created, the rebuilt
-`base_config.json` reflects the current state, not the original.
-The `ConfigDelta` events in `events.json` still apply on top, so the impact is
-limited to fields that only the workspace config set.
+`base_config.json` reflects the current state rather than the original snapshot.
+Subsequent `ConfigDelta` events in `events.json` still apply on top, so only
+fields set exclusively by the workspace config are affected.
 
-**Clap re-parsing for init_config recovery is fragile.** The user's input is
-parsed as if appended to `jp query`, but the clap argument structure may have
-changed between the version that created the conversation and the current
-version.
-Flags may have been renamed or removed.
-This is an edge case but worth noting.
+**Clap re-parsing for `init_config` recovery is fragile.** User input is parsed
+as if appended to `jp query`, so flags renamed or removed since the conversation
+was created fail to parse.
 
 ## Alternatives
 
 ### Keep trash-everything behavior
 
-Do nothing.
-Corrupt conversations are trashed as today.
-
-This is the simplest approach but loses recoverable data unnecessarily.
-The repair session adds complexity but preserves user work.
+Continue moving every corrupt conversation to `.trash/`.
+This is the simplest option, but it discards recoverable user data.
 
 ### Repair-on-load instead of during sanitize
 
-Make loading methods self-healing: if a file is missing or corrupt, repair it at
+Make `LoadBackend` methods self-healing by repairing missing or corrupt files at
 load time.
 
 Rejected because it mixes read and write concerns in the `LoadBackend` trait and
-makes repair happen at unpredictable times during command execution.
-Sanitize is the right place — it's explicitly about making the store consistent
-before any command touches it.
+triggers repairs at unpredictable points during command execution.
+The sanitize phase exists specifically to make the store consistent before any
+command touches it.
 
 ## Non-Goals
 
-- **Full design of `init_config.json`.** The file split from `base_config.json`
-  into workspace snapshot + initial overrides is a prerequisite for this RFD's
-  repair story, but the detailed format, persistence, and migration belong in a
-  dedicated RFD extending [RFD 054] and [RFD 070].
+- **Full design of `init_config.json`.** Splitting `base_config.json` into a
+  workspace snapshot and initial overrides is a prerequisite for this RFD, but
+  its format, persistence, and migration belong in a dedicated RFD extending
+  [RFD 054] and [RFD 070].
 
 - **Config provenance storage in `metadata.json`.** Storing the original `--cfg`
-  arguments for auto-rebuild is a future improvement, not a requirement for the
+  arguments in `metadata.json` to pre-populate the prompt or auto-rebuild
+  `init_config.json` is a future improvement, not a requirement for the
   interactive repair flow.
 
 ## Risks and Open Questions
 
 ### Order of repairs within a conversation
 
-If multiple files in the same conversation are corrupt, the repair session must
-decide the order.
-A natural order is: metadata first (needed for display), base config second
-(needed for config resolution), init config third, events last.
-If an earlier repair fails or the user trashes the conversation, later repairs
-are skipped.
+When multiple files in a conversation are corrupt, the repair session runs in
+dependency order: metadata first (needed for display), base config second
+(needed for config resolution), init config third, and events last.
+If an earlier repair fails or the user trashes the conversation, the remaining
+repairs are skipped.
 
 ### Editor availability
 
-The `$EDITOR` repair for `events.json` assumes an editor is configured.
-If `$EDITOR` is unset, this option should either fall back to a sensible default
-(e.g. `vi`) or be omitted from the menu, leaving only "trash."
+Repairing `events.json` in `$EDITOR` requires a configured editor.
+If `$EDITOR` is unset, the menu should either fall back to a default editor
+(e.g. `vi`) or omit the editor option, leaving only "trash."
 
 ## Implementation Plan
 
@@ -233,9 +206,8 @@ issues.
 Implement automatic repairs for metadata and base config.
 Extend `SanitizeReport` with `repaired` and `degraded` fields.
 
-**Depends on:** [RFD 070] (base config must contain only the workspace config
-snapshot for the rebuild to be a valid recovery path).
-Also depends on the `init_config.json` split (not yet written).
+**Depends on:** [RFD 070] (so `base_config.json` contains only the workspace
+config snapshot) and the `init_config.json` split (not yet written).
 **Mergeable:** Yes.
 
 ### Phase 2: Interactive repairs
@@ -249,13 +221,13 @@ trash).
 
 ## References
 
-- [RFD 052] — Workspace Data Store Sanitization.
-  Defines the current sanitize and trash behavior that this RFD replaces.
-- [RFD 054] — Split Conversation Config and Events.
-  Established the three-file conversation storage layout.
-- [RFD 070] — Negative Config Deltas.
-  Changes `base_config.json` to contain only the workspace config snapshot,
-  enabling automatic rebuild on corruption.
+- [RFD 052]: Workspace Data Store Sanitization.
+  Defines the sanitize and trash behavior that this RFD replaces.
+- [RFD 054]: Split Conversation Config and Events.
+  Establishes the three-file conversation storage layout.
+- [RFD 070]: Negative Config Deltas.
+  Restricts `base_config.json` to the workspace config snapshot, enabling
+  automatic rebuild on corruption.
 
 [RFD 052]: ../052-workspace-data-store-sanitization.md
 [RFD 054]: ../054-split-conversation-config-and-events.md

@@ -12,48 +12,44 @@
 
 This RFD extends conversation labels so a single key can hold an ordered set of
 values (such as `crate=jp_config` and `crate=jp_llm`).
-`jp c label` splits `set` off from `add`, `rm` accepts `key=value` as well as a
-bare `key`, filters match on set membership, and `--label` / `--reset-labels`
-are removed from `jp query` and `jp conversation fork`.
+`jp c label` separates `set` from `add`, `rm` accepts `key=value` in addition to
+a bare `key`, filters match on set membership, and `--label` and
+`--reset-labels` are removed from `jp query` and `jp conversation fork`.
 
 ## Motivation
 
 [RFD 101] models a label as one value per key, following `kubectl`.
-Real usage has outgrown that.
+Labels categorize a conversation along dimensions with a closed vocabulary, such
+as the crate it touches, the client, or the review stage.
+Those dimensions are naturally multi-valued: a conversation that changes shared
+logic touches both `jp_config` and `jp_llm`, and a change that affects multiple
+frontends applies to both `web` and `macos`.
+A single-valued key cannot express multiple values.
 
-Labels are used to categorise a conversation along dimensions with a closed
-vocabulary — which crate it touches, which client, which review stage.
-Dimensions are naturally multi-valued: a conversation that changes shared logic
-touches `jp_config` and `jp_llm`, and one that changes behaviour visible in more
-than one frontend is about `web` and `macos` at once.
-A single-valued key cannot say that.
-
-Two workarounds exist today and both fail:
+Two workarounds exist under the single-valued model, and both fail:
 
 - **Encode the set in the value** (`crate=jp_config,jp_llm`).
   Filters compare the whole string, so `--label=crate=jp_llm` misses.
-  Teaching the filter to split means the value *is* a set, stringly typed, with
-  deduplication and ordering pushed onto the user.
+  If the filter splits the string, the value becomes a stringly-typed set that
+  pushes deduplication and ordering onto the user.
 - **One key per value** (`crate-jp_config`, `crate-jp_llm`).
-  Filtering for one crate works, but "which crates does this conversation
-  touch?" and "any conversation with a crate label" both need prefix scanning,
-  and the grouping the producer already had is discarded and re-derived from a
-  naming convention.
+  Filtering for a single crate works, but querying which crates a conversation
+  touches or finding any conversation with a crate label requires prefix
+  scanning across keys, discarding the key grouping in favor of a naming
+  convention.
 
-Doing nothing blocks the LLM-driven auto-tagging deferred by [RFD 101], which is
-the case that surfaced this: a model asked to categorise a conversation against
-a vocabulary must be able to pick more than one value per dimension.
+Single-valued keys also block the LLM-driven auto-tagging deferred by [RFD 101]:
+a model categorizing a conversation against a vocabulary must be able to assign
+more than one value per dimension.
 
 ## Design
 
-### The model
+### Model
 
 A label maps a key to an ordered, deduplicated set of values.
 A key never maps to an empty set: removing the last value removes the key.
-
-Single-valued labels are the one-element case, not a separate concept.
-There is no per-key cardinality declaration — see
-[Alternatives](#per-key-cardinality).
+Single-valued labels are simply one-element sets, with no per-key cardinality
+declaration (see [Alternatives](#per-key-cardinality)).
 
 ### Managing labels
 
@@ -66,110 +62,104 @@ jp c label rm crate                          # the whole key
 jp c label rm                                # every label
 ```
 
-`add` inserts into the key's set.
-`set` replaces the key's set.
-Both accept several keys in one invocation, and `set` replaces only the sets of
-the keys it names — clearing every label is a bare `rm`.
+`add` inserts values into a key's set, while `set` replaces the key's set.
+Both subcommands accept multiple keys in one invocation.
+`set` replaces only the keys passed to it; a bare `jp c label rm` clears every
+label.
 
-`set` is already accepted today as an alias for `add`, and it keeps its current
-meaning: make this key hold exactly this.
-Only `add` changes behaviour, from replacing to accumulating.
+In [RFD 101], `set` is an alias for `add`.
+Here, `set` keeps its replacement behavior while `add` changes from replacing to
+accumulating.
+Making `set` a separate verb avoids a self-contradictory `add --replace` flag.
 
-`set` reports the values it displaced alongside the ones it applied, so a `set`
-that overwrote more than the user expected can be undone from its own output.
-That is the same property [RFD 101] gives `rm`, and it is why `set` is safe to
-offer as a single command rather than forcing `rm` followed by `add`.
+`set` reports the displaced values alongside the newly applied values, so an
+unintended overwrite can be undone from the command's own output, matching `rm`
+in [RFD 101].
 
-`set` exists as a verb rather than as `add --replace` because the flag form is
-self-contradictory on its face, and because a verb keeps each name honest: `set`
-goes on meaning what it means under [RFD 101], while `add` takes the behaviour
-that is genuinely new.
+`rm` accepts either a bare `key` or a `key=value` pair.
+[RFD 101] rejected `=` in removal arguments; lifting that restriction does not
+allow `=` in key names, which the key grammar still forbids.
 
-`rm` accepts a bare key or a `key=value` pair.
-[RFD 101] rejects `=` in a removal argument; that restriction is lifted, and a
-key with an `=` is still invalid because the key grammar forbids it.
+#### Argument resolution
 
-#### Argument grammar
+All operands are resolved and grouped by key before any mutation is applied, so
+passing the same key multiple times acts on the combined values rather than
+applying each operand in sequence:
 
-Operands are resolved as a whole before anything is applied, so a verb naming
-one key several times acts on the union rather than on each operand in turn:
+1. Parse every operand and expand each `:name` alias into the key and ordered
+   values produced by its rule.
+2. Group values by key in argument order, deduplicating repeated values within
+   each key.
+3. Apply the operation once per key: `add` inserts the grouped values, `set`
+   replaces the key's set with them, and `rm` removes them.
 
-1. Parse every operand; expand each `:name` alias to the key and ordered values
-   its rule produces.
-2. Group values by key, in the order the operands were given, discarding a
-   repeat of a value already seen for that key.
-3. Apply once per key: `add` inserts the grouped values, `set` replaces the
-   key's set with them, `rm` removes them.
-
-Without step 2, `jp c label set crate=jp_config crate=jp_llm` would replace the
-set twice and leave `{jp_llm}`.
-Both verbs accept aliases, and an alias contributes all of its values to its
-key's group.
+Grouping before applying ensures that `jp c label set crate=jp_config
+crate=jp_llm` sets `{jp_config, jp_llm}` rather than replacing the set twice and
+leaving `{jp_llm}`.
+Both `add` and `set` accept `:name` aliases, and an alias contributes all of its
+values to its key's group.
 
 ### Filtering
 
-`key=value` matches when the key's set contains that value.
-`key` matches when the key is present.
+A `key=value` filter matches when the key's set contains `value`.
+A bare `key` filter matches when the key is present.
 
 ```sh
 jp c ls --label=crate=jp_llm     # touches jp_llm, whatever else it touches
 jp c ls --label=crate            # has any crate label
 ```
 
-Repeated flags are ANDed, as they are under [RFD 101], so naming one key twice
-requires the set to contain both values:
+Repeating `--label` combines filters with logical AND, as in [RFD 101].
+Specifying the same key twice therefore requires the key's set to contain both
+values:
 
 ```sh
 jp c ls --label=crate=jp_config --label=crate=jp_llm  # touches both
 ```
 
-A set-expression syntax — exact-set matching, any-of, negation — is out of
-scope here and belongs to the conversation query DSL.
-"All of" needs no syntax of its own: it falls out of the conjunction rule above.
+Set-expression syntax (exact-set matching, any-of, and negation) is out of scope
+and belongs in the conversation query DSL.
+Logical AND across repeated flags already covers "all of" matching without
+dedicated syntax.
 
-### Label mutation leaves `query` and `fork`
+### Removing label mutation from `query` and `fork`
 
-`--label` on `jp query` and `jp conversation fork`, and `--reset-labels` on `jp
-conversation fork`, are removed.
-`jp c label` becomes the only way to mutate labels.
+`--label` is removed from `jp query` and `jp conversation fork`, and
+`--reset-labels` is removed from `jp conversation fork`.
+`jp c label` is the only command that mutates labels.
 
-Under a multi-valued model the flag has to mean either "add to the set" or
-"replace the set", and neither reading is safe to fix in a flag that also
-composes with configured rules: a rule with `apply_on.new` that produces
-`branch=main` alongside `--label=branch=feat` accumulates to a two-value set
-under one reading and silently discards the rule under the other.
+In a multi-valued model, `--label` must either add to a key's set or replace it.
+Neither choice composes cleanly with configured rules: if an `apply_on.new` rule
+produces `branch=main`, passing `--label=branch=feat` either accumulates into a
+two-value set (`{main, feat}`) or silently discards the rule.
 
-The flag is not carrying semantic weight that a second command cannot.
-Nothing reads labels during a turn — `Context.labels` is a Non-Goal in [RFD
-101], and no code path consults them while a query runs — so on the successful
-path, labelling at creation and labelling immediately after are the same thing:
+Separating label mutation into a second command does not affect turn execution.
+Nothing reads labels during a turn (`Context.labels` is a Non-Goal in [RFD 101],
+and no code path inspects labels while a query runs), so when a turn succeeds,
+labeling at creation and labeling immediately afterward produce the same result:
 
 ```sh
 jp q --new "..." && jp c label add crate=jp_config crate=jp_llm
 ```
 
-`jp query --new` always activates the conversation it creates, so the second
-command needs no `--id`.
-`jp conversation fork --activate` gives the same for a fork; a non-activating
-fork needs the fork's ID, which [RFD 050] Phase 1 prints.
+`jp query --new` always activates the conversation it creates, so `jp c label`
+needs no `--id`.
+`jp conversation fork --activate` behaves the same way; a fork without
+`--activate` requires the new conversation ID printed by [RFD 050] Phase 1.
 
-The two forms diverge when the turn fails.
-`--label` applies before the provider is contacted, so a missing credential or a
-dropped connection today leaves a labelled conversation; under `&&` it leaves an
-unlabelled one.
-Configured rules are unaffected either way — `apply_on.new` resolves during
-creation — so what is lost is the ad-hoc labels of a failed turn, not the
-automatic ones.
-That is the case this RFD accepts in exchange for removing the flag; see
-[Drawbacks](#drawbacks).
+The two forms differ only when the turn fails.
+`--label` applied before contacting the provider, so a missing credential or
+dropped connection left a labeled conversation, whereas `&&` skips the second
+command.
+Configured rules (`apply_on.new`) still resolve during conversation creation, so
+a failed turn loses only ad-hoc CLI labels (see [Drawbacks](#drawbacks)).
 
-Filters (`--label` on `jp c ls` and `jp c grep`) stay.
-They read labels rather than writing them, so none of the ambiguity applies.
+Read-only `--label` filters on `jp c ls` and `jp c grep` remain unchanged.
 
 ### Configured rules
 
-A rule's value may be a list, and a command-backed rule emits one value per line
-of stdout:
+A rule's `value` may be a list, and a command-backed rule emits one value per
+line of stdout:
 
 ```toml
 [conversation.labels]
@@ -182,15 +172,14 @@ value = ["jp_config", "jp_llm"]
 value.cmd = "git rev-parse --abbrev-ref HEAD"
 ```
 
-Line-per-value composes with ordinary shell tools and needs no escaping rule; a
-delimiter would reintroduce the quoting problem the CLI grammar was designed to
-avoid.
+Emitting one value per line composes with standard shell tools without escaping
+rules; an inline delimiter would reintroduce the quoting ambiguity that the CLI
+grammar avoids.
 
-This is distinct from the multi-*key* command output that [RFD 101] lists as
-future work: a rule still produces values for exactly one key, and that key is
-still the map key.
+This differs from the multi-*key* command output listed as future work in [RFD
+101]: a rule still produces values for a single key determined by its map key.
 
-The accepted shapes, extending [RFD 101]'s table:
+The accepted rule shapes extend [RFD 101]:
 
 | TOML                                     | Resolved values           |
 | ---------------------------------------- | ------------------------- |
@@ -201,38 +190,36 @@ The accepted shapes, extending [RFD 101]'s table:
 | `crate = { value = [] }`                 | no label                  |
 | `crate = { value.cmd = "..." }`          | one value per stdout line |
 
-The direct array is shorthand for `value`, mirroring how a bare string already
-is.
-A rule's values replace rather than extend across config layers: a workspace
-rule naming two crates and a user rule naming one resolve to the user's one.
-Per-entry accumulation would leave no way to narrow an inherited list, and the
-map itself already carries `MergeableMap`'s strategies for merging *entries*.
+A top-level array is shorthand for `value = [...]`, matching the bare-string
+shorthand.
+Across config layers, a rule's `value` replaces earlier layers rather than
+appending to them: a workspace rule listing two crates and a user rule listing
+one resolve to the single user crate.
+Accumulating values across layers would leave no way to narrow an inherited
+list, and the label map already uses `MergeableMap` strategies to merge entries
+across keys.
 
-Command output splits on newlines; empty lines are dropped and a command that
-writes nothing produces no label.
-Empty lines cannot be kept, because the empty string is a valid bare-label value
-and a trailing newline would otherwise add one.
-This replaces [RFD 101]'s whole-output trim.
+Command stdout is split on newlines, replacing the whole-output trim in [RFD
+101].
+Empty lines are dropped, and a command that writes no non-empty lines produces
+no label.
+Retaining empty lines would turn a trailing newline into an empty string, which
+represents a bare label.
 
-**On fork, a matching rule replaces the key's set.** Inherited labels are the
-starting state; each `apply_on.fork` rule then replaces the full set for its own
-key, and a key with no matching rule is left alone.
-That is [RFD 101]'s "re-resolved entries override the inherited values", carried
-over unchanged — under a set-valued model "override" has to say whether it
-means replace or extend, and replace is what preserves the existing precedence
-order.
-A source carrying `stage={draft, review}` under a rule producing `{approved,
-ready}` forks to `{approved, ready}`, not to all four.
+**On fork, a matching rule replaces the key's set.** Forking starts from the
+parent conversation's labels.
+Each `apply_on.fork` rule then replaces the full set for its key, leaving keys
+without a matching rule unchanged.
+This preserves [RFD 101]'s rule that re-resolved entries override inherited
+values: a conversation with `stage={draft, review}` forked under a rule
+producing `{approved, ready}` receives `{approved, ready}`, not all four values.
 
-Replacement is replacement when the rule produces nothing, so a matching rule
-that resolves to no values empties its key.
-That is what makes `value = []` a way to strip an inherited label on fork rather
-than a rule that quietly does nothing.
-A rule that *failed* is a different case: it is reported and dropped, and the
-inherited values stand, because a broken command is not a statement about what
-the key should hold.
-Resolution therefore carries "matched, produced nothing" separately from "did
-not match", which a bare set of labels cannot express.
+When a matching rule resolves to no values (such as `value = []` or a command
+with empty output), it removes the inherited key.
+By contrast, if a rule's command fails, the error is reported and the inherited
+values stand.
+Rule resolution therefore distinguishes "matched with no values" from "did not
+match", which a plain set of labels cannot express.
 
 ### Data model
 
@@ -241,38 +228,38 @@ not match", which a bare set of labels cannot express.
 pub struct Labels(BTreeMap<String, IndexSet<String>>);
 ```
 
-The two halves are ordered differently on purpose.
+Keys and values use different ordering guarantees:
 
-`IndexSet` for values: order is preserved and is part of the contract.
-Order carries meaning within a key — "mostly `jp_config`, also touches
-`jp_llm`" — and a sorted view can be rendered from an ordered collection at any
-time, while insertion order cannot be recovered from a sorted one.
-The cost is that `metadata.json` is git-visible under [RFD 031], so the same
-values added in different orders produce different bytes.
-`conversation.attachments` already behaves that way.
+- **`IndexSet` for values.** Insertion order is preserved as part of the
+  contract.
+  Order within a key can carry meaning (such as "primarily `jp_config`, also
+  touches `jp_llm`"), and a sorted view can always be derived from an ordered
+  set, whereas insertion order cannot be recovered once sorted.
+  Because `metadata.json` is git-visible under [RFD 031], adding the same values
+  in different orders produces different bytes on disk, matching the existing
+  behavior of `conversation.attachments`.
+- **`BTreeMap` for keys.** Key order carries no semantic weight, so preserving
+  insertion order across keys would only add diff noise to committed metadata.
+  Sorted keys also match what [RFD 101] writes.
 
-`BTreeMap` for keys: no equivalent argument applies.
-One key is not "more primary" than another, so making key order observable would
-add diff noise to committed metadata and buy nothing.
-Sorted keys also match what [RFD 101] already writes, so key ordering does not
-change.
+The inner field is private, and `Labels` enforces two invariants:
 
-The field is private and two invariants are enforced by the type.
+**No key maps to an empty set.** This invariant belongs on the map rather than
+on a `NonEmptySet` value type, because a `NonEmptySet` would still allow a
+caller to insert a key and then drain its values.
 
-**No key maps to an empty set.** The invariant belongs on the map rather than on
-a non-empty set type: it is a property of the collection, and a `NonEmptySet`
-would still let a caller insert a key and then drain it.
+**The empty string never coexists with a non-empty value.** A bare label (such
+as `draft`) stores `""` to record that the key is present.
+Once a key holds a non-empty value, the key's presence is already recorded,
+making the `""` marker redundant.
+Allowing both would let `jp c label add draft draft=urgent` produce `{"",
+"urgent"}`, where `--label=draft=` matches and `jp c label rm draft=` mutates
+the set even though display views show only `draft=urgent`.
+Inserting a non-empty value removes `""`, inserting `""` into a key that already
+holds a non-empty value is a no-op, and deserialization strips `""` when
+non-empty values are present.
 
-**The empty value never sits alongside a real one.** A bare label stores the
-empty value to record that its key is present, and holding any real value
-records the same thing, so the two together say nothing the second does not.
-Without this, `jp c label add draft draft=urgent` would leave `{"", "urgent"}`:
-a state where `--label=draft=` matches and `jp c label rm draft=` changes
-something, while every view that hides the marker shows a key holding one value.
-Adding a real value drops the marker, adding the marker to a key that holds one
-changes nothing, and reading normalizes a hand-edited pair away.
-
-| Method                     | Behaviour                                            |
+| Method                     | Behavior                                             |
 | -------------------------- | ---------------------------------------------------- |
 | `insert(key, value)`       | Adds to the key's set, creating it.                  |
 | `set(key, values)`         | Replaces the key's set; empty input removes the key. |
@@ -280,22 +267,22 @@ changes nothing, and reading normalizes a hand-edited pair away.
 | `remove_value(key, value)` | Removes one value, dropping the key when it empties. |
 | `get`, `contains`, `iter`  | Read access.                                         |
 
-`Labels` also owns the on-disk contract, and deserializes through a validating
-conversion rather than a derive.
-A derived `Deserialize` would write the private field directly and could
-construct exactly the states the API forbids — [RFD 031] supports editing
-`metadata.json` by hand, so `{"crate": []}` is reachable.
-Reading normalizes instead of failing, since a small manual slip should not cost
-the whole conversation:
+`Labels` also owns the on-disk format and deserializes through a validating
+conversion rather than a derived `Deserialize`.
+A derived implementation would populate the private map directly and allow
+states the API forbids, such as `{"crate": []}` in a hand-edited `metadata.json`
+([RFD 031]).
+Deserialization normalizes invalid states rather than failing, so a minor manual
+edit does not make the conversation unreadable:
 
 - A scalar becomes a one-element set.
-- An array is deduplicated, first occurrence winning.
+- An array is deduplicated, keeping the first occurrence of each value.
 - An empty array drops the key, matching `set(key, empty)`.
-- An array pairing the empty value with a real one drops the empty value.
-- A non-string value is a metadata load error.
+- An array containing both `""` and non-empty values drops `""`.
+- A non-string element returns a metadata load error.
 
-A value is read as either a scalar or an array, so conversations written before
-this RFD load unchanged, and is always written as an array:
+Deserialization accepts either a scalar or an array so conversations written
+under [RFD 101] load unchanged, while serialization always writes an array:
 
 ```json
 {
@@ -311,14 +298,15 @@ this RFD load unchanged, and is always written as an array:
 }
 ```
 
-Accepting two shapes and emitting one means no migration step.
-A JP built before `labels` existed skips the field as unknown, whatever shape
-its values take, so the array form costs nothing there either.
+Accepting both shapes on read and emitting arrays on write avoids a migration
+step.
+JP versions built before [RFD 101] ignore the unknown `labels` field regardless
+of its value type.
 
 ### Display and machine output
 
-`jp c label ls` writes one `key=value` per line, the way the user types them, so
-every line stands alone and none needs context from its neighbours:
+`jp c label ls` prints one `key=value` pair per line, matching the CLI input
+syntax:
 
 ```console
 $ jp c label ls
@@ -327,18 +315,19 @@ $ jp c label ls
  draft
 ```
 
-Comma-separating the values of a key would be ambiguous: [RFD 101] places no
-restriction on values, so `branch=feat,exp` is one legitimate value and
-`feat,exp, main` could read as two values or three.
-One value per line has no such question.
+Joining a key's values with commas on a single line would be ambiguous because
+[RFD 101] places no restriction on values: `branch=feat,exp` is a single valid
+value, so `feat,exp, main` could be read as two values or three.
 
-Every line carries a marker column, a space here, so a reader strips one
-character whichever command printed the line.
+Every line begins with a single-character status column (` ` for `ls`).
+Because label keys start with a letter, the leading column cannot be mistaken
+for part of a key, and scripts can strip the first character regardless of which
+subcommand printed the line.
 
-A mutation reads as a diff: `-` for a value the key lost, `+` for one it gained,
-and a space for one it kept.
-The lines are data, so they go to stdout; the sentence naming what changed is
-chrome and goes to stderr, per [RFD 048]:
+Mutation subcommands format stdout as a diff: `-` for removed values, `+` for
+added values, and ` ` for unchanged values on modified keys.
+Per [RFD 048], the diff lines are data on stdout and the summary header goes to
+stderr:
 
 ```console
 $ jp c label rm crate=jp_llm
@@ -357,16 +346,15 @@ Set labels on jp-c17866928997: Tool Chaining
 +crate=jp_cli
 ```
 
-One rule for every command means a line can be read without knowing what
-produced it, which is what makes `set` recoverable from its own output.
-A label key starts with a letter, so the marker column is never mistaken for
-part of the label.
+Because `set` prints displaced values with `-`, an overwritten label set can be
+recovered directly from the command output.
 
-`jp c show` renders one row per key with the values as a list beneath it — the
-same numbered multi-line cell the details view already uses for attachments and
-compactions — because it is a details view rather than a listing to read from.
+`jp c show` renders one row per key and lists its values in a numbered
+multi-line cell, matching the details view formatting for attachments and
+compactions.
 
-The JSON form carries the set:
+In JSON output, `jp c label ls` returns each key with its `values` array,
+replacing the `{"key", "value"}` object from [RFD 101]:
 
 ```json
 {
@@ -378,10 +366,8 @@ The JSON form carries the set:
 }
 ```
 
-This replaces the `{"key", "value"}` shape from [RFD 101].
-
-A mutation reports per key what the key held and what it holds now, so `set`'s
-recoverability is a property of the output rather than of the reader's memory:
+Mutation commands replace [RFD 101]'s flat `labels` array with a `changes` array
+that records `before` and `after` value lists for each modified key:
 
 ```json
 {
@@ -393,184 +379,180 @@ recoverability is a property of the output rather than of the reader's memory:
 }
 ```
 
-[RFD 101]'s flat `labels` array cannot carry both halves, so it is replaced.
-`add` and `rm` use the same shape; for them one side is a subset of the other.
-A bare label carries no values a reader can act on, so both sides are empty
-arrays rather than the empty string it is stored as.
-
-The text form keeps `set` recoverable too: its `-` lines are the values it
-displaced.
+`add` and `rm` use the same schema, with one list being a subset of the other.
+For a bare label, `before` and `after` are empty arrays (`[]`) rather than
+exposing the internal `""` marker.
 
 ## Drawbacks
 
-- **A shipped surface is removed.** `--label` on `query` and `fork`, and
-  `--reset-labels`, are described in [RFD 101] and implemented.
-  Removing them costs a keystroke in the common interactive case and a second
-  command in scripts.
+- **Removed CLI flags.** `--label` on `query` and `fork`, along with
+  `--reset-labels` on `fork`, were implemented under [RFD 101].
+  Removing them requires chaining a second command (`jp c label`) in interactive
+  sessions and scripts.
 
-- **Labelling stops being atomic with the turn.** `jp q --new --label=x` today
-  writes the label before the provider is contacted, so it survives a failed
-  turn; `jp q --new && jp c label add x` does not run the second command at all.
-  A failed turn therefore leaves a conversation carrying its configured labels
-  but none of the ad-hoc ones.
-  Accepted because the labels that matter for categorisation come from rules,
-  and because a flag that composes atomically has to answer the
-  accumulate-or-replace question this RFD exists to avoid.
+- **Ad-hoc labeling is not atomic with `query --new`.** `jp q --new --label=x`
+  wrote the label before contacting the provider, so the label survived a failed
+  turn; `jp q --new && jp c label add x` does not run the second command when
+  the query fails.
+  A failed turn therefore leaves a conversation with its configured labels
+  (`apply_on.new`) but none of its ad-hoc CLI labels.
 
-- **Order-dependent bytes in committed metadata.** Preserving value order means
-  the same logical label set can produce different `metadata.json` diffs
-  depending on the order values were added.
-  Keys stay sorted, so this is confined to the values within one key.
+- **Order-dependent bytes in committed metadata.** Preserving value insertion
+  order means the same logical label set can produce different `metadata.json`
+  diffs depending on the order values were added.
+  Keys remain sorted, so this is confined to the values within a single key.
 
-- **Every label-shaped surface changes at once.** Data model, CLI grammar,
-  filters, config, display, and JSON all move together; there is no useful
+- **Broad surface change.** The data model, CLI grammar, filters, configuration
+  rules, terminal display, and JSON schema all change together, with no useful
   intermediate state.
 
-- **`add` changes meaning.** It replaces today and accumulates after this RFD.
-  Pre-release, so no migration is owed, but the word does more work than it did.
+- **`add` changes behavior.** Under [RFD 101], `add` replaced the key's value;
+  here it appends to the key's set.
 
 ## Alternatives
 
 ### Encode the set in the value
 
-`crate=jp_config,jp_llm` as a single string.
-Rejected: filters compare whole values, so drilling down needs the filter to
-split the string, at which point the value is a set with no type behind it and
-the user owns deduplication, ordering, and escaping.
+Store multiple values in a single comma-separated string, such as
+`crate=jp_config,jp_llm`.
+Rejected because filters compare whole values; filtering by element would
+require splitting the string at query time, turning the value into an untyped
+set where the user must manage deduplication, ordering, and escaping.
 
 ### One key per value
 
-`crate-jp_config=true` and `crate-jp_llm=true`.
-Rejected: the dimension exists only as a naming convention, so "which crates?"
-and "any crate?" require prefix scanning over keys, and the grouping the
-producer already had is thrown away.
+Encode each value as its own key, such as `crate-jp_config=true` and
+`crate-jp_llm=true`.
+Rejected because the dimension exists only as a naming convention: listing which
+crates a conversation touches or matching any crate label requires prefix
+scanning across keys, discarding the explicit key grouping.
 
 ### Per-key cardinality
 
-`conversation.labels.crate.multi = true`, leaving other keys single-valued.
-Rejected on two counts.
-Storage must hold sets regardless, so this is the same data-model change plus a
-configuration knob.
-More seriously, `add` would insert or replace depending on the target key's
-configuration — the same command behaving differently according to data rather
-than to what the user typed — and a key set from the CLI with no configured
-rule would have no declared cardinality at all.
+Configure cardinality per key (such as `conversation.labels.crate.multi = true`)
+while leaving other keys single-valued.
+Rejected for two reasons.
+First, storage must hold sets regardless, so this requires the same data-model
+change plus a configuration setting.
+Second, `jp c label add` would either insert or replace depending on the target
+key's configuration, and ad-hoc keys set from the CLI without a configured rule
+would have no declared cardinality.
 
 ### `add --replace` instead of a `set` verb
 
-Rejected: "add" and "replace" contradict each other in one invocation, and
-offering both spellings for one operation runs against the consolidation [RFD
-101] settled on for its flags.
+Rejected because `add --replace` is self-contradictory, and `set` is already
+established by [RFD 101] as the subcommand for setting a key's value.
 
 ### `BTreeSet` for values
 
-Rejected: sorted storage gives identical bytes for identical sets, which is
-better for committed metadata, but discards ordering permanently.
+Rejected because sorting values in storage gives identical bytes for identical
+sets in committed metadata, but discards insertion order permanently.
 Order carries meaning in cases like primacy ("mostly `jp_config`, also touches
-`jp_llm`"), and a sorted view can always be rendered from an ordered set.
+`jp_llm`"), and a sorted view can always be rendered from an `IndexSet`.
 
 ### `IndexMap` for keys
 
-Rejected: it would make key insertion order observable in `metadata.json`, in
-`jp c show`, and in `jp c label ls`, for no gain.
-The primacy argument that justifies ordered *values* has no counterpart across
-keys, and [RFD 101] already writes keys sorted.
+Rejected because preserving key insertion order would expose arbitrary ordering
+differences in `metadata.json`, `jp c show`, and `jp c label ls`.
+Unlike values within a key, keys have no relative priority, and [RFD 101]
+already sorts keys.
 
 ### Keep `--label` and pick a semantic
 
-Either accumulate or replace, documented.
-Rejected: the choice is permanent once released, the flag saves one `&&`, and
-its interaction with configured rules is surprising under both readings.
-It can be reintroduced later if the two-command form proves annoying in practice
-— adding a flag is cheap, removing one is not.
+Keep `--label` on `query` and `fork` and define it to either accumulate or
+replace.
+Rejected because the choice is permanent once released, the flag saves only a
+second command (`&&`), and its interaction with configured rules is surprising
+under both definitions.
+A creation-time flag can be reintroduced later if the two-command workflow
+proves awkward, whereas removing a released flag is a breaking change.
 
 ## Non-Goals
 
 - **Set-expression filter syntax.** Exact-set matching, any-of, and negation
   belong to the conversation query DSL.
-  "All of" is not among them: repeated flags already AND, so it falls out of the
-  filter semantics this RFD defines.
+  ("All of" matching is already covered by repeating `--label`.)
 - **Declared value vocabularies.** Constraining `crate` to a known list of
-  values is the follow-up this RFD unblocks, not part of it.
-- **LLM-driven auto-labelling.** The [#101] follow-up, which depends on both
-  this RFD and vocabularies.
-- **Multi-key command output.** A rule still produces values for one key; the
-  `multi = true` future-work item in [RFD 101] is unchanged.
-- **Label change history.** Still no event-stream record; [RFD 101]'s Non-Goal
-  stands.
+  values is a separate follow-up that this RFD unblocks.
+- **LLM-driven auto-labeling.** Automatic labeling ([#101]) depends on both this
+  RFD and declared vocabularies.
+- **Multi-key command output.** A rule still produces values for a single key;
+  the `multi = true` future-work item in [RFD 101] is unchanged.
+- **Label change history.** Labels remain metadata with no event-stream record,
+  as in [RFD 101].
 
 ## Risks and Open Questions
 
-- **Hyrum's Law on value order.** Once order is preserved, something will depend
-  on it.
-  That is the intent, but it means sorting later would be a breaking change; the
-  contract should say plainly that order is insertion order.
+- **Hyrum's Law on value order.** Once insertion order is preserved, callers and
+  scripts will depend on it.
+  That is intentional, but it means switching to sorted storage later would be a
+  breaking change; the contract must state explicitly that order is insertion
+  order.
 
-- **`Labels` is a new choke point.** Every label read and write goes through it,
-  including `label::apply`, which currently manipulates the map directly.
-  A missing method sends a caller looking for an escape hatch, which is how the
-  empty-set invariant would erode.
+- **`Labels` as the single mutation boundary.** Every label read and write,
+  including `label::apply`, must go through `Labels` rather than manipulating
+  the underlying map directly.
+  If the `Labels` API omits a needed operation, callers might reach for raw map
+  access and bypass the non-empty and bare-label invariants.
 
 ## Implementation Plan
 
-### Phase 1: data model
+### Phase 1: Data model
 
-`Labels` in `jp_conversation` with the private field and the API above,
-including scalar-or-array read and array write.
-Replaces `BTreeMap<String, String>` on `Conversation`.
-Callers move to the API.
+Introduce `Labels` in `jp_conversation` with a private inner map, the mutation
+and query methods above, scalar-or-array deserialization, and array
+serialization.
+Replace `BTreeMap<String, String>` on `Conversation` with `Labels` and move
+callers to the new API.
 
-Mergeable independently, but only if the CLI keeps replacing: existing `Set`
-directives call `set(key, one_element_set(value))`, not `insert`.
-`insert` accumulates, so wiring it up in this phase would change `jp c label
-add` from replacing to accumulating before the verb contract that explains it
-lands in Phase 2.
+This phase can merge independently if the CLI keeps replacing values: existing
+`Set` directives must call `set(key, one_element_set(value))` rather than
+`insert`.
+Wiring up `insert` in Phase 1 would change `jp c label add` from replacing to
+accumulating before Phase 2 introduces the `set` subcommand.
 
 ### Phase 2: CLI and filters
 
-`set` as a verb, `rm key=value`, contains-semantics for filters, display and
-JSON changes.
-Switches `add` from `set` to `insert`, now that a verb exists for replacing.
+Add `set` as a subcommand, accept `key=value` in `rm`, switch `add` from `set`
+to `insert`, update `--label` filters to check set membership, and update the
+terminal and JSON output formats.
 
-Removes `--label` from `jp query` and `jp conversation fork`, and
-`--reset-labels` from `jp conversation fork`, along with the `LabelDirectives`
-clap wrapper and both of its switches — `ALIASES`, which separates `jp query`
-(where `--label=:name` resolves) from `jp conversation fork` (where it is
-rejected), and `RESET`, which registers `--reset-labels`.
-Alias support on `jp c label` is unaffected: it goes through
-`LabelDirective::parse_set` and `expand_aliases`, not through the wrapper.
+Remove `--label` from `jp query` and `jp conversation fork`, and remove
+`--reset-labels` from `jp conversation fork`.
+Delete the `LabelDirectives` clap wrapper along with its `ALIASES` switch (which
+allowed `--label=:name` on `jp query` while rejecting it on `jp conversation
+fork`) and its `RESET` switch (which registered `--reset-labels`).
+Alias support on `jp c label` is unaffected because it goes through
+`LabelDirective::parse_set` and `expand_aliases` rather than the wrapper.
 
-Depends on Phase 1.
-Lands after [RFD 050] Phase 1, which prints the forked conversation's ID: until
-then, removing `fork --label` leaves a fork that was deliberately not activated
-with no way to name it.
+This phase depends on Phase 1 and lands after [RFD 050] Phase 1, which prints
+the forked conversation's ID so scripts can label a non-activated fork.
 
-### Phase 3: configured rules
+### Phase 3: Configured rules
 
-List-valued `value`, and line-per-value stdout for command-backed rules.
-
-Depends on Phase 1.
-Independent of Phase 2.
+Support list-valued `value` settings and split stdout on newlines for
+command-backed rules.
+This phase depends on Phase 1 and is independent of Phase 2.
 
 ### Future work (out of scope, future RFDs)
 
-- Declared value vocabularies, with validation and ordered domains.
-- LLM-driven auto-labelling against a vocabulary (the [#101] follow-up).
-- Set algebra in filters, via the conversation query DSL.
+- Declared value vocabularies with validation and ordered domains.
+- LLM-driven auto-labeling against a vocabulary (the [#101] follow-up).
+- Set algebra in filters via the conversation query DSL.
 - Reintroducing a creation-time label flag, if the two-command form proves
-  annoying once [RFD 050] Phase 1 has landed.
+  awkward once [RFD 050] Phase 1 has landed.
 
 ## References
 
-- [RFD 101]: Conversation Labels — the single-valued model this extends.
-- [RFD 050]: Scripting Ergonomics for Conversation Management — Phase 1 prints
-  the forked conversation's ID, so a script can label a fork it chose not to
-  activate.
-- [RFD 031]: Durable Conversation Storage with Workspace Projection —
-  `metadata.json` is git-visible, which is what makes value ordering a
-  diff-noise question.
-- [#101]: Conversation tags — the umbrella issue whose auto-tagging half this
-  unblocks.
+- [RFD 101]: Conversation Labels.
+  Defines the single-valued label model that this RFD extends.
+- [RFD 050]: Scripting Ergonomics for Conversation Management.
+  Phase 1 prints the forked conversation's ID so a script can label a
+  non-activated fork.
+- [RFD 031]: Durable Conversation Storage with Workspace Projection.
+  Makes `metadata.json` git-visible, which motivates deterministic key ordering.
+- [#101]: Conversation tags.
+  The umbrella issue whose auto-tagging work this RFD unblocks.
 
 [#101]: https://github.com/dcdpr/jp/issues/101
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md

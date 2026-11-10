@@ -13,77 +13,71 @@
 This RFD extends JP's response and stream models to represent provider-executed
 activity, exact provider replay payloads, and typed citations on assistant
 messages.
-Usage counters for provider-hosted activity are parsed and surfaced as
-diagnostics without being persisted.
-These types form the response-model foundation required before exposing
-provider-hosted tools ([RFD D71]).
+Provider adapters parse usage counters for hosted activity and surface them as
+diagnostics without persisting them.
+These types provide the response model required before exposing provider-hosted
+tools ([RFD D71]).
 
 ## Motivation
 
-### JP currently discards these artifacts
+### Adapters discard or fail to parse hosted-tool artifacts
 
-The OpenAI adapter drops three output-item kinds outright — `FileSearch`,
-`WebSearchResults`, and `ComputerToolCall` — in three places
+The OpenAI adapter drops three output-item kinds (`FileSearch`,
+`WebSearchResults`, and `ComputerToolCall`) in three places
 (`crates/jp_llm/src/provider/openai.rs:282`, `:1445`, `:1482`), along with the
-`WebSearchCallInitiated` / `Searching` / `Completed` stream events.
-The comment above the last of these is explicit that the variants are listed
-rather than wildcarded "so a new variant in the upstream event enum fails to
+`WebSearchCallInitiated`, `Searching`, and `Completed` stream events.
+The comment at `:1482` notes that the variants are listed explicitly rather than
+matched with a wildcard "so a new variant in the upstream event enum fails to
 compile until someone decides whether JP needs it."
-This RFD is that decision.
+This RFD makes that decision.
 
-The Anthropic path cannot even parse the artifacts.
-`async_anthropic::types::MessageContent` is an internally-tagged enum over six
+The Anthropic adapter cannot parse hosted-tool artifacts at all.
+`async_anthropic::types::MessageContent` is an internally tagged enum over six
 variants with no catch-all, so a `server_tool_use` content block fails
-deserialization and takes the stream down with it.
+deserialization and aborts the stream.
 
 ### The response model cannot carry attribution
 
-`ChatResponse::Message { message: String }` is a bare string.
+`ChatResponse::Message { message: String }` is a bare `String` and cannot hold
+structured attribution.
 Anthropic, OpenAI, and Google all impose attribution or display obligations on
 search-backed output, and Anthropic's citation payload carries a URL, title,
 cited text, and an `encrypted_index` that must round-trip.
-None of that fits in a `String`.
+Without structured attribution on `ChatResponse`, JP cannot render search-backed
+text with the required citations.
 
-This is a deeper gap than any configuration question: a feature that renders
-search-backed text without its citations is incomplete and potentially
-non-compliant, and the shape of `ChatResponse` is what makes it impossible.
-
-### Waiting makes it more expensive
+### Stabilizing `elelem` before modeling hosted output causes churn
 
 [RFD D45] proposes publishing the normalized streaming event model as the public
-API of a standalone `elelem` crate, and names hosted tools as a reason to prefer
+API of a standalone `elelem` crate, and cites hosted tools as a reason to prefer
 OpenAI's Responses API.
-Freezing an event model that cannot represent hosted activity or attribution
-means paying for this twice.
+Freezing that event model before it can represent hosted activity and
+attribution would force a breaking change once provider-hosted tools are added.
 
-### If nothing is done
-
-Provider-hosted tools cannot be exposed at all, because there is nowhere to put
-what comes back.
-The dropped OpenAI artifacts stay dropped, and the next provider adds a fourth
-site that discards them.
+Without a stream representation for hosted-tool output and citations,
+provider-hosted tools cannot be exposed, the OpenAI adapter continues dropping
+these artifacts, and each new provider adapter adds another discard site.
 
 ## Design
 
 ### Hosted activity is not a Tool Call
 
-JP already has a precise concept for "a callable operation whose request JP must
-fulfill": the Tool Call.
-Its contract is that JP resolves policy, dispatches a runtime, records a
-`ToolCallResponse`, and returns the result to the provider.
-Every consumer relies on it — `turn_loop.rs` prepares each committed
-`ToolCallRequest`, `ConversationStream::sanitize_orphaned_tool_calls` injects a
-response for any request lacking one, and the restart path scans for unresponded
+In JP, a **Tool Call** is an operation whose request JP itself must fulfill: JP
+resolves execution policy, dispatches a runtime, records a `ToolCallResponse`,
+and returns the result to the provider.
+Every consumer of tool-call events relies on this contract: `turn_loop.rs`
+prepares each committed `ToolCallRequest`,
+`ConversationStream::sanitize_orphaned_tool_calls` injects a synthetic response
+for any request lacking one, and the restart path scans for unresponded
 requests.
 
-Provider-hosted activity satisfies none of that.
-The provider runs the work inside its own agent loop and continues generating.
-JP *observes* it.
-
-Recording it as a `ToolCallRequest` would make the durable stream assert that JP
-dispatched work it never dispatched, and would put every one of those consumers
-in the position of needing an exception.
-It gets its own event kind instead.
+Provider-hosted activity does not follow this contract.
+The provider executes the tool inside its own agent loop and continues
+generating while JP only observes the resulting events.
+Recording hosted activity as a `ToolCallRequest` would falsely assert in the
+durable stream that JP dispatched the work and would force every
+`ToolCallRequest` consumer to add an exception.
+Hosted activity therefore uses a dedicated event kind.
 
 ### `EventKind::HostedActivity`
 
@@ -97,25 +91,24 @@ HostedActivity
     payload     ProviderPayload (see below), optional
 ```
 
-State changes are **append-only transitions** linked by `id`, not one event
-mutated in place.
-"Started with no terminal transition" therefore has a defined meaning: the
-activity began and never finished, which a reader can detect and a provider
-adapter can act on.
+State changes are recorded as **append-only transitions** linked by `id` rather
+than mutating an event in place.
+This matches the append-only stream principle ([RFD 064]) that provider-issued
+repairs already follow, where `jp_llm::event::record_patches` appends an overlay
+rather than rewriting target events.
+An activity with a `started` transition and no terminal (`completed` or
+`failed`) transition has a defined meaning: the activity began and never
+finished, which a stream reader can detect and a provider adapter can handle on
+continuation.
 
-Append-only is the established principle ([RFD 064]).
-Provider-issued repairs already follow it: `jp_llm::event::record_patches`
-appends an overlay rather than rewriting the events it targets.
-Hosted-activity transitions follow the same rule.
-
-`sanitize_orphaned_tool_calls` matches on `EventKind::ToolCallResponse` and
-`as_tool_call_request()`, so a distinct kind is invisible to it.
-Orphan repair stays exclusive to JP-dispatched Tool Calls with no new condition
-to remember.
+Because `sanitize_orphaned_tool_calls` matches on `EventKind::ToolCallResponse`
+and `as_tool_call_request()`, `HostedActivity` is ignored during orphan repair
+without any special-case check.
 
 ### `ProviderPayload`
 
-A typed envelope, not scattered metadata keys:
+`ProviderPayload` wraps provider-native replay data in a typed envelope rather
+than scattering loose keys across event metadata:
 
 ```text
 ProviderPayload
@@ -125,35 +118,39 @@ ProviderPayload
     value       the native payload
 ```
 
-Contract:
+The envelope enforces six rules:
 
-- **Only the originating provider interprets it.** Every other adapter preserves
-  it and ignores it.
-- **Immutable.** No consumer rewrites it.
-  Compaction is non-destructive ([RFD 064]) and adds overlays, so this holds by
-  construction.
-- **Unknown versions round-trip unmodified.** A payload written by a newer JP is
-  carried, not rejected.
+- **Interpreted only by the originating provider.** Every other adapter
+  preserves the payload in the stream and ignores it.
+- **Immutable.** No consumer rewrites a stored payload.
+  Because compaction is non-destructive ([RFD 064]) and applies overlays rather
+  than mutating events, payloads remain unchanged by construction.
+- **Unknown versions round-trip unmodified.** Older JP versions preserve and
+  forward payloads written with newer format versions rather than rejecting
+  them.
 - **`version` records the wire contract selected at start.** Anthropic's web
-  search alone has three versions with different fields and defaults; without a
-  recorded selection, a JP upgrade continues an activity under a contract it did
-  not begin under.
-- **Untrusted content.** The payload may contain arbitrary web content and is
-  never rendered or logged directly (see [RFD 096]).
+  search tool has three versions with different fields and defaults; recording
+  `version` prevents a JP upgrade from continuing an in-progress activity under
+  a different wire contract.
+- **Untrusted content.** Because `value` may contain arbitrary web content, JP
+  never renders or logs it directly (see [RFD 096]).
 - **A present-but-undecodable payload is an error**, not a silent downgrade.
-  This is distinct from a payload whose *continuation requirements* cannot be
-  met, which is the consuming RFD's concern.
+  If a payload for the active provider fails to decode, the adapter returns an
+  error.
+  Handling valid payloads whose *continuation requirements* cannot be met
+  belongs to the consuming RFD ([RFD D71]).
 
-`value` is inline for now.
-Anthropic's search payloads are large, so the envelope leaves room for a blob
-reference once [RFD 066] exists; nothing here depends on that.
+`value` is stored inline in the event stream.
+Because Anthropic's search payloads are large, the envelope can later hold a
+blob reference once [RFD 066] is implemented without changing the surrounding
+event model.
 
 ### Citations on assistant content
 
-Citations annotate assistant text, so they attach to the assistant content
-event, not to hosted activity.
-A typed attribution keeps four things apart, because they answer different
-questions:
+Citations annotate assistant text, so they attach to the assistant content event
+(`ChatResponse::Message`) rather than to `HostedActivity`.
+Each `Attribution` separates the source metadata, the quoted excerpt, the text
+span within the assistant message, and the provider replay payload:
 
 ```text
 Attribution
@@ -164,206 +161,197 @@ Attribution
 ```
 
 The content event itself is the answer-side anchor.
-Anthropic emits each cited passage as its own text block, which becomes its own
-event, so the block is the anchor and `range` is absent.
-OpenAI's `url_citation` carries offsets into the response text, which become
+Anthropic emits each cited passage as its own text block (and therefore its own
+event), so the block is the anchor and `range` is absent.
+OpenAI's `url_citation` carries offsets into the response text, which populate
 `range`.
-`excerpt` is always source-side text and never stands in for `range`.
+`excerpt` always holds text quoted from the source and never substitutes for
+`range`.
 
-`range` addresses the event's final stored text.
-An adapter that rewrites text after citations arrive (the Anthropic max-token
-continuation trims overlapping text) remaps every range it keeps, or drops it.
-A stale range is never persisted.
+`range` indexes into the event's final stored text.
+An adapter that modifies text after citations arrive (such as Anthropic's
+max-token continuation trimming overlapping text) must remap or drop affected
+ranges so stale offsets are never persisted.
 
 #### Streaming lifecycle
 
 Citations stream inside a text block: Anthropic sends one `citations_delta` per
 citation before `content_block_stop`.
-The adapter forwards each citation with its block's index as it arrives,
+As each citation arrives, the adapter forwards it with its block index,
 `EventBuilder` appends it to that block's attribution list, and `Flush`
 finalizes the event.
 
-Flush is not the only point where citations reach storage.
-When a stream is interrupted or retried, `EventBuilder::peek_partial_events`
-commits unflushed message text as its own event.
-That event carries the citations received so far, marked incomplete, so a reader
-can tell a block that cites nothing from a block cut off before its attribution
-finished.
-Partial commits drop all other accumulated metadata, which is correct for
-thinking signatures because partial reasoning is resent unsigned; citations are
-the exception.
+Citations are also preserved when a stream is interrupted or retried.
+`EventBuilder::peek_partial_events` commits unflushed message text as its own
+event and attaches the citations received so far, marked incomplete, so a reader
+can distinguish an uncited block from a block truncated before its attribution
+finished streaming.
+Partial commits drop all other accumulated metadata, including thinking
+signatures, because partial reasoning is resent unsigned.
 
 ### Usage
 
 Anthropic reports hosted-activity counters
-(`usage.server_tool_use.web_search_requests`), billed separately from tokens.
+(`usage.server_tool_use.web_search_requests`), which are billed separately from
+tokens.
 
-JP persists no token usage today.
-No HTTP provider adapter reads its usage counters, and the ACP adapter keeps
-usage out of event metadata and reports it as a `debug` diagnostic
-(`anthropic/acp/usage.rs`).
-Hosted counters take the same path: the adapter parses and reports them, and
-they do not enter the conversation stream.
+JP does not persist token usage: no HTTP provider adapter reads its usage
+counters, and the ACP adapter keeps usage out of event metadata and logs it as a
+`debug` diagnostic (`anthropic/acp/usage.rs`).
+Hosted-activity counters follow the same path: the adapter parses and logs them
+without writing them to the conversation stream.
 
-The spend is still visible.
-Every hosted search is recorded as a `HostedActivity` event, so a consumer can
-count searches from the durable stream.
-That count approximates billed requests; whether a failed search is billed is
-unverified.
-Persisting usage belongs with provider-response identity; see Non-Goals.
+Consumers can still approximate billed requests by counting `HostedActivity`
+events in the durable stream, though whether providers bill for failed searches
+is unverified.
+Persisting usage counters requires provider-response identity; see Non-Goals.
 
 ### Two projections
 
-The result is that a conversation carrying hosted activity has two readings:
+A conversation carrying hosted activity supports two projections:
 
-- **Portable** — activity name, state, input, summary, plus assistant text and
-  citations.
-  Survives export, search, rendering, and switching provider.
-- **Provider-native** — the payload, meaningful only to the originating
-  provider, used for exact replay.
+- **Portable**: the activity name, state, input, and summary, together with the
+  assistant text and citations.
+  This projection survives export, search, rendering, and provider switches.
+- **Provider-native**: the `ProviderPayload`, which only the originating
+  provider reads for exact multi-turn replay.
 
 ## Drawbacks
 
-**A new `EventKind` variant touches every exhaustive match.** At least seven
-that I verified: `jp_attachment_internal/src/lib.rs`,
-`jp_cli/src/cmd/query/tool/inquiry.rs`, `jp_cli/src/editor.rs`,
-`jp_cli/src/render/turn.rs`, two in `jp_cli/src/shared/search.rs`, and
-`jp_conversation/src/storage.rs`.
+**Adding an `EventKind` variant updates every exhaustive match.** At least seven
+call sites match exhaustively on `EventKind`:
+`jp_attachment_internal/src/lib.rs`, `jp_cli/src/cmd/query/tool/inquiry.rs`,
+`jp_cli/src/editor.rs`, `jp_cli/src/render/turn.rs`, two in
+`jp_cli/src/shared/search.rs`, and `jp_conversation/src/storage.rs`.
 Provider `convert_event` implementations and the `serve-web` plugin's renderer
-also need arms.
-This is the cost of not overloading Tool Call, and it is paid once.
+also require new match arms.
+This is a one-time cost of keeping `HostedActivity` distinct from Tool Call.
 
-**Citations change a type every consumer of assistant text reads.** Adding
-attribution to `ChatResponse::Message` means every reader that pattern-matches
-message content sees a changed shape, even readers with no interest in
-citations.
+**Adding citations changes the shape of `ChatResponse::Message`.** Every
+consumer that pattern-matches on message content must handle the attribution
+field, even when it does not use citations.
 
-**The portable projection is lossy by design.** Switching provider
-mid-conversation preserves the final assistant text, citations, and normalized
-activity, but not the native state.
-That is a deliberate limit, not an oversight — see Alternatives.
+**The portable projection is lossy across provider switches.** Switching
+providers mid-conversation preserves the final assistant text, citations, and
+normalized activity, but drops the provider-native replay state (see
+Alternatives).
 
-**Nothing user-visible ships.** This RFD cannot be validated by a user-facing
-behavior on its own; its first real test is its consumer.
+**No user-visible behavior ships in this RFD.** These types cannot be validated
+through user-facing behavior until a provider adapter emits them in [RFD D71].
 
 ## Alternatives
 
-**Record hosted activity as a `ToolCallRequest` / `ToolCallResponse` pair, with
-a marker.** Rejected.
-It requires JP to fabricate a response for work it never dispatched, and needs
-coordinated exceptions in the turn loop, the execution plan, and orphan
-sanitization.
-Explored at length before this RFD; every iteration added another exception,
-which is the signal that the model was wrong rather than incomplete.
+**Record hosted activity as a `ToolCallRequest` / `ToolCallResponse` pair with a
+marker.** This approach requires JP to fabricate a response for work it never
+dispatched and requires coordinated exceptions across the turn loop, the
+execution plan, and orphan sanitization.
+Earlier iterations took this approach, and each required another special case.
 
 **Produce a portable textual digest of native results so they survive a provider
-switch.** Rejected.
-Anthropic's `encrypted_content` is useful only to Anthropic, so any digest is
-fabricated rather than translated: it cannot reproduce the original context, and
-it risks surfacing content the provider deliberately kept opaque.
-Preserve the final assistant text and normalized activity instead.
+switch.** Anthropic's `encrypted_content` is opaque to other providers, so any
+digest would be fabricated rather than translated: it cannot reproduce the
+original context and risks surfacing content the provider deliberately kept
+opaque.
+Preserving the final assistant text and normalized activity is sufficient.
 
-**Store the native payload as loose metadata keys**, as thinking signatures do
-today.
-Rejected for a payload that must carry provider identity, format, and version —
-three fields whose relationship matters.
-The signature precedent is a single opaque string; this is a structured envelope
-with a contract.
+**Store the native payload as loose metadata keys.** Thinking signatures use a
+flat metadata key because a signature is a single opaque string.
+A replay payload must carry provider identity, format, and version as a single
+validated unit, which requires the structured `ProviderPayload` envelope.
 
-**Extend `ChatResponse` with a hosted-activity variant** rather than adding an
-`EventKind`.
-Rejected: hosted activity is not assistant-authored content, and folding it in
-means every consumer of assistant text handles a variant that has no text.
+**Extend `ChatResponse` with a hosted-activity variant instead of adding an
+`EventKind`.** Hosted activity is provider-executed tool state, not
+assistant-authored content, and placing it on `ChatResponse` would force every
+consumer of assistant text to handle a variant with no text.
 
 ## Non-Goals
 
-**Provider-response identity and durable usage.** A single `ChatRequest`
-produces many provider responses (max-token chaining, retries, paused-turn
-continuations, tool cycles), and JP has no way to say which response produced
-which events.
-Usage is a property of a provider response, so persisting it needs that identity
-first; attaching counters to whichever event happened to be last records them
-against the wrong thing.
-Both are deferred on scope: the first consumer needs neither.
+**Provider-response identity and durable usage.** A single `ChatRequest` can
+produce multiple provider responses across max-token chaining, retries,
+paused-turn continuations, and tool cycles, and JP does not record which
+response produced which events.
+Because usage is a property of a provider response, attaching counters to the
+last event in a sequence would misattribute them.
+Both provider-response identity and durable usage are deferred because the first
+consumer ([RFD D71]) needs neither.
 [RFD 097] is Implemented and supplies the stable-identifier primitive a
 provider-response record would build on, so a later RFD can add both without a
 dependency gate.
 
-**Rendering.** This RFD defines the data a renderer needs.
-Terminal and web rendering, including the citation-display obligations, belong
-to the consuming RFD, where they gate a user-visible feature.
+**Rendering.** This RFD defines the stream data structures only.
+Terminal and web rendering, including citation-display obligations, belong to
+the consuming RFD ([RFD D71]), where they gate a user-visible feature.
 
-**Any specific provider's hosted tools.** No configuration surface, no request
-translation, no provider capability list.
+**Provider-specific hosted tools.** This RFD adds no configuration surface,
+request translation, or provider capability list.
 
 **Portable native state.** See Alternatives.
 
 ## Risks and Open Questions
 
-- **This constrains [RFD D45].** D45 should not publish `elelem::Event` as
-  public API before accounting for hosted activity and attribution, or the new
-  crate breaks immediately or routes hosted artifacts through generic metadata
-  — recreating the problem this RFD removes.
-- **`async-anthropic` needs extending before any of this is observable.** The
-  fork's `MessageContent` cannot parse `server_tool_use`, `ContentBlockDelta`
-  has no `citations_delta`, `Text` has no `citations`, and `Usage` has no
-  `server_tool_use` counters.
-  Whether serde can express a catch-all arm on that internally-tagged enum needs
-  verifying — `#[serde(other)]` covers unit variants only, so an untagged
-  `Unknown(Map)` arm is the likely shape, mirroring what `types::Tool` already
-  does.
-- **The normalized activity shape is derived from two providers.** Anthropic
-  pairs a call block with a result block; OpenAI emits a call item plus an
-  annotated message; Google may expose only completed grounding metadata with no
-  call/result pair at all.
-  `started | completed | failed` may not survive contact with Google.
-  Validating against a second provider is the consuming RFD's job.
-- **Citation shape across providers is unverified.** Anthropic's
-  `web_search_result_location` is the only one modelled here.
-- **`range` needs one coordinate unit.** OpenAI's `url_citation` offsets are the
-  only source of ranges, and whether they count bytes or code points is
-  unverified.
-  The unit `range` stores is chosen once that is known.
+- **Sequencing with [RFD D45].** [RFD D45] should not publish `elelem::Event` as
+  a public API before accounting for hosted activity and attribution; otherwise
+  the new crate will either break immediately or route hosted artifacts through
+  generic metadata, recreating the problem this RFD solves.
+- **Extending `async-anthropic` deserialization.** The fork's `MessageContent`
+  cannot parse `server_tool_use`, `ContentBlockDelta` has no `citations_delta`,
+  `Text` has no `citations`, and `Usage` has no `server_tool_use` counters.
+  Whether serde can express a catch-all arm on the internally tagged
+  `MessageContent` enum also requires verification: `#[serde(other)]` covers
+  unit variants only, so an untagged `Unknown(Map)` variant is the likely shape,
+  mirroring `types::Tool`.
+- **Generalizing the activity lifecycle beyond two providers.** Anthropic pairs
+  a call block with a result block, and OpenAI emits a call item plus an
+  annotated message, whereas Google may expose only completed grounding metadata
+  with no call/result pair.
+  The `started | completed | failed` state model may need adjustment when
+  validated against Google in the consuming RFD.
+- **Citation shapes across providers.** Anthropic's `web_search_result_location`
+  is the only citation payload modeled in detail here; other providers' citation
+  structures remain to be verified.
+- **Coordinate unit for `range`.** OpenAI's `url_citation` offsets are the only
+  source of ranges, and whether they count bytes or code points is unverified.
+  The coordinate unit stored in `range` will be fixed once that is verified.
 
 ## Implementation Plan
 
 ### Phase 1: `async-anthropic` support
 
-Extend the fork: `server_tool_use` and `web_search_tool_result` content blocks,
-an unknown-block arm, `Text::citations`, the `citations_delta` stream delta,
-`Usage::server_tool_use`, and the `pause_turn` stop reason.
-No JP changes.
-Independently mergeable, and a prerequisite for observing anything below.
+Extend the `async-anthropic` fork with `server_tool_use` and
+`web_search_tool_result` content blocks, an unknown-block fallback arm,
+`Text::citations`, the `citations_delta` stream delta, `Usage::server_tool_use`,
+and the `pause_turn` stop reason.
+This phase makes no changes to JP crates, is independently mergeable, and is a
+prerequisite for observing the artifacts below.
 
 ### Phase 2: `ProviderPayload` and `EventKind::HostedActivity`
 
-Add both types in `jp_conversation`, with serialization, `sanitize` behavior
-(none), and the exhaustive-match arms listed under Drawbacks.
-Includes the append-only transition rule.
-Independently mergeable; nothing produces the event yet.
+Add both types in `jp_conversation`, with serialization, no-op `sanitize`
+behavior, the append-only transition rule, and the exhaustive-match arms listed
+under Drawbacks.
 
 ### Phase 3: Streaming path
 
-An `EventPart` variant carrying hosted activity, plus `EventBuilder`
-accumulation and flush.
-Independently mergeable; no provider emits it yet.
+Add an `EventPart` variant carrying hosted activity, along with `EventBuilder`
+accumulation and flush support.
 
 ### Phase 4: Citations
 
-Typed attribution on assistant content: accumulation while the block streams,
-finalization on flush, and preservation, marked incomplete, on a partial commit.
-Independently mergeable.
+Add typed `Attribution` to assistant content, accumulate citations while a block
+streams, finalize them on `Flush`, and preserve incomplete citations on partial
+commits.
 
-Phases 2 through 4 are all inert until a provider adapter produces the
-artifacts, which is the consuming RFD's first phase.
+Each phase is independently mergeable.
+Phases 2 through 4 remain inert until a provider adapter produces these
+artifacts in [RFD D71].
 
 ## References
 
-- `crates/jp_llm/src/provider/openai.rs` — the discarded output items
-- `crates/jp_conversation/src/event.rs` — `EventKind`, `ChatResponse`
-- `crates/jp_llm/src/event_builder.rs` — flush-metadata accumulation and
-  partial commits
-- `crates/jp_llm/src/provider/anthropic/acp/usage.rs` — usage reported as a
+- `crates/jp_llm/src/provider/openai.rs`: the discarded output items
+- `crates/jp_conversation/src/event.rs`: `EventKind`, `ChatResponse`
+- `crates/jp_llm/src/event_builder.rs`: flush-metadata accumulation and partial
+  commits
+- `crates/jp_llm/src/provider/anthropic/acp/usage.rs`: usage reported as a
   diagnostic
 - <https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools>
 

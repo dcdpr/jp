@@ -11,12 +11,13 @@
 
 ## Summary
 
-This RFD extends the inquiry system ([RFD 028]) with a dedicated assistant
-configuration (model, system prompt, and request settings) for inquiry requests.
-Global defaults live at `conversation.inquiry.assistant`, with per-question
-overrides via `QuestionTarget::Assistant(PartialAssistantConfig)`, allowing
-inquiries to route to smaller models with stable schemas and a configurable
-`CachePolicy`.
+This RFD extends the inquiry system ([RFD 028]) with dedicated assistant
+configuration (model, system prompt, and request settings) for tool inquiries.
+Global defaults live at `conversation.inquiry.assistant`, and individual
+questions can override them via
+`QuestionTarget::Assistant(PartialAssistantConfig)`.
+Together with stable output schemas and a configurable `CachePolicy`, this lets
+inquiries run on smaller models with their own prompt cache.
 
 ## Motivation
 
@@ -25,35 +26,38 @@ from the assistant.
 Every inquiry triggers a **complete prompt cache miss** on Anthropic for two
 reasons:
 
-1. **Empty tool list.** The inquiry sends `tools: vec![]` while normal requests
-   include full tool definitions.
-   Since tools are the first component of the cache prefix hierarchy (`tools →
-   system → messages`), this invalidates everything.
-   (Fixed separately by passing the same tools — but insufficient alone.)
+1. **Empty tool list.** Inquiry requests send `tools: vec![]`, whereas normal
+   requests include the full tool definitions.
+   Because tools are the first component of the cache prefix (`tools → system
+   → messages`), omitting them invalidates the entire cache.
+   Passing the same tool definitions fixes this mismatch, but the second issue
+   still invalidates the cache.
 
-2. **Structured output.** The inquiry uses `output_config.format`, which causes
-   Anthropic to inject an additional system prompt.
-   From the [Anthropic docs][structured-docs]:
+2. **Structured output.** Inquiry requests set `output_config.format`, which
+   causes Anthropic to inject an additional system prompt.
+   As noted in the [Anthropic docs][structured-docs]:
 
    > Changing the output_config.format parameter will invalidate any prompt
    > cache for that conversation thread.
 
-   Even with matching tools, the system-level cache misses because the injected
-   system content differs.
+   Even when the tool definitions match, the injected system content changes the
+   system prompt and invalidates the cache for the system prompt and all
+   subsequent messages.
 
-If we take a base cost of $5/MTok (Claude Opus 4.6), and a median conversation
-of 100k tokens at a cache-write cost (125% of base), paying $0.625 per inquiry.
-For turns with 3 inquiries (common with multi-file modifications), that is
-$1,875 in avoidable cost.
+At a base input cost of $5/MTok (Claude Opus 4.6) and a cache-write rate of 125%
+of base, a 100k-token conversation costs $0.625 per inquiry.
+A turn with three inquiries, which is common during multi-file edits, adds
+$1.875 in avoidable cache writes.
 
-### Why cache preservation doesn't work
+### Why cache preservation falls short
 
-An alternative approach ([RFD 033]) proposes replacing structured output with a
-built-in `answer_inquiry` tool to preserve the cache prefix.
-This avoids the structured output injection, but `tool_choice` changes (from
-`Auto` to `Function("answer_inquiry")`) still invalidate the **messages** cache
-— which is the bulk of the tokens (~80%).
-The savings are therefore marginal.
+[RFD 033] proposes replacing structured output with a built-in `answer_inquiry`
+tool to keep the cache prefix intact.
+That avoids the system prompt injection from `output_config.format`, but
+changing `tool_choice` from `Auto` to `Function("answer_inquiry")` still
+invalidates the **messages** cache, which accounts for roughly 80% of the prompt
+tokens.
+The savings are marginal:
 
 | Approach                                       | Cost per inquiry (Opus 4.6, ~100k Ctx) |
 | ---------------------------------------------- | -------------------------------------- |
@@ -63,20 +67,20 @@ The savings are therefore marginal.
 | **This RFD (Haiku 4.5, cached, 2nd+ inquiry)** | **~$0.02**                             |
 | **This RFD (Haiku 3, uncached)**               | **~$0.025**                            |
 
-The right framing is not "preserve the main model's cache" but "use a cheap
-model and build its own cache."
+Routing inquiries to a smaller model with its own cache cuts the cost far more
+than trying to preserve the main model's cache.
 
 ## Design
 
 ### Overview
 
-Route inquiry requests to a dedicated, cheap model instead of reusing the parent
-conversation's model.
-The inquiry backend builds its own provider, model, and system prompt from
-configuration.
-Since the inquiry goes to a different model, it has zero impact on the main
-conversation's cache — and with stable schemas, multiple inquiries within a
-turn can reuse each other's cache.
+The inquiry backend routes inquiry requests to a dedicated model instead of
+reusing the parent conversation's model, building its own provider, model, and
+system prompt from configuration.
+Because inquiries run against a separate model, they do not affect the main
+conversation's prompt cache.
+With stable output schemas, multiple inquiries within the same turn also share a
+prompt cache with one another.
 
 ```txt
 Main conversation (Opus 4.6):
@@ -103,8 +107,8 @@ system_prompt = "Answer tool questions concisely based on the conversation conte
 request.cache = "off"
 ```
 
-The `assistant` field is a `PartialAssistantConfig`.
-Unset fields fall back to the parent assistant config.
+The `assistant` field is a `PartialAssistantConfig`, and unset fields fall back
+to the parent `assistant` config.
 
 ```rust
 /// Inquiry-specific configuration.
@@ -119,8 +123,7 @@ pub struct InquiryConfig {
 
 #### Per-question override: `QuestionTarget::Assistant`
 
-The existing `QuestionTarget::Assistant` variant gains an inline
-`PartialAssistantConfig`:
+`QuestionTarget::Assistant` carries an inline `PartialAssistantConfig`:
 
 ```rust
 pub enum QuestionTarget {
@@ -147,12 +150,14 @@ model.id = "anthropic/claude-haiku-3"
 ```
 
 The string `"assistant"` deserializes to
-`Assistant(PartialAssistantConfig::default())` — all fields `None`, meaning
-"use global inquiry defaults, then main model defaults."
+`Assistant(PartialAssistantConfig::default())`, where all fields are `None` and
+resolution falls back to the global inquiry defaults and then the parent
+`assistant` config.
 
 #### Resolution order
 
-When an inquiry fires, the effective config is resolved by merging three layers:
+When an inquiry runs, its effective configuration is resolved by merging three
+layers:
 
 ```
 per-question PartialAssistantConfig   (from QuestionTarget::Assistant)
@@ -162,11 +167,12 @@ conversation.inquiry.assistant        (global inquiry defaults)
 assistant                             (main model config)
 ```
 
-This follows the same merge-partial pattern used throughout the config system.
+This uses the same partial-config merge pattern as the rest of the configuration
+system.
 
-### CachePolicy on RequestConfig
+### `CachePolicy` on `RequestConfig`
 
-A new `cache` field on `RequestConfig` controls prompt caching behavior:
+A `cache` field on `RequestConfig` controls prompt caching:
 
 ```rust
 pub enum CachePolicy {
@@ -197,18 +203,19 @@ cache = "long" # Long (1h)
 cache = "10m" # Custom(10 minutes)
 ```
 
-When `Off`, the Anthropic provider skips the top-level `cache_control` and all
-explicit breakpoints.
-Other providers follow the same flag.
-The `Short` and `Long` variants map to Anthropic's `ephemeral` with default and
-`1h` TTL respectively.
-`Custom` durations are passed through where supported (e.g., Google) and rounded
-to the nearest available option otherwise.
+When `cache` is `Off`, the Anthropic provider omits the top-level
+`cache_control` field and all explicit cache breakpoints; other providers
+respect the same setting.
+On Anthropic, `Short` and `Long` map to `ephemeral` with the default TTL and a
+`1h` TTL, respectively.
+Providers that support arbitrary TTLs (such as Google) receive `Custom`
+durations directly; providers with fixed tiers round to the nearest supported
+duration.
 
 ### Stable inquiry schemas
 
-Currently, each inquiry schema includes a `const` field with a unique inquiry
-ID:
+In [RFD 028], each inquiry schema embeds the unique inquiry ID in a `const`
+field:
 
 ```json
 {
@@ -224,14 +231,15 @@ ID:
 }
 ```
 
-This changes the schema per inquiry, which:
+Embedding the ID changes the schema on every inquiry, which has two costs:
 
-- Invalidates the prompt cache (different `output_config.format`).
-- Forces recompilation of the grammar artifact (Anthropic caches compiled
-  grammars by schema, with additional latency on the first use of each schema).
+- It invalidates the prompt cache because `output_config.format` changes.
+- It forces the provider to recompile the grammar artifact on each inquiry
+  (Anthropic caches compiled grammars by schema, adding latency the first time a
+  schema is seen).
 
-The fix: remove `inquiry_id` from the schema.
-The schema becomes stable per answer type:
+Removing `inquiry_id` from the schema makes the schema stable for each answer
+type:
 
 ```json
 {
@@ -248,40 +256,42 @@ The schema becomes stable per answer type:
 }
 ```
 
-The inquiry ID moves to the prompt text: "The inquiry ID is
-`call_abc.apply_changes`."
-The `ActiveInquiry` struct already tracks the ID on our side — the schema
-`const` was a statelessness convenience, not a requirement.
-The coordinator's `spawn_inquiry` already knows which tool call each inquiry
-belongs to.
+The inquiry ID moves to the prompt text ("The inquiry ID is
+`call_abc.apply_changes`.").
+The `const` field in the schema was only a convenience for stateless matching;
+`ActiveInquiry` already tracks the ID, and the coordinator's `spawn_inquiry`
+knows which tool call owns each inquiry.
 
 With stable schemas, multiple inquiries of the same answer type within a turn
 share the same `output_config.format`.
-Combined with matching tools (empty) and system prompt, this enables prompt
-cache hits on the shared prefix:
+Combined with an empty tool list and a shared system prompt, subsequent
+inquiries hit the prompt cache on the shared prefix:
 
 | Inquiry     | Schema           | Prefix match                     | Cache behavior       |
 | ----------- | ---------------- | -------------------------------- | -------------------- |
-| 1 (boolean) | `{answer: bool}` | —                                | Write 100% tokens    |
+| 1 (boolean) | `{answer: bool}` | None                             | Write 100% tokens    |
 | 2 (boolean) | `{answer: bool}` | tools + system + shared messages | Read ~95%, write ~5% |
 | 3 (boolean) | `{answer: bool}` | tools + system + shared messages | Read ~95%, write ~5% |
 
-Select questions still vary by option set (`enum` values differ).
-Two approaches:
+`Select` questions still produce distinct schemas when their option sets (`enum`
+values) differ.
+Two approaches were considered:
 
-1. Move options to prompt text and use `{"answer": {"type": "string"}}` for all
-   selects.
-   Loses schema-level validation but stabilizes the schema.
-2. Accept that select inquiries with different option sets don't cache-share.
-   Boolean and text are the common cases.
+1. Move the options into the prompt text and use `{"answer": {"type":
+   "string"}}` for all select questions.
+   This stabilizes the schema across option sets but drops schema-level
+   validation.
+2. Keep the `enum` constraint in the schema and accept that select inquiries
+   with different option sets do not share a cache entry.
 
-Approach 2 is strictly better, as it keeps the type safety of the schema.
+Because boolean and free-text inquiries are the common cases, keeping schema
+validation (option 2) outweighs cache sharing across distinct `Select` prompts.
 
 ### Inquiry backend changes
 
-`LlmInquiryBackend` stores the resolved (merged) defaults from the global
-inquiry config and parent assistant config.
-No "override" fields — the stored values ARE the final defaults.
+`LlmInquiryBackend` merges `conversation.inquiry.assistant` onto the parent
+`assistant` config at construction time and stores the resolved values directly
+as its defaults:
 
 ```rust
 pub struct LlmInquiryBackend {
@@ -294,12 +304,11 @@ pub struct LlmInquiryBackend {
 }
 ```
 
-When `inquire` is called, it receives the per-question `PartialAssistantConfig`
-(if any).
-If the partial is empty (all `None`), the backend uses its stored defaults
-directly.
-If the partial has overrides, it merges them on top and resolves a provider from
-the `Ctx` provider registry.
+When `inquire` is called, it receives the per-question `PartialAssistantConfig`.
+When that partial is empty (all fields `None`), the backend uses its stored
+defaults directly.
+When the partial specifies overrides, the backend merges them onto its defaults
+and retrieves the target provider from the `Ctx` provider registry.
 
 The `InquiryBackend` trait signature gains the per-question config:
 
@@ -317,16 +326,16 @@ pub trait InquiryBackend: Send + Sync {
 }
 ```
 
-In all cases, the inquiry:
+Every inquiry request:
 
 - Sends `tools: vec![]` and `ToolChoice::None`.
-- Uses a stable schema (no `inquiry_id` in the schema).
-- Keeps structured output for type safety.
+- Uses a stable per-answer-type schema without `inquiry_id`.
+- Uses structured output for type-safe answers.
 
 ### Provider registry on `Ctx`
 
 To avoid constructing duplicate providers and to support per-question model
-overrides efficiently, `Ctx` gains a provider registry:
+overrides efficiently, `Ctx` caches providers in a registry:
 
 ```rust
 pub struct Ctx {
@@ -335,14 +344,16 @@ pub struct Ctx {
 }
 ```
 
-Providers are constructed on first use and cached for the process lifetime.
-The inquiry backend grabs providers from this registry rather than constructing
-its own.
-This also benefits future multi-model features.
+Providers are constructed on first use and cached for the lifetime of the
+process.
+The inquiry backend retrieves providers from this registry instead of
+constructing its own instances, and other multi-model features can share the
+same cache.
 
 ### Structured output support on `ModelDetails`
 
-Add a convenience method for checking structured output support:
+`ModelDetails` exposes a helper to check whether a model supports structured
+output:
 
 ```rust
 impl ModelDetails {
@@ -352,27 +363,29 @@ impl ModelDetails {
 }
 ```
 
-At startup, if the inquiry model is configured, validate that it supports
-structured output.
-If `None` (unknown model, e.g. custom deployment), accept with a warning.
-If explicitly unsupported (known model without the feature), surface a clear
-error before starting any work.
+At startup, JP validates that every configured inquiry model supports structured
+output.
+If `structured_output` is `Some(false)` (a known model without structured output
+support), startup fails with an error before any work begins.
+If it is `None` (an unknown model, such as a custom deployment), JP logs a
+warning and proceeds.
 
 ### Default behavior
 
-When no inquiry config is set (`conversation.inquiry` absent, question target is
-`"assistant"` string), the inquiry uses the parent conversation's model, system
-prompt, and caching.
-This preserves backward compatibility with [RFD 028].
+When `conversation.inquiry` is unset and a question uses `target = "assistant"`,
+inquiries inherit the parent conversation's model, system prompt, and cache
+policy, preserving backward compatibility with [RFD 028].
 
-To use a cheap model, set the global default:
+Set `conversation.inquiry.assistant` to route all assistant inquiries to a
+smaller model by default:
 
 ```toml
 [conversation.inquiry.assistant]
 model.id = "anthropic/claude-haiku-4-5"
 ```
 
-To override for a specific question:
+Set `target` on an individual question to override the model for that question
+alone:
 
 ```toml
 [tools.fs_modify_file.questions.apply_changes]
@@ -381,51 +394,53 @@ target.model.id = "anthropic/claude-haiku-3"
 
 ## Drawbacks
 
-- **Cheaper model may make worse decisions.** Haiku is less capable than Opus at
+- **Smaller models may give worse answers.** Haiku is less capable than Opus at
   reasoning about complex tool interactions.
-  For simple boolean questions ("Create backup?") this is unlikely to matter.
-  For complex free-text questions it could.
-  The per-question granularity lets users route complex questions to a more
-  capable model.
+  That rarely matters for simple boolean prompts such as "Create backup?", but
+  it can degrade answers to open-ended text questions.
+  Per-question overrides let users route demanding questions to a stronger
+  model.
 
-- **Config complexity.** Three-layer merge (per-question → global inquiry →
-  parent assistant) is powerful but adds cognitive overhead.
-  The simple case (`target = "assistant"` with a global default) should be
-  well-documented as the recommended starting point.
+- **Configuration layering.** Merging three layers (per-question override,
+  global inquiry default, and parent assistant config) adds mental overhead.
+  Documentation should lead with the common setup: a single global default in
+  `conversation.inquiry.assistant` paired with `target = "assistant"` on each
+  question.
 
-- **Provider registry lifecycle.** Storing providers on `Ctx` means they live
-  for the process lifetime.
-  If credentials rotate during a long session, the old provider persists.
-  Acceptable for CLI usage; may need revisiting for long-lived server processes.
+- **Provider registry lifetime.** Providers cached on `Ctx` live for the entire
+  process.
+  If credentials rotate during a long-running session, the cached provider keeps
+  using the old credentials.
+  This is acceptable for short-lived CLI invocations but may need revisiting for
+  long-lived server processes.
 
 ## Alternatives
 
 ### Cache-preserving tool use (RFD 033)
 
-Replace structured output with a built-in `answer_inquiry` tool to preserve the
-cache prefix.
-Saves ~$0.03 per inquiry because `tool_choice` changes still invalidate the
-messages cache (~95k tokens).
-This RFD saves ~$0.50+ per inquiry by using a cheap model.
+Replacing structured output with a built-in `answer_inquiry` tool ([RFD 033])
+preserves the tool and system cache prefix, but changing `tool_choice` still
+invalidates the messages cache (~95k tokens).
+That saves only about $0.03 per inquiry on Opus 4.6, whereas routing inquiries
+to a smaller model saves more than $0.50 per inquiry.
 
 ### Subset config (`InquiryAssistantConfig`)
 
-Define a focused subset of `AssistantConfig` with only the fields relevant to
-inquiries.
-Rejected: there's nothing in `AssistantConfig` that can't be useful for
-inquiries (system prompt, instructions, model parameters, request config).
-Using the full `PartialAssistantConfig` is more flexible and avoids maintaining
-a parallel config type.
+Defining a narrower `InquiryAssistantConfig` struct with only inquiry-specific
+fields was rejected because every part of `AssistantConfig` (system prompt,
+instructions, model parameters, and request settings) can be useful for an
+inquiry.
+Reusing `PartialAssistantConfig` is more flexible and avoids maintaining a
+parallel config type.
 
 ### Context compaction
 
-Reduce the conversation context sent to the inquiry model (e.g., last 1-2 turns
-only).
-Could bring inquiry cost down to ~$0.001 even on Haiku 3.
-Left as a future optimization — the current approach sends the full
-conversation stream, which is safe and correct.
-Compaction requires heuristics about what context the model needs, which first
-needs to be resolved in an RFD.
+Sending only recent conversation context (such as the last one or two turns) to
+the inquiry model could reduce the cost per inquiry to ~$0.001 on Haiku 3.
+However, deciding which context an inquiry needs requires compaction heuristics
+that merit their own RFD.
+Sending the full conversation stream is safe and accurate, so compaction is
+deferred.
 
 ## Known Limitations
 
@@ -433,146 +448,145 @@ needs to be resolved in an RFD.
 
 When the inquiry model has a smaller context window than the main model, the
 inquiry backend truncates older conversation events to fit.
-The truncation uses a character-based token estimate (~3 chars/token) with a 20%
-overhead margin for system prompt, tools, and provider metadata.
+The token count is estimated from character length (~3 characters per token)
+with a 20% margin for the system prompt, tool definitions, and provider
+metadata.
 
-To avoid re-truncating on every inquiry in a turn (which would shift the message
-prefix and bust the prompt cache), the truncation drops events from the start of
-the stream and rounds the drop amount to a coarse granularity (10% of the target
-budget).
-This keeps the cutoff point stable when the stream grows slightly between
-inquiries.
+Re-truncating to the exact budget on every inquiry would shift the message
+prefix whenever the conversation grows, invalidating the prompt cache.
+Instead, the backend drops events from the start of the stream in increments of
+10% of the target token budget, keeping the cutoff point stable across
+consecutive inquiries in the same turn.
 
 ### Cross-inquiry prompt cache misses
 
-Despite a stable truncation prefix, Anthropic's prompt caching does not achieve
-cross-inquiry cache hits on the conversation messages.
-The system prompt and tool definitions (~27k tokens in production) cache
-correctly via explicit breakpoints, but the conversation messages (~47k tokens
-after truncation) are fully rewritten on each inquiry.
+Despite the stable truncation prefix, Anthropic's prompt caching does not
+produce cross-inquiry cache hits on conversation messages.
+The system prompt and tool definitions (~27k tokens in production) hit the cache
+through explicit breakpoints, but the conversation messages (~47k tokens after
+truncation) are rewritten in full on each inquiry.
 
-The root cause: Anthropic's automatic caching uses a 20-block lookback window
-from the last message.
-Between inquiries, new events are inserted into the conversation (tool
-responses, inquiry results) which shift block indices.
-The lookback compares blocks by position, finds mismatches due to the index
-shift, and gives up before reaching the stable prefix.
+The root cause is that Anthropic's automatic caching uses a 20-block lookback
+window from the last message.
+Between inquiries, new tool responses and inquiry results are appended to the
+conversation, shifting block indices.
+When the lookback compares blocks by position, it hits those shifted indices and
+stops before reaching the stable prefix.
 
-The fix requires an explicit cache breakpoint at the boundary between the stable
-conversation prefix and the per-inquiry tail.
-However, Anthropic limits explicit breakpoints to 4 per request, and all slots
-are currently allocated (automatic on last message, system prompt, attachments,
-tools).
+Fixing this requires an explicit cache breakpoint at the boundary between the
+stable conversation prefix and the per-inquiry tail.
+However, Anthropic limits requests to four explicit breakpoints, and all four
+slots are already allocated (tools, system prompt, attachments, and the
+automatic breakpoint on the last message).
 
-A possible solution: introduce provider-agnostic **cache hint events** in the
+One potential fix is to introduce provider-agnostic **cache hint events** in
 `ConversationStream`.
-The inquiry backend would insert a hint event at the end of the stable prefix
-(right before the synthetic "Tool paused" response).
-Providers that support caching (Anthropic) translate the hint to a
-`cache_control` breakpoint on the nearest message block; other providers ignore
-it.
-This could potentially reuse one of the existing breakpoint slots (e.g. the
-automatic last-message breakpoint, which is wasted on inquiries since the last
-message always differs).
+The inquiry backend would insert a hint event at the end of the stable prefix,
+right before the synthetic "Tool paused" response.
+Providers that support explicit cache control (such as Anthropic) would
+translate the hint into a `cache_control` breakpoint on the nearest message
+block, while other providers would ignore it.
+That breakpoint could reuse the slot currently taken by the automatic
+last-message breakpoint, which is wasted on inquiries because the final message
+changes every time.
 
 This optimization is deferred to a future RFD on conversation compaction and
 cache management.
 
 > [!TIP]
-> [RFD 036] introduces conversation compaction strategies — including
-> LLM-assisted summarization — that reduce long conversation context,
-> addressing the underlying problem the cache miss issue here stems from.
+> [RFD 036] introduces conversation compaction strategies, including
+> LLM-assisted summarization, that shrink long conversation contexts and reduce
+> the token volume affected by these cache misses.
 
 ## Non-Goals
 
-- **Context compaction.** Reducing the conversation events sent to the inquiry
-  model.
-  A crude truncation is implemented for context window overflow, but smarter
-  compaction (summarization, middle-out trimming) is orthogonal.
-- **Inquiry batching.** Combining multiple questions into a single request.
-- **Provider credential validation at startup.** Validating that all configured
-  providers have working credentials before starting.
-  Worth doing but separate from this RFD.
+- **Context compaction.** The inquiry backend truncates the oldest events when a
+  conversation exceeds the inquiry model's context window, but selective
+  compaction (such as summarization or middle-out trimming) is out of scope.
+- **Inquiry batching.** Combining multiple tool questions into a single LLM
+  request is out of scope.
+- **Provider credential validation at startup.** Verifying credentials for all
+  configured providers before starting work is useful on its own, but separate
+  from this RFD.
 
 ## Implementation Plan
 
 ### Phase 1: `CachePolicy` on `RequestConfig`
 
-Add the `CachePolicy` enum and `cache` field to `RequestConfig`.
-Implement deserialization (bool and string forms, including `humantime` parsing
-for `Custom`).
-When `Off`, the Anthropic provider skips all `cache_control` annotations.
-Add config and provider tests.
+Add the `CachePolicy` enum and the `cache` field on `RequestConfig`, with
+deserialization from booleans and strings (including `humantime` durations for
+`Custom`).
+When `cache` is `Off`, skip all `cache_control` annotations in the Anthropic
+provider.
+Add configuration and provider tests.
 
-Can be merged independently.
+This phase can be merged independently.
 
 ### Phase 2: Stable inquiry schemas
 
-Remove `inquiry_id` from the structured output schema in
-`create_inquiry_schema`.
-Move the ID to the prompt text.
-Update `ActiveInquiry::extract_answer` to only extract the `answer` field (no
-`inquiry_id` validation from the response).
-Update tests.
+Remove `inquiry_id` from the structured output schema in `create_inquiry_schema`
+and include the ID in the prompt text instead.
+Update `ActiveInquiry::extract_answer` to read only the `answer` field without
+validating `inquiry_id` in the response, and update the existing tests.
 
-Can be merged independently.
+This phase can be merged independently.
 
 ### Phase 3: Provider registry on `Ctx`
 
-Add `IndexMap<ProviderId, Arc<dyn Provider>>` to `Ctx`.
-Populate it lazily on first access.
-Refactor `query.rs` to use the registry instead of constructing providers
-inline.
+Add an `IndexMap<ProviderId, Arc<dyn Provider>>` registry to `Ctx`, populated
+lazily on first access.
+Refactor `query.rs` to fetch providers from the registry instead of constructing
+them inline.
 
-Can be merged independently.
+This phase can be merged independently.
 
 ### Phase 4: `InquiryConfig` and `QuestionTarget` config changes
 
-Add `InquiryConfig` to `ConversationConfig` with `assistant:
-PartialAssistantConfig`.
-Change `QuestionTarget::Assistant` to carry a `PartialAssistantConfig`.
-Implement custom deserializer for the string/map form.
-Add config tests.
+Add `InquiryConfig` (with `assistant: PartialAssistantConfig`) to
+`ConversationConfig`, and update `QuestionTarget::Assistant` to carry a
+`PartialAssistantConfig` with a custom deserializer that accepts both string and
+map forms.
+Add configuration tests.
 
-Can be merged independently.
+This phase can be merged independently.
 
 ### Phase 5: `ModelDetails::supports_structured_output`
 
-Add the convenience method.
-Add startup validation that checks all configured inquiry models support
-structured output (error if known-unsupported, warn if unknown).
+Add `ModelDetails::supports_structured_output` and validate configured inquiry
+models at startup, failing when structured output is known to be unsupported and
+warning when support is unknown.
 
-Can be merged independently.
+This phase can be merged independently.
 
 ### Phase 6: Inquiry backend with resolved config
 
-Rewrite `LlmInquiryBackend` construction to merge the three config layers
-(per-question → global inquiry → parent assistant) into final values.
-The backend stores resolved provider, model, system prompt.
-The `inquire` method accepts the per-question `PartialAssistantConfig` for
-overrides, grabs providers from the `Ctx` registry.
-Strip tools, apply `CachePolicy`.
+Update `LlmInquiryBackend` to merge the three configuration layers (per-question
+override, global inquiry config, and parent assistant config) and store the
+resolved provider, model, and system prompt as defaults.
+Update `inquire` to accept the per-question `PartialAssistantConfig`, retrieve
+overridden providers from the `Ctx` registry, omit tool definitions, and apply
+`CachePolicy`.
 
-Depends on Phases 1-5.
+Depends on Phases 1 through 5.
 
 ### Phase 7: Default tool configs
 
-Update the default JP tool configs (e.g., `fs_modify_file`) to set
-`conversation.inquiry.assistant.model.id` to a recommended cheap model in the
-project's `.jp/config.toml`.
+Update the default JP tool configurations (such as `fs_modify_file`) in
+`.jp/config.toml` to set `conversation.inquiry.assistant.model.id` to a
+recommended smaller model.
 
 Depends on Phase 6.
 
 ## References
 
-- [RFD 028: Structured Inquiry System for Tool Questions][RFD 028] — the
-  current inquiry implementation.
-- [RFD 033: Cache-Preserving Inquiry via Tool Use][RFD 033] — alternative
-  approach (superseded by this RFD).
-- [Anthropic prompt caching docs][cache-docs] — cache prefix hierarchy and
+- [RFD 028: Structured Inquiry System for Tool Questions][RFD 028]: Base inquiry
+  architecture.
+- [RFD 033: Cache-Preserving Inquiry via Tool Use][RFD 033]: Alternative
+  tool-based approach superseded by this RFD.
+- [Anthropic prompt caching docs][cache-docs]: Cache prefix hierarchy and
   invalidation rules.
-- [Anthropic structured outputs docs][structured-docs] — system prompt
-  injection behavior.
+- [Anthropic structured outputs docs][structured-docs]: System prompt injection
+  behavior for `output_config.format`.
 
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 033]: 033-cache-preserving-inquiry-via-tool-use.md

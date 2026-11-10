@@ -15,50 +15,47 @@
 ## Summary
 
 This RFD restructures `jp query` as a client-server system.
-Every query spawns a server process that runs the agent loop ([RFD 026]) and a
+Every query runs a server process that executes the agent loop ([RFD 026]) and a
 client process that connects to the server, renders output, and handles user
 interaction.
-Detaching is a client operation (disconnect and exit), not a server operation.
+Detaching is a client operation: the client disconnects and exits while the
+server keeps running.
 This unifies foreground queries, `--detach`, Ctrl+Z mid-execution detach, and
-`conversation attach` under a single execution model.
+`conversation attach` under one execution model.
 
-This RFD depends on [RFD 026] (Agent Loop Extraction) for the `jp_agent` crate
-that the server calls, on [RFD 023] (Resumable Conversation Turns) for
-incomplete turn persistence as a fallback, on [RFD 020] (Parallel Conversations)
-for conversation locks, and on [RFD 019] (Non-Interactive Mode) for detached
-prompt policies.
-
-This RFD supersedes [RFD 024] (Detached Query Execution) and [RFD 025] (Live
+This design depends on [RFD 026] (Agent Loop Extraction) for the `jp_agent`
+crate that the server calls, [RFD 023] (Resumable Conversation Turns) for
+incomplete turn persistence as a fallback, [RFD 020] (Parallel Conversations)
+for conversation locks, and [RFD 019] (Non-Interactive Mode) for detached prompt
+policies.
+It supersedes [RFD 024] (Detached Query Execution) and [RFD 025] (Live
 Re-Attachment to Detached Queries).
 
 ## Motivation
 
 RFDs [024][RFD 024] and [025][RFD 025] proposed two separate mechanisms: a
-persist-and-exit model for detached queries that hit inquiries, and an IPC-based
+persist-and-exit model for detached queries that hit inquiries, and IPC-based
 live attachment for observing running processes.
-These are correct in isolation but create two execution models with different
-behavior:
+While each mechanism works in isolation, together they split execution into
+three distinct modes:
 
-- **Foreground**: The agent loop runs in-process.
-  Output goes to the terminal.
-  Prompts are interactive.
-  No IPC.
-- **Detached**: The agent loop runs in a daemon.
-  Output is discarded.
-  On inquiry, the process persists and exits.
-  Resumption via `--continue` starts a new process.
+- **Foreground**: The agent loop runs in-process, writes directly to the
+  terminal, and prompts interactively without IPC.
+- **Detached**: The agent loop runs in a daemon and discards output.
+  When it hits an inquiry, the process persists state and exits; `--continue`
+  then starts a new process.
 - **Attached**: An IPC client connects to a running daemon for live output and
   prompt forwarding.
 
-Three models, three code paths, three sets of edge cases.
-Mid-execution detach (Ctrl+Z) requires a fourth path: persist the in-progress
-state, re-exec as a daemon, and resume — losing the active LLM stream in the
-process.
+Each mode requires its own code path and edge-case handling.
+Mid-execution detach (Ctrl+Z) requires a fourth path that persists in-progress
+state, re-executes as a daemon, and resumes, dropping the active LLM stream in
+the process.
 
-A simpler architecture: every query is a server process.
-The user's terminal is always a client.
-The difference between foreground, detached, and attached is whether a client is
-connected, not how the server was started.
+Running every query in a server process with the user's terminal as a client
+eliminates these separate paths.
+Foreground, detached, and attached queries differ only in whether a client is
+connected, not in how the server is started.
 
 ## Design
 
@@ -81,190 +78,168 @@ jp query "message"          jp query --detach "message"
 ```
 
 The server is the `jp` binary re-executed with a hidden `_serve` subcommand
-(e.g. `jp _serve --config-fd=N --socket-path=...`).
-This subcommand is not visible in `--help` and is not part of the public CLI
-surface.
-It runs the agent loop from `jp_agent`, manages the conversation lock, persists
+(e.g. `jp _serve --config-fd=N --socket-path=...`), which is omitted from
+`--help` and the public CLI surface.
+It holds the conversation lock, runs the agent loop from `jp_agent`, persists
 events, and accepts client connections over a local IPC transport.
 
 The client is the user's `jp query` process.
 It connects to the server, renders output to the terminal, forwards user input
-(inquiry answers, interrupt signals), and exits when it disconnects or the
+(inquiry answers and interrupt signals), and exits when it disconnects or the
 server finishes.
 
 ### Startup Flow
 
-`jp query "message"`:
+For a foreground query (`jp query "message"`):
 
-1. Client process starts.
-   Parses args, resolves config, opens editor if needed, builds `ChatRequest`.
-2. Client resolves the target conversation, acquires the conversation lock.
-3. Client spawns the server as a detached process via re-exec: `jp _serve
-   --config-fd=N --socket-path=PATH`.
-   The resolved config, conversation ID, `ChatRequest`, and tool definitions are
-   serialized to a temp file; the file descriptor is inherited by the server
-   process.
-   The conversation lock fd is also inherited (see [Lock
-   Handoff](#lock-handoff-timing)).
-   The platform-specific spawning mechanism is described in [Platform
-   Portability](#platform-portability).
-4. Server writes its PID to the process registry, opens the IPC endpoint, and
-   starts the agent loop.
-5. Client connects to the IPC endpoint and enters the attach loop: read output
-   from server, write to terminal; read terminal input (inquiry answers,
-   interrupt signals), forward to server.
-6. When the server finishes the turn, it sends a `TurnComplete` message.
-   Client renders any final output and exits.
+1. The client parses arguments, resolves config, opens the editor if needed, and
+   builds the `ChatRequest`.
+2. The client resolves the target conversation and acquires the conversation
+   lock.
+3. The client serializes the resolved config, conversation ID, `ChatRequest`,
+   and tool definitions to a temp file, then spawns the server as a detached
+   process via re-exec: `jp _serve --config-fd=N --socket-path=PATH` (see
+   [Platform Portability](#platform-portability)).
+   The server inherits both the temp file descriptor and the conversation lock
+   fd (see [Lock Handoff Timing](#lock-handoff-timing)).
+4. The server writes its PID to the process registry, opens the IPC endpoint,
+   and starts the agent loop.
+5. The client connects to the IPC endpoint and enters the attach loop, writing
+   server output to the terminal and forwarding terminal input (inquiry answers
+   and interrupt signals) to the server.
+6. When the turn finishes, the server sends a `TurnComplete` message, and the
+   client renders any final output and exits.
 
-`jp query --detach "message"`:
-
-Steps 1-4 are identical.
-At step 5, the client prints the conversation ID and exits instead of
-connecting.
-The server runs unattended.
+For a detached query (`jp query --detach "message"`), steps 1 through 4 are
+identical.
+At step 5, the client prints the conversation ID and exits without connecting,
+leaving the server to run unattended.
 
 ### Server Process
 
-The server is a headless process that runs `jp_agent::run_turn_loop()`.
-It has no terminal.
-It accepts one client connection at a time over the IPC transport.
-Multiple concurrent clients are not supported in this RFD (see
-[Non-Goals](#non-goals)), though the architecture does not preclude adding
-read-only observer clients in the future.
+The server is a headless process with no controlling terminal.
+It runs `jp_agent::run_turn_loop()` and accepts one client connection at a time
+over the IPC transport.
+Multiple concurrent clients are out of scope for this RFD (see
+[Non-Goals](#non-goals)), though the design allows adding read-only observer
+clients in the future.
 
-#### Output routing
+#### Output Routing
 
 The server uses a `ResponseRenderer` ([RFD 026]) that forwards raw
-`ChatResponse` events to connected clients as structured protocol messages.
-When no client is connected, events are buffered in memory (see [Rendering
+`ChatResponse` events to the connected client as structured protocol messages.
+When no client is connected, the server buffers events in memory (see [Rendering
 Continuity](#rendering-continuity)).
-The server does not format, style, or render output — it sends structured data
-and leaves presentation to the client.
 
-This means different clients can render the same stream differently: one client
-renders markdown with ANSI styling for a terminal, another renders JSON for a
-pipeline, a future observer client might render a minimal progress view.
-The server doesn't need to know about terminal capabilities.
+The server sends structured data without formatting, styling, or rendering it,
+leaving presentation to the client.
+Without knowing terminal capabilities, the same server stream can feed a
+terminal client rendering Markdown with ANSI styling, a pipeline client emitting
+JSON, or a future observer client rendering a minimal progress view.
 
 #### Rendering Continuity
 
-When a client detaches and a new client re-attaches, the new client must be able
-to produce correct markdown output from the current stream position.
+When a client detaches and a new client re-attaches, the new client must produce
+valid Markdown output from the current stream position.
 The server supports this with an **event replay buffer** and per-client read
 pointers.
 
 ##### Event replay buffer
 
-The server always appends `ChatResponse` chunks to an in-memory buffer,
-regardless of whether any client is connected.
-Every time a complete event is flushed by the `EventBuilder` and persisted to
-disk, the buffer is cleared and all client read pointers are reset.
-The buffer only holds the content between the last persisted event and the
-current stream position — typically a few hundred tokens at most.
+The server appends all `ChatResponse` chunks to an in-memory buffer regardless
+of whether a client is connected.
+Whenever `EventBuilder` flushes and persists a complete event to disk, the
+server clears the buffer and resets all client read pointers.
+The buffer holds only the content between the last persisted event and the
+current stream position, typically at most a few hundred tokens.
 
-Each persisted event represents a complete markdown document boundary.
-The in-memory buffer therefore always starts at a clean boundary, and can be
-rendered correctly by a fresh `jp_md::Buffer` without any prior context.
-The client reads persisted events from disk for *context* (so the user sees what
-happened), not for renderer correctness.
+Because each persisted event ends on a complete Markdown document boundary, the
+in-memory buffer always starts at a clean boundary that a fresh `jp_md::Buffer`
+can render without prior context.
+The client reads persisted events from disk only to show prior conversation
+context, not for renderer correctness.
 
 ##### Per-client read pointers
 
-When a client connects, the server creates a read pointer for that client at the
-start of the current buffer.
-The server sends everything from the pointer to the buffer head, then advances
-the pointer.
-As new chunks arrive, the server appends to the buffer and sends them to all
-connected clients, advancing each pointer.
+When a client connects, the server creates a read pointer for it at the start of
+the current buffer, sends everything from the pointer to the buffer head, and
+advances the pointer.
+As new chunks arrive, the server appends them to the buffer, sends them to all
+connected clients, and advances each pointer.
 
-When a client disconnects, its pointer is kept (keyed by client ID).
+When a client disconnects, the server retains its pointer keyed by client ID.
 If the client reconnects before the buffer is flushed, it resumes from where it
-left off — no data is missed, no data is duplicated.
-If the buffer was flushed between disconnect and reconnect (the events are now
-on disk), the pointer is discarded and a new one is created at the start of the
-current buffer.
-The client re-reads the now-persisted events from disk.
+left off without missing or duplicating data.
+If the buffer was flushed while the client was disconnected, the server discards
+the old pointer, creates a new one at the start of the current buffer, and
+relies on the client to read the newly persisted events from disk.
 
-This model naturally supports multiple clients without special-casing.
-From the server's perspective, there is no behavioral difference between "client
-attached" and "no client" — it always appends to the buffer.
+Because the server always appends to the buffer whether or not a client is
+attached, this model supports multiple clients without special cases.
 
 ##### Re-attach flow
 
-1. **Read history from disk.** The client reads persisted events and renders
-   them locally for context.
-
+1. **Read history from disk.** The client reads persisted events from disk and
+   renders them locally for context.
 2. **Connect and receive the buffer.** The server sends all buffered chunks from
-   the client's read pointer (or from the start of the buffer for new clients).
-   The client pushes these into its `ResponseRenderer`, producing correct
-   markdown from the clean boundary.
+   the client's read pointer (or from the start of the buffer for new clients),
+   and the client pushes them into its `ResponseRenderer`.
+3. **Live streaming.** Once the read pointer catches up to the buffer head, new
+   chunks flow in as they arrive.
+   Because the buffer is the leading edge of the live stream, the client's
+   `jp_md::Buffer` processes the buffered chunks and the live stream as a single
+   continuous Markdown document.
 
-3. **Live streaming.** New chunks flow in as they arrive.
-   The client's renderer continues seamlessly — the buffer content and the live
-   stream are one continuous markdown flow.
-
-The critical seam is between steps 2 and 3: the buffered content and the live
-stream must be processed as a single continuous document by the client's
-`jp_md::Buffer`.
-This happens naturally because the buffer IS the leading edge of the live stream
-— the client's read pointer catches up to the head, and then new chunks extend
-it.
-
-#### Inquiry routing
+#### Inquiry Routing
 
 The server implements `PromptBackend` as a socket-backed variant.
 When the agent loop calls the prompt backend:
 
 - **Client attached**: The server serializes the inquiry and sends it to the
-  client via the socket.
+  client over the socket.
   The client renders the prompt on its terminal, collects the answer, and sends
-  it back.
-  The server delivers the answer to the agent loop.
+  it back for the server to deliver to the agent loop.
 - **No client**: The server applies the detached prompt policy ([RFD 019]).
-  For `defer` policy, this means persisting the incomplete turn ([RFD 023]) and
-  shutting down.
-  For `auto`, `defaults`, or `deny`, the existing behavior from [RFD 019]
-  applies.
+  Under the `defer` policy, it persists the incomplete turn ([RFD 023]) and
+  shuts down.
+  Under `auto`, `defaults`, or `deny`, it follows the existing behavior from
+  [RFD 019].
 
-#### Shutdown
+#### Shutdown and Lifecycle
 
-The server has no controlling terminal and does not rely on OS signals for
-lifecycle management.
-All shutdown triggers arrive as protocol messages or natural execution outcomes:
+Because the server has no controlling terminal, it does not rely on OS signals
+for lifecycle management.
+All shutdown triggers arrive as protocol messages or execution outcomes, making
+shutdown coordination cross-platform without Unix signals:
 
-- Turn completes → server exits.
-- `defer` policy triggers → server persists and exits.
-- `conversation kill` connects to the IPC endpoint and sends a `Shutdown`
-  message → server persists and exits.
-- Unrecoverable error → server persists what it can and exits.
+- **Turn completes**: The server exits normally.
+- **`defer` policy triggers**: The server persists the incomplete turn and
+  exits.
+- **`conversation kill`**: The client connects to the IPC endpoint and sends a
+  `Shutdown` message; the server persists its state and exits.
+- **Unrecoverable error**: The server persists what it can and exits.
 
-This is cross-platform by design — no dependence on Unix signals for shutdown
-coordination.
-
-#### Lifecycle
-
-On exit, the server removes its process registry entry and IPC endpoint.
-The conversation lock is released automatically (lock file close).
+On exit, the server removes its process registry entry and IPC endpoint, and
+closing the lock file releases the conversation lock automatically.
 
 ### Client Process
 
-The client is a thin terminal adapter.
-It does not run the agent loop.
+The client is a thin terminal adapter that does not run the agent loop.
 
-#### Attach loop
+#### Attach Loop
 
-After connecting to the server socket, the client enters a loop:
+After connecting to the server socket, the client runs a message loop:
 
 1. Read messages from the server (output chunks, inquiry requests, turn
-   completion, errors).
+   completion, and errors).
 2. Write output chunks to the terminal.
-3. On inquiry request: render the prompt using `TerminalPromptBackend`, collect
-   the answer, send it to the server.
-4. On Ctrl+C: send an interrupt message to the server, receive menu options,
-   render the interrupt menu locally, send the chosen action back.
-5. On `TurnComplete`: render final output, exit.
+3. On an inquiry request, render the prompt using `TerminalPromptBackend`,
+   collect the answer, and send it to the server.
+4. On Ctrl+C, send an interrupt message to the server, receive menu options,
+   render the interrupt menu locally, and send the chosen action back.
+5. On `TurnComplete`, render final output and exit.
 
-#### Ctrl+Z (detach)
+#### Detach (Ctrl+Z)
 
 When the user presses Ctrl+Z, the client:
 
@@ -272,31 +247,25 @@ When the user presses Ctrl+Z, the client:
 2. Prints "Detached: <conversation-id\>".
 3. Exits.
 
-The server continues running.
-The client's read pointer is preserved in case it reconnects.
-If other clients are connected, they continue receiving events.
-If no clients remain, events continue buffering.
-Subsequent inquiries use the detached policy.
+To the server, Ctrl+Z is an ordinary client disconnect: the server continues
+running without re-executing, losing state, or interrupting the LLM stream.
+It preserves the client's read pointer in case the client reconnects, continues
+sending events to any other connected clients (or buffering them if none
+remain), and handles subsequent inquiries with the detached policy.
 
-No state is lost.
-No re-exec.
-No LLM stream interruption.
-The server doesn't even know the user pressed Ctrl+Z — it just sees a client
-disconnect.
+#### Interrupt (Ctrl+C)
 
-#### Ctrl+C (interrupt)
+Pressing Ctrl+C on the client does not disconnect; instead, it triggers the
+interrupt protocol:
 
-Ctrl+C on the client does NOT disconnect.
-It triggers the interrupt protocol:
-
-1. Client sends `Signal { kind: Interrupt }` to the server.
-2. Server pauses streaming (same as today's SIGINT handler).
-3. Server sends `InterruptMenu { options }` to the client.
-4. Client renders the menu using `InterruptHandler`, collects the user's choice.
-5. Client sends `InterruptAction { action }` to the server.
-6. Server processes the action (Stop, Abort, Continue, Reply, Detach).
-7. If the action is `Detach`, the server sends `Acknowledged` and the client
-   disconnects (same as Ctrl+Z).
+1. The client sends `Signal { kind: Interrupt }` to the server.
+2. The server pauses streaming (matching the in-process SIGINT handler) and
+   sends `InterruptMenu { options }` to the client.
+3. The client renders the menu using `InterruptHandler`, collects the user's
+   choice, and sends `InterruptAction { action }` to the server.
+4. The server processes the action (Stop, Abort, Continue, Reply, Detach).
+5. If the action is `Detach`, the server sends `Acknowledged` and the client
+   disconnects as on Ctrl+Z.
 
 ### `conversation attach`
 
@@ -305,21 +274,15 @@ jp conversation attach <cid>
 jp conversation attach              # session's active conversation
 ```
 
-Connects to a running server process.
-The flow is the same as the client attach loop described above, but without
-spawning a server — the server already exists.
+Connects to an already-running server process and enters the [client attach
+loop](#attach-loop) without spawning a new server.
 
-#### Context on attach
+#### Context on Attach
 
-When a client attaches to a server that's already mid-stream, it follows the
-rendering continuity flow described in [Rendering
-Continuity](#rendering-continuity):
-
-1. Read persisted events from disk and render them locally.
-2. Request and replay the server's in-memory event buffer.
-3. Switch to live streaming.
-
-By default, the client renders events from the current in-progress turn.
+When a client attaches to a server mid-stream, it reads persisted events from
+disk, replays the server's in-memory event buffer, and switches to live
+streaming (see [Rendering Continuity](#rendering-continuity)).
+By default, the client renders events from the current in-progress turn:
 
 | Flag       | Behavior                                 |
 | ---------- | ---------------------------------------- |
@@ -329,18 +292,15 @@ By default, the client renders events from the current in-progress turn.
 | `--tail=0` | Skip history and replay, connect to live |
 |            | stream only.                             |
 
-#### No running process
-
-If no server is running for the conversation:
-
-- If there's a pending inquiry (`IncompleteTurn`), suggest `--continue`.
-- If the conversation is idle, error.
+If no server is running for the conversation, `conversation attach` suggests
+`--continue` when there is a pending inquiry (`IncompleteTurn`), or returns an
+error if the conversation is idle.
 
 ### `conversation kill`
 
-Connects to the server's IPC endpoint and sends a `Shutdown` message.
-The server persists its current state and exits cleanly.
-The conversation lock is released.
+Connects to the server's IPC endpoint and sends a `Shutdown` message, causing
+the server to persist its current state, release the conversation lock, and exit
+cleanly.
 
 If the IPC endpoint is unresponsive (server hung), `conversation kill --force`
 falls back to OS-level process termination (`SIGKILL` on Unix,
@@ -356,14 +316,16 @@ Running servers register in the user-local data directory:
 └── <conversation-id>.sock    # IPC endpoint (Unix socket or named pipe path)
 ```
 
-The registry entry is minimal (PID and start time).
-The `waiting-for-input` state is derived from the conversation's
-`IncompleteTurn` on disk, not from the registry — by the time a query is
-waiting, the server has exited.
-
-Stale entries (dead PID) are cleaned up by `conversation ls`.
+Each registry entry records only the PID and start time; `conversation ls`
+cleans up stale entries with dead PIDs.
+Because the server exits once a detached query defers an inquiry, the
+`waiting-for-input` state is derived from the conversation's `IncompleteTurn` on
+disk rather than from the registry.
 
 ### `conversation ls` (extended)
+
+`conversation ls` derives conversation status from the process registry and the
+conversation stream:
 
 | Status                     | Source                                   |
 | -------------------------- | ---------------------------------------- |
@@ -392,15 +354,15 @@ pub trait IpcListener: Send + Sync {
 pub trait IpcStream: AsyncRead + AsyncWrite + Send + Unpin {}
 ```
 
-On Unix, these are implemented over `tokio::net::UnixListener` / `UnixStream`.
-On Windows, over `tokio::net::windows::named_pipe`.
-The client side uses a corresponding `connect` function that returns an `impl
+Unix implements these traits over `tokio::net::UnixListener` and `UnixStream`,
+and Windows implements them over `tokio::net::windows::named_pipe`.
+The client connects via a corresponding `connect` function returning `impl
 IpcStream`.
 
 ### Protocol
 
-Newline-delimited JSON over the IPC transport.
-Single client at a time.
+The client and server communicate using newline-delimited JSON (NDJSON) over the
+IPC transport, with one connected client at a time.
 
 #### Handshake
 
@@ -423,17 +385,17 @@ The server acknowledges:
 }
 ```
 
-Version mismatch → server rejects with an error message.
+If the version does not match, the server rejects the connection with an error
+message.
 
 `can_prompt` indicates whether the client can render interactive prompts
 (`/dev/tty` available).
 When `false`, the server treats the client as an output-only consumer and
 applies the detached policy for inquiries.
 
-The handshake deliberately omits terminal capabilities (width, ANSI support,
-output format).
-The server sends structured events; the client decides how to render them based
-on its own context.
+The handshake omits terminal capabilities (width, ANSI support, output format)
+because the server sends structured events and the client renders them for its
+own output context.
 
 #### Server → Client
 
@@ -475,14 +437,14 @@ This RFD carries forward the fourth detached policy from [RFD 024], renamed from
 The server lets other tools in the batch complete, persists their results
 incrementally ([RFD 023]), persists the `InquiryRequest`, and exits.
 
-The name reflects the intent: the inquiry is deferred until a user is available,
-not queued in a running process.
-The server exits cleanly; resumption happens via `jp query --continue
---id=<cid>`, which spawns a new server and client for the resumed turn.
+Renaming `queue` to `defer` reflects that the inquiry is deferred to disk until
+a user is available, not held in a running process queue.
+The server exits cleanly, and `jp query --continue --id=<cid>` spawns a new
+server and client to resume the turn.
 
 ### End-to-End Workflows
 
-#### Normal foreground query
+#### Normal Foreground Query
 
 ```sh
 $ jp query "Refactor the auth module"
@@ -491,7 +453,7 @@ $ jp query "Refactor the auth module"
 # Turn completes. Client exits.
 ```
 
-#### Detached query
+#### Detached Query
 
 ```sh
 $ jp query --detach "Run cargo check on all crates"
@@ -508,7 +470,7 @@ $ jp conversation print --last --id=jp-c17528832001
 # Shows the completed turn.
 ```
 
-#### Detach mid-execution (Ctrl+Z)
+#### Detach Mid-Execution (Ctrl+Z)
 
 ```sh
 $ jp query "Refactor the auth module"
@@ -522,7 +484,7 @@ $ jp conversation attach jp-c17528832001
 # Live output resumes from where it was.
 ```
 
-#### Detached query hits inquiry
+#### Detached Query Hits Inquiry
 
 ```sh
 $ jp query --detach "Refactor auth"
@@ -536,7 +498,7 @@ $ jp query --continue --id=jp-c17528832001
 # Client attaches, prompts for the inquiry, continues.
 ```
 
-#### Attach to a running query from another terminal
+#### Attach to a Running Query from Another Terminal
 
 ```sh
 # Terminal 1:
@@ -550,10 +512,9 @@ $ jp conversation attach jp-c17528832001
 
 ### Piped Execution
 
-The client-server model is transparent to pipelines.
-The client is the process in the pipeline — it reads stdin, writes to
-stdout/stderr.
-The server is invisible:
+The client-server model is transparent to shell pipelines.
+The client is the process in the pipeline, reading stdin and writing to stdout
+and stderr, while the server remains invisible to the shell:
 
 ```txt
 echo foo | jp query "fix" | handler.sh
@@ -568,251 +529,218 @@ stdin ──▶  │    Client    │ ──▶ stdout (to handler.sh)
            └──────────────┘
 ```
 
-The client reads stdin before spawning the server (stdin content becomes part of
-the `ChatRequest`).
-The server never touches the pipeline's stdin/stdout.
+The client reads stdin before spawning the server and includes that input in the
+`ChatRequest`; the server never touches the pipeline's stdin or stdout.
 
-#### Output routing
+#### Output Routing in Pipelines
 
 The server sends structured events (chat response chunks, tool call
-notifications, progress updates).
-The client renders them according to its own output context:
+notifications, and progress updates), and the client renders them for its local
+output context:
 
-- Terminal stdout: markdown with ANSI styling, chrome on stderr.
-- Piped stdout: plain text on stdout, chrome on stderr.
-- `--format json`: NDJSON on stdout.
+- **Terminal stdout**: Markdown with ANSI styling on stdout, chrome on stderr.
+- **Piped stdout**: Plain text on stdout, chrome on stderr.
+- **`--format json`**: NDJSON on stdout.
 
-The client makes all rendering decisions locally.
-The server is unaware of the client's output format or terminal capabilities.
+#### Prompts in Pipelines
 
-#### Prompts in pipelines
+When stdout is piped but `/dev/tty` is available, the client still prompts
+interactively.
+It receives inquiry messages from the server over IPC and renders them on
+`/dev/tty` via `TerminalPromptBackend` ([RFD 019]), keeping prompt I/O off the
+pipeline's stdin and stdout.
 
-When stdout is piped but the user is at a terminal (`/dev/tty` available), the
-client can still prompt interactively.
-Inquiry messages arrive from the server via IPC; the client renders them via
-`/dev/tty` using `TerminalPromptBackend` (per [RFD 019]).
-The pipeline is unaffected — prompt I/O never touches stdout or stdin.
+When no terminal is available (CI, cron, `ssh -T`), the client sets `can_prompt
+= false` in the handshake.
+The server applies the detached policy for inquiries while the client continues
+forwarding output to stdout.
 
-When no terminal is available at all (CI, cron, `ssh -T`), the client cannot
-prompt.
-It signals `can_prompt = false` in the handshake.
-The server applies the detached policy for inquiries.
-The client still receives and forwards output to stdout.
+#### SIGPIPE Handling
 
-#### SIGPIPE handling
+When a downstream process closes early (such as `jp query | head -10`), the
+client receives `SIGPIPE` on its next write to stdout.
+In an in-process model, `SIGPIPE` terminates JP and loses the in-progress turn;
+in the client-server model, the server is a separate process and would otherwise
+keep running.
 
-If the downstream process closes early (`jp query | head -10`), the client
-receives SIGPIPE when writing to stdout.
-Today, JP dies and the work is lost.
-With client-server, the client dies but the server is a separate process — it
-keeps running and finishes the turn.
+To match standard pipeline behavior, the client stops the server by default and
+provides a flag to preserve background execution:
 
-Whether this is desirable depends on the user's intent.
-Two options:
-
-- **Pipeline semantics (default):** Client sends `Shutdown` to the server before
-  exiting on SIGPIPE.
-  The entire pipeline stops cleanly.
-- **Background semantics (`--persist-on-sigpipe`):** Client disconnects without
-  sending `Shutdown`.
-  The server finishes the turn.
-  The work is preserved.
-
-The default should match user expectations for pipeline behavior: if the
-downstream consumer is gone, stop producing.
-Users who want the server to continue can opt in.
+- **Pipeline semantics (default)**: On `SIGPIPE`, the client sends `Shutdown` to
+  the server before exiting so the entire pipeline stops cleanly.
+- **Background semantics (`--persist-on-sigpipe`)**: The client disconnects
+  without sending `Shutdown`, leaving the server to finish and persist the turn.
 
 ## Drawbacks
 
 **Two processes for every query.** Even a simple `jp query "hello"` spawns a
 server and a client.
-The overhead is a process spawn (~10-50ms) plus socket setup, which is small
-relative to LLM latency but nonzero.
+Process creation (~10-50ms) and socket setup add a small overhead relative to
+LLM latency.
 
-**IPC is on the critical path.** All output flows through the IPC transport.
-For terminal rendering, this adds a hop compared to direct stdout writes.
-In practice, the bottleneck is LLM token generation speed, not local IPC
+**IPC is on the critical path.** All output flows through the IPC transport,
+adding a hop before terminal rendering compared to direct stdout writes.
+In practice, LLM token generation is the bottleneck rather than local IPC
 throughput.
 
-**Interrupt handling becomes a protocol exchange.** Today, Ctrl+C is a
-synchronous in-process operation: signal → menu → action.
-With client-server, it's: signal on client → message to server → menu options
-back → user choice → action message.
-More round trips, slightly higher latency before the menu appears.
-Likely imperceptible but architecturally more complex.
+**Interrupt handling becomes a protocol exchange.** In-process Ctrl+C is a
+synchronous sequence (signal, menu, action).
+With a client and server, the client catches the signal, notifies the server,
+receives the menu options, collects the user's choice, and sends the chosen
+action back.
+These round trips add minor latency before the menu appears and make interrupt
+handling more complex than an in-process handler.
 
-**Platform-specific code.** The IPC transport and process spawning have
+**Platform-specific code.** The IPC transport and process spawning require
 platform-specific implementations (see [Platform
 Portability](#platform-portability)).
-The abstractions minimize this, but each platform needs testing.
+Trait abstractions isolate this code, but each platform still requires testing.
 
-**Complexity upfront.** Unlike the incremental approach in RFDs 024/025
-(foreground first, detach later, attach last), this model requires the full
-client-server infrastructure before any query works.
-Phase 1 is larger.
+**Upfront infrastructure.** Unlike the incremental approach in [RFD 024] and
+[RFD 025] (foreground first, detach second, attach third), this model requires
+the client-server infrastructure before detached queries work, making Phase 1
+larger.
 
 ## Alternatives
 
-### Two execution models (RFDs 024 + 025)
+### Two Execution Models (RFDs 024 + 025)
 
-Foreground queries run in-process.
-Detached queries use a daemon with persist-and-exit at inquiries.
-Live attachment is a separate IPC layer.
+Run foreground queries in-process, run detached queries in a daemon that
+persists and exits on inquiries, and layer live attachment on top via IPC.
 
-Rejected because three execution models create three code paths with different
-behaviors.
-Mid-execution detach (Ctrl+Z) requires a fourth path with state loss (active LLM
-stream dropped during re-exec).
-The unified model eliminates these problems.
+Rejected because three execution modes require three code paths with different
+behaviors, and mid-execution detach (Ctrl+Z) requires a fourth path that drops
+the active LLM stream during re-exec.
+The unified client-server model eliminates these separate paths.
 
-### Spawn server only when detaching
+### Spawn Server Only When Detaching
 
-Start queries in-process.
-On Ctrl+Z or `--detach`, re-exec as a daemon.
+Start queries in-process, and re-exec as a daemon only on Ctrl+Z or `--detach`.
 
-Rejected because the re-exec loses the active LLM stream and in-memory state.
-The server would need to retry the LLM call or resume from persisted state,
-which is lossy and complex.
-Always starting as a server avoids this entirely.
+Rejected because re-executing drops the active LLM stream and in-memory state,
+forcing the daemon to retry the LLM call or resume from disk.
+Starting every query in a server process avoids this state loss.
 
-### PTY proxy (abduco model)
+### PTY Proxy (abduco Model)
 
-Spawn a PTY, run the agent as a subprocess inside it, proxy terminal I/O over a
-socket.
-The agent doesn't know about the client-server split.
+Spawn a PTY, run the agent inside it as a subprocess, and proxy raw terminal I/O
+over a socket so the agent is unaware of the client-server split.
 
 Rejected because JP's I/O is structured (inquiries, interrupt menus, tool
-prompts), not raw terminal bytes.
-A PTY proxy would lose the structure and require parsing terminal output to
-reconstruct it.
-The structured NDJSON protocol preserves semantics.
+prompts) rather than raw terminal bytes.
+A PTY proxy discards that structure and requires parsing terminal output to
+reconstruct it, whereas the NDJSON protocol preserves message semantics.
 
-### tmux/screen wrapper
+### tmux or screen Wrapper
 
-Tell users to run JP inside tmux for detach/reattach.
+Rely on users running JP inside `tmux` or `screen` for detach and reattach.
 
-Rejected because it doesn't integrate with `conversation ls`, requires an
-external dependency, and doesn't support the structured inquiry protocol.
+Rejected because an external multiplexer requires a separate dependency, does
+not integrate with `conversation ls`, and cannot participate in the structured
+inquiry protocol.
 
 ## Non-Goals
 
-- **Multi-client attachment.** One client at a time per server.
-  The architecture could support read-only observer clients (streaming output to
-  multiple terminals) or first-answer-wins inquiry handling, but the
-  coordination adds complexity.
-  Deferred to a future RFD if the need arises.
+- **Multi-client attachment.** Each server accepts one client at a time.
+  Supporting read-only observer clients or first-answer-wins inquiry handling
+  requires extra coordination and is deferred to a future RFD.
 
-- **Cross-machine attachment.** Sockets are local.
-  No network protocol.
+- **Cross-machine attachment.** IPC sockets are local to the host; there is no
+  network transport.
 
-- **Public server API.** The socket protocol is internal.
-  It may change between releases without notice.
+- **Public server API.** The socket protocol is internal and can change between
+  releases without notice.
 
-- **Non-query commands as servers.** Only `jp query` spawns servers.
-  `conversation ls`, `conversation print`, etc. run in-process as today.
+- **Non-query commands as servers.** Only `jp query` spawns a server;
+  `conversation ls`, `conversation print`, and other commands run in-process.
 
 ## Risks and Open Questions
 
-### Lock handoff timing
+### Lock Handoff Timing
 
 The client acquires the conversation lock before spawning the server.
 
-On Unix, file descriptors survive `fork()` and `exec()` unless marked
-`FD_CLOEXEC`.
-The client opens the lock file, acquires `flock`, then spawns the server (which
-inherits the fd via `fork`).
-The child process holds the same lock from birth.
-The client closes its copy of the fd after confirming the server started.
-The lock transfers without ever being released.
+On Unix, file descriptors without `FD_CLOEXEC` survive `fork()` and `exec()`.
+The client opens the lock file, acquires `flock`, and spawns the server, which
+inherits the locked fd across `fork`.
+The client closes its copy of the fd after confirming that the server started,
+transferring the lock without ever releasing it.
+If the server fails to start, the client still holds the lock, reports the
+error, and exits without leaving an orphaned lock.
 
-On Windows, fd inheritance works differently.
-The lock file path is passed to the server process, which re-acquires the lock
-via `LockFileEx`.
-There is a brief window between the client releasing and the server acquiring.
-This is mitigated by the server acquiring the lock before signaling readiness to
-the client; if the lock is lost in the window, the server fails to start and the
-client reports the error.
+On Windows, the client passes the lock file path to the server, which
+re-acquires the lock via `LockFileEx`.
+To mitigate the brief window between the client releasing the lock and the
+server acquiring it, the server acquires the lock before signaling readiness to
+the client; if another process takes the lock in that window, the server fails
+to start and the client reports the error.
 
-If the server fails to start for any reason, the client still holds the lock and
-reports the error.
-No orphaned locks.
+### Config and State Transfer
 
-### Config and state transfer
+The client resolves config, builds the `ChatRequest`, and resolves tool
+definitions before spawning the server.
+Three options exist for passing this state to the server:
 
-The client resolves config, builds the `ChatRequest`, resolves tool definitions.
-This data needs to reach the server.
-Options:
+- **Temp file with inherited fd (chosen)**: The client writes the serialized
+  state to a temp file and passes the open fd to the server.
+  This handles arbitrary payload sizes without extra dependencies.
+- **Command-line arguments**: Too limited for large configurations and tool
+  definitions.
+- **Shared memory**: Unnecessary complexity for a one-time startup transfer.
 
-- **Serialized to a temp file, fd inherited.** The client writes the resolved
-  config to a temp file, passes the fd to the server.
-  Simple, works with arbitrary data sizes.
-- **Command-line arguments.** Too limited for complex config.
-- **Shared memory.** Overkill for a one-time transfer.
+### Server Startup Latency
 
-Temp file with fd inheritance is the pragmatic choice.
+Before accepting connections, the server must read config from the temp file,
+start the Tokio runtime, open the IPC socket, and connect to MCP servers.
+To avoid polling for the socket file on fast queries, the server signals
+readiness by writing a byte to an inherited pipe once the socket is open, and
+the client blocks on that pipe before connecting.
 
-### Server startup latency
+### Terminal Resize
 
-The server needs to initialize: read config from the temp file, set up the tokio
-runtime, open the socket, connect to MCP servers, and signal readiness.
-The client waits for the socket to appear before connecting.
+Because the client performs all rendering, it handles terminal resize events
+(`SIGWINCH` on Unix, console events on Windows) locally by updating its
+formatter's width without sending a protocol message.
+The `Resize` message in the protocol table is reserved in case the server later
+needs client dimensions to format tool output.
 
-For a fast query, this adds startup latency.
-Mitigation: the server signals readiness via a pipe (write a byte when the
-socket is open).
-The client blocks on this pipe instead of polling for the socket file.
+### Structured Output (`--format json`)
 
-### Terminal resize
+When `--format json` is set, the client's `ResponseRenderer` emits events as
+NDJSON rather than formatted text; the server sends the same structured events
+regardless of output format.
 
-Since the client handles all rendering, terminal resize (SIGWINCH on Unix,
-console events on Windows) is handled entirely client-side.
-The client updates its own formatter's terminal width.
-No protocol message needed.
+### Fallback for Restricted Environments
 
-The `Resize` message in the protocol table is reserved for future use (e.g., if
-the server ever needs to know the client's dimensions for formatting tool
-output), but is not required for the initial implementation.
-
-### Structured output (`--format json`)
-
-When `--format json` is set, the client renders events as NDJSON instead of
-formatted text.
-This is a client-side rendering decision — the server sends the same structured
-events regardless.
-The client's `ResponseRenderer` implementation determines the output format.
-
-### Fallback for restricted environments
-
-Some environments (containers with restricted IPC, unusual sandboxes) may not
-support the IPC transport.
-A fallback to in-process execution (today's model) could be provided behind a
-flag (`--no-server`) for compatibility.
-This is not a launch requirement but should be considered.
+Containers with restricted IPC or strict sandboxes may block local sockets or
+named pipes.
+A `--no-server` flag can retain in-process execution as a compatibility
+fallback, though it is not required for launch.
 
 ### Platform Portability
 
-The architecture is cross-platform by design.
-Platform-specific details are isolated behind two abstractions:
+Platform-specific behavior is isolated to IPC transport, process spawning,
+shutdown, PID checks, lock handoff, and terminal events:
 
-**IPC transport.** Abstracted behind the `IpcListener`/`IpcStream` traits.
-The protocol layer (NDJSON messages) is transport-agnostic.
+**IPC transport.** Abstracted behind the `IpcListener` and `IpcStream` traits so
+the NDJSON protocol layer remains transport-agnostic.
 
 | Platform      | Transport           | Rust ecosystem                    |
 | ------------- | ------------------- | --------------------------------- |
 | macOS / Linux | Unix domain sockets | `tokio::net::UnixListener`        |
 | Windows       | Named pipes         | `tokio::net::windows::named_pipe` |
 
-The `interprocess` crate provides `LocalSocketListener`/`LocalSocketStream` as a
-cross-platform abstraction, or JP can implement the trait directly per platform.
+The `interprocess` crate provides `LocalSocketListener` and `LocalSocketStream`
+as a cross-platform abstraction, or JP can implement the traits directly per
+platform.
 
 **Process spawning.** The server must outlive the client.
-On Unix, this uses the [double-fork pattern][double-fork]: fork once to create a
-child, the child calls `setsid()` to become a session leader (detaching from the
-client's terminal), then forks again.
-The intermediate process exits immediately, so the grandchild is reparented to
-PID 1 and cannot acquire a controlling terminal.
-On Windows, `CreateProcess` with detached flags achieves the same result without
-forking.
+On Unix, spawning uses the [double-fork pattern][double-fork]: fork once, call
+`setsid()` in the child to detach from the controlling terminal as a new session
+leader, and fork again so the intermediate process exits immediately and the
+grandchild is reparented to PID 1.
+On Windows, `CreateProcess` with detached creation flags achieves the same
+result without forking.
 
 | Platform | Mechanism                  | Rust                      |
 | -------- | -------------------------- | ------------------------- |
@@ -820,93 +748,83 @@ forking.
 | Windows  | `DETACHED_PROCESS` +       | `std::process::Command` + |
 |          | `CREATE_NEW_PROCESS_GROUP` | `.creation_flags()`       |
 
-**Shutdown.** Uses protocol messages (`Shutdown` via IPC), not OS signals.
-`conversation kill --force` uses `SIGKILL` on Unix, `TerminateProcess` on
-Windows.
+**Shutdown.** Normal shutdown uses the `Shutdown` IPC message rather than OS
+signals; `conversation kill --force` uses `SIGKILL` on Unix and
+`TerminateProcess` on Windows.
 
-**PID liveness.** `kill(pid, 0)` on Unix, `OpenProcess(SYNCHRONIZE, ...)` on
-Windows.
-Used only for stale registry cleanup.
+**PID liveness.** Stale registry cleanup checks process liveness via `kill(pid,
+0)` on Unix and `OpenProcess(SYNCHRONIZE, ...)` on Windows.
 
-**Lock handoff.** `flock` fds are inherited across fork on Unix.
-On Windows, the lock file path is passed and the server re-acquires via
-`LockFileEx` (the `fd-lock` crate handles both platforms, per [RFD 020]).
+**Lock handoff.** Unix inherits `flock` file descriptors across `fork`; Windows
+passes the lock file path and re-acquires the lock via `LockFileEx` (handled on
+both platforms by the `fd-lock` crate, per [RFD 020]).
 
-**Terminal events.** SIGWINCH on Unix, console events on Windows.
-Both handled by `crossterm` in the client.
-The server never interacts with a terminal directly.
+**Terminal events.** `crossterm` handles `SIGWINCH` on Unix and console events
+on Windows inside the client; the server never interacts with a terminal.
 
 ## Implementation Plan
 
 ### Phase 1: Server Process and IPC
 
-Implement the server process: platform-specific detached spawning, process
-registry, IPC listener (Unix sockets on Unix, named pipes on Windows).
-The server runs `jp_agent::run_turn_loop()` with sink writers (no client).
-`jp query --detach` uses this: spawn server, exit.
+Implement the server process with platform-specific detached spawning, the
+process registry, and the IPC listener (Unix sockets on Unix, named pipes on
+Windows).
+The server runs `jp_agent::run_turn_loop()` with sink writers when no client is
+connected.
+Wire `jp query --detach` to spawn the server and exit, `conversation kill` to
+send `Shutdown` over IPC, and `conversation ls` to list running servers.
 
-`conversation kill` sends `Shutdown` via IPC.
-`conversation ls` shows running servers.
-
-No client attachment yet — foreground `jp query` still runs in-process using
-the old code path.
-
+Foreground `jp query` still runs in-process without client attachment.
 Depends on [RFD 026] (agent loop extraction).
 
 ### Phase 2: Client Attach Loop
 
-Implement the client: connect to server socket, render output, forward
-inquiries, handle disconnects.
-`conversation attach` uses this to connect to running servers.
-
-The server forwards structured events to the attached client.
-When no client is connected, events are buffered for replay on re-attach (see
-[Rendering Continuity](#rendering-continuity)).
-
+Implement the client attach loop to connect to the server socket, render output,
+forward inquiries, and handle disconnects, and wire `conversation attach` to use
+it.
+The server forwards structured events to the attached client and buffers events
+for replay when no client is connected (see [Rendering
+Continuity](#rendering-continuity)).
 Foreground `jp query` still runs in-process.
 
 ### Phase 3: Interrupt Protocol
 
-Implement the Ctrl+C interrupt exchange: client sends `Signal`, server responds
-with `InterruptMenu`, client sends `InterruptAction`.
-The `InterruptHandler` logic moves to the client (menu rendering) and server
+Implement the Ctrl+C interrupt exchange: the client sends `Signal`, the server
+replies with `InterruptMenu`, and the client responds with `InterruptAction`.
+Split `InterruptHandler` between the client (menu rendering) and the server
 (action processing).
 
 ### Phase 4: Foreground Queries as Client-Server
 
-Wire `jp query` (without `--detach`) to spawn a server and immediately attach.
-This replaces the in-process turn loop for all foreground queries.
-
-Add Ctrl+Z handling: client sends `Disconnect` and exits.
-
-The old in-process code path can be retained behind `--no-server` as a fallback.
+Update foreground `jp query` (without `--detach`) to spawn a server and attach
+immediately, replacing the in-process turn loop.
+Add Ctrl+Z handling so the client sends `Disconnect` and exits.
+Retain the in-process code path behind `--no-server` as a fallback.
 
 ### Phase 5: Cleanup
 
-Remove the old in-process turn loop from `jp_cli` (or keep behind
-`--no-server`).
-Update `--detach` to use the same spawn path as foreground queries (skip step
-5).
-Ensure `--continue` spawns a new server for resumed turns.
+Remove the in-process turn loop from `jp_cli` (or keep it behind `--no-server`),
+unify `--detach` with the foreground spawn path by skipping the attach step, and
+update `--continue` to spawn a new server for resumed turns.
 
 ## References
 
-- [RFD 026: Agent Loop Extraction][RFD 026] — `jp_agent` crate that the server
+- [RFD 026: Agent Loop Extraction][RFD 026]: `jp_agent` crate that the server
   calls.
-- [RFD 023: Resumable Conversation Turns][RFD 023] — incomplete turn
-  persistence; fallback when `queue` policy triggers.
-- [RFD 021: Printer Live Redirection][RFD 021] — `swap_writers()` may still be
-  useful for non-rendering output (tracing, diagnostics) but is no longer
-  central to the client-server output model.
-- [RFD 020: Parallel Conversations][RFD 020] — conversation locks inherited by
+- [RFD 023: Resumable Conversation Turns][RFD 023]: incomplete turn persistence;
+  fallback when the `defer` (`queue`) policy triggers.
+- [RFD 021: Printer Live Redirection][RFD 021]: `swap_writers()` remains useful
+  for non-rendering output (tracing, diagnostics) but is not part of the
+  client-server output model.
+- [RFD 020: Parallel Conversations][RFD 020]: conversation locks inherited by
   the server.
-- [RFD 019: Non-Interactive Mode][RFD 019] — detached prompt policies; `queue`
-  is the default when no client attached.
-- [RFD 024: Detached Query Execution][RFD 024] — superseded; process registry
-  and `queue` policy carried forward.
-- [RFD 025: Live Re-Attachment][RFD 025] — superseded; socket protocol and
-  attach flow carried forward.
-- [abduco] — prior art for minimal session detach/reattach over Unix sockets.
+- [RFD 019: Non-Interactive Mode][RFD 019]: detached prompt policies; `defer`
+  (`queue`) is the default when no client is attached.
+- [RFD 024: Detached Query Execution][RFD 024]: superseded; process registry and
+  `defer` (`queue`) policy carried forward.
+- [RFD 025: Live Re-Attachment][RFD 025]: superseded; socket protocol and attach
+  flow carried forward.
+- [abduco]: prior art for minimal session detach/reattach over Unix sockets.
 
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 020]: 020-parallel-conversations.md

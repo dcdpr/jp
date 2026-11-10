@@ -12,142 +12,120 @@
 This guide defines JP's extensibility strategy: keep the core limited to the
 agent loop, storage API, and configuration pipeline, and build LLM providers,
 renderers, attachment handlers, and tools as plugins.
-An internal event bus connects the core pipeline to plugins that subscribe to
-observe, intercept, or extend execution.
+An internal event bus connects the core pipeline to plugins that observe,
+intercept, or extend execution.
 
 ## Why Plugins
 
 JP is a tool for working with LLMs, and its plugin system is designed to be
 built with them.
-The core has the properties that make AI-assisted development hard: layered
-config merging, streaming state machines, cross-cutting coordination between
-tool execution and user interaction.
-These need careful human design.
+The core involves layered config merging, streaming state machines, and
+cross-cutting coordination between tool execution and user interaction.
+That work is hard to delegate to an LLM and needs careful human design.
 
-Plugins have the opposite properties.
-They are self-contained binaries or Wasm modules with well-defined contracts.
-Input goes in, output comes out.
-This is the kind of bounded, protocol-driven work where AI pair programming
-works well.
-The result is a natural division of labor: human attention on the core, parallel
-(and often assistant-guided) experimentation on plugins.
+Plugins are the opposite: self-contained binaries or Wasm modules with bounded,
+protocol-driven contracts where AI pair programming works well.
+This creates a natural division of labor, keeping human attention on the core
+while enabling parallel, often assistant-guided experimentation in plugins.
 
-This also means faster iteration.
-A plugin can be built, tested, and shipped without touching the main binary.
-A contributor can prototype a new workflow without waiting for a core review
-cycle and without risking regressions in unrelated code paths.
+Plugins also speed up iteration.
+Contributors can build, test, and ship a plugin or prototype a new workflow
+without touching the main binary, waiting for a core review cycle, or risking
+regressions in unrelated code paths.
 
 ## The Core
 
-The core is deliberately small.
-It owns three things:
+The core owns three responsibilities:
 
-**The agent loop.** The turn lifecycle: build thread, stream from LLM, handle
-tool calls, persist.
-This is the state machine at the center of `jp query`.
-It coordinates plugins but does not contain domain-specific logic that could
-live in a plugin instead.
-
-**The storage API.** Conversation state, event streams, metadata, workspace
-management, locking.
-All plugins interact with conversations through this API — they never access
-storage directly.
-
-**The config pipeline.** The layered merge that produces `AppConfig` (global →
-workspace → local → conversation → env → CLI).
-A core invariant: once the pipeline completes, the resulting config is
-**immutable** for the duration of the run.
-No plugin can mutate config after resolution.
-This invariant simplifies reasoning about behavior — the config you see at
-startup is the config that governs the entire session.
-Plugins that need mutable session state (OAuth tokens, "don't ask again"
-preferences, cached data) store it through the storage API (workspace state,
-conversation metadata) or their own side channels — never by mutating
-`AppConfig`.
+- **The agent loop.** The state machine at the center of `jp query` that drives
+  the turn lifecycle: building the thread, streaming from the LLM, handling tool
+  calls, and persisting events.
+  It coordinates plugins without holding domain-specific logic that belongs in a
+  plugin.
+- **The storage API.** Conversation state, event streams, metadata, workspace
+  management, and locking.
+  Plugins interact with conversations exclusively through this API and never
+  access storage directly.
+- **The config pipeline.** The layered merge (`global → workspace → local →
+  conversation → env → CLI`) that produces `AppConfig`.
+  Once resolved, `AppConfig` is **immutable** for the duration of the run: the
+  configuration at startup governs the entire session, and no plugin can mutate
+  it afterward.
+  Plugins that need mutable session state (OAuth tokens, "don't ask again"
+  preferences, cached data) store it through the storage API (workspace state or
+  conversation metadata) or in their own side channels.
 
 Everything else is an extension point.
 
 ## What Becomes a Plugin
 
-Several subsystems that currently live inside the `jp` binary are candidates for
-extraction into plugins.
-The goal is not to move code for the sake of it, but to reduce the core's
-surface area and make each subsystem independently testable, replaceable, and
-shippable.
+Several subsystems compiled into the `jp` binary belong in plugins instead.
+Extracting them shrinks the core and makes each subsystem independently
+testable, replaceable, and shippable.
 
 ### LLM Providers
 
-Today, every LLM provider (Anthropic, Google, OpenAI, Ollama, etc.) is a Rust
-module compiled into the binary.
-The `Provider` trait and `get_provider()` dispatch are wired into `jp_llm`.
-Adding a provider means modifying core code and shipping a new release.
+Every LLM provider (Anthropic, Google, OpenAI, Ollama, and others) is currently
+a Rust module compiled into the binary, with the `Provider` trait and
+`get_provider()` dispatch wired into `jp_llm`.
+Adding a provider requires modifying core code and shipping a new release.
 
-The direction: providers become plugins.
+Moving providers into plugins removes that bottleneck.
 When a user configures `anthropic/claude-sonnet-4-6`, JP resolves `anthropic` as
 a provider plugin.
-First-party provider plugins install silently (the same UX as today).
-Third-party providers prompt for approval, following the same trust model as
-command plugins.
+First-party provider plugins install silently, preserving the current UX, while
+third-party providers prompt for approval under the same trust model as command
+plugins.
 
-The `Provider` trait already defines the right boundary: `model_details`,
-`models`, `chat_completion_stream`.
-A Wasm capability interface or a protocol-based command plugin could implement
-this trait.
-The user experience does not change — `jp query -m anthropic/foo` works the
-same whether `anthropic` is compiled in or loaded as a plugin.
-
-This reduces the core binary to the agent loop, storage, and config — no HTTP
-clients, no provider-specific serialization, no API key management beyond what
-the plugin protocol provides.
+The `Provider` trait (`model_details`, `models`, `chat_completion_stream`)
+already defines the boundary, which a Wasm capability interface or a
+protocol-based command plugin can implement.
+The CLI stays the same: `jp query -m anthropic/foo` works identically whether
+`anthropic` is compiled in or loaded as a plugin.
+Extracting providers removes HTTP clients, provider-specific serialization, and
+API key management (beyond what the plugin protocol provides) from the core
+binary.
 
 ### Terminal Rendering
 
-Today, the `ChatRenderer` and `Printer` pipeline process LLM response chunks
-into formatted terminal output.
-This is tightly coupled to the agent loop.
+The `ChatRenderer` and `Printer` pipeline formats LLM response chunks for the
+terminal and is tightly coupled to the agent loop.
 
-The direction: the agent loop produces structured content events (message
-chunks, tool call headers, reasoning blocks, status updates).
-A rendering plugin consumes those events and writes to the terminal.
-The terminal renderer becomes the default output plugin — always present, but
-replaceable.
-
-This makes alternative frontends (web UI, TUI, IDE integration) equal citizens.
-They subscribe to the same content events and render in their own way.
-The four-channel output model ([RFD 048]) already separates content, chrome,
-tool calls, and errors into distinct streams — the rendering plugin consumes
-these channels.
+Decoupling them turns the terminal renderer into the default, replaceable output
+plugin.
+The agent loop emits structured content events (message chunks, tool call
+headers, reasoning blocks, status updates), and the rendering plugin consumes
+them through the four-channel output model ([RFD 048]), which separates content,
+chrome, tool calls, and errors into distinct streams.
+Alternative frontends (web UI, TUI, IDE integration) subscribe to the same
+events and render them in their own format.
 
 ### Attachment Handlers
 
-Already on this path.
-[RFD 016] defines Wasm plugins with an `attachment` capability interface.
-[RFD 017] designs the first Wasm attachment handlers.
+Attachment handlers are already moving to plugins.
+[RFD 016] defines the Wasm `attachment` capability interface, and [RFD 017]
+designs the first Wasm attachment handlers.
 Built-in handlers (file content, HTTP content, Bear notes) will migrate to Wasm
 plugins over time.
 
 ### Tools
 
-The Wasm plugin architecture ([RFD 016]) reserves a `tool` capability interface
-for future work.
-MCP tools are already external (they run as separate server processes).
-Local tools defined in `.jp/mcp/tools/` are effectively shell-script plugins.
-The pattern is established.
+MCP tools already run as external server processes, and local tools in
+`.jp/mcp/tools/` act as shell-script plugins.
+For in-process tools, the Wasm plugin architecture ([RFD 016]) reserves a `tool`
+capability interface.
 
 ## The Internal Event Bus
 
-The integration points described in the next section share a common need:
-plugins that observe, intercept, or react to things happening inside JP's
-execution pipeline.
-Rather than designing ad-hoc hook APIs for each case, JP uses a single
-mechanism: an internal event bus.
+Rather than defining ad-hoc hook APIs for each stage of execution, JP uses a
+single internal event bus for plugins that observe, intercept, or react to the
+pipeline.
 
 ### How It Works
 
-JP emits structured events at well-defined points in its execution pipeline.
-Each event has a type, a timestamp, and a typed payload.
-Plugins register as listeners for specific event types.
-The bus delivers matching events to each registered listener.
+JP emits structured events at fixed points in the execution pipeline.
+Each event carries a type, a timestamp, and a typed payload, and the bus
+delivers it to every listener subscribed to that event type.
 
 ```
 Agent Loop ──emit──▶ Event Bus ──deliver──▶ [Listener A]
@@ -157,172 +135,143 @@ Agent Loop ──emit──▶ Event Bus ──deliver──▶ [Listener A]
                     (continues)
 ```
 
-Some events are **informational**: the listener observes but does not influence
-the outcome (e.g., "a turn completed," "a tool call returned").
-Some events are **interceptable**: the listener can modify the payload or abort
-the operation (e.g., "a tool call is about to execute").
-The event type determines which category it belongs to.
+Each event type is either **informational** or **interceptable**:
+
+- **Informational events** notify listeners without affecting execution (for
+  example, "a turn completed" or "a tool call returned").
+- **Interceptable events** let the listener modify the payload or abort the
+  operation (for example, "a tool call is about to execute").
 
 ### Listener Registration
 
-A listener is anything that can receive events: a Wasm plugin, a command plugin
-connected over the protocol, or an internal Rust component.
-Listeners declare which event types they care about.
-The bus only delivers matching events — plugins that subscribe to tool-call
-events don't see rendering events.
+A listener can be a Wasm plugin, a command plugin connected over the protocol,
+or an internal Rust component.
+Listeners subscribe only to the event types they handle; a plugin subscribed to
+tool-call events never receives rendering events.
 
-For command plugins, event delivery uses the subscription model from [RFD D18].
-For Wasm plugins, a new `listener` capability interface receives events
-in-process.
-For internal components (like the terminal renderer or future diagnostics
-subsystem), registration is direct.
+How a listener registers depends on its runtime:
+
+- **Command plugins** use the subscription model from [RFD D18].
+- **Wasm plugins** receive events in-process through a `listener` capability
+  interface.
+- **Internal components** (such as the terminal renderer or diagnostics
+  subsystem) register directly in Rust.
 
 ### Delivery Guarantees
 
-Events are delivered synchronously for interceptable events (the pipeline waits
-for the listener's response) and asynchronously for informational events
-(fire-and-forget).
-This means interceptable hooks add latency — a slow listener slows the
-pipeline.
-Informational listeners cannot block the agent loop.
+The bus delivers interceptable events synchronously, pausing the pipeline until
+the listener responds, so a slow interceptor adds latency to the pipeline.
+It delivers informational events asynchronously (fire-and-forget), so
+informational listeners cannot block the agent loop.
 
-The event bus is for observation and interception, not for primary data flow.
-Critical content paths — such as streaming LLM chunks to the renderer — use
+The event bus handles observation and interception, not primary data flow.
+Critical content paths, such as streaming LLM chunks to the renderer, use
 dedicated backpressured channels.
-The event bus broadcasts informational copies of those events to analytics and
+The bus broadcasts informational copies of those events to analytics and
 diagnostics listeners, where occasional dropped events are acceptable.
-This distinction prevents a slow observer from blocking the agent loop or a fast
-producer from causing unbounded memory growth.
+Separating the two prevents a slow observer from stalling the agent loop and a
+fast producer from causing unbounded memory growth.
 
-A listener that needs to persist or forward events externally (e.g., push to a
-pub/sub server, write to a file) is responsible for its own buffering.
-JP does not guarantee delivery if the listener crashes.
+Listeners that persist or forward events externally (for example, pushing to a
+pub/sub server or writing to a file) manage their own buffering.
+JP does not guarantee delivery if a listener crashes.
 
 ## Integration Points
 
-These are the events the bus emits and the points in the pipeline where plugins
-can participate.
-Each integration point describes what it is, what plugins can do with it, and
-what use cases it enables.
+Plugins can hook into the pipeline at six stages, from config resolution through
+conversation persistence.
 
 ### Config Pipeline Hooks
 
-**When:** During config resolution, before the config is finalized.
+**When:** During config resolution, before `AppConfig` is finalized.
 
 **What a plugin can do:**
 
-- Contribute additional config layers.
-  A plugin declares its config surface via JSON Schema, and users set values
-  through the standard config inheritance chain
-  (`plugins.command.<name>.options` or a dedicated path).
-  The plugin's schema participates in validation and `jp config show`.
-- Provide config defaults that the user can override, rather than the other way
-  around.
+- Declare a config surface via JSON Schema so users can configure the plugin
+  through the standard inheritance chain (`plugins.command.<name>.options` or a
+  dedicated path), with full validation and visibility in `jp config show`.
+- Contribute default config layers alongside files, environment variables, and
+  CLI flags that the user's own settings can override.
 
-**What a plugin cannot do:** Mutate config after the pipeline completes.
-The `AppConfig` immutability invariant holds.
-Config pipeline hooks run during the build phase, contributing layers alongside
-files, env vars, and CLI flags.
-Once the pipeline produces the final `AppConfig`, it is frozen.
+**What a plugin cannot do:** Mutate `AppConfig` after resolution finishes.
 
-**Mechanism:** Plugins declare a JSON Schema for their config surface.
-JP validates user-provided values against this schema during the pipeline build.
-The validated config is passed to the plugin in the `init` message (for command
-plugins) or as a typed import (for Wasm plugins).
-Complex config needs (custom merge logic, `KvAssignment` semantics) are served
-by a config-over-JSON API that plugins call during the build phase.
+**Mechanism:** During the pipeline build, JP validates user-provided values
+against each plugin's JSON Schema and passes the validated config in the `init`
+message (for command plugins) or as a typed import (for Wasm plugins).
+Plugins that need custom merge logic or `KvAssignment` semantics call a
+config-over-JSON API during the build phase.
 
-**Bootstrap sequence:** The config pipeline must know which plugins are active
-before it can load their schemas, but the plugin list is itself part of the
-config being built.
-This is resolved with a two-phase approach: first, a structural parse identifies
-enabled plugins and loads their schemas; then, a validating pass applies those
-schemas to the full config.
-This is the same pattern JP already uses for MCP server and tool config
-resolution.
+**Bootstrap sequence:** Because the active plugin list is part of the config
+being built, resolution runs in two phases, matching MCP server and tool config
+resolution: a structural pass identifies enabled plugins and loads their
+schemas, and a validation pass applies those schemas to the full config.
 
-**Enables:** Typed, validated plugin config without coupling `jp_config` to
-plugin internals.
-Replaces the current unstructured `options: Value` field with something
-discoverable and self-documenting.
-See [RFD 077] for the initial design.
+**Enables:** Typed, discoverable plugin configuration that replaces the
+unstructured `options: Value` field without coupling `jp_config` to plugin
+internals (see [RFD 077]).
 
 ### Pre-Query Events
 
-**When:** After config resolution, before the agent loop starts.
-This is the gap between `ConfigPipeline::build()` and `run_turn_loop()`.
+**When:** Between `ConfigPipeline::build()` and `run_turn_loop()`, after config
+resolution and before the agent loop starts.
 
 **Event type:** Interceptable.
 
 **What a plugin can do:**
 
-- Auto-attach context based on workspace state (current git diff, recent test
+- Attach context based on workspace state (current git diff, recent test
   failures, project-specific knowledge files).
-- Augment the user's prompt (prepend a preamble, inject structured
+- Augment the user's prompt (prepend a preamble or inject structured
   instructions).
 - Validate or transform attachments before they enter the thread.
 
-**Visibility constraint:** Any context injected via pre-query events must be
-surfaced to the user.
-Injected attachments appear in the conversation record.
-Prompt modifications are logged to the chrome channel.
-Silent prompt mutation breaks the user's mental model of what the LLM is
-responding to — pre-query hooks must not operate invisibly.
+**Visibility constraint:** Pre-query hooks must not mutate the prompt silently,
+since hidden modifications obscure what the LLM is responding to.
+Injected attachments are recorded in the conversation stream, and prompt
+modifications are logged to the chrome channel.
 
-**Note:** Many auto-context use cases are better expressed as config
-contributions (system instructions, attachment lists) rather than runtime hooks.
-If the context is deterministic and based on workspace state, a config pipeline
-hook is the right tool.
-Pre-query events are for cases where the context depends on the specific query
-being sent.
+**Scope:** Deterministic workspace context (system instructions, static
+attachment lists) belongs in a config pipeline hook.
+Pre-query events are for context that depends on the specific query being sent.
 
 ### Tool Call Events
 
-**When:** Before and after tool execution.
-The `ToolCoordinator` manages the pipeline: `prepare → permission → execute →
-collect results`.
+**When:** Around tool execution in `ToolCoordinator` (`prepare → permission →
+execute → collect results`), which expands with event hooks to `prepare →
+intercept → permission → execute → after → complete`.
 
 **Event types:**
 
 - `tool_call.intercept` (interceptable): Emitted after the executor is prepared
-  but **before** the permission prompt.
-  The listener receives the tool name, arguments, and executor metadata.
-  It can modify arguments, substitute the executor, return a cached result, or
-  abort the call.
-  The modified request is what the user sees in the permission prompt — the
-  interception is visible, not hidden.
+  and **before** the permission prompt.
+  The listener receives the tool name, arguments, and executor metadata, and can
+  modify arguments, substitute the executor, return a cached result, or abort
+  the call.
+  Running interception before the permission prompt ensures the user always
+  reviews and approves the final tool call, including any listener
+  modifications.
 - `tool_call.after` (interceptable): Emitted after execution, before the result
   is sent to the LLM.
-  The listener receives the request and result.
-  It can transform, filter, or redact the result.
+  The listener receives the request and result and can transform, filter, or
+  redact the output.
 - `tool_call.complete` (informational): Emitted after the result is committed to
-  the conversation stream.
-  For logging, analytics, and diagnostics.
+  the conversation stream, for logging, analytics, and diagnostics.
 
-The pipeline ordering is: `prepare → intercept → permission → execute →
-after → complete`.
-This ordering is deliberate: because interception happens before permission, the
-user always approves the final form of the tool call, including any
-modifications made by listeners.
-
-**Security consideration:** An interceptable `tool_call.intercept` event gives a
-listener the power to modify tool calls.
-Listeners must declare which tool names they intercept.
-The user explicitly approves this at plugin install time.
-Modifications to tool arguments or executors are logged.
-The permission model is analogous to browser extension permissions — you grant
-access to specific capabilities, not blanket access.
+**Security:** Because `tool_call.intercept` can rewrite tool calls, listeners
+must declare the specific tool names they intercept, and the user approves that
+scope at plugin install time (similar to browser extension permissions).
+All modifications to tool arguments or executors are logged.
 
 **Enables:**
 
 - *Logging and analytics.* Record every tool call with timing and results.
-- *Policy enforcement.* Dynamic rules beyond static `run_mode` config (e.g., "no
-  filesystem writes during review," "only allow tools from this MCP server in
-  this workspace").
-- *Caching.* Return cached results for deterministic calls (e.g., a `read_file`
-  for a file unchanged since the last call).
-- *Judges.* An agent that observes tool calls and provides automated feedback to
-  steer the main LLM (see [Judges](#judges) below).
+- *Policy enforcement.* Apply dynamic rules beyond static `run_mode` config (for
+  example, blocking filesystem writes during a review or restricting tools to a
+  specific MCP server in a workspace).
+- *Caching.* Return cached results for deterministic calls (such as `read_file`
+  on an unchanged file).
+- *Judges.* Observe tool calls and inject automated feedback to steer the main
+  LLM (see [Judges](#judges)).
 
 ### LLM Response Events
 
@@ -331,28 +280,24 @@ access to specific capabilities, not blanket access.
 **Event types:**
 
 - `response.chunk` (informational): A copy of each content or reasoning chunk as
-  it arrives.
-  Note: the primary renderer (terminal, web UI) does **not** consume chunks
-  through the event bus.
-  It uses a dedicated backpressured channel to guarantee no data loss.
-  The event bus broadcasts copies for observation and analysis.
-- `response.complete` (informational): The full assembled response after
+  it arrives, broadcast for observation and analysis while primary renderers
+  (terminal, web UI, TUI) read from the dedicated backpressured rendering
+  channel.
+- `response.complete` (informational): The full assembled response once
   streaming ends.
 
 **Enables:**
 
-- *Alternative frontends.* A web UI or TUI subscribes to the dedicated rendering
-  channel (not the event bus) for reliable content delivery.
-  The event bus serves secondary consumers like logging and analytics.
-- *Interception analysis.* A listener that monitors response quality and flags
-  issues (off-topic responses, hallucinated code references, safety concerns).
-  Real-time stream interception (aborting a generation mid-stream) is not served
-  by the informational `response.chunk` event.
-  That requires a cancellation signal to the agent loop, likely through the
-  interrupt handler stack ([RFD 045]).
-- *Diagnostics.* Semantic analysis plugins that process complete responses to
+- *Secondary stream consumers.* Logging, analytics, and live telemetry alongside
+  the primary frontend.
+- *Response monitoring.* Listeners that evaluate response quality and flag
+  off-topic drift, hallucinated code references, or safety concerns.
+  Aborting a generation mid-stream requires sending a cancellation signal to the
+  agent loop through the interrupt handler stack ([RFD 045]), since
+  `response.chunk` is informational.
+- *Diagnostics.* Semantic analysis plugins that process completed responses to
   extract summaries, sentiment, named entities, or classifications (see
-  [Diagnostics](#diagnostics) below).
+  [Diagnostics](#diagnostics)).
 
 ### Turn Lifecycle Events
 
@@ -361,161 +306,131 @@ access to specific capabilities, not blanket access.
 **Event types:**
 
 - `turn.started` (informational): A new turn has begun.
-- `turn.cycle_complete` (informational): One LLM streaming cycle finished (there
-  may be more if tool calls trigger follow-up cycles).
-- `turn.complete` (informational): The entire turn has finished and events are
+- `turn.cycle_complete` (informational): One LLM streaming cycle finished (tool
+  calls may trigger follow-up cycles).
+- `turn.complete` (informational): The turn has finished and its events are
   persisted.
 - `turn.aborted` (informational): The turn was interrupted or failed.
 
 **Enables:**
 
 - *Post-turn automation.* Trigger workflows after a turn: run tests, commit
-  staged changes, update a tracking issue, notify a team channel.
+  staged changes, update a tracking issue, or notify a team channel.
 - *Conversation analytics.* Track turn count, token usage, tool call frequency,
   and model performance over time.
-- *Chaining.* Feed a turn's output into another conversation or system (e.g., a
-  review pipeline, a summary generator).
-- *Judges.* An agent that evaluates the completed response and injects automated
-  follow-up messages to correct or refine the LLM's output.
+- *Chaining.* Feed a turn's output into another conversation or system (such as
+  a review pipeline or summary generator).
+- *Judges.* Evaluate the completed response and inject automated follow-up
+  messages to correct or refine the LLM's output.
 
 ### Conversation Events
 
-**When:** Whenever events are persisted to a conversation stream, from any
-source (the agent loop, a plugin writing via `push_events`, a concurrent `jp
-query` session).
+**When:** Whenever events are persisted to a conversation stream from any source
+(the agent loop, a plugin writing via `push_events`, or a concurrent `jp query`
+session).
 
 **Event type:** Informational.
 
 **Enables:**
 
 - *Sync and backup.* Mirror conversations to an external system.
-- *Notifications.* Alert when specific patterns occur (e.g., a tool call fails
-  repeatedly, a conversation exceeds a token budget).
+- *Notifications.* Alert when specific patterns occur (such as repeated tool
+  call failures or a conversation exceeding a token budget).
 - *Indexing.* Build a search index over conversation content for retrieval.
 
-**Mechanism:** For command plugins, this is the subscription model from [RFD
-D18].
-For regular `jp query` runs (no long-lived command plugin), a lightweight
-registration mechanism lets listeners receive events in-process during the
-session.
-A plugin could also start a background pub/sub server alongside `jp` that
-streams events to external listeners, or simply append events to a file for
-offline processing.
+**Mechanism:** Long-lived command plugins subscribe via [RFD D18], while
+standard `jp query` sessions deliver events in-process to registered listeners.
+A plugin can also run a background pub/sub server alongside `jp` to stream
+events to external consumers, or append events to a file for offline processing.
 
-## Use Cases Enabled by the Event Bus
+## Event Bus Use Cases
 
-The integration points above combine to support several patterns that would
-otherwise require core changes.
+Combining these integration points supports workflows that would otherwise
+require changes to the core.
 
 ### Judges
 
-Configurable agents that observe specific events and provide automated feedback
-to steer the main LLM.
-A judge subscribes to `tool_call.after` and/or `turn.complete` events, evaluates
-the content against criteria (code quality, adherence to style guides,
-correctness), and injects a system message or automated reply into the
-conversation.
-
-Different judges can cover different concerns: one for code review, one for
-security analysis, one for style compliance.
-They run as independent plugins, each with its own model configuration and
-system prompt.
-The user enables judges per-workspace or per-conversation through config.
+A judge is an agent plugin that subscribes to `tool_call.after` or
+`turn.complete` events, evaluates the output against criteria such as code
+quality, style compliance, or security, and injects a system message or
+automated reply to steer the main LLM.
+Each judge runs as an independent plugin with its own model configuration and
+system prompt, enabled per-workspace or per-conversation in config.
 
 ### Interceptors
 
-Automated systems that monitor LLM responses in real time and intervene when the
-output goes off track.
-An interceptor subscribes to `response.chunk` or `response.complete` events and
-evaluates quality signals.
-When it detects a problem (hallucinated file paths, contradictory statements,
-off-topic drift), it can flag the issue for the user or inject a correction into
-the next turn.
+An interceptor monitors `response.chunk` or `response.complete` events during
+streaming and intervenes when the response goes off track.
+When it detects hallucinated file paths, contradictory statements, or off-topic
+drift, it flags the issue for the user or injects a correction into the next
+turn.
 
-This is similar to judges but operates during streaming rather than after the
-turn completes.
+### Diagnostics
 
-### Diagnostics and Semantic Metadata
-
-Plugins that apply NLP or lightweight ML to conversation content to extract
-structured metadata:
+Diagnostics plugins subscribe to `turn.complete` events, run NLP or lightweight
+ML over the turn content, and write structured metadata back to the conversation
+through the storage API:
 
 - **Summarization.** Generate turn or conversation summaries.
 - **Classification.** Zero-shot classification of conversation topics or intent.
 - **Sentiment analysis.** Track the tone and trajectory of a conversation.
 - **Named entity recognition.** Extract references to files, functions,
   concepts, and people.
-- **Keyword extraction.** Identify key themes for indexing and retrieval.
+- **Keyword extraction.** Identify themes for indexing and retrieval.
 
-A diagnostics plugin subscribes to `turn.complete` events, processes the
-content, and writes structured metadata back to the conversation (via the
-storage API).
-This metadata enables downstream features: conversation search, knowledge
+Downstream tools can use this metadata for conversation search, knowledge
 graphs, review dashboards, and quality tracking.
 
 ### Notifications
 
-A plugin that subscribes to conversation and turn lifecycle events and pushes
-notifications to external systems.
-Examples: a Slack notification when a long-running query completes, a desktop
-notification when a tool call needs approval, or a webhook that fires when a
+Notification plugins subscribe to conversation and turn lifecycle events and
+push alerts to external systems: a Slack message when a long-running query
+completes, a desktop alert when a tool call needs approval, or a webhook when a
 conversation reaches a token budget threshold.
+Because notifications are informational and low-frequency, they are a natural
+first use case for the event bus.
 
-This is a natural first use case for the event bus because it is informational
-(no interception), low-frequency, and immediately useful.
+## Where New Functionality Belongs
 
-## Where Does New Functionality Belong?
+Evaluate new features in this order:
 
-When considering a new feature, apply this sequence:
+1. **Command plugin.** New subcommands, servers, exporters, and standalone
+   workflows belong in command plugins, the lowest-friction extension path.
+2. **Wasm plugin.** New attachment handlers, tools, and LLM providers belong
+   behind a Wasm capability interface.
+3. **Event listener.** Features that observe or intercept existing behavior
+   (tool calls, responses, turn lifecycle) belong on the event bus.
+   If no existing event type covers the use case, design a new event type first.
+4. **Configuration.** Features that control deterministic behavior
+   (auto-attaching context, setting defaults, enabling tools) belong in a config
+   pipeline hook or JSON Schema extension rather than a runtime hook.
+5. **Core.** Only changes to the agent loop, storage format, or config pipeline
+   itself belong in the core and require a core RFD.
 
-**1. Can it be a command plugin?** If the feature is a new subcommand, a server,
-an exporter, or a standalone workflow — build it as a command plugin.
-This is the lowest-friction path.
-
-**2. Can it be a Wasm plugin?** If the feature is a new attachment handler,
-tool, or LLM provider — it belongs behind a Wasm capability interface.
-
-**3. Can it be an event listener?** If the feature needs to observe or intercept
-existing behavior (tool calls, responses, turn lifecycle), check whether one of
-the event types above covers the use case.
-If the event type doesn't exist yet, that's a signal to design it.
-
-**4. Can it be expressed as config?** If the feature is about controlling
-existing behavior (auto-attaching context, setting defaults, enabling tools), a
-config pipeline hook or a JSON Schema extension is likely the right path.
-Prefer config over runtime hooks when the behavior is deterministic.
-
-**5. Does it need to change the core?** If the feature requires modifying the
-agent loop, the storage format, or the config pipeline itself — it belongs in
-the core.
-Write an RFD.
-
-The bias is toward plugins and events.
-If you find yourself reaching into `jp_cli` or `jp_llm` to add something that
-could be self-contained, step back and ask whether an event subscription, a
-capability interface, or a config extension would serve the same purpose.
+Default to plugins and events.
+Before adding self-contained logic to `jp_cli` or `jp_llm`, check whether an
+event subscription, a capability interface, or a config extension can express it
+instead.
 
 ## Plugin Maturity
 
-As the plugin ecosystem grows, users need signals to assess plugin quality.
-This section sketches a vocabulary for plugin maturity — not a scoring system
-to implement today, but a framework for when the ecosystem warrants it.
-
-**Dimensions:**
+As the set of third-party plugins grows, users need signals to evaluate a
+plugin's maturity along four dimensions:
 
 - **Authoring method.** Core-team authored, assistant-guided (human designs, AI
-  implements), or vibe-coded (predominantly AI-generated).
-  Not a quality judgment — signals the level of deliberate design.
-- **Test coverage.** Does the plugin test protocol handling or capability
-  contracts?
-- **Documentation.** README, structured help ([RFD D19]), config schema.
-- **Integration depth.** Informational listener → interceptor →
-  agent-integrated → config-extending.
-  Deeper integration means more surface for breakage.
+  implements), or vibe-coded (predominantly AI-generated), indicating how much
+  deliberate human design went into the plugin.
+- **Test coverage.** Whether the plugin tests its protocol handling and
+  capability contracts.
+- **Documentation.** Whether the plugin provides a README, structured help ([RFD
+  D19]), and a config schema.
+- **Integration depth.** From informational listener, to interceptor, to
+  agent-integrated, to config-extending.
+  Deeper integration carries more surface for breakage.
 
-The plugin registry ([RFD 072]) already carries an `official` field.
-Future registry metadata could include `tested`, `documented`, and `authoring`
-signals — informational, not gatekeeping.
+The plugin registry ([RFD 072]) already carries an `official` field and can add
+informational `tested`, `documented`, and `authoring` fields when needed,
+without gating publication.
 
 ## References
 
@@ -526,7 +441,7 @@ signals — informational, not gatekeeping.
 - [RFD D18: Plugin Event Subscriptions and Query Delegation][RFD D18]
 - [RFD D19: Structured Plugin Help Protocol][RFD D19]
 - [RFD 077: Plugin Configuration and Trust Policy][RFD 077]
-- [Vector RFC: Registered Internal Events][vector-events] — prior art for
+- [Vector RFC: Registered Internal Events][vector-events]: Prior art for
   internal event systems in pipeline architectures.
 
 [RFD 016]: ../016-wasm-plugin-architecture.md
