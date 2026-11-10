@@ -47,6 +47,7 @@ JP_CFG=()                # `--cfg` flags for every turn (persona, skills)
 SNAPSHOT_FILES=()        # state files copied into the run's snapshots each turn
 GATE_LABEL="gate"        # label for the gate result in the post-turn summary
 DISCARD_ON_GATE_FAILURE=0 # reset the branch when an iteration fails the gate
+MAX_REPAIRS=3            # in-place repairs before a repairable gate failure counts as a plain one
 
 # When the 5-hour session quota is exhausted, wait and probe periodically so
 # the run can resume once the window reopens.
@@ -414,14 +415,53 @@ EOF
     printf '%s\n' "$1"
 }
 
-# Reset the branch and the working tree (excluding `state/`) to `$1`. Returns
-# non-zero without modifying files if HEAD has moved off `$BRANCH`, or if git
-# fails.
+# Keep everything an iteration produced reachable before a discard resets it:
+# its commits, plus uncommitted and untracked files outside `state/`, recorded as
+# one more commit on top of HEAD. The ref is
+# `refs/loop/discarded/<mission>/<run id>/<iteration>`, and git never collects a
+# commit a ref points at. Sets `DISCARD_REF`. Returns non-zero when the work
+# could not be recorded.
+pin_iteration() {
+    local base=$1 dir tree commit
+    if [[ $(git rev-parse HEAD) == "$base" && -z $(git status --porcelain -- "${NOT_STATE[@]}") ]]; then
+        return 0
+    fi
+
+    # A temporary index, so recording the work leaves the real one untouched.
+    dir=$(mktemp -d) || return 1
+    if ! tree=$(
+        export GIT_INDEX_FILE=$dir/index
+        git read-tree HEAD &&
+            git add -A -- "${NOT_STATE[@]}" &&
+            git write-tree
+    ); then
+        rm -rf "$dir"
+        return 1
+    fi
+    rm -rf "$dir"
+
+    commit=$(git rev-parse HEAD) || return 1
+    if [[ $tree != "$(git rev-parse 'HEAD^{tree}')" ]]; then
+        commit=$(git commit-tree "$tree" -p HEAD \
+            -m "$MISSION: uncommitted work of iteration $seq, run $RUN_ID") || return 1
+    fi
+    DISCARD_REF="refs/loop/discarded/$MISSION/$RUN_ID/$seq"
+    git update-ref "$DISCARD_REF" "$commit" || return 1
+}
+
+# Reset the branch and the working tree (excluding `state/`) to `$1`, after
+# recording the work with `pin_iteration`. Returns non-zero without modifying
+# files if HEAD has moved off `$BRANCH` or the work could not be recorded, and
+# non-zero if git fails.
 discard_iteration() {
     local base=$1 branch_now path
     branch_now=$(git rev-parse --abbrev-ref HEAD)
     if [[ $branch_now != "$BRANCH" ]]; then
         echo "$MISSION: HEAD is on '$branch_now', not '$BRANCH'; refusing to discard" >&2
+        return 1
+    fi
+    if ! pin_iteration "$base"; then
+        echo "$MISSION: could not record the iteration's work; refusing to discard" >&2
         return 1
     fi
     # Use `git reset` + `git restore` with `NOT_STATE` instead of
@@ -457,6 +497,10 @@ ROTATE_REASON="first conversation"
 TURN_PID=""
 TRANSIENTS=0             # consecutive stalled streams
 UNTRACKED_BEFORE=""
+TARGET=""
+REPAIR_BASE=""            # base of the iteration a repair turn continues
+REPAIRS=0                 # consecutive in-place repairs
+DISCARD_REF=""
 rc=0                     # exit status of the last turn
 RUN_STATUS=0             # the harness's own exit status; 1 when the run aborts
 
@@ -515,15 +559,19 @@ while :; do
         break
     fi
 
-    head_before=$(git rev-parse HEAD)
+    # A repair continues the iteration it repairs, so it keeps that iteration's
+    # base: the gate checks, and a discard resets, the work of every turn since.
+    head_before=${REPAIR_BASE:-$(git rev-parse HEAD)}
     export LOOP_ITERATION
     LOOP_ITERATION=$(printf '%03d' $((ITER + 1)))
     export LOOP_ITERATION_BASE=$head_before
 
     # Query `next-target` before incrementing ITER so a run that exits when no
     # targets remain does not count an unexecuted iteration. Skip `next-target`
-    # on repair turns, which must fix the broken working tree first.
-    TARGET=""
+    # on repair turns, which keep the target they repair.
+    if [[ $GATE_OK -eq 1 ]]; then
+        TARGET=""
+    fi
     if [[ -n $NEXT_TARGET && $GATE_OK -eq 1 ]]; then
         set +e
         TARGET=$("$NEXT_TARGET")
@@ -585,7 +633,7 @@ while :; do
         continue_prompt "$LAST_FACTS" >> "$prompt"
         mode="continue"
     fi
-    if [[ -n $TARGET ]]; then
+    if [[ -n $TARGET && $mode != repair ]]; then
         if declare -F target_prompt >/dev/null; then
             target_prompt "$TARGET" >> "$prompt"
         else
@@ -614,7 +662,7 @@ while :; do
     for file in ${SNAPSHOT_FILES[@]+"${SNAPSHOT_FILES[@]}"}; do
         cp "$STATE/$file" "$RUN_SNAPS/$seq-$file" 2>/dev/null || true
     done
-    if [[ $DISCARD_ON_GATE_FAILURE -eq 1 ]]; then
+    if [[ $DISCARD_ON_GATE_FAILURE -eq 1 && -z $REPAIR_BASE ]]; then
         UNTRACKED_BEFORE=$(git -c core.quotePath=false ls-files --others --exclude-standard -- "${NOT_STATE[@]}")
     fi
 
@@ -681,6 +729,8 @@ while :; do
     GATE_OK=1
     GATE_OUTPUT=""
     DISCARDED=0
+    DISCARD_REF=""
+    REPAIRING=0
     gate_text="skipped"
     if [[ $GATE -eq 1 && -n $GATE_BIN ]]; then
         export LOOP_TURN_STATUS=$rc
@@ -689,8 +739,20 @@ while :; do
         gate_rc=$?
         set -e
         printf '%s\n' "$gate_raw" > "$RUN_DIR/iter-$seq.gate.log"
+        # A turn cut short by a usage limit or a stall has not tried its repair.
+        if [[ $gate_rc -eq 2 && $LIMITED -eq 0 && $TRANSIENT -eq 0 ]]; then
+            REPAIRS=$((REPAIRS + 1))
+        fi
         if [[ $gate_rc -eq 0 ]]; then
             gate_text="PASS"
+        elif [[ $gate_rc -eq 2 && $REPAIRS -le $MAX_REPAIRS ]]; then
+            # Exit status 2: the gate keeps the work, and the next turn repairs it
+            # in place, whatever DISCARD_ON_GATE_FAILURE says.
+            GATE_OK=0
+            REPAIRING=1
+            gate_text="REPAIR"
+            GATE_OUTPUT=$gate_raw
+            echo "$MISSION: [$seq] gate kept the work; the next turn repairs it in place" >&2
         elif [[ $DISCARD_ON_GATE_FAILURE -eq 1 ]]; then
             gate_text="FAIL"
             if ! discard_iteration "$head_before"; then
@@ -698,13 +760,19 @@ while :; do
                 break
             fi
             DISCARDED=1
-            echo "$MISSION: [$seq] gate FAILED; the iteration is discarded" >&2
+            echo "$MISSION: [$seq] gate FAILED; the iteration is discarded${DISCARD_REF:+ and kept at $DISCARD_REF}" >&2
         else
             GATE_OK=0
             gate_text="FAIL"
             GATE_OUTPUT=$gate_raw
             echo "$MISSION: [$seq] gate FAILED; the next turn repairs" >&2
         fi
+    fi
+    if [[ $REPAIRING -eq 1 ]]; then
+        REPAIR_BASE=$head_before
+    else
+        REPAIR_BASE=""
+        REPAIRS=0
     fi
 
     dirty=$(git status --porcelain -- "${NOT_STATE[@]}" | wc -l | tr -d ' ')
@@ -718,6 +786,12 @@ while :; do
         if [[ $DISCARDED -eq 1 ]]; then
             echo "- the gate failed, so the harness discarded the iteration;" \
                  "the branch is back at \`$(git rev-parse --short "$head_before")\`"
+            if [[ -n $DISCARD_REF ]]; then
+                echo "- the discarded work is kept at \`$DISCARD_REF\`"
+            fi
+        fi
+        if [[ $REPAIRING -eq 1 ]]; then
+            echo "- the gate kept the changes; the next turn repairs them in place"
         fi
         if [[ $LIMITED -eq 1 ]]; then
             echo "- the turn was interrupted by a usage limit, not by an error in your changes"
