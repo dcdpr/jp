@@ -51,7 +51,7 @@ fn cut_on_october_1() -> Fixture {
     fixture.commit("fix: Retry (#1)");
     fixture.push();
     run(&fixture, &fixture.shell_at(OCTOBER_1), |pipeline| {
-        cut(pipeline, None)
+        cut(pipeline, None, None)
     })
     .unwrap();
 
@@ -91,7 +91,7 @@ fn a_cut_not_yet_published_says_how_to_publish_it_and_what_comes_next() {
              left them, delete them with `git branch -D release/0.1 \
              release-notes/v0.1.0`.\n\n0.1.0 is in preparation on release/0.1. Its notes are on \
              release-notes/v0.1.0, and main at {} lacks some of them: merge release-notes/v0.1.0 \
-             into main through a pull request once they are final, then finalize it.\n",
+             into main once they are final, then finalize it.\n",
             &head[..7]
         )
     );
@@ -114,8 +114,8 @@ fn merged_notes_say_to_finalize() {
     );
 }
 
-/// A notes branch merged and then deleted on `origin`, as a forge does after a
-/// pull request, stays here; it is no reason to push.
+/// A notes branch merged and then deleted on `origin`, as a forge does once a
+/// pull request merges, stays here; it is no reason to push.
 #[test]
 fn a_merged_notes_branch_left_here_is_not_pushed_again() {
     let fixture = cut_on_october_1();
@@ -205,7 +205,7 @@ fn a_checkout_behind_main_says_to_bring_it_in_first() {
 }
 
 /// A notes branch edited here and elsewhere has to be brought together before
-/// its pull request can carry both.
+/// it can be merged with both.
 #[test]
 fn a_diverged_notes_branch_is_named() {
     let fixture = cut_on_october_1();

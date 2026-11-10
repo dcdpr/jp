@@ -174,7 +174,7 @@ fn preparing(
     let next = match finalize::notes(pipeline, releases, line, version, main)? {
         Notes::Unmerged { branch, .. } => format!(
             "Its notes are on {branch}, and {at} lacks some of them: merge {notes_branch} into \
-             {MAIN} through a pull request once they are final, then finalize it."
+             {MAIN} once they are final, then finalize it."
         ),
         Notes::Unfiled(pending) => format!(
             "{at} still has {} at the top of {} whose changes {} ships, so its notes aren't filed \

@@ -45,7 +45,7 @@ fn cut_on_october_1() -> Fixture {
     let shell = fixture.shell_at(OCTOBER_1);
     let options = options(&json!({}));
     let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
-    cut(&pipeline, None).unwrap();
+    cut(&pipeline, None, None).unwrap();
 
     fixture
 }

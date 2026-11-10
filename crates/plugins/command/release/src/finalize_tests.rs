@@ -29,7 +29,7 @@ fn cut_here(fixture: &Fixture) {
     let shell = fixture.shell();
     let options = options();
     let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
-    cut(&pipeline, None).unwrap();
+    cut(&pipeline, None, None).unwrap();
 }
 
 /// The message of the tag `tag` in the workspace's repository.

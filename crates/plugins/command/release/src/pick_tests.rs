@@ -33,7 +33,7 @@ fn cut_0_1_0() -> Fixture {
     fixture.fragment("retry", "fixed", "Retried.");
     fixture.commit("fix: Retry (#1)");
     fixture.push();
-    run(&fixture, |pipeline| cut(pipeline, None)).unwrap();
+    run(&fixture, |pipeline| cut(pipeline, None, None)).unwrap();
 
     fixture
 }
@@ -97,8 +97,8 @@ fn stopped(fixture: &Fixture) -> Utf8PathBuf {
 const PICKED_AND_FILED: &str =
     "Picked 1 commit onto release/0.1 for release 0.1.0.\nFiled 1 fragment into \
      changelog.d/0.1.0/ on release-notes/v0.1.0.\n\nNothing is published yet. Publish them \
-     with:\n\n    git push origin release/0.1 release-notes/v0.1.0\n\nthen open a pull request \
-     from release-notes/v0.1.0 into main, unless one is open from it already.\n";
+     with:\n\n    git push origin release/0.1 release-notes/v0.1.0\n\nthen merge \
+     release-notes/v0.1.0 into main once its notes are final.\n";
 
 #[test]
 fn a_pick_files_its_fragment_on_the_notes_branch_with_main_merged_in() {
@@ -153,8 +153,8 @@ fn a_pick_files_its_fragment_on_the_notes_branch_with_main_merged_in() {
     assert_eq!(fixture.git(&["worktree", "list"]).lines().count(), 1);
 }
 
-/// Once the notes branch's pull request has merged, a later pick's notes start
-/// from what merged, so a new pull request from the branch shows only them.
+/// Once the notes branch has merged, a later pick's notes start from what
+/// merged, so merging the branch again brings only them.
 #[test]
 fn a_pick_after_the_notes_merged_files_only_its_own_fragment() {
     let fixture = cut_0_1_0();
@@ -209,9 +209,10 @@ fn a_notes_branch_that_conflicts_with_main_stops_the_pick_before_anything_change
     );
     assert!(
         error.ends_with(
-            "If its pull request has merged, delete it with `git branch -D release-notes/v0.1.0` \
-             and `git push origin --delete release-notes/v0.1.0`, and pick again; otherwise merge \
-             main into it yourself, resolving the conflicts, and pick again."
+            "If release-notes/v0.1.0 has merged into main, delete it with `git branch -D \
+             release-notes/v0.1.0` and `git push origin --delete release-notes/v0.1.0`, and pick \
+             again; otherwise merge main into it yourself, resolving the conflicts, and pick \
+             again."
         ),
         "{error}"
     );
@@ -237,7 +238,7 @@ fn the_next_cut_leaves_a_fragment_a_pick_ships() {
     .unwrap();
     change(&fixture, "src/later.rs", "later", "fix: A later fix (#3)");
 
-    run(&fixture, |pipeline| cut(pipeline, None)).unwrap();
+    run(&fixture, |pipeline| cut(pipeline, None, None)).unwrap();
 
     assert!(
         fixture
@@ -295,7 +296,7 @@ fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
 fn a_fragment_a_later_release_ships_too_is_copied_with_its_credits() {
     let (fixture, hash) = on_gitlab_with_a_fix();
     let gitlab = options_for("gitlab");
-    run_with(&fixture, &gitlab, |pipeline| cut(pipeline, None)).unwrap();
+    run_with(&fixture, &gitlab, |pipeline| cut(pipeline, None, None)).unwrap();
 
     run_with(&fixture, &gitlab, |pipeline| {
         pick(pipeline, &version("0.1.1"), slice::from_ref(&hash))
@@ -321,7 +322,7 @@ fn a_fragment_a_later_release_ships_too_is_copied_with_its_credits() {
 fn a_fragment_filed_into_a_later_release_is_copied_from_its_directory() {
     let (fixture, hash) = on_gitlab_with_a_fix();
     let gitlab = options_for("gitlab");
-    run_with(&fixture, &gitlab, |pipeline| cut(pipeline, None)).unwrap();
+    run_with(&fixture, &gitlab, |pipeline| cut(pipeline, None, None)).unwrap();
     fixture.merge_notes(
         "0.2.0",
         "chore(release): Cut release 0.2.0\n\nSee merge request group/project!7",

@@ -496,7 +496,7 @@ fn merge_notes(notes: &Worktree<'_>, name: &str, tip: &str) -> Result<(), String
     }
 
     Err(format!(
-        "Merging {MAIN} into {name} conflicts in {}. If its pull request has merged, delete it \
+        "Merging {MAIN} into {name} conflicts in {}. If {name} has merged into {MAIN}, delete it \
          with `git branch -D {name}` and `git push {ORIGIN} --delete {name}`, and pick again; \
          otherwise merge {MAIN} into it yourself, resolving the conflicts, and pick again.",
         conflicts.join(", ")
@@ -823,8 +823,7 @@ fn finish(
     ));
     if filed_notes {
         said.push_str(&format!(
-            "\nthen open a pull request from {notes_branch} into {MAIN}, unless one is open from \
-             it already.\n"
+            "\nthen merge {notes_branch} into {MAIN} once its notes are final.\n"
         ));
     }
 

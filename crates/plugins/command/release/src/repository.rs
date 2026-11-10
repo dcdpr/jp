@@ -11,7 +11,7 @@
 //! The default branch is `main`.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     env, fs, process,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -471,6 +471,20 @@ impl<'a> Repository<'a> {
         let listing = self.git(&["rev-list", "--first-parent", hash])?;
 
         Ok(listing.lines().map(ToOwned::to_owned).collect())
+    }
+
+    /// Every commit in the history of the commit `hash`, itself included.
+    pub(crate) fn ancestors(&self, hash: &str) -> Result<HashSet<String>, String> {
+        let listing = self.git(&["rev-list", hash])?;
+
+        Ok(listing.lines().map(ToOwned::to_owned).collect())
+    }
+
+    /// The hash and message of each commit on the first-parent line of the
+    /// commit `hash`, newest first, as `git log -z --format=%H%n%B` writes
+    /// them.
+    pub(crate) fn first_parent_log(&self, hash: &str) -> Result<String, String> {
+        self.git(&["log", "--first-parent", "-z", "--format=%H%n%B", hash])
     }
 
     /// The release branches, here or on `origin`, whose history holds the

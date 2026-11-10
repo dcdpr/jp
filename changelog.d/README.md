@@ -101,6 +101,11 @@ them, one per pull request or commit:
 A turn that stalls while idle is retried instead of failing.
 ```
 
+`Credits` also decide which release lists the fragment: the first one that ships
+every change they name.
+Without them, that is the first release that ships the commit adding the
+fragment, so a fragment written after its change merged needs them.
+
 A fragment takes no other field: its type is in its name.
 
 ## Highlights

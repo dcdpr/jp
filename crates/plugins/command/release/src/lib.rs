@@ -154,6 +154,15 @@ enum Command {
         /// upgrade section.
         #[arg(long, value_parser = parse_version)]
         version: Option<Version>,
+
+        /// Start the release branch at this commit, an earlier one on the
+        /// first-parent line of the commit checked out, to release the history
+        /// up to it.
+        ///
+        /// Only the fragments whose changes it holds are filed: those whose
+        /// `Credits` name its commits, or that it added itself.
+        #[arg(long, value_name = "COMMIT")]
+        at: Option<String>,
     },
 
     /// Pick commits from `main` into a release in preparation, or start the
@@ -447,8 +456,8 @@ fn handle_command(
         }
         Command::Check => check(&ctx),
         Command::Render { render } => render_release(&ctx, &render),
-        Command::Cut { version } => make_release(root, &options, |pipeline| {
-            cut::cut(pipeline, version.as_ref())
+        Command::Cut { version, at } => make_release(root, &options, |pipeline| {
+            cut::cut(pipeline, version.as_ref(), at.as_deref())
         }),
         Command::Pick {
             version: Some(version),
