@@ -7,7 +7,9 @@ use tracing::{debug, trace};
 
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries, trash::trash_conversation, value::cleanup_tmp_files,
+    Storage, dir_entries,
+    trash::trash_conversation,
+    value::{cleanup_tmp_files, has_tmp_files},
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -129,6 +131,7 @@ impl Storage {
             }
 
             self.cleanup_import_staging(&conversations_dir);
+            self.cleanup_orphaned_tmp_files(&conversations_dir);
             validate_root(&conversations_dir, &mut result);
         }
 
@@ -183,6 +186,37 @@ impl Storage {
             let _err = std::fs::remove_dir_all(path);
         }
     }
+
+    /// Remove orphaned `.tmp` files from conversation directories under
+    /// `conversations_dir`.
+    ///
+    /// Acquires each conversation's lock before deleting its `.tmp` files so
+    /// the sweep does not delete the staging file of an in-flight atomic write
+    /// in another process.
+    /// Conversations that are currently locked are skipped.
+    fn cleanup_orphaned_tmp_files(&self, conversations_dir: &Utf8Path) {
+        for entry in dir_entries(conversations_dir) {
+            if !entry.file_type().is_ok_and(|ft| ft.is_dir())
+                || entry.file_name().starts_with('.')
+                || !has_tmp_files(entry.path())
+            {
+                continue;
+            }
+
+            // Unparseable directory names cannot be locked and will be trashed
+            // by `validate_root`.
+            let Ok(id) = ConversationId::try_from_dirname(entry.file_name()) else {
+                continue;
+            };
+
+            let Ok(Some(_guard)) = self.try_lock_conversation(&id.to_string(), None) else {
+                trace!(%id, "Skipping temp file cleanup: conversation is locked.");
+                continue;
+            };
+
+            cleanup_tmp_files(entry.path());
+        }
+    }
 }
 
 /// Trash a conversation that failed validation.
@@ -203,10 +237,6 @@ fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
                 && !entry.file_name().starts_with('.')
         })
         .collect();
-
-    for entry in &entries {
-        cleanup_tmp_files(entry.path());
-    }
 
     let outcomes: Vec<_> = entries
         .par_iter()

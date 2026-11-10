@@ -33,6 +33,11 @@
 //! └── Drop: if dirty → read data → persist → lock released when Arc drops
 //! ```
 //!
+//! Every [`ConversationMut`] derived from a [`ConversationLock`] shares an
+//! in-process write mutex, serializing concurrent persists across threads.
+//! The `flock` serializes writers across processes; the write gate serializes
+//! them within a process.
+//!
 //! # Callback-Based Mutation
 //!
 //! Write access uses callbacks instead of returning raw `RwLockWriteGuard`s.
@@ -126,6 +131,13 @@ impl PersistState {
 /// failure recorded while a future unwinds outlives the scope that recorded it.
 pub(crate) type PersistFailures = Arc<Mutex<PersistState>>;
 
+/// Per-conversation mutex that serializes persists within a process.
+///
+/// Persisting rewrites the conversation's files via fixed `<file>.tmp` paths,
+/// so concurrent persists of the same conversation would overwrite or delete
+/// each other's temp files.
+type WriteGate = Arc<Mutex<()>>;
+
 /// Result of attempting to acquire a conversation lock.
 #[derive(Debug)]
 pub enum LockResult {
@@ -154,6 +166,7 @@ pub struct ConversationLock {
     lock_guard: Arc<Box<dyn ConversationLockGuard>>,
     projection: Projection,
     persist: PersistFailures,
+    write_gate: WriteGate,
 
     /// Set once this conversation has been written, and shared with the
     /// workspace that handed the lock out.
@@ -188,6 +201,7 @@ impl ConversationLock {
             lock_guard: Arc::new(lock_guard),
             projection,
             persist,
+            write_gate: WriteGate::default(),
             written,
         }
     }
@@ -258,6 +272,7 @@ impl ConversationLock {
             projection: self.projection,
             discard_on_drop: false,
             persist: Arc::clone(&self.persist),
+            write_gate: Arc::clone(&self.write_gate),
             written: Arc::clone(&self.written),
             _lock_guard: Arc::clone(&self.lock_guard),
         }
@@ -279,6 +294,7 @@ impl ConversationLock {
             projection: self.projection,
             discard_on_drop: false,
             persist: self.persist,
+            write_gate: self.write_gate,
             written: self.written,
             _lock_guard: self.lock_guard,
         }
@@ -323,6 +339,7 @@ pub struct ConversationMut {
     // Shared with the workspace, the originating lock, and every other scope
     // derived from it, so a failure recorded here survives this scope's drop.
     persist: PersistFailures,
+    write_gate: WriteGate,
 
     /// Set once a write succeeds; read by the workspace that handed out the
     /// lock this came from.
@@ -484,6 +501,7 @@ impl ConversationMut {
             return Ok(());
         }
 
+        let _gate = self.write_gate.lock();
         let meta = self.metadata.read();
         let evts = self.events.read();
         // Not recorded on the shared state: this error is returned, so the
@@ -574,6 +592,7 @@ impl Drop for ConversationMut {
             return;
         }
 
+        let _gate = self.write_gate.lock();
         let meta = self.metadata.read();
         let evts = self.events.read();
 

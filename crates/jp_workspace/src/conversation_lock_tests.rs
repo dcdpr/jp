@@ -1,7 +1,7 @@
 use std::{
     io,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicUsize, Ordering as AtomicOrdering},
     },
 };
@@ -91,6 +91,46 @@ impl PersistBackend for FailingPersistBackend {
             Utf8Path::new("/data/conv/events.json"),
             io::Error::from(io::ErrorKind::StorageFull),
         ))
+    }
+
+    fn remove(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn archive(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+}
+
+/// Persistence backend that counts writes invoked with and without `gate`
+/// locked.
+#[derive(Debug, Default)]
+struct GateCheckingBackend {
+    gate: OnceLock<WriteGate>,
+    gated: AtomicUsize,
+    ungated: AtomicUsize,
+}
+
+impl PersistBackend for GateCheckingBackend {
+    fn write(
+        &self,
+        _id: &ConversationId,
+        _metadata: &Conversation,
+        _events: &ConversationStream,
+        _projection: Projection,
+    ) -> Result<(), jp_storage::Error> {
+        let gate = self.gate.get().expect("gate installed before any write");
+        let counter = if gate.is_locked() {
+            &self.gated
+        } else {
+            &self.ungated
+        };
+        counter.fetch_add(1, AtomicOrdering::SeqCst);
+        Ok(())
     }
 
     fn remove(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
@@ -650,4 +690,41 @@ fn multiple_as_mut_each_persist_independently() {
     assert_eq!(mock.writes().len(), 2);
     assert_eq!(mock.writes()[0].1.title.as_deref(), Some("first"));
     assert_eq!(mock.writes()[1].1.title.as_deref(), Some("second"));
+}
+
+#[test]
+fn every_persist_path_holds_the_write_gate() {
+    // Single-threaded, so `gate.is_locked()` inside `PersistBackend::write` can
+    // only be true if the persist path itself acquired the gate.
+    let backend = Arc::new(GateCheckingBackend::default());
+    let lock = ConversationLock::new(
+        test_handle(),
+        Arc::new(RwLock::new(Conversation::default())),
+        Arc::new(RwLock::new(ConversationStream::new_test())),
+        Arc::clone(&backend) as _,
+        Box::new(NoopLockGuard),
+        Projection::Projected,
+        PersistFailures::default(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
+    backend
+        .gate
+        .set(Arc::clone(&lock.write_gate))
+        .expect("gate installed once");
+
+    let mut flushed = lock.as_mut();
+    flushed.update_metadata(|m| m.title = Some("flushed".into()));
+    flushed.flush().unwrap();
+    drop(flushed);
+
+    let dropped = lock.as_mut();
+    dropped.update_metadata(|m| m.title = Some("dropped".into()));
+    drop(dropped);
+
+    let into_mut = lock.into_mut();
+    into_mut.update_metadata(|m| m.title = Some("owned".into()));
+    drop(into_mut);
+
+    assert_eq!(backend.ungated.load(AtomicOrdering::SeqCst), 0);
+    assert_eq!(backend.gated.load(AtomicOrdering::SeqCst), 3);
 }
