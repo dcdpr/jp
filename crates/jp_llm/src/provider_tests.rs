@@ -6,8 +6,12 @@ use jp_test::{Result, function_name};
 use serde_json::json;
 
 use super::*;
-use crate::test::{
-    ProviderTestMode, TestRequest, fixture_attachment, run_test_mode, test_model_details,
+use crate::{
+    error::StreamErrorKind,
+    test::{
+        ProviderTestMode, TestRefusal, TestRequest, fixture_attachment, run_test_mode,
+        test_model_details,
+    },
 };
 
 /// Generate every provider's recorded suite, once per billing route.
@@ -191,6 +195,84 @@ async fn models(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -
     run_test_mode(provider, test_name, Some(request), mode).await
 }
 
+const UNKNOWN_MODEL: &str = "foobarbaz";
+
+/// Providers that ignore the requested `model` field and serve whichever model
+/// the server was started with.
+const SERVES_ANY_MODEL: &[ProviderId] = &[ProviderId::Llamacpp];
+
+/// Verify that a chat request for an unknown model fails with
+/// [`StreamErrorKind::UnknownModel`].
+///
+/// Clones the route's valid [`ModelDetails`] and replaces only the model name
+/// so the request is not rejected for unrelated parameter mismatches.
+async fn unknown_model(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -> Result {
+    // Anthropic's subscription route records with a direct subscription token,
+    // which is not an authorized use of the subscription, so no new recordings
+    // are made against it.
+    if provider == ProviderId::Anthropic && mode == ProviderTestMode::Subscription {
+        return Ok(());
+    }
+
+    let support = provider_test_support(provider);
+    let mut details = match mode {
+        ProviderTestMode::Subscription => support.subscription().map(ProviderTestRoute::model),
+        ProviderTestMode::Api => None,
+    }
+    .unwrap_or_else(|| support.api().model());
+    details.id.name = UNKNOWN_MODEL.parse()?;
+
+    let request = TestRequest::chat(provider)
+        .model(details.id.clone())
+        .model_details(details)
+        .chat_request("Test message")
+        .expect_refusal(move |refusal| {
+            if SERVES_ANY_MODEL.contains(&provider) {
+                assert!(
+                    matches!(refusal, TestRefusal::Answered),
+                    "expected {provider} to answer for any model, got: {refusal:?}"
+                );
+                return;
+            }
+
+            assert!(
+                matches!(refusal, TestRefusal::Stream {
+                    kind: StreamErrorKind::UnknownModel,
+                    ..
+                }),
+                "expected the stream to refuse `{UNKNOWN_MODEL}` as an unknown model, got: \
+                 {refusal:?}"
+            );
+        });
+
+    run_test_mode(provider, test_name, Some(request), mode).await
+}
+
+/// Verify [`Provider::model_details`] behavior for an unknown model.
+///
+/// Anthropic and OpenAI query a per-model endpoint and return an error; other
+/// providers search their model list and fall back to empty [`ModelDetails`],
+/// deferring the refusal to the chat request.
+async fn unknown_model_details(
+    provider: ProviderId,
+    test_name: &str,
+    mode: ProviderTestMode,
+) -> Result {
+    let request = TestRequest::ModelLookup {
+        name: UNKNOWN_MODEL.to_owned(),
+        assert: Arc::new(move |result| {
+            let lookup_fails = matches!(provider, ProviderId::Anthropic | ProviderId::Openai);
+            assert_eq!(
+                result.is_err(),
+                lookup_fails,
+                "unexpected lookup result for `{UNKNOWN_MODEL}`: {result:?}"
+            );
+        }),
+    };
+
+    run_test_mode(provider, test_name, Some(request), mode).await
+}
+
 /// Providers that don't support image/vision input.
 const NO_IMAGE_SUPPORT: &[ProviderId] = &[ProviderId::Cerebras];
 
@@ -351,6 +433,7 @@ test_all_providers![
         tool_call_stream,
         multi_turn_conversation,
         structured_output,
+        unknown_model,
     ],
-    api_only: [model_details, models],
+    api_only: [model_details, models, unknown_model_details],
 ];

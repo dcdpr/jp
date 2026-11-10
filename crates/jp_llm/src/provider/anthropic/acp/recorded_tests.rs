@@ -24,7 +24,7 @@ use std::{
     time::Duration,
 };
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use datetime_literal::datetime;
 use jp_config::{AppConfig, assistant::request::CachePolicy, model::parameters::ReasoningConfig};
 use jp_conversation::{
@@ -47,13 +47,16 @@ use tracing_subscriber::{
 use uuid::Uuid;
 
 use super::{
+    Error,
     cassette::{self, Framed, Recorded},
     inspect, model_details, options,
     schema::agent_method,
+    served_models,
     transcript::PreparedRequest,
     transport::{self, NativeArtifact, Transport},
 };
 use crate::{
+    error::{StreamError, StreamErrorKind},
     event::{Event, EventPart, FinishReason},
     query::{ChatQuery, QueryContext},
 };
@@ -368,4 +371,118 @@ async fn cache_reconstruction() {
     );
     assert_eq!(tokens(&off, "cache_read_input_tokens"), 0);
     assert_eq!(tokens(&off, "cache_creation_input_tokens"), 0);
+}
+
+fn only_connection(name: &str) -> Vec<Framed> {
+    let read = cassette::read(name).unwrap_or_else(|error| panic!("{error}"));
+    let mut scripts = cassette::connections(read);
+    assert_eq!(scripts.len(), 1, "`{name}` should hold one connection");
+    scripts.remove(0)
+}
+
+/// Under `RECORD=1`, opens a session against the installed adapter without
+/// sending a prompt, so recording consumes no subscription quota.
+#[tokio::test]
+async fn listed_models() {
+    let listed = if cassette::recording() {
+        inspect(None)
+            .await
+            .expect("a qualified adapter and an active login");
+        transport::list_models(None).await.unwrap()
+    } else {
+        let script = only_connection("models");
+        transport::models(Box::new(Recorded(script)), Utf8Path::new("/tmp"))
+            .await
+            .unwrap()
+    };
+
+    let models = served_models(&listed);
+    assert!(
+        models.len() > 1,
+        "the adapter should offer more than one model, got: {models:?}"
+    );
+    insta::assert_json_snapshot!(
+        "listed_models",
+        models
+            .iter()
+            .map(|model| json!({"id": model.id.to_string(), "display_name": model.display_name}))
+            .collect::<Vec<_>>()
+    );
+}
+
+fn short_query(model: &str) -> ChatQuery {
+    let mut config = AppConfig::new_test();
+    config.assistant.model.id = format!("anthropic/{model}").parse().unwrap();
+    config.assistant.model.parameters.max_tokens = Some(16);
+    config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+    config.assistant.request.cache = CachePolicy::Off;
+    let timestamp = datetime!(2026-09-11 12:00:00 Z);
+    let mut events = ConversationStream::new(config.into()).with_created_at(timestamp);
+    events.extend([ConversationEvent::new(
+        ChatRequest::from("Reply with OK."),
+        timestamp,
+    )]);
+    ThreadBuilder::new()
+        .with_events(events)
+        .build()
+        .unwrap()
+        .into()
+}
+
+#[tokio::test]
+async fn unknown_model_is_refused_as_unknown() {
+    let recording = cassette::recording();
+    if recording {
+        inspect(None)
+            .await
+            .expect("a qualified adapter and an active login");
+    }
+
+    let model = model_details(&"foobarbaz".parse().unwrap());
+    let prepared = PreparedRequest::new(&model, short_query("foobarbaz")).unwrap();
+    let (artifact, transport): (NativeArtifact, Box<dyn Transport>) = if recording {
+        let launch = transport::launch(&prepared, &context(), CachePolicy::Off, None)
+            .expect("a prepared launch");
+        (
+            launch.artifact,
+            Box::new(transport::Spawned {
+                command: launch.command,
+                tap: cassette::tap("unknown_model"),
+            }),
+        )
+    } else {
+        replayed(only_connection("unknown_model"))(&prepared)
+    };
+    let environment = options::environment(&prepared, CachePolicy::Off);
+
+    let (sender, mut receiver) = mpsc::channel(64);
+    let driver = transport::drive(
+        prepared,
+        context(),
+        vec![],
+        environment,
+        artifact,
+        transport,
+        sender,
+    );
+    let drain = async { while receiver.recv().await.is_some() {} };
+
+    let (result, ()) = tokio::time::timeout(Duration::from_mins(2), async {
+        tokio::join!(driver, drain)
+    })
+    .await
+    .expect("the ACP conversation exceeded two minutes");
+
+    let error = match result {
+        Ok(()) => panic!("Claude Code answered for `foobarbaz` instead of refusing it"),
+        Err(Error::Stream(error)) => *error,
+        Err(error) => StreamError::other(error.to_string()),
+    };
+    assert_eq!(
+        error.kind,
+        StreamErrorKind::UnknownModel,
+        "refused as {:?}: {}",
+        error.kind,
+        error.message()
+    );
 }

@@ -1,6 +1,10 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use jp_config::style::StyleConfig;
+use jp_config::{
+    PartialAppConfig, ToPartial as _,
+    model::id::{ModelIdConfig, PartialModelIdOrAliasConfig},
+    style::StyleConfig,
+};
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
@@ -536,6 +540,61 @@ impl TurnCoordinator {
     /// intact for the next visible content.
     pub fn enter_tool_call(&mut self, chrome_visible: bool) -> Option<DefaultBackground> {
         self.view.enter_tool_call_region(chrome_visible)
+    }
+
+    /// Return `true` if the current turn can be restarted on another model.
+    ///
+    /// Holds when the turn contains nothing past its opening request: no
+    /// committed response, tool call, follow-up request, or uncommitted partial
+    /// content.
+    pub fn can_restart_turn(&self, stream: &ConversationStream) -> bool {
+        if !self.peek_partial_events().is_empty() {
+            return false;
+        }
+
+        let mut events = stream.iter().rev().map(|entry| entry.event);
+        events
+            .next()
+            .is_some_and(ConversationEvent::is_chat_request)
+            && events.next().is_some_and(ConversationEvent::is_turn_start)
+    }
+
+    /// Restart the current turn on `model`.
+    ///
+    /// Trims the current turn, appends a config delta setting
+    /// `assistant.model.id` to `model`, and starts a new turn with the original
+    /// request so the turn's config reflects `model` from its first event.
+    ///
+    /// Returns `false` without modifying `stream` if [`can_restart_turn`] is
+    /// `false`.
+    ///
+    /// [`can_restart_turn`]: Self::can_restart_turn
+    #[must_use]
+    pub fn restart_turn_on(
+        &mut self,
+        stream: &mut ConversationStream,
+        model: &ModelIdConfig,
+    ) -> bool {
+        if !self.can_restart_turn(stream) {
+            return false;
+        }
+
+        let Some(request) = stream.trim_last_turn() else {
+            return false;
+        };
+
+        let mut delta = PartialAppConfig::empty();
+        delta.assistant.model.id = PartialModelIdOrAliasConfig::Id(model.to_partial());
+        stream.add_config_delta(delta);
+
+        // Append to `stream` directly instead of calling `self.start_turn`: the
+        // request was already emitted in JSON mode and the view's header state
+        // is unchanged.
+        stream.start_turn(request);
+
+        self.view.set_model_id(Some(model.to_string()));
+        self.prepare_retry_continuation();
+        true
     }
 
     /// Wire the view's tool-separator flag to the turn's `ToolRenderer` so

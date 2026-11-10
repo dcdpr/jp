@@ -104,6 +104,85 @@ async fn a_flat_error_envelope_reaches_the_message() {
     );
 }
 
+#[tokio::test]
+async fn a_vllm_404_naming_the_model_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        404,
+        r#"{"error":{"message":"The model `glm-5.3` does not exist.","type":"NotFoundError","param":"model","code":404}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+    assert!(!err.is_retryable());
+    assert_eq!(
+        err.message(),
+        "The model `glm-5.3` does not exist. (HTTP 404 Not Found)"
+    );
+}
+
+/// Older vLLM servers send a flat envelope without `param`.
+#[tokio::test]
+async fn a_legacy_vllm_404_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        404,
+        r#"{"object":"error","message":"The model `glm-5.3` does not exist.","type":"NotFoundError","param":null,"code":404}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+}
+
+#[tokio::test]
+async fn an_openai_model_not_found_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        404,
+        r#"{"error":{"message":"The model `gpt-9` does not exist or you do not have access to it.","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+}
+
+#[tokio::test]
+async fn an_archived_cerebras_model_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        404,
+        r#"{"message":"Model zai-glm-4.7 is archived and unavailable for the organization.","type":"model_archived_error","param":"model","code":"model_archived"}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+}
+
+#[tokio::test]
+async fn a_subscription_400_model_not_found_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        400,
+        r#"{"detail":"The 'foobarbaz' model is not supported when using Codex with a ChatGPT account.","error":{"type":"invalid_request_error","code":"model_not_found","message":"The 'foobarbaz' model is not supported when using Codex with a ChatGPT account."}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+}
+
+#[tokio::test]
+async fn a_404_for_an_unknown_route_is_not_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(404, r#"{"detail":"Not Found"}"#)).await;
+
+    assert_eq!(err.kind, StreamErrorKind::Other);
+}
+
+#[tokio::test]
+async fn a_400_naming_the_model_is_not_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        400,
+        r#"{"error":{"message":"model does not support tools","type":"BadRequestError","param":"model","code":400}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::Other);
+}
+
 /// The nested envelope keeps working.
 #[tokio::test]
 async fn a_nested_error_envelope_reaches_the_message() {

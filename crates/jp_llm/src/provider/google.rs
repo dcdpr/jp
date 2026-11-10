@@ -1440,6 +1440,10 @@ impl From<GeminiError> for StreamError {
                     return insufficient_quota(&msg, err);
                 }
 
+                if unknown_model_name(value).is_some() {
+                    return StreamError::unknown_model(msg).with_source(err);
+                }
+
                 // An oversized prompt is the same size on the next attempt, so it
                 // is fatal rather than retryable.
                 if looks_like_context_window_error(&msg) {
@@ -1456,25 +1460,30 @@ impl From<GeminiError> for StreamError {
 
 impl From<GeminiError> for Error {
     fn from(error: GeminiError) -> Self {
-        match &error {
-            GeminiError::Api(api) if api.get("status").and_then(Value::as_u64) == Some(404) => {
-                if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
-                    v.as_str().and_then(|s| {
-                        s.contains("Call ListModels").then(|| {
-                            s.split('/')
-                                .nth(1)
-                                .and_then(|v| v.split(' ').next())
-                                .unwrap_or("unknown")
-                        })
-                    })
-                }) {
-                    return Self::UnknownModel(model.to_owned());
-                }
-                Self::Gemini(error)
-            }
-            _ => Self::Gemini(error),
+        if let GeminiError::Api(api) = &error
+            && let Some(model) = unknown_model_name(api)
+        {
+            return Self::UnknownModel(model.to_owned());
         }
+
+        Self::Gemini(error)
     }
+}
+
+/// Extract the rejected model name from a Gemini `404` unknown-model error.
+///
+/// Gemini reports unknown models with a `404` status and a message naming the
+/// model resource: `models/<name> is not found for API version ...`.
+/// A `404` for a wrong endpoint carries no such message.
+fn unknown_model_name(api: &Value) -> Option<&str> {
+    if api.get("status").and_then(Value::as_u64) != Some(404) {
+        return None;
+    }
+
+    let message = api.pointer("/message/error/message")?.as_str()?;
+    let name = message.strip_prefix("models/")?.split(' ').next()?;
+
+    (!name.is_empty()).then_some(name)
 }
 
 /// Returns `true` if the error is a Google API 400 "Corrupted thought

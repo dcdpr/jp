@@ -614,6 +614,8 @@ async fn runtime_model_rejection_preserves_its_classification() {
         panic!("expected classified failure")
     };
     assert!(!error.is_retryable());
+    // The error data does not match the missing-model pattern.
+    assert_eq!(error.kind, StreamErrorKind::Other);
     let Some(Error::ModelSelection { model, source }) =
         error.source().unwrap().downcast_ref::<Error>()
     else {
@@ -625,6 +627,17 @@ async fn runtime_model_rejection_preserves_its_classification() {
         "Unknown model on this account."
     );
     assert!(receiver.recv().await.is_none());
+}
+
+#[test]
+fn a_missing_model_in_the_error_data_is_an_unknown_model() {
+    let refused =
+        RpcError::internal_error().data(json!({"details": "Model 'foobarbaz' not found"}));
+    assert!(refuses_unknown_model(&refused));
+
+    let other = RpcError::internal_error().data(json!({"details": "Session not found"}));
+    assert!(!refuses_unknown_model(&other));
+    assert!(!refuses_unknown_model(&RpcError::internal_error()));
 }
 
 #[tokio::test(start_paused = true)]
@@ -803,6 +816,7 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             }
             m if m == agent_method::SESSION_SET_CONFIG_OPTION => {
                 let current = if params["configId"] == "model" {
+                    // The fixture lists no models, so the API name is sent.
                     assert_eq!(params["value"], "claude-opus-5");
                     json!("resolved-fixture-model")
                 } else {

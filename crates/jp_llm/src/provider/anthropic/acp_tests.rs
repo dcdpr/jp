@@ -10,6 +10,7 @@ use crate::{
     Error as LlmError,
     provider::anthropic::{
         Anthropic,
+        acp::schema::SessionConfigSelectOption,
         resolve::{self, Route},
     },
 };
@@ -120,6 +121,202 @@ fn rejected_api_key_login_names_the_key_source() {
          provider llm auth list` shows them), or remove that API key setting from Claude Code's \
          settings"
     );
+}
+
+fn offered(values: &[(&str, &str)]) -> Vec<SessionConfigSelectOption> {
+    values
+        .iter()
+        .map(|(value, name)| SessionConfigSelectOption {
+            value: (*value).into(),
+            name: Some((*name).to_owned()),
+        })
+        .collect()
+}
+
+/// The values and labels Claude Code's `model` setting offered when
+/// `live.jsonl` was recorded.
+const RECORDED: &[(&str, &str)] = &[
+    ("default", "Default (recommended)"),
+    ("opus", "Opus 5.5"),
+    ("fable", "Fable 5.2"),
+    ("sonnet", "Sonnet 5.5"),
+    ("haiku", "Haiku 5.5"),
+    ("claude-fable-5-1", "Fable 5.1"),
+    ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+    ("claude-sonnet-5", "Sonnet 5"),
+    ("claude-opus-5", "Opus 5"),
+    ("claude-fable-5", "Fable 5"),
+    ("claude-opus-4-8", "Opus 4.8"),
+    ("claude-opus-4-7", "Opus 4.7"),
+    ("claude-opus-4-6", "Opus 4.6"),
+    ("claude-sonnet-4-6", "Sonnet 4.6"),
+];
+
+#[test]
+fn an_api_model_is_sent_as_the_offer_with_its_version() {
+    let offers = offered(RECORDED);
+
+    assert_eq!(subscription_model("claude-opus-5-5", &offers), "opus");
+    assert_eq!(
+        subscription_model("claude-opus-5", &offers),
+        "claude-opus-5"
+    );
+    assert_eq!(subscription_model("claude-fable-5-2", &offers), "fable");
+    assert_eq!(
+        subscription_model("claude-fable-5-1", &offers),
+        "claude-fable-5-1"
+    );
+    assert_eq!(subscription_model("claude-sonnet-5-5", &offers), "sonnet");
+    assert_eq!(
+        subscription_model("claude-sonnet-5", &offers),
+        "claude-sonnet-5"
+    );
+    // Date suffixes are ignored on both the offered option and the requested
+    // model name.
+    assert_eq!(
+        subscription_model("claude-haiku-4-5", &offers),
+        "claude-haiku-4-5-20251001"
+    );
+    assert_eq!(
+        subscription_model("claude-opus-4-7-20260416", &offers),
+        "claude-opus-4-7"
+    );
+}
+
+#[test]
+fn a_dotted_version_matches_a_dashed_one() {
+    let offers = offered(RECORDED);
+
+    assert_eq!(subscription_model("claude-fable-5.2", &offers), "fable");
+    assert_eq!(
+        subscription_model("claude-opus-4.8", &offers),
+        "claude-opus-4-8"
+    );
+}
+
+#[test]
+fn without_its_version_a_model_is_sent_as_its_family() {
+    let offers = offered(RECORDED);
+
+    assert_eq!(subscription_model("claude-opus-9", &offers), "opus");
+    assert_eq!(subscription_model("claude-opus-4-1", &offers), "opus");
+    assert_eq!(subscription_model("claude-fable-6", &offers), "fable");
+}
+
+#[test]
+fn several_offers_of_a_version_prefer_the_1m_variant_then_the_bare_alias() {
+    assert_eq!(
+        subscription_model(
+            "claude-opus-5-5",
+            &offered(&[("opus", "Opus 5.5"), ("opus[1m]", "Opus 5.5")])
+        ),
+        "opus[1m]"
+    );
+    assert_eq!(
+        subscription_model(
+            "claude-opus-9",
+            &offered(&[("claude-opus-4-8", "Opus 4.8"), ("opus", "Opus 5.5")])
+        ),
+        "opus"
+    );
+}
+
+#[test]
+fn without_a_matching_offer_the_api_name_is_sent() {
+    assert_eq!(subscription_model("claude-opus-5", &[]), "claude-opus-5");
+
+    let offers = offered(&[("opus", "Opus 5.5"), ("sonnet", "Sonnet 5.5")]);
+    assert_eq!(
+        subscription_model("claude-haiku-4-5", &offers),
+        "claude-haiku-4-5"
+    );
+    assert_eq!(subscription_model("foobarbaz", &offers), "foobarbaz");
+}
+
+#[test]
+fn listed_models_are_named_by_their_api_id() {
+    let mut offers = offered(RECORDED);
+    offers.push(SessionConfigSelectOption {
+        value: "some-future-family".into(),
+        name: None,
+    });
+    // A second Opus 5.5 maps to the same API model, so it is listed once.
+    offers.push(SessionConfigSelectOption {
+        value: "opus[1m]".into(),
+        name: Some("Opus 5.5".to_owned()),
+    });
+
+    let models = served_models(&offers);
+
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.to_string())
+            .collect::<Vec<_>>(),
+        [
+            // Bare aliases resolve to the version in their display label, even
+            // if uncataloged.
+            "anthropic/claude-opus-5-5",
+            "anthropic/claude-fable-5-2",
+            "anthropic/claude-sonnet-5-5",
+            "anthropic/claude-haiku-5-5",
+            "anthropic/claude-fable-5-1",
+            // Dated values resolve to their cataloged model ID.
+            "anthropic/claude-haiku-4-5",
+            "anthropic/claude-sonnet-5",
+            "anthropic/claude-opus-5",
+            "anthropic/claude-fable-5",
+            "anthropic/claude-opus-4-8",
+            "anthropic/claude-opus-4-7",
+            "anthropic/claude-opus-4-6",
+            "anthropic/claude-sonnet-4-6",
+        ]
+    );
+    assert!(models.iter().all(ModelDetails::served_by_subscription));
+}
+
+#[test]
+fn a_listed_model_round_trips_to_its_offer() {
+    let offers = offered(RECORDED);
+
+    for model in served_models(&offers) {
+        let sent = subscription_model(&model.id.name, &offers);
+        let label = offers
+            .iter()
+            .find(|option| option.value.0 == sent)
+            .and_then(|option| option.name.as_deref());
+        assert_eq!(
+            label,
+            model.display_name.as_deref(),
+            "{} was sent as {sent}",
+            model.id
+        );
+    }
+}
+
+#[test]
+fn an_unlabelled_alias_is_the_newest_model_in_its_family() {
+    let models = served_models(&[SessionConfigSelectOption {
+        value: "sonnet".into(),
+        name: None,
+    }]);
+
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.to_string())
+            .collect::<Vec<_>>(),
+        ["anthropic/claude-sonnet-5-5"]
+    );
+}
+
+#[test]
+fn a_listed_model_keeps_its_api_models_overrides() {
+    let [fable] = served_models(&offered(&[("claude-fable-5-1[1m]", "Fable 5.1")]))
+        .try_into()
+        .unwrap();
+
+    assert!(fable.reasoning.is_some());
 }
 
 #[test]

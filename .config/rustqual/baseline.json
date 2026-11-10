@@ -1,22 +1,22 @@
 {
   "version": 2,
-  "quality_score": 0.7280331666192694,
-  "iosp_score": 0.9204174300963913,
+  "quality_score": 0.7285685108764074,
+  "iosp_score": 0.920808561236623,
   "violations": 999,
-  "total": 17177,
-  "complexity_warnings": 199,
-  "magic_number_warnings": 267,
+  "total": 17255,
+  "complexity_warnings": 200,
+  "magic_number_warnings": 268,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 494,
+  "function_length_warnings": 496,
   "unsafe_warnings": 74,
   "error_handling_warnings": 203,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 315,
+  "boilerplate_warnings": 318,
   "srp_struct_warnings": 50,
-  "srp_module_warnings": 262,
+  "srp_module_warnings": 266,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3185,
+  "total_findings": 3196,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -3348,7 +3348,7 @@
     {
       "name": "TurnCoordinator::handle_streaming_event",
       "file": "crates/jp_cli/src/cmd/query/turn/coordinator.rs",
-      "line": 271
+      "line": 275
     },
     {
       "name": "claim_waiting_region",
@@ -3363,17 +3363,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1112
+      "line": 1175
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1211
+      "line": 1274
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1326
+      "line": 1389
     },
     {
       "name": "QueryText::read",
@@ -4598,17 +4598,17 @@
     {
       "name": "StreamError::from_http",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 351
+      "line": 357
     },
     {
       "name": "extract_retry_from_text",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 792
+      "line": 845
     },
     {
       "name": "extract_retry_after",
       "file": "crates/jp_llm/src/error.rs",
-      "line": 863
+      "line": 916
     },
     {
       "name": "EventChain::ingest_normal",
@@ -4723,12 +4723,12 @@
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/ollama.rs",
-      "line": 149
+      "line": 166
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/ollama.rs",
-      "line": 258
+      "line": 275
     },
     {
       "name": "MockProvider::with_chunked_message",
@@ -4748,7 +4748,7 @@
     {
       "name": "read_output",
       "file": "crates/jp_llm/src/provider/anthropic/acp.rs",
-      "line": 503
+      "line": 647
     },
     {
       "name": "State::sdk",
@@ -4758,17 +4758,17 @@
     {
       "name": "State::stream_event",
       "file": "crates/jp_llm/src/provider/anthropic/acp/protocol.rs",
-      "line": 623
+      "line": 626
     },
     {
       "name": "stream",
       "file": "crates/jp_llm/src/provider/anthropic/acp/transport.rs",
-      "line": 46
+      "line": 49
     },
     {
       "name": "drive",
       "file": "crates/jp_llm/src/provider/anthropic/acp/transport.rs",
-      "line": 372
+      "line": 375
     },
     {
       "name": "PreparedRequest::new",
@@ -4778,27 +4778,27 @@
     {
       "name": "environment",
       "file": "crates/jp_llm/src/provider/anthropic/acp/options.rs",
-      "line": 160
+      "line": 170
     },
     {
       "name": "tap",
       "file": "crates/jp_llm/src/provider/anthropic/acp/cassette.rs",
-      "line": 155
+      "line": 156
     },
     {
       "name": "recorder",
       "file": "crates/jp_llm/src/provider/anthropic/acp/cassette.rs",
-      "line": 167
+      "line": 168
     },
     {
       "name": "serve",
       "file": "crates/jp_llm/src/provider/anthropic/acp/cassette.rs",
-      "line": 308
+      "line": 309
     },
     {
       "name": "command",
       "file": "crates/jp_llm/src/provider/anthropic/acp/process.rs",
-      "line": 46
+      "line": 50
     },
     {
       "name": "handle_sse_event_sync",
@@ -4833,37 +4833,37 @@
     {
       "name": "resolve_cache_control",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1703
+      "line": 1706
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1735
+      "line": 1738
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2637
+      "line": 2653
     },
     {
       "name": "transform_schema",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2695
+      "line": 2711
     },
     {
       "name": "map_content_start",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3112
+      "line": 3182
     },
     {
       "name": "map_content_delta",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3153
+      "line": 3223
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3198
+      "line": 3268
     },
     {
       "name": "walk_chain",
@@ -4978,7 +4978,7 @@
     {
       "name": "EventBuilder::handle_part",
       "file": "crates/jp_llm/src/event_builder.rs",
-      "line": 148
+      "line": 147
     },
     {
       "name": "collect_with_retry",

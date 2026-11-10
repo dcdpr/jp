@@ -1281,6 +1281,15 @@ impl From<jp_openrouter::Error> for StreamError {
                 ..
             }
             | E::Stream(_) => StreamError::transient(err.to_string()).with_source(err),
+            // OpenRouter returns HTTP 400 with no distinct error code for
+            // unknown models, so match the message text to distinguish it from
+            // other 400 Bad Request errors.
+            E::Api {
+                code: 400,
+                ref message,
+            } if message.contains("is not a valid model ID") => {
+                StreamError::unknown_model(err.to_string()).with_source(err)
+            }
             _ => StreamError::other(err.to_string()).with_source(err),
         }
     }

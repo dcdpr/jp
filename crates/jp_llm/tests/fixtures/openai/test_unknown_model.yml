@@ -1,0 +1,42 @@
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": []
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Test message"
+        }
+      ],
+      "reasoning": {
+        "effort": "none",
+        "summary": "auto"
+      },
+      "store": false,
+      "stream": true,
+      "tool_choice": "auto",
+      "tools": [],
+      "truncation": "auto"
+    }
+then:
+  status: 404
+  header:
+    - name: content-type
+      value: application/json
+  body: |-
+    {
+      "error": {
+        "message": "The model `foobarbaz` does not exist or you do not have access to it.",
+        "type": "invalid_request_error",
+        "param": null,
+        "code": "model_not_found"
+      }
+    }

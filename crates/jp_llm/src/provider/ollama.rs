@@ -81,10 +81,18 @@ impl Provider for Ollama {
             "Sending request to Ollama."
         );
 
-        Ok(self
-            .client
-            .send_chat_messages_stream(request)
-            .await?
+        let response = match self.client.send_chat_messages_stream(request).await {
+            Ok(response) => response,
+            // Ollama rejects unknown models before returning a stream. Wrap the
+            // error in a single-item stream so it follows the same `StreamError`
+            // path as other providers.
+            Err(OllamaError::Other(body)) if let Some(message) = unknown_model_message(&body) => {
+                return Ok(stream::iter([Err(StreamError::unknown_model(message))]).boxed());
+            }
+            Err(error) => return Err(error.into()),
+        };
+
+        Ok(response
             .map(|v| v.map_err(|()| StreamError::other("Ollama stream error")))
             .map_ok({
                 let mut reasoning_flushed = false;
@@ -99,6 +107,15 @@ impl Provider for Ollama {
             .try_flatten()
             .boxed())
     }
+}
+
+/// Extract the error message from an Ollama unknown-model response body (e.g.
+/// `{"error":"model 'foobarbaz' not found"}`).
+fn unknown_model_message(body: &str) -> Option<String> {
+    let parsed: Value = serde_json::from_str(body).ok()?;
+    let message = parsed.get("error")?.as_str()?;
+
+    (message.starts_with("model '") && message.ends_with("' not found")).then(|| message.to_owned())
 }
 
 fn map_model(model: LocalModel) -> Result<ModelDetails> {
