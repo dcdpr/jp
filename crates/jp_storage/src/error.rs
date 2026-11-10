@@ -30,6 +30,19 @@ pub enum Error {
         source: io::Error,
     },
 
+    /// Moving `from` into place at `to` failed.
+    ///
+    /// Both paths are named because the failure can lie with either: a missing
+    /// `from` reports "No such file or directory", which against `to` alone
+    /// points at a file that is fine.
+    #[error("failed to rename {from} to {to}")]
+    RenameFailed {
+        from: Utf8PathBuf,
+        to: Utf8PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
     /// The filesystem holding `path` has no room left.
     ///
     /// Separate from [`Error::WriteFailed`] because it is the one write failure
@@ -64,6 +77,28 @@ impl Error {
             Self::OutOfSpace { path, source }
         } else {
             Self::WriteFailed { path, source }
+        }
+    }
+
+    /// Classify a failed rename of `from` onto `to`.
+    ///
+    /// Yields [`Error::OutOfSpace`] for `to` when the operating system reported
+    /// a full filesystem, and [`Error::RenameFailed`] otherwise.
+    #[must_use]
+    pub fn rename_failed(
+        from: impl Into<Utf8PathBuf>,
+        to: impl Into<Utf8PathBuf>,
+        source: io::Error,
+    ) -> Self {
+        let to = to.into();
+        if is_storage_full(&source) {
+            Self::OutOfSpace { path: to, source }
+        } else {
+            Self::RenameFailed {
+                from: from.into(),
+                to,
+                source,
+            }
         }
     }
 }

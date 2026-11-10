@@ -126,6 +126,21 @@ fn write_failure_renders_the_path_and_the_os_error() {
     );
 }
 
+#[test]
+fn rename_failure_renders_both_paths_and_the_os_error() {
+    let error = Error::from(jp_storage::Error::rename_failed(
+        Utf8Path::new("/data/conv/events.json.tmp"),
+        Utf8Path::new("/data/conv/events.json"),
+        io::Error::from(io::ErrorKind::NotFound),
+    ));
+
+    assert_eq!(
+        rendered(&error),
+        "Failed to move file into \
+         place\nfrom=/data/conv/events.json.tmp\nto=/data/conv/events.json\nerror=entity not found"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_workspace_persist_failure_keeps_the_full_cause_chain() {

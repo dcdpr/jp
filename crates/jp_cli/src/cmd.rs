@@ -1114,6 +1114,13 @@ impl From<jp_storage::Error> for Error {
                 ("error", source.to_string().into()),
             ]
             .into(),
+            Error::RenameFailed { from, to, source } => [
+                ("message", "Failed to move file into place".into()),
+                ("from", from.to_string().into()),
+                ("to", to.to_string().into()),
+                ("error", source.to_string().into()),
+            ]
+            .into(),
             Error::ConversationNotFound(id) => [
                 ("message", "Conversation not found.".into()),
                 ("id", id.to_string().into()),

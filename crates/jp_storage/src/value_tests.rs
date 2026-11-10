@@ -74,6 +74,31 @@ fn write_json_failure_names_the_path_it_was_writing() {
 }
 
 #[test]
+fn write_json_rename_failure_names_both_paths() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("out.json");
+
+    // A non-empty directory at the target lets the temp write succeed and
+    // makes the rename onto it fail on all platforms.
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("occupant"), "").unwrap();
+
+    let error = write_json(&path, &json!({"v": 1})).expect_err("rename should fail");
+
+    // Naming only the target reads as "the target is missing" when the rename
+    // source vanished, which sends the user to look at a file that is fine.
+    let tmp_path = Utf8PathBuf::from(format!("{path}{TMP_SUFFIX}"));
+    match error {
+        Error::RenameFailed { from, to, .. } => {
+            assert_eq!(from, tmp_path);
+            assert_eq!(to, path);
+        }
+        other => panic!("expected RenameFailed, got {other:?}"),
+    }
+    assert!(!tmp_path.exists(), "the temp file is cleaned up");
+}
+
+#[test]
 fn write_json_overwrites_existing_file() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("out.json");

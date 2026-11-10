@@ -301,3 +301,41 @@ fn test_validation_cleans_up_orphaned_tmp_files() {
     assert!(conv_dir.join("metadata.json").exists());
     assert!(conv_dir.join("events.json").exists());
 }
+
+#[test]
+fn tmp_files_are_swept_only_when_the_conversation_is_unlocked() {
+    // A `.tmp` file beside a locked conversation is the in-flight half of an
+    // atomic write by the lock holder, possibly in another process. Removing it
+    // makes that writer's rename fail with "No such file or directory".
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    write_valid(tmp.path(), &id);
+    let in_flight = tmp
+        .path()
+        .join(CONVERSATIONS_DIR)
+        .join(id.to_dirname(None))
+        .join("events.json.tmp");
+    fs::write(&in_flight, "partial").unwrap();
+
+    let guard = storage
+        .try_lock_conversation(&id.to_string(), None)
+        .unwrap()
+        .expect("the lock is free in this test");
+
+    let result = storage.validate_conversations();
+    assert_eq!(result.valid.len(), 1);
+    assert!(
+        in_flight.is_file(),
+        "the lock holder's in-flight write must survive the sweep"
+    );
+
+    drop(guard);
+
+    drop(storage.validate_conversations());
+    assert!(
+        !in_flight.exists(),
+        "an orphaned temp file is reaped once nobody holds the lock"
+    );
+}
