@@ -207,6 +207,39 @@ fn test_map_model_gemini_3_8_flash() {
 }
 
 #[test]
+fn test_map_model_gemini_4_carbon() {
+    let model = types::Model {
+        base_model_id: "gemini-4-carbon".to_owned(),
+        display_name: "Gemini 4 Carbon".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "gemini-4-carbon").try_into().unwrap()
+    );
+    assert_eq!(details.display_name, Some("Gemini 4 Carbon".to_owned()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.prefill, None);
+}
+
+#[test]
 fn test_map_model_gemini_4_argon() {
     let model = types::Model {
         base_model_id: "gemini-4-argon".to_owned(),
