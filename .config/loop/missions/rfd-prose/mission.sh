@@ -24,8 +24,11 @@ ROTATE_EVENTS=100000
 SNAPSHOT_FILES=(progress.tsv)
 GATE_LABEL='prose gate'
 
-# A rewrite that fails the gate is thrown away, and the RFD is retried with the
-# gate's reason in the prompt, up to three times.
+# A rewrite that touches other files or changes what must stay byte-identical is
+# discarded, kept under `refs/loop/discarded/`, and retried with the gate's
+# reason in the prompt. A turn that stops before finishing, or leaves broken `#`
+# links, keeps its edits and the next turn repairs them in the same
+# conversation. Either way an RFD gets three attempts.
 DISCARD_ON_GATE_FAILURE=1
 
 if ! command -v comfort >/dev/null 2>&1; then
@@ -142,8 +145,21 @@ EOF
     fi
 }
 
-# Unreachable while DISCARD_ON_GATE_FAILURE=1, which discards a failed
-# iteration instead of asking for a repair.
+# A repair turn continues the same RFD, whose path the gate reads from
+# `state/current`.
 repair_prompt() {
-    printf 'The previous change failed the prose gate:\n\n%s\n' "$1"
+    local path id
+    path=$(cat "$STATE/current")
+    id=$(rfd_id "$path")
+
+    printf 'The harness checked your work on RFD %s, `%s`, and kept it, but it is not\nfinished:\n\n```\n%s\n```\n' "$id" "$path" "$1"
+    fill <<'EOF'
+
+Don't start the prose pass over. Continue from the file as it stands: finish the
+sections you had not reached, a section or two at a time with `fs_modify_file`,
+and point each broken link at the anchor shown. Then run `markdown_format` with
+`paths` set to the RFD's path only, and commit with `git_commit`. The harness
+folds your commits into one, so a second commit is fine. Never stage or commit
+anything under `@STATE@/`, and never rewrite git history.
+EOF
 }
