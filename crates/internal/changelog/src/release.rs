@@ -201,8 +201,9 @@ impl From<NoAddress> for ReleaseError {
 /// without a tag, `v<version>`, so a release counts as released once it is
 /// tagged, whenever its notes were filed.
 ///
-/// Credits link to the project on `forge`, at the web address of git's `origin`
-/// remote; without a `forge`, to the one that address is on (see
+/// Credits link to the project on `forge`, at the web address `repository`
+/// gives, such as `https://github.com/dcdpr/jp`, or else at git's `origin`
+/// remote's; without a `forge`, to the one that address is on (see
 /// [`Forge::infer`]).
 /// A release's date is its tag's, `v<version>`.
 /// `headings` names the types in the summary that stands in for a missing
@@ -217,6 +218,7 @@ pub fn read(
     dir: &Utf8Path,
     part: &Part,
     forge: Option<Forge>,
+    repository: Option<&str>,
     headings: &Headings,
 ) -> Result<Release, ReleaseError> {
     let Contents {
@@ -227,7 +229,10 @@ pub fn read(
         Part::Release(_) => directory::read(dir, part)?,
     };
 
-    let address = git::origin(dir).as_deref().and_then(web_address);
+    let address = match repository {
+        Some(address) => Some(address.to_owned()),
+        None => git::origin(dir).as_deref().and_then(web_address),
+    };
     let forge = forge.unwrap_or_else(|| Forge::infer(address.as_deref()));
     let project = Project::new(forge, address.as_deref())?;
 

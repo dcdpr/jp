@@ -598,6 +598,59 @@ fn render_credits_the_configured_forge_under_the_configured_headings() {
     "});
 }
 
+/// A rehearsal's clone, whose `origin` is a path on disk, links its credits
+/// from the configured address, and the forge is the one that address is on.
+#[test]
+fn render_links_credits_from_the_configured_repository() {
+    let repository = Repository::new("/srv/git/jp.git");
+    repository.write(
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
+    );
+    repository.commit("fix(llm): Retry idle turns (#1207)");
+    let mut message = init_message(repository.path(), &["render"]);
+    message.options = Map::from_iter([(
+        "repository".to_owned(),
+        json!("https://github.com/dcdpr/jp/"),
+    )]);
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    assert_eq!(printed(&messages), indoc! {"
+        1 entry is unreleased: Fixed (1).
+
+        ## Changelog
+
+        ### Fixed
+
+        - Idle turns are retried.
+          ([#1207](https://github.com/dcdpr/jp/pull/1207))
+    "});
+}
+
+#[test]
+fn render_names_the_setting_when_a_forge_has_no_address_to_link_to() {
+    let repository = Repository::new("/srv/git/jp.git");
+    repository.write(
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
+    );
+    repository.commit("fix(llm): Retry idle turns (#1207)");
+    let mut message = init_message(repository.path(), &["render"]);
+    message.options = Map::from_iter([("forge".to_owned(), json!("github"))]);
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some(
+            "The forge is `github`, but git's `origin` remote has no web address for credits to \
+             link to; set `plugins.command.release.options.repository` to the project's, such as \
+             `https://github.com/dcdpr/jp`."
+        )
+    );
+}
+
 #[test]
 fn render_prints_a_releases_upgrade_guide() {
     let repository = Repository::new("https://github.com/dcdpr/jp");

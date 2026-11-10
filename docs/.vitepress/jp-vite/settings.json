@@ -1,5 +1,5 @@
 {
-  "revision": "821837a8ca63bc94",
+  "revision": "e6a7cb432f02c53a",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
   "branch": "main",
@@ -131,6 +131,7 @@
     "dir": "changelog.d",
     "route": "releases",
     "forge": "github",
+    "repository": "https://github.com/dcdpr/jp",
     "headings": {
       "added": "New features",
       "fixed": "Bug fixes"

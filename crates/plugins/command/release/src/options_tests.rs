@@ -59,6 +59,34 @@ fn the_forge_is_named_as_github_gitlab_or_none() {
 }
 
 #[test]
+fn the_repository_is_a_web_address_without_a_slash_at_its_end() {
+    assert_eq!(read(json!({})).unwrap().repository, None);
+    assert_eq!(
+        read(json!({ "repository": "https://github.com/dcdpr/jp/" }))
+            .unwrap()
+            .repository
+            .as_deref(),
+        Some("https://github.com/dcdpr/jp")
+    );
+}
+
+/// A remote git reads, but no browser opens, isn't an address credits can link
+/// from.
+#[test]
+fn a_repository_that_is_not_a_web_address_is_refused() {
+    for repository in ["git@github.com:dcdpr/jp.git", "/srv/git/jp.git", "https://"] {
+        assert_eq!(
+            read(json!({ "repository": repository })),
+            Err(
+                "`plugins.command.release.options.repository` must be an `https://` address."
+                    .to_owned()
+            ),
+            "{repository}"
+        );
+    }
+}
+
+#[test]
 fn headings_rename_the_types_they_name() {
     let options = read(json!({
         "headings": { "added": "New features", "fixed": " Bug fixes " }

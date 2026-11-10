@@ -73,13 +73,14 @@ export function workspaceRoot(settings, srcDir = SRC_DIR) {
 
 // The arguments `changelog` takes to render the release `version`, or what no
 // tag ships yet when it is `null`, from the fragments directory `dir`, with
-// the forge and the headings `release`, the settings' `release`, names, as
-// `view`, such as `['--format', 'json']`.
+// the forge, the web address credits link from, and the headings `release`,
+// the settings' `release`, names, as `view`, such as `['--format', 'json']`.
 export function renderArgs(release, dir, version, view) {
     const args = ['render']
     if (version) args.push(version)
     args.push('--dir', dir)
     if (release.forge) args.push('--forge', release.forge)
+    if (release.repository) args.push('--repository', release.repository)
     for (const [type, heading] of Object.entries(release.headings ?? {})) {
         args.push('--heading', `${type}=${heading}`)
     }

@@ -17,6 +17,7 @@ const RELEASE = {
     dir: 'changelog.d',
     route: 'releases',
     forge: 'github',
+    repository: 'https://github.com/dcdpr/jp',
     headings: { added: 'New features', fixed: 'Bug fixes' },
 }
 
@@ -26,7 +27,7 @@ test('the release directories are listed newest first, and nothing else is', () 
     assert.deepEqual(releaseVersions(names), ['1.0.0', '1.0.0-rc.1', '0.10.0', '0.9.1', '0.2.0'])
 })
 
-test('changelog renders with the forge and headings the settings name', () => {
+test('changelog renders with the forge, web address, and headings the settings name', () => {
     assert.deepEqual(renderArgs(RELEASE, '/work/changelog.d', '0.3.0', ['--format', 'json']), [
         'render',
         '0.3.0',
@@ -34,6 +35,8 @@ test('changelog renders with the forge and headings the settings name', () => {
         '/work/changelog.d',
         '--forge',
         'github',
+        '--repository',
+        'https://github.com/dcdpr/jp',
         '--heading',
         'added=New features',
         '--heading',
@@ -44,9 +47,9 @@ test('changelog renders with the forge and headings the settings name', () => {
 })
 
 // Without a version, `changelog` renders what no tag ships yet; without a
-// forge, it reads the one git's `origin` is on.
-test('the unreleased changes render without a version, and a forge left unset is left out', () => {
-    const release = { ...RELEASE, forge: null, headings: {} }
+// forge or a web address, it reads them from git's `origin`.
+test('the unreleased changes render without a version, and what is left unset is left out', () => {
+    const release = { ...RELEASE, forge: null, repository: null, headings: {} }
 
     assert.deepEqual(renderArgs(release, '/work/changelog.d', null, ['--format', 'json']), [
         'render',

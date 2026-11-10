@@ -108,6 +108,45 @@ fn finalize_tags_the_tip_of_the_release_branch_with_its_notes_and_pushes_nothing
     assert!(fixture.origin_tags().is_empty());
 }
 
+/// The fixture's `origin` is a path on disk, so the tag's notes link their
+/// credits from the configured address, as `render` does.
+#[test]
+fn the_notes_in_the_tag_link_from_the_configured_repository() {
+    let fixture = Fixture::new();
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
+    let Value::Object(options) = json!({
+        "forge": "github",
+        "repository": "https://github.com/dcdpr/jp",
+    }) else {
+        panic!("options are an object");
+    };
+    let options = Options::read(&options).unwrap();
+    let shell = fixture.shell();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
+    cut(&pipeline, None, None).unwrap();
+    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#2)");
+
+    finalize(&pipeline, &version("0.1.0")).unwrap();
+
+    assert_eq!(
+        tag_message(&fixture, "v0.1.0"),
+        concat!(
+            "Release 0.1.0\n",
+            "\n",
+            "Version 0.1.0 has 1 entry: Fixed (1).\n",
+            "\n",
+            "## Changelog\n",
+            "\n",
+            "### Fixed\n",
+            "\n",
+            "- Retried.\n",
+            "  ([#1](https://github.com/dcdpr/jp/pull/1))",
+        )
+    );
+}
+
 /// The upgrade guide follows the notes in the same message, so a breaking entry
 /// links to its section by anchor; git keeps the `#` headings.
 #[test]

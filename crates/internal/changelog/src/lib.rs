@@ -45,7 +45,7 @@ pub mod release;
 
 pub use directory::{CheckError, Place, Problem, ProblemKind, Report, check};
 pub use document::{ListedCredit, with_credits};
-pub use forge::{Credit, CreditKind, Forge, UnknownForge};
+pub use forge::{Credit, CreditKind, Forge, NoAddress, UnknownForge};
 pub use fragment::{Fragment, FragmentError, NameError, Type, UnknownType, Upgrade};
 pub use git::GitError;
 pub use highlight::{Highlight, HighlightError};

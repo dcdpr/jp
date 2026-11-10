@@ -191,11 +191,13 @@ run = "allow"
 
 # Fragments and highlights are laid out in the style of `.comfort.toml` as they
 # are written, so they pass `fmt-markdown-ci` as they land. Release notes credit
-# GitHub pull requests, linked at the address of git's `origin` remote.
+# GitHub pull requests, linked at JP's repository rather than at `origin`, which
+# a rehearsal's clone points elsewhere.
 [plugins.command.release.options]
 fragments_dir = "changelog.d"
 format_on_write = true
 forge = "github"
+repository = "https://github.com/dcdpr/jp"
 # The version lives in `[workspace.package]`, which `cargo set-version` (from
 # cargo-edit) writes through `jp_cli`, one of the crates inheriting it, along
 # with `Cargo.lock`. `--workspace` would also overwrite the crates under

@@ -593,8 +593,8 @@ Both `changelog render` (the standalone crate binary) and `jp release render`
 accept `--format json` or `--format markdown`, plus `--page notes` or `--page
 upgrade` for Markdown output.
 The `changelog` binary does not read JP configuration; it receives the fragments
-directory, forge, and section headings via CLI flags, which `jp release render`
-populates from the plugin configuration.
+directory, forge, project web address (`repository`), and section headings via
+CLI flags, which `jp release render` populates from the plugin configuration.
 In Markdown mode, breaking entries link to their upgrade guide section using a
 base path passed by the caller.
 

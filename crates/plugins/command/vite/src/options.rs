@@ -27,10 +27,10 @@
 //! Each setting has one owner.
 //! The document directories, the RFD categories, the label keys a ticket or a
 //! wiki page names an RFD under, the ticket vocabulary, how much of the Done
-//! column the board shows, and the fragments directory, forge, and headings the
-//! release notes are rendered with belong to `jp rfd`, `jp ticket`, `jp wiki`,
-//! and `jp release`, and are read here from the whole configuration
-//! ([`rfd_options`], [`ticket_options`], [`wiki_options`],
+//! column the board shows, and the fragments directory, forge, web address, and
+//! headings the release notes are rendered with belong to `jp rfd`, `jp
+//! ticket`, `jp wiki`, and `jp release`, and are read here from the whole
+//! configuration ([`rfd_options`], [`ticket_options`], [`wiki_options`],
 //! [`release_options`]), with the defaults those plugins use.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -262,8 +262,12 @@ pub(crate) struct ReleaseOptions {
     pub dir: Utf8PathBuf,
 
     /// The forge the release notes credit change requests on; `None` leaves it
-    /// to the host of git's `origin` remote.
+    /// to the host of the project's web address.
     pub forge: Option<Forge>,
+
+    /// The project's web address, which the credits link from, without a `/` at
+    /// its end; `None` leaves it to git's `origin` remote.
+    pub repository: Option<String>,
 
     /// The heading of each type's section of the release notes, by the type's
     /// id; a type left out keeps its default heading.
@@ -276,6 +280,7 @@ pub(crate) struct ReleaseOptions {
 struct ReleaseSection {
     fragments_dir: Option<Utf8PathBuf>,
     forge: Option<String>,
+    repository: Option<String>,
     headings: BTreeMap<String, String>,
 }
 
@@ -373,8 +378,8 @@ pub(crate) fn wiki_options(config: &Value) -> Result<WikiOptions, String> {
 /// What the site reads of `jp release`'s options, from the whole configuration
 /// the host passed.
 ///
-/// The forge and the headings are held to what `jp release` accepts, so a value
-/// it refuses never reaches the snapshot.
+/// The forge, the web address, and the headings are held to what `jp release`
+/// accepts, so a value it refuses never reaches the snapshot.
 pub(crate) fn release_options(config: &Value) -> Result<ReleaseOptions, String> {
     let section: ReleaseSection = section(config, "release")?;
 
@@ -391,6 +396,19 @@ pub(crate) fn release_options(config: &Value) -> Result<ReleaseOptions, String> 
         .map(|forge| forge.parse::<Forge>())
         .transpose()
         .map_err(|error| format!("`plugins.command.release.options.forge`: {error}."))?;
+
+    let repository = match section.repository {
+        None => None,
+        Some(repository) if is_web_address(&repository) => {
+            Some(repository.trim_end_matches('/').to_owned())
+        }
+        Some(_) => {
+            return Err(
+                "`plugins.command.release.options.repository` must be an `https://` address."
+                    .to_owned(),
+            );
+        }
+    };
 
     let mut headings = BTreeMap::new();
     for (type_, heading) in &section.headings {
@@ -409,6 +427,7 @@ pub(crate) fn release_options(config: &Value) -> Result<ReleaseOptions, String> 
     Ok(ReleaseOptions {
         dir,
         forge,
+        repository,
         headings,
     })
 }

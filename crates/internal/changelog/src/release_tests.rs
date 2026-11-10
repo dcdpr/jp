@@ -227,6 +227,7 @@ fn each_file_is_credited_to_the_pull_requests_that_wrote_it_before_the_cut() {
         &repository.fragments(),
         &release("0.3.0"),
         None,
+        None,
         &Headings::default(),
     )
     .unwrap();
@@ -259,6 +260,7 @@ fn a_commit_without_a_pull_request_is_credited_as_itself() {
         &repository.fragments(),
         &release("0.3.0"),
         None,
+        None,
         &Headings::default(),
     )
     .unwrap();
@@ -278,13 +280,27 @@ fn a_release_is_dated_by_its_tag() {
     let repository = jp_after_cutting_0_3_0();
     let fragments = repository.fragments();
 
-    let untagged = read(&fragments, &release("0.3.0"), None, &Headings::default()).unwrap();
+    let untagged = read(
+        &fragments,
+        &release("0.3.0"),
+        None,
+        None,
+        &Headings::default(),
+    )
+    .unwrap();
     assert_eq!(untagged.version, Some(Version::new(0, 3, 0)));
     assert_eq!(untagged.date, None);
 
     // Eight commits, then the tag, a day after each other from October 1st.
     repository.tag("v0.3.0");
-    let tagged = read(&fragments, &release("0.3.0"), None, &Headings::default()).unwrap();
+    let tagged = read(
+        &fragments,
+        &release("0.3.0"),
+        None,
+        None,
+        &Headings::default(),
+    )
+    .unwrap();
     assert_eq!(tagged.date.as_deref(), Some("2026-10-10"));
 }
 
@@ -296,7 +312,14 @@ fn an_untagged_release_is_still_unreleased() {
     let repository = jp_after_cutting_0_3_0();
     let fragments = repository.fragments();
 
-    let unreleased = read(&fragments, &Part::Unreleased, None, &Headings::default()).unwrap();
+    let unreleased = read(
+        &fragments,
+        &Part::Unreleased,
+        None,
+        None,
+        &Headings::default(),
+    )
+    .unwrap();
 
     let help = repository.hash("HEAD~4");
     assert_eq!(entry_credits(&unreleased), [
@@ -314,7 +337,14 @@ fn an_untagged_release_is_still_unreleased() {
     );
 
     repository.tag("v0.3.0");
-    let unreleased = read(&fragments, &Part::Unreleased, None, &Headings::default()).unwrap();
+    let unreleased = read(
+        &fragments,
+        &Part::Unreleased,
+        None,
+        None,
+        &Headings::default(),
+    )
+    .unwrap();
 
     assert_eq!(entry_credits(&unreleased), [("show-model", vec!["#1243"])]);
     assert!(unreleased.highlights.is_empty());
@@ -328,6 +358,7 @@ fn the_unreleased_fragments_have_no_version_or_date() {
     let unreleased = read(
         &repository.fragments(),
         &Part::Unreleased,
+        None,
         None,
         &Headings::default(),
     )
@@ -347,7 +378,14 @@ fn without_an_overview_the_release_is_summarized() {
         (Type::Fixed, "Bug fixes".to_owned()),
     ]);
 
-    let release = read(&repository.fragments(), &release("0.3.0"), None, &headings).unwrap();
+    let release = read(
+        &repository.fragments(),
+        &release("0.3.0"),
+        None,
+        None,
+        &headings,
+    )
+    .unwrap();
 
     assert_eq!(release.overview, indoc! {"
         Version 0.3.0 has 4 entries: New features (1), Changed (1), and Bug fixes (2).
@@ -370,6 +408,7 @@ fn the_overview_is_what_the_releases_overview_md_holds() {
         &repository.fragments(),
         &release("0.3.0"),
         None,
+        None,
         &Headings::default(),
     )
     .unwrap();
@@ -388,6 +427,7 @@ fn an_empty_overview_md_is_summarized_like_a_missing_one() {
     let release = read(
         &repository.fragments(),
         &release("0.3.0"),
+        None,
         None,
         &Headings::default(),
     )
@@ -418,6 +458,7 @@ fn listed_credits_replace_the_ones_history_names() {
     let release = read(
         &repository.fragments(),
         &release("0.3.1"),
+        None,
         None,
         &Headings::default(),
     )
@@ -476,6 +517,7 @@ fn entries_are_ordered_by_type_then_first_credit_then_slug() {
         &repository.fragments(),
         &Part::Unreleased,
         None,
+        None,
         &Headings::default(),
     )
     .unwrap();
@@ -508,6 +550,7 @@ fn without_an_origin_every_credit_is_a_commit_linked_nowhere() {
         &repository.fragments(),
         &Part::Unreleased,
         None,
+        None,
         &Headings::default(),
     )
     .unwrap();
@@ -528,11 +571,68 @@ fn a_forge_that_links_needs_an_origin_with_a_web_address() {
         &repository.fragments(),
         &Part::Unreleased,
         Some(Forge::GitHub),
+        None,
         &Headings::default(),
     )
     .unwrap_err();
 
     assert!(matches!(error, ReleaseError::NoAddress(_)), "{error:?}");
+}
+
+/// A clone whose `origin` is a path on disk, such as a rehearsal's, is given
+/// the project's address, and the forge is the one that address is on.
+#[test]
+fn credits_link_from_a_given_address_when_origin_has_none() {
+    let repository = Repository::new(Some("/srv/git/jp.git"));
+    repository.write(
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
+    );
+    repository.commit("fix(llm): Retry idle turns (#1207)");
+
+    let release = read(
+        &repository.fragments(),
+        &Part::Unreleased,
+        None,
+        Some("https://github.com/dcdpr/jp"),
+        &Headings::default(),
+    )
+    .unwrap();
+
+    assert_eq!(release.entries[0].credits, [Credit {
+        kind: CreditKind::ChangeRequest,
+        label: "#1207".to_owned(),
+        url: Some("https://github.com/dcdpr/jp/pull/1207".to_owned()),
+    }]);
+}
+
+/// The given address wins over `origin`'s, and the forge follows it: GitLab
+/// names no merge request in a squash commit's subject, so the commit is
+/// credited as itself.
+#[test]
+fn a_given_address_wins_over_origins_and_decides_the_forge() {
+    let repository = Repository::new(Some("https://github.com/someone/jp-fork"));
+    repository.write(
+        "changelog.d/retry-idle-turns.fixed.md",
+        "Idle turns are retried.\n",
+    );
+    repository.commit("fix(llm): Retry idle turns (#1207)");
+
+    let release = read(
+        &repository.fragments(),
+        &Part::Unreleased,
+        None,
+        Some("https://gitlab.com/group/jp"),
+        &Headings::default(),
+    )
+    .unwrap();
+
+    let head = repository.hash("HEAD");
+    assert_eq!(release.entries[0].credits, [Credit {
+        kind: CreditKind::Commit,
+        label: head[..7].to_owned(),
+        url: Some(format!("https://gitlab.com/group/jp/-/commit/{head}")),
+    }]);
 }
 
 /// A self-hosted GitLab names its forge, and a merge request is read from the
@@ -562,6 +662,7 @@ fn gitlab_merge_requests_are_read_from_merge_commits() {
         &repository.fragments(),
         &Part::Unreleased,
         Some(Forge::GitLab),
+        None,
         &Headings::default(),
     )
     .unwrap();
@@ -593,6 +694,7 @@ fn a_shallow_clone_is_refused() {
         &clone.path().join("changelog.d"),
         &release("0.3.0"),
         None,
+        None,
         &Headings::default(),
     )
     .unwrap_err();
@@ -613,6 +715,7 @@ fn a_part_that_breaks_the_format_is_not_read() {
     let error = read(
         &repository.fragments(),
         &release("0.3.0"),
+        None,
         None,
         &Headings::default(),
     )
@@ -658,6 +761,7 @@ fn a_release_serializes_to_the_json_other_tools_read() {
     let release = read(
         &repository.fragments(),
         &release("0.3.0"),
+        None,
         None,
         &Headings::default(),
     )

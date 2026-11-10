@@ -1,6 +1,8 @@
 use camino_tempfile::Utf8TempDir;
+use serde_json::{Value, json};
 
 use super::*;
+use crate::repository_testing::Fixture;
 
 #[test]
 fn the_fragments_directory_is_read_below_the_workspace_root() {
@@ -25,6 +27,34 @@ fn the_fragments_directory_is_read_below_the_workspace_root() {
         Err(format!(
             "The fragments directory {outside} is outside the workspace, so no release has it."
         ))
+    );
+}
+
+/// The fixture's `origin` is a path on disk, on no forge; a configured address
+/// names one, unless the forge is configured too.
+#[test]
+fn the_forge_follows_the_configured_repository() {
+    let fixture = Fixture::new();
+    let shell = fixture.shell();
+    let forge = |options: Value| {
+        let Value::Object(options) = options else {
+            panic!("options are an object");
+        };
+        let options = Options::read(&options).unwrap();
+
+        Pipeline::new(&shell, fixture.root(), &options)
+            .unwrap()
+            .forge()
+    };
+
+    assert_eq!(forge(json!({})), Forge::None);
+    assert_eq!(
+        forge(json!({ "repository": "https://gitlab.com/group/jp" })),
+        Forge::GitLab
+    );
+    assert_eq!(
+        forge(json!({ "repository": "https://gitlab.com/group/jp", "forge": "github" })),
+        Forge::GitHub
     );
 }
 

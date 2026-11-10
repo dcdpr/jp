@@ -102,8 +102,12 @@ pub(crate) struct ReleaseSettings {
     pub route: String,
 
     /// The forge the notes credit change requests on, when one is configured;
-    /// otherwise the one git's `origin` remote is on.
+    /// otherwise the one the project's web address is on.
     pub forge: Option<String>,
+
+    /// The project's web address, which the credits link from, when one is
+    /// configured; otherwise git's `origin` remote's, where the site is built.
+    pub repository: Option<String>,
 
     /// The heading of each type's section of the release notes, by the type's
     /// id; a type left out keeps its default heading.
@@ -307,6 +311,7 @@ fn releases(root: &Utf8Path, options: ReleaseOptions) -> Result<Option<ReleaseSe
         dir,
         route: RELEASE_ROUTE.to_owned(),
         forge: options.forge.map(|forge| forge.id().to_owned()),
+        repository: options.repository,
         headings: options.headings,
     }))
 }

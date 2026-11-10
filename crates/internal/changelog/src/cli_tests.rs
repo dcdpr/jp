@@ -40,6 +40,7 @@ fn render_takes_the_settings_jp_reads_from_configuration_as_flags() {
     let Command::Render {
         dir,
         forge,
+        repository,
         headings,
         ..
     } = parse(&[
@@ -49,6 +50,8 @@ fn render_takes_the_settings_jp_reads_from_configuration_as_flags() {
         "docs/changes",
         "--forge",
         "gitlab",
+        "--repository",
+        "https://gitlab.example.com/group/jp/",
         "--heading",
         "added=New features",
         "--heading",
@@ -60,6 +63,10 @@ fn render_takes_the_settings_jp_reads_from_configuration_as_flags() {
 
     assert_eq!(dir.as_str(), "docs/changes");
     assert_eq!(forge, Some(Forge::GitLab));
+    assert_eq!(
+        repository.as_deref(),
+        Some("https://gitlab.example.com/group/jp")
+    );
     assert_eq!(headings, [
         (Type::Added, "New features".to_owned()),
         (Type::Fixed, "Bug fixes".to_owned()),
@@ -72,6 +79,7 @@ fn render_reads_the_unreleased_fragments_from_changelog_d_by_default() {
         render,
         dir,
         forge,
+        repository,
         headings,
     } = parse(&["changelog", "render"])
     else {
@@ -81,7 +89,18 @@ fn render_reads_the_unreleased_fragments_from_changelog_d_by_default() {
     assert_eq!(render.part(), Part::Unreleased);
     assert_eq!(dir.as_str(), "changelog.d");
     assert_eq!(forge, None);
+    assert_eq!(repository, None);
     assert_eq!(headings, []);
+}
+
+#[test]
+fn the_repository_has_to_be_a_web_address() {
+    for address in ["/srv/git/jp.git", "git@github.com:dcdpr/jp.git", "https://"] {
+        assert!(
+            Cli::try_parse_from(["changelog", "render", "--repository", address]).is_err(),
+            "{address}"
+        );
+    }
 }
 
 #[test]

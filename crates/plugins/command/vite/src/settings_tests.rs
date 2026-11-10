@@ -448,6 +448,7 @@ fn the_wiki_the_releases_and_the_redirects_render_last() {
             dir: "changelog.d".to_owned(),
             route: "releases".to_owned(),
             forge: None,
+            repository: Some("https://github.com/dcdpr/jp".to_owned()),
             headings: BTreeMap::from([("fixed".to_owned(), "Bug fixes".to_owned())]),
         }),
         redirects: BTreeMap::from([("/architecture/glossary".to_owned(), "W-0a1b2c3".to_owned())]),
@@ -471,6 +472,7 @@ fn the_wiki_the_releases_and_the_redirects_render_last() {
     "dir": "changelog.d",
     "route": "releases",
     "forge": null,
+    "repository": "https://github.com/dcdpr/jp",
     "headings": {
       "fixed": "Bug fixes"
     }
@@ -499,6 +501,7 @@ fn the_releases_are_read_where_jp_release_keeps_its_fragments() {
         "plugins": { "command": { "release": { "options": {
             "fragments_dir": "notes/changes",
             "forge": "gitlab",
+            "repository": "https://gitlab.example.com/group/jp",
             "headings": { "fixed": " Bug fixes ", "added": "New features" },
             "cadence": "2w"
         } } } }
@@ -512,6 +515,7 @@ fn the_releases_are_read_where_jp_release_keeps_its_fragments() {
             dir: "notes/changes".to_owned(),
             route: "releases".to_owned(),
             forge: Some("gitlab".to_owned()),
+            repository: Some("https://gitlab.example.com/group/jp".to_owned()),
             headings: BTreeMap::from([
                 ("added".to_owned(), "New features".to_owned()),
                 ("fixed".to_owned(), "Bug fixes".to_owned()),
@@ -549,6 +553,7 @@ fn the_releases_need_their_fragments_directory() {
             dir: "changelog.d".to_owned(),
             route: "releases".to_owned(),
             forge: None,
+            repository: None,
             headings: BTreeMap::new(),
         })
     );

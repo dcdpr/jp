@@ -11,7 +11,7 @@
 //! branch's tip once the branch is pushed.
 
 use changelog::{
-    ReleaseError,
+    NoAddress, ReleaseError,
     directory::{Part, ReadError},
     markdown, release,
 };
@@ -19,6 +19,7 @@ use semver::Version;
 
 use crate::{
     cut,
+    options::no_address,
     pipeline::{Pipeline, counted, listed, problems, push, short},
     releases::{self, Line, Releases},
     repository::{MAIN, ORIGIN, Worktree},
@@ -234,6 +235,7 @@ fn message(
         &pipeline.fragments_in(main),
         &Part::Release(version.clone()),
         options.forge,
+        options.repository.as_deref(),
         &options.headings,
     )
     .map_err(|error| match error {
@@ -241,6 +243,7 @@ fn message(
             "The notes of {version} break their format; fix these first:\n{}",
             problems(main, &found)
         ),
+        ReleaseError::NoAddress(NoAddress(forge)) => no_address(forge),
         error => error.to_string(),
     })?;
 

@@ -59,7 +59,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{
-    ReleaseError, Type,
+    NoAddress, ReleaseError, Type,
     cli::{Format, Render, View, version as parse_version},
     directory::ReadError,
     release,
@@ -76,7 +76,7 @@ use crate::{
     build::Profile,
     edit::Host,
     entry::{Fragments, HIGHLIGHTS},
-    options::Options,
+    options::{Options, no_address},
     pipeline::Pipeline,
     repository::MAIN,
     shell::Shell,
@@ -735,7 +735,8 @@ fn check(ctx: &Context<'_>) -> Result<Output, String> {
 /// Print a release's notes or upgrade guide, or the fragments no release has
 /// taken yet, as `render` asks.
 ///
-/// Credits link to the configured forge, or to the one git's `origin` remote is
+/// Credits link from the configured `repository`, or else from git's `origin`
+/// remote's web address, to the configured forge, or to the one that address is
 /// on, and the configured headings name each type's section.
 /// An upgrade guide with no sections prints nothing, and says why on stderr.
 fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> {
@@ -752,6 +753,7 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
         &fragments.dir,
         &render.part(),
         ctx.options.forge,
+        ctx.options.repository.as_deref(),
         &ctx.options.headings,
     )
     .map_err(|error| unreadable(fragments, error))?;
@@ -858,6 +860,7 @@ fn unreadable(fragments: &Fragments<'_>, error: ReleaseError) -> String {
             version,
         }
         .to_string(),
+        ReleaseError::NoAddress(NoAddress(forge)) => no_address(forge),
         error => error.to_string(),
     }
 }

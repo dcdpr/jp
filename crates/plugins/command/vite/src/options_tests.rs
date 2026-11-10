@@ -138,6 +138,7 @@ fn the_release_options_default_to_what_jp_release_uses() {
         Ok(ReleaseOptions {
             dir: Utf8PathBuf::from("changelog.d"),
             forge: None,
+            repository: None,
             headings: BTreeMap::new(),
         })
     );
@@ -151,6 +152,7 @@ fn the_release_options_are_read_from_jp_releases_settings() {
         "plugins": { "command": { "release": { "options": {
             "fragments_dir": "changes",
             "forge": "none",
+            "repository": "https://github.com/dcdpr/jp/",
             "headings": { "security": " Security fixes " },
             "bump": "cargo set-version {version}"
         } } } }
@@ -161,6 +163,7 @@ fn the_release_options_are_read_from_jp_releases_settings() {
         Ok(ReleaseOptions {
             dir: Utf8PathBuf::from("changes"),
             forge: Some(Forge::None),
+            repository: Some("https://github.com/dcdpr/jp".to_owned()),
             headings: BTreeMap::from([("security".to_owned(), "Security fixes".to_owned())]),
         })
     );
@@ -193,6 +196,10 @@ fn release_options_jp_release_refuses_are_refused() {
     assert_eq!(
         refused(json!({ "headings": { "fixed": " " } })),
         "`plugins.command.release.options.headings.fixed` is empty."
+    );
+    assert_eq!(
+        refused(json!({ "repository": "git@github.com:dcdpr/jp.git" })),
+        "`plugins.command.release.options.repository` must be an `https://` address."
     );
 }
 

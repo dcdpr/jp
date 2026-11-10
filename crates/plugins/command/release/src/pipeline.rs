@@ -45,11 +45,22 @@ impl<'a> Pipeline<'a> {
     }
 
     /// The forge change requests are reviewed on: the configured one, or the
-    /// one `origin`'s address is on.
+    /// one the project's [`address`] is on.
+    ///
+    /// [`address`]: Self::address
     pub(crate) fn forge(&self) -> Forge {
         self.options
             .forge
-            .unwrap_or_else(|| Forge::infer(self.repo.origin_address().as_deref()))
+            .unwrap_or_else(|| Forge::infer(self.address().as_deref()))
+    }
+
+    /// The project's web address, which credits link from: the configured
+    /// `repository`, or `origin`'s.
+    pub(crate) fn address(&self) -> Option<String> {
+        self.options
+            .repository
+            .clone()
+            .or_else(|| self.repo.origin_address())
     }
 }
 

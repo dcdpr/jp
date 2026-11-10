@@ -162,6 +162,7 @@ fn the_releases_get_their_index_and_page_templates() {
         dir: "changelog.d".to_owned(),
         route: "releases".to_owned(),
         forge: None,
+        repository: None,
         headings: BTreeMap::new(),
     });
     let settings = Settings {

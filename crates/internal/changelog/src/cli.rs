@@ -8,7 +8,8 @@
 //! `changelog render [VERSION]` prints a release's notes or upgrade guide, or
 //! what no tag ships yet, as Markdown or as the JSON other tools render from
 //! ([`Render`]).
-//! The forge and the headings arrive as flags rather than from configuration.
+//! The forge, the web address credits link from, and the headings arrive as
+//! flags rather than from configuration.
 //!
 //! Neither reads configuration, so CI can run them without `jp`.
 
@@ -16,6 +17,7 @@ use std::process::ExitCode;
 
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use doc::repository::is_web_address;
 use semver::Version;
 
 use crate::{
@@ -23,7 +25,7 @@ use crate::{
     forge::Forge,
     fragment::Type,
     markdown::{self, UPGRADE_GUIDE},
-    release::{self, Headings, Release},
+    release::{self, Headings, Release, ReleaseError},
 };
 
 #[derive(Debug, Parser)]
@@ -69,11 +71,18 @@ enum Command {
 
         /// Where change requests are reviewed: `github`, `gitlab`, or `none`.
         ///
-        /// Without it, the forge is read from the address of git's `origin`
-        /// remote: `github` for github.com, `gitlab` for gitlab.com, and `none`
-        /// for any other host.
+        /// Without it, the forge is read from the address credits link from,
+        /// `--repository` or git's `origin` remote: `github` for github.com,
+        /// `gitlab` for gitlab.com, and `none` for any other host.
         #[arg(long)]
         forge: Option<Forge>,
+
+        /// The project's web address, which credits link from, such as
+        /// `https://github.com/dcdpr/jp`.
+        ///
+        /// Without it, the address of git's `origin` remote.
+        #[arg(long, value_name = "URL", value_parser = repository)]
+        repository: Option<String>,
 
         /// The heading of a type's section of the release notes, such as
         /// `added=New features`.
@@ -215,6 +224,17 @@ pub fn version(text: &str) -> Result<Version, String> {
         .map_err(|error| format!("`{text}` is not a release's version, such as `0.3.0`: {error}"))
 }
 
+/// Read `--repository`'s web address, without a `/` at its end.
+fn repository(text: &str) -> Result<String, String> {
+    if !is_web_address(text) {
+        return Err(format!(
+            "`{text}` isn't a web address, such as `https://github.com/dcdpr/jp`"
+        ));
+    }
+
+    Ok(text.trim_end_matches('/').to_owned())
+}
+
 /// Read `--heading`'s `TYPE=HEADING`.
 fn heading(text: &str) -> Result<(Type, String), String> {
     let (type_, heading) = text
@@ -253,12 +273,24 @@ pub fn main() -> ExitCode {
             render,
             dir,
             forge,
+            repository,
             headings,
         } => {
             let headings = Headings::from_iter(headings);
             let printed = render.view(Format::Markdown).and_then(|view| {
-                let release = release::read(&dir, &render.part(), forge, &headings)
-                    .map_err(|error| error.to_string())?;
+                let release = release::read(
+                    &dir,
+                    &render.part(),
+                    forge,
+                    repository.as_deref(),
+                    &headings,
+                )
+                .map_err(|error| match error {
+                    ReleaseError::NoAddress(error) => {
+                        format!("{error}; name the project's with `--repository`")
+                    }
+                    error => error.to_string(),
+                })?;
                 view.render(&release, &headings)
             });
 
