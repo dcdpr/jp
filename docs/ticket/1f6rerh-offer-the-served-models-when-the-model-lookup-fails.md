@@ -1,6 +1,6 @@
 # Offer the served models when the model lookup fails
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-07
 - **Label**: domain=llm
@@ -23,8 +23,16 @@ Recovery here is a different flow from the turn loop's: nothing has been
 appended yet, so the picker would run before `TurnStart`, record the pick as an
 ordinary config delta, and look up the picked model again.
 
-- [ ] Classify a refused lookup as an unknown model for Anthropic and OpenAI
-- [ ] In an interactive query, offer the provider's served models and continue
-      with the pick
-- [ ] Non-interactively, end with "Unknown model" listing the served models
-- [ ] A test that starts above `run_turn_loop`
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-10T21:00:00Z
+
+Resolved by T-19hjnnn (PR #1299), which makes `Provider::model_details` advisory
+across providers and removes OpenAI's network lookup.
+Unknown Anthropic and OpenAI models return `ModelDetails::empty` from
+`model_details` and fail on the chat request instead, reaching PR #1298's
+unknown-model classification, served-models error, and interactive model picker
+without a separate pre-`TurnStart` recovery flow.
