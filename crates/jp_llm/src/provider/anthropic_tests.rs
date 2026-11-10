@@ -2835,8 +2835,11 @@ fn test_create_request_resends_redacted_thinking_as_native_block() {
     ));
 }
 
+/// Reasoning without an Anthropic signature is omitted rather than sent as
+/// text: Anthropic refuses requests that carry reasoning in message content
+/// (`reasoning_extraction`).
 #[test]
-fn test_create_request_falls_back_to_think_tags_without_signature() {
+fn test_create_request_drops_reasoning_without_signature() {
     let model = ModelDetails {
         id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
         display_name: None,
@@ -2874,28 +2877,20 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
     let beta = BetaFeatures(vec![]);
     let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
-    assert_eq!(request.messages.len(), 3);
-    let assistant = &request.messages[1];
-    assert_eq!(assistant.role, types::MessageRole::Assistant);
-    assert_eq!(assistant.content.0.len(), 2);
-
-    assert!(matches!(
-        &assistant.content.0[0],
-        types::MessageContent::Text(text)
-            if text.text == "<think>\ninternal reasoning\n</think>\n\n"
-    ));
-    assert!(matches!(
-        &assistant.content.0[1],
-        types::MessageContent::Text(text) if text.text == "Visible answer"
-    ));
+    assert_eq!(
+        serde_json::to_value(&request.messages).unwrap(),
+        serde_json::json!([
+            {"role":"user","content":[{"type":"text","text":"First question"}]},
+            {"role":"assistant","content":[{"type":"text","text":"Visible answer"}]},
+            {"role":"user","content":[{"type":"text","text":"Follow-up question"}]}
+        ])
+    );
 }
 
-/// Anthropic can return a thinking block that carries a signature but no text.
-/// Once a repair patch strips the signature, nothing is left to send, and
-/// replaying it as an empty `<think></think>` pair would spend tokens on
-/// nothing.
+/// A textless thinking block whose signature was stripped by a repair patch
+/// leaves an empty unsigned reasoning event, which is omitted from the request.
 #[test]
-fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
+fn test_create_request_drops_empty_reasoning() {
     let model = ModelDetails {
         id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
         display_name: None,
@@ -2913,7 +2908,6 @@ fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
     let mut events = ConversationStream::new_test();
     events.start_turn("First question");
     events.extend([
-        // A signed-but-textless block whose signature a patch removed.
         ConversationEvent::now(ChatResponse::reasoning("")),
         ConversationEvent::now(ChatResponse::message("Visible answer")),
     ]);
@@ -2948,11 +2942,10 @@ fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
 }
 
 /// When the conversation ends with an assistant turn carrying signed thinking
-/// (a resumed/continued turn), that thinking must be rewritten as `<think>`
-/// text rather than re-sent as a native block, which Anthropic rejects in the
-/// continuation target.
+/// (a resumed or continued turn), Anthropic rejects that thinking as a native
+/// block and refuses it as text, so it is dropped.
 #[test]
-fn test_create_request_downgrades_trailing_assistant_thinking() {
+fn test_create_request_drops_trailing_assistant_thinking() {
     let model = ModelDetails {
         id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
         display_name: None,
@@ -2962,8 +2955,8 @@ fn test_create_request_downgrades_trailing_assistant_thinking() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        // Prefill unsupported, so a synthetic continue is appended after the
-        // (downgraded) assistant turn.
+        // Prefill is unsupported, so a synthetic continue message is appended
+        // after the assistant turn.
         prefill: None,
         subscription: None,
         features: vec!["adaptive-thinking"],
@@ -2992,32 +2985,180 @@ fn test_create_request_downgrades_trailing_assistant_thinking() {
     let beta = BetaFeatures(vec![]);
     let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
-    // user, assistant (downgraded), synthetic continue user.
-    assert_eq!(request.messages.len(), 3);
-    let assistant = &request.messages[1];
-    assert_eq!(assistant.role, types::MessageRole::Assistant);
-
-    assert!(
-        !assistant
-            .content
-            .0
-            .iter()
-            .any(|c| matches!(c, types::MessageContent::Thinking(_))),
-        "trailing assistant thinking must be downgraded, not sent natively"
+    assert_eq!(
+        serde_json::to_value(&request.messages).unwrap(),
+        serde_json::json!([
+            {"role":"user","content":[{"type":"text","text":"Question"}]},
+            {"role":"assistant","content":[{"type":"text","text":"partial answer"}]},
+            {"role":"user","content":[{"type":"text","text":CONTINUE_MESSAGE}]}
+        ])
     );
-    assert!(matches!(
-        &assistant.content.0[0],
-        types::MessageContent::Text(text)
-            if text.text == "<think>\ninternal reasoning\n</think>\n\n"
-    ));
-    assert!(matches!(
-        &assistant.content.0[1],
-        types::MessageContent::Text(text) if text.text == "partial answer"
-    ));
 }
 
-/// Redacted (encrypted) thinking in the continuation target has no readable
-/// form, so it is dropped rather than rewritten.
+/// A continued turn that produced only thinking leaves an empty assistant
+/// message once that thinking is dropped.
+/// The empty message is removed, so the request ends with the user's prompt and
+/// needs no synthetic continue.
+#[test]
+fn test_create_request_removes_trailing_assistant_left_empty() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("internal reasoning"))
+            .with_metadata_field(THINKING_SIGNATURE_KEY, "sig_123"),
+    ]);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&request.messages).unwrap(),
+        serde_json::json!([
+            {"role":"user","content":[{"type":"text","text":"Question"}]}
+        ])
+    );
+}
+
+/// When the user interrupts the assistant mid-reasoning and replies, the
+/// unsigned partial reasoning is omitted and the reply is prefixed with
+/// [`INTERRUPTED_REASONING_NOTE`] once, regardless of how many reasoning events
+/// were omitted.
+#[test]
+fn test_create_request_notes_reasoning_interrupted_by_user() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("first partial thought")),
+        ConversationEvent::now(ChatResponse::reasoning("second partial thought")),
+        ConversationEvent::now(ChatRequest::from("No, the answer is Y.")),
+    ]);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&request.messages).unwrap(),
+        serde_json::json!([
+            {"role":"user","content":[
+                {"type":"text","text":"Question"},
+                {"type":"text","text":"Your previous turn was interrupted while you were still reasoning, before you replied.\n\nNo, the answer is Y."}
+            ]}
+        ])
+    );
+}
+
+/// Reasoning from another provider is omitted like any other unsigned
+/// reasoning; the assistant text that followed it is kept, and no interruption
+/// note is added because the assistant replied.
+#[test]
+fn test_create_request_drops_reasoning_from_other_providers() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Question");
+    events.add_config_delta(
+        serde_json::from_value::<jp_config::PartialAppConfig>(
+            serde_json::json!({"assistant":{"model":{"id":"openai/gpt-6-astra"}}}),
+        )
+        .unwrap(),
+    );
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("Foreign reasoning.")),
+        ConversationEvent::now(ChatResponse::message("Foreign answer.")),
+    ]);
+    events.start_turn("Follow-up");
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&request.messages).unwrap(),
+        serde_json::json!([
+            {"role":"user","content":[{"type":"text","text":"Question"}]},
+            {"role":"assistant","content":[{"type":"text","text":"Foreign answer."}]},
+            {"role":"user","content":[{"type":"text","text":"Follow-up"}]}
+        ])
+    );
+}
+
+/// Redacted thinking in the trailing assistant message is dropped alongside
+/// signed thinking when continuing a turn.
 #[test]
 fn test_create_request_drops_trailing_redacted_thinking() {
     let model = ModelDetails {
@@ -3550,11 +3691,7 @@ mod thinking_signature_recovery {
         },
     };
 
-    /// Build patches the way the provider does: classify the error, then
-    /// repair.
-    ///
-    /// Going through the classifier keeps these expectations honest about which
-    /// rejection kind each error text produces.
+    /// Classify `error` and build repair patches for `request`.
     fn patches_for(
         request: &types::CreateMessagesRequest,
         error: &StreamError,
@@ -3563,7 +3700,6 @@ mod thinking_signature_recovery {
         build_thinking_patches(request, error, rejection)
     }
 
-    /// The `(metadata_key, metadata_value)` each patch targets, in order.
     fn patch_targets(patches: &[EventPatch]) -> Vec<(&str, &str)> {
         patches
             .iter()
@@ -3960,13 +4096,13 @@ mod thinking_signature_recovery {
         ]
     }
 
-    /// Anthropic requires a turn to carry its thinking blocks back exactly as
-    /// generated, so downgrading only the block named in the error is rejected
-    /// on the next request with `cannot be modified`.
+    /// Anthropic requires a turn to carry its thinking blocks back intact, so
+    /// stripping only the block named in the error is rejected on the next
+    /// request with `cannot be modified`.
     ///
-    /// The turn spans several of our messages, and every thinking block in all
-    /// of them has to go — including `sig_early`, which sits in the turn's
-    /// first message, two messages before the one the error names.
+    /// The turn spans several messages, and every thinking block across all of
+    /// them is stripped, including `sig_early` in the turn's first message (two
+    /// messages before the one the error names).
     #[test]
     fn rejected_block_downgrades_every_thinking_block_in_its_turn() {
         let request = request(interleaved_thinking_conversation());
@@ -3992,11 +4128,11 @@ mod thinking_signature_recovery {
 
     /// The rejected block often sits in the middle of the final turn rather
     /// than in its last assistant message: Anthropic reports a position in the
-    /// turn, and the trailing assistant message has already been rewritten as
-    /// `<think>` text by [`downgrade_trailing_thinking`].
+    /// turn, and the trailing assistant message has already had its thinking
+    /// dropped by [`drop_trailing_thinking`].
     /// Every thinking block in the named message still has to go.
     ///
-    /// [`downgrade_trailing_thinking`]: super::super::downgrade_trailing_thinking
+    /// [`drop_trailing_thinking`]: super::super::drop_trailing_thinking
     #[test]
     fn mid_turn_message_downgrades_every_thinking_block() {
         let request = request(vec![
@@ -4096,11 +4232,10 @@ mod thinking_signature_recovery {
     }
 
     /// A position can parse and resolve, yet land in a turn carrying no native
-    /// thinking — our turn model disagreeing with the one the API reports
-    /// against.
-    /// The repair falls back to a turn that does carry thinking, and still
-    /// downgrades the whole of it: emitting a single patch there would be the
-    /// partial rewrite the API refuses, costing another round.
+    /// thinking when our turn model disagrees with the API's.
+    /// The repair falls back to a turn that carries thinking and strips every
+    /// thinking block in it, avoiding a partial strip that the API would
+    /// reject.
     #[test]
     fn position_resolving_into_a_thinkingless_turn_still_downgrades_a_whole_turn() {
         let request = request(vec![

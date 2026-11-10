@@ -106,14 +106,13 @@ impl EventBuilder {
     }
 
     /// Returns the partial assistant content accumulated in unflushed buffers,
-    /// as correctly-typed responses in stream-index order.
+    /// as [`ChatResponse`] variants in stream-index order.
     ///
-    /// Used when a stream is interrupted or retried and the turn resumes: each
-    /// partial buffer is committed as its own event, so reasoning stays
-    /// reasoning and message text stays message text.
+    /// Each partial buffer is returned as its own [`ChatResponse`] variant so
+    /// reasoning stays [`ChatResponse::Reasoning`] and message text stays
+    /// [`ChatResponse::Message`].
     /// The provider's request builder decides how to serialize partial
-    /// reasoning back to the model (Anthropic sends unsigned reasoning as
-    /// `<think>` text, never a native thinking block).
+    /// reasoning back to the model (Anthropic omits unsigned reasoning).
     ///
     /// Empty buffers are skipped.
     /// Tool-call and structured buffers are excluded: a partial tool call would

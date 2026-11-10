@@ -17,16 +17,17 @@ with `Invalid 'signature' in 'thinking' block`.
 For accounts created on or after 2026-08-31 the first of these is the default
 rather than an opt-in.
 
-JP handles both, in `anthropic.rs`: `classify_thinking_rejection` names the
-rejection, `build_thinking_patches` rewrites the whole assistant turn holding
-the offending block as `<think>` text, and the stream yields
-`FinishReason::Retry` so `turn_loop` reissues the request.
+JP handles both in `anthropic.rs`: `classify_thinking_rejection` classifies the
+error, `build_thinking_patches` strips the signatures from the assistant turn
+containing the offending block so subsequent requests omit that turn's
+reasoning, and the stream yields `FinishReason::Retry` so `turn_loop` reissues
+the request.
 It is tested and it converges.
 
 It is also entirely reactive.
 Every repair costs a round trip that ends in a 400, and it pays for that round
-trip by discarding that turn's native reasoning — the API keeps the text, but
-the model no longer sees the blocks as its own.
+trip by discarding that turn's reasoning: the turn's text and tool calls are
+kept, but the model no longer sees its thinking.
 On a turn-scoped rejection that is one round and one turn's reasoning.
 On a signature rejection spanning a long conversation it is one round per turn
 that carries thinking.
@@ -58,9 +59,9 @@ assistant turn carries blocks, and its blocks are read only by Opus 5.5, Fable
 ## To settle first
 
 Whether a cross-model replay is a 400 or a silent drop.
-The migration guide's wording — "runs those turns without them" — reads like
-the blocks are ignored rather than rejected, which would make the model-switch
-half of this a silent context loss rather than a failed request.
+The migration guide's wording ("runs those turns without them") reads like the
+blocks are ignored rather than rejected, which would make the model-switch half
+of this a silent context loss rather than a failed request.
 If so it still deserves a notice, but it is a different fix from the
 tools-and-system half, and possibly a different ticket.
 
