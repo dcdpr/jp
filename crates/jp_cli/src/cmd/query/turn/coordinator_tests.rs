@@ -702,6 +702,95 @@ fn test_complete_early_commits_partials() {
     assert_eq!(stream.len(), len_before + 1);
 }
 
+fn event_kinds(stream: &ConversationStream) -> Vec<&'static str> {
+    stream
+        .iter()
+        .map(|entry| {
+            if entry.event.is_turn_start() {
+                "TurnStart"
+            } else if entry.event.is_chat_request() {
+                "ChatRequest"
+            } else if entry.event.as_chat_response().is_some() {
+                "ChatResponse"
+            } else {
+                "other"
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn restarting_an_unanswered_turn_records_the_model_before_the_request() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    let picked: ModelIdConfig = "test/picked".parse().unwrap();
+    assert!(coordinator.restart_turn_on(&mut stream, &picked));
+
+    assert_eq!(event_kinds(&stream), ["TurnStart", "ChatRequest"]);
+    let first = stream.iter().next().unwrap();
+    assert_eq!(first.config.assistant.model.id.to_string(), "test/picked");
+}
+
+#[test]
+fn a_turn_with_a_response_is_not_restarted() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    coordinator.handle_event(&mut stream, Event::message(0, "answer"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    let model_before = stream.config().unwrap().assistant.model.id.to_string();
+
+    let picked: ModelIdConfig = "test/picked".parse().unwrap();
+    assert!(!coordinator.restart_turn_on(&mut stream, &picked));
+
+    assert_eq!(event_kinds(&stream), [
+        "TurnStart",
+        "ChatRequest",
+        "ChatResponse"
+    ]);
+    assert_eq!(
+        stream.config().unwrap().assistant.model.id.to_string(),
+        model_before
+    );
+}
+
+#[test]
+fn a_turn_with_partial_content_is_not_restarted() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    coordinator.handle_event(&mut stream, Event::message(0, "partial"));
+
+    let picked: ModelIdConfig = "test/picked".parse().unwrap();
+    assert!(!coordinator.restart_turn_on(&mut stream, &picked));
+
+    assert_eq!(event_kinds(&stream), ["TurnStart", "ChatRequest"]);
+    assert_eq!(coordinator.peek_partial_events().len(), 1);
+}
+
 #[test]
 fn test_complete_early_without_partials() {
     let mut stream = ConversationStream::new_test();

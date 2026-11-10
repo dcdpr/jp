@@ -565,15 +565,22 @@ impl TurnCoordinator {
     /// `assistant.model.id` to `model`, and starts a new turn with the original
     /// request so the turn's config reflects `model` from its first event.
     ///
-    /// Requires [`can_restart_turn`] to be `true` so trimming the turn does not
-    /// discard committed events.
+    /// Returns `false` without modifying `stream` if [`can_restart_turn`] is
+    /// `false`.
     ///
     /// [`can_restart_turn`]: Self::can_restart_turn
-    pub fn restart_turn_on(&mut self, stream: &mut ConversationStream, model: &ModelIdConfig) {
-        debug_assert!(self.can_restart_turn(stream));
+    #[must_use]
+    pub fn restart_turn_on(
+        &mut self,
+        stream: &mut ConversationStream,
+        model: &ModelIdConfig,
+    ) -> bool {
+        if !self.can_restart_turn(stream) {
+            return false;
+        }
 
         let Some(request) = stream.trim_last_turn() else {
-            return;
+            return false;
         };
 
         let mut delta = PartialAppConfig::empty();
@@ -587,6 +594,7 @@ impl TurnCoordinator {
 
         self.view.set_model_id(Some(model.to_string()));
         self.prepare_retry_continuation();
+        true
     }
 
     /// Wire the view's tool-separator flag to the turn's `ToolRenderer` so

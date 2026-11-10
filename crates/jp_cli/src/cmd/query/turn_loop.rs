@@ -698,16 +698,15 @@ async fn drive_turn(
                                             &printer,
                                         )
                                         .await
+                                        && conv.update_events(|stream| {
+                                            turn_coordinator.restart_turn_on(stream, &picked.id)
+                                        })
                                     {
                                         info!(
                                             from = %model.id,
                                             to = %picked.id,
-                                            "Restarting the turn on a model the provider serves."
+                                            "Restarted the turn on a model the provider serves."
                                         );
-
-                                        conv.update_events(|stream| {
-                                            turn_coordinator.restart_turn_on(stream, &picked.id);
-                                        });
 
                                         model = picked;
                                         inquiry_backend = build_inquiry_backend(
