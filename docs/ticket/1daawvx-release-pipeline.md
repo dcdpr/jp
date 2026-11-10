@@ -35,7 +35,7 @@ Tracking ticket for [RFD 122].
       `main` alone and again when a release's tag is pushed, switches the
       navigation to "Releases", and retires `jilu`.
       Depends on Phase 1 and RFD 116's site phase.
-- [ ] **Cut the past, and abandon**: Adds `cut --at`, files fragments by the
+- [x] **Cut the past, and abandon**: Adds `cut --at`, files fragments by the
       changes their `Credits` name, starts release branches from trees without
       `changelog.d/`, and adds `abandon`.
       `cut` tells the person releasing to merge the notes branch into `main`.
