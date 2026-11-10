@@ -3,8 +3,9 @@ import { withBase } from 'vitepress'
 
 import { data } from '../loaders/releases.data.js'
 
-// The releases a tag has made as a table, newest first, which a page renders
-// with `<ReleaseIndex />`: each one's date, and its upgrade guide when it has
+// The releases with pages of their own as a table, newest first, which a page
+// renders with `<ReleaseIndex />`: each one's date, or under `jp vite serve`
+// that a release in preparation is a draft, and its upgrade guide when it has
 // one. Above the table, a link to the changes no release ships yet.
 
 function changes(count) {
@@ -28,7 +29,7 @@ function changes(count) {
         <tbody>
             <tr v-for="release in data.releases" :key="release.version">
                 <td><a :href="withBase(release.path)">{{ release.version }}</a></td>
-                <td>{{ release.date }}</td>
+                <td>{{ release.date ?? 'Draft' }}</td>
                 <td><a v-if="release.upgrade" :href="withBase(release.upgrade)">Upgrade guide</a></td>
             </tr>
         </tbody>

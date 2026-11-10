@@ -2,15 +2,23 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+    drafting,
     notesContent,
     notesPath,
     released,
     releaseVersions,
     renderArgs,
+    shown,
     upgradeContent,
     upgradePath,
     workspaceRoot,
 } from '../site/jp-vite/releases.mjs'
+
+// The warning a draft page opens with, below its title, for release 0.4.0.
+const DRAFT_NOTICE = '> [!WARNING]\n'
+    + '> Draft: 0.4.0 isn\'t tagged yet, so this page can still change.\n'
+    + '> Only `jp vite serve` shows it; until the tag, the built site lists these changes on the '
+    + 'Unreleased page.\n'
 
 // The settings' `release`, as `jp vite sync` writes it for JP.
 const RELEASE = {
@@ -90,6 +98,41 @@ test('only a release a tag has made gets pages of its own', () => {
     ]
 
     assert.deepEqual(released(releases).map(({ version }) => version), ['0.3.0'])
+})
+
+// `jp vite serve` names the workspace root in `JP_VITE_SERVE`; a build sets
+// nothing.
+test('only the dev server shows drafts', () => {
+    assert.equal(drafting({ JP_VITE_SERVE: '/work' }), true)
+    assert.equal(drafting({}), false)
+})
+
+test('under the dev server, a release in preparation gets pages of its own too', () => {
+    const releases = [
+        { version: '0.4.0', release: { version: '0.4.0', date: null } },
+        { version: '0.3.0', release: { version: '0.3.0', date: '2026-10-28' } },
+    ]
+
+    assert.deepEqual(shown(releases, false).map(({ version }) => version), ['0.3.0'])
+    assert.deepEqual(shown(releases, true).map(({ version }) => version), ['0.4.0', '0.3.0'])
+})
+
+test('the notes of a release in preparation open with a draft warning', () => {
+    const release = { version: '0.4.0', date: null }
+
+    assert.equal(
+        notesContent(release, 'JP 0.4.0 fans out.\n'),
+        `# Release 0.4.0\n\n${DRAFT_NOTICE}\nJP 0.4.0 fans out.\n`,
+    )
+})
+
+test('the upgrade guide of a release in preparation opens with a draft warning', () => {
+    assert.equal(
+        upgradeContent('0.4.0', '## Rebuild your plugins\n', 'releases', true),
+        `# Upgrading to 0.4.0\n\n${DRAFT_NOTICE}\n`
+            + 'What the changes in [release 0.4.0](/releases/0.4.0) require you to do.\n\n'
+            + '## Rebuild your plugins\n',
+    )
 })
 
 test('the unreleased changes have a page of their own', () => {

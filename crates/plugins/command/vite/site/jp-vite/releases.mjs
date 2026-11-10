@@ -17,7 +17,10 @@ import { SETTINGS_FILE, SRC_DIR, readSettings } from './settings.mjs'
 // A release is released once it is tagged, which gives it its date. Until
 // then it has no pages, and its notes are on the Unreleased page, which
 // `changelog` renders without a version: what no tag ships yet, the fragments
-// at the top level and those of every release not yet tagged.
+// at the top level and those of every release not yet tagged. Under
+// `jp vite serve`, a release in preparation also gets its pages, marked as a
+// draft, so its notes can be read as they will appear; the built site never
+// has them.
 //
 // The site therefore builds without `jp`, but `changelog` has to be on `PATH`
 // wherever the site is built or served, in a clone that isn't shallow. When it
@@ -106,11 +109,36 @@ export function released(releases) {
     return releases.filter(({ release }) => release.date)
 }
 
+// Whether releases in preparation get draft pages: under `jp vite serve`,
+// which names the workspace root in `JP_VITE_SERVE` of the environment `env`.
+export function drafting(env = process.env) {
+    return Boolean(env.JP_VITE_SERVE)
+}
+
+// The releases among `releases` that get pages: each one a tag has made, and
+// with `drafts`, each one in preparation too.
+export function shown(releases, drafts) {
+    return drafts ? releases : released(releases)
+}
+
+// What opens a draft page of the release `version`, below its title: a
+// warning that it can still change, and that the built site doesn't show it.
+function draftNotice(version) {
+    return '> [!WARNING]\n'
+        + `> Draft: ${version} isn't tagged yet, so this page can still change.\n`
+        + '> Only `jp vite serve` shows it; until the tag, the built site lists these changes on '
+        + 'the Unreleased page.\n'
+}
+
 // The release notes page of `release`, the model `changelog` wrote, around
-// its `notes`: a title, and when it was released.
+// its `notes`: a title, and when it was released, or a draft's warning while
+// it has no date.
 export function notesContent(release, notes) {
     if (!release.version) {
         return `# Unreleased\n\nThe changes no release ships yet.\n\n${notes}`
+    }
+    if (!release.date) {
+        return `# Release ${release.version}\n\n${draftNotice(release.version)}\n${notes}`
     }
 
     return `# Release ${release.version}\n\nReleased on ${release.date}.\n\n${notes}`
@@ -118,8 +146,8 @@ export function notesContent(release, notes) {
 
 // The upgrade guide page of the release `version`, or of the changes no
 // release ships yet when it is `null`, around its `guide`, linking back to its
-// notes below the releases' `route`.
-export function upgradeContent(version, guide, route) {
+// notes below the releases' `route`; a `draft` opens with a draft's warning.
+export function upgradeContent(version, guide, route, draft = false) {
     if (!version) {
         return '# Upgrading to the unreleased changes\n\n'
             + `What the [unreleased changes](${notesPath(route, UNRELEASED)}) require you to do.\n\n`
@@ -127,6 +155,7 @@ export function upgradeContent(version, guide, route) {
     }
 
     return `# Upgrading to ${version}\n\n`
+        + (draft ? `${draftNotice(version)}\n` : '')
         + `What the changes in [release ${version}](${notesPath(route, version)}) require you `
         + `to do.\n\n${guide}`
 }
@@ -155,15 +184,17 @@ function versions(ctx) {
     return releaseVersions(names)
 }
 
-// Each release a tag has made, newest first, with the model `changelog` wrote
-// of it.
+// Each release a tag has made, and under `jp vite serve` each one in
+// preparation too, newest first, with the model `changelog` wrote of it.
 function releases(ctx) {
-    return released(versions(ctx).map(version => ({ version, release: model(ctx, version) })))
+    const all = versions(ctx).map(version => ({ version, release: model(ctx, version) }))
+
+    return shown(all, drafting())
 }
 
 // The pages to build: the changes no release ships yet, as `version` `null`,
-// then each release a tag has made, each with the model `changelog` wrote of
-// it.
+// then each release with pages of its own, each with the model `changelog`
+// wrote of it.
 function pages(ctx) {
     return [{ version: null, release: model(ctx, null) }, ...releases(ctx)]
 }
@@ -207,9 +238,9 @@ function model(ctx, version) {
     return release
 }
 
-// What the release index lists: each release a tag has made, newest first,
-// with its date and its upgrade guide's path when it has one; and how many
-// entries no release ships yet.
+// What the release index lists: each release with pages of its own, newest
+// first, with its date, `null` for a draft, and its upgrade guide's path when
+// it has one; and how many entries no release ships yet.
 export function releaseIndex() {
     const ctx = context()
     if (!ctx) return { unreleased: null, releases: [] }
@@ -230,8 +261,8 @@ export function releaseIndex() {
     }
 }
 
-// The release notes pages: one for each release a tag has made, and one for
-// the changes no release ships yet.
+// The release notes pages: one for each release with pages of its own, and one
+// for the changes no release ships yet.
 export function notesPages() {
     const ctx = context()
     if (!ctx) return []
@@ -246,8 +277,9 @@ export function notesPages() {
     })
 }
 
-// The upgrade guide pages: one for each release a tag has made with upgrade
-// sections, and one for the changes no release ships yet when they have any.
+// The upgrade guide pages: one for each release with pages of its own and
+// upgrade sections, and one for the changes no release ships yet when they have
+// any.
 export function upgradePages() {
     const ctx = context()
     if (!ctx) return []
@@ -258,8 +290,12 @@ export function upgradePages() {
 
         const view = ['--format', 'markdown', '--page', 'upgrade']
         const guide = changelog(ctx, renderArgs(ctx.release, ctx.dir, version, view))
+        const draft = Boolean(version) && !release.date
 
-        return [{ params: { version: version ?? UNRELEASED }, content: upgradeContent(version, guide, route) }]
+        return [{
+            params: { version: version ?? UNRELEASED },
+            content: upgradeContent(version, guide, route, draft),
+        }]
     })
 }
 
