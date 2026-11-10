@@ -1,11 +1,12 @@
-//! Non-blocking model metadata lookups.
+//! Advisory model metadata lookups.
 //!
-//! `advisory_lookup` and `find_listed` bound provider model queries to
+//! [`advisory_lookup`] and [`find_listed`] bound provider model queries to
 //! [`MODEL_LOOKUP_TIMEOUT`].
-//! Because model metadata (context window, output token limit, reasoning
-//! support) is optional for sending a chat request, a lookup that fails or
-//! times out logs a warning and returns `None` so the caller can fall back to
-//! built-in model tables or [`ModelDetails::empty`].
+//! Model metadata (context window, output token limit, reasoning support) is
+//! optional for sending a chat request.
+//! If a lookup fails or times out, these helpers log a warning and return
+//! `None` so the caller can fall back to built-in model tables or
+//! [`ModelDetails::empty`].
 
 use std::{fmt::Display, time::Duration};
 

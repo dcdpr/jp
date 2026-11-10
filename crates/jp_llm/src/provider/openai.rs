@@ -587,9 +587,9 @@ impl Provider for Openai {
         // model ID, so all capability metadata comes from `CAPABILITIES`.
         let details = map_model(ModelResponse::named(name.to_string()))?;
 
-        // Reject models known not to support ChatGPT subscriptions up front;
-        // the subscription host returns a generic 404 that cannot be
-        // distinguished from a typo. Unknown models (`subscription: None`) are
+        // Reject known API-only models up front with credential guidance; the
+        // subscription host rejects them with the same `model_not_found` error
+        // it returns for a typo. Unknown models (`subscription: None`) are
         // allowed through so newly added subscription models work without a
         // binary update.
         if attempt.is_subscription() && details.subscription == Some(false) {

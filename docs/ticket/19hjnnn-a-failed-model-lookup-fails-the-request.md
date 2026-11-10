@@ -20,9 +20,9 @@ This broke:
 
 - Anthropic-compatible gateways that do not serve `/v1/models/{id}`, such as
   Synthetic's `/anthropic` endpoint, on every turn.
-- vLLM, llama.cpp, Ollama, Cerebras, Google, and OpenRouter whenever their
-  `/v1/models` listing failed (for example, behind a router that does not expose
-  that endpoint).
+- vLLM, llama.cpp, Ollama, Cerebras, Google, and OpenRouter whenever their model
+  listing failed (for example, behind a router that does not expose a models
+  endpoint).
 - The model picker for unknown OpenAI and Anthropic models, because the lookup
   failed before the chat stream could classify the provider refusal as an
   unknown-model error.
@@ -43,21 +43,23 @@ models.
   (and fails if the chain is exhausted), because the chat request would fail
   with the same credential error.
   All other lookup failures fall back to `MODEL_OVERRIDES`.
-  With reasoning support unknown and reasoning unconfigured, an API request asks
-  for summarized adaptive thinking instead of taking Anthropic's default, which
-  bills reasoning it does not return.
-  The Claude Code route still sends nothing and lets Claude Code choose.
+  When reasoning is unconfigured and support is unknown, the API route requests
+  summarized adaptive thinking; omitting `thinking` uses Anthropic's default
+  (`display: "omitted"` on current models), which bills reasoning tokens without
+  returning them.
+  The Claude Code subscription route omits `thinking` so Claude Code chooses the
+  mode.
 - OpenAI: skips the network lookup entirely.
   `GET /v1/models/{id}` returns only the model ID, so `CAPABILITIES` was already
   the sole source of metadata.
 
 Pre-request checks outside the metadata lookup still fail fast: credential
-resolution, OpenAI's check that a ChatGPT subscription supports the model, and a
-missing Claude Code binary on the ACP route.
+resolution, OpenAI's check that a ChatGPT subscription supports the model, and
+Claude Code runtime and login checks on the ACP route.
 
-A lookup no longer stops the turn for a model the provider does not serve, so
-the provider refusal of the chat request comes through instead.
-Classifying that refusal as an unknown-model error, listing the available
-models, and offering the interactive model picker are #1298's.
+Lookups no longer fail the turn when a provider does not serve the requested
+model, so the chat request reaches the provider and surfaces its refusal.
+PR #1298 classifies that refusal as an unknown-model error, lists the served
+models, and offers the interactive model picker.
 
 Found while triaging review feedback on RFD 125.

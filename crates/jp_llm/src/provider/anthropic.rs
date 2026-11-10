@@ -461,8 +461,8 @@ impl Provider for Anthropic {
             let failure = match timeout(MODEL_LOOKUP_TIMEOUT, client.models().get(name)).await {
                 Ok(Ok(model)) => return map_model(model),
 
-                // Credential errors will also fail the chat request, so advance
-                // the credential chain now or fail if it is exhausted.
+                // Rejected or spent credentials also fail the chat request, so
+                // advance the credential chain now or fail if it is exhausted.
                 Ok(Err(error)) if is_switchable(&error) => {
                     attempt = self.advance_or_fail(&attempt, error, name).await?;
                     continue;
@@ -2202,16 +2202,18 @@ fn create_request(
         && parameters.reasoning.is_none()
         && !model.served_by_subscription()
     {
-        // Support is unknown, as after a failed model lookup, and reasoning is
-        // unconfigured. Infer adaptive for the same reason as the configured
-        // case above: sending nothing takes the provider default, which on
-        // current models thinks with `display: "omitted"` and bills reasoning
-        // the transcript never receives. No effort is sent, so the API's
-        // default effort applies.
+        // When reasoning is unconfigured and support is unknown (e.g. after a
+        // failed model lookup), request summarized adaptive thinking. Omitting
+        // `thinking` uses the API default, which on current models runs
+        // thinking with `display: "omitted"` and bills reasoning tokens that
+        // never reach the transcript. Effort is omitted so the API default
+        // applies.
         //
-        // Not on the Claude Code route, where support is never reported and
-        // Claude Code picks the thinking mode when none is sent. Inferring
-        // adaptive there would reach models that reject it, such as Haiku 4.5.
+        // Skip this fallback on the ACP subscription route
+        // (`served_by_subscription`), where `acp::model_details` leaves
+        // `reasoning` unset and Claude Code chooses the thinking mode when
+        // `thinking` is omitted. Sending `adaptive` there fails on models that
+        // reject adaptive thinking, such as Haiku 4.5.
         debug!(
             id = %model.id,
             inferred = true,
