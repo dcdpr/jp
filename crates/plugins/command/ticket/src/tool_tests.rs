@@ -2543,8 +2543,8 @@ fn move_to_the_top_and_the_bottom_of_a_column() {
     );
 }
 
-/// A ticket's rank belongs to the column it held it in: moved out and back
-/// without a placement, it returns below the ranked tickets, not above them.
+/// Moving a ranked ticket to another column and back without a placement drops
+/// its previous rank, placing it below the column's ranked tickets.
 #[test]
 fn move_out_of_a_column_and_back_forgets_the_rank() {
     let dir = Utf8TempDir::new().unwrap();

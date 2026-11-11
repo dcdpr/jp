@@ -956,11 +956,11 @@ fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     Ok(describe_move(tickets, id, ticket, status, moved.previous, to)?.into())
 }
 
-/// Describe a move that landed: the status change `status` asked for, the
-/// ticket's place in column `to` as the board now lays it out, and a warning
-/// when closing left checklist items unchecked.
+/// Format the summary of a completed move: any requested status change, the
+/// ticket's new position in `to`, and a warning if closing left unchecked
+/// checklist items.
 ///
-/// `ticket` is the ticket as read before the move.
+/// `ticket` is the ticket state read before the move.
 fn describe_move(
     tickets: &Tickets<'_>,
     id: TicketId,

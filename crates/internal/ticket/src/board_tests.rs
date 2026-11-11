@@ -429,8 +429,8 @@ fn move_to_another_column_drops_the_rank_the_ticket_held() {
     );
 }
 
-/// A rank left behind in the column a ticket returns to, by a status change
-/// that went around the board, is dropped as well.
+/// Moving into a column also clears any stale rank entry left in that column by
+/// a direct status edit.
 #[test]
 fn move_to_drops_a_stale_rank_in_the_column_moved_to() {
     let dir = Utf8TempDir::new().unwrap();
@@ -450,8 +450,6 @@ fn move_to_drops_a_stale_rank_in_the_column_moved_to() {
     assert_eq!(read(dir.path()).unwrap(), order(&["T-02wt0k1"], &[], &[]));
 }
 
-/// A move that keeps the ticket in its column and names no place leaves its
-/// rank alone.
 #[test]
 fn move_to_the_same_column_keeps_the_rank() {
     let dir = Utf8TempDir::new().unwrap();
@@ -502,8 +500,6 @@ fn move_to_the_top_and_bottom_places_against_the_column_on_disk() {
     );
 }
 
-/// A column holding no other ticket has nothing to place against, so the order
-/// file is not created.
 #[test]
 fn move_to_the_top_of_an_empty_column_ranks_nothing() {
     let dir = Utf8TempDir::new().unwrap();
@@ -522,8 +518,6 @@ fn move_to_the_top_of_an_empty_column_ranks_nothing() {
     assert!(!dir.path().join(BOARD_FILE).exists());
 }
 
-/// A move waits for a writer already holding the board's lock, so it reads the
-/// tickets and the order only once that writer is done.
 #[test]
 fn move_to_waits_for_the_board_lock() {
     let dir = Utf8TempDir::new().unwrap();
@@ -542,8 +536,7 @@ fn move_to_waits_for_the_board_lock() {
         )
     });
 
-    // Long enough for an unlocked move to finish many times over; a move that
-    // waits for the lock is still waiting however long this is.
+    // Give the spawned thread time to block on the lock.
     thread::sleep(Duration::from_millis(300));
     assert!(!mover.is_finished());
     assert_eq!(status_on_disk(&dir, "02wt0k2"), Status::Todo);
@@ -553,9 +546,6 @@ fn move_to_waits_for_the_board_lock() {
     assert_eq!(status_on_disk(&dir, "02wt0k2"), Status::InProgress);
 }
 
-/// Two moves started together, one to the top of a column and one to its
-/// bottom, both land: neither writes back an order read before the other's
-/// write.
 #[test]
 fn concurrent_moves_to_the_top_and_bottom_both_land() {
     for _ in 0..20 {

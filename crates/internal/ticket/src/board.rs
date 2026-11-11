@@ -41,15 +41,14 @@ use crate::{
 /// The order file, inside the ticket directory.
 pub const BOARD_FILE: &str = ".board.json";
 
-/// The lock file, inside the ticket directory.
+/// Lock file inside the ticket directory.
 ///
-/// A writer holds an exclusive lock on it while it reads the tickets and the
-/// order file, decides where a ticket goes, and writes the result, so two
-/// writers, in one process or in several, never both read one order and each
-/// write back their own.
-/// It is created on first use and never removed: a lock file unlinked on
-/// release lets the next writer lock a new file while a waiting one still locks
-/// the old one.
+/// Writers hold an exclusive lock on this file across the entire
+/// read-modify-write cycle so concurrent writers cannot overwrite each other's
+/// changes.
+/// The file is created on first use and never unlinked: unlinking on release
+/// would let a new writer lock a newly created inode while a waiting writer
+/// locks the unlinked one.
 pub const LOCK_FILE: &str = ".board.lock";
 
 /// Where a ticket lands relative to the one it is ranked against.
@@ -61,7 +60,7 @@ pub enum Place {
     After,
 }
 
-/// Where [`move_to`] puts a ticket in the column it moves to.
+/// Target position of a ticket within its destination column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
     /// Directly above or below another ticket in the column.
@@ -183,9 +182,8 @@ impl Order {
         true
     }
 
-    /// Drop every entry naming `id`, in every column.
-    ///
-    /// Returns whether any entry was dropped.
+    /// Remove `id` from every column, returning `true` if any entry was
+    /// removed.
     fn forget(&mut self, id: TicketId) -> bool {
         let name = id.to_string();
         let mut dropped = false;
@@ -289,20 +287,19 @@ pub struct Moved {
     pub previous: Status,
 }
 
-/// Move `id` to the column `status` names, placed there as `at` says.
+/// Move `id` to `status` at the position specified by `at`.
 ///
-/// Every check runs before anything is written, so a refused move changes
-/// nothing: a ticket to place next to has to be another readable ticket already
-/// at `status`, and the order file has to be readable.
+/// Validates the move before writing to disk: any anchor ticket must be a
+/// distinct, readable ticket already at `status`, and `.board.json` (if
+/// present) must be valid.
 ///
-/// [`Placement::Top`] and [`Placement::Bottom`] place the ticket above or below
-/// every other ticket in the column as it stands while the board's lock is
-/// held; in a column holding no other ticket they place nothing.
-/// A ticket that changes column loses any rank it held in any column, so
-/// without a placement it joins its new column below the ranked tickets, even
-/// in a column it was ranked in before.
-/// The order file is written only when an entry changes, so a board ranking
-/// nothing keeps having no order file.
+/// [`Placement::Top`] and [`Placement::Bottom`] anchor against the first or
+/// last other ticket in the destination column while holding [`LOCK_FILE`]; in
+/// an otherwise empty column, no rank entry is needed.
+/// Changing a ticket's status removes any existing rank entries for `id`, so
+/// moving to a new column without `at` places the ticket below any ranked
+/// tickets in that column.
+/// `.board.json` is written only when the rank order changes.
 pub fn move_to(
     dir: &Utf8Path,
     formatting: &Formatting,
@@ -370,11 +367,11 @@ pub fn move_to(
     Ok(Moved { path, previous })
 }
 
-/// Take the board's lock in `dir`, held until the returned file is dropped.
+/// Acquire an exclusive lock on [`LOCK_FILE`] in `dir`, held until the returned
+/// [`File`] is dropped.
 ///
-/// Waits for a writer holding it already.
-/// A directory that doesn't exist holds no tickets to write, and so nothing to
-/// lock: `None`.
+/// Blocks if another writer holds the lock.
+/// Returns `Ok(None)` if `dir` does not exist yet.
 fn lock(dir: &Utf8Path) -> Result<Option<File>, Error> {
     let file = match OpenOptions::new()
         .create(true)
