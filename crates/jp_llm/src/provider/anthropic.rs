@@ -2535,6 +2535,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5-2")
             },
         },
@@ -2543,6 +2544,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5-1")
             },
         },
@@ -2560,6 +2562,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-5-5")
             },
         },
@@ -2579,6 +2582,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
                 between_tools: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-sonnet-5-5")
             },
         },
@@ -2588,6 +2592,14 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2026, 1),
                 reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-sonnet-5")
+            },
+        },
+        // Knowledge cutoff not yet known; accepts `thinking: disabled`.
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                reported: adaptive(true, true),
+                ..ModelOverrides::new("claude-haiku-5-5")
             },
         },
         Entry {
@@ -2650,7 +2662,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
                 sampling: true,
-                reported: budgetted(1_000_000),
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-sonnet-4-5")
             },
         },

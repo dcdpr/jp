@@ -113,6 +113,21 @@ fn the_table_fallback_matches_the_recorded_listing() {
 }
 
 #[test]
+fn every_active_model_in_the_table_records_what_the_listing_reported() {
+    let missing: Vec<_> = MODEL_OVERRIDES
+        .values()
+        .filter(|overrides| overrides.deprecated == ModelDeprecation::Active)
+        .filter(|overrides| overrides.reported.is_none())
+        .map(|overrides| overrides.id)
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "re-record tests/fixtures/anthropic/test_models.yml and add `reported` for: {missing:?}"
+    );
+}
+
+#[test]
 fn an_unknown_output_limit_falls_back_to_the_default() {
     let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
     let provider = Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()));
