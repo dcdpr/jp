@@ -152,46 +152,37 @@ fn ai_lists_findings_under_their_rule_and_guidance() {
     "});
 }
 
+/// The `cargo_check` tool in `.config/jp/tools` reads this output, and its
+/// tests parse the same fixture.
 #[test]
-fn json_carries_the_findings_and_counts() {
-    let verdict_ = Verdict {
-        new: vec![NewFinding {
-            finding: finding(
-                "CX-004",
-                "src/a.rs",
-                40,
-                "parse",
-                "Function length 72 in parse",
-            ),
-            shared: None,
-        }],
-        enforced: vec![],
-        base: Some(BTreeMap::from([("main".to_owned(), 0)])),
+fn json_carries_the_findings_counts_and_rules() {
+    let out = verdict(&failing(), &guidance(), Format::Json);
+
+    assert_eq!(out, include_str!("../fixtures/verdict.json"));
+}
+
+#[test]
+fn json_names_only_the_rules_with_findings() {
+    let passing = Verdict {
+        base: Some(BTreeMap::from([("main".to_owned(), 1)])),
         head: BTreeMap::from([("main".to_owned(), 1)]),
         titles: titles(),
+        ..Verdict::default()
     };
 
-    let out = verdict(&verdict_, &guidance(), Format::Json);
+    let out = verdict(&passing, &guidance(), Format::Json);
 
     assert_eq!(out, indoc! {r#"
         {
-          "new": [
-            {
-              "file": "src/a.rs",
-              "line": 40,
-              "rule": "CX-004",
-              "symbol": "parse",
-              "message": "Function length 72 in parse",
-              "pass": "main"
-            }
-          ],
+          "new": [],
           "enforced": [],
           "base": {
-            "main": 0
+            "main": 1
           },
           "head": {
             "main": 1
-          }
+          },
+          "rules": {}
         }
     "#});
 }
