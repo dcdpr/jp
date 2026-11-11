@@ -1,25 +1,23 @@
-//! What git knows about the `origin` remote of the work tree holding a root.
-//!
-//! Whether a file may be overwritten is the `overwrite` crate's to say.
+//! Git remote discovery for the workspace work tree.
 
 use std::process::{Command, Stdio};
 
 use camino::Utf8Path;
 
-/// What git knows of the `origin` remote of the work tree holding a root.
+/// URL and default branch of the `origin` remote.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Remote {
-    /// Its address.
+    /// Remote URL from `git remote get-url origin`.
     pub origin: Option<String>,
 
-    /// Its default branch, `main`, as `origin/HEAD` names it.
+    /// Default branch name from `refs/remotes/origin/HEAD` (e.g. `"main"`).
     pub branch: Option<String>,
 }
 
-/// What git knows of the `origin` remote of the work tree holding `root`.
+/// Read the `origin` remote URL and default branch for `root`.
 ///
-/// Either part is `None` when git doesn't know it: there is no `origin`, or no
-/// `origin/HEAD`, which `git remote set-head origin --auto` sets.
+/// Fields are `None` if `origin` or `origin/HEAD` is not configured (see `git
+/// remote set-head origin --auto`).
 pub(crate) fn remote(root: &Utf8Path) -> Remote {
     let branch = run(root, &[
         "symbolic-ref",
@@ -34,8 +32,8 @@ pub(crate) fn remote(root: &Utf8Path) -> Remote {
     }
 }
 
-/// What a git command printed, trimmed, or `None` when it failed, couldn't be
-/// run, or printed nothing.
+/// Run `git` in `root` with `args` and return trimmed non-empty stdout, or
+/// `None` on failure.
 fn run(root: &Utf8Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .args(args)

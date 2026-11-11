@@ -76,7 +76,6 @@ fn composed(text: Option<&str>) -> HostToPlugin {
     })
 }
 
-/// Run git in `dir`, failing the test with its stderr.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Process::new("git")
         .current_dir(dir)
@@ -91,11 +90,6 @@ fn git(dir: &Utf8Path, args: &[&str]) {
     );
 }
 
-/// A repository holding a site in `docs` with both workflows, everything
-/// committed.
-///
-/// The config is set locally so the machine's identity and signing setup can't
-/// reach in and change what the test does.
 fn project() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     git(root.path(), &["init", "--quiet", "--initial-branch=main"]);
@@ -226,8 +220,6 @@ fn init_writes_the_project_files_with_the_answers() {
     assert!(!config.contains("RFDs"), "{config}");
 }
 
-/// Nobody to ask, and no flag: nothing is written rather than a site without a
-/// title.
 #[test]
 fn init_without_a_title_writes_nothing() {
     let root = Utf8TempDir::new().unwrap();
@@ -263,7 +255,6 @@ fn init_with_the_same_answers_changes_nothing() {
     );
 }
 
-/// The project's `package.json` is committed, so git can give it back.
 #[test]
 fn init_overwrites_what_git_can_restore() {
     let root = project();
@@ -307,7 +298,6 @@ fn init_refuses_an_edit_git_has_not_recorded() {
     assert!(!root.path().join("docs/index.md").exists());
 }
 
-/// Outside git nothing can restore a file, so only `--force` overwrites one.
 #[test]
 fn init_overwrites_outside_git_only_when_forced() {
     let root = Utf8TempDir::new().unwrap();
@@ -424,8 +414,6 @@ fn a_page_the_project_wrote_is_left_alone() {
     );
 }
 
-/// "Refuses when an owned file is modified or untracked, since git cannot
-/// restore an edit it never recorded."
 #[test]
 fn sync_refuses_to_overwrite_what_git_has_not_recorded() {
     let root = project();
@@ -466,8 +454,6 @@ fn sync_refuses_to_overwrite_what_git_has_not_recorded() {
     );
 }
 
-/// A project that ignores the synced files still has nothing to restore a hand
-/// edit from, so an ignored file is refused like any untracked one.
 #[test]
 fn sync_refuses_to_overwrite_an_ignored_file() {
     let root = project();
@@ -491,8 +477,6 @@ fn sync_refuses_to_overwrite_an_ignored_file() {
     assert_eq!(fs::read_to_string(&config).unwrap(), "Edited by hand");
 }
 
-/// A file that doesn't exist yet risks nothing, and the snapshot, the pages,
-/// and the loaders of a new install are all new.
 #[test]
 fn sync_writes_new_files_in_a_dirty_tree() {
     let root = project();
@@ -525,8 +509,6 @@ fn sync_asks_before_writing() {
     );
 }
 
-/// Outside git there is nothing to undo a sync with, so the question doesn't
-/// say there is.
 #[test]
 fn sync_outside_git_asks_without_pointing_at_git() {
     let root = Utf8TempDir::new().unwrap();
@@ -558,8 +540,6 @@ fn a_declined_sync_writes_nothing() {
     assert!(!root.path().join("docs/.vitepress/jp-vite").exists());
 }
 
-/// A script with no terminal has to say `--yes`; a run that writes nothing must
-/// not look like one that synced.
 #[test]
 fn a_sync_with_nobody_to_ask_fails() {
     let root = project();
@@ -576,8 +556,6 @@ fn a_sync_with_nobody_to_ask_fails() {
     );
 }
 
-/// Outside git a sync writes the files that are new, and overwrites one that
-/// exists only when forced, since nothing could restore it.
 #[test]
 fn sync_outside_git_overwrites_only_when_forced() {
     let root = Utf8TempDir::new().unwrap();

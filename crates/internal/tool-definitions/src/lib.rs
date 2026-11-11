@@ -1,25 +1,23 @@
-//! Tool definitions for the tools a command plugin serves.
+//! Tool definition scaffolding and schema syncing for command plugins.
 //!
-//! A plugin serving tools ships a starting definition for each: a TOML file
-//! declaring the tool under `conversation.tools`, its `source` naming the
-//! plugin.
-//! [`Definitions`] describes them, and runs the two commands every such plugin
-//! offers:
+//! Each command plugin that provides tools ships a default TOML definition per
+//! tool under `conversation.tools`, with `source` pointing to the plugin.
+//! [`Definitions`] implements the two commands shared by these plugins:
 //!
-//! - `jp <plugin> tools init PATH` writes the starting set into PATH, one file
-//!   per tool, for a project to load and adjust; from then on the project owns
-//!   them.
-//! - `jp <plugin> tools sync PATH` writes what the definitions mirror from the
-//!   configuration, such as the categories a plugin accepts or the labels its
-//!   vocabulary defines, into the schemas of the tools that take them.
-//!   It owns a file of its own, [`SYNCED_FILE`], and rewrites it whole, so
-//!   edits to the definitions survive it.
+//! - `jp <plugin> tools init PATH` writes the default definitions into `PATH`,
+//!   one file per tool, for the project to load and customize.
+//! - `jp <plugin> tools sync PATH` writes configuration-derived parameter
+//!   schemas (such as allowed categories or label vocabularies) into
+//!   [`SYNCED_FILE`].
+//!   Because it rewrites only [`SYNCED_FILE`], hand edits to the tool
+//!   definition files are preserved.
 //!
-//! Both overwrite a file that holds something else only as the `overwrite`
-//! crate allows: when git can restore it, or with `--force`.
+//! Both commands overwrite an existing file with different contents only when
+//! git can restore it or when `--force` is passed (see [`overwrite`]).
 //!
-//! Tools are found by their `source`, not by their key, so a tool a project
-//! renames in its configuration gets what it takes under the name it has there.
+//! `tools sync` matches tools by their `source` field rather than their table
+//! key, so a tool renamed in the workspace configuration still receives its
+//! synced parameter schemas under its configured key.
 
 mod labels;
 
@@ -34,56 +32,57 @@ pub use labels::Role;
 use overwrite::{Existing, Unrecorded};
 use serde_json::Value;
 
-/// The file `tools sync` writes, inside the definitions directory.
+/// Filename written by `tools sync` inside the definitions directory.
 pub const SYNCED_FILE: &str = "synced.toml";
 
-/// The tool definitions a plugin ships.
+/// Default tool definitions and sync metadata for a command plugin.
 #[derive(Debug, Clone, Copy)]
 pub struct Definitions {
-    /// The plugin, as a tool's `source` names it, `plugin.command.<plugin>`,
-    /// and as `jp <plugin>` runs it.
+    /// Plugin name used in `source = "plugin.command.<plugin>..."` and `jp
+    /// <plugin>`.
     pub plugin: &'static str,
 
-    /// The starting definitions, each a file name and its contents.
+    /// Default definition files as `(filename, contents)` pairs.
     pub files: &'static [(&'static str, &'static str)],
 
-    /// What `tools sync` writes into the definitions, as the two commands name
-    /// it in what they print: `categories`, `labels`.
+    /// Plural noun for the synced values in status output (e.g. `"categories"`,
+    /// `"labels"`).
     pub offers: &'static str,
 }
 
-/// A parameter of a tool that takes its values from the configuration.
+/// A tool parameter whose schema values are derived from workspace
+/// configuration.
 #[derive(Debug, Clone, Copy)]
 pub struct Mirror<'a> {
-    /// The parameter, as the tool's definition declares it.
+    /// Parameter name in the tool's definition.
     pub parameter: &'static str,
 
-    /// What the parameter accepts, written into its schema.
+    /// Allowed values written into the parameter schema.
     pub values: Values<'a>,
 }
 
-/// What a mirrored parameter takes.
+/// Allowed values for a [`Mirror`] parameter.
 #[derive(Debug, Clone, Copy)]
 pub enum Values<'a> {
-    /// A string parameter taking one of these, such as a category.
+    /// String parameter restricted to a fixed list of values (e.g. categories).
     OneOf(&'a [String]),
 
-    /// An array parameter whose items are labels of a vocabulary.
+    /// Array parameter whose elements are labels from a [`Vocabulary`].
     Labels {
-        /// The labels on offer, and the rules an item's labels are held to.
+        /// Label vocabulary defining allowed labels and validation constraints.
         vocabulary: &'a Vocabulary,
 
-        /// What carries the labels, as the rules a write is held to name it:
-        /// `ticket`, `page`.
+        /// Singular noun for the labeled item in generated descriptions (e.g.
+        /// `"ticket"`, `"page"`).
         item: &'a str,
 
-        /// Whether the tool writes an item's labels or filters by them.
+        /// Whether the tool creates, adds, or filters by labels.
         role: Role,
     },
 }
 
 impl<'a> Mirror<'a> {
-    /// `parameter`, a string, taking one of `values`.
+    /// Create a string parameter mirror with an `enum` of `values`.
     #[must_use]
     pub fn one_of(parameter: &'static str, values: &'a [String]) -> Self {
         Self {
@@ -92,8 +91,7 @@ impl<'a> Mirror<'a> {
         }
     }
 
-    /// `parameter`, an array, taking labels of `vocabulary` that an `item`
-    /// carries, used as `role` says.
+    /// Create an array parameter mirror for labels from `vocabulary`.
     #[must_use]
     pub fn labels(
         parameter: &'static str,
@@ -111,8 +109,8 @@ impl<'a> Mirror<'a> {
         }
     }
 
-    /// The parameter's schema for the tool keyed `key`, as TOML tables; empty
-    /// when there is nothing to offer.
+    /// Render the parameter schema for the tool at `key` as TOML tables, or an
+    /// empty string if there are no constraints to write.
     fn render(&self, key: &str) -> String {
         let key = toml_key(key);
         match self.values {
@@ -137,21 +135,22 @@ impl<'a> Mirror<'a> {
 }
 
 impl Definitions {
-    /// The line a synced file opens with.
+    /// Return the header comment written at the top of [`SYNCED_FILE`].
     ///
-    /// A file in [`SYNCED_FILE`]'s place without it was not written by this
-    /// plugin's `tools sync`, and is left alone.
+    /// `tools sync` checks for this header before overwriting [`SYNCED_FILE`]
+    /// so it does not overwrite a file written by another plugin or by hand.
     #[must_use]
     pub fn header(&self) -> String {
         format!("# Generated by `jp {} tools sync`.", self.plugin)
     }
 
-    /// Write the starting definitions into `dir`, creating it if needed, and
-    /// say what was written.
+    /// Write the default tool definitions into `dir`, creating `dir` if needed,
+    /// and return a summary of the actions taken.
     ///
-    /// A file that already holds its shipped definition is left as it is.
-    /// One that holds anything else is overwritten when git can restore it, or
-    /// with `force`; otherwise `init` refuses before writing anything.
+    /// Files that already match the shipped definitions are left untouched.
+    /// Files with different contents are overwritten only if git can restore
+    /// them or `force` is true; otherwise `init` returns an error before
+    /// writing any files.
     pub fn init(&self, dir: &Utf8Path, force: bool) -> Result<String, String> {
         let mut planned = vec![];
         for (name, content) in self.files {
@@ -183,8 +182,8 @@ impl Definitions {
                     continue;
                 }
                 Existing::Differs => fs::write(&path, content).map(|()| "Overwrote"),
-                // `create_new` rather than a plain write, so a file that
-                // appeared since it was read is still not overwritten.
+                // Use `create_new` so a file created after `overwrite::existing`
+                // ran is not overwritten.
                 Existing::Missing => OpenOptions::new()
                     .write(true)
                     .create_new(true)
@@ -205,11 +204,11 @@ impl Definitions {
         Ok(text)
     }
 
-    /// The configured tools this plugin serves, as `(key, tool)` pairs ordered
-    /// by key.
+    /// Return the configured tools served by this plugin as `(config_key,
+    /// tool_name)` pairs, sorted by `config_key`.
     ///
-    /// `tool` is the name the plugin knows it by: the last part of its
-    /// `source`, or its key when the source names only the plugin.
+    /// `tool_name` is the suffix after `plugin.command.<plugin>.` in `source`,
+    /// or `config_key` when `source` names only the plugin.
     #[must_use]
     pub fn served_tools(&self, config: &Value) -> Vec<(String, String)> {
         let Some(tools) = config
@@ -234,26 +233,23 @@ impl Definitions {
         served
     }
 
-    /// Write `dir`'s synced file: [`Definitions::header`], `notes`, then what
-    /// `mirrors` says each configured tool takes, and say what was written.
+    /// Write [`SYNCED_FILE`] in `dir` with [`Definitions::header`], `notes`,
+    /// and the parameter schemas from `mirrors`, returning a summary of the
+    /// result.
     ///
-    /// `config` is the configuration the host resolved, and `mirrors` maps a
-    /// tool, by the name the plugin knows it by, to the parameters it takes
-    /// from the configuration.
+    /// `config` is the resolved workspace configuration, and `mirrors` maps a
+    /// plugin tool name to the parameters whose schemas are derived from
+    /// configuration.
     ///
-    /// A tool whose definition leaves a parameter out gets nothing in it: the
-    /// synced file adds only the accepted values, and values alone would make a
-    /// parameter without a type, which leaves the tool out of every
-    /// conversation.
-    /// What was left out is named.
+    /// Tools whose base definition does not declare a mirrored parameter (with
+    /// a `type`) are skipped and listed in the returned summary; writing `enum`
+    /// values without a `type` would produce an invalid parameter definition.
     ///
-    /// A synced file that already holds what `sync` would write is left
-    /// untouched.
-    /// One that holds something else is overwritten when git can restore it, or
-    /// with `force`.
-    /// One this plugin's `tools sync` didn't write is overwritten only with
-    /// `force`, so plugins pointed at one directory don't overwrite each
-    /// other's.
+    /// If [`SYNCED_FILE`] already has the target contents, it is not rewritten.
+    /// If it has different contents, it is overwritten when git can restore it
+    /// or when `force` is true.
+    /// A file missing [`Definitions::header`] (written by another plugin or by
+    /// hand) requires `force` even if tracked by git.
     pub fn sync<'a>(
         &self,
         dir: &Utf8Path,
@@ -285,9 +281,11 @@ impl Definitions {
         Ok(self.sync_summary(&path, unchanged, &synced))
     }
 
-    /// What is in the synced file at `path`, or `None` when there is none.
+    /// Read [`SYNCED_FILE`] at `path`, returning `Ok(None)` if it does not
+    /// exist.
     ///
-    /// Refuses, unless `force`, a file this plugin's `tools sync` didn't write.
+    /// Unless `force` is true, returns an error if the file does not start with
+    /// [`Definitions::header`].
     fn read_synced(
         &self,
         path: &Utf8Path,
@@ -310,8 +308,8 @@ impl Definitions {
         Ok(Some(existing))
     }
 
-    /// The synced file for `config`: [`Definitions::header`], `notes`, then
-    /// what `mirrors` says each configured tool takes.
+    /// Render [`SYNCED_FILE`] for `config` and track which tools were updated
+    /// or skipped.
     fn render_synced<'a>(
         &self,
         config: &Value,
@@ -342,7 +340,6 @@ impl Definitions {
         synced
     }
 
-    /// What `sync` says it did with the synced file at `path`.
     fn sync_summary(&self, path: &Utf8Path, unchanged: bool, synced: &Synced) -> String {
         let verb = if unchanged { "Unchanged" } else { "Wrote" };
         let mut text = if synced.covered.is_empty() {
@@ -369,22 +366,19 @@ impl Definitions {
     }
 }
 
-/// A synced file as `sync` renders it.
+/// Rendered [`SYNCED_FILE`] contents and tool coverage.
 struct Synced {
     text: String,
 
-    /// The tool keys it writes values for.
+    /// Tool keys that received synced parameter schemas.
     covered: Vec<String>,
 
-    /// The tools left out, each with the parameter its definition doesn't
-    /// declare.
+    /// Skipped tools and the undeclared parameter name for each.
     undeclared: Vec<String>,
 }
 
-/// Refuse when one of `names`, files in `dir` about to be overwritten, holds
-/// something git couldn't restore.
-///
-/// `command` is the command as the user would run it again, without `--force`.
+/// Return a refusal error if any file in `names` (relative to `dir`) cannot be
+/// restored by git.
 fn refuse_unrecorded(dir: &Utf8Path, names: &[Utf8PathBuf], command: &str) -> Result<(), String> {
     let unrecorded = overwrite::unrecorded(dir, names)?;
     if unrecorded.is_empty() {
@@ -399,10 +393,11 @@ fn refuse_unrecorded(dir: &Utf8Path, names: &[Utf8PathBuf], command: &str) -> Re
     Err(overwrite::refusal(command, &shown))
 }
 
-/// Whether the configured tool `key` declares the parameter `name`, with a
-/// type.
+/// Return whether the configured tool `key` declares parameter `name` with a
+/// non-null `type`.
 ///
-/// The values a previous sync wrote don't count: they carry no type.
+/// Values written by a previous `tools sync` have no `type` field and do not
+/// count.
 fn declares(config: &Value, key: &str, name: &str) -> bool {
     config
         .get("conversation")
@@ -414,7 +409,8 @@ fn declares(config: &Value, key: &str, name: &str) -> bool {
         .is_some_and(|kind| !kind.is_null())
 }
 
-/// A TOML key: bare when it can be, quoted otherwise.
+/// Format `key` as a TOML key, quoting it if it contains characters outside
+/// `[A-Za-z0-9_-]`.
 fn toml_key(key: &str) -> String {
     let bare = !key.is_empty()
         && key
@@ -428,7 +424,7 @@ fn toml_key(key: &str) -> String {
     }
 }
 
-/// A TOML basic string holding `value`.
+/// Format `value` as a double-quoted TOML basic string.
 fn toml_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');

@@ -51,17 +51,19 @@ const SYNCED_NOTES: &str = "\
 /// What a synced file adds to its notes when the board defines no labels.
 const NO_LABELS: &str = "#\n# The board defines no labels, so the tools take any label.\n";
 
-/// Write the starting definitions into `dir`, creating it if needed.
+/// Write the default tool definitions into `dir`, creating it if needed.
 ///
-/// A file git couldn't restore is overwritten only with `force`.
+/// Existing files that git cannot restore are overwritten only when `force` is
+/// true.
 pub(crate) fn init(dir: &Utf8Path, force: bool) -> Result<Output, String> {
     DEFINITIONS.init(dir, force).map(Output::from)
 }
 
-/// Write the board's labels into the schemas of the configured tools that take
-/// them, as `dir`'s synced file.
+/// Write [`tool_definitions::SYNCED_FILE`] in `dir` with the board's configured
+/// labels.
 ///
-/// A synced file git couldn't restore is overwritten only with `force`.
+/// An existing synced file that git cannot restore is overwritten only when
+/// `force` is true.
 pub(crate) fn sync(
     dir: &Utf8Path,
     config: &Value,

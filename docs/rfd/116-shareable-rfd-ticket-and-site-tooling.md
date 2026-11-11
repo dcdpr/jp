@@ -619,34 +619,35 @@ on their next `jp vite sync`.
 
 ### Overwriting Files
 
-Every command that writes configuration, definitions, or site files into a
-project follows one rule when a file it writes already exists and holds
-something else: `jp ticket tools init` and `tools sync`, the same pair in `jp
-rfd` and `jp wiki`, `jp rfd init` for its templates, and `jp vite init` and
-`sync`.
+All commands that write configuration, tool definitions, templates, or site
+files into a project share a single overwrite policy (`jp ticket tools init` and
+`tools sync`, the corresponding commands in `jp rfd` and `jp wiki`, `jp rfd
+init`, and `jp vite init` and `sync`).
+When a target file already exists with different contents:
 
-- In a git work tree, a file git can restore is overwritten: one that is
-  tracked, with no changes since the last commit.
-- A file with changes since the last commit, staged or not, or one git doesn't
-  track or ignores, is refused.
-- A file marked assume-unchanged or skip-worktree is refused: `git status`
-  doesn't look at it, so an edit to it is reported nowhere.
-- A file reached through a symlink, its own or a directory's, is refused: git
-  records where a link points, not what its target holds, and a write follows
-  the link.
-- Outside a git work tree, nothing can restore a file, so every one is refused.
-- `--force` overwrites a refused file anyway, writing through a symlink to its
-  target.
+- In a git work tree, tracked files with no staged or unstaged changes since
+  `HEAD` can be restored by git and are overwritten.
+- Modified (staged or unstaged), untracked, and ignored files are refused.
+- Files marked `assume-unchanged` or `skip-worktree` are refused, because `git
+  status` ignores local edits to them.
+- Files reached through a symlink (the file itself or an ancestor directory) are
+  refused, because git tracks only the symlink target path, not the target's
+  contents, and writing follows the symlink.
+- Outside a git work tree, existing files cannot be restored by git and are
+  refused.
+- `--force` overwrites refused files anyway, following symlinks to their
+  targets.
 
-A file that doesn't exist, or already holds what the command writes, loses
-nothing and is never refused.
-A refusal lists each file with why git couldn't restore it, and writes nothing.
-The `overwrite` crate in `crates/internal` decides, so the commands can't drift
-apart.
+Missing files and files that already match the target contents (ignoring `CRLF`
+vs. `LF` line endings) are never refused and are not rewritten when unchanged.
+When any file is refused, the command lists each file and the reason git cannot
+restore it, and exits without writing any files.
+The shared `overwrite` crate in `crates/internal/overwrite` implements these
+checks.
 
-Files that hold a project's state rather than what a command ships, such as
-`.priority.json` and a directory's epoch file, are created when missing and
-never overwritten.
+Files that hold project state rather than shipped templates or assets, such as
+`.priority.json` and directory epoch files, are created when missing and never
+overwritten.
 
 ### Version Skew
 

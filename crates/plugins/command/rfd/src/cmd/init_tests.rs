@@ -22,7 +22,6 @@ fn empty() -> Workspace {
     workspace
 }
 
-/// Run git in `dir`, failing the test with its stderr.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
@@ -37,10 +36,6 @@ fn git(dir: &Utf8Path, args: &[&str]) {
     );
 }
 
-/// Commit everything in the workspace, making it a repository first.
-///
-/// The config is set locally so the machine's identity and signing setup can't
-/// reach in and change what the test does.
 fn commit(workspace: &Workspace) {
     let root = &workspace.paths.root;
     if !root.join(".git").exists() {
@@ -78,7 +73,6 @@ fn init_sets_up_the_rfd_directory() {
     assert!(!workspace.exists("docs/rfd/001-jp-rfd-process.md"));
 }
 
-/// The templates a new project starts with are JP's own.
 #[test]
 fn the_default_templates_are_the_ones_jp_uses() {
     let jp = jp_root().join("docs/rfd");
@@ -104,8 +98,6 @@ fn a_category_of_the_projects_own_gets_a_template_naming_it() {
     );
 }
 
-/// Running it again adds what is missing, such as the template for a category
-/// added since, and leaves a template as it wrote it alone.
 #[test]
 fn init_adds_what_is_missing() {
     let workspace = empty();
@@ -123,8 +115,6 @@ fn init_adds_what_is_missing() {
     );
 }
 
-/// Outside git nothing could restore an edited template, so `init` writes
-/// nothing unless forced.
 #[test]
 fn init_overwrites_an_edited_template_outside_git_only_when_forced() {
     let workspace = empty();
@@ -157,9 +147,6 @@ fn init_overwrites_an_edited_template_outside_git_only_when_forced() {
     );
 }
 
-/// A committed edit is one git can give back, so `init` overwrites it, and an
-/// edit made since is refused.
-/// The priority board is the project's ranking, and stays as it is.
 #[test]
 fn init_overwrites_a_template_git_can_restore() {
     let workspace = empty();
@@ -191,7 +178,6 @@ fn init_overwrites_a_template_git_can_restore() {
     );
 }
 
-/// What `init` writes is what `draft` reads.
 #[test]
 fn a_draft_can_be_written_right_after_init() {
     let workspace = empty();

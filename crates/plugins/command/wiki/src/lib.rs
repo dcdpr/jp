@@ -322,17 +322,16 @@ enum Command {
 enum ToolsCommand {
     /// Write a starting set of tool definitions, one file per tool.
     ///
-    /// A file that already holds the shipped definition is left as it is.
-    /// One that holds anything else is overwritten when git can restore it:
-    /// tracked, with no changes since the last commit.
-    /// Otherwise, or outside a git work tree, it is refused unless `--force`.
-    /// The workspace configuration has to load the directory for the tools to
-    /// appear.
+    /// Existing files that match the shipped definitions are left untouched.
+    /// Files with different contents are overwritten if they are tracked by git
+    /// with no uncommitted changes; otherwise `--force` is required.
+    /// The workspace configuration must load the directory for the tools to
+    /// take effect.
     Init {
         /// Directory to write them into, relative to the workspace root.
         path: Utf8PathBuf,
 
-        /// Overwrite files git couldn't restore.
+        /// Overwrite files that git cannot restore.
         #[arg(long)]
         force: bool,
     },
@@ -346,8 +345,8 @@ enum ToolsCommand {
         /// Directory holding the definitions, relative to the workspace root.
         path: Utf8PathBuf,
 
-        /// Overwrite the synced file when git couldn't restore it, or when
-        /// another plugin wrote it.
+        /// Overwrite the synced file even if git cannot restore it or another
+        /// plugin wrote it.
         #[arg(long)]
         force: bool,
     },

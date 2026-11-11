@@ -1,10 +1,11 @@
-//! What syncing changes in a project: the owned files that are missing or
-//! differ from what the binary writes, the files under `.vitepress/jp-vite/`
-//! the binary no longer has, and the starting pages the project doesn't have.
+//! File planning and execution for `jp vite sync`.
 //!
-//! [`plan`] and [`missing`] read the project and change nothing; [`apply`]
-//! writes what they found.
-//! Whether a file may be overwritten is the `overwrite` crate's to say.
+//! [`plan`] and [`missing`] inspect the workspace without modifying disk:
+//! [`plan`] finds `jp-vite`-owned files that are missing, modified, or obsolete
+//! under `.vitepress/jp-vite/`, and [`missing`] finds workflow landing pages
+//! that do not exist yet.
+//! [`apply`] writes and removes the planned files; overwrite safety checks live
+//! in [`overwrite`].
 
 use std::{
     collections::BTreeSet,

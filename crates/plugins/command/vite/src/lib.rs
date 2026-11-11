@@ -1,19 +1,17 @@
-//! `jp-vite`: set up, sync, and serve the site that renders a workspace's RFDs,
-//! tickets, and wiki pages.
+//! `jp-vite`: set up, sync, and serve the VitePress site for a workspace's
+//! RFDs, tickets, and wiki pages.
 //!
-//! A command plugin providing three commands: `jp vite init`, `jp vite sync`,
-//! and `jp vite serve`.
-//! The site's own files are built into the binary (the `site` module): the
-//! loaders for each document kind, the components, the styles, the dev-server
-//! middleware, and a configuration fragment, which go to the project's
-//! `.vitepress/jp-vite/` with a snapshot of the settings they read (the
-//! `settings` module); and a starting index and board page for the RFD, ticket,
-//! and wiki directories.
-//! Each command has a module of its own: `init` writes the files that stay the
-//! project's own; `sync` rewrites the owned ones and creates the pages a
-//! project doesn't have; and `serve` runs the dev server.
-//! `init` and `sync` overwrite a file only as the `overwrite` crate allows:
-//! when git can restore it, or with `--force`.
+//! Provides three subcommands: `jp vite init`, `jp vite sync`, and `jp vite
+//! serve`.
+//! The `site` module embeds the files owned by `jp-vite`: data loaders, Vue
+//! components, styles, dev-server middleware, a VitePress config fragment
+//! (written to `.vitepress/jp-vite/` alongside the `settings` snapshot), and
+//! default landing pages for the RFD, ticket, and wiki directories.
+//! `init` writes the project-owned scaffolding files, `sync` writes the
+//! `jp-vite`-owned files and creates any missing landing pages, and `serve`
+//! runs the dev server.
+//! Both `init` and `sync` overwrite existing files with different contents only
+//! when git can restore them or `--force` is passed (see [`overwrite`]).
 //!
 //! Settings come from `plugins.command.vite.options`, and from `jp rfd`'s, `jp
 //! ticket`'s, and `jp wiki`'s options, read by the `options` module.
@@ -75,9 +73,9 @@ enum Command {
     ///
     /// Writes `package.json`, `.vitepress/config.mts`, the theme entry, and a
     /// homepage, which are yours from then on.
-    /// A file that holds something else is overwritten when git can restore it:
-    /// tracked, with no changes since the last commit.
-    /// Otherwise, or outside a git work tree, it is refused unless `--force`.
+    /// Existing files with different contents are overwritten if they are
+    /// tracked by git with no uncommitted changes; otherwise `--force` is
+    /// required.
     Init {
         /// The site's title.
         /// Asked for when missing.
@@ -89,26 +87,24 @@ enum Command {
         #[arg(long)]
         description: Option<String>,
 
-        /// Overwrite files git couldn't restore.
+        /// Overwrite files that git cannot restore.
         #[arg(long)]
         force: bool,
     },
 
     /// Write the site's own files from this binary.
     ///
-    /// They are the loaders, components, styles, and dev-server middleware in
-    /// `.vitepress/jp-vite/`, and the settings they read.
-    /// The index and board pages of the RFD and ticket directories are created
-    /// where they are missing, and are never changed once they exist.
-    /// Lists what it will change and asks once.
-    /// Refuses to overwrite a file git couldn't restore, which outside a git
-    /// work tree is every file, unless `--force`.
+    /// Writes the loaders, components, styles, dev-server middleware, and
+    /// settings snapshot into `.vitepress/jp-vite/`, and creates any missing
+    /// index and board pages in the RFD, ticket, and wiki directories.
+    /// Lists the planned changes and prompts once for confirmation.
+    /// Existing files that git cannot restore require `--force` to overwrite.
     Sync {
         /// Write nothing, and fail when a file isn't the one sync would write.
         #[arg(long, conflicts_with_all = ["force", "yes"])]
         check: bool,
 
-        /// Overwrite files git couldn't restore.
+        /// Overwrite files that git cannot restore.
         #[arg(long)]
         force: bool,
 
@@ -290,12 +286,12 @@ struct Answers {
     description: Option<String>,
 }
 
-/// Set up a site in the source directory, asking for its title and description
-/// when no flag gave them.
+/// Initialize a VitePress site in the source directory, prompting for `title`
+/// and `description` when not provided via flags.
 ///
-/// They are asked for even when every file exists: the configuration and the
-/// homepage hold them, so without them there is no telling whether those files
-/// hold what `init` writes.
+/// Always resolves `title` and `description` even when all target files already
+/// exist, because both values are needed to render `.vitepress/config.mts` and
+/// `index.md` and compare them against the files on disk.
 fn init_site<R: BufRead, W: Write>(
     root: &Utf8Path,
     options: &Options,
@@ -478,10 +474,8 @@ fn changes(root: &Utf8Path, settings: &settings::Settings) -> Result<Vec<Change>
     Ok(changes)
 }
 
-/// Refuse when a file a change would overwrite or remove holds something git
-/// couldn't restore.
-///
-/// A file that doesn't exist yet risks nothing.
+/// Return a refusal error if any existing file touched by `changes` cannot be
+/// restored by git.
 fn refuse_unrecorded(root: &Utf8Path, changes: &[Change]) -> Result<(), String> {
     let at_risk: Vec<Utf8PathBuf> = changes
         .iter()
@@ -510,9 +504,9 @@ fn listing(changes: &[Change]) -> String {
         .collect()
 }
 
-/// The question `sync` asks before changing anything.
+/// Build the confirmation prompt shown before `sync` writes files.
 ///
-/// Outside a git work tree there is nothing to point at for undoing it.
+/// Omits the git restore hint when running outside a git work tree.
 fn confirmation(count: usize, in_work_tree: bool) -> ComposeRequest {
     let option = |value: &str, label: &str| ComposeOption {
         value: value.to_owned(),

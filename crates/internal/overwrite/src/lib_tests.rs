@@ -6,7 +6,6 @@ use camino_tempfile::Utf8TempDir;
 
 use super::*;
 
-/// Run git in `dir`, failing the test with its stderr.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
@@ -21,10 +20,6 @@ fn git(dir: &Utf8Path, args: &[&str]) {
     );
 }
 
-/// A repository with one commit holding two pages in `sub/docs/rfd/`.
-///
-/// The config is set locally so the machine's identity and signing setup can't
-/// reach in and change what the test does.
 fn repository() -> Utf8TempDir {
     let top = Utf8TempDir::new().unwrap();
     git(top.path(), &["init", "--quiet", "--initial-branch=main"]);
@@ -49,10 +44,6 @@ fn the_prefix_is_the_dir_below_the_top_of_the_work_tree() {
     assert_eq!(prefix(&top.path().join("sub")), Ok(Some("sub/".to_owned())));
 }
 
-/// A directory that doesn't exist is an error, not "outside a work tree": git
-/// couldn't be started there to say either way.
-/// The OS error's wording varies by platform, so only the part this crate
-/// writes is compared.
 #[test]
 fn a_missing_directory_has_no_answer() {
     let dir = Utf8TempDir::new().unwrap();
@@ -60,15 +51,13 @@ fn a_missing_directory_has_no_answer() {
 
     let error = prefix(&missing).unwrap_err();
 
+    // Compare only the prefix because the OS error message varies by platform.
     assert!(
         error.starts_with(&format!("git couldn't be run in {missing}: ")),
         "{error}"
     );
 }
 
-/// A failing git command is reported, not read as "nothing to refuse".
-/// Git's message names the temporary directory, so only the part this crate
-/// writes is compared.
 #[test]
 fn a_path_git_rejects_is_an_error() {
     let top = repository();
@@ -85,8 +74,6 @@ fn a_directory_outside_a_work_tree_has_no_prefix() {
     assert_eq!(prefix(dir.path()), Ok(None));
 }
 
-/// What git recorded can be restored; a change it hasn't, or a file it doesn't
-/// track, can't.
 #[test]
 fn modified_and_untracked_files_are_unrecorded() {
     let top = repository();
@@ -110,8 +97,6 @@ fn modified_and_untracked_files_are_unrecorded() {
     ]);
 }
 
-/// Paths are taken against the directory they are asked about, wherever it sits
-/// in the work tree.
 #[test]
 fn paths_are_relative_to_the_directory() {
     let top = repository();
@@ -144,8 +129,6 @@ fn a_staged_change_is_still_unrecorded() {
     )]);
 }
 
-/// `git status` leaves ignored files out unless asked, and git has no more copy
-/// of an ignored file than of any other untracked one.
 #[test]
 fn ignored_files_are_untracked() {
     let top = repository();
@@ -180,7 +163,6 @@ fn ignored_files_are_untracked() {
     ]);
 }
 
-/// Outside a work tree nothing can restore a file, however it got there.
 #[test]
 fn every_file_outside_a_work_tree_is_unrecorded() {
     let dir = Utf8TempDir::new().unwrap();
@@ -199,9 +181,6 @@ fn every_file_outside_a_work_tree_is_unrecorded() {
     ]);
 }
 
-/// `git status` checks only where a committed symlink points, so an unchanged
-/// link reports nothing even though writing through it overwrites a target git
-/// has no copy of.
 #[cfg(unix)]
 #[test]
 fn a_committed_symlink_is_unrecorded() {
@@ -224,8 +203,6 @@ fn a_committed_symlink_is_unrecorded() {
     );
 }
 
-/// A file below a symlinked directory is reached through the link just the
-/// same, and git refuses to look past one.
 #[cfg(unix)]
 #[test]
 fn a_file_below_a_symlinked_directory_is_unrecorded() {
@@ -248,8 +225,6 @@ fn a_file_below_a_symlinked_directory_is_unrecorded() {
     )]);
 }
 
-/// A link outside a work tree is refused for being a link: that is what
-/// `--force` writes through.
 #[cfg(unix)]
 #[test]
 fn a_symlink_outside_a_work_tree_is_named_as_one() {
@@ -263,9 +238,6 @@ fn a_symlink_outside_a_work_tree_is_named_as_one() {
     );
 }
 
-/// `git status` doesn't look at a file marked assume-unchanged or
-/// skip-worktree, so an edit to one is reported nowhere, and git has no copy of
-/// it.
 #[test]
 fn an_edit_hidden_from_status_is_unrecorded() {
     for flag in ["--assume-unchanged", "--skip-worktree"] {
@@ -301,8 +273,6 @@ fn hidden_entries_are_read_below_the_prefix() {
     ]);
 }
 
-/// Committing doesn't make a link or a hidden edit restorable, so only
-/// `--force` is offered.
 #[test]
 fn a_refusal_of_links_and_hidden_edits_offers_only_force() {
     let message = refusal("jp ticket tools init tools", &[
@@ -319,8 +289,6 @@ fn a_refusal_of_links_and_hidden_edits_offers_only_force() {
     );
 }
 
-/// Nothing to overwrite asks git nothing, so a directory that doesn't exist yet
-/// is fine.
 #[test]
 fn no_paths_are_never_unrecorded() {
     let dir = Utf8TempDir::new().unwrap();
@@ -355,8 +323,6 @@ fn a_refusal_in_a_work_tree_suggests_committing() {
     );
 }
 
-/// There is nothing to commit to outside a work tree, so only `--force` is
-/// offered.
 #[test]
 fn a_refusal_outside_a_work_tree_offers_only_force() {
     let message = refusal("jp rfd init", &[(
@@ -384,8 +350,6 @@ fn existing_compares_a_file_with_what_would_be_written() {
     assert_eq!(existing(&path, b"b\n"), Ok(Existing::Differs));
 }
 
-/// A directory in a file's place can't be read, and is an error rather than a
-/// file that differs.
 #[test]
 fn existing_reports_a_path_it_cannot_read() {
     let dir = Utf8TempDir::new().unwrap();

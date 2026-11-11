@@ -7,26 +7,22 @@ use serde_json::json;
 
 use super::*;
 
-/// A plugin `notes` serving `list` and `create`, which take a category.
 const NOTES: Definitions = Definitions {
     plugin: "notes",
     files: &[("create.toml", "# create\n"), ("list.toml", "# list\n")],
     offers: "categories",
 };
 
-/// What the synced file says about itself in these tests.
 const SYNCED_NOTES: &str = "#\n# Mirrors the categories.\n";
 
 fn categories() -> Vec<String> {
     vec!["design".to_owned(), "guide".to_owned()]
 }
 
-/// A definition served as `source`, declaring `category` with a type.
 fn categorized(source: &str) -> Value {
     json!({ "source": source, "parameters": { "category": { "type": "string" } } })
 }
 
-/// Sync `dir` for `config`, where `create` and `list` take a category.
 fn sync(dir: &Utf8Path, config: &Value) -> Result<String, String> {
     sync_with(dir, config, false)
 }
@@ -46,7 +42,6 @@ fn sync_with(dir: &Utf8Path, config: &Value, force: bool) -> Result<String, Stri
     )
 }
 
-/// Run git in `dir`, failing the test with its stderr.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
@@ -61,10 +56,6 @@ fn git(dir: &Utf8Path, args: &[&str]) {
     );
 }
 
-/// An empty repository.
-///
-/// The config is set locally so the machine's identity and signing setup can't
-/// reach in and change what the test does.
 fn repository() -> Utf8TempDir {
     let dir = Utf8TempDir::new().unwrap();
     git(dir.path(), &["init", "--quiet", "--initial-branch=main"]);
@@ -106,8 +97,6 @@ fn init_writes_one_file_per_definition() {
     );
 }
 
-/// Outside git nothing could restore an edit `init` overwrites, so it refuses
-/// before writing any file.
 #[test]
 fn init_refuses_to_overwrite_outside_git_and_writes_nothing() {
     let dir = Utf8TempDir::new().unwrap();
@@ -133,8 +122,6 @@ fn init_refuses_to_overwrite_outside_git_and_writes_nothing() {
     assert!(!dir.path().join("create.toml").exists());
 }
 
-/// A file that already holds what `init` would write risks nothing, so running
-/// `init` again over its own output needs no `force`.
 #[test]
 fn init_leaves_a_file_as_shipped_alone() {
     let dir = Utf8TempDir::new().unwrap();
@@ -155,8 +142,6 @@ fn init_leaves_a_file_as_shipped_alone() {
     assert_eq!(fs::read_to_string(&list).unwrap(), "# list\n");
 }
 
-/// Git can give back a committed edit, so `init` puts the shipped definition
-/// back over it without `force`.
 #[test]
 fn init_overwrites_what_git_can_restore() {
     let dir = repository();
@@ -202,9 +187,6 @@ fn init_refuses_an_edit_git_has_not_recorded() {
     assert!(!dir.path().join("create.toml").exists());
 }
 
-/// A committed symlink to a definition shared outside the repository is
-/// unchanged as far as git knows, but writing through it would overwrite the
-/// shared target, which git has no copy of.
 #[cfg(unix)]
 #[test]
 fn init_refuses_to_write_through_a_committed_symlink() {
@@ -232,8 +214,6 @@ fn init_refuses_to_write_through_a_committed_symlink() {
     assert!(!dir.path().join("create.toml").exists());
 }
 
-/// An edit to a definition marked assume-unchanged is one `git status` doesn't
-/// report and git has no copy of.
 #[test]
 fn init_refuses_an_edit_hidden_by_assume_unchanged() {
     let dir = repository();
@@ -263,7 +243,6 @@ fn init_refuses_an_edit_hidden_by_assume_unchanged() {
     assert!(!dir.path().join("create.toml").exists());
 }
 
-/// `force` puts back the shipped definition over an edit nothing could restore.
 #[test]
 fn init_with_force_overwrites_a_file_that_differs() {
     let dir = Utf8TempDir::new().unwrap();
@@ -285,9 +264,6 @@ fn init_with_force_overwrites_a_file_that_differs() {
     assert_eq!(fs::read_to_string(&list).unwrap(), "# list\n");
 }
 
-/// Tools are found by their source, so a project that exposes `list` under a
-/// name of its own gets the values under that name too, and a tool of the same
-/// name another plugin serves gets none.
 #[test]
 fn sync_writes_what_each_tool_takes_found_by_source() {
     let dir = Utf8TempDir::new().unwrap();
@@ -319,10 +295,6 @@ fn sync_writes_what_each_tool_takes_found_by_source() {
     );
 }
 
-/// A tool whose definition leaves the parameter out is left out too, rather
-/// than given a parameter with no type, which would drop the tool from every
-/// conversation.
-/// The values an earlier sync wrote don't declare it.
 #[test]
 fn sync_leaves_out_a_parameter_a_tool_doesnt_declare() {
     let dir = Utf8TempDir::new().unwrap();
@@ -348,8 +320,6 @@ fn sync_leaves_out_a_parameter_a_tool_doesnt_declare() {
     assert!(!fs::read_to_string(&path).unwrap().contains("notes_create"));
 }
 
-/// The file is rewritten whole, so a tool removed from the configuration drops
-/// out of it rather than lingering.
 #[test]
 fn sync_rewrites_its_file_whole() {
     let dir = repository();
@@ -372,9 +342,6 @@ fn sync_rewrites_its_file_whole() {
     );
 }
 
-/// Syncing the same configuration again is a no-op: it needs no git to restore
-/// anything, and doesn't touch the file.
-/// The file is made read-only, so a write that still happened fails the test.
 #[test]
 fn sync_leaves_an_unchanged_file_untouched() {
     let dir = Utf8TempDir::new().unwrap();
@@ -383,6 +350,7 @@ fn sync_leaves_an_unchanged_file_untouched() {
         "notes_list": categorized("plugin.command.notes.list"),
     }}});
     sync(dir.path(), &config).unwrap();
+    // Make the file read-only so any write attempt fails the test.
     let mut permissions = fs::metadata(&path).unwrap().permissions();
     permissions.set_readonly(true);
     fs::set_permissions(&path, permissions).unwrap();
@@ -395,8 +363,6 @@ fn sync_leaves_an_unchanged_file_untouched() {
     );
 }
 
-/// A synced file that changes is overwritten only as `init` overwrites a
-/// definition: outside git, nothing could restore it.
 #[test]
 fn sync_refuses_to_overwrite_outside_git_unless_forced() {
     let dir = Utf8TempDir::new().unwrap();
@@ -428,11 +394,6 @@ fn sync_refuses_to_overwrite_outside_git_unless_forced() {
     );
 }
 
-/// A file in the synced file's place that this plugin's `sync` didn't write is
-/// someone's, and stays as it is unless forced, even where git could restore
-/// it.
-/// Other plugins write a file of the same name, so pointing them at one
-/// directory must not let one overwrite another's.
 #[test]
 fn sync_leaves_a_file_it_did_not_write_alone() {
     let dir = repository();
@@ -462,9 +423,6 @@ fn sync_leaves_a_file_it_did_not_write_alone() {
     );
 }
 
-/// A synced file that can't be read is an error, not a file to overwrite.
-/// The OS error's wording varies by platform, so only the part this crate
-/// writes is compared.
 #[test]
 fn sync_reports_a_synced_file_it_cannot_read() {
     let dir = Utf8TempDir::new().unwrap();
@@ -502,8 +460,6 @@ fn a_tool_named_by_the_plugin_alone_is_known_by_its_key() {
     ]);
 }
 
-/// `sync` reads a declared parameter's type under `type`, which is how the host
-/// sends the configuration.
 #[test]
 fn the_host_sends_a_declared_parameter_with_its_type() {
     let partial: jp_config::PartialAppConfig = toml::from_str(
@@ -528,8 +484,6 @@ fn the_host_sends_a_declared_parameter_with_its_type() {
     assert!(!declares(&config, "notes_create", "category"), "{config:#}");
 }
 
-/// A tool key is the user's to choose, and a TOML table header has to quote one
-/// that isn't a bare key.
 #[test]
 fn keys_and_values_are_written_as_toml() {
     assert_eq!(toml_key("ticket_create"), "ticket_create");
@@ -543,8 +497,6 @@ fn keys_and_values_are_written_as_toml() {
     assert_eq!(toml_string("tab\there"), r#""tab\u0009here""#);
 }
 
-/// The file `sync` writes has to load, or the whole workspace configuration
-/// fails with it.
 #[test]
 fn the_synced_file_parses_with_a_quoted_key() {
     let dir = Utf8TempDir::new().unwrap();

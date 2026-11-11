@@ -39,17 +39,19 @@ const SYNCED_NOTES: &str = "\
 # whole, and edits to it are lost.
 ";
 
-/// Write the starting definitions into `dir`, creating it if needed.
+/// Write the default tool definitions into `dir`, creating it if needed.
 ///
-/// A file git couldn't restore is overwritten only with `force`.
+/// Existing files that git cannot restore are overwritten only when `force` is
+/// true.
 pub(crate) fn init(dir: &Utf8Path, force: bool) -> Result<Output, String> {
     DEFINITIONS.init(dir, force).map(Output::from)
 }
 
-/// Write the categories into the schemas of the configured tools that take one,
-/// as `dir`'s synced file.
+/// Write [`tool_definitions::SYNCED_FILE`] in `dir` with the configured RFD
+/// categories.
 ///
-/// A synced file git couldn't restore is overwritten only with `force`.
+/// An existing synced file that git cannot restore is overwritten only when
+/// `force` is true.
 pub(crate) fn sync(
     dir: &Utf8Path,
     config: &Value,

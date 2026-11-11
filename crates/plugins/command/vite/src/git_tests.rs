@@ -2,7 +2,6 @@ use camino_tempfile::Utf8TempDir;
 
 use super::*;
 
-/// Run git in `dir`, failing the test with its stderr.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
@@ -17,10 +16,6 @@ fn git(dir: &Utf8Path, args: &[&str]) {
     );
 }
 
-/// An empty repository.
-///
-/// The config is set locally so the machine's identity and signing setup can't
-/// reach in and change what the test does.
 fn repository() -> Utf8TempDir {
     let top = Utf8TempDir::new().unwrap();
     git(top.path(), &["init", "--quiet", "--initial-branch=main"]);

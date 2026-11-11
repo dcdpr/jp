@@ -34,7 +34,6 @@ fn an_empty_site_is_missing_every_file() {
     ]);
 }
 
-/// Running it again adds only what is missing.
 #[test]
 fn a_file_that_exists_is_not_missing() {
     let dir = Utf8TempDir::new().unwrap();
@@ -43,8 +42,6 @@ fn a_file_that_exists_is_not_missing() {
     assert_eq!(missing(dir.path()).len(), 3);
 }
 
-/// The configuration merges in the fragment `sync` writes, and quotes the title
-/// and description whatever they hold.
 #[test]
 fn the_configuration_takes_the_title_and_the_navigation() {
     assert_eq!(
@@ -72,8 +69,6 @@ export default defineConfig(withJpVite({
     );
 }
 
-/// A double-quoted YAML scalar reads the same escapes JSON writes, so a colon
-/// or a quote in the title can't break the front matter.
 #[test]
 fn the_homepage_quotes_what_it_shows() {
     assert_eq!(
@@ -106,7 +101,6 @@ fn writing_creates_the_files_and_their_directories() {
     assert!(theme.contains("    enhanceApp,\n"), "{theme}");
 }
 
-/// A file found the same is left alone, and one found different is overwritten.
 #[test]
 fn the_plan_says_which_files_writing_changes() {
     let root = Utf8TempDir::new().unwrap();
@@ -146,7 +140,6 @@ fn the_plan_says_which_files_writing_changes() {
     );
 }
 
-/// A file that appeared after the templates were planned is not replaced.
 #[test]
 fn writing_refuses_a_file_that_appeared_since_the_plan() {
     let root = Utf8TempDir::new().unwrap();

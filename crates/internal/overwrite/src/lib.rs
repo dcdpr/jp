@@ -1,27 +1,28 @@
-//! Whether a command may overwrite a file.
+//! File-overwrite checks for command plugins.
 //!
-//! Every command plugin that writes files into a project, such as `tools init`,
-//! `tools sync`, `jp rfd init`, and `jp vite sync`, follows one rule when a
-//! file it would write already exists and holds something else:
+//! Command plugins that write files into a project (`tools init`, `tools sync`,
+//! `jp rfd init`, `jp vite init`, and `jp vite sync`) share one rule when a
+//! target file already exists with different contents:
 //!
-//! - In a git work tree, it overwrites a file git can restore: one that is
-//!   tracked and unchanged since the last commit.
-//!   A file with changes since the last commit, staged or not, or one git
-//!   doesn't track or ignores, is refused.
-//! - A file marked assume-unchanged or skip-worktree is refused: `git status`
-//!   doesn't look at it, so an edit to it is reported nowhere.
-//! - A file reached through a symlink, its own or a directory's, is refused:
-//!   git records where a link points, not what the target holds, and writing
-//!   follows the link.
-//! - Outside a git work tree, nothing can restore the file, so it is refused.
-//! - `--force` overwrites a refused file anyway, writing through a symlink to
-//!   its target.
+//! - In a git work tree, tracked files with no changes since `HEAD` can be
+//!   restored by git and are overwritten.
+//!   Modified (staged or unstaged), untracked, and ignored files are refused.
+//! - Files marked `assume-unchanged` or `skip-worktree` are refused because
+//!   `git status` ignores local edits to them.
+//! - Files reached through a symlink (the file itself or an ancestor directory)
+//!   are refused because git tracks only the link path, not the target's
+//!   contents, and writing follows the symlink.
+//! - Outside a git work tree, existing files cannot be restored by git and are
+//!   refused.
+//! - `--force` overwrites refused files anyway, following symlinks to their
+//!   targets.
 //!
-//! A file that doesn't exist, or already holds what the command would write,
-//! loses nothing and is never refused.
+//! Missing files and files that already match the target contents (ignoring
+//! `CRLF` vs. `LF` line endings) are never refused.
 //!
-//! [`existing`] says what is in a file's place, [`unrecorded`] finds the files
-//! to refuse, and [`refusal`] says why they were refused.
+//! [`existing`] compares a file on disk against the target contents,
+//! [`unrecorded`] finds existing files that git cannot restore, and [`refusal`]
+//! formats the error message.
 
 use std::{
     fmt::Write as _,
@@ -31,21 +32,21 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 
-/// What is in the place of a file a command would write.
+/// State of a target path on disk relative to the contents to be written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Existing {
-    /// Nothing: writing the file loses nothing.
+    /// The file does not exist.
     Missing,
 
-    /// The text the command would write, however its lines end.
+    /// The file already has the target contents (ignoring `CRLF` vs. `LF` line
+    /// endings).
     Same,
 
-    /// Something else, which writing the file would overwrite.
+    /// The file exists with different contents.
     Differs,
 }
 
-/// What is in `path`'s place, compared with the `contents` a command would
-/// write there.
+/// Compare the file at `path` against `contents`.
 pub fn existing(path: &Utf8Path, contents: &[u8]) -> Result<Existing, String> {
     match fs::read(path) {
         Ok(found) if same_text(&found, contents) => Ok(Existing::Same),
@@ -55,30 +56,30 @@ pub fn existing(path: &Utf8Path, contents: &[u8]) -> Result<Existing, String> {
     }
 }
 
-/// Why git can't restore a file a command would overwrite.
+/// Reason git cannot restore a file if it is overwritten.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unrecorded {
-    /// It has changes since the last commit, staged or not.
+    /// The file has staged or unstaged changes since `HEAD`.
     Modified,
 
-    /// Git doesn't track it, or ignores it.
+    /// The file is untracked or ignored by git.
     Untracked,
 
-    /// It is marked assume-unchanged or skip-worktree, so `git status` doesn't
-    /// report an edit to it.
+    /// The file is marked `assume-unchanged` or `skip-worktree`, so `git
+    /// status` does not report edits to it.
     Hidden,
 
-    /// It, or a directory above it, is a symlink: git can restore the link, not
-    /// the target a write would overwrite.
+    /// The file or one of its parent directories is a symlink; git tracks the
+    /// link path, not the target's contents.
     Symlink,
 
-    /// It isn't in a git work tree.
+    /// The file is not inside a git work tree.
     NoWorkTree,
 }
 
 impl Unrecorded {
-    /// Why the file is refused, as a refusal lists it, and whether committing
-    /// the file would let the command overwrite it.
+    /// Return the reason label for [`refusal`] and whether committing the file
+    /// would make it restorable.
     fn describe(self) -> (&'static str, bool) {
         match self {
             Self::Modified => ("changed since the last commit", true),
@@ -90,10 +91,11 @@ impl Unrecorded {
     }
 }
 
-/// Where the work tree holding `dir` starts, as the path from its top to `dir`:
-/// empty when `dir` is the top, otherwise ending in `/`.
+/// Return the path of `dir` relative to the git work tree root (empty at the
+/// root, or ending with `/` in a subdirectory).
 ///
-/// `None` when `dir` isn't in a git work tree, or git isn't installed.
+/// Returns `None` if `dir` is outside a git work tree or `git` is not
+/// installed.
 pub fn prefix(dir: &Utf8Path) -> Result<Option<String>, String> {
     let output = match git(dir, ["rev-parse", "--show-prefix"]) {
         Ok(output) => output,
@@ -110,13 +112,15 @@ pub fn prefix(dir: &Utf8Path) -> Result<Option<String>, String> {
     ))
 }
 
-/// The files among `paths` git couldn't restore if they were overwritten, and
-/// why, ordered by path.
+/// Return the files in `paths` that git cannot restore if overwritten, sorted
+/// by path.
 ///
-/// `paths` are relative to `dir`, and name files that exist.
-/// A path reached through a symlink is unrecorded wherever it is, and outside a
-/// git work tree every one of them is.
-/// `dir` itself may be a symlink: git reads the directory it resolves to.
+/// Each path in `paths` must be relative to `dir` and point to an existing
+/// file.
+/// Any path traversing a symlink within `dir` is reported as
+/// [`Unrecorded::Symlink`], and outside a git work tree all remaining paths are
+/// reported as [`Unrecorded::NoWorkTree`].
+/// `dir` itself may be a symlink; git operates on its resolved directory.
 pub fn unrecorded(
     dir: &Utf8Path,
     paths: &[Utf8PathBuf],
@@ -148,8 +152,8 @@ pub fn unrecorded(
     Ok(found)
 }
 
-/// Whether `path`, relative to `dir`, or a directory between `dir` and it, is a
-/// symlink.
+/// Return whether `path` (relative to `dir`) or any intermediate directory
+/// under `dir` is a symlink.
 fn through_symlink(dir: &Utf8Path, path: &Utf8Path) -> Result<bool, String> {
     let mut current = dir.to_path_buf();
     for component in path.components() {
@@ -165,7 +169,6 @@ fn through_symlink(dir: &Utf8Path, path: &Utf8Path) -> Result<bool, String> {
     Ok(false)
 }
 
-/// Run git in `dir` with `args`, its stdin closed.
 fn git<'a>(dir: &Utf8Path, args: impl IntoIterator<Item = &'a str>) -> io::Result<Output> {
     Command::new("git")
         .args(args)
@@ -174,15 +177,12 @@ fn git<'a>(dir: &Utf8Path, args: impl IntoIterator<Item = &'a str>) -> io::Resul
         .output()
 }
 
-/// The error for git failing to start in `dir`.
 fn not_run(dir: &Utf8Path, error: &io::Error) -> String {
     format!("git couldn't be run in {dir}: {error}")
 }
 
-/// What git printed when run in `dir` with `args` followed by `paths`.
-///
-/// Fails when git couldn't start or exited unsuccessfully, naming the git
-/// subcommand, the first of `args`.
+/// Run `git` in `dir` with `args` and `paths`, returning stdout or an error
+/// naming the subcommand (`args[0]`).
 fn read(dir: &Utf8Path, args: &[&str], paths: &[Utf8PathBuf]) -> Result<String, String> {
     let all = args
         .iter()
@@ -201,8 +201,7 @@ fn read(dir: &Utf8Path, args: &[&str], paths: &[Utf8PathBuf]) -> Result<String, 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// What `git status` says about `paths`, relative to `dir`, which sits at
-/// `prefix` in its work tree.
+/// Check `paths` (relative to `dir` at work-tree `prefix`) with `git status`.
 fn status(
     dir: &Utf8Path,
     prefix: &str,
@@ -213,9 +212,8 @@ fn status(
         "--porcelain=v1",
         "-z",
         "--untracked-files=all",
-        // An ignored file is as untracked as any other, and git has no copy of
-        // it to restore. With `--untracked-files=all`, ignored directories are
-        // listed file by file.
+        // Include ignored files and expand ignored directories
+        // (`--untracked-files=all`) so ignored files are reported as untracked.
         "--ignored=traditional",
         "--no-renames",
         "--",
@@ -224,11 +222,12 @@ fn status(
     Ok(parse_status(&read(dir, &args, paths)?, prefix))
 }
 
-/// Read `git status --porcelain=v1 -z --no-renames --ignored` output, keeping
-/// the entries below `prefix`, as paths relative to it.
+/// Parse `git status --porcelain=v1 -z --no-renames --ignored` output into
+/// paths relative to `prefix`.
 ///
-/// Porcelain output names paths from the top of the work tree.
-/// An ignored file (`!!`) is read as untracked: git keeps no copy of either.
+/// Porcelain paths are relative to the work tree root.
+/// Both untracked (`??`) and ignored (`!!`) files map to
+/// [`Unrecorded::Untracked`].
 fn parse_status(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
     output
         .split('\0')
@@ -246,8 +245,8 @@ fn parse_status(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
         .collect()
 }
 
-/// The tracked files among `paths`, relative to `dir`, which sits at `prefix`
-/// in its work tree, that are marked assume-unchanged or skip-worktree.
+/// Find tracked files in `paths` that are marked `assume-unchanged` or
+/// `skip-worktree`.
 fn hidden(
     dir: &Utf8Path,
     prefix: &str,
@@ -258,9 +257,8 @@ fn hidden(
     Ok(parse_hidden(&read(dir, &args, paths)?, prefix))
 }
 
-/// Read `git ls-files -v -z --full-name` output, keeping the entries below
-/// `prefix` that are assume-unchanged (a lowercase tag) or skip-worktree (`S`),
-/// as paths relative to it.
+/// Parse `git ls-files -v -z --full-name` output, returning entries under
+/// `prefix` marked `assume-unchanged` (lowercase tag) or `skip-worktree` (`S`).
 fn parse_hidden(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
     output
         .split('\0')
@@ -277,11 +275,10 @@ fn parse_hidden(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
         .collect()
 }
 
-/// The message refusing to overwrite `files`, each listed with why git couldn't
-/// restore it.
+/// Format an error message refusing to overwrite `files`, listing why git
+/// cannot restore each one.
 ///
-/// `command` is the command as the user would run it again, without `--force`,
-/// such as `jp vite sync`.
+/// `command` is the invocation without `--force` (e.g. `jp vite sync`).
 #[must_use]
 pub fn refusal(command: &str, files: &[(Utf8PathBuf, Unrecorded)]) -> String {
     let mut message = format!("Git couldn't restore these files, so `{command}` leaves them:\n");
@@ -304,12 +301,13 @@ pub fn refusal(command: &str, files: &[(Utf8PathBuf, Unrecorded)]) -> String {
     message
 }
 
-/// Whether a file holds the same text as `other`, however its lines end.
+/// Return whether `file` and `other` have identical contents when `CRLF` is
+/// normalized to `LF`.
 ///
-/// Git can check text files out with CRLF line endings (`core.autocrlf`, on by
-/// default in Git for Windows) and commits them back with LF, so a file that
-/// differs from what a command writes only there is, to git, the same file.
-/// A `\r` that doesn't end a line still counts.
+/// Git can check out text files with `CRLF` line endings (`core.autocrlf`,
+/// enabled by default in Git for Windows) while storing `LF` in the index, so a
+/// file that differs only in `CRLF` vs. `LF` line endings is unchanged in git.
+/// Standalone `\r` bytes not followed by `\n` are preserved.
 #[must_use]
 pub fn same_text(file: &[u8], other: &[u8]) -> bool {
     fn lf(bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {

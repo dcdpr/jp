@@ -1449,8 +1449,6 @@ fn tools_init_takes_force() {
     }
 }
 
-/// `--force` overwrites a definition the project changed, which `init` without
-/// it refuses to touch.
 #[test]
 fn tools_init_with_force_overwrites_a_changed_definition() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1479,7 +1477,6 @@ fn tools_init_with_force_overwrites_a_changed_definition() {
     );
 }
 
-/// The definitions directory is taken against the workspace root, like `--dir`.
 #[test]
 fn tools_init_writes_into_a_directory_under_the_root() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1492,8 +1489,8 @@ fn tools_init_writes_into_a_directory_under_the_root() {
     })
     .unwrap();
 
-    // Joined the way the directory and the file name are, so the path reads the
-    // same as in the output on Windows too.
+    // Use `Utf8Path::join` so path separators match the command output on
+    // Windows.
     let written = dir.path().join("config/tools").join("create.toml");
     assert!(written.exists());
     assert!(

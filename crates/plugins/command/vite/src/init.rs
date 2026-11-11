@@ -1,13 +1,10 @@
-//! `jp vite init`: set up a VitePress site in the source directory.
+//! `jp vite init`: initialize a VitePress site in the source directory.
 //!
-//! Writes the project's own files, which `jp vite sync` never touches:
-//! `package.json`, `.vitepress/config.mts`, the theme entry, and a homepage.
-//! The configuration merges in the fragment `sync` writes, and the theme entry
-//! renders what the RFD and ticket pages add above a document.
-//! Running it again writes them again, overwriting a file that holds something
-//! else only as the `overwrite` crate allows.
-//!
-//! The title and description go into the configuration and the homepage.
+//! Writes the project-owned site files (`package.json`,
+//! `.vitepress/config.mts`, `.vitepress/theme/index.js`, and `index.md`), which
+//! `jp vite sync` never modifies.
+//! Re-running `init` overwrites existing files with different contents only
+//! when git can restore them or `--force` is passed (see [`overwrite`]).
 
 use std::{fs, io::Write as _};
 
@@ -16,17 +13,16 @@ use overwrite::Existing;
 
 use crate::settings::below;
 
-/// A file `init` writes, below the source directory.
+/// A template file written by `jp vite init`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Template {
-    /// Where it goes, below the source directory.
+    /// Path relative to the VitePress source directory.
     pub path: &'static str,
 
-    /// What it holds, before [`Fill`] is applied.
+    /// Raw template contents before [`Fill`] substitution.
     pub contents: &'static str,
 }
 
-/// The files `init` writes.
 pub(crate) const TEMPLATES: [Template; 4] = [
     Template {
         path: "package.json",
@@ -46,17 +42,18 @@ pub(crate) const TEMPLATES: [Template; 4] = [
     },
 ];
 
-/// What a template's placeholders are filled with.
+/// Placeholder values substituted into [`TEMPLATES`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Fill {
     pub title: String,
     pub description: String,
 
-    /// The navigation bar's links after Home, as label and site path.
+    /// Navigation bar links after `Home`, as `(label, link)` pairs.
     pub nav: Vec<(String, String)>,
 }
 
-/// The templates whose files `site_dir` doesn't have yet.
+/// Return the templates from [`TEMPLATES`] whose target files do not exist in
+/// `site_dir`.
 pub(crate) fn missing(site_dir: &Utf8Path) -> Vec<Template> {
     TEMPLATES
         .into_iter()
@@ -64,8 +61,8 @@ pub(crate) fn missing(site_dir: &Utf8Path) -> Vec<Template> {
         .collect()
 }
 
-/// Each template, with what is in its file's place below `site_dir`, compared
-/// with what it renders to with `fill`.
+/// Render each template with `fill` and compare it against the file in
+/// `site_dir`.
 pub(crate) fn plan(site_dir: &Utf8Path, fill: &Fill) -> Result<Vec<(Template, Existing)>, String> {
     TEMPLATES
         .into_iter()
@@ -78,10 +75,10 @@ pub(crate) fn plan(site_dir: &Utf8Path, fill: &Fill) -> Result<Vec<(Template, Ex
         .collect()
 }
 
-/// `template` with its placeholders filled.
+/// Render `template` with `fill`.
 ///
-/// The title and description are written as quoted strings, which both the
-/// configuration and the homepage's front matter read, whatever they hold.
+/// `title` and `description` are JSON-quoted, which is valid in both the
+/// TypeScript config and YAML front matter.
 pub(crate) fn render(template: &Template, fill: &Fill) -> String {
     let quoted = |text: &str| serde_json::to_string(text).expect("a string serializes");
 
@@ -101,11 +98,12 @@ pub(crate) fn render(template: &Template, fill: &Fill) -> String {
         .replace("@@nav@@", &nav)
 }
 
-/// Write the templates `planned` found missing or different below `site_dir`.
+/// Write the missing or differing templates from `planned` into `site_dir`.
 ///
-/// A missing file that appeared since it was planned is not replaced.
-/// Returns one line per file written, `Created` or `Overwrote` and its path
-/// relative to `root`.
+/// Files that were missing during planning are opened with `create_new` so a
+/// file created in the meantime is not overwritten.
+/// Returns a status line (`Created <path>` or `Overwrote <path>`, relative to
+/// `root`) for each file written.
 pub(crate) fn write(
     root: &Utf8Path,
     site_dir: &Utf8Path,

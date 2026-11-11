@@ -1,13 +1,12 @@
-//! `jp rfd init`: set up the RFD directory.
+//! `jp rfd init`: initialize the RFD directory.
 //!
-//! Creates the directory and its drafts directory, a template for each
-//! configured category, and an empty priority board.
-//! Running it again writes the templates again, overwriting one that holds
-//! something else only as the `overwrite` crate allows: when git can restore
-//! it, or with `--force`.
-//! The priority board is the project's ranking, not a template, so one that
-//! exists is never touched.
-//! It writes no RFD 001: the process document is each project's own.
+//! Creates the RFD directory, the `drafts/` subdirectory, a template for each
+//! configured category, and an empty `.priority.json` board.
+//! Re-running `init` writes any missing templates and overwrites modified
+//! templates only when git can restore them or `--force` is passed (see
+//! [`overwrite`]).
+//! An existing `.priority.json` holds project state and is never overwritten.
+//! `init` does not create RFD 001, as each project defines its own RFD process.
 
 use std::fs;
 
@@ -21,7 +20,7 @@ use crate::{
     priority::{PRIORITY_FILE, Priority},
 };
 
-/// The templates for the default categories, by category.
+/// Built-in templates for the default RFD categories.
 const TEMPLATES: [(&str, &str); 4] = [
     ("design", include_str!("../../templates/design.md")),
     ("decision", include_str!("../../templates/decision.md")),
@@ -29,22 +28,21 @@ const TEMPLATES: [(&str, &str); 4] = [
     ("process", include_str!("../../templates/process.md")),
 ];
 
-/// The template for a category without one of its own; `CATEGORY` is replaced
-/// by the category's name.
+/// Fallback template for custom categories; `CATEGORY` is replaced with the
+/// capitalized category name.
 const OTHER: &str = include_str!("../../templates/other.md");
 
-/// A category's template, as `init` plans to write it.
+/// Planned template file and its current state on disk.
 struct Planned {
-    /// The file's name in the RFD directory.
     name: Utf8PathBuf,
     text: String,
     existing: Existing,
 }
 
-/// Set up the RFD directory for `categories`.
+/// Initialize the RFD directory and category templates for `categories`.
 ///
-/// A template git couldn't restore is overwritten only with `force`; without
-/// it, nothing is written.
+/// Modified templates that git cannot restore are overwritten only when `force`
+/// is true; otherwise no files are written.
 pub(crate) fn init(paths: &Paths, categories: &[String], force: bool) -> Result<Output, String> {
     let planned = plan(paths, categories)?;
     if !force {
@@ -73,7 +71,8 @@ pub(crate) fn init(paths: &Paths, categories: &[String], force: bool) -> Result<
     Ok(output)
 }
 
-/// Each category's template, with what is in its file's place.
+/// Build the template write plan for `categories` and check each target path on
+/// disk.
 fn plan(paths: &Paths, categories: &[String]) -> Result<Vec<Planned>, String> {
     categories
         .iter()
@@ -93,7 +92,7 @@ fn plan(paths: &Paths, categories: &[String]) -> Result<Vec<Planned>, String> {
         .collect()
 }
 
-/// Refuse when a template that differs holds something git couldn't restore.
+/// Return a refusal error if any differing template cannot be restored by git.
 fn refuse_unrecorded(paths: &Paths, planned: &[Planned]) -> Result<(), String> {
     let differing: Vec<Utf8PathBuf> = planned
         .iter()
@@ -111,7 +110,7 @@ fn refuse_unrecorded(paths: &Paths, planned: &[Planned]) -> Result<(), String> {
     Err(overwrite::refusal("jp rfd init", &unrecorded))
 }
 
-/// Create the RFD directory and its drafts directory where they are missing.
+/// Create the RFD directory and its `drafts/` subdirectory if missing.
 fn create_dirs(paths: &Paths, output: &mut Output) -> Result<(), String> {
     for dir in [paths.rfds.clone(), paths.drafts()] {
         if dir.is_dir() {
@@ -126,7 +125,7 @@ fn create_dirs(paths: &Paths, output: &mut Output) -> Result<(), String> {
     Ok(())
 }
 
-/// Write the templates that are missing or differ.
+/// Write missing or differing category templates.
 fn write_templates(
     paths: &Paths,
     planned: Vec<Planned>,
@@ -153,7 +152,7 @@ fn write_templates(
     Ok(())
 }
 
-/// The template a new project starts `category` with.
+/// Return the template contents for `category`.
 fn template(category: &str) -> String {
     TEMPLATES
         .iter()
