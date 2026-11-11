@@ -6,10 +6,33 @@
 
 # Rules that never fail the gate and are omitted from reports.
 #
-# IOSP is exempt because rustqual cannot disable it, and the 862 existing
-# violations (6.2% of functions) exceed the 5% `max_suppression_ratio`, so
-# per-function suppressions are not an option.
-exempt = ["iosp/violation"]
+# Rules covered by Clippy or prone to AST-only false positives are disabled
+# (T-0yh5m6r). Rules with a config toggle are disabled in `config.toml` or
+# `dry.toml`; rules without a toggle are exempted here.
+exempt = [
+    # rustqual cannot disable it, and the 862 existing violations (6.2% of
+    # functions) exceed the 5% `max_suppression_ratio`, so per-function
+    # suppressions are not an option.
+    "iosp/violation",
+
+    # Parameter count: covered by `clippy::too_many_arguments`, configured via
+    # `too-many-arguments-threshold` in `.clippy.toml`.
+    "SRP-003",
+
+    # Manual `Default` impls: covered by `clippy::derivable_impls`.
+    "BP-005",
+
+    # Inconsistent error types in a module. False-positives on serde
+    # `serialize`/`deserialize` functions, whose error types are fixed by the
+    # serde traits. Re-enable once the vendored rustqual skips trait-signature
+    # error types (T-1dhk659).
+    "IET",
+
+    # Trivial `Display` impls. False-positives on multi-value `write!` calls and
+    # format-preserving delegation alongside genuine newtype boilerplate.
+    # Re-enable once the vendored rustqual distinguishes them (T-1dhk659).
+    "BP-002",
+]
 
 # Rules with zero findings on `main`. Any finding for an enforced rule fails the
 # gate, even if it already existed at the base revision. Rules are only ever

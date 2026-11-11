@@ -23,12 +23,24 @@
 enabled = false
 
 # rustqual's default of 300 is its own house style, not JP's. Only code lines
-# count: blank lines, `//`, `///` and block comments don't, and counting stops
-# at the first `#[cfg(test)]` in the file. `SRP-002` also fires on the
-# independent-cluster cohesion check, so raising the line limit alone does not
-# eliminate all `SRP-002` findings. Decided in T-0yh5m6r.
+# count: blank lines, `//`, `///`, and block comments are excluded, and
+# counting stops at the first `#[cfg(test)]` in the file. Decided in T-0yh5m6r.
+#
+# `lcom4_threshold`: `SRP-001` scores a struct on cohesion (LCOM4, weight 0.4),
+# field count, method count, and fan-out, and fires at 0.6. At rustqual's
+# default of 2, two method groups score the full 0.4, so a single-field command
+# struct whose `run` method does not read `self` fires on fan-out alone. At 3,
+# two groups score 0.2 and three or more score 0.4.
+#
+# `max_independent_clusters`: set high to disable the independent-cluster check
+# in `SRP-002`, which has no dedicated toggle. `rustqual` reports only the
+# cluster count without naming the functions in each cluster, leaving nothing
+# actionable. Restore the default of 2 once the vendored `rustqual` includes
+# cluster names (T-1dhk659).
 [srp]
-file_length = 800
+file_length              = 800
+lcom4_threshold          = 3
+max_independent_clusters = 1_000_000
 
 # `.expect()` counts as an error-handling finding (`A20`), the same as
 # `.unwrap()`, `panic!` and `unreachable!`. A deliberate `.expect()` with a
@@ -53,3 +65,19 @@ allow_expect = false
 [tests]
 file_length        = 1_000_000
 max_function_lines = 150
+
+# Rules covered by Clippy are disabled (T-0yh5m6r):
+#
+# - `SLM` (methods that do not use `self`): covered by `clippy::unused_self`
+#   (enabled via `clippy::pedantic`). `rustqual` ignores
+#   `#[expect(clippy::unused_self)]`, so keeping `SLM` enabled would require a
+#   duplicate suppression comment on every deliberate case.
+# - `NMS` (`&mut self` never mutated): covered by
+#   `clippy::needless_pass_by_ref_mut` (tracked in T-1haa4rr). Because
+#   `rustqual` checks syntax without type information, all 22 `NMS` findings in
+#   the workspace on 2026-11-11 were false positives on methods that return
+#   `&mut` to a field or mutate through a method call, while Clippy caught 20
+#   genuine cases that `NMS` missed.
+[structural]
+check_slm = false
+check_nms = false

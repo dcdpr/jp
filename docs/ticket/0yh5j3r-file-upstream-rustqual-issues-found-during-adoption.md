@@ -50,6 +50,37 @@ newer release has fixed.
    too.
    Reproduce that second case before filing, and propose limiting the exemption
    to a body that is a single literal expression.
+8. **`TQ-002` doesn't follow calls through trait impls.** A test that reaches
+   the code under test through `.into()` (`From`) or `to_string()` (`Display`)
+   is reported as calling no production function: `from_datetime` in
+   `crates/jp_cli/src/cmd/time_tests.rs` and
+   `initialize_timeout_display_includes_timeout_command_and_stderr` in
+   `crates/jp_mcp/src/client_tests.rs`, both marked `qual:allow(test_quality,
+   no_sut)`.
+   Two neighboring tests in `client_tests.rs` assert on `to_string()` the same
+   way and are not reported; find out what differs before filing.
+9. **Concrete impact of item 1.** Before moving early `#[cfg(test)]` items to
+   the end of each file, `crates/jp_llm/src/provider/anthropic.rs` (~3,700
+   lines, `#[cfg(test)]` import on line 25) counted as 22 production lines,
+   `openai.rs` as 52, and `google.rs` as 134, allowing the largest files in the
+   workspace to pass the `SRP-002` length check.
+   T-1haqsmg enforces placing `#[cfg(test)]` only at the end of a file in JP,
+   but the upstream bug remains for workspaces without that convention.
+10. **`SRP-002` does not name its clusters.** The SARIF message reports "N
+    independent clusters" without listing the functions in each cluster, even
+    though the analyzer computes them (`cluster_names`).
+    For example, `crates/jp_cli/src/bootstrap.rs` is reported with 3 clusters
+    despite having a single responsibility; without the function names, the
+    finding cannot be verified or acted on.
+    The cluster check is disabled in `.config/rustqual/config.toml` until the
+    message includes cluster members.
+11. **`qual:allow(complexity, magic_numbers)` on a `static` or `const` is
+    reported as `ORPHAN-001` without explaining why.** `rustqual` does not flag
+    magic numbers inside `const` or `static` initializers, so a suppression
+    marker on those items has no finding to match.
+    Reporting `ORPHAN-001` is accurate, but the message ("no finding in window")
+    does not indicate that `const` and `static` items are already exempt from
+    `CX-003`.
 
 ## Comments
 

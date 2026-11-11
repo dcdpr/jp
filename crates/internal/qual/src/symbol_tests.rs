@@ -89,6 +89,19 @@ fn nested_items_are_joined_into_a_path() {
 }
 
 #[test]
+fn contains_an_item_by_its_whole_path() {
+    let symbols = Symbols::parse(SOURCE).unwrap();
+
+    assert!(symbols.contains("parse"));
+    assert!(symbols.contains("Parser::run"));
+    assert!(symbols.contains("<Parser as Display>::fmt"));
+
+    assert!(!symbols.contains("run"));
+    assert!(!symbols.contains("Parser::parse"));
+    assert!(!symbols.contains(""));
+}
+
+#[test]
 fn rejects_source_that_does_not_parse() {
     assert!(Symbols::parse("fn (").is_err());
 }

@@ -1,3 +1,4 @@
+// qual:allow(srp, file_length=2900) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4k"
 use std::{
     sync::{Arc, LazyLock, Mutex, PoisonError},
     time::Duration,
@@ -53,35 +54,9 @@ use crate::{
 
 pub mod auth;
 pub mod oauth;
-#[cfg(test)]
-pub(crate) mod parity;
 pub mod rate_limits;
 pub(crate) mod resolve;
 pub mod usage;
-
-#[cfg(test)]
-#[path = "openai/auth_rejected_tests.rs"]
-mod auth_rejected_tests;
-
-#[cfg(test)]
-#[path = "openai/fold_tests.rs"]
-mod fold_tests;
-
-#[cfg(test)]
-#[path = "openai/latency_tests.rs"]
-mod latency_tests;
-
-#[cfg(test)]
-#[path = "openai/redeem_tests.rs"]
-mod redeem_tests;
-
-#[cfg(test)]
-#[path = "openai/switchable_tests.rs"]
-mod switchable_tests;
-
-#[cfg(test)]
-#[path = "openai/usage_limit_tests.rs"]
-mod usage_limit_tests;
 
 /// The path the subscription host serves the responses endpoint at.
 ///
@@ -260,64 +235,6 @@ impl Openai {
         resolve::preflight(&provider.config, provider.store.as_ref(), "", Utc::now())?;
 
         Ok(provider)
-    }
-
-    /// Build a provider around an explicit credential, bypassing the chain.
-    ///
-    /// Test seam: no environment or store access, no preflight.
-    #[cfg(test)]
-    pub(crate) fn with_credential(config: &OpenaiConfig, credential: Credential) -> Self {
-        Self {
-            config: config.clone(),
-            store: None,
-            fixed_credential: Some((credential, resolve::Attribution::default())),
-            base_url: config.base_url.clone(),
-            codex_base_url: config.codex_base_url.clone(),
-            reset_budget: RESET_PROPAGATION_BUDGET,
-            reset_interval: RESET_RETRY_INTERVAL,
-            pending_redemption: Arc::new(Mutex::new(None)),
-            client_cache: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    /// Build a provider that resolves its chain against `store`.
-    ///
-    /// Test seam: the chain walks an in-memory store instead of the user's, and
-    /// no preflight runs.
-    #[cfg(test)]
-    pub(crate) fn with_store(config: &OpenaiConfig, store: CredentialStore) -> Self {
-        Self {
-            store: Some(store),
-            fixed_credential: None,
-            ..Self::with_credential(config, Credential::ApiKey(String::new()))
-        }
-    }
-
-    /// Shorten the wait for a redeemed reset, so a test pinning it runs in
-    /// milliseconds rather than the minute production allows.
-    #[cfg(test)]
-    pub(crate) fn with_reset_timing(mut self, budget: Duration, interval: Duration) -> Self {
-        self.reset_budget = budget;
-        self.reset_interval = interval;
-        self
-    }
-
-    /// Build a provider around an explicit subscription credential.
-    ///
-    /// Test seam for recording and replaying the subscription endpoint without
-    /// reading the user's credential store.
-    #[cfg(test)]
-    pub(crate) fn with_subscription_credential(
-        config: &OpenaiConfig,
-        token: String,
-        account_id: String,
-    ) -> Self {
-        let mut provider = Self::with_credential(config, Credential::Bearer(token));
-        let Some((_, attribution)) = &mut provider.fixed_credential else {
-            unreachable!("with_credential always sets a fixed credential");
-        };
-        attribution.account_id = Some(account_id);
-        provider
     }
 
     /// Resolve the credential for a request against `model`.
@@ -1222,145 +1139,6 @@ impl ModelResponse {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn catalog_model_details(name: &str) -> ModelDetails {
-    map_model(ModelResponse::named(name.to_owned())).expect("a valid OpenAI model id")
-}
-
-/// `OpenAI`'s recorded-test routes.
-///
-/// The only provider so far billed two ways, so the only one whose fixtures are
-/// recorded twice and compared.
-#[cfg(test)]
-pub(crate) static TEST_SUPPORT: OpenaiTestSupport = OpenaiTestSupport;
-
-#[cfg(test)]
-pub(crate) struct OpenaiTestSupport;
-
-#[cfg(test)]
-impl super::ProviderTestSupport for OpenaiTestSupport {
-    fn api(&self) -> &'static dyn super::ProviderTestRoute {
-        &API_ROUTE
-    }
-
-    fn subscription(&self) -> Option<&'static dyn super::ProviderTestRoute> {
-        Some(&SUBSCRIPTION_ROUTE)
-    }
-
-    fn assert_rewrite_preserves_meaning(&self, model: &ModelDetails, query: ChatQuery) {
-        parity::assert_rewrite_preserves_meaning(model, query);
-    }
-
-    fn project_request(&self, body: &serde_json::Value) -> serde_json::Value {
-        parity::project_body(body)
-    }
-}
-
-#[cfg(test)]
-static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
-    id: PROVIDER,
-    base_url: |config| config.openai.base_url.clone(),
-    set_base_url: |config, url| config.openai.base_url = url,
-    use_replay_credentials: |config| {
-        config.openai.api_key_env = super::replay_credential_env().into();
-    },
-    // The same model the subscription route records against, read from the
-    // catalog rather than restated here. Comparing two recordings only says
-    // something about the wire dialects when everything else about the request
-    // is held equal, and the model drives reasoning shape, cache handling, and
-    // sampling.
-    model: || catalog_model_details(SHARED_TEST_MODEL),
-};
-
-/// The model both recorded routes use.
-///
-/// Served by a subscription and by the API, and the cheapest model that carries
-/// the full GPT-5.6 feature set.
-#[cfg(test)]
-pub(crate) const SHARED_TEST_MODEL: &str = "gpt-5.6-luna";
-
-#[cfg(test)]
-static SUBSCRIPTION_ROUTE: SubscriptionTestRoute = SubscriptionTestRoute;
-
-/// The `ChatGPT` subscription route.
-///
-/// Recording authenticates exactly as a user's own machine does: through the
-/// credential store, resolved by the same chain a real request walks.
-/// Logging in is a one-time `jp provider llm auth login openai`, and refresh
-/// and rotation are then the production code's problem rather than the
-/// harness's.
-#[cfg(test)]
-pub(crate) struct SubscriptionTestRoute;
-
-#[cfg(test)]
-impl super::ProviderTestRoute for SubscriptionTestRoute {
-    fn base_url(&self, config: &jp_config::providers::llm::LlmProviderConfig) -> String {
-        config.openai.codex_base_url.clone()
-    }
-
-    fn set_base_url(&self, config: &mut jp_config::providers::llm::LlmProviderConfig, url: String) {
-        // The recording server forwards a request's path onto the target's
-        // host and drops whatever path the target URL carried. This is the only
-        // endpoint JP addresses below a path, so the path is restated here to
-        // survive the round trip and reach `…/backend-api/codex/responses`
-        // rather than the web app's front door.
-        config.openai.codex_base_url = format!("{url}/backend-api/codex");
-    }
-
-    fn provider(
-        &self,
-        config: &jp_config::providers::llm::LlmProviderConfig,
-        recording: bool,
-    ) -> std::result::Result<Box<dyn Provider>, String> {
-        // A replayed cassette answers without authenticating, so the token only
-        // has to exist. Reading the store on replay would make the suite
-        // depend on the machine running it.
-        if !recording {
-            return Ok(Box::new(Openai::with_subscription_credential(
-                &config.openai,
-                "test-token".to_owned(),
-                "test-account".to_owned(),
-            )));
-        }
-
-        let profile = super::first_stored_profile(jp_credentials::PROVIDER_OPENAI).ok_or(
-            "recording needs a stored ChatGPT subscription; run `jp provider llm auth login \
-             openai` once",
-        )?;
-
-        let mut config = config.openai.clone();
-        config.auth = vec![AuthEntry::Subscription(Some(profile))];
-
-        Openai::new(&config)
-            .map(|provider| Box::new(provider) as Box<dyn Provider>)
-            .map_err(|error| error.to_string())
-    }
-
-    fn model(&self) -> ModelDetails {
-        catalog_model_details(SHARED_TEST_MODEL)
-    }
-}
-
-#[cfg(test)]
-impl Openai {
-    /// Build the OpenAI wire request for `query` and serialize it to JSON
-    /// without sending.
-    /// Test-only seam for snapshotting request construction (notably compaction
-    /// projection) across providers.
-    #[expect(
-        clippy::unused_self,
-        reason = "uniform per-provider seam; only some providers read instance state"
-    )]
-    pub(crate) fn request_value(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<serde_json::Value> {
-        let (request, ..) = create_request(model, query)?;
-        Ok(serde_json::to_value(request)?)
-    }
-}
-
 /// Create a request for the given model and query details.
 ///
 /// Returns the request, structured-output and reasoning flags, and tool
@@ -1705,8 +1483,6 @@ fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
 /// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
 /// to derive from, so every value here is maintained by hand against OpenAI's
 /// published model documentation.
-// qual:allow(complexity, magic_numbers) reason: "model catalogue: context
-// windows, output limits and cutoff dates are data, not constants"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
@@ -3925,6 +3701,36 @@ impl From<types::response::Error> for Error {
         Self::OpenaiResponse(error)
     }
 }
+
+#[cfg(test)]
+pub(crate) mod parity;
+
+#[cfg(test)]
+pub(crate) mod test_support;
+
+#[cfg(test)]
+#[path = "openai/auth_rejected_tests.rs"]
+mod auth_rejected_tests;
+
+#[cfg(test)]
+#[path = "openai/fold_tests.rs"]
+mod fold_tests;
+
+#[cfg(test)]
+#[path = "openai/latency_tests.rs"]
+mod latency_tests;
+
+#[cfg(test)]
+#[path = "openai/redeem_tests.rs"]
+mod redeem_tests;
+
+#[cfg(test)]
+#[path = "openai/switchable_tests.rs"]
+mod switchable_tests;
+
+#[cfg(test)]
+#[path = "openai/usage_limit_tests.rs"]
+mod usage_limit_tests;
 
 #[cfg(test)]
 #[path = "openai_tests.rs"]

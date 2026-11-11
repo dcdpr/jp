@@ -12,7 +12,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     Finding, Guidance, Policy, Report, Verdict,
-    diff::{self, Renames, RenamesError},
+    diff::{self, Relocation, Renames, RenamesError},
     policy::{self, PolicyError},
     sarif::{self, RawFinding, SarifError},
     symbol::Symbols,
@@ -190,7 +190,88 @@ impl Workspace {
         )?;
         let renames = Renames::from_name_status(&names)?;
 
-        Ok(diff::verdict(&base_report, &head_report, &renames, &policy))
+        let candidates = diff::relocation_candidates(&base_report, &head_report, &renames, &policy);
+        let relocations = self.relocations(runner, sha, candidates, &renames)?;
+
+        Ok(diff::verdict(
+            &base_report,
+            &head_report,
+            &renames,
+            &relocations,
+            &policy,
+        ))
+    }
+
+    /// Keep the `candidates` that the source of both trees confirms.
+    ///
+    /// An item moved when the working tree's [`Relocation::from`] no longer
+    /// defines it and [`Relocation::to`] did not define it at commit `sha`.
+    /// An item that is still in its file was fixed there, and an item that the
+    /// destination already had is a different item with the same symbol.
+    fn relocations(
+        &self,
+        runner: &dyn ProcessRunner,
+        sha: &str,
+        candidates: BTreeSet<Relocation>,
+        renames: &Renames,
+    ) -> Result<BTreeSet<Relocation>, Error> {
+        let mut head = BTreeMap::<String, Option<Symbols>>::new();
+        let mut base = BTreeMap::<String, Option<Symbols>>::new();
+        let mut relocations = BTreeSet::new();
+
+        for candidate in candidates {
+            let source = match head.entry(candidate.from.clone()) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let symbols = head_symbols(&self.root.join(entry.key()))?;
+                    entry.insert(symbols)
+                }
+            };
+            if defines(source.as_ref(), &candidate.symbol) {
+                continue;
+            }
+
+            let destination = match base.entry(candidate.to.clone()) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let path = renames.old_path(entry.key());
+                    let symbols = self.base_symbols(runner, sha, path)?;
+                    entry.insert(symbols)
+                }
+            };
+            if defines(destination.as_ref(), &candidate.symbol) {
+                continue;
+            }
+
+            relocations.insert(candidate);
+        }
+
+        Ok(relocations)
+    }
+
+    /// Index the items of `path` as it is at commit `sha`, or return `None`
+    /// when the commit has no such file.
+    fn base_symbols(
+        &self,
+        runner: &dyn ProcessRunner,
+        sha: &str,
+        path: &str,
+    ) -> Result<Option<Symbols>, Error> {
+        // `git show` fails on a missing path the same way it fails on anything
+        // else, and `ls-tree` prints nothing for one.
+        let list = ["ls-tree", "-z", "--name-only", sha, "--", path];
+        if run(runner, "git", &list, &self.root)?.is_empty() {
+            return Ok(None);
+        }
+
+        let object = format!("{sha}:{path}");
+        let source = run(runner, "git", &["show", &object], &self.root)?;
+        Symbols::parse(&source)
+            .map(Some)
+            .map_err(|source| Error::Parse {
+                path: object.into(),
+                source,
+            })
     }
 
     /// Load remediation guidance for each rule in `rules` that has a file in
@@ -357,6 +438,33 @@ fn locate(tree: &Utf8Path, raw: Vec<(String, RawFinding)>) -> Result<Vec<Finding
     }
 
     Ok(findings)
+}
+
+/// Index the items of the working-tree file at `path`, or return `None` when
+/// the file is gone.
+fn head_symbols(path: &Utf8Path) -> Result<Option<Symbols>, Error> {
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::Read {
+                path: path.to_owned(),
+                source,
+            });
+        }
+    };
+
+    Symbols::parse(&source)
+        .map(Some)
+        .map_err(|source| Error::Parse {
+            path: path.to_owned(),
+            source,
+        })
+}
+
+/// Whether a file, when it exists, has an item at `symbol`.
+fn defines(symbols: Option<&Symbols>, symbol: &str) -> bool {
+    symbols.is_some_and(|symbols| symbols.contains(symbol))
 }
 
 /// Return `true` if `rev` is a full-length SHA-1 or SHA-256 null object ID.

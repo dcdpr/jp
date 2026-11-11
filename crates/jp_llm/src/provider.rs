@@ -489,12 +489,12 @@ impl ProviderTestSupport for UnsupportedTestRoute {
 #[cfg(test)]
 pub(crate) fn provider_test_support(id: ProviderId) -> &'static dyn ProviderTestSupport {
     match id {
-        ProviderId::Anthropic => &anthropic::TEST_SUPPORT,
+        ProviderId::Anthropic => &anthropic::test_support::TEST_SUPPORT,
         ProviderId::Cerebras => &cerebras::TEST_SUPPORT,
-        ProviderId::Google => &google::TEST_SUPPORT,
+        ProviderId::Google => &google::test_support::TEST_SUPPORT,
         ProviderId::Llamacpp => &llamacpp::TEST_SUPPORT,
         ProviderId::Ollama => &ollama::TEST_SUPPORT,
-        ProviderId::Openai => &openai::TEST_SUPPORT,
+        ProviderId::Openai => &openai::test_support::TEST_SUPPORT,
         ProviderId::Openrouter => &openrouter::TEST_SUPPORT,
         ProviderId::Test => &mock::TEST_SUPPORT,
         ProviderId::Vllm => &vllm::TEST_SUPPORT,

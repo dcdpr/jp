@@ -1,3 +1,4 @@
+// qual:allow(srp, file_length=1200) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4m"
 use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
 use async_stream::stream;
@@ -179,26 +180,6 @@ fn call(
             }
         }
     })
-}
-
-#[cfg(test)]
-impl Google {
-    /// Build the Google wire request for `query` and serialize it to JSON
-    /// without sending.
-    /// Test-only seam for snapshotting request construction (notably compaction
-    /// projection) across providers.
-    #[expect(
-        clippy::unused_self,
-        reason = "uniform per-provider seam; only some providers read instance state"
-    )]
-    pub(crate) fn request_value(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<serde_json::Value> {
-        let (request, _) = create_request(model, query)?;
-        Ok(serde_json::to_value(request)?)
-    }
 }
 
 #[expect(clippy::too_many_lines)]
@@ -583,9 +564,6 @@ fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
 /// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
-// qual:allow(complexity, magic_numbers) reason: "model catalogue: thinking
-// budgets and cutoff dates are data maintained against Google's published
-// documentation"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
@@ -1568,34 +1546,8 @@ fn is_function_response_content(content: &types::Content) -> bool {
             .all(|part| matches!(part.data, types::ContentData::FunctionResponse(_)))
 }
 
-/// Google's recorded-test route.
 #[cfg(test)]
-pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
-
-#[cfg(test)]
-static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
-    id: ProviderId::Google,
-    base_url: |config| config.google.base_url.clone(),
-    // The client addresses the API version as part of the host, so the
-    // recording server has to be reachable at the same path.
-    set_base_url: |config, url| config.google.base_url = format!("{url}/v1beta"),
-    use_replay_credentials: |config| {
-        config.google.api_key_env = super::replay_credential_env().into();
-    },
-    model: || ModelDetails {
-        id: "google/gemini-2.5-flash-lite".parse().unwrap(),
-        display_name: None,
-        context_window: Some(200_000),
-        max_output_tokens: Some(64_000),
-        reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        subscription: None,
-        features: vec![],
-    },
-};
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "google_tests.rs"]

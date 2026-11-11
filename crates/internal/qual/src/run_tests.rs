@@ -95,6 +95,11 @@ fn ok(stdout: impl Into<String>) -> io::Result<ProcessOutput> {
     })
 }
 
+/// The answer to a command a test didn't script.
+fn unexpected(spec: &ProcessSpec) -> io::Result<ProcessOutput> {
+    Err(io::Error::other(format!("unexpected command: {spec}")))
+}
+
 fn is_pass(spec: &ProcessSpec, config: &str) -> bool {
     spec.program == "rustqual" && spec.args.get(1).is_some_and(|path| path.ends_with(config))
 }
@@ -268,7 +273,7 @@ fn diff_responder(root: Utf8PathBuf) -> MockProcessRunner {
                 ok(sarif(&[("DRY-002", "src/lib.rs", 5, "dead code: unused")]))
             }
             _ if is_pass(spec, "dry.toml") => ok(sarif(&[])),
-            _ => Err(io::Error::other(format!("unexpected command: {spec}"))),
+            _ => unexpected(spec),
         }
     })
 }
@@ -330,7 +335,7 @@ fn diff_removes_the_base_worktree_when_its_analysis_fails() {
             ("git", ["worktree", "remove", ..]) => ok(""),
             ("rustqual", ["--version"]) => ok("rustqual 1.8.2\n"),
             ("rustqual", _) if spec.dir != root => ok("not sarif"),
-            _ => Err(io::Error::other(format!("unexpected command: {spec}"))),
+            _ => unexpected(spec),
         }
     });
 
@@ -341,6 +346,129 @@ fn diff_removes_the_base_worktree_when_its_analysis_fails() {
         "worktree add",
         "worktree remove"
     ]);
+}
+
+const RUN: &str = indoc! {"
+    pub fn run() -> u32 {
+        42
+    }
+"};
+
+/// Answers a `diff` run in which the magic number in `run` is in `src/lib.rs`
+/// at the base and in `head_file` in the working tree.
+///
+/// `base_source` is what `head_file` held at the base commit, or `None` when
+/// the commit has no such file.
+fn moved_finding_responder(
+    root: Utf8PathBuf,
+    head_file: &'static str,
+    base_source: Option<&'static str>,
+) -> MockProcessRunner {
+    MockProcessRunner::responding(move |spec| {
+        let args: Vec<&str> = spec.args.iter().map(String::as_str).collect();
+        match (spec.program.as_str(), args.as_slice()) {
+            ("git", ["merge-base", "HEAD", "main"]) => ok("0123abcd\n"),
+            ("git", ["worktree", "add", "--detach", tree, "0123abcd"]) => {
+                write_lib(Utf8Path::new(tree));
+                ok("")
+            }
+            ("git", ["worktree", "remove", ..] | ["diff", ..]) => ok(""),
+            ("git", ["ls-tree", "-z", "--name-only", "0123abcd", "--", path])
+                if *path == head_file =>
+            {
+                ok(base_source.map_or_else(String::new, |_| format!("{head_file}\0")))
+            }
+            ("git", ["show", object]) if *object == format!("0123abcd:{head_file}") => {
+                ok(base_source.unwrap_or_default())
+            }
+            ("rustqual", ["--version"]) => ok("rustqual 1.8.2\n"),
+            _ if is_pass(spec, "dry.toml") => ok(sarif(&[])),
+            _ if is_pass(spec, "config.toml") => {
+                let file = if spec.dir == root {
+                    head_file
+                } else {
+                    "src/lib.rs"
+                };
+                ok(sarif(&[("CX-003", file, 2, "Magic number 42 in run")]))
+            }
+            _ => unexpected(spec),
+        }
+    })
+}
+
+fn ran_git(runner: &MockProcessRunner, subcommand: &str) -> bool {
+    runner
+        .calls()
+        .iter()
+        .any(|spec| spec.program == "git" && spec.args.first().is_some_and(|arg| arg == subcommand))
+}
+
+#[test]
+fn diff_follows_a_function_that_moved_to_a_new_file() {
+    let (dir, workspace) = workspace();
+    fs::write(dir.path().join("src/lib.rs"), "fn unused() {}\n").unwrap();
+    fs::write(dir.path().join("src/moved.rs"), RUN).unwrap();
+    let runner = moved_finding_responder(dir.path().to_owned(), "src/moved.rs", None);
+
+    let verdict = workspace.diff(&runner, "main").unwrap();
+
+    assert!(verdict.passed());
+    assert_eq!(verdict.new, vec![]);
+    assert!(ran_git(&runner, "ls-tree"));
+}
+
+/// `src/lib.rs` still defines `run`, so its finding was fixed and not moved:
+/// the `run` in `src/other.rs` is another function, and its finding is new.
+#[test]
+fn diff_reports_a_finding_in_a_namesake_when_the_function_stayed() {
+    let (dir, workspace) = workspace();
+    fs::write(dir.path().join("src/other.rs"), RUN).unwrap();
+    let runner = moved_finding_responder(dir.path().to_owned(), "src/other.rs", Some(RUN));
+
+    let verdict = workspace.diff(&runner, "main").unwrap();
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("src/other.rs", 2, "CX-003", "run", "Magic number 42 in run"),
+        shared: None,
+    }]);
+    // The working tree settled it; the base commit was not consulted.
+    assert!(!ran_git(&runner, "ls-tree"));
+}
+
+/// `run` is gone from `src/lib.rs`, but `src/other.rs` had its own `run` at the
+/// base, so nothing moved into it.
+#[test]
+fn diff_reports_a_finding_in_a_function_the_destination_already_had() {
+    let (dir, workspace) = workspace();
+    fs::write(dir.path().join("src/lib.rs"), "fn unused() {}\n").unwrap();
+    fs::write(dir.path().join("src/other.rs"), RUN).unwrap();
+    let runner = moved_finding_responder(dir.path().to_owned(), "src/other.rs", Some(RUN));
+
+    let verdict = workspace.diff(&runner, "main").unwrap();
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("src/other.rs", 2, "CX-003", "run", "Magic number 42 in run"),
+        shared: None,
+    }]);
+    assert!(ran_git(&runner, "show"));
+}
+
+/// The destination existed at the base without a `run`, so the function moved
+/// into a file that was already there.
+#[test]
+fn diff_follows_a_function_that_moved_to_an_existing_file() {
+    let (dir, workspace) = workspace();
+    fs::write(dir.path().join("src/lib.rs"), "fn unused() {}\n").unwrap();
+    fs::write(dir.path().join("src/other.rs"), RUN).unwrap();
+    let runner = moved_finding_responder(
+        dir.path().to_owned(),
+        "src/other.rs",
+        Some("fn helper() {}\n"),
+    );
+
+    let verdict = workspace.diff(&runner, "main").unwrap();
+
+    assert!(verdict.passed());
 }
 
 #[test]

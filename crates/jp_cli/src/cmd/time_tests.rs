@@ -92,6 +92,7 @@ fn into_datetime() {
     assert_eq!(dt, *t);
 }
 
+// qual:allow(test_quality, no_sut) reason: "calls `From<DateTime<Utc>>` through `.into()`"
 #[test]
 fn from_datetime() {
     let dt = Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap();
