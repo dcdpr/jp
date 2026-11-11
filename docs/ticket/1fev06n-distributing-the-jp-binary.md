@@ -17,13 +17,15 @@ Tracking ticket for [RFD 123].
       Sets JP's `build` option and release toolchain, and makes `jp --version`
       read `SOURCE_DATE_EPOCH`.
       Depends on RFD 122's building phase.
-- [ ] **Add install scripts**: Adds `install.sh` and `install.ps1` as templates
-      a publisher fills in, and replaces the "no binaries" warning in
+- [ ] **Add install scripts**: Adds `install.sh` and `install.ps1` to
+      `.config/release/`, with the `{download}` placeholder a publisher fills in
+      and `JP_DOWNLOAD` to try them, and replaces the "no binaries" warning in
       `docs/installation.md` with them, manual download and checksum
       verification, the macOS quarantine note, and building from source.
       Depends on Phase 1.
-- [ ] **Add `jp release github`**: Creates the plugin with `publish` and `sync`,
-      adds GitHub's Releases API to `jp_github`, and runs `sync` in JP's CI on
+- [ ] **Add `jp release github`**: Creates the plugin with `publish`, its
+      `assets` setting, and `sync`, adds GitHub's Releases API to `jp_github`,
+      sets JP's `assets` to its install scripts, and runs `sync` in JP's CI on
       pushes to `main` that change a version's directory.
       Depends on Phases 1 and 2.
 - [ ] **Release JP's history**: Adds `just backfill` with `init`, `next`,

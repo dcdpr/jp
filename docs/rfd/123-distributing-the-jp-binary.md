@@ -55,7 +55,7 @@ before anything is published.
 | `jp-x86_64-pc-windows-msvc.zip`       |                                                                                     |
 | `checksums.txt`                       | A SHA-256 for each archive, in `sha256sum`'s format                                 |
 | `manifest.json`                       | The version, commit, and profile built, and each archive's platform ([RFD 122]) |
-| `install.sh`, `install.ps1`           | Install scripts, which the publisher adds ([Installation](#installation))           |
+| `install.sh`, `install.ps1`           | Install scripts, which JP's publishers add ([Installation](#installation))          |
 
 The archive names carry no version, so a publisher can serve the newest
 release's files at one address.
@@ -136,8 +136,12 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/dcdpr/jp/releases/
 The scripts detect the platform, download its archive and `checksums.txt`,
 refuse an archive whose checksum doesn't match, and install `jp` into Cargo's
 bin directory (`~/.cargo/bin`), where `cargo install` puts it.
-They are templates in the repository, and a publisher fills in the address it
-serves the release from, so the same scripts work for any publisher.
+They are JP's files, in `.config/release/` next to its build script, and hold a
+`{download}` placeholder for the address a release's files are served from, such
+as `https://github.com/dcdpr/jp/releases/download/v0.3.0`, which the publisher
+fills in, so the same scripts work for any publisher.
+`JP_DOWNLOAD` names another address, such as `file://` and a build's directory,
+to try a script before anything is published.
 An archive downloaded by hand is checked with `sha256sum -c --ignore-missing
 checksums.txt`, and `cargo install --git` with `--tag` builds a release from
 source.
@@ -156,11 +160,21 @@ A workspace that doesn't install it publishes nothing to GitHub but its tags.
 - `jp release github publish 0.3.0` publishes a release's publishable build
   ([RFD 122]): it creates or updates the GitHub Release of `v0.3.0`, titled
   `Release 0.3.0`, uploads the archives, `checksums.txt`, `manifest.json`, and
-  the install scripts filled in with GitHub's download address, and marks the
-  release with the highest version as the latest.
+  the files its `assets` setting names, and marks the release with the highest
+  version as the latest.
+  Each of those files is uploaded with every `{download}` in it replaced by the
+  address GitHub serves the release's files from.
 - `jp release github sync` rewrites the description of each Release whose notes
   changed on `main`, and JP's CI runs it on pushes to `main` that change a
   version's directory.
+
+The install scripts install `jp` alone, so they are JP's to list, and a
+workspace releasing something else lists its own files or none:
+
+```toml
+[plugins.command.release-github.options]
+assets = [".config/release/install.sh", ".config/release/install.ps1"]
+```
 
 A Release's description is the release's notes, rendered from `main` as the site
 renders them, followed by the commands that install that release.
@@ -327,16 +341,17 @@ Depends on [RFD 122] Phase 6.
 
 ### Phase 2: Install scripts
 
-Add `install.sh` and `install.ps1` as templates, and replace the "no binaries"
-warning in `docs/installation.md` with them, manual download and checksum
-verification, the macOS quarantine note, and building from source.
+Add `install.sh` and `install.ps1` to `.config/release/`, with the `{download}`
+placeholder and `JP_DOWNLOAD`, and replace the "no binaries" warning in
+`docs/installation.md` with them, manual download and checksum verification, the
+macOS quarantine note, and building from source.
 Depends on Phase 1.
 
 ### Phase 3: `jp release github`
 
-Create the plugin with `publish` and `sync`, add GitHub's Releases API to
-`jp_github`, and run `sync` in JP's CI on pushes to `main` that change a
-version's directory.
+Create the plugin with `publish`, its `assets` setting, and `sync`, add GitHub's
+Releases API to `jp_github`, set JP's `assets` to its install scripts, and run
+`sync` in JP's CI on pushes to `main` that change a version's directory.
 Depends on Phases 1 and 2.
 
 ### Phase 4: JP's history
