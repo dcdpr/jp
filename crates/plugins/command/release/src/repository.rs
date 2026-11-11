@@ -85,11 +85,18 @@ impl Checkout {
     }
 
     /// That the checkout lacks commits of `origin`'s `main`, and how to bring
-    /// them in.
+    /// them in: `git pull` on `main`, and `git merge origin/main` on any other
+    /// branch, where `git pull` brings in the branch's own upstream.
     pub(crate) fn behind(&self) -> String {
+        let how = if self.branch.as_deref() == Some(MAIN) {
+            "`git pull`".to_owned()
+        } else {
+            format!("`git merge {ORIGIN}/{MAIN}`")
+        };
+
         format!(
             "{} lacks commits {ORIGIN}'s {MAIN} has, at {}; bring them in first, such as with \
-             `git pull`.",
+             {how}.",
             self.describe(),
             short(&self.main)
         )

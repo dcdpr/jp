@@ -265,6 +265,31 @@ fn a_checkout_without_mains_commits_is_refused() {
     );
 }
 
+/// `git pull` on a branch other than `main` brings in that branch's upstream,
+/// not `main`'s commits.
+#[test]
+fn a_branch_behind_main_is_told_to_merge_it() {
+    let fixture = Fixture::new();
+    let behind = fixture.hash("HEAD");
+    fixture.write("src/later.rs", "// Merged later.\n");
+    let main = fixture.commit("A later change");
+    fixture.push();
+    fixture.git(&["switch", "--quiet", "--create", "rehearsal", &behind]);
+    let shell = fixture.shell();
+    let repository = Repository::open(&shell, fixture.root()).unwrap();
+    repository.fetch().unwrap();
+
+    assert_eq!(
+        repository.checkout(),
+        Err(format!(
+            "rehearsal at {} lacks commits origin's main has, at {}; bring them in first, such as \
+             with `git merge origin/main`.",
+            &behind[..7],
+            &main[..7]
+        ))
+    );
+}
+
 #[test]
 fn a_branch_is_set_only_from_where_it_was_read() {
     let fixture = Fixture::new();
