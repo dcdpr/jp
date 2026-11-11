@@ -169,6 +169,37 @@ fn a_build_that_wrote_what_was_asked_for_is_accepted() {
     }]);
 }
 
+/// A release can ship an installer beside an archive for the same platform.
+#[test]
+fn a_target_can_have_several_files() {
+    let out = written();
+    fs::write(out.path().join("jp-setup.exe"), CONTENTS).unwrap();
+    fs::write(
+        out.path().join("checksums.txt"),
+        format!("{HASH}  {ARCHIVE}\n{HASH}  jp-setup.exe\n"),
+    )
+    .unwrap();
+    fs::write(
+        out.path().join("manifest.json"),
+        json!({
+            "format": 1,
+            "version": "0.3.0",
+            "commit": COMMIT,
+            "profile": "release",
+            "artifacts": [
+                { "file": ARCHIVE, "target": TARGET },
+                { "file": "jp-setup.exe", "target": TARGET },
+            ],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let manifest = check(out.path(), &version("0.3.0"), COMMIT, Profile::Release).unwrap();
+
+    assert_eq!(manifest.artifacts.len(), 2);
+}
+
 /// `sha256sum` marks a file it read in binary mode with `*`, and a hash may be
 /// written in either case.
 #[test]
@@ -237,8 +268,6 @@ fn everything_wrong_with_what_a_build_wrote_is_listed() {
         "manifest.json lists `jp-x86_64-unknown-linux-gnu.tar.xz` twice.",
         "manifest.json names no target for `jp-mac.tar.xz`.",
         "manifest.json lists `jp-mac.tar.xz`, which the build didn't write.",
-        "manifest.json lists two archives for x86_64-unknown-linux-gnu: \
-         `jp-x86_64-unknown-linux-gnu.tar.xz` and `jp-linux-copy.tar.xz`.",
         "checksums.txt line 2 isn't a SHA-256 and a file name, as `sha256sum` writes them.",
         "checksums.txt lists `stray.tar.xz`, which manifest.json doesn't.",
         "checksums.txt has no SHA-256 for `jp-linux-copy.tar.xz`.",

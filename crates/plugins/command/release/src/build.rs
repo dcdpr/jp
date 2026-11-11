@@ -66,8 +66,8 @@ pub(crate) const CONTRACT: &str = r#"The build command:
   It has to name {source} and {out}.
 
 What it leaves in {out}:
-  - The files the release ships, such as archives or an installer, at most
-    one for each target.
+  - The files the release ships, such as archives or an installer, each for a
+    target; a target may have several, such as an installer and an archive.
   - checksums.txt: each of those files' SHA-256 and no other's, in the format
     `sha256sum` and `shasum -a 256` write.
   - manifest.json: the version, the commit {source} is at, the profile, and
@@ -307,9 +307,9 @@ fn target(releases: &Releases, tags: &Tags, version: &Version) -> Result<Target,
 /// and return its manifest.
 ///
 /// `manifest.json` has to name what was asked for and list at least one
-/// archive, each a file in `out` for a platform no other archive is for;
-/// `checksums.txt`, in `sha256sum`'s format, has to give each archive the
-/// SHA-256 of its contents, and nothing else may be in `out`.
+/// archive, each a file in `out` with the platform it is for; `checksums.txt`,
+/// in `sha256sum`'s format, has to give each archive the SHA-256 of its
+/// contents, and nothing else may be in `out`.
 /// The error lists every problem found, one sentence each.
 pub(crate) fn check(
     out: &Utf8Path,
@@ -343,7 +343,6 @@ pub(crate) fn check(
     }
 
     let mut files = BTreeSet::new();
-    let mut targets = BTreeMap::new();
     for artifact in &manifest.artifacts {
         let file = artifact.file.as_str();
         if !is_file_name(file) {
@@ -358,13 +357,8 @@ pub(crate) fn check(
             continue;
         }
 
-        let target = artifact.target.trim();
-        if target.is_empty() {
+        if artifact.target.trim().is_empty() {
             problems.push(format!("{MANIFEST} names no target for `{file}`."));
-        } else if let Some(other) = targets.insert(target, file) {
-            problems.push(format!(
-                "{MANIFEST} lists two archives for {target}: `{other}` and `{file}`."
-            ));
         }
         if !out.join(file).is_file() {
             problems.push(format!(
