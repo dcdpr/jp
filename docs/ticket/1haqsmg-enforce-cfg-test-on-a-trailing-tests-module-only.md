@@ -129,7 +129,10 @@ Both `qual` gate interactions from the comment above are resolved:
   Any other file that exceeds 800 lines after moving its `#[cfg(test)]` items
   should receive a `file_length` pin within ~10% of its line count and a
   follow-up split ticket.
-- `qual diff` now matches symbol-scoped findings across files by `(rule,
-  symbol)`, so moving a function into `test_support.rs` does not report its
-  existing findings as new.
+- `qual diff` keeps the baseline of a finding whose item moved to another file,
+  so moving a function into `test_support.rs` does not report its existing
+  findings as new.
+  It follows an item only when the source confirms the move: the old file no
+  longer defines the item, and the new file didn't define it at the base commit.
+  A same-named item in another file gets no credit.
   File-level findings have an empty symbol and remain scoped to their file.

@@ -23,5 +23,9 @@ Split the module into child modules under `provider/openai/` by responsibility:
 
 Lower the `file_length` pin as each responsibility is extracted, and remove the
 suppression once `openai.rs` is under 800 production lines.
-`qual diff` matches symbol-scoped findings across files by `(rule, symbol)`, so
-moving a function does not report its existing findings as new.
+A function that moves to a child module keeps the baseline of its existing
+findings: `qual diff` follows an item once the old file no longer defines it and
+the new file didn't define it at the base commit.
+Move a function whole.
+A function left behind under its old name, or moved into a file that already had
+an item of that name, has its findings reported as new.

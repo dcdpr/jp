@@ -67,3 +67,13 @@ Two things differ from the description:
 
 If a force-push to `main` leaves the previous tip unreachable in the clone, `git
 merge-base` fails and `qual` exits with code 2, failing the job.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T15:09:42Z
+
+Verified after merge (#1319): the `qual` job ran on the push to `main`, with the
+full checkout and `github.event.before` as the base, and failed a pull request
+on a probe finding with an `::error` annotation on its line.
+`qual` is a required status check on `main`.

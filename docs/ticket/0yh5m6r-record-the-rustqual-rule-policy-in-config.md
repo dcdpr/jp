@@ -1,6 +1,6 @@
 # Record the rustqual rule policy in config
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -178,3 +178,20 @@ Decided later on 2026-11-11:
 
 All items under *To decide* are resolved.
 Follow-up Clippy work is tracked in T-1haqqbv and T-1haa4rr.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T15:09:41Z
+
+Closed: every item under *To decide* has a decision, recorded in the comments
+above and applied in `.config/rustqual/`.
+
+What the decisions leave open is tracked elsewhere:
+
+- `BP-002`, `IET` and the cluster half of `SRP-002` come back once the vendored
+  rustqual fixes them (T-1dhk659, *Exemptions to lift*).
+- `TQ-003` moves onto coverage data in T-1ha99kp.
+- The `unsafe` sites (`CX-006`) are not marked yet.
+  T-1haa4rr decides whether they get `qual:allow(unsafe)` markers or `//
+  SAFETY:` comments under `clippy::undocumented_unsafe_blocks`.
