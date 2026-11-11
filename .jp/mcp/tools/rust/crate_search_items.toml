@@ -3,6 +3,11 @@ enable = false
 run = "allow"
 
 source = "mcp.bookworm.crate_search_items"
+
+# Independent reads against crates.io and docs.rs, bounded to stay polite to
+# both; every failure is reported.
+fan_out = { concurrency = 4 }
+
 summary = "Search for item definitions within a crate."
 description = """\
 Returns a list of items (modules, types, functions, methods, traits, variants, \

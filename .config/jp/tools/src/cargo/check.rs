@@ -3,16 +3,16 @@ use std::collections::BTreeSet;
 use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
-use super::MAX_DIAGNOSTIC_BYTES;
+use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope, comfort_scope};
 use crate::util::{ToolResult, error, truncate};
 
-/// Run clippy and comfort over the workspace or one package, and, with
-/// `wiki_check`, `jp wiki check` over the workspace's wiki.
+/// Run clippy and comfort over `packages`, or the whole workspace when it is
+/// empty, and, with `wiki_check`, `jp wiki check` over the workspace's wiki.
 pub(crate) async fn cargo_check(
     root: &Utf8Path,
     rustflags: &str,
     profile: Option<&str>,
-    package: Option<String>,
+    packages: &[String],
     checksum_freshness: bool,
     wiki_check: bool,
 ) -> ToolResult {
@@ -20,7 +20,7 @@ pub(crate) async fn cargo_check(
         root,
         rustflags,
         profile,
-        package.as_deref(),
+        packages,
         Checks {
             checksum_freshness,
             wiki: wiki_check,
@@ -43,11 +43,11 @@ fn cargo_check_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
     profile: Option<&str>,
-    package: Option<&str>,
+    packages: &[String],
     checks: Checks,
     runner: &R,
 ) -> ToolResult {
-    let clippy_scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+    let clippy_scope = cargo_scope(packages, "--workspace");
     let profile_arg = profile.map(|name| format!("--profile={name}"));
 
     let mut env = vec![("RUSTFLAGS", rustflags)];
@@ -59,16 +59,19 @@ fn cargo_check_impl<R: ProcessRunner>(
         env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
     }
 
-    let mut args = vec![
-        "clippy",
-        "--color=never",
-        clippy_scope.as_str(),
+    let mut args = vec!["clippy", "--color=never"];
+    args.extend(clippy_scope.iter().map(String::as_str));
+    args.extend([
         "--quiet",
+        // Cargo stops scheduling new crates after the first one fails to
+        // compile, so an error in one package would hide the diagnostics of
+        // every package not yet started.
+        "--keep-going",
         "--all-targets",
         // Matches `just lint-ci`. Code behind an optional feature is not
         // compiled without this, so its lints surface only on CI.
         "--all-features",
-    ];
+    ]);
     if let Some(profile) = profile_arg.as_deref() {
         args.push(profile);
     }
@@ -87,7 +90,7 @@ fn cargo_check_impl<R: ProcessRunner>(
     let clippy = truncate(clippy.trim(), MAX_DIAGNOSTIC_BYTES);
 
     let mut notes = vec![];
-    match comfort_check(root, package, runner)? {
+    match comfort_check(root, packages, runner)? {
         ComfortCheck::Clean => {}
         ComfortCheck::Drift(note) => notes.push(note),
         ComfortCheck::Failed(stderr) => {
@@ -172,17 +175,12 @@ enum ComfortCheck {
 /// [`ComfortCheck::Drift`] note rather than an error.
 fn comfort_check<R: ProcessRunner>(
     root: &Utf8Path,
-    package: Option<&str>,
+    packages: &[String],
     runner: &R,
 ) -> Result<ComfortCheck, std::io::Error> {
     // The style comes from `.comfort.toml` at `root`, which comfort runs in.
     let mut comfort_args = vec!["--check", "--list-changed", "--language", "rust"];
-    if let Some(pkg) = package {
-        comfort_args.push("--package");
-        comfort_args.push(pkg);
-    } else {
-        comfort_args.push("--workspace");
-    }
+    comfort_args.extend(comfort_scope(packages));
 
     let ProcessOutput {
         stderr,

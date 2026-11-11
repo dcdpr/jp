@@ -51,7 +51,7 @@ fn test_cargo_check_with_warnings() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -89,7 +89,7 @@ fn test_cargo_check_no_warnings() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -120,7 +120,7 @@ fn clean_clippy_with_comfort_drift_appends_note() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -159,7 +159,7 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -196,7 +196,7 @@ fn comfort_drift_listing_is_bounded() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -233,7 +233,7 @@ fn comfort_real_failure_is_reported_as_error() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -262,7 +262,7 @@ fn clippy_failure_short_circuits_before_running_comfort() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -286,6 +286,7 @@ fn package_scope_is_passed_through_to_both_tools() {
             "--color=never",
             "--package=my_pkg",
             "--quiet",
+            "--keep-going",
             "--all-targets",
             "--all-features",
         ])
@@ -305,7 +306,7 @@ fn package_scope_is_passed_through_to_both_tools() {
         &ctx.root,
         "-W warnings",
         None,
-        Some("my_pkg"),
+        &["my_pkg".to_owned()],
         Checks::default(),
         &runner,
     )
@@ -314,6 +315,60 @@ fn package_scope_is_passed_through_to_both_tools() {
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."
     );
+}
+
+/// Several packages are checked in one clippy run and one comfort run, so
+/// shared dependencies compile once.
+#[test]
+fn each_package_is_passed_through_to_both_tools() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "clippy",
+            "--color=never",
+            "--package=jp_storage",
+            "--package=jp_workspace",
+            "--quiet",
+            "--keep-going",
+            "--all-targets",
+            "--all-features",
+        ])
+        .returns_success("")
+        .expect("comfort")
+        .args(&[
+            "--check",
+            "--list-changed",
+            "--language",
+            "rust",
+            "--package",
+            "jp_storage",
+            "--package",
+            "jp_workspace",
+        ])
+        .returns_success("")
+        .expect("jp")
+        .args(&["--no-interactive", "wiki", "check"])
+        .returns_success("Checked 12 pages: 0 errors, 0 warnings.\n");
+
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        &["jp_storage".to_owned(), "jp_workspace".to_owned()],
+        WIKI,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+    // The wiki check covers the whole wiki, so it runs once however many
+    // packages are named.
+    assert_eq!(runner.calls().len(), 3);
 }
 
 /// The configured profile has to reach clippy.
@@ -332,6 +387,7 @@ fn profile_is_passed_through_to_clippy() {
             "--color=never",
             "--workspace",
             "--quiet",
+            "--keep-going",
             "--all-targets",
             "--all-features",
             "--profile=agent",
@@ -344,7 +400,7 @@ fn profile_is_passed_through_to_clippy() {
         &ctx.root,
         "-W warnings",
         Some("agent"),
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -368,6 +424,7 @@ fn clippy_gets_no_profile_flag_unless_configured() {
             "--color=never",
             "--workspace",
             "--quiet",
+            "--keep-going",
             "--all-targets",
             "--all-features",
         ])
@@ -379,7 +436,7 @@ fn clippy_gets_no_profile_flag_unless_configured() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -410,7 +467,7 @@ fn checksum_freshness_reaches_cargo() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks {
             checksum_freshness: true,
             wiki: false,
@@ -445,7 +502,7 @@ fn checksum_freshness_is_absent_unless_opted_into() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -481,7 +538,7 @@ fn a_clean_wiki_adds_nothing() {
         .args(&["--no-interactive", "wiki", "check"])
         .returns_success("Checked 12 pages: 0 errors, 0 warnings.\n");
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WIKI, &runner).unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -509,7 +566,7 @@ fn wiki_findings_are_reported() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WIKI, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             `cargo clippy` found no warnings or errors.
@@ -539,7 +596,7 @@ fn a_wiki_that_cant_be_checked_is_a_note() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WIKI, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             `cargo clippy` found no warnings or errors.

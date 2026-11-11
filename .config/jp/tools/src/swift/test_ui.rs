@@ -23,7 +23,7 @@ use super::{
     report::{
         RESULT_BUNDLE, UI_BUNDLE, bundle_document, bundle_issues, clear_result_bundle,
         clear_screenshots, close_leftover_apps, collect_failures, collect_screenshots,
-        collect_staged_issues, executed_tests, outcome, ui_bundle_filter,
+        collect_staged_issues, executed_tests, outcome, ui_bundle_filter, unmatched,
     },
 };
 use crate::util::{ToolResult, error};
@@ -117,7 +117,7 @@ fn swift_test_ui_impl<R: ProcessRunner>(
     // Emptied before the run so what is collected afterwards belongs to it and
     // not to the run before.
     clear_screenshots();
-    clear_result_bundle(&ctx.root);
+    clear_result_bundle(&ctx.root, RESULT_BUNDLE);
 
     let Finished { output, ended } = run(ctx, tests, runner)?;
 
@@ -128,7 +128,7 @@ fn swift_test_ui_impl<R: ProcessRunner>(
     // failure — and holds the same expectations and comments as plain text. The
     // log the tests keep themselves is last, and needed only for a failure
     // recorded before the runner wrote anything.
-    let document = bundle_document(ctx, runner);
+    let document = bundle_document(ctx, RESULT_BUNDLE, runner);
     let reported = document
         .as_ref()
         .and_then(bundle_issues)
@@ -164,34 +164,6 @@ fn swift_test_ui_impl<R: ProcessRunner>(
     }
 
     Ok(format!("```\n{summary}\n```").into())
-}
-
-/// The requested names that nothing in `executed` answers to.
-///
-/// A name is either a whole test (`Suite/test()`) or a suite standing for
-/// everything beneath it, so a name is matched by an identifier that equals it
-/// or continues it after a `/`.
-///
-/// Empty when `executed` is, which is deliberate: an unreadable bundle means
-/// the question cannot be answered, and answering "none of them ran" would fail
-/// a suite that passed.
-fn unmatched(requested: &[String], executed: &[String]) -> Vec<String> {
-    if executed.is_empty() {
-        return Vec::new();
-    }
-
-    requested
-        .iter()
-        .filter(|name| {
-            !executed.iter().any(|id| {
-                id == *name
-                    || id
-                        .strip_prefix(name.as_str())
-                        .is_some_and(|rest| rest.starts_with('/'))
-            })
-        })
-        .cloned()
-        .collect()
 }
 
 /// Every test in the UI bundle, as `xcodebuild` reports them.

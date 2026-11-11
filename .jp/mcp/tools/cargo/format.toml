@@ -11,5 +11,6 @@ results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.cargo_format.parameters.package]
-description = "Package to format, if unspecified, all workspace packages will be formatted."
-type = "string"
+description = "Package, or list of packages, to format in one run. If unspecified, all workspace packages will be formatted."
+type = ["string", "array"]
+items.type = "string"

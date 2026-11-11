@@ -6,6 +6,11 @@ style.parameters = "function_call"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Each operation is its own history query; reads run unbounded and every
+# failure is reported.
+fan_out = true
+
 summary = "Search the git commit history."
 description = """
 Returns a list of commits matching the given filters. Each entry includes the short hash, author, \

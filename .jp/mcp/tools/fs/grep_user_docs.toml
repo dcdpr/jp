@@ -17,6 +17,11 @@ options.suppress = [".git/", "**/target/"]
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Searches are independent reads, so they run unbounded and every failure is
+# reported.
+fan_out = true
+
 summary = "Grep the project's user documentation."
 
 examples = """

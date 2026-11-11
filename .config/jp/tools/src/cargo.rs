@@ -134,7 +134,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 &root,
                 &rustflags,
                 profile.as_deref(),
-                t.opt("package")?,
+                &packages(t.opt("package")?),
                 checksum_freshness,
                 t.option_or("wiki_check", false),
             )
@@ -156,14 +156,14 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 &root,
                 &rustflags,
                 profile.as_deref(),
-                t.opt("package")?,
+                &packages(t.opt("package")?),
                 t.opt("testname")?,
                 t.opt("backtrace")?,
                 checksum_freshness,
             )
             .await
         }
-        "format" => cargo_format(&root, &rustflags, t.opt("package")?).await,
+        "format" => cargo_format(&root, &rustflags, &packages(t.opt("package")?)).await,
         "install_tools" => cargo_install_tools(&root).await,
         "update" => cargo_update(&root, t.req("packages")?).await,
         _ => return unknown_tool(t),
@@ -176,6 +176,38 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     }
 
     note_root(outcome, &root, "cargo")
+}
+
+/// The packages named by a `package` argument, given as a string or an array of
+/// strings.
+///
+/// An unset argument and an empty array both return no packages, which every
+/// subcommand reads as the whole workspace.
+fn packages(arg: Option<OneOrMany<String>>) -> Vec<String> {
+    arg.map(OneOrMany::into_vec).unwrap_or_default()
+}
+
+/// Cargo flags that scope a run to `packages`: one `--package=<name>` per
+/// package, or `workspace_flag` alone when `packages` is empty.
+fn cargo_scope(packages: &[String], workspace_flag: &str) -> Vec<String> {
+    if packages.is_empty() {
+        return vec![workspace_flag.to_owned()];
+    }
+
+    packages.iter().map(|v| format!("--package={v}")).collect()
+}
+
+/// Comfort flags that scope a run to `packages`: a `--package <name>` pair per
+/// package, or `--workspace` when `packages` is empty.
+fn comfort_scope(packages: &[String]) -> Vec<&str> {
+    if packages.is_empty() {
+        return vec!["--workspace"];
+    }
+
+    packages
+        .iter()
+        .flat_map(|v| ["--package", v.as_str()])
+        .collect()
 }
 
 /// Refuse a redirected root that cargo treats as a member of a larger

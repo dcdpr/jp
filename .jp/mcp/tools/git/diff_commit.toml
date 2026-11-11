@@ -6,6 +6,11 @@ style.parameters = "function_call"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# One revision per operation; reads run unbounded and every failure is
+# reported.
+fan_out = true
+
 summary = "Show the actual diff for specific files in a commit."
 description = """
 Returns the diff content for the given files in a commit. The `paths` \
