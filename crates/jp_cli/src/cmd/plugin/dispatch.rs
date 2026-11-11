@@ -70,12 +70,16 @@ use super::{
 };
 use crate::{
     Ctx, KeyValueOrPath, cmd,
-    cmd::query::{
-        NewTitle, PendingStreamTrim, TurnInputs,
-        interrupt::{
-            Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
+    cmd::{
+        conversation::compact::{apply_compactions, build_compaction_events},
+        query::{
+            NewTitle, PendingStreamTrim, TurnInputs,
+            interrupt::{
+                Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
+            },
+            last_request_id, resolve_new_title, turn_structured_data,
         },
-        last_request_id, resolve_new_title, turn_structured_data,
+        turn_selection::TurnSelection,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -952,6 +956,8 @@ async fn run_query(
     };
 
     let new = request.new;
+    // A conversation the request creates has nothing to compact.
+    let compact = request.compact && !new;
     let lock = match lock_for_query(ctx, &request, expires_at) {
         Ok(lock) => lock,
         Err(error) => return failed(error),
@@ -1027,6 +1033,7 @@ async fn run_query(
         &lock,
         chat_request.clone(),
         interrupts,
+        compact,
     )
     .await;
     ctx.swap_config(host_config);
@@ -1311,6 +1318,7 @@ async fn prepare_turn(
     lock: &ConversationLock,
     chat_request: ChatRequest,
     interrupts: TurnInterrupts,
+    compact: bool,
 ) -> Result<(TurnInputs, ConversationStream), cmd::Error> {
     // The client was built from the config this host read at startup. A provider
     // added to the workspace since then is otherwise unknown to it, and starting
@@ -1346,6 +1354,10 @@ async fn prepare_turn(
     // was last used, which is what orders the list.
     lock.as_mut()
         .update_metadata(|meta| meta.last_activated_at = chrono::Utc::now());
+
+    if compact {
+        compact_before_turn(lock, &config).await?;
+    }
 
     // Recorded before the turn, so the conversation carries the change that
     // produced it rather than a turn whose configuration came from nowhere.
@@ -1396,6 +1408,32 @@ async fn prepare_turn(
     .await?;
 
     Ok((inputs, stream))
+}
+
+/// Compact the conversation `lock` holds with its configured rules, as `jp
+/// query --compact` does, before a delegated turn reads it.
+///
+/// The message loop waits for this.
+/// The built-in rules strip reasoning and tool calls without calling a model,
+/// but a configured summary rule calls one.
+async fn compact_before_turn(
+    lock: &ConversationLock,
+    config: &AppConfig,
+) -> Result<(), cmd::Error> {
+    let events = lock.events().clone();
+    let notices = NoticeSink::new(|notice| warn!(%notice, "Compaction notice."));
+    let compactions = build_compaction_events(
+        &events,
+        config,
+        &config.conversation.compaction.rules,
+        &TurnSelection::default(),
+        None,
+        &notices,
+    )
+    .await?;
+    apply_compactions(&lock.as_mut(), compactions);
+
+    Ok(())
 }
 
 /// Decide how a conversation nobody has named gets a title from its first

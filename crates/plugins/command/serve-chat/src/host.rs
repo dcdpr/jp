@@ -75,11 +75,12 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// finishes.
     fn start(&self, turn: NewTurn) -> impl Future<Output = Result<(String, Turn), String>> + Send;
 
-    /// Start a turn on an existing `conversation`.
+    /// Start a turn on an existing `conversation`, compacting it first when
+    /// `compact` is set.
     ///
     /// The request reaches the host before this returns, so a reply sent after
     /// it reaches the host after it.
-    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn;
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>, compact: bool) -> Turn;
 
     /// Inject `content` into the running turn on `conversation` as a user
     /// reply.
@@ -244,6 +245,7 @@ impl Host for HostClient {
                 cfg: turn.cfg,
                 schema: None,
                 expires_in: Some(turn.expires_in),
+                compact: false,
             });
 
             // Register both waiters before sending the request so a fast turn cannot
@@ -277,7 +279,7 @@ impl Host for HostClient {
         }
     }
 
-    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn {
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>, compact: bool) -> Turn {
         let id = self.next_id();
         let message = PluginToHost::Query(QueryRequest {
             id: Some(id.clone()),
@@ -288,6 +290,7 @@ impl Host for HostClient {
             cfg,
             schema: None,
             expires_in: None,
+            compact,
         });
 
         // Written now rather than when the turn is first awaited, so it precedes

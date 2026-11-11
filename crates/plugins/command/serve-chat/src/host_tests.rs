@@ -111,7 +111,7 @@ async fn a_query_is_written_before_its_turn_is_awaited() {
 
     let turn = f
         .client
-        .query("c1", "Hi", vec!["personas/planner".to_owned()]);
+        .query("c1", "Hi", vec!["personas/planner".to_owned()], true);
 
     assert_eq!(f.written.messages(), vec![PluginToHost::Query(
         QueryRequest {
@@ -123,6 +123,7 @@ async fn a_query_is_written_before_its_turn_is_awaited() {
             cfg: vec!["personas/planner".to_owned()],
             schema: None,
             expires_in: None,
+            compact: true,
         }
     )]);
 
@@ -134,7 +135,7 @@ async fn a_query_is_written_before_its_turn_is_awaited() {
 async fn a_query_the_host_refuses_fails_with_its_message() {
     let f = fixture();
 
-    let turn = f.client.query("c1", "Hi", vec![]);
+    let turn = f.client.query("c1", "Hi", vec![], false);
     answer(&f.host, &error("1", "conversation is locked"));
 
     assert_eq!(within(turn).await, Err("conversation is locked".to_owned()));
@@ -304,7 +305,7 @@ async fn a_closed_host_ends_every_waiting_request_and_shuts_down() {
         ..
     } = fixture();
 
-    let turn = client.query("c1", "Hi", vec![]);
+    let turn = client.query("c1", "Hi", vec![], false);
     drop(host);
 
     assert_eq!(
@@ -331,7 +332,7 @@ async fn a_shutdown_message_shuts_down() {
 async fn an_answer_nobody_waits_for_is_dropped() {
     let f = fixture();
 
-    let turn = f.client.query("c1", "Hi", vec![]);
+    let turn = f.client.query("c1", "Hi", vec![], false);
     answer(&f.host, &query_complete("99"));
     answer(&f.host, &query_complete("1"));
 

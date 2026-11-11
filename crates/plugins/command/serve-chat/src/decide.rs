@@ -34,10 +34,18 @@ pub(crate) enum Action {
 
     /// Start the chat's next turn in a new conversation.
     NewConversation,
+
+    /// Compact the chat's conversation before its next turn.
+    Compact,
 }
 
 impl Action {
-    const ALL: [Self; 3] = [Self::Ignore, Self::Answer, Self::NewConversation];
+    const ALL: [Self; 4] = [
+        Self::Ignore,
+        Self::Answer,
+        Self::NewConversation,
+        Self::Compact,
+    ];
 
     /// The option's name in the question and the answer.
     fn key(self) -> &'static str {
@@ -45,6 +53,7 @@ impl Action {
             Self::Ignore => "ignore",
             Self::Answer => "answer",
             Self::NewConversation => "new_conversation",
+            Self::Compact => "compact",
         }
     }
 
@@ -62,6 +71,10 @@ impl Action {
             Self::NewConversation => {
                 "The last message asks the assistant to start over in a new, empty conversation, \
                  and asks nothing else."
+            }
+            Self::Compact => {
+                "The last message asks the assistant to compact, shorten, or clean up its current \
+                 conversation while keeping it, and asks nothing else."
             }
         }
     }

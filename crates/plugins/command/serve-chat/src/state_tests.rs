@@ -59,6 +59,39 @@ fn a_forgotten_chat_has_no_conversation_after_a_restart() {
     assert_eq!(reopened.conversation(&other, day(7)), Some("17624160001"));
 }
 
+/// The mark survives a restart, and is taken once.
+#[test]
+fn a_compaction_mark_is_kept_until_it_is_taken() {
+    let dir = Utf8TempDir::new().unwrap();
+    let chat = Chat::Group("Z3JvdXA=".to_owned());
+    let mut state = State::open(dir.path()).unwrap();
+    state.set(&chat, day(7), "17624160000").unwrap();
+
+    assert_eq!(state.compact_next(&chat, day(7)), Ok(true));
+
+    let mut reopened = State::open(dir.path()).unwrap();
+    assert_eq!(reopened.take_compact(&chat), Ok(true));
+    assert_eq!(reopened.take_compact(&chat), Ok(false));
+    assert_eq!(
+        State::open(dir.path()).unwrap().take_compact(&chat),
+        Ok(false)
+    );
+}
+
+/// Yesterday's conversation is not the one a daily chat's next turn uses.
+#[test]
+fn a_chat_without_a_conversation_this_period_has_nothing_to_compact() {
+    let mut state = State::in_memory();
+    let chat = Chat::Group("Z3JvdXA=".to_owned());
+    state.set(&chat, day(6), "17624160000").unwrap();
+
+    assert_eq!(state.compact_next(&chat, day(7)), Ok(false));
+    assert_eq!(
+        state.compact_next(&Chat::Direct("+31600000000".to_owned()), day(7)),
+        Ok(false)
+    );
+}
+
 #[test]
 fn an_unreadable_state_file_is_an_error() {
     let dir = Utf8TempDir::new().unwrap();

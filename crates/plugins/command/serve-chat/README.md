@@ -74,13 +74,20 @@ The model answers one `choice` question, picking one of:
 | `answer`           | Runs a turn for the message, or hands it to the running one |
 | `ignore`           | Nothing; the message is for the other people in the chat    |
 | `new_conversation` | Replies that the next message starts a new conversation     |
+| `compact`          | Replies that the next turn compacts the conversation first  |
+
+Compacting applies `conversation.compaction.rules`, as `jp query --compact`
+does.
+The built-in rule strips reasoning and tool calls from every turn but the first
+and the last, without calling a model.
 
 - The bridge takes the action only when the model gives it at least `threshold`;
   otherwise, and when the API fails, the message is answered, and a failure is
   logged.
 - A message sent to the assistant (a direct message, a mention, or a reply to
-  it) is never ignored, and only such a message can start a new conversation, so
-  two people talking about starting over don't reset it.
+  it) is never ignored, and only such a message can start a new conversation or
+  compact the current one, so two people talking about starting over don't reset
+  it.
 - The model reads the chat's last eight lines, the assistant's answers included,
   so a follow-up such as "why?" can count as meant for it.
   Those lines leave the machine: they go to `decide.url`.

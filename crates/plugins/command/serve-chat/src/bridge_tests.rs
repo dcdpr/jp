@@ -119,10 +119,12 @@ impl Host for FakeHost {
         future::ready(Ok((conversation, self.turn())))
     }
 
-    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn {
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>, compact: bool) -> Turn {
         {
             let mut log = self.0.lock().unwrap();
-            log.calls.push(format!("query {conversation} {content:?}"));
+            let compacted = if compact { " compacted" } else { "" };
+            log.calls
+                .push(format!("query {conversation}{compacted} {content:?}"));
             log.cfgs.push(cfg);
         }
         self.turn()
@@ -937,6 +939,75 @@ async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
 
     let calls = f.host.calls();
     assert!(calls[1].starts_with("start "), "{calls:?}");
+}
+
+/// "@JP compact" gets no turn of its own: the chat's next turn compacts the
+/// conversation first, and only that one.
+#[tokio::test]
+async fn asking_to_compact_compacts_before_the_next_turn() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Compact, 0.9)),
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Answer, 0.9)),
+    ]);
+    let to_you = |text: &str| Inbound {
+        addressed: true,
+        ..in_group(CLIENT, text)
+    };
+    f.receive(to_you("what's next?"));
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.outbox.take();
+
+    f.receive(to_you("compact please"));
+    f.settle().await;
+
+    assert_eq!(f.outbox.take(), vec![format!(
+        "send group:Z3JvdXA=: {COMPACT}"
+    )]);
+    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
+
+    f.receive(to_you("and now?"));
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.receive(to_you("and after that?"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls()[1..], [
+        "query c1 compacted \"Ada Client (to you): and now?\"",
+        "query c1 \"Ada Client (to you): and after that?\"",
+    ]);
+}
+
+#[tokio::test]
+async fn asking_to_compact_before_any_conversation_says_there_is_none() {
+    let (mut f, _) = deciding(vec![Ok(verdict(Action::Compact, 0.9))]);
+
+    f.receive(from(CLIENT, "compact please"));
+    f.settle().await;
+
+    assert_eq!(f.outbox.take(), vec![format!(
+        "send direct:+31611111111: {NOTHING_TO_COMPACT}"
+    )]);
+    assert!(f.host.calls().is_empty());
+}
+
+/// Two people talking about tidying up don't compact the assistant's
+/// conversation: only a message sent to it can.
+#[tokio::test]
+async fn talk_between_people_cannot_compact_the_conversation() {
+    let (mut f, _) = deciding(vec![Ok(verdict(Action::Compact, 0.9))]);
+
+    f.receive(in_group(CLIENT, "let's clean up this thread"));
+    f.settle().await;
+    f.settle().await;
+
+    assert!(f.outbox.take().iter().all(|sent| !sent.contains(COMPACT)));
+    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
 }
 
 /// Two people talking about starting over don't reset the assistant's

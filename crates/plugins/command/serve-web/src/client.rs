@@ -167,6 +167,7 @@ impl PluginClient {
             content: content.to_owned(),
             schema: None,
             expires_in: None,
+            compact: false,
         });
 
         match self.request_within(&id, &msg, None).await? {
@@ -214,6 +215,7 @@ impl PluginClient {
             cfg,
             schema: None,
             expires_in: None,
+            compact: false,
         });
 
         // Both waiters before the request goes out. Registering the second one

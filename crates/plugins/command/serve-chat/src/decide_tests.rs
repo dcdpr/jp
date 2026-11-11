@@ -30,7 +30,7 @@ fn the_request_asks_one_choice_between_the_actions() {
         .keys()
         .collect();
     options.sort();
-    assert_eq!(options, ["answer", "ignore", "new_conversation"]);
+    assert_eq!(options, ["answer", "compact", "ignore", "new_conversation"]);
 }
 
 /// Shaped like the `choice` answer in Jev's documentation.
@@ -70,8 +70,8 @@ fn an_answer_the_bridge_cant_act_on_is_an_error() {
             "the decide API's answer has no `answers.action.choice`",
         ),
         (
-            json!({ "answers": { "action": { "choice": "compact", "probabilities": { "compact": 1.0 } } } }),
-            "the decide API chose `compact`, which isn't an option",
+            json!({ "answers": { "action": { "choice": "summarize", "probabilities": { "summarize": 1.0 } } } }),
+            "the decide API chose `summarize`, which isn't an option",
         ),
         (
             json!({ "answers": { "action": { "choice": "answer", "probabilities": { "ignore": 1.0 } } } }),

@@ -8,7 +8,7 @@
 //! Any other message waits in the [`Queue`].
 //! Before either, a message can wait in the [`Inbox`] for a model to decide
 //! what to do with it: answer it, ignore it, or start the chat's next turn in a
-//! new conversation.
+//! new or a compacted conversation.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
@@ -57,6 +57,10 @@ const SILENT: &str = "NO_REPLY";
 const FAILED: &str = "Sorry, that didn't work. The bridge's log says why.";
 
 const NEW_CONVERSATION: &str = "Your next message starts a new conversation.";
+
+const COMPACT: &str = "I'll compact this conversation before answering your next message.";
+
+const NOTHING_TO_COMPACT: &str = "There's no conversation to compact yet.";
 
 const PAUSED: &str = "Changes are paused until the last ones have been reviewed. I'll answer as \
                       soon as that's done.";
@@ -313,6 +317,17 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     }
                     self.outbox.send(&incoming.chat, NEW_CONVERSATION);
                 }
+                Action::Compact => {
+                    let reply = match self.state.compact_next(&incoming.chat, self.period()) {
+                        Ok(true) => COMPACT,
+                        Ok(false) => NOTHING_TO_COMPACT,
+                        Err(error) => {
+                            self.host.log(Level::ERROR, &error);
+                            FAILED
+                        }
+                    };
+                    self.outbox.send(&incoming.chat, reply);
+                }
             }
         }
         self.pump();
@@ -550,11 +565,20 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             .state
             .conversation(&waiting.chat, period)
             .map(ToOwned::to_owned);
+        // A mark that couldn't be cleared was still set.
+        let compact = self
+            .state
+            .take_compact(&waiting.chat)
+            .unwrap_or_else(|error| {
+                self.host.log(Level::ERROR, &error);
+                true
+            });
         let request = TurnRequest {
             content: waiting.texts.join("\n\n"),
             title: title(&self.options, &waiting, period),
             cfg: cfg(&self.options, &waiting.person),
             expires_in: self.options.conversation_ttl.clone(),
+            compact,
         };
         let host = self.host.clone();
         let events = self.events_tx.clone();
@@ -609,7 +633,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 /// failed, the message is answered: a wasted turn costs less than a question
 /// nobody answers.
 /// A message sent to the assistant is never ignored, and only such a message
-/// can start a new conversation, so talk between people can't reset it.
+/// can start a new conversation or compact the current one, so talk between
+/// people can't change what the assistant remembers.
 fn action(verdict: Option<Verdict>, incoming: &Incoming, threshold: f64) -> Action {
     let Some(verdict) = verdict.filter(|verdict| verdict.probability >= threshold) else {
         return Action::Answer;
@@ -617,7 +642,7 @@ fn action(verdict: Option<Verdict>, incoming: &Incoming, threshold: f64) -> Acti
 
     match verdict.action {
         Action::Ignore if incoming.addressed => Action::Answer,
-        Action::NewConversation if !incoming.addressed => Action::Answer,
+        Action::NewConversation | Action::Compact if !incoming.addressed => Action::Answer,
         action => action,
     }
 }
@@ -726,6 +751,9 @@ struct TurnRequest {
 
     /// Expiry for a conversation the turn creates.
     expires_in: String,
+
+    /// Whether to compact an existing conversation before the turn.
+    compact: bool,
 }
 
 /// Start a turn on `conversation`, or on a new one when it is `None`, and wait
@@ -748,7 +776,7 @@ async fn run_turn<H: Host>(
 
     let (conversation, turn) = match conversation {
         Some(conversation) => {
-            let turn = host.query(&conversation, &request.content, cfg);
+            let turn = host.query(&conversation, &request.content, cfg, request.compact);
             (conversation, turn)
         }
         None => {

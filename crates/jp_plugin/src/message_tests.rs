@@ -519,14 +519,28 @@ fn a_structured_temporary_query_reads_from_json() {
             cfg: vec![],
             schema: Some(Map::from_iter([("type".to_owned(), json!("object"))])),
             expires_in: Some("5m".to_owned()),
+            compact: false,
         })
     );
 }
 
-/// A plugin that asks for neither sends the same bytes it sent before the
+#[test]
+fn a_compacting_query_round_trips() {
+    let json = r#"{"type":"query","conversation":"123","content":"hi","compact":true}"#;
+
+    let msg = from_str::<PluginToHost>(json).unwrap();
+
+    let PluginToHost::Query(query) = &msg else {
+        panic!("not a query: {msg:?}");
+    };
+    assert!(query.compact);
+    assert_eq!(serde_json::to_string(&msg).unwrap(), json);
+}
+
+/// A plugin that asks for none of them sends the same bytes it sent before the
 /// fields existed, so an older host still reads it.
 #[test]
-fn a_plain_query_writes_neither_schema_nor_expires_in() {
+fn a_plain_query_writes_neither_schema_nor_expires_in_nor_compact() {
     let msg = PluginToHost::Query(QueryRequest {
         id: None,
         conversation: "123".to_owned(),
@@ -536,6 +550,7 @@ fn a_plain_query_writes_neither_schema_nor_expires_in() {
         cfg: vec![],
         schema: None,
         expires_in: None,
+        compact: false,
     });
 
     assert_eq!(

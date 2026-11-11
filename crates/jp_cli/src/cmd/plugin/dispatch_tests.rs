@@ -1679,6 +1679,46 @@ fn summarized(ws: &Workspace, id: ConversationId) -> TurnSummaries {
     }
 }
 
+/// The turn ranges compacted in the conversation `lock` holds.
+fn compacted(lock: &ConversationLock) -> Vec<(usize, usize)> {
+    lock.with_events(|events| {
+        events
+            .compactions()
+            .map(|compaction| (compaction.from_turn, compaction.to_turn))
+            .collect()
+    })
+}
+
+/// The built-in rule keeps the first and last turn as they are, so of three
+/// turns only the middle one is compacted.
+#[tokio::test]
+async fn a_compacting_query_compacts_with_the_configured_rules() {
+    let (ws, id, _tmp) = workspace_with_a_turn();
+    let lock = lock_for_turn(&ws, id);
+    lock.as_mut().update_events(|stream| {
+        add_turn(stream, ChatResponse::message("A second answer"));
+        add_turn(stream, ChatResponse::message("A third answer"));
+    });
+
+    compact_before_turn(&lock, &AppConfig::new_test())
+        .await
+        .unwrap();
+
+    assert_eq!(compacted(&lock), [(1, 1)]);
+}
+
+#[tokio::test]
+async fn compacting_a_conversation_too_short_to_compact_changes_nothing() {
+    let (ws, id, _tmp) = workspace_with_a_turn();
+    let lock = lock_for_turn(&ws, id);
+
+    compact_before_turn(&lock, &AppConfig::new_test())
+        .await
+        .unwrap();
+
+    assert_eq!(compacted(&lock), []);
+}
+
 fn lock_for_turn(ws: &Workspace, id: ConversationId) -> ConversationLock {
     let handle = ws.acquire_conversation(&id).unwrap();
     let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
@@ -1813,6 +1853,7 @@ fn expiring_query(new: bool, expires_in: Option<&str>) -> QueryRequest {
         cfg: vec![],
         schema: None,
         expires_in: expires_in.map(str::to_owned),
+        compact: false,
     }
 }
 

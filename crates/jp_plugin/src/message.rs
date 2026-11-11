@@ -624,6 +624,14 @@ pub struct QueryRequest {
     /// Requires `new`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>,
+
+    /// Compact the conversation before the turn runs, with the rules in
+    /// `conversation.compaction.rules`, as `jp query --compact` does.
+    ///
+    /// Ignored with `new`: a conversation the request creates has nothing to
+    /// compact.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compact: bool,
 }
 
 /// Ask the host to change what a running turn is doing.

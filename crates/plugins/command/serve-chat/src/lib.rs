@@ -53,15 +53,16 @@ use crate::{
 
 /// Minimum host protocol version required by this plugin.
 ///
-/// Protocol 11 added `expires_in` on `query` requests; protocol 9 added in-turn
-/// `interrupt` replies.
-const REQUIRED_PROTOCOL: u32 = 11;
+/// Protocol 14 added `compact` on `query`, which a host built before it would
+/// ignore without saying so; 11 added `expires_in`, and 9 in-turn `interrupt`
+/// replies.
+const REQUIRED_PROTOCOL: u32 = 14;
 
 /// Embedded plugin manifest read by `jp` for binary discovery.
 ///
 /// `protocol` must match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
-    protocol: 11,
+    protocol: 14,
     description: "Relay chat messages to JP turns, and the answers back",
     command: ["serve", "chat"],
 );
@@ -87,7 +88,8 @@ Configuration (`plugins.command.serve-chat.options`):
   signal.command     The signal-cli executable. Default: signal-cli.
   signal.attachments_dir  Where signal-cli saves attachments.
   decide             Ask a model what to do with each message: answer it,
-                     ignore it, or start a new conversation. `url`, `model`,
+                     ignore it, start a new conversation, or compact the
+                     current one. `url`, `model`,
                      `api_key_env` (default JEV_API_KEY; empty for no token),
                      `threshold` (default 0.5), `instructions`.
   people.<key>       Who is answered: `name`, and their `signal` account.
