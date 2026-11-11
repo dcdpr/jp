@@ -2543,6 +2543,43 @@ fn move_to_the_top_and_the_bottom_of_a_column() {
     );
 }
 
+/// A ticket's rank belongs to the column it held it in: moved out and back
+/// without a placement, it returns below the ranked tickets, not above them.
+#[test]
+fn move_out_of_a_column_and_back_forgets_the_rank() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k3", "position": "top" }),
+    );
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k1", "after": "T-02wt0k3" }),
+    );
+
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k3", "status": "in progress" }),
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "status": "todo" })
+        )),
+        "Moved T-02wt0k3:\n- status: In Progress -> Todo\n- place: 3 of 3 in Todo, below \
+         T-02wt0k2\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k1\"\n  ],\n  \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+}
+
 #[test]
 fn move_to_another_column_and_a_place_in_it_at_once() {
     let dir = Utf8TempDir::new().unwrap();

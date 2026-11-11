@@ -118,8 +118,11 @@ fn fan_out_value(text: &str) -> Option<toml::Value> {
         .cloned()
 }
 
-/// Read tools fan out concurrently; write tools run sequentially in call order
-/// so concurrent writes to the same ticket file or `.board.json` cannot race.
+/// Read tools fan out concurrently; write tools run the operations of one batch
+/// sequentially, in the order the assistant wrote them, so each sees what the
+/// one before it wrote.
+/// Separate calls still run in parallel; what keeps two of them from losing a
+/// move is the board's lock, not this setting.
 /// `list` already accepts filters, so it does not use `fan_out`.
 #[test]
 fn tools_batch_as_far_as_they_safely_can() {

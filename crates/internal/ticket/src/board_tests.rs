@@ -1,3 +1,5 @@
+use std::{sync::Barrier, thread, time::Duration};
+
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
@@ -272,7 +274,7 @@ fn move_to_places_the_ticket_next_to_its_neighbour() {
         &Formatting::default(),
         id("02wt0k1"),
         Status::InProgress,
-        Some((Place::After, id("02wt0k2"))),
+        Some(Placement::Next(Place::After, id("02wt0k2"))),
     )
     .unwrap();
 
@@ -302,7 +304,7 @@ fn move_to_refuses_a_neighbour_outside_the_column_and_changes_nothing() {
         &Formatting::default(),
         id("02wt0k1"),
         Status::InProgress,
-        Some((Place::Before, id("02wt0k2"))),
+        Some(Placement::Next(Place::Before, id("02wt0k2"))),
     )
     .unwrap_err();
 
@@ -329,7 +331,7 @@ fn move_to_refuses_an_unreadable_order_file_before_moving() {
         &Formatting::default(),
         id("02wt0k1"),
         Status::Done,
-        Some((Place::After, id("02wt0k2"))),
+        Some(Placement::Next(Place::After, id("02wt0k2"))),
     )
     .unwrap_err();
 
@@ -371,7 +373,7 @@ fn move_to_refuses_a_ticket_placed_next_to_itself() {
         &Formatting::default(),
         id("02wt0k1"),
         Status::Done,
-        Some((Place::Before, id("02wt0k1"))),
+        Some(Placement::Next(Place::Before, id("02wt0k1"))),
     )
     .unwrap_err();
 
@@ -380,6 +382,216 @@ fn move_to_refuses_a_ticket_placed_next_to_itself() {
         "T-02wt0k1 can't be ranked against itself."
     );
     assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::Todo);
+}
+
+#[test]
+fn forget_drops_the_ticket_from_every_column() {
+    let mut order = order(&["T-02wt0k1", "T-02wt0k2"], &["T-02wt0k1"], &["T-02wt0k3"]);
+
+    assert!(order.forget(id("02wt0k1")));
+    assert_eq!(order, self::order(&["T-02wt0k2"], &[], &["T-02wt0k3"]));
+
+    assert!(!order.forget(id("02wt0k1")));
+}
+
+/// A ticket ranked in Todo, moved out and back without a placement, joins Todo
+/// below the ranked tickets rather than at the rank it held before.
+#[test]
+fn move_to_another_column_drops_the_rank_the_ticket_held() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::Todo);
+    write(dir.path(), &order(&["T-02wt0k2", "T-02wt0k1"], &[], &[])).unwrap();
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k2"),
+        Status::InProgress,
+        None,
+    )
+    .unwrap();
+    assert_eq!(read(dir.path()).unwrap(), order(&["T-02wt0k1"], &[], &[]));
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k2"),
+        Status::Todo,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        read(dir.path())
+            .unwrap()
+            .arrange(Status::Todo, &ids(&["02wt0k1", "02wt0k2"])),
+        ids(&["02wt0k1", "02wt0k2"])
+    );
+}
+
+/// A rank left behind in the column a ticket returns to, by a status change
+/// that went around the board, is dropped as well.
+#[test]
+fn move_to_drops_a_stale_rank_in_the_column_moved_to() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::InProgress);
+    write(dir.path(), &order(&["T-02wt0k2", "T-02wt0k1"], &[], &[])).unwrap();
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k2"),
+        Status::Todo,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(read(dir.path()).unwrap(), order(&["T-02wt0k1"], &[], &[]));
+}
+
+/// A move that keeps the ticket in its column and names no place leaves its
+/// rank alone.
+#[test]
+fn move_to_the_same_column_keeps_the_rank() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::Todo);
+    write(dir.path(), &order(&["T-02wt0k2"], &[], &[])).unwrap();
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k2"),
+        Status::Todo,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(read(dir.path()).unwrap(), order(&["T-02wt0k2"], &[], &[]));
+}
+
+#[test]
+fn move_to_the_top_and_bottom_places_against_the_column_on_disk() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::Todo);
+    write_ticket(&dir, "02wt0k3", Status::Todo);
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k3"),
+        Status::Todo,
+        Some(Placement::Top),
+    )
+    .unwrap();
+    assert_eq!(read(dir.path()).unwrap(), order(&["T-02wt0k3"], &[], &[]));
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k1"),
+        Status::Todo,
+        Some(Placement::Bottom),
+    )
+    .unwrap();
+    assert_eq!(
+        read(dir.path()).unwrap(),
+        order(&["T-02wt0k3", "T-02wt0k2", "T-02wt0k1"], &[], &[])
+    );
+}
+
+/// A column holding no other ticket has nothing to place against, so the order
+/// file is not created.
+#[test]
+fn move_to_the_top_of_an_empty_column_ranks_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+
+    move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k1"),
+        Status::InProgress,
+        Some(Placement::Top),
+    )
+    .unwrap();
+
+    assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::InProgress);
+    assert!(!dir.path().join(BOARD_FILE).exists());
+}
+
+/// A move waits for a writer already holding the board's lock, so it reads the
+/// tickets and the order only once that writer is done.
+#[test]
+fn move_to_waits_for_the_board_lock() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::Todo);
+    let held = lock(dir.path()).unwrap().unwrap();
+
+    let path = dir.path().to_owned();
+    let mover = thread::spawn(move || {
+        move_to(
+            &path,
+            &Formatting::default(),
+            id("02wt0k2"),
+            Status::InProgress,
+            Some(Placement::Top),
+        )
+    });
+
+    // Long enough for an unlocked move to finish many times over; a move that
+    // waits for the lock is still waiting however long this is.
+    thread::sleep(Duration::from_millis(300));
+    assert!(!mover.is_finished());
+    assert_eq!(status_on_disk(&dir, "02wt0k2"), Status::Todo);
+
+    drop(held);
+    mover.join().unwrap().unwrap();
+    assert_eq!(status_on_disk(&dir, "02wt0k2"), Status::InProgress);
+}
+
+/// Two moves started together, one to the top of a column and one to its
+/// bottom, both land: neither writes back an order read before the other's
+/// write.
+#[test]
+fn concurrent_moves_to_the_top_and_bottom_both_land() {
+    for _ in 0..20 {
+        let dir = Utf8TempDir::new().unwrap();
+        for body in ["02wt0k1", "02wt0k2", "02wt0k3", "02wt0k4"] {
+            write_ticket(&dir, body, Status::Todo);
+        }
+        let start = Barrier::new(2);
+
+        thread::scope(|scope| {
+            for (body, placement) in [("02wt0k3", Placement::Top), ("02wt0k2", Placement::Bottom)] {
+                let start = &start;
+                let dir = dir.path();
+                scope.spawn(move || {
+                    start.wait();
+                    move_to(
+                        dir,
+                        &Formatting::default(),
+                        id(body),
+                        Status::Todo,
+                        Some(placement),
+                    )
+                    .unwrap();
+                });
+            }
+        });
+
+        assert_eq!(
+            read(dir.path()).unwrap(),
+            order(
+                &["T-02wt0k3", "T-02wt0k1", "T-02wt0k4", "T-02wt0k2"],
+                &[],
+                &[]
+            )
+        );
+    }
 }
 
 #[test]

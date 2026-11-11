@@ -40,7 +40,7 @@ use serde::Serialize;
 use serde_json::Value;
 use ticket::{
     Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
-    board::{self, Place},
+    board::{self, Place, Placement},
     check::Problem,
     checklist::{self, Progress},
     import::Import,
@@ -1626,8 +1626,9 @@ fn move_ticket(
     status: Status,
     at: Option<(Place, TicketId)>,
 ) -> Result<Output, String> {
-    let board::Moved { path, previous } =
-        board::move_to(dir, formatting, id, status, at).map_err(|error| error.to_string())?;
+    let placement = at.map(|(place, other)| Placement::Next(place, other));
+    let board::Moved { path, previous } = board::move_to(dir, formatting, id, status, placement)
+        .map_err(|error| error.to_string())?;
     let next_to = at.map(|(place, other)| format!("{} {other}", relation(place)));
 
     let mut output = Output::from(match next_to {

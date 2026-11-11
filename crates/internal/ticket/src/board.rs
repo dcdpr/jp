@@ -19,11 +19,14 @@
 //!
 //! [`Order`] is the file's contents and the pure operations on them;
 //! [`read()`], [`write()`], [`rank()`], and [`move_to()`] touch the disk.
+//! [`rank()`] and [`move_to()`] hold the board's lock, [`LOCK_FILE`], from
+//! their first read to their last write.
 
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    fs, io,
+    fs::{self, File, OpenOptions},
+    io,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -38,6 +41,17 @@ use crate::{
 /// The order file, inside the ticket directory.
 pub const BOARD_FILE: &str = ".board.json";
 
+/// The lock file, inside the ticket directory.
+///
+/// A writer holds an exclusive lock on it while it reads the tickets and the
+/// order file, decides where a ticket goes, and writes the result, so two
+/// writers, in one process or in several, never both read one order and each
+/// write back their own.
+/// It is created on first use and never removed: a lock file unlinked on
+/// release lets the next writer lock a new file while a waiting one still locks
+/// the old one.
+pub const LOCK_FILE: &str = ".board.lock";
+
 /// Where a ticket lands relative to the one it is ranked against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
@@ -45,6 +59,17 @@ pub enum Place {
     Before,
     /// Directly below it.
     After,
+}
+
+/// Where [`move_to`] puts a ticket in the column it moves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// Directly above or below another ticket in the column.
+    Next(Place, TicketId),
+    /// Above every other ticket in the column.
+    Top,
+    /// Below every other ticket in the column.
+    Bottom,
 }
 
 /// The ranked tickets of each column, top first.
@@ -157,6 +182,21 @@ impl Order {
 
         true
     }
+
+    /// Drop every entry naming `id`, in every column.
+    ///
+    /// Returns whether any entry was dropped.
+    fn forget(&mut self, id: TicketId) -> bool {
+        let name = id.to_string();
+        let mut dropped = false;
+        for column in [&mut self.todo, &mut self.in_progress, &mut self.done] {
+            let count = column.len();
+            column.retain(|entry| *entry != name);
+            dropped |= column.len() != count;
+        }
+
+        dropped
+    }
 }
 
 /// Read the board's order from the ticket directory.
@@ -210,6 +250,7 @@ pub fn rank(dir: &Utf8Path, id: TicketId, place: Place, other: TicketId) -> Resu
         return Err(Error::SameTicket(id));
     }
 
+    let _lock = lock(dir)?;
     let entries = store::list(dir)?;
     let status = status_of(&entries, id)?;
     let other_status = status_of(&entries, other)?;
@@ -248,43 +289,46 @@ pub struct Moved {
     pub previous: Status,
 }
 
-/// Move `id` to the column `status` names, directly before or after another
-/// ticket there when `at` names one.
+/// Move `id` to the column `status` names, placed there as `at` says.
 ///
 /// Every check runs before anything is written, so a refused move changes
-/// nothing: the ticket to place next to has to be another readable ticket
-/// already at `status`, and the order file has to be readable.
-/// Without `at`, the ticket joins the column below the tickets ranked there,
-/// and the order file is neither read nor written.
+/// nothing: a ticket to place next to has to be another readable ticket already
+/// at `status`, and the order file has to be readable.
+///
+/// [`Placement::Top`] and [`Placement::Bottom`] place the ticket above or below
+/// every other ticket in the column as it stands while the board's lock is
+/// held; in a column holding no other ticket they place nothing.
+/// A ticket that changes column loses any rank it held in any column, so
+/// without a placement it joins its new column below the ranked tickets, even
+/// in a column it was ranked in before.
+/// The order file is written only when an entry changes, so a board ranking
+/// nothing keeps having no order file.
 pub fn move_to(
     dir: &Utf8Path,
     formatting: &Formatting,
     id: TicketId,
     status: Status,
-    at: Option<(Place, TicketId)>,
+    at: Option<Placement>,
 ) -> Result<Moved, Error> {
-    let Some((place, other)) = at else {
-        let (path, previous) = store::set_status(dir, formatting, id, status)?;
-        return Ok(Moved { path, previous });
-    };
-
-    if id == other {
+    if matches!(at, Some(Placement::Next(_, other)) if other == id) {
         return Err(Error::SameTicket(id));
     }
 
+    let _lock = lock(dir)?;
     let entries = store::list(dir)?;
-    status_of(&entries, id)?;
-    let other_status = status_of(&entries, other)?;
-    if other_status != status {
-        return Err(Error::NotInColumn {
-            other,
-            other_status,
-            status,
-        });
+    let from = status_of(&entries, id)?;
+    if let Some(Placement::Next(_, other)) = at {
+        let other_status = status_of(&entries, other)?;
+        if other_status != status {
+            return Err(Error::NotInColumn {
+                other,
+                other_status,
+                status,
+            });
+        }
     }
 
     let mut order = read(dir)?;
-    let (path, previous) = store::set_status(dir, formatting, id, status)?;
 
     // The column as it stands once `id` has joined it.
     let column: Vec<TicketId> = entries
@@ -299,11 +343,52 @@ pub fn move_to(
         .map(|entry| entry.id)
         .collect();
 
-    // Both tickets were just found at `status`, so the move always lands.
-    order.rank(status, &column, id, place, other);
-    write(dir, &order)?;
+    let others = || {
+        order
+            .arrange(status, &column)
+            .into_iter()
+            .filter(|other| *other != id)
+    };
+    let next_to = match at {
+        None => None,
+        Some(Placement::Next(place, other)) => Some((place, other)),
+        Some(Placement::Top) => others().next().map(|first| (Place::Before, first)),
+        Some(Placement::Bottom) => others().next_back().map(|last| (Place::After, last)),
+    };
+
+    let (path, previous) = store::set_status(dir, formatting, id, status)?;
+
+    let mut changed = from != status && order.forget(id);
+    if let Some((place, other)) = next_to {
+        // Both tickets were just found at `status`, so the move always lands.
+        changed |= order.rank(status, &column, id, place, other);
+    }
+    if changed {
+        write(dir, &order)?;
+    }
 
     Ok(Moved { path, previous })
+}
+
+/// Take the board's lock in `dir`, held until the returned file is dropped.
+///
+/// Waits for a writer holding it already.
+/// A directory that doesn't exist holds no tickets to write, and so nothing to
+/// lock: `None`.
+fn lock(dir: &Utf8Path) -> Result<Option<File>, Error> {
+    let file = match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(dir.join(LOCK_FILE))
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    file.lock()?;
+
+    Ok(Some(file))
 }
 
 /// The status of the ticket `wanted` among `entries`.

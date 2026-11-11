@@ -29,7 +29,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
     Comment, Labels, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
-    board::{self, Order, Place},
+    board::{self, Order, Place, Placement},
     checklist::{self, Marked},
     parse, render, store,
 };
@@ -900,22 +900,14 @@ fn edit_labels(
     }
 }
 
-/// Target position of a ticket within its destination column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Placement {
-    /// Directly above or below another ticket.
-    Next(Place, TicketId),
-    Top,
-    Bottom,
-}
-
 /// Move a ticket to another column, reorder it within a column, or both.
 ///
 /// Validates the move before writing to disk: any anchor ticket must belong to
 /// the destination column, and status changes enforce parent-child completion
 /// rules.
-/// `top` and `bottom` anchor against the first and last other ticket in the
-/// destination column's board order.
+/// `top` and `bottom` are resolved against the destination column while the
+/// board is locked, so concurrent moves each see the order the previous one
+/// wrote.
 /// Closing a ticket with unchecked checklist items succeeds with a warning.
 fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
@@ -949,10 +941,8 @@ fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         },
     };
     let to = status.unwrap_or(ticket.metadata.status);
-    let order = board::read(&tickets.dir)?;
-    let at = anchor(placement, id, &column(&entries, &order, to));
 
-    let moved = match board::move_to(&tickets.dir, &tickets.formatting, id, to, at) {
+    let moved = match board::move_to(&tickets.dir, &tickets.formatting, id, to, placement) {
         Ok(moved) => moved,
         Err(
             refused @ (store::Error::NoSuchTicket(_)
@@ -963,12 +953,28 @@ fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         Err(other) => return Err(other.into()),
     };
 
+    Ok(describe_move(tickets, id, ticket, status, moved.previous, to)?.into())
+}
+
+/// Describe a move that landed: the status change `status` asked for, the
+/// ticket's place in column `to` as the board now lays it out, and a warning
+/// when closing left checklist items unchecked.
+///
+/// `ticket` is the ticket as read before the move.
+fn describe_move(
+    tickets: &Tickets<'_>,
+    id: TicketId,
+    ticket: &Ticket,
+    status: Option<Status>,
+    previous: Status,
+    to: Status,
+) -> Result<String, Error> {
     let mut text = format!("Moved {id}:\n");
     if let Some(status) = status {
-        text.push_str(&if moved.previous == status {
+        text.push_str(&if previous == status {
             format!("- status: already {status}\n")
         } else {
-            format!("- status: {} -> {status}\n", moved.previous)
+            format!("- status: {previous} -> {status}\n")
         });
     }
     let after = store::list(&tickets.dir)?;
@@ -982,7 +988,7 @@ fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         text.push_str(&format!("- warning: {warning}\n"));
     }
 
-    Ok(text.into())
+    Ok(text)
 }
 
 /// Parse the placement arguments (`before`, `after`, or `position`), allowing
@@ -1036,25 +1042,6 @@ fn column(entries: &[store::Entry], order: &Order, status: Status) -> Vec<Ticket
         .collect();
 
     order.arrange(status, &at_status)
-}
-
-/// Resolve `placement` to the `(Place, TicketId)` anchor pair for
-/// [`board::move_to`].
-///
-/// Returns `None` when `placement` is `None`, or when `Top`/`Bottom` is used in
-/// a column with no other tickets.
-fn anchor(
-    placement: Option<Placement>,
-    id: TicketId,
-    column: &[TicketId],
-) -> Option<(Place, TicketId)> {
-    let mut others = column.iter().copied().filter(|other| *other != id);
-
-    match placement? {
-        Placement::Next(place, other) => Some((place, other)),
-        Placement::Top => others.next().map(|first| (Place::Before, first)),
-        Placement::Bottom => others.next_back().map(|last| (Place::After, last)),
-    }
 }
 
 /// Format `id`'s 1-based position in `column` and the ticket directly above it.

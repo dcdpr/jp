@@ -1,6 +1,8 @@
 /.jp/**/QUERY_MESSAGE.md
 /.jp/conversations/.trash
 /.jp/mcp/state/
+# Held while a ticket move rewrites the board's order; never holds content.
+/docs/ticket/.board.lock
 
 # Rust specific
 **/target
