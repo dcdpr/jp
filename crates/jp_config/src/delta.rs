@@ -66,22 +66,17 @@ pub fn path(prefix: &str, name: &str) -> String {
     }
 }
 
-/// Calculate the delta between two strategy-carrying lists.
+/// Calculate the delta between two [`MergeableVec`] values.
 ///
-/// An unchanged list is no change, and the delta is empty.
-/// Appending reaches `next` exactly when `next` starts with `prev` and repeats
-/// no element, and the delta is then the tail, carried as a plain list so the
-/// fold appends it.
-/// Every other difference — an element removed, reordered, inserted before the
-/// last one, or repeated — carries the whole of `next` with `replace`.
+/// Returns an empty list when `next` equals `prev`.
+/// When `next` starts with `prev` and contains no duplicate elements, returns
+/// the appended tail as a plain list so merging appends it.
+/// Every other difference (removal, reordering, insertion before the end, or a
+/// newly duplicated element) returns the full `next` list with the `replace`
+/// strategy.
 ///
-/// Order is part of the answer, not a detail.
-/// A delta that reproduced the set of elements while appending them in a
-/// different order changes the meaning of any list whose order matters, and
-/// says nothing at all about a list that only lost an element.
-///
-/// A [`MergeableVec`] can express `replace` on the wire, which is why this
-/// needs no separate path report.
+/// Because [`MergeableVec`] encodes the `replace` strategy directly, callers do
+/// not need a separate unset-path entry.
 pub fn delta_mergeable_vec<T: Clone + PartialEq>(
     prev: &MergeableVec<T>,
     next: MergeableVec<T>,

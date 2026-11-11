@@ -384,8 +384,8 @@ fn law_holds_for_an_unchanged_list_that_repeats() {
     assert_law(&["A", "B", "A"], &["A", "B", "A"]);
 }
 
-/// An unchanged list is no change, whatever it holds.
-/// A delta that restates it would be recorded on every turn.
+/// `assert_law` passes even if the delta uses `replace`; verify that the delta
+/// is actually empty.
 #[test]
 fn an_unchanged_list_that_repeats_has_an_empty_delta() {
     let prev = snapshot(&["A", "B", "A"]);

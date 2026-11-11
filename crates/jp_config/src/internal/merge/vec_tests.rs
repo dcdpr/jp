@@ -381,10 +381,8 @@ fn test_discarded_default_preserves_duplicates_in_the_replacement() {
 
 #[test]
 fn test_empty_next_leaves_prev_untouched() {
-    // A layer that does not mention the list contributes nothing, so there is
-    // no second source to deduplicate against. A conversation folds every
-    // config delta over its whole state, and a list the delta leaves alone must
-    // come out as it went in.
+    // Merging an empty `next` (an unset field in a partial layer) must return
+    // `prev` without deduplicating its existing elements.
     let prev = MergeableVec::Merged(MergedVec {
         value: vec![1, 2, 1],
         strategy: Some(MergedVecStrategy::Replace),

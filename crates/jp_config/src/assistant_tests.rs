@@ -461,12 +461,12 @@ fn test_assistant_config_deserialize() {
     }
 }
 
-/// Load `file` onto the test config, then apply it again on top of the resolved
-/// result, and return the config each pass resolves to.
+/// Merge `file` into the base config, resolve it, then merge `file` again onto
+/// the resolved config's partial representation.
 ///
-/// This is the shape of `--cfg skill/x` on a conversation that already loaded
-/// it: the conversation layer is a resolved config turned back into a partial,
-/// and the file is a partial as written.
+/// This reproduces passing `--cfg` on a conversation that already loaded the
+/// same config file: the conversation base is a resolved config converted back
+/// to a partial via [`ToPartial`], while the `--cfg` file is a raw partial.
 fn apply_twice(file: &crate::PartialAppConfig) -> (crate::AppConfig, crate::AppConfig) {
     let mut base = crate::AppConfig::new_test().to_partial();
     base.merge(&(), file.clone()).unwrap();
@@ -501,8 +501,6 @@ fn instructions_file(position: Option<isize>) -> crate::PartialAppConfig {
     partial
 }
 
-/// A section a config file declares again, on top of a resolved config that
-/// already holds it, appears once.
 #[test]
 fn redeclared_section_without_position_is_deduplicated() {
     let (once, twice) = apply_twice(&section_file(None));
@@ -511,8 +509,6 @@ fn redeclared_section_without_position_is_deduplicated() {
     assert_eq!(twice.assistant.system_prompt_sections.len(), 1);
 }
 
-/// A file spelling out the default position declares the same section as one
-/// leaving it out.
 #[test]
 fn redeclared_section_with_default_position_is_deduplicated() {
     let (once, twice) = apply_twice(&section_file(Some(0)));
@@ -521,8 +517,6 @@ fn redeclared_section_with_default_position_is_deduplicated() {
     assert_eq!(twice.assistant.system_prompt_sections.len(), 1);
 }
 
-/// Instructions a config file declares again, on top of a resolved config that
-/// already holds them, appear once.
 #[test]
 fn redeclared_instructions_without_position_are_deduplicated() {
     let (once, twice) = apply_twice(&instructions_file(None));
@@ -533,8 +527,6 @@ fn redeclared_instructions_without_position_are_deduplicated() {
     );
 }
 
-/// A file spelling out the default position declares the same instructions as
-/// one leaving it out.
 #[test]
 fn redeclared_instructions_with_default_position_are_deduplicated() {
     let (once, twice) = apply_twice(&instructions_file(Some(0)));

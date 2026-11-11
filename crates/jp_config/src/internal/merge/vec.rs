@@ -35,9 +35,9 @@ where
         return Ok(Some(with_dedup_flag(next, dedup)));
     }
 
-    // A layer that leaves the list alone contributes nothing, so there is no
-    // second source to deduplicate against. Deduplicating `prev` here would
-    // drop repeats from every list a config delta does not touch.
+    // An empty `next` means the incoming layer left the field unset. Return
+    // `prev` as-is so the default deduplication pass below does not strip
+    // duplicate elements from lists that the layer did not modify.
     if next.is_empty() {
         return Ok(Some(prev));
     }
@@ -125,20 +125,23 @@ where
     vec_with_strategy(prev, next, context)
 }
 
-/// A list item whose partial can spell the same value more than one way.
+/// Normalization for partial list items before merge deduplication.
 ///
-/// A field left unset and the same field set to its declared default resolve
-/// identically, but compare unequal as partials, so deduplication keeps both.
+/// A partial field left `None` and the same field set to `Some(default)`
+/// resolve to the same value, but compare unequal in [`PartialEq`].
+/// Normalizing both to a canonical form allows list deduplication to treat them
+/// as equal.
 pub trait CanonicalItem {
-    /// Rewrite `self` to the single spelling every equivalent partial shares.
+    /// Normalize `self` in place so equivalent partials compare equal.
     fn canonicalize(&mut self);
 }
 
-/// Merge two lists of items that have more than one spelling.
+/// Merge two `MergeableVec` values after normalizing items via
+/// [`CanonicalItem`].
 ///
-/// Identical to [`vec_with_strategy`], except that both sides are brought to
-/// their [`CanonicalItem`] spelling first, so deduplication recognizes an item
-/// whichever way each layer wrote it.
+/// Normalizes every element in `prev` and `next` before merging and
+/// deduplicating with [`vec_with_strategy`], so equivalent partials (for
+/// example, `position: None` and `position: Some(0)`) are deduplicated.
 pub fn canonical_vec_with_strategy<T>(
     mut prev: MergeableVec<T>,
     mut next: MergeableVec<T>,

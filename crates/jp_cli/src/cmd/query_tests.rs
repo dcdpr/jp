@@ -1588,11 +1588,11 @@ fn section(tag: &str, position: i32) -> PartialSectionConfig {
     }
 }
 
-/// Run two plain queries against a conversation created from `base`, and return
-/// the delta the second one would record.
+/// Run two queries without CLI overrides against a conversation initialized
+/// from `base`, and return the config delta produced by the second query.
 ///
-/// The first query may record a delta: the conversation is created from `base`
-/// alone, without the built-in tools a query injects.
+/// The first query may record a delta for the built-in tools injected during
+/// query config resolution.
 fn second_plain_query_delta(base: &PartialAppConfig) -> Option<ApplyDelta> {
     let tmp = Utf8TempDir::new().unwrap();
     let mut workspace = Workspace::in_memory(tmp.path());
@@ -1634,8 +1634,6 @@ fn second_plain_query_delta(base: &PartialAppConfig) -> Option<ApplyDelta> {
     delta
 }
 
-/// A plain query against an unchanged workspace records no config delta, even
-/// when the system prompt sections are declared out of position order.
 #[test]
 fn plain_query_records_no_delta_for_unsorted_prompt_sections() {
     let mut base = AppConfig::new_test().to_partial();
@@ -1645,8 +1643,6 @@ fn plain_query_records_no_delta_for_unsorted_prompt_sections() {
     assert_eq!(second_plain_query_delta(&base), None);
 }
 
-/// A plain query against an unchanged workspace records no config delta, even
-/// when a system prompt section is declared twice.
 #[test]
 fn plain_query_records_no_delta_for_repeated_prompt_sections() {
     let mut base = AppConfig::new_test().to_partial();

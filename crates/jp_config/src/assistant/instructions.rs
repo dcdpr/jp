@@ -77,8 +77,9 @@ impl ToPartial for InstructionsConfig {
         Self::Partial {
             title: partial_opts(self.title.as_ref(), defaults.title),
             description: partial_opts(self.description.as_ref(), defaults.description),
-            // Omitted at the declared default: the spelling `CanonicalItem`
-            // reduces all instructions to before list deduplication.
+            // `defaults.position` is `None` on the partial type, but the schema
+            // default is `0`. Passing `Some(0)` maps the default position back
+            // to `None` so it matches a config that omitted `position`.
             position: partial_opt(&self.position, Some(0)),
             items: partial_opt(&self.items, defaults.items),
             examples: self.examples.iter().map(ToPartial::to_partial).collect(),
@@ -87,7 +88,6 @@ impl ToPartial for InstructionsConfig {
 }
 
 impl CanonicalItem for PartialInstructionsConfig {
-    /// An explicit `position = 0` is the default, spelled out.
     fn canonicalize(&mut self) {
         if self.position == Some(0) {
             self.position = None;
