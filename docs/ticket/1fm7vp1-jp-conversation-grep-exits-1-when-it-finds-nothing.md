@@ -8,24 +8,25 @@
 - **Label**: package=jp_cli
 - **Label**: type=task
 
-In JP, exit status 1 means an error and nothing else.
-`jp conversation grep` breaks that rule twice:
+In JP, exit status `1` is reserved for runtime errors.
+`jp conversation grep` violates that convention in two places:
 
-- Finding nothing returns `Error::from(1).expected()`
-  (`crates/jp_cli/src/cmd/conversation/grep.rs:420`, `:511`), so a script can't
-  tell "no matches" from a failure.
-- `pattern matching failed` exits 2 (`grep.rs:414`).
-  That is the code clap, and plugin dispatch after it
-  (`crates/jp_cli/src/cmd/plugin/dispatch.rs:3038-3041`), use for usage errors,
-  but a pattern failing part-way through is a runtime error.
+- Returning no matches yields `Error::from(1).expected()`
+  (`crates/jp_cli/src/cmd/conversation/grep.rs:420`, `:511`), preventing scripts
+  from distinguishing "no matches" from an execution error.
+- `pattern matching failed` exits with status `2` (`grep.rs:414`), which `clap`
+  and plugin dispatch (`crates/jp_cli/src/cmd/plugin/dispatch.rs:3038-3041`)
+  reserve for CLI usage errors, even though a mid-search pattern failure is a
+  runtime error.
 
-Proposed: "no matches" exits 3, the code RFD 135 gives a below-threshold answer,
-so both commands report a negative result the same way.
-The pattern failure exits 1.
+Proposal: exit `3` when no matches are found (matching the below-threshold exit
+status in RFD 135 so both commands report negative outcomes with `3`), and exit
+`1` on pattern matching failures.
 
-Scripts that branch on grep's exit 1 break, so the change goes in the changelog.
+Because scripts that branch on `grep` exiting `1` will need updating, this
+change requires a changelog entry.
 
-- [ ] "No matches" exits 3, still marked expected.
-- [ ] A failed pattern exits 1.
-- [ ] The docs that name the old codes: `render_empty`'s ("The status is always
-      1") and `RunOutcome::AsExpected`'s (`crates/jp_cli/src/lib.rs:330-333`).
+- [ ] Return exit status `3` (still marked expected) when no matches are found.
+- [ ] Return exit status `1` when pattern matching fails.
+- [ ] Update the doc comments on `render_empty` ("The status is always 1") and
+      `RunOutcome::AsExpected` (`crates/jp_cli/src/lib.rs:330-333`).

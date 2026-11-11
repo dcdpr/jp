@@ -9,42 +9,39 @@
 - **Label**: relevant-rfd=112
 - **Label**: type=feature
 
-Nothing runs a single command without the session's active conversation while
-the session keeps it.
+There is no target that runs a single command without the session's active
+conversation while leaving the session's active conversation intact.
 
-This matters more once commands can run without a conversation.
-`jp decide`, proposed in RFD 135, targets the active conversation by default,
-and runs without one when none is active.
-`-!` stops it writing, but it still applies the conversation's config, including
-its decision model.
-The per-run way out in that RFD is `-c decision.conversation=none`, which only
-`jp decide` has.
+This matters for commands that can run without a conversation.
+`jp decide` (proposed in RFD 135) targets the active conversation by default and
+runs standalone when none is active.
+Passing `-!` (`--no-persist`) suppresses persistence, but still loads the active
+conversation's configuration (including its decision model).
+Without a target keyword, the only per-invocation opt-out is `-c
+decision.conversation=none`, which is specific to `jp decide`.
 
-Proposed: a `none` target, meaning no conversation.
+Proposal: add a `none` conversation target representing the absence of a
+conversation:
 
-- `--id=none` runs one command without a conversation.
-- `jp c use none` drops the session's active conversation for every later
-  command.
+- `--id=none` (`-i none`) runs a single command without a conversation.
+- `jp c use none` clears the session's active conversation for subsequent
+  commands.
 
-RFD 112 (Discussion) adds `jp c use --clear` for the second, and rejects a
-`none` keyword on the grounds that a word in the target slot should name a
-target.
-Once `--id=none` exists, the target grammar has a word for no conversation, and
-`jp c use none` is the same word in the same slot.
-RFD 112 changes with this ticket: `jp c use --clear` becomes `jp c use none`,
-and its rejected alternative "A `none` or `NONE` keyword instead of `--clear`"
-is reversed.
+RFD 112 (Discussion) originally proposed `jp c use --clear` and rejected a
+`none` keyword on the grounds that a target slot should name a target.
+Once `--id=none` is needed for `-i`, accepting `none` in `jp c use none` uses
+the same keyword across both positions.
+RFD 112 is updated accordingly: `jp c use --clear` becomes `jp c use none`, and
+the rejected "`none` or `NONE` keyword" alternative becomes the design.
 
 Open questions:
 
-- The workspace axis.
-  RFD 112 gives `jp w use` a `--clear` too; `jp w use none` keeps the two axes
-  alike, but `-w none` would then have to mean running without a workspace.
-- Which commands accept `--id=none`: those that can run without a conversation,
-  which is `jp decide` alone.
-  `jp query` always has one, and under T-1fygs3m it starts a temporary one where
-  it has none, so `--id=none` there would either mean a new temporary
-  conversation or be refused.
+- **Workspace axis.** RFD 112 also proposed `jp w use --clear`; replacing it
+  with `jp w use none` keeps both axes consistent, and `-w none` runs a single
+  command without a workspace.
+- **Commands that require a conversation.** Only commands that can run without a
+  conversation (such as `jp decide`) accept `--id=none`; commands that require a
+  conversation (such as `jp query`) reject `none`.
 
 ## Comments
 
@@ -53,10 +50,11 @@ Open questions:
 - **From**: jp
 - **Date**: 2026-11-11T13:18:23Z
 
-The design moved into RFD 112: `none` is now a target on both axes.
+Incorporated into RFD 112: `none` is a target on both the workspace and
+conversation axes.
 `jp w use none` and `jp c use none` replace `--clear`, and `-w none` and
-`--id=none` run one command without a workspace or conversation.
-RFD 135 uses `-i none` for a single `jp decide` run without the active
+`--id=none` run a single command without a workspace or conversation.
+RFD 135 uses `-i none` to run a single `jp decide` invocation without the active
 conversation.
-The work is tracked by RFD 112's tracking ticket once it is accepted, so this
-ticket closes.
+Implementation will be tracked under RFD 112's tracking ticket once accepted, so
+this ticket is closed.

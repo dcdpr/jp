@@ -42,8 +42,8 @@ static DRAFT_TOKEN: LazyLock<Regex> =
 /// carries back.
 const LINKS: [(&str, &str); 2] = [("Requires", "Required by"), ("Extends", "Extended by")];
 
-/// The back-link fields a draft carries for other drafts, which a published RFD
-/// can't.
+/// Back-link metadata fields that may reference drafts on a draft RFD, but must
+/// be stripped when publishing.
 const BACK_LINKS: [&str; 2] = ["Required by", "Extended by"];
 
 /// Advance the RFD `id` one status.
@@ -157,12 +157,12 @@ fn check_number(paths: &Paths, draft: RfdId, number: RfdId) -> Result<RfdId, Str
     Ok(number)
 }
 
-/// Refuse a draft that would publish a reference to another draft: the docs
-/// build rejects draft ids anywhere in a published RFD.
+/// Reject a draft that would publish a reference to another draft, since the
+/// docs build rejects draft IDs anywhere in a published RFD.
 ///
-/// The draft's own id doesn't count, since the promotion rewrites it, and
-/// neither do its `Required by` and `Extended by` back-links to drafts, which
-/// it drops along with the reference definitions only they use.
+/// Ignores the draft's own ID (rewritten during promotion) and any `Required
+/// by` or `Extended by` back-links to drafts (stripped along with their unused
+/// reference definitions).
 fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<(), String> {
     let mut published = document.clone();
     drop_draft_back_links(&mut published);
@@ -198,13 +198,10 @@ fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<()
     ))
 }
 
-/// Drop the back-links to drafts, and the reference definitions that only they
-/// used.
+/// Remove draft entries from `Required by` and `Extended by`, along with any
+/// reference link definitions used only by those entries.
 ///
-/// A formatter that writes links by reference turns `[RFD D07](D07-x.md)` into
-/// `[RFD D07]` and a `[RFD D07]: D07-x.md` line at the bottom, which would
-/// otherwise outlive the entry and publish the draft's id.
-/// `false` when nothing was dropped.
+/// Returns `true` if the document was modified.
 fn drop_draft_back_links(document: &mut Document) -> bool {
     let labels: Vec<String> = BACK_LINKS
         .iter()

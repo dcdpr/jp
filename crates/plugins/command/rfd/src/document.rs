@@ -84,12 +84,11 @@ pub(crate) fn body(content: &str) -> String {
     lines[start..].join("\n").trim().to_owned()
 }
 
-/// The reference label an entry of a relationship field links through:
-/// `tickets` for `[RFD 001][tickets]`, `RFD 001` for `[RFD 001]` and `[RFD
-/// 001][]`.
+/// Extract the reference link label from a relationship field entry:
+/// `"tickets"` for `[RFD 001][tickets]`, and `"RFD 001"` for `[RFD 001]` or
+/// `[RFD 001][]`.
 ///
-/// `None` for an inline link, `[RFD 001](001-x.md)`, or an entry that is no
-/// link.
+/// Returns `None` for inline links (`[RFD 001](001-x.md)`) or plain text.
 #[must_use]
 pub(crate) fn reference_label(entry: &str) -> Option<String> {
     let (text, rest) = entry.trim().strip_prefix('[')?.split_once(']')?;
@@ -288,11 +287,11 @@ impl Document {
         }
     }
 
-    /// Remove the reference definition `[label]: …` when no other line uses
-    /// `[label]`.
+    /// Remove the reference link definition `[label]: …` if no other line
+    /// references `[label]`.
     ///
-    /// Labels match case-insensitively, as CommonMark matches them.
-    /// `false` when the definition is still used or the document has none.
+    /// Label matching is case-insensitive, following CommonMark.
+    /// Returns `false` if the definition is still referenced or does not exist.
     pub(crate) fn remove_unused_definition(&mut self, label: &str) -> bool {
         let reference = format!("[{}]", label.to_lowercase());
         let definition = format!("{reference}:");

@@ -518,10 +518,10 @@ Dedicated event types and fields let a compaction pass strip notifications
 without parsing message content.
 
 > [!TIP]
-> [RFD 134] gives entries recorded between turns a pending turn of their own,
-> outside every compaction range.
-> A notification queued there is never summarised into the turn before it, and
-> moves into the next turn when that turn starts.
+> [RFD 134] places entries recorded between turns into a pending turn outside
+> every compaction range.
+> A notification queued between turns is not summarized into the preceding turn
+> and instead becomes part of the next turn when it starts.
 
 ### System-initiated turn semantics
 

@@ -11,11 +11,13 @@
 ## Summary
 
 This RFD introduces `.`, `..`, `../..`, and `/` as hierarchy targets that walk
-the workspace nesting chain, and a `none` target that names no selection: `jp w
-use none` and `jp c use none` drop the session's selection, and `-w none` and
-`--id=none` run one command without one.
-`none` replaces `jp w use cwd` for clearing, which gives `cwd` a single meaning
-in every position and gives workspaces and conversations a shared vocabulary.
+the workspace nesting chain, and a `none` target that represents the absence of
+a selection: `jp w use none` and `jp c use none` drop the session's selection,
+and `-w none` and `--id=none` run a single command without a workspace or
+conversation.
+Replacing `jp w use cwd` with `jp w use none` gives `cwd` a single meaning in
+every position and gives workspaces and conversations a shared targeting
+vocabulary.
 
 ## Motivation
 
@@ -34,11 +36,12 @@ whereas a cleared record does not.
 use` has neither a flag nor a keyword to drop the session's active conversation.
 Starting with a clean slate requires opening a new terminal.
 
-**Nothing runs one command without the session's selection.** A command that can
-work without a conversation, such as `jp decide` ([RFD 135]), still loads the
-active conversation's config whenever the session has one, and `-!` only stops
-it from writing.
-The target slot has a word for every conversation and none for no conversation.
+**No target runs a single command without the session's selection.** A command
+that can run without a conversation, such as `jp decide` ([RFD 135]), still
+loads the active conversation's configuration whenever the session has an active
+conversation, and `-!` (`--no-persist`) only suppresses persistence.
+Neither `-w` nor `-i` has a target that opts out of the active selection for a
+single invocation.
 
 **`.` has an unresolved collision in [RFD 087].** [RFD 087]'s grammar table
 lists `cwd` and `.` as workspace targets, while the `[!WARNING]` block
@@ -144,14 +147,15 @@ splitting into one spelling that selects and another that clears.
 | `-w none`               | Runs one command without a workspace      |
 | `--id=none` (`-i none`) | Runs one command without a conversation   |
 
-A command that cannot run without a workspace or a conversation rejects `none`
-with an error naming the target, as it rejects any target it cannot resolve.
-`none` is a single target: combining it with another, or with `--always` on `jp
-w use`, is rejected.
+A command that requires a workspace or conversation rejects `none` with an error
+naming the target, just as it rejects any unresolvable target.
+`none` cannot be combined with other targets in a multi-target list or with
+`--always` on `jp w use`.
 
-`-w` and `-i` take targets, so running one command without a selection needs a
-word in the target slot.
-`use` takes the same word, so "no conversation" has one spelling everywhere.
+Because `-w` and `-i` accept targets rather than flags, running a single command
+without a selection requires a target keyword.
+Accepting `none` on `use` as well gives "no selection" a single spelling across
+both subcommands and flags.
 
 Using `none` on `use` drops the **whole record**, not just the active entry:
 
@@ -201,15 +205,16 @@ used it to clear.
 To avoid a silent behavior change, `jp w use cwd` errors for one release before
 selecting the current workspace.
 
-**`none` shadows a directory and a picker query of that name.** `jp w use none`
-no longer selects a directory named `none`, and `jp c use none` no longer opens
-the picker filtered on "none".
-`./none` still names the directory, as `./cwd` does today.
+**`none` shadows a directory or picker query of the same name.** `jp w use none`
+no longer selects a directory named `none` (use `./none` instead, matching
+`./cwd`), and `jp c use none` no longer opens the picker filtered on `"none"`.
 
-**`none` means slightly different things on the workspace axis.** After `jp w
-use none`, the session has no selection and resolves its workspace from `cwd`;
-`-w none` runs without a workspace even inside one.
-On the conversation axis there is no ambient default, so both mean the same.
+**`jp w use none` and `-w none` differ when run inside a workspace.** After `jp
+w use none` clears the session record, subsequent commands fall back to
+resolving a workspace from `cwd`, whereas `-w none` runs without a workspace
+even when invoked inside one.
+On the conversation axis there is no ambient fallback, so `jp c use none` and
+`-i none` produce the same state.
 
 **`..` and `/` are unused in flat workspace layouts.** Nested workspaces are
 uncommon, so most users do not have a parent workspace; for them, two thirds of
@@ -237,16 +242,17 @@ conversation targets.
 It keeps the `cwd` overload between `--workspace` and `jp w use`, and leaves `jp
 c use` with no way to clear the active conversation.
 
-**A `--clear` flag on `use`.** Rejected.
-It drops the session's selection, but running one command without a selection
-needs a value in `-w` and `-i`, which take targets rather than flags.
-With both, "no conversation" has two spellings.
+**Use a `--clear` flag on `use`.** Rejected.
+A flag on `use` clears the session record, but running a single command without
+a selection still requires a target value for `-w` and `-i`, which would split
+"no selection" across two spellings (`--clear` on `use` and `none` on
+`-w`/`-i`).
 
-**Uppercase `NONE`.** Rejected.
-[RFD 038] uses uppercase `NONE` for `--cfg`, whose values are usually paths and
-need a keyword that stands out.
-Target grammars already let lowercase keywords such as `cwd` and `recent` shadow
-paths.
+**Use uppercase `NONE`.** Rejected.
+[RFD 038] uses uppercase `NONE` for `--cfg` because config values are often
+arbitrary strings or paths where a reset keyword needs visual distinction,
+whereas target grammars already reserve lowercase keywords such as `cwd` and
+`recent`.
 
 **Path-based `..`.** Rejected.
 Because `Workspace::find_root` walks up the directory tree, resolving `..` as a

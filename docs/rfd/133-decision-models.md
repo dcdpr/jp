@@ -11,69 +11,69 @@
 
 ## Summary
 
-A decision model answers typed questions about a piece of input with
-probabilities, and generates no text.
-This RFD adds a `providers.decision` namespace for servers that speak the System
-One API, JP's own types for questions and answers, and a `decide` request that
-lets command plugins ask a decision model.
+A decision model answers typed questions about an input with probabilities
+instead of generating text.
+This RFD adds a `providers.decision` namespace for servers implementing the
+System One API, question and answer types in `jp_conversation`, and a `decide`
+protocol request for command plugins.
 
 ## Motivation
 
 A decision model takes a *state* (text or a JSON value) and a set of named
 questions, and returns one typed answer per question: the probability that a
-statement is true, a pick from a fixed set of options, or a position on an
+statement is true, a selection from a fixed set of options, or a position on an
 ordered rubric.
-TypeSafe's Jev was the first.
-The endpoint it introduced, `POST /v1/systemone`, is also served by Ollama,
-AWS's Strands Decider, and open models such as Kev.
-An answer arrives in 70 to 500 ms, and input costs a fraction of an LLM's.
+TypeSafe's Jev introduced this model class and its `POST /v1/systemone`
+endpoint, which Ollama, AWS's Strands Decider, and open models such as Kev also
+serve.
+Responses return in 70 to 500 ms at a fraction of an LLM's input cost.
 
-Plugins built on JP make small judgments of this kind: which crate an issue
-belongs to, whether a ticket is worth acting on, whether a staged diff needs a
-changelog entry.
-Today each one is a `query` request with a `schema` ([RFD 072]): a full turn for
-one structured value, seconds of latency, and an answer with no probability
-attached.
-No JP provider speaks System One, so a plugin that wants a decision model has to
-bring its own credentials and HTTP client.
+JP plugins frequently make these classifications: which crate owns an issue,
+whether a ticket needs action, or whether a staged diff requires a changelog
+entry.
+With only LLM providers available, each classification requires a `query`
+request with a `schema` ([RFD 072]), which runs a full turn with seconds of
+latency and returns a structured value without a probability.
+Because no JP provider speaks System One, a plugin that uses a decision model
+must manage its own credentials and HTTP client.
 
 ## Design
 
 ### Terms
 
-- **Decision model**: a model that answers questions about a state with typed,
+- **Decision model**: A model that answers questions about a state with typed,
   probabilistic answers.
-- **Decision**: one request to a decision model: a state, named questions, and
-  the answers that come back.
-- **State**: the input every question in a decision is about.
+- **Decision**: A single request to a decision model, consisting of a state,
+  named questions, and the returned answers.
+- **State**: The input evaluated by every question in a decision.
 
-A decision question is not an inquiry.
-An inquiry is a question a tool asks during a turn, answered by the user or the
-assistant ([RFD 028]).
+A decision question is distinct from an inquiry, which is a question a tool asks
+during a turn and the user or assistant answers ([RFD 028]).
 
 ### Questions and answers
 
 Question types follow the System One API:
 
-| Type     | Asks                                       | Answer                                                    |
-| -------- | ------------------------------------------ | --------------------------------------------------------- |
-| `noul`   | Is this statement true?                    | probability of yes, 0 to 1                                |
-| `choice` | Which of these options applies? (2 to 255) | the option, a probability per option, a confidence        |
-| `score`  | Where does this sit on a rubric? (2 to 10) | the expected level, a probability per level, a confidence |
+| Type     | Question                                   | Answer                                                  |
+| -------- | ------------------------------------------ | ------------------------------------------------------- |
+| `noul`   | Is this statement true?                    | Probability of `true` (0 to 1)                          |
+| `choice` | Which of these options applies? (2 to 255) | Selected option, probability per option, and confidence |
+| `score`  | Where does this sit on a rubric? (2 to 10) | Expected level, probability per level, and confidence   |
 
-Questions and answers are JP's own types, in `jp_conversation::event::decision`.
-Each decision source converts its server's format into them, so an answer has
-one shape whichever server gave it.
-This follows `jp_llm`, whose providers convert their wire formats into
-`jp_conversation`'s `ChatResponse` and `ToolCallRequest`.
-Their JSON matches the System One shapes, so a plugin author reads one set of
-documentation.
+Questions and answers are defined as JP types in
+`jp_conversation::event::decision`.
+Each decision source converts its server's wire format into these types so
+answers have a uniform representation regardless of which server produced them,
+matching how `jp_llm` providers convert wire formats into `ChatResponse` and
+`ToolCallRequest`.
+Their JSON serialization matches the System One schema, so plugin authors can
+reference the System One documentation directly.
 
-Where servers accept different requests, JP's types require what every server
-requires.
-Every question carries non-empty `instructions`, which TypeSafe makes optional
-and Ollama requires; `choice` and `score` take at least two options, where
-TypeSafe accepts one; and the state is never empty, which Ollama rejects.
+Where System One servers differ in request validation, JP's types enforce the
+strictest common requirements.
+Every question requires non-empty `instructions` (optional in TypeSafe, required
+by Ollama); `choice` and `score` require at least two options (TypeSafe accepts
+one); and the state cannot be empty (rejected by Ollama).
 
 ### Configuration
 
@@ -91,39 +91,35 @@ base_url = "http://localhost:11434"
 id = "typesafe/jev-latest"
 ```
 
-- `providers.decision` is a map of providers the user declares and names, each
-  naming a provider source and holding that source's settings.
-  One source can back several servers, such as a hosted endpoint and a local
-  one, which a struct with one field per implementation, as `providers.llm` is,
-  cannot express.
-  The namespace is new, so it starts in that shape with nothing to migrate.
-- `systemone` is the only source.
-  Its settings are `base_url` and an optional `api_key_env`; without a key,
-  requests carry no credential, which suits a local server.
-- `source` is required once layers are merged.
-  A layer that patches a declared provider may leave it out.
-  With one source there is one settings struct, so a patch that leaves out
-  `source` still merges into the right fields.
-- `decision.model` is optional, and nothing is declared under
-  `providers.decision` by default.
-  A config without either loads as it does today, so commands that never ask a
-  decision model need neither.
-- `decision.model.id` is `<provider>/<model>`.
-  When it is set, a provider not declared under `providers.decision` is a config
-  error that lists the declared ones.
-- `decision` is a new top-level section, next to `assistant`, layered and
-  overridden like any other.
+- `providers.decision` is a map of user-named provider entries, each specifying
+  a `source` and that source's settings.
+  Unlike `providers.llm`, which has one fixed struct field per implementation, a
+  map lets a single source back multiple servers (such as a hosted endpoint and
+  a local server).
+- `systemone` is the only supported `source`.
+  It accepts `base_url` and an optional `api_key_env`; omitting `api_key_env`
+  sends unauthenticated requests for local servers.
+- `source` is required in the finalized configuration, but an override layer
+  patching an existing provider entry can omit it.
+  Because `systemone` is the only source, all entries share a single settings
+  struct and partial layers merge without repeating `source`.
+- `decision.model` is optional, and `providers.decision` is empty by default.
+  Configurations that do not use decision models require neither section.
+- `decision.model.id` has the form `<provider>/<model>`.
+  Referencing a provider not declared under `providers.decision` fails config
+  resolution with an error listing the declared providers.
+- `decision` is a top-level configuration section alongside `assistant`,
+  participating in normal config layering and `--cfg` overrides.
 
-Decision and LLM providers are separate namespaces with separate model ID types.
-Each model ID resolves its provider in its own namespace, and a provider not
-declared there is a config error.
-A model the provider's server cannot serve, such as a chat model named as
-`decision.model.id`, is reported by the server when a request runs.
+Decision and LLM providers use separate namespaces and distinct model ID types.
+Each model ID resolves its provider within its own namespace.
+If `decision.model.id` names a model that the configured server cannot serve
+(such as a chat model), the server rejects it when a request runs.
 
 ### Command plugins
 
-A plugin sends `decide`, and the host answers `decided`, or `error` when the
-request fails:
+A plugin sends `decide`, and the host replies with `decided`, or with `error` if
+the request fails:
 
 ```json
 {"type": "decide", "id": "7",
@@ -140,28 +136,27 @@ request fails:
                       "probabilities": {"cli": 0.9, "llm": 0.1}}}}
 ```
 
-- `questions` and `answers` are the types above.
-- `cfg` layers over the plugin's config for this request only, as `--cfg` does
-  for one run of a command.
-  A request with no `decision.model.id` once `cfg` is applied gets an `error`
-  naming the setting.
-- A `decide` request touches no conversation.
-- The host holds the credentials, as it does for `query`.
-- The host answers requests as they complete, not in the order they arrived.
-  A plugin classifying a backlog keeps many in flight, and that only pays off if
-  the host runs them concurrently.
-- `decide` requires an `id`, which the host echoes on `decided` and `error`, as
-  [RFD 072] requires one on `query` and `interrupt`, whose replies also arrive
-  out of order.
-  A `decide` without one is answered at once with an `error` and never reaches
-  the provider.
-- A request still outstanding when the plugin invocation ends is cancelled, with
-  no reply: when the plugin exits, closes its output, or the host shuts down.
-  Delegated turns are awaited past the plugin's exit because they persist the
-  user's work; a decision writes nothing, so once the plugin is gone, nothing
-  would read its answer.
-- The messages raise `PROTOCOL_VERSION`, 13 today.
-  A plugin that sends `decide` declares the new version in `ready`.
+- `questions` and `answers` use the `jp_conversation::event::decision` types.
+- `cfg` layers over the plugin's configuration for that single request, matching
+  `--cfg` on the CLI.
+  If `decision.model.id` remains unset after applying `cfg`, the host replies
+  with an `error` naming `decision.model.id`.
+- A `decide` request does not read or modify any conversation, and the host
+  resolves provider credentials just as it does for `query`.
+- The host executes `decide` requests concurrently and replies as each completes
+  rather than in arrival order, so a plugin classifying a batch of items can
+  keep multiple requests in flight.
+- Because replies can arrive out of order, `decide` requires an `id` field,
+  matching `query` and `interrupt` in [RFD 072].
+  The host echoes `id` on `decided` and `error`; a `decide` request without an
+  `id` is rejected immediately with an `error` before reaching the provider.
+- In-flight `decide` requests are cancelled without a reply when the plugin
+  exits, closes stdout, or receives a host shutdown.
+  Unlike delegated `query` turns, which the host awaits after plugin exit
+  because they persist conversation events, a `decide` request writes no state
+  and has no reader once the plugin terminates.
+- Adding `decide` and `decided` increments `PROTOCOL_VERSION` (from 13).
+  A plugin that sends `decide` must declare the new protocol version in `ready`.
 
 ### Crates
 
@@ -169,103 +164,105 @@ request fails:
 plugin `decide` ──> decide runner (jp_cli) ──> jp_decision::Provider ──> systemone source
 ```
 
-- **`jp_decision`** is a new crate.
-  It holds the `Provider` trait (`decide` and `models`) and the `systemone`
-  source.
-  The System One wire format stays inside the source, so a change to the
-  standard changes one module.
-- **`jp_conversation`** gains the question and answer types.
-- **`jp_config`** gains `providers.decision`, `decision.model`, and a decision
-  model ID keyed by provider name.
-  `ModelIdConfig` keys on the closed `ProviderId` enum, which cannot name a
-  declared provider.
-- **`jp_cli`** gains the plugin messages and a runner that resolves config,
-  builds the request, and calls the provider.
+- **`jp_decision`**: New crate defining the `Provider` trait (`decide` and
+  `models`) and the `systemone` source.
+  Keeping the System One wire format inside the `systemone` module isolates
+  changes to the external API.
+- **`jp_conversation`**: Defines the decision question and answer types.
+- **`jp_config`**: Adds `providers.decision`, `decision.model`, and a decision
+  model ID keyed by user-declared provider name (unlike `ModelIdConfig`, which
+  is keyed by the closed `ProviderId` enum).
+- **`jp_cli`**: Adds the plugin protocol messages and a runner that resolves
+  configuration, builds the request, and invokes the provider.
 
-`jp_llm` does not change.
-A decision model has no messages, tools, streaming, or reasoning, and fits none
-of `jp_llm::Provider`'s methods.
+`jp_llm` is unchanged: decision models have no messages, tools, streaming, or
+reasoning, so they do not fit `jp_llm::Provider`.
 
 ## Drawbacks
 
-- A third provider namespace next to `llm` and `mcp`, in a different shape from
-  `providers.llm`, and a second model ID type next to `ModelIdConfig`.
-- System One is two months old.
-  A breaking change stays inside the `systemone` source, but JP's question and
-  answer types follow the standard's.
+- **Additional provider namespace and model ID type.** Introducing
+  `providers.decision` adds a third provider namespace alongside `llm` and `mcp`
+  with a map structure that differs from `providers.llm`, plus a second model ID
+  type alongside `ModelIdConfig`.
+- **Coupling to an early specification.** The System One API is two months old.
+  Wire-format changes stay isolated inside the `systemone` source, but JP's
+  question and answer types mirror the System One data model.
 
 ## Alternatives
 
-**A `systemone` source under `providers.llm`.** One namespace instead of two,
-but chat and decision models would share one model ID type and one provider
-lookup, and every caller of `jp_llm::Provider` would have to tell the two apart
-at runtime.
+**Add a `systemone` source under `providers.llm`.** Rejected.
+Sharing a single namespace would force chat and decision models to share one
+model ID type and provider lookup, requiring every caller of `jp_llm::Provider`
+to distinguish the two at runtime.
 
-**Decisions through an LLM with structured output.** Works with every provider
-JP has.
-Without logprobs the probabilities are invented, and each decision costs a
-turn's latency.
-It stays a possible later source (see Non-Goals), whose answers would have to
-say that their probabilities are not calibrated.
+**Run decisions through an LLM with structured output.** Rejected as the primary
+mechanism.
+Although this works with every existing LLM provider, each decision incurs full
+turn latency, and without logprobs any returned probabilities are uncalibrated
+estimates.
+An LLM-backed source remains a possible future addition (see
+[Non-Goals](#non-goals)), provided its answers indicate that their probabilities
+are uncalibrated.
 
-**Plugins call decision servers themselves.** Needs no protocol change, but each
-plugin brings its own HTTP client and asks the user for credentials JP already
-holds.
+**Have plugins call decision servers directly.** Rejected.
+Avoiding a protocol addition would force each plugin to bundle its own HTTP
+client and manage credentials that JP already holds.
 
-**A `model` field on the plugin request.** Shorter for a plugin that alternates
-models, but it bypasses the config pipeline every other request goes through.
-`cfg` reaches the same models.
+**Add a `model` field to the `decide` plugin request.** Rejected.
+While slightly shorter for plugins that switch models per request, a dedicated
+field would bypass the configuration pipeline that every other request uses, and
+`cfg` already supports per-request model overrides.
 
 ## Non-Goals
 
-- **A shell command, and decisions recorded in a conversation.** Both are left
-  to their own RFD.
+- **A CLI subcommand or conversation persistence for decisions.** Both are
+  deferred to a separate RFD.
 - **A `decide` tool for the assistant.**
-- **`box` questions and images in state.** TypeSafe gates both behind opt-in
-  headers, and a `box` answer has nothing to render it.
-- **Other decision sources,** such as OpenAI's Decisions API, which has no
-  published schema, or an LLM-backed source.
-- **Decisions inside JP's own flows,** such as answering tool inquiries ([RFD
-  028]) or gating tool calls.
-  Each builds on `jp_decision::Provider` in its own RFD.
+- **`box` questions and image states.** TypeSafe gates both behind opt-in
+  headers, and JP has no rendering surface for `box` answers.
+- **Other decision sources**, such as OpenAI's Decisions API (which has no
+  published schema) or an LLM-backed fallback source.
+- **Using decision models inside JP's own internal flows**, such as answering
+  tool inquiries ([RFD 028]) or gating tool calls.
+  Those workflows can build on `jp_decision::Provider` in separate RFDs.
 
 ## Risks and Open Questions
 
-**Steerable answers.** A University of Southern California study reported that
-short, natural-looking injected text flipped 61% of correct Jev decisions.
-A decision over untrusted input (an issue body, a web page, tool output) that
-gates an action can be steered.
-The documentation for the `decide` request says so.
+**Prompt injection against decision models.** A University of Southern
+California study found that short, natural-looking injected text flipped 61% of
+correct Jev decisions.
+Any decision over untrusted input (such as an issue body, web page, or tool
+output) that gates an action is vulnerable to steering, and the `decide`
+protocol documentation notes this risk.
 
-**Servers differ.** Servers implementing System One differ in which requests
-they accept, not only in option limits and how they compute confidence.
-Ollama requires `instructions` and a non-empty `state`, caps cloud requests at
-64 questions, and echoes the requested model name where TypeSafe reports the
-version that answered.
-JP's types require what every server requires; anything else a server rejects
-comes back as an error from the source.
-JP passes answers through and claims nothing about comparing them across models.
+**Divergence across System One servers.** Implementations of System One differ
+in request validation, option limits, and confidence calculation.
+For example, Ollama requires `instructions` and a non-empty `state`, caps cloud
+requests at 64 questions, and echoes the requested model name where TypeSafe
+returns the resolved model version.
+JP's types enforce the requirements shared by all servers, and any
+server-specific rejection is returned as a provider error.
+JP forwards the server's answers as returned and makes no guarantee that
+probabilities or confidence scores are comparable across models.
 
 ## Implementation Plan
 
-1. **Config.** `providers.decision` with the `systemone` settings,
-   `decision.model`, the decision model ID type, and the check that its provider
-   is declared.
-   Schema snapshots updated.
-   Merges alone.
-2. **Types and `jp_decision`.** The question and answer types in
-   `jp_conversation`, the trait, and the `systemone` source, with request and
-   response tests against recorded responses, as `jp_llm`'s providers have.
-   Depends on 1.
-   Merges alone.
-3. **Plugins.** The runner, `decide` and `decided`, concurrent handling, the
-   required `id`, and the protocol version.
-   [RFD 072]'s Request IDs section gains `decide` next to `query` and
-   `interrupt`.
-   Depends on 2.
-4. **Documentation.** A configuration guide section, and glossary entries for
-   Decision and Decision Model, each noting that a decision is not an inquiry.
-   Depends on 3.
+1. **Configuration.** Add `providers.decision` with `systemone` settings,
+   `decision.model`, the decision model ID type, validation that the referenced
+   provider is declared, and updated schema snapshots.
+   This phase is independently mergeable.
+2. **Types and `jp_decision`.** Add the question and answer types in
+   `jp_conversation`, the `jp_decision::Provider` trait, and the `systemone`
+   source with recorded request/response fixture tests matching `jp_llm`.
+   This phase depends on Phase 1 and is independently mergeable.
+3. **Plugin protocol.** Add the `decide` runner, `decide` and `decided`
+   messages, concurrent execution, required `id` validation, and the bumped
+   protocol version, and list `decide` alongside `query` and `interrupt` in [RFD
+   072]'s Request IDs section.
+   This phase depends on Phase 2.
+4. **Documentation.** Add a configuration guide section and glossary entries for
+   Decision and Decision Model (distinguishing decisions from inquiries).
+   This phase depends on Phase 3.
 
 ## References
 

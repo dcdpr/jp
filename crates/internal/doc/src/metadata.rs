@@ -297,8 +297,7 @@ impl Document {
         &mut self.lines
     }
 
-    /// Keep only the lines `keep` accepts, such as to drop a reference
-    /// definition outside the block.
+    /// Retain only the lines for which `keep` returns `true`.
     pub fn retain_lines(&mut self, mut keep: impl FnMut(&str) -> bool) {
         self.lines.retain(|line| keep(line));
     }

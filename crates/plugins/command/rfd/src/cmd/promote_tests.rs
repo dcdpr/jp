@@ -282,9 +282,6 @@ fn a_draft_mentioning_another_draft_is_not_published() {
     );
 }
 
-/// A formatter that writes links by reference leaves the back-link's target in
-/// a definition at the bottom; it goes with the back-link, so neither blocks
-/// the promotion nor reaches the published file.
 #[test]
 fn a_back_link_written_by_reference_goes_with_its_definition() {
     let workspace = Workspace::new();
@@ -309,7 +306,6 @@ fn a_back_link_written_by_reference_goes_with_its_definition() {
     assert!(!text.contains("Required by"), "{text}");
 }
 
-/// A definition the body still uses is a body reference, back-link or not.
 #[test]
 fn a_back_link_definition_the_body_uses_still_blocks_the_promotion() {
     let workspace = Workspace::new();

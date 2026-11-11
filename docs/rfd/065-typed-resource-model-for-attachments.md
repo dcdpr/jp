@@ -451,11 +451,10 @@ resources as XML, operating on `&[Resource]` from `ChatRequest` rather than a
 separate `Vec<Attachment>`.
 
 > [!TIP]
-> [RFD 135] adds resources that are never stored: `Thread::into_parts` renders
-> each recorded decision as a `Resource` on its turn's first `ChatRequest`, in
-> the request it builds.
-> A provider that reads resources from `ChatRequest` events renders them with no
-> code of its own.
+> [RFD 135] synthesizes transient resources at request-build time:
+> `Thread::into_parts` converts each recorded `Decision` event into a `Resource`
+> on its turn's first `ChatRequest`, so providers that read resources from
+> `ChatRequest` events render decisions without decision-specific code.
 
 ## Drawbacks
 
