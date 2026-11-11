@@ -192,8 +192,10 @@ conversation = "none"
   `--cfg`, and then removed from the config, as `conversation.default_id` is
   (`lib.rs:863-869`).
   It never appears in a recorded config delta.
-- `--cfg decision.conversation=none` overrides it for one run, and
-  `JP_CFG_DECISION_CONVERSATION=none` for every run in an environment.
+- `JP_CFG_DECISION_CONVERSATION=none` overrides it for every run in an
+  environment.
+  For one run, `-i none` ([RFD 112]) runs without a conversation, as `--cfg
+  decision.conversation=none` does.
 - Plugins ignore it (see [Plugins](#plugins)).
 
 ### The `Decision` event
@@ -351,8 +353,7 @@ It and the plugin `decide` request call the same runner.
   `jp query` that follows does not see the decision.
 - Targeting a conversation means both that its config applies and that the
   decision is recorded there.
-  `-!` keeps the config and drops the recording; `decision.conversation = none`
-  drops both.
+  `-!` keeps the config and drops the recording; `-i none` drops both.
 - A decision's state is resent with every later request until a compaction
   strips it.
   A large diff costs tokens on each of those turns, and `strip` is opt-in.
@@ -508,11 +509,13 @@ untested.
   `llm-typesafe`
 - [RFD 030]: Schema DSL
 - [RFD 065]: Typed Resource Model for Attachments
+- [RFD 112]: Hierarchy Targets and Explicit Selection Clearing
 - [RFD 133]: Decision Models
 - [RFD 134]: Pending Turn
 
 [RFD 030]: 030-schema-dsl.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
+[RFD 112]: 112-hierarchy-targets-and-explicit-selection-clearing.md
 [RFD 133]: 133-decision-models.md
 [RFD 134]: 134-pending-turn.md
 [willison-jev]: https://simonwillison.net/2026/Sep/21/jev/
