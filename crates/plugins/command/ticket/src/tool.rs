@@ -133,7 +133,7 @@ fn capabilities(call: &ToolCall) -> Option<&'static [Capability]> {
             Capability::Delete,
         ],
         "comment" | "edit" => &[Capability::Read, Capability::Update],
-        // A board that has ranked nothing yet has no order file to update.
+        // `Create` is needed when `.board.json` does not exist yet.
         "move" => &[Capability::Read, Capability::Update, Capability::Create],
         _ => return None,
     })
@@ -900,7 +900,7 @@ fn edit_labels(
     }
 }
 
-/// Where `move` places a ticket within the column it ends up in.
+/// Target position of a ticket within its destination column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Placement {
     /// Directly above or below another ticket.
@@ -909,15 +909,14 @@ enum Placement {
     Bottom,
 }
 
-/// Move one ticket to another column, to another place within one, or both.
+/// Move a ticket to another column, reorder it within a column, or both.
 ///
-/// Every check runs before anything is written: a ticket to sit next to has to
-/// be another ticket in the column the move ends in, and a change of column
-/// keeps the parent rules `edit`'s `status` keeps.
-/// `top` and `bottom` are placed against the first and the last other ticket of
-/// the column as the board shows it.
-/// Closing a ticket whose checklist has unchecked items is allowed, and warned
-/// about.
+/// Validates the move before writing to disk: any anchor ticket must belong to
+/// the destination column, and status changes enforce parent-child completion
+/// rules.
+/// `top` and `bottom` anchor against the first and last other ticket in the
+/// destination column's board order.
+/// Closing a ticket with unchecked checklist items succeeds with a warning.
 fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
@@ -986,9 +985,10 @@ fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     Ok(text.into())
 }
 
-/// Read `move`'s placement: `before`, `after`, or `position`, at most one.
+/// Parse the placement arguments (`before`, `after`, or `position`), allowing
+/// at most one.
 ///
-/// The inner error is the refusal, for the assistant.
+/// The inner `Err` is a user-facing refusal message for the assistant.
 fn placement(args: &Arguments<'_>) -> Result<Result<Option<Placement>, String>, Error> {
     let before = args.optional::<Value>("before")?;
     let after = args.optional::<Value>("after")?;
@@ -1016,16 +1016,13 @@ fn placement(args: &Arguments<'_>) -> Result<Result<Option<Placement>, String>, 
     })
 }
 
-/// A placement next to the ticket `value` names, read from the argument
-/// `argument`.
 fn next_to(place: Place, value: &Value, argument: &str) -> Result<Option<Placement>, String> {
     id_arg(value)
         .map(|other| Some(Placement::Next(place, other)))
         .map_err(|refusal| format!("`{argument}`: {refusal}"))
 }
 
-/// The tickets of the column holding `status`, top first, as the board shows
-/// them.
+/// Return the tickets with `status` in board order (top to bottom).
 fn column(entries: &[store::Entry], order: &Order, status: Status) -> Vec<TicketId> {
     let at_status: Vec<TicketId> = entries
         .iter()
@@ -1041,11 +1038,11 @@ fn column(entries: &[store::Entry], order: &Order, status: Status) -> Vec<Ticket
     order.arrange(status, &at_status)
 }
 
-/// The ticket `id` is placed next to, and on which side, for `placement` in a
-/// column laid out as `column`.
+/// Resolve `placement` to the `(Place, TicketId)` anchor pair for
+/// [`board::move_to`].
 ///
-/// `None` when the move names no place, or when `top` or `bottom` meets a
-/// column holding no other ticket, where `id` is both.
+/// Returns `None` when `placement` is `None`, or when `Top`/`Bottom` is used in
+/// a column with no other tickets.
 fn anchor(
     placement: Option<Placement>,
     id: TicketId,
@@ -1060,10 +1057,9 @@ fn anchor(
     }
 }
 
-/// Where `id` sits in `column`, the column holding `status`: its position, and
-/// the ticket directly above it.
+/// Format `id`'s 1-based position in `column` and the ticket directly above it.
 ///
-/// `None` when the column doesn't hold `id`.
+/// Returns `None` if `id` is not in `column`.
 fn place_in(column: &[TicketId], id: TicketId, status: Status) -> Option<String> {
     let index = column.iter().position(|other| *other == id)?;
     let place = format!("{} of {} in {status}", index + 1, column.len());

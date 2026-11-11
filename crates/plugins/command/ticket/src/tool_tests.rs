@@ -2443,8 +2443,6 @@ fn list_counts_the_checklist() {
     );
 }
 
-/// Three Todo tickets, `T-02wt0k1` to `T-02wt0k3`, which the board shows in
-/// that order.
 fn three_in_todo(dir: &Utf8TempDir) -> [TicketId; 3] {
     [
         write_ticket_as(dir, "T-02wt0k1", "First"),
@@ -2453,7 +2451,6 @@ fn three_in_todo(dir: &Utf8TempDir) -> [TicketId; 3] {
     ]
 }
 
-/// The board's order file, as it is on disk now.
 fn board_file(dir: &Utf8TempDir) -> String {
     fs::read_to_string(tickets(dir).dir.join(board::BOARD_FILE)).unwrap()
 }
@@ -2479,7 +2476,7 @@ fn move_changes_the_column_and_says_where_the_ticket_landed() {
         )),
         "Moved T-02wt0k2:\n- status: already In Progress\n- place: 1 of 1 in In Progress\n"
     );
-    // A change of column alone ranks nothing.
+    // Changing status without a placement does not create `.board.json`.
     assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
 }
 
@@ -2511,8 +2508,8 @@ fn move_places_a_ticket_before_or_after_another() {
     );
 }
 
-/// `bottom` places the ticket after the last one shown, which ranks every
-/// ticket above it.
+/// Moving to `bottom` anchors after the last ticket in the column, which writes
+/// every preceding ticket in that column into `.board.json`.
 #[test]
 fn move_to_the_top_and_the_bottom_of_a_column() {
     let dir = Utf8TempDir::new().unwrap();
@@ -2546,7 +2543,6 @@ fn move_to_the_top_and_the_bottom_of_a_column() {
     );
 }
 
-/// The place is taken in the column the ticket moves to, not the one it leaves.
 #[test]
 fn move_to_another_column_and_a_place_in_it_at_once() {
     let dir = Utf8TempDir::new().unwrap();
@@ -2570,7 +2566,6 @@ fn move_to_another_column_and_a_place_in_it_at_once() {
     );
 }
 
-/// A neighbour outside the column is refused before anything is written.
 #[test]
 fn move_next_to_a_ticket_in_another_column_changes_nothing() {
     let dir = Utf8TempDir::new().unwrap();
@@ -2602,7 +2597,6 @@ fn move_next_to_a_ticket_in_another_column_changes_nothing() {
     assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
 }
 
-/// The parent rules hold for a move as they do for `edit`'s `status`.
 #[test]
 fn move_closing_a_parent_with_open_children_is_refused() {
     let dir = Utf8TempDir::new().unwrap();

@@ -1,24 +1,25 @@
 [conversation.tools.ticket_move]
 enable = false
 source = "plugin.command.ticket.move"
-summary = "Move a ticket to another column of the board, or another place in one."
+summary = "Move a ticket to another column or reorder it within a column."
 description = """
-Move one ticket on the board: to another column, to a place within its column,
-or both in one call. Each column is a queue, worked from the top.
+Move a ticket on the board: to another column, to a position within a column,
+or both in one call. Each column is a queue worked from the top.
 
-- `status` moves it to `todo`, `in progress`, or `done`; `done` closes it. A
-  parent closes only once its children are all `done`. Closing a ticket with
-  checklist items unchecked is allowed, and the result names them. Without
-  `status`, the ticket stays in its column.
-- `before` or `after` places it directly above or below another ticket, which
-  has to be in the column it ends up in.
-- `position` places it at the `top` or the `bottom` of that column.
+- `status` moves the ticket to `todo`, `in progress`, or `done`; `done` closes
+  it. A parent can close only once all of its children are `done`. Closing a
+  ticket with unchecked checklist items is allowed, and the result lists them.
+  Without `status`, the ticket stays in its current column.
+- `before` or `after` places the ticket directly above or below another ticket,
+  which must be in the target column.
+- `position` places the ticket at the `top` or `bottom` of the target column.
 
-Name at most one of `before`, `after`, and `position`. Without any of them, a
-ticket moved to another column joins it below the tickets ranked there.
+Pass at most one of `before`, `after`, or `position`. Without any of them, a
+ticket moved to another column is placed below any ranked tickets in that
+column.
 
-The result says where the ticket ended up: its place in the column, and the
-ticket directly above it.
+The result reports the ticket's new position in the column and the ticket
+directly above it.
 """
 
 examples = """
@@ -27,19 +28,19 @@ Put a ticket at the top of Todo, as the next thing to work on:
 {"id": "T-02wt0kx", "position": "top"}
 ```
 
-Rank it directly below another one:
+Place a ticket directly below another ticket:
 ```json
 {"id": "T-02wt0kx", "after": "T-02wt0m3"}
 ```
 
-Start work on it, ahead of what is in progress already:
+Start work on a ticket ahead of other in-progress tickets:
 ```json
 {"id": "T-02wt0kx", "status": "in progress", "position": "top"}
 ```
 """
 
-# Several moves in one call are made one at a time in the order written: each
-# reads the board the one before it left.
+# Multiple moves in a single call run sequentially in the order given, so each
+# move sees the board state written by the previous one.
 fan_out = { concurrency = 1 }
 
 [conversation.tools.ticket_move.style]
@@ -56,20 +57,20 @@ summary = "The ticket to move: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
 type = "string"
 required = false
 enum = ["todo", "in progress", "done"]
-summary = "The column to move it to; `done` closes it. Omit it to stay in the same column."
+summary = "Target column; `done` closes the ticket. Omit to keep the current column."
 
 [conversation.tools.ticket_move.parameters.before]
 type = "string"
 required = false
-summary = "Place it directly above this ticket, which has to be in the column it ends up in."
+summary = "Place the ticket directly above this ticket (must be in the target column)."
 
 [conversation.tools.ticket_move.parameters.after]
 type = "string"
 required = false
-summary = "Place it directly below this ticket, which has to be in the column it ends up in."
+summary = "Place the ticket directly below this ticket (must be in the target column)."
 
 [conversation.tools.ticket_move.parameters.position]
 type = "string"
 required = false
 enum = ["top", "bottom"]
-summary = "Place it at the top or the bottom of the column it ends up in."
+summary = "Place the ticket at the top or bottom of the target column."

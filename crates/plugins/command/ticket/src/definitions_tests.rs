@@ -118,11 +118,9 @@ fn fan_out_value(text: &str) -> Option<toml::Value> {
         .cloned()
 }
 
-/// Reads batch freely; writes batch one at a time, in the order written, since
-/// two writes to one ticket would race for its file, and two moves for the
-/// board's order file.
-/// `list` filters already, so it doesn't batch.
-/// JP's own definitions say the same as the ones `tools init` writes.
+/// Read tools fan out concurrently; write tools run sequentially in call order
+/// so concurrent writes to the same ticket file or `.board.json` cannot race.
+/// `list` already accepts filters, so it does not use `fan_out`.
 #[test]
 fn tools_batch_as_far_as_they_safely_can() {
     let one_at_a_time = fan_out_value("{ concurrency = 1 }");
