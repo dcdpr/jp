@@ -555,6 +555,9 @@ Ok(
                         base_url: Some(
                             "https://generativelanguage.googleapis.com/v1beta",
                         ),
+                        silence_allowance_secs: Some(
+                            300,
+                        ),
                     },
                     llamacpp: PartialLlamacppConfig {
                         base_url: Some(

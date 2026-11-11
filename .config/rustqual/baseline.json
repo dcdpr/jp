@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.7596803235676399,
-  "iosp_score": 0.9209866875489429,
-  "violations": 1009,
-  "total": 17460,
+  "quality_score": 0.7597913401385138,
+  "iosp_score": 0.9209764494171035,
+  "violations": 1010,
+  "total": 17471,
   "complexity_warnings": 200,
   "magic_number_warnings": 268,
   "nesting_depth_warnings": 31,
@@ -1033,12 +1033,12 @@
     {
       "name": "PartialRequestConfig::assign",
       "file": "crates/jp_config/src/assistant/request.rs",
-      "line": 162
+      "line": 169
     },
     {
       "name": "MaxResponseBytes::from",
       "file": "crates/jp_config/src/assistant/request.rs",
-      "line": 337
+      "line": 344
     },
     {
       "name": "PartialInstructionsConfig::assign",
@@ -1253,7 +1253,7 @@
     {
       "name": "PartialGoogleConfig::assign",
       "file": "crates/jp_config/src/providers/llm/google.rs",
-      "line": 83
+      "line": 104
     },
     {
       "name": "PartialOpenrouterConfig::assign",
@@ -3376,6 +3376,11 @@
       "line": 912
     },
     {
+      "name": "StreamRetryState::idle_timeout",
+      "file": "crates/jp_cli/src/cmd/query/stream/retry.rs",
+      "line": 238
+    },
+    {
       "name": "InterruptHandler<P>::collect_reply_inline",
       "file": "crates/jp_cli/src/cmd/query/interrupt/handler.rs",
       "line": 478
@@ -3418,17 +3423,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1174
+      "line": 1170
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1273
+      "line": 1269
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1388
+      "line": 1384
     },
     {
       "name": "QueryText::read",
@@ -4708,12 +4713,12 @@
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1094
+      "line": 1098
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1409
+      "line": 1413
     },
     {
       "name": "prepare_soft_force_retry_request",

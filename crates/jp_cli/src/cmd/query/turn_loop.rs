@@ -286,10 +286,6 @@ async fn drive_turn(
 
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request);
-    let idle_timeout = match cfg.assistant.request.stream_idle_timeout_secs {
-        0 => None,
-        secs => Some(Duration::from_secs(u64::from(secs))),
-    };
     let output_limit = cfg.assistant.request.max_response_bytes.bytes();
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
@@ -469,7 +465,7 @@ async fn drive_turn(
                         .set_execution(execution)
                         .map_err(Error::McpHost)?;
                     let raw_stream = started.events;
-                    let raw_stream = match idle_timeout {
+                    let raw_stream = match stream_retry.idle_timeout() {
                         Some(idle) => with_idle_timeout(raw_stream, idle),
                         None => raw_stream,
                     };

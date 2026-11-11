@@ -1441,6 +1441,7 @@ providers: ProviderConfig
           *: string | [string]
       auth?: [string]
       base_url?: string
+      silence_allowance_secs?: int
     llamacpp: LlamacppConfig
       base_url?: string
     ollama: OllamaConfig

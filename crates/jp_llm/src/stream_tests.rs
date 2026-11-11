@@ -379,8 +379,10 @@ async fn response_keepalive_allowance_restarts_on_each_item() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn no_response_keepalive_before_the_first_item() {
-    // Time to first token stays owned by the downstream idle timeout.
+async fn response_keepalive_covers_silence_before_the_first_item() {
+    // Google sends nothing, not even headers, until its first part exists: a
+    // large prompt or a tool call written before any text reads as a long
+    // silence from the moment the request is sent.
     let inner = stream::once(async {
         tokio::time::sleep(Duration::from_secs(12)).await;
         Ok(Event::message(0, "a"))
@@ -393,7 +395,29 @@ async fn no_response_keepalive_before_the_first_item() {
         paused_wall_clock(),
     );
 
-    assert_eq!(timeline(wrapped).await, vec![(12, "part"), (12, "end")]);
+    assert_eq!(timeline(wrapped).await, vec![
+        (5, "keepalive"),
+        (10, "keepalive"),
+        (12, "part"),
+        (12, "end"),
+    ]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn response_keepalive_stops_for_a_request_that_is_never_answered() {
+    let inner = stream::pending().boxed();
+    let wrapped = with_response_keepalive_at(
+        inner,
+        Duration::from_secs(5),
+        Duration::from_secs(12),
+        paused_wall_clock(),
+    );
+
+    assert_eq!(timeline(wrapped).await, vec![
+        (5, "keepalive"),
+        (10, "keepalive"),
+        (70, "silent"),
+    ]);
 }
 
 #[tokio::test(start_paused = true)]

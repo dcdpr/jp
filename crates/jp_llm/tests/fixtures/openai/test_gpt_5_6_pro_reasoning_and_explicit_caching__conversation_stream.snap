@@ -214,7 +214,8 @@ expression: v
             "api_key"
           ],
           "api_key_env": "GEMINI_API_KEY",
-          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
         },
         "llamacpp": {
           "base_url": "http://127.0.0.1:8080"

@@ -49,20 +49,18 @@ static PROVIDER: ProviderId = ProviderId::Google;
 /// heartbeat always lands before the idle window elapses.
 const RESPONSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// How long a response may stay silent before keep-alives stop.
-///
-/// Gemini sends a function call as one part once its arguments are complete, so
-/// a model writing a large call is silent for as long as the writing takes.
-/// This bounds that wait; a connection that died mid-response is detected this
-/// long plus one idle window after its last part.
-const RESPONSE_KEEPALIVE_ALLOWANCE: Duration = Duration::from_mins(5);
-
 const THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
 const THOUGHT_SIGNATURE_DUMMY_VALUE: &str = "skip_thought_signature_validator";
 
 #[derive(Debug, Clone)]
 pub struct Google {
     client: GeminiClient,
+
+    /// How long a response may stay silent before keep-alives stop, from
+    /// `providers.llm.google.silence_allowance_secs`.
+    ///
+    /// `None` sends no keep-alives.
+    silence_allowance: Option<Duration>,
 }
 
 #[async_trait]
@@ -100,11 +98,13 @@ impl Provider for Google {
             "Request payload."
         );
 
-        Ok(with_response_keepalive(
-            call(client, request, slug, 0, structured),
-            RESPONSE_KEEPALIVE_INTERVAL,
-            RESPONSE_KEEPALIVE_ALLOWANCE,
-        ))
+        let stream = call(client, request, slug, 0, structured);
+        Ok(match self.silence_allowance {
+            Some(allowance) => {
+                with_response_keepalive(stream, RESPONSE_KEEPALIVE_INTERVAL, allowance)
+            }
+            None => stream,
+        })
     }
 }
 
@@ -1045,6 +1045,10 @@ impl TryFrom<&GoogleConfig> for Google {
 
         Ok(Google {
             client: GeminiClient::new(api_key).with_api_url(config.base_url.clone()),
+            silence_allowance: match config.silence_allowance_secs {
+                0 => None,
+                secs => Some(Duration::from_secs(u64::from(secs))),
+            },
         })
     }
 }
