@@ -953,22 +953,23 @@ fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         Err(other) => return Err(other.into()),
     };
 
-    Ok(describe_move(tickets, id, ticket, status, moved.previous, to)?.into())
+    Ok(describe_move(tickets, id, ticket, status, moved.previous)?.into())
 }
 
 /// Format the summary of a completed move: any requested status change, the
-/// ticket's new position in `to`, and a warning if closing left unchecked
-/// checklist items.
+/// ticket's new position in the column it moved to, and a warning if closing
+/// left unchecked checklist items.
 ///
-/// `ticket` is the ticket state read before the move.
+/// `ticket` is the ticket state read before the move; without `status`, the
+/// ticket stayed in its column.
 fn describe_move(
     tickets: &Tickets<'_>,
     id: TicketId,
     ticket: &Ticket,
     status: Option<Status>,
     previous: Status,
-    to: Status,
 ) -> Result<String, Error> {
+    let to = status.unwrap_or(ticket.metadata.status);
     let mut text = format!("Moved {id}:\n");
     if let Some(status) = status {
         text.push_str(&if previous == status {
