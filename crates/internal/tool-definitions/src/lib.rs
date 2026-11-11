@@ -267,18 +267,39 @@ impl Definitions {
         }
 
         let command = format!("jp {} tools sync {dir}", self.plugin);
-        let header = self.header();
         let path = dir.join(SYNCED_FILE);
-        let existing = match fs::read_to_string(&path) {
-            Ok(existing) => Some(existing),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        let existing = self.read_synced(&path, &command, force)?;
+        let synced = self.render_synced(config, notes, mirrors);
+
+        let unchanged = existing
+            .as_ref()
+            .is_some_and(|text| overwrite::same_text(text.as_bytes(), synced.text.as_bytes()));
+        if !unchanged {
+            if !force && existing.is_some() {
+                refuse_unrecorded(dir, &[Utf8PathBuf::from(SYNCED_FILE)], &command)?;
+            }
+            fs::write(&path, &synced.text)
+                .map_err(|error| format!("failed to write {path}: {error}"))?;
+        }
+
+        Ok(self.sync_summary(&path, unchanged, &synced))
+    }
+
+    /// What is in the synced file at `path`, or `None` when there is none.
+    ///
+    /// Refuses, unless `force`, a file this plugin's `tools sync` didn't write.
+    fn read_synced(
+        &self,
+        path: &Utf8Path,
+        command: &str,
+        force: bool,
+    ) -> Result<Option<String>, String> {
+        let existing = match fs::read_to_string(path) {
+            Ok(existing) => existing,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(format!("{path}: {error}")),
         };
-        if !force
-            && existing
-                .as_ref()
-                .is_some_and(|text| !text.starts_with(&header))
-        {
+        if !force && !existing.starts_with(&self.header()) {
             return Err(format!(
                 "{path} was not written by `jp {} tools sync`, so it is left alone. Move it \
                  aside, or run `{command} --force` to overwrite it.",
@@ -286,35 +307,45 @@ impl Definitions {
             ));
         }
 
-        let mut out = format!("{header}\n{notes}");
-        let mut covered: Vec<String> = vec![];
-        let mut undeclared: Vec<String> = vec![];
+        Ok(Some(existing))
+    }
+
+    /// The synced file for `config`: [`Definitions::header`], `notes`, then
+    /// what `mirrors` says each configured tool takes.
+    fn render_synced<'a>(
+        &self,
+        config: &Value,
+        notes: &str,
+        mirrors: impl Fn(&str) -> Vec<Mirror<'a>>,
+    ) -> Synced {
+        let mut synced = Synced {
+            text: format!("{}\n{notes}", self.header()),
+            covered: vec![],
+            undeclared: vec![],
+        };
         for (key, tool) in self.served_tools(config) {
             for mirror in mirrors(&tool) {
                 if !declares(config, &key, mirror.parameter) {
-                    undeclared.push(format!("{key} (no `{}` parameter)", mirror.parameter));
+                    synced
+                        .undeclared
+                        .push(format!("{key} (no `{}` parameter)", mirror.parameter));
                     continue;
                 }
 
-                out.push_str(&mirror.render(&key));
-                if !covered.contains(&key) {
-                    covered.push(key.clone());
+                synced.text.push_str(&mirror.render(&key));
+                if !synced.covered.contains(&key) {
+                    synced.covered.push(key.clone());
                 }
             }
         }
 
-        let unchanged = existing
-            .as_ref()
-            .is_some_and(|text| overwrite::same_text(text.as_bytes(), out.as_bytes()));
-        if !unchanged {
-            if !force && existing.is_some() {
-                refuse_unrecorded(dir, &[Utf8PathBuf::from(SYNCED_FILE)], &command)?;
-            }
-            fs::write(&path, out).map_err(|error| format!("failed to write {path}: {error}"))?;
-        }
+        synced
+    }
 
+    /// What `sync` says it did with the synced file at `path`.
+    fn sync_summary(&self, path: &Utf8Path, unchanged: bool, synced: &Synced) -> String {
         let verb = if unchanged { "Unchanged" } else { "Wrote" };
-        let mut text = if covered.is_empty() {
+        let mut text = if synced.covered.is_empty() {
             format!(
                 "{verb} {path}; no configured tool takes {} from `jp {}`.\n",
                 self.offers, self.plugin
@@ -323,19 +354,31 @@ impl Definitions {
             format!(
                 "{verb} {path}, with {} for {}\n",
                 self.offers,
-                covered.join(", ")
+                synced.covered.join(", ")
             )
         };
-        if !undeclared.is_empty() {
+        if !synced.undeclared.is_empty() {
             text.push_str(&format!(
                 "Left out {}: the values go into that parameter, which their definitions don't \
                  declare.\n",
-                undeclared.join(", ")
+                synced.undeclared.join(", ")
             ));
         }
 
-        Ok(text)
+        text
     }
+}
+
+/// A synced file as `sync` renders it.
+struct Synced {
+    text: String,
+
+    /// The tool keys it writes values for.
+    covered: Vec<String>,
+
+    /// The tools left out, each with the parameter its definition doesn't
+    /// declare.
+    undeclared: Vec<String>,
 }
 
 /// Refuse when one of `names`, files in `dir` about to be overwritten, holds

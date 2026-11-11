@@ -462,6 +462,21 @@ fn sync_leaves_a_file_it_did_not_write_alone() {
     );
 }
 
+/// A synced file that can't be read is an error, not a file to overwrite.
+/// The OS error's wording varies by platform, so only the part this crate
+/// writes is compared.
+#[test]
+fn sync_reports_a_synced_file_it_cannot_read() {
+    let dir = Utf8TempDir::new().unwrap();
+    let path = dir.path().join(SYNCED_FILE);
+    fs::create_dir(&path).unwrap();
+
+    let error = sync(dir.path(), &json!({})).unwrap_err();
+
+    assert!(error.starts_with(&format!("{path}: ")), "{error}");
+    assert!(path.is_dir());
+}
+
 #[test]
 fn sync_needs_an_existing_directory() {
     let dir = Utf8TempDir::new().unwrap();

@@ -26,7 +26,7 @@
 use std::{
     fmt::Write as _,
     fs, io,
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -77,15 +77,15 @@ pub enum Unrecorded {
 }
 
 impl Unrecorded {
-    /// Why the file is refused, as a refusal lists it.
-    #[must_use]
-    pub fn reason(self) -> &'static str {
+    /// Why the file is refused, as a refusal lists it, and whether committing
+    /// the file would let the command overwrite it.
+    fn describe(self) -> (&'static str, bool) {
         match self {
-            Self::Modified => "changed since the last commit",
-            Self::Untracked => "not tracked",
-            Self::Hidden => "marked assume-unchanged or skip-worktree",
-            Self::Symlink => "reached through a symlink",
-            Self::NoWorkTree => "not in a git work tree",
+            Self::Modified => ("changed since the last commit", true),
+            Self::Untracked => ("not tracked", true),
+            Self::Hidden => ("marked assume-unchanged or skip-worktree", false),
+            Self::Symlink => ("reached through a symlink", false),
+            Self::NoWorkTree => ("not in a git work tree", false),
         }
     }
 }
@@ -95,15 +95,10 @@ impl Unrecorded {
 ///
 /// `None` when `dir` isn't in a git work tree, or git isn't installed.
 pub fn prefix(dir: &Utf8Path) -> Result<Option<String>, String> {
-    let output = match Command::new("git")
-        .args(["rev-parse", "--show-prefix"])
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .output()
-    {
+    let output = match git(dir, ["rev-parse", "--show-prefix"]) {
         Ok(output) => output,
         Err(error) if error.kind() == io::ErrorKind::NotFound && dir.is_dir() => return Ok(None),
-        Err(error) => return Err(format!("git couldn't be run in {dir}: {error}")),
+        Err(error) => return Err(not_run(dir, &error)),
     };
 
     if !output.status.success() {
@@ -170,6 +165,42 @@ fn through_symlink(dir: &Utf8Path, path: &Utf8Path) -> Result<bool, String> {
     Ok(false)
 }
 
+/// Run git in `dir` with `args`, its stdin closed.
+fn git<'a>(dir: &Utf8Path, args: impl IntoIterator<Item = &'a str>) -> io::Result<Output> {
+    Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .output()
+}
+
+/// The error for git failing to start in `dir`.
+fn not_run(dir: &Utf8Path, error: &io::Error) -> String {
+    format!("git couldn't be run in {dir}: {error}")
+}
+
+/// What git printed when run in `dir` with `args` followed by `paths`.
+///
+/// Fails when git couldn't start or exited unsuccessfully, naming the git
+/// subcommand, the first of `args`.
+fn read(dir: &Utf8Path, args: &[&str], paths: &[Utf8PathBuf]) -> Result<String, String> {
+    let all = args
+        .iter()
+        .copied()
+        .chain(paths.iter().map(|path| path.as_str()));
+    let output = git(dir, all).map_err(|error| not_run(dir, &error))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "`git {}` failed: {}",
+            args.first().copied().unwrap_or_default(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// What `git status` says about `paths`, relative to `dir`, which sits at
 /// `prefix` in its work tree.
 fn status(
@@ -177,36 +208,20 @@ fn status(
     prefix: &str,
     paths: &[Utf8PathBuf],
 ) -> Result<Vec<(Utf8PathBuf, Unrecorded)>, String> {
-    let output = Command::new("git")
-        .args([
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-            // An ignored file is as untracked as any other, and git has no copy
-            // of it to restore. With `--untracked-files=all`, ignored
-            // directories are listed file by file.
-            "--ignored=traditional",
-            "--no-renames",
-            "--",
-        ])
-        .args(paths.iter().map(|path| path.as_str()))
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("git couldn't be run in {dir}: {error}"))?;
+    let args = [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        // An ignored file is as untracked as any other, and git has no copy of
+        // it to restore. With `--untracked-files=all`, ignored directories are
+        // listed file by file.
+        "--ignored=traditional",
+        "--no-renames",
+        "--",
+    ];
 
-    if !output.status.success() {
-        return Err(format!(
-            "`git status` failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    Ok(parse_status(
-        &String::from_utf8_lossy(&output.stdout),
-        prefix,
-    ))
+    Ok(parse_status(&read(dir, &args, paths)?, prefix))
 }
 
 /// Read `git status --porcelain=v1 -z --no-renames --ignored` output, keeping
@@ -238,25 +253,9 @@ fn hidden(
     prefix: &str,
     paths: &[Utf8PathBuf],
 ) -> Result<Vec<(Utf8PathBuf, Unrecorded)>, String> {
-    let output = Command::new("git")
-        .args(["ls-files", "-v", "-z", "--full-name", "--"])
-        .args(paths.iter().map(|path| path.as_str()))
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("git couldn't be run in {dir}: {error}"))?;
+    let args = ["ls-files", "-v", "-z", "--full-name", "--"];
 
-    if !output.status.success() {
-        return Err(format!(
-            "`git ls-files` failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    Ok(parse_hidden(
-        &String::from_utf8_lossy(&output.stdout),
-        prefix,
-    ))
+    Ok(parse_hidden(&read(dir, &args, paths)?, prefix))
 }
 
 /// Read `git ls-files -v -z --full-name` output, keeping the entries below
@@ -286,13 +285,13 @@ fn parse_hidden(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
 #[must_use]
 pub fn refusal(command: &str, files: &[(Utf8PathBuf, Unrecorded)]) -> String {
     let mut message = format!("Git couldn't restore these files, so `{command}` leaves them:\n");
+    let mut committable = false;
     for (path, why) in files {
-        let _ = writeln!(message, "  {path} ({})", why.reason());
+        let (reason, fixed_by_committing) = why.describe();
+        committable |= fixed_by_committing;
+        let _ = writeln!(message, "  {path} ({reason})");
     }
 
-    let committable = files
-        .iter()
-        .any(|(_, why)| matches!(why, Unrecorded::Modified | Unrecorded::Untracked));
     if committable {
         let _ = write!(
             message,

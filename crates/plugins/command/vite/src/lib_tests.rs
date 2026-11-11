@@ -525,6 +525,25 @@ fn sync_asks_before_writing() {
     );
 }
 
+/// Outside git there is nothing to undo a sync with, so the question doesn't
+/// say there is.
+#[test]
+fn sync_outside_git_asks_without_pointing_at_git() {
+    let root = Utf8TempDir::new().unwrap();
+    fs::create_dir_all(root.path().join("docs")).unwrap();
+
+    let messages = exchange(&[init(root.path(), &["sync"]), composed(Some("write"))]);
+
+    let asked = messages.iter().find_map(|message| match message {
+        PluginToHost::Compose(request) => Some(request),
+        _ => None,
+    });
+    assert_eq!(asked.map(|request| request.help.as_deref()), Some(None));
+    let (text, code, _) = printed(&messages);
+    assert_eq!(code, 0);
+    assert!(!text.contains("git diff"), "{text}");
+}
+
 #[test]
 fn a_declined_sync_writes_nothing() {
     let root = project();

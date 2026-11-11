@@ -49,6 +49,35 @@ fn the_prefix_is_the_dir_below_the_top_of_the_work_tree() {
     assert_eq!(prefix(&top.path().join("sub")), Ok(Some("sub/".to_owned())));
 }
 
+/// A directory that doesn't exist is an error, not "outside a work tree": git
+/// couldn't be started there to say either way.
+/// The OS error's wording varies by platform, so only the part this crate
+/// writes is compared.
+#[test]
+fn a_missing_directory_has_no_answer() {
+    let dir = Utf8TempDir::new().unwrap();
+    let missing = dir.path().join("missing");
+
+    let error = prefix(&missing).unwrap_err();
+
+    assert!(
+        error.starts_with(&format!("git couldn't be run in {missing}: ")),
+        "{error}"
+    );
+}
+
+/// A failing git command is reported, not read as "nothing to refuse".
+/// Git's message names the temporary directory, so only the part this crate
+/// writes is compared.
+#[test]
+fn a_path_git_rejects_is_an_error() {
+    let top = repository();
+
+    let error = unrecorded(top.path(), &[Utf8PathBuf::from("../outside.toml")]).unwrap_err();
+
+    assert!(error.starts_with("`git status` failed: "), "{error}");
+}
+
 #[test]
 fn a_directory_outside_a_work_tree_has_no_prefix() {
     let dir = Utf8TempDir::new().unwrap();
@@ -353,6 +382,22 @@ fn existing_compares_a_file_with_what_would_be_written() {
     fs::write(&path, "a\r\n").unwrap();
     assert_eq!(existing(&path, b"a\n"), Ok(Existing::Same));
     assert_eq!(existing(&path, b"b\n"), Ok(Existing::Differs));
+}
+
+/// A directory in a file's place can't be read, and is an error rather than a
+/// file that differs.
+#[test]
+fn existing_reports_a_path_it_cannot_read() {
+    let dir = Utf8TempDir::new().unwrap();
+    let path = dir.path().join("a.toml");
+    fs::create_dir(&path).unwrap();
+
+    let error = existing(&path, b"a\n").unwrap_err();
+
+    assert!(
+        error.starts_with(&format!("failed to read {path}: ")),
+        "{error}"
+    );
 }
 
 #[test]

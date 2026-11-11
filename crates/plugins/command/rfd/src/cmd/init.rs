@@ -33,64 +33,27 @@ const TEMPLATES: [(&str, &str); 4] = [
 /// by the category's name.
 const OTHER: &str = include_str!("../../templates/other.md");
 
+/// A category's template, as `init` plans to write it.
+struct Planned {
+    /// The file's name in the RFD directory.
+    name: Utf8PathBuf,
+    text: String,
+    existing: Existing,
+}
+
 /// Set up the RFD directory for `categories`.
 ///
 /// A template git couldn't restore is overwritten only with `force`; without
 /// it, nothing is written.
 pub(crate) fn init(paths: &Paths, categories: &[String], force: bool) -> Result<Output, String> {
-    let mut planned = vec![];
-    for category in categories {
-        let name = Utf8PathBuf::from(format!("000-{category}-template.md"));
-        let path = paths.rfds.join(&name);
-        let text = template(category);
-        let existing = overwrite::existing(&path, paths.formatting.apply(&path, &text).as_bytes())?;
-        planned.push((name, text, existing));
-    }
-
+    let planned = plan(paths, categories)?;
     if !force {
-        let differing: Vec<Utf8PathBuf> = planned
-            .iter()
-            .filter(|(.., existing)| *existing == Existing::Differs)
-            .map(|(name, ..)| name.clone())
-            .collect();
-        let unrecorded: Vec<_> = overwrite::unrecorded(&paths.rfds, &differing)?
-            .into_iter()
-            .map(|(name, why)| (Utf8PathBuf::from(paths.show(&paths.rfds.join(name))), why))
-            .collect();
-        if !unrecorded.is_empty() {
-            return Err(overwrite::refusal("jp rfd init", &unrecorded));
-        }
+        refuse_unrecorded(paths, &planned)?;
     }
 
     let mut output = Output::default();
-
-    for dir in [paths.rfds.clone(), paths.drafts()] {
-        if dir.is_dir() {
-            continue;
-        }
-        fs::create_dir_all(&dir).map_err(|error| format!("{dir}: {error}"))?;
-        output
-            .text
-            .push_str(&format!("Created {}/\n", paths.show(&dir)));
-    }
-
-    for (name, text, existing) in planned {
-        let path = paths.rfds.join(name);
-        let verb = match existing {
-            Existing::Same => continue,
-            Existing::Missing => {
-                paths.create(&path, &text)?;
-                "Wrote"
-            }
-            Existing::Differs => {
-                paths.write(&path, &text)?;
-                "Overwrote"
-            }
-        };
-        output
-            .text
-            .push_str(&format!("{verb} {}\n", paths.show(&path)));
-    }
+    create_dirs(paths, &mut output)?;
+    write_templates(paths, planned, &mut output)?;
 
     let board = paths.rfds.join(PRIORITY_FILE);
     if !board.exists() {
@@ -108,6 +71,86 @@ pub(crate) fn init(paths: &Paths, categories: &[String], force: bool) -> Result<
     }
 
     Ok(output)
+}
+
+/// Each category's template, with what is in its file's place.
+fn plan(paths: &Paths, categories: &[String]) -> Result<Vec<Planned>, String> {
+    categories
+        .iter()
+        .map(|category| {
+            let name = Utf8PathBuf::from(format!("000-{category}-template.md"));
+            let path = paths.rfds.join(&name);
+            let text = template(category);
+            let existing =
+                overwrite::existing(&path, paths.formatting.apply(&path, &text).as_bytes())?;
+
+            Ok(Planned {
+                name,
+                text,
+                existing,
+            })
+        })
+        .collect()
+}
+
+/// Refuse when a template that differs holds something git couldn't restore.
+fn refuse_unrecorded(paths: &Paths, planned: &[Planned]) -> Result<(), String> {
+    let differing: Vec<Utf8PathBuf> = planned
+        .iter()
+        .filter(|planned| planned.existing == Existing::Differs)
+        .map(|planned| planned.name.clone())
+        .collect();
+    let unrecorded: Vec<_> = overwrite::unrecorded(&paths.rfds, &differing)?
+        .into_iter()
+        .map(|(name, why)| (Utf8PathBuf::from(paths.show(&paths.rfds.join(name))), why))
+        .collect();
+    if unrecorded.is_empty() {
+        return Ok(());
+    }
+
+    Err(overwrite::refusal("jp rfd init", &unrecorded))
+}
+
+/// Create the RFD directory and its drafts directory where they are missing.
+fn create_dirs(paths: &Paths, output: &mut Output) -> Result<(), String> {
+    for dir in [paths.rfds.clone(), paths.drafts()] {
+        if dir.is_dir() {
+            continue;
+        }
+        fs::create_dir_all(&dir).map_err(|error| format!("{dir}: {error}"))?;
+        output
+            .text
+            .push_str(&format!("Created {}/\n", paths.show(&dir)));
+    }
+
+    Ok(())
+}
+
+/// Write the templates that are missing or differ.
+fn write_templates(
+    paths: &Paths,
+    planned: Vec<Planned>,
+    output: &mut Output,
+) -> Result<(), String> {
+    for planned in planned {
+        let path = paths.rfds.join(planned.name);
+        let verb = match planned.existing {
+            Existing::Same => continue,
+            Existing::Missing => {
+                paths.create(&path, &planned.text)?;
+                "Wrote"
+            }
+            Existing::Differs => {
+                paths.write(&path, &planned.text)?;
+                "Overwrote"
+            }
+        };
+        output
+            .text
+            .push_str(&format!("{verb} {}\n", paths.show(&path)));
+    }
+
+    Ok(())
 }
 
 /// The template a new project starts `category` with.
