@@ -167,7 +167,6 @@ impl PluginClient {
             content: content.to_owned(),
             schema: None,
             expires_in: None,
-            compact: false,
         });
 
         match self.request_within(&id, &msg, None).await? {
@@ -215,7 +214,6 @@ impl PluginClient {
             cfg,
             schema: None,
             expires_in: None,
-            compact: false,
         });
 
         // Both waiters before the request goes out. Registering the second one
@@ -545,12 +543,13 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
                 let _ = shutdown_tx.send(true);
             }
 
-            // `Composed` and `Edited` answer `compose` and `edit_files`, which
-            // this plugin never sends: it serves HTTP and has no terminal to use.
+            // `Composed`, `Edited`, and `Compacted` answer `compose`,
+            // `edit_files`, and `compact`, which this plugin never sends.
             HostToPlugin::Init(_)
             | HostToPlugin::Describe
             | HostToPlugin::Composed(_)
-            | HostToPlugin::Edited(_) => {
+            | HostToPlugin::Edited(_)
+            | HostToPlugin::Compacted(_) => {
                 warn!("Unexpected message after startup");
             }
 

@@ -20,8 +20,8 @@ use std::{
 };
 
 use jp_plugin::message::{
-    ExitMessage, HostToPlugin, InterruptRequest, LogMessage, PluginToHost, PrintMessage,
-    QueryRequest, ReadConfigRequest, ReadEventsRequest,
+    CompactRequest, ExitMessage, HostToPlugin, InterruptRequest, LogMessage, PluginToHost,
+    PrintMessage, QueryRequest, ReadConfigRequest, ReadEventsRequest,
 };
 use serde_json::{Map, Value};
 use tokio::sync::{oneshot, watch};
@@ -75,12 +75,18 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// finishes.
     fn start(&self, turn: NewTurn) -> impl Future<Output = Result<(String, Turn), String>> + Send;
 
-    /// Start a turn on an existing `conversation`, compacting it first when
-    /// `compact` is set.
+    /// Start a turn on an existing `conversation`.
     ///
     /// The request reaches the host before this returns, so a reply sent after
     /// it reaches the host after it.
-    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>, compact: bool) -> Turn;
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn;
+
+    /// Compact `conversation` with its configured rules, resolving with the
+    /// report `jp conversation compact` prints.
+    fn compact(
+        &self,
+        conversation: &str,
+    ) -> impl Future<Output = Result<Vec<String>, String>> + Send + 'static;
 
     /// Inject `content` into the running turn on `conversation` as a user
     /// reply.
@@ -245,7 +251,6 @@ impl Host for HostClient {
                 cfg: turn.cfg,
                 schema: None,
                 expires_in: Some(turn.expires_in),
-                compact: false,
             });
 
             // Register both waiters before sending the request so a fast turn cannot
@@ -279,7 +284,7 @@ impl Host for HostClient {
         }
     }
 
-    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>, compact: bool) -> Turn {
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn {
         let id = self.next_id();
         let message = PluginToHost::Query(QueryRequest {
             id: Some(id.clone()),
@@ -290,7 +295,6 @@ impl Host for HostClient {
             cfg,
             schema: None,
             expires_in: None,
-            compact,
         });
 
         // Written now rather than when the turn is first awaited, so it precedes
@@ -345,6 +349,31 @@ impl Host for HostClient {
                 HostToPlugin::Done(_) => Ok(()),
                 HostToPlugin::Error(error) => Err(error.message),
                 other => Err(format!("unexpected answer to a stop: {other:?}")),
+            }
+        }
+    }
+
+    fn compact(
+        &self,
+        conversation: &str,
+    ) -> impl Future<Output = Result<Vec<String>, String>> + Send + 'static {
+        let client = self.clone();
+        let conversation = conversation.to_owned();
+
+        async move {
+            let id = client.next_id();
+            let message = PluginToHost::Compact(CompactRequest {
+                id: Some(id.clone()),
+                conversation,
+                args: vec![],
+            });
+
+            // No deadline: a rule that summarizes calls a model, which takes as
+            // long as it takes.
+            match client.request(&id, &message, None).await? {
+                HostToPlugin::Compacted(compacted) => Ok(compacted.report),
+                HostToPlugin::Error(error) => Err(error.message),
+                other => Err(format!("unexpected answer to compact: {other:?}")),
             }
         }
     }
@@ -453,6 +482,7 @@ fn read_host(reader: impl BufRead, pending: &Pending, shutdown: &watch::Sender<b
             HostToPlugin::Config(answer) => answer.id.clone(),
             HostToPlugin::QueryComplete(answer) => answer.id.clone(),
             HostToPlugin::Created(answer) => answer.id.clone(),
+            HostToPlugin::Compacted(answer) => answer.id.clone(),
             HostToPlugin::Done(answer) => answer.id.clone(),
             HostToPlugin::Error(answer) => answer.id.clone(),
             _ => None,

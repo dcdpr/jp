@@ -37,13 +37,13 @@ use jp_llm::event::NoticeSink;
 use jp_plugin::{
     Manifest, PROTOCOL_VERSION,
     message::{
-        ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
-        ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
-        DescribeResponse, DoneResponse, DraftResponse, EditFilesRequest, EditedResponse,
-        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, InterruptAction as WireAction,
-        InterruptRequest, LockState, LogMessage, OutputFormat as PluginOutputFormat, PathsInfo,
-        PluginToHost, QueryCompleteResponse, QueryRequest, SetTitleRequest, WorkspaceInfo,
-        WriteDraftRequest,
+        CompactRequest, CompactedResponse, ComposeMode, ComposeOption, ComposeRequest,
+        ComposeResponse, ConfigEntry, ConfigResponse, ConfigsResponse, ConversationSummary,
+        ConversationsResponse, CreatedResponse, DescribeResponse, DoneResponse, DraftResponse,
+        EditFilesRequest, EditedResponse, ErrorResponse, EventsResponse, HostToPlugin, InitMessage,
+        InterruptAction as WireAction, InterruptRequest, LockState, LogMessage,
+        OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
+        QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
     registry::{Registry, RegistryPlugin},
 };
@@ -71,7 +71,7 @@ use super::{
 use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::{
-        conversation::compact::{apply_compactions, build_compaction_events},
+        conversation::compact::Compact,
         query::{
             NewTitle, PendingStreamTrim, TurnInputs,
             interrupt::{
@@ -79,7 +79,6 @@ use crate::{
             },
             last_request_id, resolve_new_title, turn_structured_data,
         },
-        turn_selection::TurnSelection,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -837,6 +836,13 @@ async fn message_loop(
                 output::print(&ctx.printer, &print, &ctx.config().style.markdown);
             }
 
+            // `None` means the compaction is running and will answer for itself.
+            PluginToHost::Compact(request) => {
+                if let Some(response) = run_compact(ctx, request, stdin, turns) {
+                    answer(stdin, &response, "a compact request")?;
+                }
+            }
+
             // Answered once the turn has acted on it, which can be well after
             // this loop has moved on, so the wait gets a task of its own.
             PluginToHost::Interrupt(request) => {
@@ -956,8 +962,6 @@ async fn run_query(
     };
 
     let new = request.new;
-    // A conversation the request creates has nothing to compact.
-    let compact = request.compact && !new;
     let lock = match lock_for_query(ctx, &request, expires_at) {
         Ok(lock) => lock,
         Err(error) => return failed(error),
@@ -1033,7 +1037,6 @@ async fn run_query(
         &lock,
         chat_request.clone(),
         interrupts,
-        compact,
     )
     .await;
     ctx.swap_config(host_config);
@@ -1158,12 +1161,18 @@ fn lock_for_query(
             .map_err(|error| format!("failed to create the conversation: {error}"));
     }
 
-    let id = parse_conversation_id(&request.conversation)?;
+    lock_existing(ctx, &request.conversation)
+}
+
+/// Take exclusive hold of an existing conversation, failing rather than waiting
+/// when something else holds it.
+fn lock_existing(ctx: &Ctx, conversation: &str) -> Result<ConversationLock, String> {
+    let id = parse_conversation_id(conversation)?;
 
     let handle = ctx
         .workspace
         .acquire_conversation(&id)
-        .map_err(|error| format!("conversation {}: {error}", request.conversation))?;
+        .map_err(|error| format!("conversation {conversation}: {error}"))?;
 
     match ctx
         .workspace
@@ -1318,7 +1327,6 @@ async fn prepare_turn(
     lock: &ConversationLock,
     chat_request: ChatRequest,
     interrupts: TurnInterrupts,
-    compact: bool,
 ) -> Result<(TurnInputs, ConversationStream), cmd::Error> {
     // The client was built from the config this host read at startup. A provider
     // added to the workspace since then is otherwise unknown to it, and starting
@@ -1354,10 +1362,6 @@ async fn prepare_turn(
     // was last used, which is what orders the list.
     lock.as_mut()
         .update_metadata(|meta| meta.last_activated_at = chrono::Utc::now());
-
-    if compact {
-        compact_before_turn(lock, &config).await?;
-    }
 
     // Recorded before the turn, so the conversation carries the change that
     // produced it rather than a turn whose configuration came from nowhere.
@@ -1410,30 +1414,101 @@ async fn prepare_turn(
     Ok((inputs, stream))
 }
 
-/// Compact the conversation `lock` holds with its configured rules, as `jp
-/// query --compact` does, before a delegated turn reads it.
+/// Compact a conversation on the plugin's behalf, as `jp conversation compact`
+/// does with the same arguments.
 ///
-/// The message loop waits for this.
-/// The built-in rules strip reasoning and tool calls without calling a model,
-/// but a configured summary rule calls one.
-async fn compact_before_turn(
-    lock: &ConversationLock,
-    config: &AppConfig,
-) -> Result<(), cmd::Error> {
-    let events = lock.events().clone();
-    let notices = NoticeSink::new(|notice| warn!(%notice, "Compaction notice."));
-    let compactions = build_compaction_events(
-        &events,
-        config,
-        &config.conversation.compaction.rules,
-        &TurnSelection::default(),
-        None,
-        &notices,
-    )
-    .await?;
-    apply_compactions(&lock.as_mut(), compactions);
+/// `None` means the compaction is under way and will send its own reply,
+/// correlated by the request's id.
+/// It runs on a task of its own because a rule that summarizes calls a model,
+/// and the message loop has to keep answering meanwhile.
+/// Anything returned is a failure that happened before it started.
+fn run_compact(
+    ctx: &Ctx,
+    request: CompactRequest,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    turns: &mut JoinSet<()>,
+) -> Option<HostToPlugin> {
+    let CompactRequest {
+        id,
+        conversation,
+        args,
+    } = request;
+    let failed = |message: String| Some(action_failed(id.clone(), "compact", message));
 
-    Ok(())
+    let compact = match Compact::from_args(&args) {
+        Ok(compact) => compact,
+        Err(error) => return failed(format!("invalid compaction arguments: {error}")),
+    };
+    let lock = match lock_existing(ctx, &conversation) {
+        Ok(lock) => lock,
+        Err(error) => return failed(error),
+    };
+    // `--model` applies to the conversation's configuration, as it does at a
+    // terminal.
+    let model: Vec<String> = compact
+        .model()
+        .map(|model| format!("assistant.model.id={model}"))
+        .into_iter()
+        .collect();
+    let config = match conversation_config(ctx, &lock, &model) {
+        Ok(config) => config,
+        Err(error) => return failed(error),
+    };
+
+    let stdin = Arc::clone(stdin);
+    turns.spawn(async move {
+        let reply = match compact_conversation(&compact, &config, lock).await {
+            Ok(report) => HostToPlugin::Compacted(CompactedResponse {
+                id,
+                conversation,
+                report,
+            }),
+            Err(error) => {
+                let detail = compaction_error(&error);
+                warn!(%conversation, %detail, "A compaction failed.");
+                action_failed(id, "compact", detail)
+            }
+        };
+
+        let mut writer = stdin.lock().expect("stdin lock poisoned");
+        drop(write_message(&mut *writer, &reply));
+    });
+
+    None
+}
+
+/// A failed compaction as `jp conversation compact` reports it: what went
+/// wrong, then what the error adds, such as the range that would resolve an
+/// overlap.
+fn compaction_error(error: &cmd::Error) -> String {
+    let Some(message) = &error.message else {
+        return error_chain(error);
+    };
+
+    let mut text = message.clone();
+    for (_, value) in &error.metadata {
+        text.push(' ');
+        match value.as_str() {
+            Some(value) => text.push_str(value),
+            None => text.push_str(&value.to_string()),
+        }
+    }
+
+    text
+}
+
+/// Compact the conversation `lock` holds as `compact` says, returning the
+/// report `jp conversation compact` prints.
+async fn compact_conversation(
+    compact: &Compact,
+    config: &AppConfig,
+    lock: ConversationLock,
+) -> Result<Vec<String>, cmd::Error> {
+    let notices = NoticeSink::new(|notice| warn!(%notice, "Compaction notice."));
+
+    compact
+        .compact_locked(config, lock.into_mut(), None, &notices)
+        .await
 }
 
 /// Decide how a conversation nobody has named gets a title from its first
@@ -2022,6 +2097,7 @@ fn handle_request(
         PluginToHost::Compose(_)
         | PluginToHost::EditFiles(_)
         | PluginToHost::Query(_)
+        | PluginToHost::Compact(_)
         | PluginToHost::Interrupt(_)
         | PluginToHost::Print(_) => {
             unreachable!("answered before the lock")

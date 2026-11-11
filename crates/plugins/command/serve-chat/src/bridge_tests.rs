@@ -39,6 +39,9 @@ struct HostLog {
 
     /// What [`Host::tools`] answers.
     tools: Result<Vec<String>, String>,
+
+    /// Compactions waiting for the test to finish them, in order.
+    compactions: Vec<oneshot::Sender<Result<Vec<String>, String>>>,
 }
 
 impl Default for HostLog {
@@ -53,6 +56,7 @@ impl Default for HostLog {
             answer: None,
             cfgs: vec![],
             tools: Ok(vec![]),
+            compactions: vec![],
         }
     }
 }
@@ -96,6 +100,11 @@ impl FakeHost {
         self.0.lock().unwrap().refuse_replies = true;
     }
 
+    fn end_compaction(&self, result: Result<Vec<String>, String>) {
+        let compaction = self.0.lock().unwrap().compactions.remove(0);
+        compaction.send(result).unwrap();
+    }
+
     fn turn(&self) -> Turn {
         let (tx, rx) = oneshot::channel();
         self.0.lock().unwrap().turns.push(tx);
@@ -119,15 +128,27 @@ impl Host for FakeHost {
         future::ready(Ok((conversation, self.turn())))
     }
 
-    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>, compact: bool) -> Turn {
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn {
         {
             let mut log = self.0.lock().unwrap();
-            let compacted = if compact { " compacted" } else { "" };
-            log.calls
-                .push(format!("query {conversation}{compacted} {content:?}"));
+            log.calls.push(format!("query {conversation} {content:?}"));
             log.cfgs.push(cfg);
         }
         self.turn()
+    }
+
+    fn compact(
+        &self,
+        conversation: &str,
+    ) -> impl Future<Output = Result<Vec<String>, String>> + Send + 'static {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut log = self.0.lock().unwrap();
+            log.calls.push(format!("compact {conversation}"));
+            log.compactions.push(tx);
+        }
+
+        async move { rx.await.unwrap_or_else(|_| Err("dropped".to_owned())) }
     }
 
     fn reply(
@@ -330,6 +351,7 @@ fn from(sender: &str, text: &str) -> Inbound {
         sender: vec![sender.to_owned()],
         name: None,
         addressed: false,
+        leading_mention: false,
         text: text.to_owned(),
         attachments: vec![],
     }
@@ -495,6 +517,7 @@ async fn a_group_message_names_its_sender() {
         sender: vec![CLIENT.to_owned()],
         name: Some("Ada".to_owned()),
         addressed: false,
+        leading_mention: false,
         text: "Is anything planned for search?".to_owned(),
         attachments: vec![],
     });
@@ -523,6 +546,7 @@ async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
         ],
         name: Some("José O'Brien".to_owned()),
         addressed: false,
+        leading_mention: false,
         text: "Hello?".to_owned(),
         attachments: vec![],
     };
@@ -700,6 +724,7 @@ async fn an_addressed_group_message_says_it_is_to_the_assistant() {
         sender: vec![CLIENT.to_owned()],
         name: Some("Ada".to_owned()),
         addressed: true,
+        leading_mention: false,
         text: " what's next?".to_owned(),
         attachments: vec![],
     });
@@ -722,6 +747,7 @@ async fn a_silent_answer_sends_nothing() {
         sender: vec![CLIENT.to_owned()],
         name: Some("Ada".to_owned()),
         addressed: false,
+        leading_mention: false,
         text: "Lunch at one?".to_owned(),
         attachments: vec![],
     });
@@ -781,18 +807,29 @@ async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
 }
 
 /// Answers each question with the next of its scripted results, and records
-/// what it was asked.
+/// what it was asked and which actions it was offered.
 #[derive(Default)]
 struct FakeDecider {
     answers: Mutex<Vec<Result<Verdict, String>>>,
     asked: Mutex<Vec<String>>,
+    offered: Mutex<Vec<&'static [Action]>>,
 }
 
 impl Decide for FakeDecider {
-    fn decide(&self, state: String) -> Decision {
+    fn decide(&self, state: String, actions: &'static [Action]) -> Decision {
         self.asked.lock().unwrap().push(state);
+        self.offered.lock().unwrap().push(actions);
         let answer = self.answers.lock().unwrap().remove(0);
         Box::pin(future::ready(answer))
+    }
+}
+
+/// A group message that starts by mentioning the assistant, as a command does.
+fn command(sender: &str, text: &str) -> Inbound {
+    Inbound {
+        addressed: true,
+        leading_mention: true,
+        ..in_group(sender, text)
     }
 }
 
@@ -808,7 +845,7 @@ fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>
     let mut f = fixture();
     let decider = Arc::new(FakeDecider {
         answers: Mutex::new(answers),
-        asked: Mutex::default(),
+        ..FakeDecider::default()
     });
     f.bridge.options.decide = Some(DecideOptions {
         url: "https://decide.invalid".to_owned(),
@@ -855,28 +892,49 @@ async fn a_group_message_the_decider_answers_starts_a_turn() {
     );
 }
 
-/// A message sent to the assistant, by mentioning it or in a direct chat, is
-/// answered even when the model would ignore it.
+/// Commands are offered only for a message that starts by mentioning the
+/// assistant, or one in a direct chat.
+/// A mention later in the message, or a reply to the assistant, is offered
+/// answering or ignoring it.
 #[tokio::test]
-async fn a_message_sent_to_the_assistant_is_never_ignored() {
-    let (mut f, _) = deciding(vec![
-        Ok(verdict(Action::Ignore, 0.95)),
-        Ok(verdict(Action::Ignore, 0.95)),
+async fn only_a_message_that_may_give_a_command_is_offered_the_commands() {
+    let (mut f, decider) = deciding(vec![
+        Ok(verdict(Action::Ignore, 0.9)),
+        Ok(verdict(Action::Ignore, 0.9)),
+        Ok(verdict(Action::Ignore, 0.9)),
+        Ok(verdict(Action::Ignore, 0.9)),
     ]);
 
+    f.receive(command(CLIENT, "compact please"));
+    f.settle().await;
     f.receive(Inbound {
         addressed: true,
-        ..in_group(CLIENT, "thanks!")
+        ..in_group(CLIENT, "so, compact please?")
     });
     f.settle().await;
+    f.receive(in_group(CLIENT, "compact please"));
     f.settle().await;
-    f.end_turn().await;
-    f.receive(from(MAINTAINER, "Hi"));
-    f.settle().await;
+    f.receive(from(CLIENT, "compact please"));
     f.settle().await;
 
-    assert_eq!(f.host.calls().len(), 2, "{:?}", f.host.calls());
-    assert!(f.host.logs().is_empty(), "{:?}", f.host.logs());
+    assert_eq!(*decider.offered.lock().unwrap(), [
+        Action::offered(true),
+        Action::offered(false),
+        Action::offered(false),
+        Action::offered(true),
+    ]);
+}
+
+/// The decider decides, even for a message that mentions the assistant: nothing
+/// overrides an `ignore`.
+#[tokio::test]
+async fn a_message_the_decider_ignores_gets_no_turn_even_when_it_names_the_assistant() {
+    let (mut f, _) = deciding(vec![Ok(verdict(Action::Ignore, 0.95))]);
+
+    f.receive(command(CLIENT, "thanks!"));
+    f.settle().await;
+
+    assert!(f.host.calls().is_empty(), "{:?}", f.host.calls());
 }
 
 /// A wasted turn costs less than a question nobody answers.
@@ -910,19 +968,13 @@ async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
         Ok(verdict(Action::NewConversation, 0.9)),
         Ok(verdict(Action::Answer, 0.9)),
     ]);
-    f.receive(Inbound {
-        addressed: true,
-        ..in_group(CLIENT, "what's next?")
-    });
+    f.receive(command(CLIENT, "what's next?"));
     f.settle().await;
     f.settle().await;
     f.end_turn().await;
     f.outbox.take();
 
-    f.receive(Inbound {
-        addressed: true,
-        ..in_group(CLIENT, "start over")
-    });
+    f.receive(command(CLIENT, "start over"));
     f.settle().await;
 
     assert_eq!(f.outbox.take(), vec![format!(
@@ -930,10 +982,7 @@ async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
     )]);
     assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
 
-    f.receive(Inbound {
-        addressed: true,
-        ..in_group(CLIENT, "what's next?")
-    });
+    f.receive(command(CLIENT, "what's next?"));
     f.settle().await;
     f.settle().await;
 
@@ -941,46 +990,102 @@ async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
     assert!(calls[1].starts_with("start "), "{calls:?}");
 }
 
-/// "@JP compact" gets no turn of its own: the chat's next turn compacts the
-/// conversation first, and only that one.
+/// "@JP compact" compacts the chat's conversation through the host, gets no
+/// turn of its own, and is answered with what was compacted.
+/// A message sent meanwhile waits for the compaction, rather than finding the
+/// conversation locked.
 #[tokio::test]
-async fn asking_to_compact_compacts_before_the_next_turn() {
+async fn asking_to_compact_compacts_the_conversation_and_says_what_changed() {
     let (mut f, _) = deciding(vec![
         Ok(verdict(Action::Answer, 0.9)),
         Ok(verdict(Action::Compact, 0.9)),
         Ok(verdict(Action::Answer, 0.9)),
-        Ok(verdict(Action::Answer, 0.9)),
     ]);
-    let to_you = |text: &str| Inbound {
-        addressed: true,
-        ..in_group(CLIENT, text)
-    };
-    f.receive(to_you("what's next?"));
+    f.receive(command(CLIENT, "what's next?"));
     f.settle().await;
     f.settle().await;
     f.end_turn().await;
     f.outbox.take();
 
-    f.receive(to_you("compact please"));
+    f.receive(command(CLIENT, "please compact"));
+    f.settle().await;
+    f.receive(command(CLIENT, "and now?"));
     f.settle().await;
 
-    assert_eq!(f.outbox.take(), vec![format!(
-        "send group:Z3JvdXA=: {COMPACT}"
-    )]);
-    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
+    assert_eq!(f.host.calls()[1..], ["compact c1"]);
 
-    f.receive(to_you("and now?"));
+    f.host.end_compaction(Ok(vec![
+        "Kept turn 1.".to_owned(),
+        "Compacted turns 2..3 (2 total, reasoning + tools).".to_owned(),
+    ]));
+    f.settle().await;
+    // The waiting message's turn reports `Started` once the host has it.
+    f.settle().await;
+
+    assert_eq!(f.outbox.take()[..1], ["send group:Z3JvdXA=: Compacted \
+                                       this conversation:\nKept turn \
+                                       1.\nCompacted turns 2..3 (2 \
+                                       total, reasoning + tools)."]);
+    assert_eq!(f.host.calls()[2..], [
+        "query c1 \"Ada Client (to you): and now?\""
+    ]);
+}
+
+#[tokio::test]
+async fn a_compaction_the_host_refuses_says_why() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Compact, 0.9)),
+    ]);
+    f.receive(command(CLIENT, "what's next?"));
     f.settle().await;
     f.settle().await;
     f.end_turn().await;
-    f.receive(to_you("and after that?"));
+    f.outbox.take();
+
+    f.receive(command(CLIENT, "please compact"));
     f.settle().await;
+    f.host
+        .end_compaction(Err("No turns to compact in conversation c1.".to_owned()));
     f.settle().await;
 
-    assert_eq!(f.host.calls()[1..], [
-        "query c1 compacted \"Ada Client (to you): and now?\"",
-        "query c1 \"Ada Client (to you): and after that?\"",
+    assert_eq!(f.outbox.take(), ["send group:Z3JvdXA=: I couldn't \
+                                  compact this conversation: No turns to \
+                                  compact in conversation c1."]);
+}
+
+/// The running turn holds the conversation, so a compaction would find it
+/// locked.
+#[tokio::test]
+async fn asking_to_compact_during_a_turn_in_that_chat_waits_for_the_answer() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Compact, 0.9)),
     ]);
+    f.receive(command(CLIENT, "what's next?"));
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.receive(command(CLIENT, "and after that?"));
+    f.settle().await;
+    f.settle().await;
+    f.outbox.take();
+
+    f.receive(command(CLIENT, "please compact"));
+    f.settle().await;
+
+    assert_eq!(f.outbox.take(), vec![format!(
+        "send group:Z3JvdXA=: {BUSY_COMPACTING}"
+    )]);
+    assert!(
+        f.host
+            .calls()
+            .iter()
+            .all(|call| !call.starts_with("compact")),
+        "{:?}",
+        f.host.calls()
+    );
 }
 
 #[tokio::test]
@@ -996,39 +1101,6 @@ async fn asking_to_compact_before_any_conversation_says_there_is_none() {
     assert!(f.host.calls().is_empty());
 }
 
-/// Two people talking about tidying up don't compact the assistant's
-/// conversation: only a message sent to it can.
-#[tokio::test]
-async fn talk_between_people_cannot_compact_the_conversation() {
-    let (mut f, _) = deciding(vec![Ok(verdict(Action::Compact, 0.9))]);
-
-    f.receive(in_group(CLIENT, "let's clean up this thread"));
-    f.settle().await;
-    f.settle().await;
-
-    assert!(f.outbox.take().iter().all(|sent| !sent.contains(COMPACT)));
-    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
-}
-
-/// Two people talking about starting over don't reset the assistant's
-/// conversation: only a message sent to it can.
-#[tokio::test]
-async fn talk_between_people_cannot_start_a_new_conversation() {
-    let (mut f, _) = deciding(vec![Ok(verdict(Action::NewConversation, 0.9))]);
-
-    f.receive(in_group(CLIENT, "let's start over on the design"));
-    f.settle().await;
-    f.settle().await;
-
-    assert!(
-        f.outbox
-            .take()
-            .iter()
-            .all(|sent| !sent.contains(NEW_CONVERSATION))
-    );
-    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
-}
-
 /// "Rank it first", then, while the turn runs, an unaddressed "actually
 /// second": once the decider says it is for the assistant, it goes into the
 /// running turn.
@@ -1038,10 +1110,7 @@ async fn a_correction_the_decider_answers_goes_into_the_running_turn() {
         Ok(verdict(Action::Answer, 0.9)),
         Ok(verdict(Action::Answer, 0.9)),
     ]);
-    f.receive(Inbound {
-        addressed: true,
-        ..in_group(CLIENT, "rank T-1 first")
-    });
+    f.receive(command(CLIENT, "rank T-1 first"));
     f.settle().await;
     f.settle().await;
 
@@ -1062,10 +1131,7 @@ async fn a_decision_reads_the_assistants_last_answer() {
         Ok(verdict(Action::Answer, 0.9)),
         Ok(verdict(Action::Answer, 0.9)),
     ]);
-    f.receive(Inbound {
-        addressed: true,
-        ..in_group(CLIENT, "what's next?")
-    });
+    f.receive(command(CLIENT, "what's next?"));
     f.settle().await;
     f.settle().await;
     f.end_turn().await;

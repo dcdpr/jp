@@ -21,10 +21,6 @@ const STATE_FILE: &str = "state.json";
 struct Entry {
     date: NaiveDate,
     conversation: String,
-
-    /// Whether the conversation is compacted before its next turn.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    compact: bool,
 }
 
 /// Map from a chat's key (its `Display` form) to its latest conversation.
@@ -90,44 +86,9 @@ impl State {
         self.chats.chats.insert(chat.to_string(), Entry {
             date: period,
             conversation: conversation.to_owned(),
-            compact: false,
         });
 
         self.save()
-    }
-
-    /// Mark `chat`'s conversation for the period starting on `period` to be
-    /// compacted before its next turn, returning whether it has one.
-    pub(crate) fn compact_next(&mut self, chat: &Chat, period: NaiveDate) -> Result<bool, String> {
-        let Some(entry) = self
-            .chats
-            .chats
-            .get_mut(&chat.to_string())
-            .filter(|entry| entry.date == period)
-        else {
-            return Ok(false);
-        };
-        entry.compact = true;
-
-        self.save().map(|()| true)
-    }
-
-    /// Whether `chat`'s conversation is marked to be compacted, clearing the
-    /// mark.
-    ///
-    /// An error means the mark was set, but clearing it couldn't be saved.
-    pub(crate) fn take_compact(&mut self, chat: &Chat) -> Result<bool, String> {
-        let Some(entry) = self
-            .chats
-            .chats
-            .get_mut(&chat.to_string())
-            .filter(|entry| entry.compact)
-        else {
-            return Ok(false);
-        };
-        entry.compact = false;
-
-        self.save().map(|()| true)
     }
 
     /// Forget `chat`'s conversation, so its next turn starts a new one.

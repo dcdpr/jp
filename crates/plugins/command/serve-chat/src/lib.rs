@@ -53,9 +53,8 @@ use crate::{
 
 /// Minimum host protocol version required by this plugin.
 ///
-/// Protocol 14 added `compact` on `query`, which a host built before it would
-/// ignore without saying so; 11 added `expires_in`, and 9 in-turn `interrupt`
-/// replies.
+/// Protocol 14 added `compact`; 11 added `expires_in` on `query`, and 9 in-turn
+/// `interrupt` replies.
 const REQUIRED_PROTOCOL: u32 = 14;
 
 /// Embedded plugin manifest read by `jp` for binary discovery.
@@ -88,8 +87,9 @@ Configuration (`plugins.command.serve-chat.options`):
   signal.command     The signal-cli executable. Default: signal-cli.
   signal.attachments_dir  Where signal-cli saves attachments.
   decide             Ask a model what to do with each message: answer it,
-                     ignore it, start a new conversation, or compact the
-                     current one. `url`, `model`,
+                     ignore it, or, when it starts by mentioning the bot,
+                     start a new conversation or compact the current one.
+                     `url`, `model`,
                      `api_key_env` (default JEV_API_KEY; empty for no token),
                      `threshold` (default 0.5), `instructions`.
   people.<key>       Who is answered: `name`, and their `signal` account.

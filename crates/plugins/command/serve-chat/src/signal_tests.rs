@@ -36,6 +36,7 @@ fn a_direct_message_is_from_its_sender_in_a_chat_of_their_own() {
             ],
             name: Some("name".to_owned()),
             addressed: false,
+            leading_mention: false,
             text: "What is being worked on?".to_owned(),
             attachments: vec![],
         })
@@ -53,6 +54,7 @@ fn a_group_message_in_subscription_mode_is_in_the_group() {
             sender: vec!["22222222-2222-4222-8222-222222222222".to_owned()],
             name: None,
             addressed: false,
+            leading_mention: false,
             text: "See attached".to_owned(),
             attachments: vec![Attachment {
                 content_type: "image/png".to_owned(),
@@ -76,6 +78,7 @@ fn a_sender_with_a_hidden_number_is_named_by_account_id() {
             sender: vec!["33333333-3333-4333-8333-333333333333".to_owned()],
             name: Some("Ada Client".to_owned()),
             addressed: false,
+            leading_mention: false,
             text: "ping".to_owned(),
             attachments: vec![],
         })
@@ -134,6 +137,37 @@ fn addressed(line: &str) -> (String, bool) {
         Line::Message(message) => (message.text, message.addressed),
         other => panic!("expected a message, got {other:?}"),
     }
+}
+
+fn leading_mention(line: &str) -> bool {
+    match read(line) {
+        Line::Message(message) => message.leading_mention,
+        other => panic!("expected a message, got {other:?}"),
+    }
+}
+
+/// "@bot compact" can be a command; "so @bot, compact" is talk about it.
+#[test]
+fn only_a_message_starting_with_a_mention_of_the_bridge_leads_with_it() {
+    let leading = group_message(
+        " \u{fffc} compact please",
+        r#"[{"number":null,"uuid":"44444444-4444-4444-8444-444444444444","start":1,"length":1}]"#,
+        "",
+    );
+    let later = group_message(
+        "so \u{fffc}, compact please",
+        r#"[{"number":"+31600000000","uuid":null,"start":3,"length":1}]"#,
+        "",
+    );
+    let someone_else = group_message(
+        "\u{fffc} compact please",
+        r#"[{"number":"+31622222222","uuid":null,"start":0,"length":1}]"#,
+        "",
+    );
+
+    assert!(leading_mention(&leading));
+    assert!(!leading_mention(&later));
+    assert!(!leading_mention(&someone_else));
 }
 
 #[test]

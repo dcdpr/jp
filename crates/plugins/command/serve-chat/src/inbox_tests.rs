@@ -10,7 +10,7 @@ use crate::decide::{Action, Verdict};
 struct Recorder(Mutex<Vec<String>>);
 
 impl Decide for Recorder {
-    fn decide(&self, state: String) -> Decision {
+    fn decide(&self, state: String, _actions: &'static [Action]) -> Decision {
         self.0.lock().unwrap().push(state);
         Box::pin(async {
             Ok(Verdict {
@@ -25,12 +25,12 @@ fn group() -> Chat {
     Chat::Group("Z3JvdXA=".to_owned())
 }
 
-fn incoming(text: &str, addressed: bool, context: Option<&str>) -> Incoming {
+fn incoming(text: &str, commands: bool, context: Option<&str>) -> Incoming {
     Incoming {
         chat: group(),
         person: "ada".to_owned(),
         text: text.to_owned(),
-        addressed,
+        commands,
         context: context.map(ToOwned::to_owned),
     }
 }

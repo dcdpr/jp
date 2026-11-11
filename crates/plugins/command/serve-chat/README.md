@@ -69,25 +69,31 @@ threshold = 0.5
 
 The model answers one `choice` question, picking one of:
 
-| Action             | What the bridge does                                        |
-| ------------------ | ----------------------------------------------------------- |
-| `answer`           | Runs a turn for the message, or hands it to the running one |
-| `ignore`           | Nothing; the message is for the other people in the chat    |
-| `new_conversation` | Replies that the next message starts a new conversation     |
-| `compact`          | Replies that the next turn compacts the conversation first  |
+| Action             | What the bridge does                                         |
+| ------------------ | ------------------------------------------------------------ |
+| `answer`           | Runs a turn for the message, or hands it to the running one  |
+| `ignore`           | Nothing; the message is for the other people in the chat     |
+| `new_conversation` | Replies that the next message starts a new conversation      |
+| `compact`          | Compacts the conversation now, and replies with what changed |
 
-Compacting applies `conversation.compaction.rules`, as `jp query --compact`
-does.
+The last two are commands.
+They are offered only for a message that starts by mentioning the bot, such as
+"@JP compact please", or one in a direct chat.
+Any other message is answered or ignored, so two people talking about starting
+over don't reset the bot's conversation.
+
+Compacting asks `jp` to run `jp conversation compact` on the chat's
+conversation, which applies `conversation.compaction.rules`.
 The built-in rule strips reasoning and tool calls from every turn but the first
 and the last, without calling a model.
+A message sent while it runs waits for it; a request to compact while the bot is
+answering in that chat is turned down, since the turn holds the conversation.
 
 - The bridge takes the action only when the model gives it at least `threshold`;
   otherwise, and when the API fails, the message is answered, and a failure is
   logged.
-- A message sent to the assistant (a direct message, a mention, or a reply to
-  it) is never ignored, and only such a message can start a new conversation or
-  compact the current one, so two people talking about starting over don't reset
-  it.
+- The model's choice is final: a message it ignores gets no turn, even one that
+  mentions the bot.
 - The model reads the chat's last eight lines, the assistant's answers included,
   so a follow-up such as "why?" can count as meant for it.
   Those lines leave the machine: they go to `decide.url`.

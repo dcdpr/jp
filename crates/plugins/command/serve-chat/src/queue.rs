@@ -6,6 +6,7 @@
 //! While a reply is in flight to a running turn, nothing leaves the queue: if
 //! the turn refuses the reply, it goes back ahead of the messages that came
 //! after it.
+//! While the queue is held, such as during a compaction, no turn starts.
 
 use std::collections::VecDeque;
 
@@ -39,6 +40,10 @@ pub(crate) struct Queue {
 
     /// Whether a reply is in flight to the running turn.
     replying: bool,
+
+    /// How many things other than a turn, such as compactions, are using a
+    /// conversation; no turn starts until none is.
+    held: usize,
 
     /// Set once the bridge is stopping: nothing leaves the queue again.
     closed: bool,
@@ -80,10 +85,10 @@ impl Queue {
         self.batches.push_front(waiting);
     }
 
-    /// The next batch to run as a turn, unless a reply is in flight or the
-    /// queue is closed.
+    /// The next batch to run as a turn, unless a reply is in flight, the queue
+    /// is held, or it is closed.
     pub(crate) fn next_turn(&mut self) -> Option<Waiting> {
-        if self.closed || self.replying {
+        if self.closed || self.replying || self.held > 0 {
             return None;
         }
 
@@ -128,6 +133,16 @@ impl Queue {
     /// on.
     pub(crate) fn replied(&mut self) {
         self.replying = false;
+    }
+
+    /// Start no turn until a matching [`Self::release`].
+    pub(crate) fn hold(&mut self) {
+        self.held += 1;
+    }
+
+    /// Let turns start again once every [`Self::hold`] is released.
+    pub(crate) fn release(&mut self) {
+        self.held = self.held.saturating_sub(1);
     }
 
     /// Release nothing from now on.

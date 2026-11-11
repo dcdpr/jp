@@ -1689,34 +1689,105 @@ fn compacted(lock: &ConversationLock) -> Vec<(usize, usize)> {
     })
 }
 
-/// The built-in rule keeps the first and last turn as they are, so of three
-/// turns only the middle one is compacted.
-#[tokio::test]
-async fn a_compacting_query_compacts_with_the_configured_rules() {
-    let (ws, id, _tmp) = workspace_with_a_turn();
-    let lock = lock_for_turn(&ws, id);
-    lock.as_mut().update_events(|stream| {
+/// A conversation of three turns, which the built-in rule can compact: it keeps
+/// the first and the last turn as they are.
+fn workspace_with_three_turns() -> (Workspace, ConversationId, Utf8TempDir) {
+    let (ws, id, tmp) = workspace_with_a_turn();
+    lock_for_turn(&ws, id).as_mut().update_events(|stream| {
         add_turn(stream, ChatResponse::message("A second answer"));
         add_turn(stream, ChatResponse::message("A third answer"));
     });
 
-    compact_before_turn(&lock, &AppConfig::new_test())
-        .await
-        .unwrap();
-
-    assert_eq!(compacted(&lock), [(1, 1)]);
+    (ws, id, tmp)
 }
 
+/// No arguments applies the configured rules, which compact the middle turn,
+/// and the reply carries what `jp conversation compact` prints.
 #[tokio::test]
-async fn compacting_a_conversation_too_short_to_compact_changes_nothing() {
-    let (ws, id, _tmp) = workspace_with_a_turn();
-    let lock = lock_for_turn(&ws, id);
+async fn a_compact_request_without_arguments_applies_the_configured_rules() {
+    let (ws, id, _tmp) = workspace_with_three_turns();
+    let compact = Compact::from_args(&[]).unwrap();
 
-    compact_before_turn(&lock, &AppConfig::new_test())
+    let report = compact_conversation(&compact, &AppConfig::new_test(), lock_for_turn(&ws, id))
         .await
         .unwrap();
 
-    assert_eq!(compacted(&lock), []);
+    assert_eq!(report, [
+        "Kept turn 1.",
+        "Compacted turns 2..2 (1 total, reasoning + tools).",
+        "Kept turn 3.",
+    ]);
+    assert_eq!(compacted(&lock_for_turn(&ws, id)), [(1, 1)]);
+}
+
+/// The arguments are the command's: `--dry-run` reports and changes nothing.
+#[tokio::test]
+async fn a_compact_request_reads_the_commands_arguments() {
+    let (ws, id, _tmp) = workspace_with_three_turns();
+    let compact = Compact::from_args(&["--dry-run".to_owned()]).unwrap();
+
+    let report = compact_conversation(&compact, &AppConfig::new_test(), lock_for_turn(&ws, id))
+        .await
+        .unwrap();
+
+    assert_eq!(report, [
+        "Would have kept turn 1.",
+        "Would have compacted turns 2..2 (1 total, reasoning + tools).",
+        "Would have kept turn 3.",
+    ]);
+    assert_eq!(compacted(&lock_for_turn(&ws, id)), []);
+}
+
+/// The command refuses to compact nothing, and so does the request.
+#[tokio::test]
+async fn a_compact_request_with_nothing_to_compact_fails() {
+    let (ws, id, _tmp) = workspace_with_a_turn();
+    let compact = Compact::from_args(&[]).unwrap();
+
+    let error = compact_conversation(&compact, &AppConfig::new_test(), lock_for_turn(&ws, id))
+        .await
+        .unwrap_err();
+
+    // What the plugin is told: the command's message, without the `error 1:`
+    // framing its `Display` adds for a terminal.
+    assert_eq!(
+        compaction_error(&error),
+        "No turns to compact in conversation jp-c17000000000, the selection resolves to 0 of its \
+         1 turns."
+    );
+    assert_eq!(compacted(&lock_for_turn(&ws, id)), []);
+}
+
+/// An error's details follow its message, as plain text.
+#[test]
+fn a_compaction_errors_details_follow_its_message() {
+    let mut error = cmd::Error::from("Summary overlap");
+    error.push_metadata("reason", "Your text would have to cover turns 1..6.");
+    error.push_metadata("suggestion", "Re-run with `--from 1 --to 6`.");
+
+    assert_eq!(
+        compaction_error(&error),
+        "Summary overlap Your text would have to cover turns 1..6. Re-run with `--from 1 --to 6`."
+    );
+}
+
+#[test]
+fn compact_arguments_the_command_refuses_are_refused() {
+    let error = Compact::from_args(&["--frobnicate".to_owned()]).unwrap_err();
+
+    assert!(
+        error.starts_with("error: unexpected argument '--frobnicate' found"),
+        "{error}"
+    );
+}
+
+/// The request names the conversation, so its arguments can't name another.
+#[test]
+fn compact_arguments_naming_a_conversation_are_refused() {
+    assert_eq!(
+        Compact::from_args(&["jp-c17940623496".to_owned()]).unwrap_err(),
+        "the arguments name a conversation; name it in the request"
+    );
 }
 
 fn lock_for_turn(ws: &Workspace, id: ConversationId) -> ConversationLock {
@@ -1853,7 +1924,6 @@ fn expiring_query(new: bool, expires_in: Option<&str>) -> QueryRequest {
         cfg: vec![],
         schema: None,
         expires_in: expires_in.map(str::to_owned),
-        compact: false,
     }
 }
 

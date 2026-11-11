@@ -7,8 +7,8 @@
 //! reply at a time, and never ahead of an earlier message from the same chat.
 //! Any other message waits in the [`Queue`].
 //! Before either, a message can wait in the [`Inbox`] for a model to decide
-//! what to do with it: answer it, ignore it, or start the chat's next turn in a
-//! new or a compacted conversation.
+//! what to do with it: answer it, ignore it, or, for a message that may give a
+//! command, start a new conversation or compact the current one.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
@@ -58,9 +58,9 @@ const FAILED: &str = "Sorry, that didn't work. The bridge's log says why.";
 
 const NEW_CONVERSATION: &str = "Your next message starts a new conversation.";
 
-const COMPACT: &str = "I'll compact this conversation before answering your next message.";
-
 const NOTHING_TO_COMPACT: &str = "There's no conversation to compact yet.";
+
+const BUSY_COMPACTING: &str = "I'm still answering here. Ask me to compact once I've replied.";
 
 const PAUSED: &str = "Changes are paused until the last ones have been reviewed. I'll answer as \
                       soon as that's done.";
@@ -92,6 +92,13 @@ pub(crate) enum Event {
     /// What to do with the first message in the inbox.
     Decided {
         result: Result<Verdict, String>,
+    },
+
+    /// A compaction of `chat`'s conversation finished, with the report the host
+    /// gave.
+    Compacted {
+        chat: Chat,
+        result: Result<Vec<String>, String>,
     },
 
     /// Outcome of delivering an in-turn reply to the host.
@@ -267,8 +274,10 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         };
 
-        let addressed = message.addressed || matches!(message.chat, Chat::Direct(_));
-        self.inbox.push(message.chat, key, text, addressed);
+        // A command has to start by naming the assistant in a group; in a direct
+        // chat, every message is to it.
+        let commands = message.leading_mention || matches!(message.chat, Chat::Direct(_));
+        self.inbox.push(message.chat, key, text, commands);
         self.pump();
     }
 
@@ -304,8 +313,9 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             .as_ref()
             .map_or(0.0, |decide| decide.threshold);
 
+        let period = self.period();
         if let Some(incoming) = self.inbox.decided() {
-            match action(result.ok(), &incoming, threshold) {
+            match action(result.ok(), threshold) {
                 Action::Answer => self.route(incoming),
                 Action::Ignore => self.host.log(
                     Level::INFO,
@@ -318,15 +328,21 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     self.outbox.send(&incoming.chat, NEW_CONVERSATION);
                 }
                 Action::Compact => {
-                    let reply = match self.state.compact_next(&incoming.chat, self.period()) {
-                        Ok(true) => COMPACT,
-                        Ok(false) => NOTHING_TO_COMPACT,
-                        Err(error) => {
-                            self.host.log(Level::ERROR, &error);
-                            FAILED
+                    // The running turn holds its conversation; compacting it
+                    // now would find it locked.
+                    let busy = self
+                        .running
+                        .as_ref()
+                        .is_some_and(|running| running.chat == incoming.chat);
+                    match self.state.conversation(&incoming.chat, period) {
+                        None => self.outbox.send(&incoming.chat, NOTHING_TO_COMPACT),
+                        Some(_) if busy => self.outbox.send(&incoming.chat, BUSY_COMPACTING),
+                        Some(conversation) => {
+                            // No turn starts while the conversation is compacted.
+                            self.queue.hold();
+                            compact(&self.host, &self.events_tx, incoming.chat, conversation);
                         }
-                    };
-                    self.outbox.send(&incoming.chat, reply);
+                    }
                 }
             }
         }
@@ -430,6 +446,21 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             }
 
             Event::Decided { result } => self.decided(result),
+
+            Event::Compacted { chat, result } => {
+                self.queue.release();
+                let reply = match result {
+                    Ok(report) => format!("Compacted this conversation:\n{}", report.join("\n")),
+                    Err(error) => {
+                        self.host.log(
+                            Level::ERROR,
+                            &format!("Compacting the conversation in {chat} failed: {error}"),
+                        );
+                        format!("I couldn't compact this conversation: {error}")
+                    }
+                };
+                self.outbox.send(&chat, &reply);
+            }
 
             Event::Replied {
                 chat,
@@ -565,20 +596,11 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             .state
             .conversation(&waiting.chat, period)
             .map(ToOwned::to_owned);
-        // A mark that couldn't be cleared was still set.
-        let compact = self
-            .state
-            .take_compact(&waiting.chat)
-            .unwrap_or_else(|error| {
-                self.host.log(Level::ERROR, &error);
-                true
-            });
         let request = TurnRequest {
             content: waiting.texts.join("\n\n"),
             title: title(&self.options, &waiting, period),
             cfg: cfg(&self.options, &waiting.person),
             expires_in: self.options.conversation_ttl.clone(),
-            compact,
         };
         let host = self.host.clone();
         let events = self.events_tx.clone();
@@ -627,24 +649,33 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 }
 
-/// What the bridge does with `incoming`, given the model's `verdict`.
+/// What the bridge does with a message, given the model's `verdict`.
 ///
-/// When the model is unsure, or there is no verdict because the decide API
-/// failed, the message is answered: a wasted turn costs less than a question
-/// nobody answers.
-/// A message sent to the assistant is never ignored, and only such a message
-/// can start a new conversation or compact the current one, so talk between
-/// people can't change what the assistant remembers.
-fn action(verdict: Option<Verdict>, incoming: &Incoming, threshold: f64) -> Action {
-    let Some(verdict) = verdict.filter(|verdict| verdict.probability >= threshold) else {
-        return Action::Answer;
-    };
+/// The model's choice, which was only offered the commands for a message that
+/// may give one, unless it is unsure or there is no verdict because the decide
+/// API failed: then the message is answered, since a wasted turn costs less
+/// than a question nobody answers.
+fn action(verdict: Option<Verdict>, threshold: f64) -> Action {
+    verdict
+        .filter(|verdict| verdict.probability >= threshold)
+        .map_or(Action::Answer, |verdict| verdict.action)
+}
 
-    match verdict.action {
-        Action::Ignore if incoming.addressed => Action::Answer,
-        Action::NewConversation | Action::Compact if !incoming.addressed => Action::Answer,
-        action => action,
-    }
+/// Compact `conversation` on the host, sending [`Event::Compacted`] for `chat`
+/// when it finishes.
+fn compact<H: Host>(
+    host: &H,
+    events: &mpsc::UnboundedSender<Event>,
+    chat: Chat,
+    conversation: &str,
+) {
+    let compaction = host.compact(conversation);
+    let events = events.clone();
+
+    tokio::spawn(async move {
+        let result = compaction.await;
+        drop(events.send(Event::Compacted { chat, result }));
+    });
 }
 
 /// What a turn reads for `message` from `name`: its text, then a line for each
@@ -751,9 +782,6 @@ struct TurnRequest {
 
     /// Expiry for a conversation the turn creates.
     expires_in: String,
-
-    /// Whether to compact an existing conversation before the turn.
-    compact: bool,
 }
 
 /// Start a turn on `conversation`, or on a new one when it is `None`, and wait
@@ -776,7 +804,7 @@ async fn run_turn<H: Host>(
 
     let (conversation, turn) = match conversation {
         Some(conversation) => {
-            let turn = host.query(&conversation, &request.content, cfg, request.compact);
+            let turn = host.query(&conversation, &request.content, cfg);
             (conversation, turn)
         }
         None => {

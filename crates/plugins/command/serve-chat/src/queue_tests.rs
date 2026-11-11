@@ -31,6 +31,43 @@ fn consecutive_messages_from_one_person_form_one_batch() {
     assert_eq!(queue.next_turn(), None);
 }
 
+/// A message sent during a compaction waits for it, rather than finding the
+/// conversation locked.
+#[test]
+fn a_held_queue_starts_no_turn_until_released() {
+    let mut queue = Queue::default();
+    queue.hold();
+    queue.push(direct("a"), "ada".to_owned(), "One".to_owned());
+
+    assert_eq!(queue.next_turn(), None);
+
+    queue.release();
+
+    assert_eq!(
+        queue.next_turn(),
+        Some(waiting(direct("a"), "ada", &["One"]))
+    );
+}
+
+/// Two compactions in two chats: the first to finish doesn't let a turn start
+/// on the conversation the second is still compacting.
+#[test]
+fn a_queue_held_twice_waits_for_both_releases() {
+    let mut queue = Queue::default();
+    queue.hold();
+    queue.hold();
+    queue.push(direct("a"), "ada".to_owned(), "One".to_owned());
+
+    queue.release();
+    assert_eq!(queue.next_turn(), None);
+
+    queue.release();
+    assert_eq!(
+        queue.next_turn(),
+        Some(waiting(direct("a"), "ada", &["One"]))
+    );
+}
+
 /// A batch is attributed to one person, so a turn writes as whoever asked.
 #[test]
 fn another_person_starts_a_batch_of_their_own() {

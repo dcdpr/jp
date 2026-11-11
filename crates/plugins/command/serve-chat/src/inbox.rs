@@ -15,7 +15,7 @@ use std::{
 };
 
 use crate::{
-    decide::{Decide, Decision},
+    decide::{Action, Decide, Decision},
     transport::Chat,
 };
 
@@ -36,9 +36,10 @@ pub(crate) struct Incoming {
     /// What the turn reads, with the sender's name in a group.
     pub text: String,
 
-    /// Whether it was sent to the assistant: in a direct chat, or mentioning it
-    /// or replying to it in a group.
-    pub addressed: bool,
+    /// Whether it may give the assistant a command, such as starting a new
+    /// conversation: it was sent in a direct chat, or starts by mentioning the
+    /// assistant in a group.
+    pub commands: bool,
 
     /// What a decision about it reads, for a message that waits for one.
     pub context: Option<String>,
@@ -91,14 +92,14 @@ impl Inbox {
 
     /// Queue `text` from `person` in `chat`, to wait for a decision when there
     /// is a decider.
-    pub(crate) fn push(&mut self, chat: Chat, person: String, text: String, addressed: bool) {
+    pub(crate) fn push(&mut self, chat: Chat, person: String, text: String, commands: bool) {
         let context = self.decider.is_some().then(|| self.context(&chat, &text));
         self.remember(&chat, &text);
         self.pending.push_back(Incoming {
             chat,
             person,
             text,
-            addressed,
+            commands,
             context,
         });
     }
@@ -116,7 +117,8 @@ impl Inbox {
         match (&front.context, &self.decider) {
             (Some(context), Some(decider)) => {
                 self.deciding = true;
-                Some(Next::Decide(decider.decide(context.clone())))
+                let actions = Action::offered(front.commands);
+                Some(Next::Decide(decider.decide(context.clone(), actions)))
             }
             _ => self.pending.pop_front().map(Next::Take),
         }

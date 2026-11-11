@@ -6,6 +6,9 @@
 //! the probability it gives that action.
 //! The bridge takes the action only when that probability reaches
 //! `decide.threshold`.
+//!
+//! Only a message that may give a command is offered the commands, such as
+//! starting a new conversation; any other is answered or ignored.
 
 use std::{future::Future, pin::Pin, time::Duration};
 
@@ -35,17 +38,31 @@ pub(crate) enum Action {
     /// Start the chat's next turn in a new conversation.
     NewConversation,
 
-    /// Compact the chat's conversation before its next turn.
+    /// Compact the chat's conversation.
     Compact,
 }
 
 impl Action {
-    const ALL: [Self; 4] = [
+    /// What a message that can't give a command may lead to.
+    const MESSAGE: &[Self] = &[Self::Ignore, Self::Answer];
+
+    /// What a message that may give a command may lead to.
+    const COMMAND: &[Self] = &[
         Self::Ignore,
         Self::Answer,
         Self::NewConversation,
         Self::Compact,
     ];
+
+    /// The actions offered for a message, which include the commands when
+    /// `commands` is set.
+    pub(crate) fn offered(commands: bool) -> &'static [Self] {
+        if commands {
+            Self::COMMAND
+        } else {
+            Self::MESSAGE
+        }
+    }
 
     /// The option's name in the question and the answer.
     fn key(self) -> &'static str {
@@ -78,10 +95,6 @@ impl Action {
             }
         }
     }
-
-    fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|action| action.key() == key)
-    }
 }
 
 /// The model's answer: the action it picked, and the probability it gave it.
@@ -96,8 +109,9 @@ pub(crate) type Decision = Pin<Box<dyn Future<Output = Result<Verdict, String>> 
 
 /// Decides what the bridge does with the last message in a chat.
 pub(crate) trait Decide: Send + Sync {
-    /// The action for the last message in `state`, a chat's recent messages.
-    fn decide(&self, state: String) -> Decision;
+    /// Which of `actions` to take for the last message in `state`, a chat's
+    /// recent messages.
+    fn decide(&self, state: String, actions: &'static [Action]) -> Decision;
 }
 
 /// A decide API over HTTP, with a bearer token when it asks for one.
@@ -123,11 +137,11 @@ impl SystemOne {
 }
 
 impl Decide for SystemOne {
-    fn decide(&self, state: String) -> Decision {
-        let mut request = self
-            .client
-            .post(&self.options.url)
-            .json(&request_body(&self.options, &state));
+    fn decide(&self, state: String, actions: &'static [Action]) -> Decision {
+        let mut request =
+            self.client
+                .post(&self.options.url)
+                .json(&request_body(&self.options, &state, actions));
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
@@ -149,16 +163,16 @@ impl Decide for SystemOne {
 
             let body: Value = serde_json::from_str(&body)
                 .map_err(|error| format!("the decide API's answer isn't JSON: {error}"))?;
-            verdict(&body)
+            verdict(&body, actions)
         })
     }
 }
 
-/// The request asking `options.instructions` about `state`, with every
-/// [`Action`] as an option.
-pub(crate) fn request_body(options: &DecideOptions, state: &str) -> Value {
-    let criteria: Map<String, Value> = Action::ALL
-        .into_iter()
+/// The request asking `options.instructions` about `state`, with `actions` as
+/// the options.
+pub(crate) fn request_body(options: &DecideOptions, state: &str, actions: &[Action]) -> Value {
+    let criteria: Map<String, Value> = actions
+        .iter()
         .map(|action| (action.key().to_owned(), json!(action.description())))
         .collect();
     let mut questions = Map::new();
@@ -174,8 +188,9 @@ pub(crate) fn request_body(options: &DecideOptions, state: &str) -> Value {
     })
 }
 
-/// The action a decide API answer picks, and the probability it gives it.
-pub(crate) fn verdict(body: &Value) -> Result<Verdict, String> {
+/// Which of `actions` a decide API answer picks, and the probability it gives
+/// it.
+pub(crate) fn verdict(body: &Value, actions: &[Action]) -> Result<Verdict, String> {
     let answer = body
         .pointer(&format!("/answers/{QUESTION}"))
         .ok_or_else(|| format!("the decide API's answer has no `answers.{QUESTION}`"))?;
@@ -183,7 +198,10 @@ pub(crate) fn verdict(body: &Value) -> Result<Verdict, String> {
         .get("choice")
         .and_then(Value::as_str)
         .ok_or_else(|| format!("the decide API's answer has no `answers.{QUESTION}.choice`"))?;
-    let action = Action::from_key(choice)
+    let action = actions
+        .iter()
+        .copied()
+        .find(|action| action.key() == choice)
         .ok_or_else(|| format!("the decide API chose `{choice}`, which isn't an option"))?;
     let probability = answer
         .get("probabilities")

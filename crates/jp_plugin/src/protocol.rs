@@ -22,7 +22,7 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 11      | `schema` and `expires_in` on `query`, `data` on its reply.      |
 /// | 12      | `tool` on `init`, answered with `tool_outcome`.                 |
 /// | 13      | `edit_files`, answered with `edited`.                           |
-/// | 14      | `compact` on `query`, compacting before the turn.               |
+/// | 14      | `compact`, answered with `compacted`.                           |
 pub const PROTOCOL_VERSION: u32 = 14;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.

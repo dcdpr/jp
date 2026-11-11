@@ -4,8 +4,8 @@
 use std::io::{self, BufReader, PipeWriter};
 
 use jp_plugin::message::{
-    ConfigResponse, CreatedResponse, DoneResponse, ErrorResponse, EventsResponse, InterruptAction,
-    QueryCompleteResponse,
+    CompactedResponse, ConfigResponse, CreatedResponse, DoneResponse, ErrorResponse,
+    EventsResponse, InterruptAction, QueryCompleteResponse,
 };
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -111,7 +111,7 @@ async fn a_query_is_written_before_its_turn_is_awaited() {
 
     let turn = f
         .client
-        .query("c1", "Hi", vec!["personas/planner".to_owned()], true);
+        .query("c1", "Hi", vec!["personas/planner".to_owned()]);
 
     assert_eq!(f.written.messages(), vec![PluginToHost::Query(
         QueryRequest {
@@ -123,7 +123,6 @@ async fn a_query_is_written_before_its_turn_is_awaited() {
             cfg: vec!["personas/planner".to_owned()],
             schema: None,
             expires_in: None,
-            compact: true,
         }
     )]);
 
@@ -135,7 +134,7 @@ async fn a_query_is_written_before_its_turn_is_awaited() {
 async fn a_query_the_host_refuses_fails_with_its_message() {
     let f = fixture();
 
-    let turn = f.client.query("c1", "Hi", vec![], false);
+    let turn = f.client.query("c1", "Hi", vec![]);
     answer(&f.host, &error("1", "conversation is locked"));
 
     assert_eq!(within(turn).await, Err("conversation is locked".to_owned()));
@@ -226,6 +225,50 @@ async fn a_reply_is_taken_or_refused() {
     assert_eq!(request.content.as_deref(), Some("Actually second"));
 }
 
+/// With no arguments the host applies the configured rules, and its report
+/// comes back as it is.
+#[tokio::test]
+async fn compact_asks_for_the_configured_rules_and_returns_the_report() {
+    let f = fixture();
+    let (written, host) = (f.written.clone(), Arc::clone(&f.host));
+    tokio::spawn(async move {
+        eventually(|| written.messages().len() == 1).await;
+        answer(
+            &host,
+            &HostToPlugin::Compacted(CompactedResponse {
+                id: Some("1".to_owned()),
+                conversation: "c1".to_owned(),
+                report: vec!["Kept turn 1.".to_owned()],
+            }),
+        );
+    });
+
+    let report = within(f.client.compact("c1")).await;
+
+    assert_eq!(report, Ok(vec!["Kept turn 1.".to_owned()]));
+    assert_eq!(f.written.messages(), vec![PluginToHost::Compact(
+        CompactRequest {
+            id: Some("1".to_owned()),
+            conversation: "c1".to_owned(),
+            args: vec![],
+        }
+    )]);
+}
+
+#[tokio::test]
+async fn a_compaction_the_host_refuses_fails_with_its_message() {
+    let f = fixture();
+    let (written, host) = (f.written.clone(), Arc::clone(&f.host));
+    tokio::spawn(async move {
+        eventually(|| written.messages().len() == 1).await;
+        answer(&host, &error("1", "No turns to compact"));
+    });
+
+    let report = within(f.client.compact("c1")).await;
+
+    assert_eq!(report, Err("No turns to compact".to_owned()));
+}
+
 #[tokio::test]
 async fn stop_asks_the_running_turn_to_stop() {
     let f = fixture();
@@ -305,7 +348,7 @@ async fn a_closed_host_ends_every_waiting_request_and_shuts_down() {
         ..
     } = fixture();
 
-    let turn = client.query("c1", "Hi", vec![], false);
+    let turn = client.query("c1", "Hi", vec![]);
     drop(host);
 
     assert_eq!(
@@ -332,7 +375,7 @@ async fn a_shutdown_message_shuts_down() {
 async fn an_answer_nobody_waits_for_is_dropped() {
     let f = fixture();
 
-    let turn = f.client.query("c1", "Hi", vec![], false);
+    let turn = f.client.query("c1", "Hi", vec![]);
     answer(&f.host, &query_complete("99"));
     answer(&f.host, &query_complete("1"));
 

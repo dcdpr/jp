@@ -44,6 +44,10 @@ pub(crate) struct Inbound {
     /// of its messages.
     pub addressed: bool,
 
+    /// Whether the message starts by mentioning the bridge's own account, as a
+    /// command to it does.
+    pub leading_mention: bool,
+
     /// Message text; empty if the message contained only attachments.
     pub text: String,
 

@@ -13,24 +13,52 @@ fn options() -> DecideOptions {
     }
 }
 
-#[test]
-fn the_request_asks_one_choice_between_the_actions() {
-    let body = request_body(&options(), "Last message:\nAda Client: thanks!");
-
-    assert_eq!(body["model"], "jev-latest");
-    assert_eq!(body["state"], "Last message:\nAda Client: thanks!");
-    assert_eq!(body["questions"]["action"]["type"], "choice");
-    assert_eq!(
-        body["questions"]["action"]["instructions"],
-        "What should the assistant do?"
-    );
+/// The options a request offers, sorted.
+fn offered(body: &Value) -> Vec<&String> {
     let mut options: Vec<&String> = body["questions"]["action"]["criteria"]
         .as_object()
         .unwrap()
         .keys()
         .collect();
     options.sort();
-    assert_eq!(options, ["answer", "compact", "ignore", "new_conversation"]);
+    options
+}
+
+#[test]
+fn a_message_that_may_give_a_command_is_offered_the_commands() {
+    let body = request_body(
+        &options(),
+        "Last message:\nAda Client (to you): compact please",
+        Action::offered(true),
+    );
+
+    assert_eq!(body["model"], "jev-latest");
+    assert_eq!(
+        body["state"],
+        "Last message:\nAda Client (to you): compact please"
+    );
+    assert_eq!(body["questions"]["action"]["type"], "choice");
+    assert_eq!(
+        body["questions"]["action"]["instructions"],
+        "What should the assistant do?"
+    );
+    assert_eq!(offered(&body), [
+        "answer",
+        "compact",
+        "ignore",
+        "new_conversation"
+    ]);
+}
+
+#[test]
+fn any_other_message_is_offered_answering_or_ignoring_it() {
+    let body = request_body(
+        &options(),
+        "Last message:\nAda Client: thanks!",
+        Action::offered(false),
+    );
+
+    assert_eq!(offered(&body), ["answer", "ignore"]);
 }
 
 /// Shaped like the `choice` answer in Jev's documentation.
@@ -50,7 +78,7 @@ fn the_answer_is_the_chosen_action_and_its_probability() {
     });
 
     assert_eq!(
-        verdict(&body),
+        verdict(&body, Action::offered(true)),
         Ok(Verdict {
             action: Action::NewConversation,
             probability: 0.82,
@@ -80,6 +108,21 @@ fn an_answer_the_bridge_cant_act_on_is_an_error() {
     ];
 
     for (body, error) in cases {
-        assert_eq!(verdict(&body), Err(error.to_owned()), "{body}");
+        assert_eq!(
+            verdict(&body, Action::offered(true)),
+            Err(error.to_owned()),
+            "{body}"
+        );
     }
+}
+
+/// A command the message wasn't offered isn't taken, even if a server picks it.
+#[test]
+fn a_command_that_wasnt_offered_is_an_error() {
+    let body = json!({ "answers": { "action": { "choice": "compact", "probabilities": { "compact": 0.9 } } } });
+
+    assert_eq!(
+        verdict(&body, Action::offered(false)),
+        Err("the decide API chose `compact`, which isn't an option".to_owned())
+    );
 }

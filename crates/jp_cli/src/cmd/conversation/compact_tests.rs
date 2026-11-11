@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use camino_tempfile::{Utf8TempDir, tempdir};
+use camino_tempfile::tempdir;
 use chrono::{DateTime, Utc};
 use clap::error::ErrorKind;
 use jp_config::{
@@ -17,7 +17,7 @@ use jp_conversation::{
     event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::event::NoticeSink;
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
@@ -459,30 +459,6 @@ fn blank_verbatim_summary_is_rejected() {
     );
 }
 
-/// A `Ctx` backed by an in-memory printer, for exercising the dry-run preview.
-///
-/// The tempdir is returned so it outlives the ctx, whose workspace points into
-/// it.
-fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir) {
-    let tmp = tempdir().unwrap();
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
-
-    let workspace = Workspace::in_memory(tmp.path());
-
-    let ctx = Ctx::new(
-        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
-        workspace,
-        None,
-        Runtime::new().unwrap(),
-        Globals::default(),
-        AppConfig::new_test(),
-        None,
-        printer,
-    );
-
-    (ctx, out, tmp)
-}
-
 /// A fixed id for the previews, so the rendered errors are deterministic.
 fn preview_id() -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(1)).unwrap()
@@ -493,11 +469,9 @@ fn preview_rejects_a_blank_verbatim_summary() {
     // Regression: `--summary '' --dry-run` used to print a successful preview
     // while the real run rejected the same rule, so the preview promised a
     // compaction that could not be performed.
-    let (ctx, _out, _tmp) = preview_ctx();
     let stream = stream_of(4);
 
     let error = Compact::preview_compaction(
-        &ctx,
         preview_id(),
         &stream,
         &[summary_rule(Some("   "))],
@@ -666,10 +640,7 @@ fn the_default_rules_compact_the_middle_of_a_three_turn_conversation() {
 /// than `check_turn_range`.
 #[test]
 fn an_explicit_start_still_collides_with_the_rule_s_protected_end() {
-    let (ctx, _out, _tmp) = preview_ctx();
-
     let error = Compact::preview_compaction(
-        &ctx,
         preview_id(),
         &stream_of(3),
         &default_rules(),
@@ -690,10 +661,7 @@ fn an_explicit_start_still_collides_with_the_rule_s_protected_end() {
 /// a special case.
 #[test]
 fn a_selection_with_no_window_is_rejected_too() {
-    let (ctx, _out, _tmp) = preview_ctx();
-
     let error = Compact::preview_compaction(
-        &ctx,
         preview_id(),
         &stream_of(3),
         &default_rules(),
@@ -715,10 +683,7 @@ fn a_selection_with_no_window_is_rejected_too() {
 /// preview.
 #[test]
 fn preview_rejects_a_selection_that_compacts_nothing() {
-    let (ctx, _out, _tmp) = preview_ctx();
-
     let error = Compact::preview_compaction(
-        &ctx,
         preview_id(),
         &stream_of(2),
         &default_rules(),
@@ -746,8 +711,6 @@ fn preview_does_not_itemize_a_summary_rule() {
     // nothing, but the preview builds a summary-less mechanical compaction, so
     // it has to make that call from the rule or the two disagree: the dry run
     // would list items the run it previews never selects.
-    let (ctx, out, _tmp) = preview_ctx();
-
     let mut stream = ConversationStream::new_test();
     stream.start_turn("think");
     stream
@@ -772,45 +735,31 @@ fn preview_does_not_itemize_a_summary_rule() {
     .unwrap()
     .remove(0);
 
-    Compact::preview_compaction(
-        &ctx,
-        preview_id(),
-        &stream,
-        &[rule],
-        &parse_compact(&[]).range,
-    )
-    .unwrap();
-    ctx.printer.flush();
+    let report =
+        Compact::preview_compaction(preview_id(), &stream, &[rule], &parse_compact(&[]).range)
+            .unwrap();
 
     // One range line and nothing under it. The 4 KB reasoning block clears the
     // 1 KB threshold, so an unguarded preview would name it here.
-    assert_eq!(
-        *out.lock(),
-        "Would have compacted turns 1..1 (1 total, verbatim summary).\n"
-    );
+    assert_eq!(report, [
+        "Would have compacted turns 1..1 (1 total, verbatim summary)."
+    ]);
 }
 
 #[test]
 fn preview_refuses_an_overlap_the_real_run_would_refuse() {
     // The preview shares `resolve_rule_range` with the real run, so the same
     // widening over an existing summary is refused before anything is printed.
-    let (ctx, out, _tmp) = preview_ctx();
     let mut stream = stream_of(6);
     stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::generated("earlier")));
 
     let mut rule = summary_rule(Some("hand-written"));
     rule.keep_last = RuleBound::FromEnd(2);
 
-    let error = Compact::preview_compaction(
-        &ctx,
-        preview_id(),
-        &stream,
-        &[rule],
-        &parse_compact(&[]).range,
-    )
-    .unwrap_err();
+    let error =
+        Compact::preview_compaction(preview_id(), &stream, &[rule], &parse_compact(&[]).range)
+            .unwrap_err();
 
-    ctx.printer.flush();
     // The full refusal as the user reads it: what went wrong, and the exact
     // range that resolves it.
     assert_eq!(
@@ -819,11 +768,6 @@ fn preview_refuses_an_overlap_the_real_run_would_refuse() {
          another one, so your text for turns 1..4 would have to stand in for turns 1..6 as \
          well.\", suggestion:\"Re-run with `--from 1 --to 6` to cover the whole range, or `jp \
          conversation compact --reset` to drop the existing compactions first.\")"
-    );
-    assert_eq!(
-        out.lock().clone(),
-        "",
-        "a refused preview must print no timeline"
     );
 }
 

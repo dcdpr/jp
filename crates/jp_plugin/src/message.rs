@@ -80,6 +80,9 @@ pub enum HostToPlugin {
     /// A delegated turn finished.
     QueryComplete(QueryCompleteResponse),
 
+    /// Response to `compact`.
+    Compacted(CompactedResponse),
+
     /// A conversation asked for by `query` with `new` exists.
     ///
     /// Sent as soon as it has been created and locked, before its first turn
@@ -148,6 +151,9 @@ pub enum PluginToHost {
     /// Ask the host to change what a running turn is doing.
     Interrupt(InterruptRequest),
 
+    /// Ask the host to compact a conversation.
+    Compact(CompactRequest),
+
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
 
@@ -188,6 +194,7 @@ impl PluginToHost {
             Self::SetTitle(m) => m.id.as_deref(),
             Self::WriteDraft(m) => m.id.as_deref(),
             Self::Interrupt(m) => m.id.as_deref(),
+            Self::Compact(m) => m.id.as_deref(),
 
             // Not requests: nothing is waiting on an answer to any of these.
             Self::Ready(_)
@@ -624,14 +631,45 @@ pub struct QueryRequest {
     /// Requires `new`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>,
+}
 
-    /// Compact the conversation before the turn runs, with the rules in
-    /// `conversation.compaction.rules`, as `jp query --compact` does.
+/// Ask the host to compact a conversation, as `jp conversation compact` does.
+///
+/// Answered with [`HostToPlugin::Compacted`] once the conversation is
+/// compacted, or with [`HostToPlugin::Error`].
+/// A rule that summarizes calls a model, so this can take as long as a turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompactRequest {
+    /// Optional request correlation ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation to compact.
+    pub conversation: String,
+
+    /// The arguments `jp conversation compact` takes, without a conversation,
+    /// such as `["--keep-last", "2", "--reasoning"]`.
     ///
-    /// Ignored with `new`: a conversation the request creates has nothing to
-    /// compact.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub compact: bool,
+    /// They are read the way that command reads them, so every option it has,
+    /// this request has, including `--dry-run` and `--reset`.
+    /// None applies `conversation.compaction.rules`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
+/// Response to `compact`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompactedResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation that was compacted.
+    pub conversation: String,
+
+    /// What `jp conversation compact` prints for the same arguments, one line
+    /// each: which turns were kept, and which compacted and how.
+    pub report: Vec<String>,
 }
 
 /// Ask the host to change what a running turn is doing.

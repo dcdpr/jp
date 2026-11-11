@@ -519,28 +519,68 @@ fn a_structured_temporary_query_reads_from_json() {
             cfg: vec![],
             schema: Some(Map::from_iter([("type".to_owned(), json!("object"))])),
             expires_in: Some("5m".to_owned()),
-            compact: false,
         })
     );
 }
 
 #[test]
-fn a_compacting_query_round_trips() {
-    let json = r#"{"type":"query","conversation":"123","content":"hi","compact":true}"#;
+fn a_compact_request_carries_the_commands_arguments() {
+    let json = r#"{"type":"compact","id":"c1","conversation":"123","args":["--keep-last","2","--reasoning"]}"#;
 
     let msg = from_str::<PluginToHost>(json).unwrap();
 
-    let PluginToHost::Query(query) = &msg else {
-        panic!("not a query: {msg:?}");
-    };
-    assert!(query.compact);
+    assert_eq!(
+        msg,
+        PluginToHost::Compact(CompactRequest {
+            id: Some("c1".to_owned()),
+            conversation: "123".to_owned(),
+            args: vec![
+                "--keep-last".to_owned(),
+                "2".to_owned(),
+                "--reasoning".to_owned()
+            ],
+        })
+    );
+    assert_eq!(msg.id(), Some("c1"));
     assert_eq!(serde_json::to_string(&msg).unwrap(), json);
 }
 
-/// A plugin that asks for none of them sends the same bytes it sent before the
+/// No arguments applies the configured rules, and isn't written at all.
+#[test]
+fn a_compact_request_without_arguments_omits_them() {
+    let msg = PluginToHost::Compact(CompactRequest {
+        id: None,
+        conversation: "123".to_owned(),
+        args: vec![],
+    });
+
+    assert_eq!(
+        serde_json::to_string(&msg).unwrap(),
+        r#"{"type":"compact","conversation":"123"}"#
+    );
+}
+
+#[test]
+fn a_compacted_reply_carries_the_report() {
+    let msg = HostToPlugin::Compacted(CompactedResponse {
+        id: Some("c1".to_owned()),
+        conversation: "123".to_owned(),
+        report: vec!["Kept turn 1.".to_owned(), "Compacted turns 2-4.".to_owned()],
+    });
+
+    let json = serde_json::to_string(&msg).unwrap();
+
+    assert_eq!(
+        json,
+        r#"{"type":"compacted","id":"c1","conversation":"123","report":["Kept turn 1.","Compacted turns 2-4."]}"#
+    );
+    assert_eq!(from_str::<HostToPlugin>(&json).unwrap(), msg);
+}
+
+/// A plugin that asks for neither sends the same bytes it sent before the
 /// fields existed, so an older host still reads it.
 #[test]
-fn a_plain_query_writes_neither_schema_nor_expires_in_nor_compact() {
+fn a_plain_query_writes_neither_schema_nor_expires_in() {
     let msg = PluginToHost::Query(QueryRequest {
         id: None,
         conversation: "123".to_owned(),
@@ -550,7 +590,6 @@ fn a_plain_query_writes_neither_schema_nor_expires_in_nor_compact() {
         cfg: vec![],
         schema: None,
         expires_in: None,
-        compact: false,
     });
 
     assert_eq!(

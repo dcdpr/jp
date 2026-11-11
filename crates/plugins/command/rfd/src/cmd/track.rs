@@ -463,7 +463,6 @@ pub(crate) fn plan_query(request: &PlanRequest<'_>) -> QueryRequest {
         cfg: PLAN_CFG.map(ToOwned::to_owned).to_vec(),
         schema: Some(plan_schema()),
         expires_in: Some(PLAN_LIFETIME.to_owned()),
-        compact: false,
     }
 }
 
