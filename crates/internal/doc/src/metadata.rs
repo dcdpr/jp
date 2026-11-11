@@ -230,13 +230,6 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
             .map(|field| field.value)
             .collect()
     }
-
-    /// Whether the line at `index` belongs to the field `key`, continuation
-    /// lines included.
-    #[must_use]
-    pub fn is_field_line(&self, key: &str, index: usize) -> bool {
-        field_lines(self.lines, key).is_some_and(|range| range.contains(&index))
-    }
 }
 
 /// The value of the field spanning `range`: what follows its key, and its
