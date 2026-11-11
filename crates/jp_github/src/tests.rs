@@ -1205,6 +1205,57 @@ async fn releases_upload_asset_posts_the_file_to_the_release_upload_url() {
     mock.assert();
 }
 
+/// A tag's SHA is the commit it tags, which GitHub sends as plain text when
+/// asked for `application/vnd.github.sha`.
+#[tokio::test]
+async fn repos_commit_sha_reads_the_plain_text_sha() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/commits/tags/v0.2.0")
+                .header("accept", "application/vnd.github.sha");
+            then.status(200)
+                .body("0123456789abcdef0123456789abcdef01234567");
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let sha = client
+        .repos("acme", "widgets")
+        .commit_sha("tags/v0.2.0")
+        .await
+        .expect("commit sha");
+
+    assert_eq!(sha, "0123456789abcdef0123456789abcdef01234567");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn repos_commit_sha_reports_a_missing_reference_with_its_status() {
+    let server = MockServer::start_async().await;
+    server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/commits/tags/v9.0.0");
+            then.status(422)
+                .json_body(json!({ "message": "No commit found for SHA: tags/v9.0.0" }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let error = client
+        .repos("acme", "widgets")
+        .commit_sha("tags/v9.0.0")
+        .await
+        .expect_err("no such tag");
+
+    let Error::GitHub { source, .. } = error else {
+        panic!("expected a GitHub error, got {error:?}");
+    };
+    assert_eq!(source.status_code.as_u16(), 422);
+}
+
 #[tokio::test]
 async fn releases_delete_asset_treats_204_as_success() {
     let server = MockServer::start_async().await;

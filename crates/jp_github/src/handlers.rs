@@ -1029,6 +1029,24 @@ impl ReposHandler {
         }
     }
 
+    /// The SHA of the commit `reference` names: a commit's SHA,
+    /// `heads/<branch>`, or `tags/<tag>`, an annotated tag's peeled to the
+    /// commit it tags.
+    ///
+    /// A reference that names no commit is a GitHub error with status 404 or
+    /// 422.
+    pub async fn commit_sha(&self, reference: &str) -> Result<String> {
+        let sha = self
+            .client
+            .get_with_accept(
+                &format!("/repos/{}/{}/commits/{reference}", self.owner, self.repo),
+                "application/vnd.github.sha",
+            )
+            .await?;
+
+        Ok(sha.trim().to_owned())
+    }
+
     #[must_use]
     pub fn list_collaborators(&self) -> RepoCollaboratorListBuilder {
         RepoCollaboratorListBuilder {
