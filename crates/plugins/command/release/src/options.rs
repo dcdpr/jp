@@ -6,7 +6,7 @@
 //! forge = "github"
 //! repository = "https://github.com/dcdpr/jp"
 //! bump = "cargo set-version --package jp_cli {version}"
-//! build = "bash .config/release/build.sh {source} {out} {profile}"
+//! build = "bash .config/release/build.sh {version} {source} {out} {profile}"
 //! cadence = "2w"
 //!
 //! [plugins.command.release.options.headings]

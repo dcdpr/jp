@@ -59,6 +59,10 @@ before anything is published.
 
 The archive names carry no version, so a publisher can serve the newest
 release's files at one address.
+Each archive holds a directory named after it, such as
+`jp-aarch64-apple-darwin/`, with `jp`, or `jp.exe`, and the `README.md` and
+`LICENSE` of the commit built; commits from before [#77], which added the
+license, have none to ship.
 Releases from before [#428], which added Windows to CI, have no Windows archive:
 no Windows build of them was ever run.
 
@@ -68,7 +72,7 @@ JP's `build` command is a script that runs on macOS:
 
 ```toml
 [plugins.command.release.options]
-build = "bash .config/release/build.sh {source} {out} {profile}"
+build = "bash .config/release/build.sh {version} {source} {out} {profile}"
 ```
 
 It builds the `jp` binary of the `jp_cli` package from `{source}` for each
@@ -106,7 +110,8 @@ The `quick` profile is Cargo's default release profile, for testing the script
 in a fraction of the time.
 The script sets both through `CARGO_PROFILE_RELEASE_*` and ignores rustflags in
 Cargo's configuration files, so every commit builds the same way, whatever its
-`Cargo.toml` or the releaser's settings say.
+`Cargo.toml` or the releaser's settings say, and it remaps the releaser's paths,
+such as Cargo's registry, out of the panic messages the binaries carry.
 It sets `SOURCE_DATE_EPOCH` to the commit's time, which `jp --version` shows as
 its build date, so a release reports the day it was cut rather than the day it
 was built; commits from before this RFD's first phase show the day they were
@@ -365,6 +370,7 @@ After it, they apply T-1f2jmb7's rulesets, which block deleting tags, something
   [create-gh-release-action], the tools considered.
 
 [#428]: https://github.com/dcdpr/jp/pull/428
+[#77]: https://github.com/dcdpr/jp/pull/77
 [GitHub discussion 48311]: https://github.com/orgs/community/discussions/48311
 [GoReleaser]: https://goreleaser.com/customization/builds/builders/rust/
 [GoReleaser Pro]: https://goreleaser.com/pro/

@@ -203,6 +203,9 @@ repository = "https://github.com/dcdpr/jp"
 # with `Cargo.lock`. `--workspace` would also overwrite the crates under
 # `crates/contrib/`, which keep versions of their own.
 bump = "cargo set-version --package jp_cli {version}"
+# Every target JP ships, built on a Mac by JP's own script; its header says what
+# it needs installed.
+build = "bash .config/release/build.sh {version} {source} {out} {profile}"
 # A release every two weeks while JP moves fast: `jp release due` says the next
 # one should be cut two weeks after the last.
 cadence = "2w"

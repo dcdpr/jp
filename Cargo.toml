@@ -234,6 +234,12 @@ private_intra_doc_links = "allow"
 [workspace.metadata.vet]
 store = { path = './.config/supply-chain' }
 
+# The toolchain `jp release build` builds JP's releases with: an exact stable
+# version, where `rust-toolchain.toml` pins the nightly that development and CI
+# use. See `.config/release/build.sh`.
+[workspace.metadata.release]
+toolchain = "1.99.1"
+
 [profile.profiling]
 inherits = "release"
 debug = true
