@@ -592,7 +592,7 @@ struct TurnRequest {
     /// Title for a conversation the turn creates.
     title: String,
 
-    /// [`cfg`], before [`turn_cfg`] adds the tool entry.
+    /// [`cfg()`], before [`turn_cfg`] adds the tool entry.
     cfg: Vec<String>,
 
     /// Expiry for a conversation the turn creates.

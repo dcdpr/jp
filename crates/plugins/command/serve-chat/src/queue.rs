@@ -22,6 +22,17 @@ pub(crate) struct Waiting {
     pub texts: Vec<String>,
 }
 
+impl Waiting {
+    /// A batch holding the one message `text`.
+    fn new(chat: Chat, person: String, text: String) -> Self {
+        Self {
+            chat,
+            person,
+            texts: vec![text],
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Queue {
     batches: VecDeque<Waiting>,
@@ -45,31 +56,22 @@ impl Queue {
             Some(index) if self.batches[index].person == person => {
                 self.batches[index].texts.push(text);
             }
-            _ => self.batches.push_back(Waiting {
-                chat,
-                person,
-                texts: vec![text],
-            }),
+            _ => self.batches.push_back(Waiting::new(chat, person, text)),
         }
     }
 
     /// Queue `text` ahead of everything waiting for `chat`, for a reply a turn
     /// didn't take: it was sent before them.
     pub(crate) fn push_first(&mut self, chat: Chat, person: String, text: String) {
-        match self.batches.iter().position(|queued| queued.chat == chat) {
+        let index = self.batches.iter().position(|queued| queued.chat == chat);
+        match index {
             Some(index) if self.batches[index].person == person => {
                 self.batches[index].texts.insert(0, text);
             }
-            Some(index) => self.batches.insert(index, Waiting {
-                chat,
-                person,
-                texts: vec![text],
-            }),
-            None => self.batches.push_front(Waiting {
-                chat,
-                person,
-                texts: vec![text],
-            }),
+            // Ahead of the chat's first batch, or of everything when it has none.
+            _ => self
+                .batches
+                .insert(index.unwrap_or(0), Waiting::new(chat, person, text)),
         }
     }
 
