@@ -39,6 +39,10 @@ enum Command {
     Diff {
         /// Base revision to compare against.
         /// Compared at `git merge-base HEAD <base>`.
+        ///
+        /// Git's null object ID (all zeros at full length) means there is no
+        /// base revision: nothing is compared, and only findings for enforced
+        /// rules are reported.
         #[arg(long)]
         base: String,
 

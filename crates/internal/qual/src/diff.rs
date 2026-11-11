@@ -90,8 +90,9 @@ pub struct Verdict {
     /// existed at the base revision.
     pub enforced: Vec<Finding>,
 
-    /// Gating finding count per pass at the base revision.
-    pub base: BTreeMap<String, usize>,
+    /// Gating finding count per pass at the base revision, or `None` when the
+    /// target tree was judged without a base revision.
+    pub base: Option<BTreeMap<String, usize>>,
 
     /// Gating finding count per pass in the target tree.
     pub head: BTreeMap<String, usize>,
@@ -158,20 +159,36 @@ pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy)
     }
     new.sort_by(|a, b| a.finding.cmp(&b.finding));
 
-    let enforced = head
-        .findings
-        .iter()
-        .filter(|finding| policy.is_enforced(&finding.rule))
-        .cloned()
-        .collect();
-
     Verdict {
         new,
-        enforced,
-        base: counts(base, policy),
+        enforced: enforced(head, policy),
+        base: Some(counts(base, policy)),
         head: counts(head, policy),
         titles: head.titles.clone(),
     }
+}
+
+/// Judge `head` under `policy` without a base revision to compare it against.
+///
+/// No finding counts as new, so only findings for enforced rules fail the
+/// verdict.
+#[must_use]
+pub fn enforced_only(head: &Report, policy: &Policy) -> Verdict {
+    Verdict {
+        new: Vec::new(),
+        enforced: enforced(head, policy),
+        base: None,
+        head: counts(head, policy),
+        titles: head.titles.clone(),
+    }
+}
+
+fn enforced(head: &Report, policy: &Policy) -> Vec<Finding> {
+    head.findings
+        .iter()
+        .filter(|finding| policy.is_enforced(&finding.rule))
+        .cloned()
+        .collect()
 }
 
 fn counts(report: &Report, policy: &Policy) -> BTreeMap<String, usize> {

@@ -147,6 +147,18 @@ jobs:
           # still checked after every merge.
           - task: shear
             scope: ${{ github.ref == 'refs/heads/main' && 'expand' || 'source' }}
+          # `qual-ci` compares `HEAD` against its merge base with `scope`. On a
+          # pull request that is the merge commit's first parent, which a depth
+          # of 2 reaches. On `main` it is the commit the push replaced, any
+          # number of commits back, so the checkout fetches the whole history.
+          # A push that creates the branch has the null object ID there, which
+          # `qual` reads as no base.
+          #
+          # The depths are strings because the checkout step falls back to 1 on
+          # a falsy value, and the number 0 is falsy where the string is not.
+          - task: qual
+            scope: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+            fetch_depth: ${{ github.event_name == 'pull_request' && '2' || '0' }}
     name: ${{ matrix.task }}${{ matrix.name_suffix }}
     # A run without a target cache falls back to a full build. Cap it so a
     # pathological run doesn't burn an hour of Windows minutes unnoticed.

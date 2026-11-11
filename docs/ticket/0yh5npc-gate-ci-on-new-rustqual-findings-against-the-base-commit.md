@@ -1,6 +1,6 @@
 # Gate CI on new rustqual findings against the base commit
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -46,3 +46,25 @@ rustqual's own command later touches only that call.
 - Check the `justfile`, the configs and `docs/` for any other references to the
   baselines.
   Keep `just qual` as the exploratory entry point.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T08:22:12Z
+
+Two things differ from the description:
+
+- **No-base case:** `qual report` never fails, so `qual diff --base <rev>` takes
+  git's null object ID (all zeros, at full length) as "no base".
+  It analyses the working tree only and fails only on enforced rules.
+  The workflow passes `github.event.before` through unchanged, and the recipe
+  stays one command with no branch in shell.
+- **History on push:** fetching the `before` sha on top of a depth-1 checkout
+  leaves `git merge-base HEAD <before>` without a common ancestor, so the `qual`
+  task checks out the full history on push (`fetch-depth: 0`) and a depth of 2
+  on pull requests.
+
+A force-push to `main` whose old tip is no longer reachable makes `git
+merge-base` fail, and `qual` exits 2: an error, not a pass.

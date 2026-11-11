@@ -56,7 +56,7 @@ fn failing() -> Verdict {
             "",
             "wildcard import: std::io",
         )],
-        base: BTreeMap::from([("main".to_owned(), 1)]),
+        base: Some(BTreeMap::from([("main".to_owned(), 1)])),
         head: BTreeMap::from([("main".to_owned(), 3)]),
         titles: titles(),
     }
@@ -166,7 +166,7 @@ fn json_carries_the_findings_and_counts() {
             shared: None,
         }],
         enforced: vec![],
-        base: BTreeMap::from([("main".to_owned(), 0)]),
+        base: Some(BTreeMap::from([("main".to_owned(), 0)])),
         head: BTreeMap::from([("main".to_owned(), 1)]),
         titles: titles(),
     };
@@ -199,7 +199,10 @@ fn json_carries_the_findings_and_counts() {
 #[test]
 fn a_passing_verdict_prints_the_counts_per_pass() {
     let passing = Verdict {
-        base: BTreeMap::from([("dry".to_owned(), 3), ("main".to_owned(), 10)]),
+        base: Some(BTreeMap::from([
+            ("dry".to_owned(), 3),
+            ("main".to_owned(), 10),
+        ])),
         head: BTreeMap::from([("dry".to_owned(), 3), ("main".to_owned(), 9)]),
         ..Verdict::default()
     };
@@ -212,6 +215,26 @@ fn a_passing_verdict_prints_the_counts_per_pass() {
         verdict(&passing, &Guidance::default(), Format::Github),
         "::notice::No new rustqual findings. Findings per pass, base -> head: dry 3 -> 3, main 10 \
          -> 9.\n"
+    );
+}
+
+#[test]
+fn a_passing_verdict_without_a_base_prints_the_head_counts() {
+    let passing = Verdict {
+        base: None,
+        head: BTreeMap::from([("dry".to_owned(), 3), ("main".to_owned(), 9)]),
+        ..Verdict::default()
+    };
+
+    assert_eq!(
+        verdict(&passing, &Guidance::default(), Format::Text),
+        "No base revision to compare against, and no rustqual findings in enforced rules. \
+         Findings per pass: dry 3, main 9.\n"
+    );
+    assert_eq!(
+        verdict(&passing, &Guidance::default(), Format::Github),
+        "::notice::No base revision to compare against, and no rustqual findings in enforced \
+         rules. Findings per pass: dry 3, main 9.\n"
     );
 }
 
