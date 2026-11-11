@@ -45,7 +45,7 @@ use serde_json::Value;
 
 use crate::{
     options::Options,
-    settings::{snapshot, source_dir},
+    settings::{below, snapshot, source_dir},
     sync::Change,
 };
 
@@ -536,10 +536,10 @@ fn confirmation(count: usize, in_work_tree: bool) -> ComposeRequest {
     }
 }
 
-/// `path` as the user reads it: relative to `root` when it's below it.
+/// `path` as the user reads it: relative to `root` when it's below it, with `/`
+/// between its components.
 pub(crate) fn shown(root: &Utf8Path, path: &Utf8Path) -> Utf8PathBuf {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.to_path_buf(), Utf8Path::to_path_buf)
+    below(root, path).map_or_else(|| path.to_path_buf(), Utf8PathBuf::from)
 }
 
 /// The usage text, rendered from the same clap definition the commands parse.
