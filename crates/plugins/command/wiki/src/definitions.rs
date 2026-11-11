@@ -45,14 +45,25 @@ const SYNCED_NOTES: &str = "\
 /// What a synced file adds to its notes when the wiki defines no labels.
 const NO_LABELS: &str = "#\n# The wiki defines no labels, so the tools take any label.\n";
 
-/// Write the starting definitions into `dir`, creating it if needed.
-pub(crate) fn init(dir: &Utf8Path) -> Result<Output, String> {
-    DEFINITIONS.init(dir).map(Output::from)
+/// Write the default tool definitions into `dir`, creating it if needed.
+///
+/// Existing files that git cannot restore are overwritten only when `force` is
+/// true.
+pub(crate) fn init(dir: &Utf8Path, force: bool) -> Result<Output, String> {
+    DEFINITIONS.init(dir, force).map(Output::from)
 }
 
-/// Write the configured labels into the schemas of the configured tools that
-/// take them, as `dir`'s synced file.
-pub(crate) fn sync(dir: &Utf8Path, config: &Value, options: &Options) -> Result<Output, String> {
+/// Write [`tool_definitions::SYNCED_FILE`] in `dir` with the configured wiki
+/// labels.
+///
+/// An existing synced file that git cannot restore is overwritten only when
+/// `force` is true.
+pub(crate) fn sync(
+    dir: &Utf8Path,
+    config: &Value,
+    options: &Options,
+    force: bool,
+) -> Result<Output, String> {
     let vocabulary = options.vocabulary()?;
     let notes = if vocabulary.is_empty() {
         format!("{SYNCED_NOTES}{NO_LABELS}")
@@ -61,7 +72,13 @@ pub(crate) fn sync(dir: &Utf8Path, config: &Value, options: &Options) -> Result<
     };
 
     DEFINITIONS
-        .sync(dir, config, &notes, |tool| mirrors(tool, &vocabulary))
+        .sync(
+            dir,
+            config,
+            &notes,
+            |tool| mirrors(tool, &vocabulary),
+            force,
+        )
         .map(Output::from)
 }
 

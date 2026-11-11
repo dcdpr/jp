@@ -1,18 +1,17 @@
-//! `jp-vite`: set up, sync, and serve the site that renders a workspace's RFDs,
-//! tickets, and wiki pages.
+//! `jp-vite`: set up, sync, and serve the VitePress site for a workspace's
+//! RFDs, tickets, and wiki pages.
 //!
-//! A command plugin providing three commands: `jp vite init`, `jp vite sync`,
-//! and `jp vite serve`.
-//! The site's own files are built into the binary (the `site` module): the
-//! loaders for each document kind, the components, the styles, the dev-server
-//! middleware, and a configuration fragment, which go to the project's
-//! `.vitepress/jp-vite/` with a snapshot of the settings they read (the
-//! `settings` module); and a starting index and board page for the RFD, ticket,
-//! and wiki directories.
-//! Each command has a module of its own: `init` writes the files that stay the
-//! project's own; `sync` rewrites the owned ones and creates the pages a
-//! project doesn't have, only where git can restore what it overwrites (the
-//! `git` module); and `serve` runs the dev server.
+//! Provides three subcommands: `jp vite init`, `jp vite sync`, and `jp vite
+//! serve`.
+//! The `site` module embeds the files owned by `jp-vite`: data loaders, Vue
+//! components, styles, dev-server middleware, a VitePress config fragment
+//! (written to `.vitepress/jp-vite/` alongside the `settings` snapshot), and
+//! default landing pages for the RFD, ticket, and wiki directories.
+//! `init` writes the project-owned scaffolding files, `sync` writes the
+//! `jp-vite`-owned files and creates any missing landing pages, and `serve`
+//! runs the dev server.
+//! Both `init` and `sync` overwrite existing files with different contents only
+//! when git can restore them or `--force` is passed (see [`overwrite`]).
 //!
 //! Settings come from `plugins.command.vite.options`, and from `jp rfd`'s, `jp
 //! ticket`'s, and `jp wiki`'s options, read by the `options` module.
@@ -39,12 +38,12 @@ use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
     InitMessage, PluginToHost, PrintMessage,
 };
+use overwrite::Existing;
 use serde_json::Value;
 
 use crate::{
-    git::Unrecorded,
     options::Options,
-    settings::{snapshot, source_dir},
+    settings::{below, snapshot, source_dir},
     sync::Change,
 };
 
@@ -74,7 +73,9 @@ enum Command {
     ///
     /// Writes `package.json`, `.vitepress/config.mts`, the theme entry, and a
     /// homepage, which are yours from then on.
-    /// A file that exists is left as it is.
+    /// Existing files with different contents are overwritten if they are
+    /// tracked by git with no uncommitted changes; otherwise `--force` is
+    /// required.
     Init {
         /// The site's title.
         /// Asked for when missing.
@@ -85,22 +86,25 @@ enum Command {
         /// Asked for when missing.
         #[arg(long)]
         description: Option<String>,
+
+        /// Overwrite files that git cannot restore.
+        #[arg(long)]
+        force: bool,
     },
 
     /// Write the site's own files from this binary.
     ///
-    /// They are the loaders, components, styles, and dev-server middleware in
-    /// `.vitepress/jp-vite/`, and the settings they read.
-    /// The index and board pages of the RFD and ticket directories are created
-    /// where they are missing, and are never changed once they exist.
-    /// Lists what it will change and asks once.
-    /// Refuses to overwrite a file git couldn't restore, unless `--force`.
+    /// Writes the loaders, components, styles, dev-server middleware, and
+    /// settings snapshot into `.vitepress/jp-vite/`, and creates any missing
+    /// index and board pages in the RFD, ticket, and wiki directories.
+    /// Lists the planned changes and prompts once for confirmation.
+    /// Existing files that git cannot restore require `--force` to overwrite.
     Sync {
         /// Write nothing, and fail when a file isn't the one sync would write.
         #[arg(long, conflicts_with_all = ["force", "yes"])]
         check: bool,
 
-        /// Overwrite files git couldn't restore.
+        /// Overwrite files that git cannot restore.
         #[arg(long)]
         force: bool,
 
@@ -234,12 +238,16 @@ where
     let root = init.workspace.root.as_path();
 
     let result = match args.command {
-        Command::Init { title, description } => init_site(
+        Command::Init {
+            title,
+            description,
+            force,
+        } => init_site(
             root,
             &options,
             &init.config,
-            title,
-            description,
+            Answers { title, description },
+            force,
             &mut session,
         ),
         Command::Sync { check, force, yes } => sync_site(
@@ -272,48 +280,74 @@ fn finish(stdout: &mut impl Write, result: Result<String, String>) -> Result<(),
     }
 }
 
-/// Set up a site in the source directory, asking for its title and description
-/// when a file needs them and no flag gave them.
+/// The site's title and description, as the flags gave them.
+struct Answers {
+    title: Option<String>,
+    description: Option<String>,
+}
+
+/// Initialize a VitePress site in the source directory, prompting for `title`
+/// and `description` when not provided via flags.
+///
+/// Always resolves `title` and `description` even when all target files already
+/// exist, because both values are needed to render `.vitepress/config.mts` and
+/// `index.md` and compare them against the files on disk.
 fn init_site<R: BufRead, W: Write>(
     root: &Utf8Path,
     options: &Options,
     config: &Value,
-    title: Option<String>,
-    description: Option<String>,
+    answers: Answers,
+    force: bool,
     session: &mut Session<R, W>,
 ) -> Result<String, String> {
     let site_dir = source_dir(root, options)?;
-    let missing = init::missing(&site_dir);
-    if missing.is_empty() {
+    let title = match answers.title {
+        Some(title) => title,
+        None => session.ask("The site's title", "--title")?,
+    };
+    let description = match answers.description {
+        Some(description) => description,
+        None => session.ask("One line describing the site", "--description")?,
+    };
+    let fill = init::Fill {
+        title,
+        description,
+        nav: nav(root, options, config),
+    };
+
+    let planned = init::plan(&site_dir, &fill)?;
+    if planned
+        .iter()
+        .all(|(_, existing)| *existing == Existing::Same)
+    {
         return Ok(format!(
-            "{}/ already has its package.json, configuration, theme, and homepage.\n",
+            "{}/ already has the package.json, configuration, theme, and homepage `jp vite init` \
+             writes.\n",
             shown(root, &site_dir)
         ));
     }
 
-    let (title, description) = if missing.iter().any(|template| template.titled) {
-        let title = match title {
-            Some(title) => title,
-            None => session.ask("The site's title", "--title")?,
-        };
-        let description = match description {
-            Some(description) => description,
-            None => session.ask("One line describing the site", "--description")?,
-        };
-        (title, description)
-    } else {
-        (String::new(), String::new())
-    };
+    if !force {
+        let differing: Vec<Utf8PathBuf> = planned
+            .iter()
+            .filter(|(_, existing)| *existing == Existing::Differs)
+            .map(|(template, _)| Utf8PathBuf::from(template.path))
+            .collect();
+        let unrecorded: Vec<_> = overwrite::unrecorded(&site_dir, &differing)?
+            .into_iter()
+            .map(|(path, why)| (shown(root, &site_dir.join(path)), why))
+            .collect();
+        if !unrecorded.is_empty() {
+            return Err(overwrite::refusal("jp vite init", &unrecorded));
+        }
+    }
 
-    let written = init::write(root, &site_dir, &missing, &init::Fill {
-        title,
-        description,
-        nav: nav(root, options, config),
-    })?;
+    let written = init::write(root, &site_dir, &planned, &fill)?;
 
     let mut text = String::new();
-    for path in written {
-        text.push_str(&format!("Created {path}\n"));
+    for line in written {
+        text.push_str(&line);
+        text.push('\n');
     }
     text.push_str(
         "The configuration imports files `jp vite sync` writes, with the RFD and ticket pages: \
@@ -387,24 +421,17 @@ fn sync_site<R: BufRead, W: Write>(
         ));
     }
 
-    let Some(prefix) = git::prefix(root)? else {
-        return Err(
-            "`jp vite sync` writes only in a git work tree, where git can restore what it \
-             overwrites."
-                .to_owned(),
-        );
-    };
-
     if !flags.force {
-        refuse_unrecorded(root, &prefix, &changes)?;
+        refuse_unrecorded(root, &changes)?;
     }
+    let in_work_tree = overwrite::prefix(root)?.is_some();
 
     session.print(&format!(
         "`jp vite sync` will change:\n{}",
         listing(&changes)
     ))?;
     if !flags.yes {
-        match session.compose(confirmation(changes.len()))? {
+        match session.compose(confirmation(changes.len(), in_work_tree))? {
             Some(answer) if answer == WRITE => {}
             Some(_) => return Ok("Nothing written.\n".to_owned()),
             None => {
@@ -421,9 +448,13 @@ fn sync_site<R: BufRead, W: Write>(
     let synced = changes.len() - kept.len();
 
     let mut text = format!(
-        "Synced {synced} {}. `git diff` shows what changed.\n",
+        "Synced {synced} {}.",
         if synced == 1 { "file" } else { "files" }
     );
+    if in_work_tree {
+        text.push_str(" `git diff` shows what changed.");
+    }
+    text.push('\n');
     for path in kept {
         text.push_str(&format!(
             "Left {path}, which was created in the meantime.\n"
@@ -443,11 +474,9 @@ fn changes(root: &Utf8Path, settings: &settings::Settings) -> Result<Vec<Change>
     Ok(changes)
 }
 
-/// Refuse when a file a change would overwrite or remove holds something git
-/// couldn't restore.
-///
-/// A file that doesn't exist yet risks nothing.
-fn refuse_unrecorded(root: &Utf8Path, prefix: &str, changes: &[Change]) -> Result<(), String> {
+/// Return a refusal error if any existing file touched by `changes` cannot be
+/// restored by git.
+fn refuse_unrecorded(root: &Utf8Path, changes: &[Change]) -> Result<(), String> {
     let at_risk: Vec<Utf8PathBuf> = changes
         .iter()
         .map(Change::path)
@@ -455,23 +484,12 @@ fn refuse_unrecorded(root: &Utf8Path, prefix: &str, changes: &[Change]) -> Resul
         .map(Utf8Path::to_path_buf)
         .collect();
 
-    let unrecorded = git::unrecorded(root, prefix, &at_risk)?;
+    let unrecorded = overwrite::unrecorded(root, &at_risk)?;
     if unrecorded.is_empty() {
         return Ok(());
     }
 
-    let mut message =
-        String::from("Git couldn't restore these files, so `jp vite sync` leaves them:\n");
-    for (path, why) in &unrecorded {
-        let why = match why {
-            Unrecorded::Modified => "changed since the last commit",
-            Unrecorded::Untracked => "not tracked",
-        };
-        message.push_str(&format!("  {path} ({why})\n"));
-    }
-    message.push_str("Commit them, or run `jp vite sync --force` to overwrite them anyway.");
-
-    Err(message)
+    Err(overwrite::refusal("jp vite sync", &unrecorded))
 }
 
 /// The changes, one per line.
@@ -486,8 +504,10 @@ fn listing(changes: &[Change]) -> String {
         .collect()
 }
 
-/// The question `sync` asks before changing anything.
-fn confirmation(count: usize) -> ComposeRequest {
+/// Build the confirmation prompt shown before `sync` writes files.
+///
+/// Omits the git restore hint when running outside a git work tree.
+fn confirmation(count: usize, in_work_tree: bool) -> ComposeRequest {
     let option = |value: &str, label: &str| ComposeOption {
         value: value.to_owned(),
         label: label.to_owned(),
@@ -503,17 +523,17 @@ fn confirmation(count: usize) -> ComposeRequest {
             options: vec![option(WRITE, "Yes"), option("skip", "No")],
             default: Some(WRITE.to_owned()),
         },
-        help: Some(
+        help: in_work_tree.then(|| {
             "Git can restore them: `git diff` shows what changed, and `git checkout` puts it back."
-                .to_owned(),
-        ),
+                .to_owned()
+        }),
     }
 }
 
-/// `path` as the user reads it: relative to `root` when it's below it.
+/// `path` as the user reads it: relative to `root` when it's below it, with `/`
+/// between its components.
 pub(crate) fn shown(root: &Utf8Path, path: &Utf8Path) -> Utf8PathBuf {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.to_path_buf(), Utf8Path::to_path_buf)
+    below(root, path).map_or_else(|| path.to_path_buf(), Utf8PathBuf::from)
 }
 
 /// The usage text, rendered from the same clap definition the commands parse.

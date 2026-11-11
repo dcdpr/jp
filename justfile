@@ -2448,8 +2448,19 @@ docs-ci: _install_ci_matchers
     cargo doc --locked --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
 
 # Generate code coverage on CI.
+#
+# `--no-report` turns off the cleanup `cargo llvm-cov` otherwise does before a
+# run, so workspace test binaries restored from the cache stay in `target/`. A
+# crate whose build hash changed (a new dependency, say) gets a new binary next
+# to the stale one, and the report counts the stale binary's regions, mapped
+# onto the new source, as uncovered. The `cargo clean` below removes the
+# workspace crates' artifacts and keeps the cached dependencies.
+#
+# It is `cargo clean`, not `cargo llvm-cov clean --workspace`: the latter cleans
+# only the `dev` profile's directory, and these builds use `coverage`.
 [group('ci')]
 coverage-ci: _coverage-setup _install_ci_matchers
+    cargo clean --locked --workspace --profile=coverage --target-dir=target/llvm-cov-target
     cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info --profile=coverage

@@ -1,22 +1,23 @@
-//! Tool definitions for the tools a command plugin serves.
+//! Tool definition scaffolding and schema syncing for command plugins.
 //!
-//! A plugin serving tools ships a starting definition for each: a TOML file
-//! declaring the tool under `conversation.tools`, its `source` naming the
-//! plugin.
-//! [`Definitions`] describes them, and runs the two commands every such plugin
-//! offers:
+//! Each command plugin that provides tools ships a default TOML definition per
+//! tool under `conversation.tools`, with `source` pointing to the plugin.
+//! [`Definitions`] implements the two commands shared by these plugins:
 //!
-//! - `jp <plugin> tools init PATH` writes the starting set into PATH, one file
-//!   per tool, for a project to load and adjust; from then on the project owns
-//!   them.
-//! - `jp <plugin> tools sync PATH` writes what the definitions mirror from the
-//!   configuration, such as the categories a plugin accepts or the labels its
-//!   vocabulary defines, into the schemas of the tools that take them.
-//!   It owns a file of its own, [`SYNCED_FILE`], and rewrites it whole, so
-//!   edits to the definitions survive it.
+//! - `jp <plugin> tools init PATH` writes the default definitions into `PATH`,
+//!   one file per tool, for the project to load and customize.
+//! - `jp <plugin> tools sync PATH` writes configuration-derived parameter
+//!   schemas (such as allowed categories or label vocabularies) into
+//!   [`SYNCED_FILE`].
+//!   Because it rewrites only [`SYNCED_FILE`], hand edits to the tool
+//!   definition files are preserved.
 //!
-//! Tools are found by their `source`, not by their key, so a tool a project
-//! renames in its configuration gets what it takes under the name it has there.
+//! Both commands overwrite an existing file with different contents only when
+//! git can restore it or when `--force` is passed (see [`overwrite`]).
+//!
+//! `tools sync` matches tools by their `source` field rather than their table
+//! key, so a tool renamed in the workspace configuration still receives its
+//! synced parameter schemas under its configured key.
 
 mod labels;
 
@@ -25,61 +26,63 @@ use std::{
     io::{self, Write as _},
 };
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use jp_label::Vocabulary;
 pub use labels::Role;
+use overwrite::{Existing, Unrecorded};
 use serde_json::Value;
 
-/// The file `tools sync` writes, inside the definitions directory.
+/// Filename written by `tools sync` inside the definitions directory.
 pub const SYNCED_FILE: &str = "synced.toml";
 
-/// The tool definitions a plugin ships.
+/// Default tool definitions and sync metadata for a command plugin.
 #[derive(Debug, Clone, Copy)]
 pub struct Definitions {
-    /// The plugin, as a tool's `source` names it, `plugin.command.<plugin>`,
-    /// and as `jp <plugin>` runs it.
+    /// Plugin name used in `source = "plugin.command.<plugin>..."` and `jp
+    /// <plugin>`.
     pub plugin: &'static str,
 
-    /// The starting definitions, each a file name and its contents.
+    /// Default definition files as `(filename, contents)` pairs.
     pub files: &'static [(&'static str, &'static str)],
 
-    /// What `tools sync` writes into the definitions, as the two commands name
-    /// it in what they print: `categories`, `labels`.
+    /// Plural noun for the synced values in status output (e.g. `"categories"`,
+    /// `"labels"`).
     pub offers: &'static str,
 }
 
-/// A parameter of a tool that takes its values from the configuration.
+/// A tool parameter whose schema values are derived from workspace
+/// configuration.
 #[derive(Debug, Clone, Copy)]
 pub struct Mirror<'a> {
-    /// The parameter, as the tool's definition declares it.
+    /// Parameter name in the tool's definition.
     pub parameter: &'static str,
 
-    /// What the parameter accepts, written into its schema.
+    /// Allowed values written into the parameter schema.
     pub values: Values<'a>,
 }
 
-/// What a mirrored parameter takes.
+/// Allowed values for a [`Mirror`] parameter.
 #[derive(Debug, Clone, Copy)]
 pub enum Values<'a> {
-    /// A string parameter taking one of these, such as a category.
+    /// String parameter restricted to a fixed list of values (e.g. categories).
     OneOf(&'a [String]),
 
-    /// An array parameter whose items are labels of a vocabulary.
+    /// Array parameter whose elements are labels from a [`Vocabulary`].
     Labels {
-        /// The labels on offer, and the rules an item's labels are held to.
+        /// Label vocabulary defining allowed labels and validation constraints.
         vocabulary: &'a Vocabulary,
 
-        /// What carries the labels, as the rules a write is held to name it:
-        /// `ticket`, `page`.
+        /// Singular noun for the labeled item in generated descriptions (e.g.
+        /// `"ticket"`, `"page"`).
         item: &'a str,
 
-        /// Whether the tool writes an item's labels or filters by them.
+        /// Whether the tool creates, adds, or filters by labels.
         role: Role,
     },
 }
 
 impl<'a> Mirror<'a> {
-    /// `parameter`, a string, taking one of `values`.
+    /// Create a string parameter mirror with an `enum` of `values`.
     #[must_use]
     pub fn one_of(parameter: &'static str, values: &'a [String]) -> Self {
         Self {
@@ -88,8 +91,7 @@ impl<'a> Mirror<'a> {
         }
     }
 
-    /// `parameter`, an array, taking labels of `vocabulary` that an `item`
-    /// carries, used as `role` says.
+    /// Create an array parameter mirror for labels from `vocabulary`.
     #[must_use]
     pub fn labels(
         parameter: &'static str,
@@ -107,8 +109,8 @@ impl<'a> Mirror<'a> {
         }
     }
 
-    /// The parameter's schema for the tool keyed `key`, as TOML tables; empty
-    /// when there is nothing to offer.
+    /// Render the parameter schema for the tool at `key` as TOML tables, or an
+    /// empty string if there are no constraints to write.
     fn render(&self, key: &str) -> String {
         let key = toml_key(key);
         match self.values {
@@ -133,48 +135,64 @@ impl<'a> Mirror<'a> {
 }
 
 impl Definitions {
-    /// The line a synced file opens with.
+    /// Return the header comment written at the top of [`SYNCED_FILE`].
     ///
-    /// A file in [`SYNCED_FILE`]'s place without it was not written by this
-    /// plugin's `tools sync`, and is left alone.
+    /// `tools sync` checks for this header before overwriting [`SYNCED_FILE`]
+    /// so it does not overwrite a file written by another plugin or by hand.
     #[must_use]
     pub fn header(&self) -> String {
         format!("# Generated by `jp {} tools sync`.", self.plugin)
     }
 
-    /// Write the starting definitions into `dir`, creating it if needed, and
-    /// say what was written.
+    /// Write the default tool definitions into `dir`, creating `dir` if needed,
+    /// and return a summary of the actions taken.
     ///
-    /// Refuses before writing anything when one of the files is already there.
-    pub fn init(&self, dir: &Utf8Path) -> Result<String, String> {
-        let existing: Vec<String> = self
-            .files
-            .iter()
-            .map(|(name, _)| dir.join(name))
-            .filter(|path| path.exists())
-            .map(|path| path.to_string())
-            .collect();
-        if !existing.is_empty() {
-            return Err(format!(
-                "Refusing to overwrite {}. Move them aside first.",
-                existing.join(", ")
-            ));
+    /// Files that already match the shipped definitions are left untouched.
+    /// Files with different contents are overwritten only if git can restore
+    /// them or `force` is true; otherwise `init` returns an error before
+    /// writing any files.
+    pub fn init(&self, dir: &Utf8Path, force: bool) -> Result<String, String> {
+        let mut planned = vec![];
+        for (name, content) in self.files {
+            let path = dir.join(name);
+            let existing = overwrite::existing(&path, content.as_bytes())?;
+            planned.push((*name, path, *content, existing));
+        }
+
+        if !force {
+            let differing: Vec<Utf8PathBuf> = planned
+                .iter()
+                .filter(|(.., existing)| *existing == Existing::Differs)
+                .map(|(name, ..)| Utf8PathBuf::from(*name))
+                .collect();
+            refuse_unrecorded(
+                dir,
+                &differing,
+                &format!("jp {} tools init {dir}", self.plugin),
+            )?;
         }
 
         fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
 
         let mut text = String::new();
-        for (name, content) in self.files {
-            let path = dir.join(name);
-            // `create_new` rather than a plain write, so a file that appeared
-            // since the check above is still not overwritten.
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .and_then(|mut file| file.write_all(content.as_bytes()))
-                .map_err(|error| format!("failed to write {path}: {error}"))?;
-            text.push_str(&format!("Wrote {path}\n"));
+        for (_, path, content, existing) in planned {
+            let written = match existing {
+                Existing::Same => {
+                    text.push_str(&format!("Unchanged {path}\n"));
+                    continue;
+                }
+                Existing::Differs => fs::write(&path, content).map(|()| "Overwrote"),
+                // Use `create_new` so a file created after `overwrite::existing`
+                // ran is not overwritten.
+                Existing::Missing => OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut file| file.write_all(content.as_bytes()))
+                    .map(|()| "Wrote"),
+            };
+            let verb = written.map_err(|error| format!("failed to write {path}: {error}"))?;
+            text.push_str(&format!("{verb} {path}\n"));
         }
 
         text.push_str(&format!(
@@ -186,11 +204,11 @@ impl Definitions {
         Ok(text)
     }
 
-    /// The configured tools this plugin serves, as `(key, tool)` pairs ordered
-    /// by key.
+    /// Return the configured tools served by this plugin as `(config_key,
+    /// tool_name)` pairs, sorted by `config_key`.
     ///
-    /// `tool` is the name the plugin knows it by: the last part of its
-    /// `source`, or its key when the source names only the plugin.
+    /// `tool_name` is the suffix after `plugin.command.<plugin>.` in `source`,
+    /// or `config_key` when `source` names only the plugin.
     #[must_use]
     pub fn served_tools(&self, config: &Value) -> Vec<(String, String)> {
         let Some(tools) = config
@@ -215,91 +233,171 @@ impl Definitions {
         served
     }
 
-    /// Write `dir`'s synced file: [`Definitions::header`], `notes`, then what
-    /// `mirrors` says each configured tool takes, and say what was written.
+    /// Write [`SYNCED_FILE`] in `dir` with [`Definitions::header`], `notes`,
+    /// and the parameter schemas from `mirrors`, returning a summary of the
+    /// result.
     ///
-    /// `config` is the configuration the host resolved, and `mirrors` maps a
-    /// tool, by the name the plugin knows it by, to the parameters it takes
-    /// from the configuration.
+    /// `config` is the resolved workspace configuration, and `mirrors` maps a
+    /// plugin tool name to the parameters whose schemas are derived from
+    /// configuration.
     ///
-    /// A tool whose definition leaves a parameter out gets nothing in it: the
-    /// synced file adds only the accepted values, and values alone would make a
-    /// parameter without a type, which leaves the tool out of every
-    /// conversation.
-    /// What was left out is named.
+    /// Tools whose base definition does not declare a mirrored parameter (with
+    /// a `type`) are skipped and listed in the returned summary; writing `enum`
+    /// values without a `type` would produce an invalid parameter definition.
+    ///
+    /// If [`SYNCED_FILE`] already has the target contents, it is not rewritten.
+    /// If it has different contents, it is overwritten when git can restore it
+    /// or when `force` is true.
+    /// A file missing [`Definitions::header`] (written by another plugin or by
+    /// hand) requires `force` even if tracked by git.
     pub fn sync<'a>(
         &self,
         dir: &Utf8Path,
         config: &Value,
         notes: &str,
         mirrors: impl Fn(&str) -> Vec<Mirror<'a>>,
+        force: bool,
     ) -> Result<String, String> {
         if !dir.is_dir() {
             return Err(format!("{dir} is not a directory."));
         }
 
-        let header = self.header();
+        let command = format!("jp {} tools sync {dir}", self.plugin);
         let path = dir.join(SYNCED_FILE);
-        match fs::read_to_string(&path) {
-            Ok(existing) if !existing.starts_with(&header) => {
-                return Err(format!(
-                    "{path} was not written by `jp {} tools sync`, so it is left alone. Move it \
-                     aside first.",
-                    self.plugin
-                ));
+        let existing = self.read_synced(&path, &command, force)?;
+        let synced = self.render_synced(config, notes, mirrors);
+
+        let unchanged = existing
+            .as_ref()
+            .is_some_and(|text| overwrite::same_text(text.as_bytes(), synced.text.as_bytes()));
+        if !unchanged {
+            if !force && existing.is_some() {
+                refuse_unrecorded(dir, &[Utf8PathBuf::from(SYNCED_FILE)], &command)?;
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("{path}: {error}")),
+            fs::write(&path, &synced.text)
+                .map_err(|error| format!("failed to write {path}: {error}"))?;
         }
 
-        let mut out = format!("{header}\n{notes}");
-        let mut covered: Vec<String> = vec![];
-        let mut undeclared: Vec<String> = vec![];
+        Ok(self.sync_summary(&path, unchanged, &synced))
+    }
+
+    /// Read [`SYNCED_FILE`] at `path`, returning `Ok(None)` if it does not
+    /// exist.
+    ///
+    /// Unless `force` is true, returns an error if the file does not start with
+    /// [`Definitions::header`].
+    fn read_synced(
+        &self,
+        path: &Utf8Path,
+        command: &str,
+        force: bool,
+    ) -> Result<Option<String>, String> {
+        let existing = match fs::read_to_string(path) {
+            Ok(existing) => existing,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("{path}: {error}")),
+        };
+        if !force && !existing.starts_with(&self.header()) {
+            return Err(format!(
+                "{path} was not written by `jp {} tools sync`, so it is left alone. Move it \
+                 aside, or run `{command} --force` to overwrite it.",
+                self.plugin
+            ));
+        }
+
+        Ok(Some(existing))
+    }
+
+    /// Render [`SYNCED_FILE`] for `config` and track which tools were updated
+    /// or skipped.
+    fn render_synced<'a>(
+        &self,
+        config: &Value,
+        notes: &str,
+        mirrors: impl Fn(&str) -> Vec<Mirror<'a>>,
+    ) -> Synced {
+        let mut synced = Synced {
+            text: format!("{}\n{notes}", self.header()),
+            covered: vec![],
+            undeclared: vec![],
+        };
         for (key, tool) in self.served_tools(config) {
             for mirror in mirrors(&tool) {
                 if !declares(config, &key, mirror.parameter) {
-                    undeclared.push(format!("{key} (no `{}` parameter)", mirror.parameter));
+                    synced
+                        .undeclared
+                        .push(format!("{key} (no `{}` parameter)", mirror.parameter));
                     continue;
                 }
 
-                out.push_str(&mirror.render(&key));
-                if !covered.contains(&key) {
-                    covered.push(key.clone());
+                synced.text.push_str(&mirror.render(&key));
+                if !synced.covered.contains(&key) {
+                    synced.covered.push(key.clone());
                 }
             }
         }
 
-        fs::write(&path, out).map_err(|error| format!("failed to write {path}: {error}"))?;
+        synced
+    }
 
-        let mut text = if covered.is_empty() {
+    fn sync_summary(&self, path: &Utf8Path, unchanged: bool, synced: &Synced) -> String {
+        let verb = if unchanged { "Unchanged" } else { "Wrote" };
+        let mut text = if synced.covered.is_empty() {
             format!(
-                "Wrote {path}; no configured tool takes {} from `jp {}`.\n",
+                "{verb} {path}; no configured tool takes {} from `jp {}`.\n",
                 self.offers, self.plugin
             )
         } else {
             format!(
-                "Wrote {path}, with {} for {}\n",
+                "{verb} {path}, with {} for {}\n",
                 self.offers,
-                covered.join(", ")
+                synced.covered.join(", ")
             )
         };
-        if !undeclared.is_empty() {
+        if !synced.undeclared.is_empty() {
             text.push_str(&format!(
                 "Left out {}: the values go into that parameter, which their definitions don't \
                  declare.\n",
-                undeclared.join(", ")
+                synced.undeclared.join(", ")
             ));
         }
 
-        Ok(text)
+        text
     }
 }
 
-/// Whether the configured tool `key` declares the parameter `name`, with a
-/// type.
+/// Rendered [`SYNCED_FILE`] contents and tool coverage.
+struct Synced {
+    text: String,
+
+    /// Tool keys that received synced parameter schemas.
+    covered: Vec<String>,
+
+    /// Skipped tools and the undeclared parameter name for each.
+    undeclared: Vec<String>,
+}
+
+/// Return a refusal error if any file in `names` (relative to `dir`) cannot be
+/// restored by git.
+fn refuse_unrecorded(dir: &Utf8Path, names: &[Utf8PathBuf], command: &str) -> Result<(), String> {
+    let unrecorded = overwrite::unrecorded(dir, names)?;
+    if unrecorded.is_empty() {
+        return Ok(());
+    }
+
+    let shown: Vec<(Utf8PathBuf, Unrecorded)> = unrecorded
+        .into_iter()
+        .map(|(name, why)| (dir.join(name), why))
+        .collect();
+
+    Err(overwrite::refusal(command, &shown))
+}
+
+/// Return whether the configured tool `key` declares parameter `name` with a
+/// non-null `type`.
 ///
-/// The values a previous sync wrote don't count: they carry no type.
+/// Values written by a previous `tools sync` have no `type` field and do not
+/// count.
 fn declares(config: &Value, key: &str, name: &str) -> bool {
     config
         .get("conversation")
@@ -311,7 +409,8 @@ fn declares(config: &Value, key: &str, name: &str) -> bool {
         .is_some_and(|kind| !kind.is_null())
 }
 
-/// A TOML key: bare when it can be, quoted otherwise.
+/// Format `key` as a TOML key, quoting it if it contains characters outside
+/// `[A-Za-z0-9_-]`.
 fn toml_key(key: &str) -> String {
     let bare = !key.is_empty()
         && key
@@ -325,7 +424,7 @@ fn toml_key(key: &str) -> String {
     }
 }
 
-/// A TOML basic string holding `value`.
+/// Format `value` as a double-quoted TOML basic string.
 fn toml_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');

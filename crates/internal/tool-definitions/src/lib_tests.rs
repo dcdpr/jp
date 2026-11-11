@@ -1,35 +1,74 @@
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+use std::process::Command;
+
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
 
 use super::*;
 
-/// A plugin `notes` serving `list` and `create`, which take a category.
 const NOTES: Definitions = Definitions {
     plugin: "notes",
     files: &[("create.toml", "# create\n"), ("list.toml", "# list\n")],
     offers: "categories",
 };
 
-/// What the synced file says about itself in these tests.
 const SYNCED_NOTES: &str = "#\n# Mirrors the categories.\n";
 
 fn categories() -> Vec<String> {
     vec!["design".to_owned(), "guide".to_owned()]
 }
 
-/// A definition served as `source`, declaring `category` with a type.
 fn categorized(source: &str) -> Value {
     json!({ "source": source, "parameters": { "category": { "type": "string" } } })
 }
 
-/// Sync `dir` for `config`, where `create` and `list` take a category.
 fn sync(dir: &Utf8Path, config: &Value) -> Result<String, String> {
+    sync_with(dir, config, false)
+}
+
+fn sync_with(dir: &Utf8Path, config: &Value, force: bool) -> Result<String, String> {
     let categories = categories();
 
-    NOTES.sync(dir, config, SYNCED_NOTES, |tool| match tool {
-        "create" | "list" => vec![Mirror::one_of("category", &categories)],
-        _ => vec![],
-    })
+    NOTES.sync(
+        dir,
+        config,
+        SYNCED_NOTES,
+        |tool| match tool {
+            "create" | "list" => vec![Mirror::one_of("category", &categories)],
+            _ => vec![],
+        },
+        force,
+    )
+}
+
+fn git(dir: &Utf8Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
+
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn repository() -> Utf8TempDir {
+    let dir = Utf8TempDir::new().unwrap();
+    git(dir.path(), &["init", "--quiet", "--initial-branch=main"]);
+    git(dir.path(), &["config", "user.name", "Tester"]);
+    git(dir.path(), &["config", "user.email", "tester@example.com"]);
+    git(dir.path(), &["config", "commit.gpgsign", "false"]);
+
+    dir
+}
+
+fn commit(dir: &Utf8Path) {
+    git(dir, &["add", "-A"]);
+    git(dir, &["commit", "--quiet", "-m", "Commit"]);
 }
 
 #[test]
@@ -37,7 +76,7 @@ fn init_writes_one_file_per_definition() {
     let dir = Utf8TempDir::new().unwrap();
     let target = dir.path().join("tools/notes");
 
-    let text = NOTES.init(&target).unwrap();
+    let text = NOTES.init(&target, false).unwrap();
 
     assert_eq!(
         fs::read_to_string(target.join("create.toml")).unwrap(),
@@ -58,20 +97,22 @@ fn init_writes_one_file_per_definition() {
     );
 }
 
-/// A project owns its definitions once they are written, so a second `init`
-/// must not undo its edits, and refuses before writing any file.
 #[test]
-fn init_refuses_to_overwrite_and_writes_nothing() {
+fn init_refuses_to_overwrite_outside_git_and_writes_nothing() {
     let dir = Utf8TempDir::new().unwrap();
     fs::write(dir.path().join("list.toml"), "# mine\n").unwrap();
 
-    let error = NOTES.init(dir.path()).unwrap_err();
+    let error = NOTES.init(dir.path(), false).unwrap_err();
 
     assert_eq!(
         error,
         format!(
-            "Refusing to overwrite {}. Move them aside first.",
-            dir.path().join("list.toml")
+            "Git couldn't restore these files, so `jp notes tools init {}` leaves them:\n  {} \
+             (not in a git work tree)\nRun `jp notes tools init {} --force` to overwrite them \
+             anyway.",
+            dir.path(),
+            dir.path().join("list.toml"),
+            dir.path()
         )
     );
     assert_eq!(
@@ -81,9 +122,148 @@ fn init_refuses_to_overwrite_and_writes_nothing() {
     assert!(!dir.path().join("create.toml").exists());
 }
 
-/// Tools are found by their source, so a project that exposes `list` under a
-/// name of its own gets the values under that name too, and a tool of the same
-/// name another plugin serves gets none.
+#[test]
+fn init_leaves_a_file_as_shipped_alone() {
+    let dir = Utf8TempDir::new().unwrap();
+    let create = dir.path().join("create.toml");
+    let list = dir.path().join("list.toml");
+    fs::write(&create, "# create\n").unwrap();
+
+    let text = NOTES.init(dir.path(), false).unwrap();
+
+    assert_eq!(
+        text,
+        format!(
+            "Unchanged {create}\nWrote {list}\nLoad the directory from the workspace \
+             configuration, then run `jp notes tools sync {}` to offer the categories.\n",
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&list).unwrap(), "# list\n");
+}
+
+#[test]
+fn init_overwrites_what_git_can_restore() {
+    let dir = repository();
+    let list = dir.path().join("list.toml");
+    fs::write(&list, "# mine\n").unwrap();
+    commit(dir.path());
+
+    let text = NOTES.init(dir.path(), false).unwrap();
+
+    assert_eq!(
+        text,
+        format!(
+            "Wrote {}\nOverwrote {list}\nLoad the directory from the workspace configuration, \
+             then run `jp notes tools sync {}` to offer the categories.\n",
+            dir.path().join("create.toml"),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&list).unwrap(), "# list\n");
+}
+
+#[test]
+fn init_refuses_an_edit_git_has_not_recorded() {
+    let dir = repository();
+    let list = dir.path().join("list.toml");
+    fs::write(&list, "# mine\n").unwrap();
+    commit(dir.path());
+    fs::write(&list, "# mine, edited\n").unwrap();
+
+    let error = NOTES.init(dir.path(), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "Git couldn't restore these files, so `jp notes tools init {}` leaves them:\n  {list} \
+             (changed since the last commit)\nCommit them, or run `jp notes tools init {} \
+             --force` to overwrite them anyway.",
+            dir.path(),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&list).unwrap(), "# mine, edited\n");
+    assert!(!dir.path().join("create.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn init_refuses_to_write_through_a_committed_symlink() {
+    let dir = repository();
+    let shared = Utf8TempDir::new().unwrap();
+    let target = shared.path().join("list.toml");
+    fs::write(&target, "# shared\n").unwrap();
+    let list = dir.path().join("list.toml");
+    symlink(&target, &list).unwrap();
+    commit(dir.path());
+
+    let error = NOTES.init(dir.path(), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "Git couldn't restore these files, so `jp notes tools init {}` leaves them:\n  {list} \
+             (reached through a symlink)\nRun `jp notes tools init {} --force` to overwrite them \
+             anyway.",
+            dir.path(),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&target).unwrap(), "# shared\n");
+    assert!(!dir.path().join("create.toml").exists());
+}
+
+#[test]
+fn init_refuses_an_edit_hidden_by_assume_unchanged() {
+    let dir = repository();
+    let list = dir.path().join("list.toml");
+    fs::write(&list, "# mine\n").unwrap();
+    commit(dir.path());
+    git(dir.path(), &[
+        "update-index",
+        "--assume-unchanged",
+        "list.toml",
+    ]);
+    fs::write(&list, "# mine, customized\n").unwrap();
+
+    let error = NOTES.init(dir.path(), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "Git couldn't restore these files, so `jp notes tools init {}` leaves them:\n  {list} \
+             (marked assume-unchanged or skip-worktree)\nRun `jp notes tools init {} --force` to \
+             overwrite them anyway.",
+            dir.path(),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&list).unwrap(), "# mine, customized\n");
+    assert!(!dir.path().join("create.toml").exists());
+}
+
+#[test]
+fn init_with_force_overwrites_a_file_that_differs() {
+    let dir = Utf8TempDir::new().unwrap();
+    let create = dir.path().join("create.toml");
+    let list = dir.path().join("list.toml");
+    fs::write(&create, "# create\n").unwrap();
+    fs::write(&list, "# mine\n").unwrap();
+
+    let text = NOTES.init(dir.path(), true).unwrap();
+
+    assert_eq!(
+        text,
+        format!(
+            "Unchanged {create}\nOverwrote {list}\nLoad the directory from the workspace \
+             configuration, then run `jp notes tools sync {}` to offer the categories.\n",
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&list).unwrap(), "# list\n");
+}
+
 #[test]
 fn sync_writes_what_each_tool_takes_found_by_source() {
     let dir = Utf8TempDir::new().unwrap();
@@ -115,10 +295,6 @@ fn sync_writes_what_each_tool_takes_found_by_source() {
     );
 }
 
-/// A tool whose definition leaves the parameter out is left out too, rather
-/// than given a parameter with no type, which would drop the tool from every
-/// conversation.
-/// The values an earlier sync wrote don't declare it.
 #[test]
 fn sync_leaves_out_a_parameter_a_tool_doesnt_declare() {
     let dir = Utf8TempDir::new().unwrap();
@@ -144,16 +320,15 @@ fn sync_leaves_out_a_parameter_a_tool_doesnt_declare() {
     assert!(!fs::read_to_string(&path).unwrap().contains("notes_create"));
 }
 
-/// The file is rewritten whole, so a tool removed from the configuration drops
-/// out of it rather than lingering.
 #[test]
 fn sync_rewrites_its_file_whole() {
-    let dir = Utf8TempDir::new().unwrap();
+    let dir = repository();
     let configured = json!({ "conversation": { "tools": {
         "notes_list": categorized("plugin.command.notes.list"),
     }}});
 
     sync(dir.path(), &configured).unwrap();
+    commit(dir.path());
     let text = sync(dir.path(), &json!({})).unwrap();
 
     let path = dir.path().join(SYNCED_FILE);
@@ -167,29 +342,97 @@ fn sync_rewrites_its_file_whole() {
     );
 }
 
-/// A file in the synced file's place that this plugin's `sync` didn't write is
-/// someone's, and stays as it is.
-/// Other plugins write a file of the same name, so pointing them at one
-/// directory must not let one clobber another's.
 #[test]
-fn sync_leaves_a_file_it_did_not_write_alone() {
+fn sync_leaves_an_unchanged_file_untouched() {
     let dir = Utf8TempDir::new().unwrap();
     let path = dir.path().join(SYNCED_FILE);
-    fs::write(&path, "# Generated by `jp rfd tools sync`.\n").unwrap();
+    let config = json!({ "conversation": { "tools": {
+        "notes_list": categorized("plugin.command.notes.list"),
+    }}});
+    sync(dir.path(), &config).unwrap();
+    // Make the file read-only so any write attempt fails the test.
+    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+
+    let text = sync(dir.path(), &config).unwrap();
+
+    assert_eq!(
+        text,
+        format!("Unchanged {path}, with categories for notes_list\n")
+    );
+}
+
+#[test]
+fn sync_refuses_to_overwrite_outside_git_unless_forced() {
+    let dir = Utf8TempDir::new().unwrap();
+    let path = dir.path().join(SYNCED_FILE);
+    let configured = json!({ "conversation": { "tools": {
+        "notes_list": categorized("plugin.command.notes.list"),
+    }}});
+    sync(dir.path(), &configured).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
 
     let error = sync(dir.path(), &json!({})).unwrap_err();
 
     assert_eq!(
         error,
         format!(
-            "{path} was not written by `jp notes tools sync`, so it is left alone. Move it aside \
-             first."
+            "Git couldn't restore these files, so `jp notes tools sync {}` leaves them:\n  {path} \
+             (not in a git work tree)\nRun `jp notes tools sync {} --force` to overwrite them \
+             anyway.",
+            dir.path(),
+            dir.path()
+        )
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    sync_with(dir.path(), &json!({}), true).unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        format!("# Generated by `jp notes tools sync`.\n{SYNCED_NOTES}")
+    );
+}
+
+#[test]
+fn sync_leaves_a_file_it_did_not_write_alone() {
+    let dir = repository();
+    let path = dir.path().join(SYNCED_FILE);
+    fs::write(&path, "# Generated by `jp rfd tools sync`.\n").unwrap();
+    commit(dir.path());
+
+    let error = sync(dir.path(), &json!({})).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "{path} was not written by `jp notes tools sync`, so it is left alone. Move it aside, \
+             or run `jp notes tools sync {} --force` to overwrite it.",
+            dir.path()
         )
     );
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "# Generated by `jp rfd tools sync`.\n"
     );
+
+    sync_with(dir.path(), &json!({}), true).unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        format!("# Generated by `jp notes tools sync`.\n{SYNCED_NOTES}")
+    );
+}
+
+#[test]
+fn sync_reports_a_synced_file_it_cannot_read() {
+    let dir = Utf8TempDir::new().unwrap();
+    let path = dir.path().join(SYNCED_FILE);
+    fs::create_dir(&path).unwrap();
+
+    let error = sync(dir.path(), &json!({})).unwrap_err();
+
+    assert!(error.starts_with(&format!("{path}: ")), "{error}");
+    assert!(path.is_dir());
 }
 
 #[test]
@@ -217,8 +460,6 @@ fn a_tool_named_by_the_plugin_alone_is_known_by_its_key() {
     ]);
 }
 
-/// `sync` reads a declared parameter's type under `type`, which is how the host
-/// sends the configuration.
 #[test]
 fn the_host_sends_a_declared_parameter_with_its_type() {
     let partial: jp_config::PartialAppConfig = toml::from_str(
@@ -243,8 +484,6 @@ fn the_host_sends_a_declared_parameter_with_its_type() {
     assert!(!declares(&config, "notes_create", "category"), "{config:#}");
 }
 
-/// A tool key is the user's to choose, and a TOML table header has to quote one
-/// that isn't a bare key.
 #[test]
 fn keys_and_values_are_written_as_toml() {
     assert_eq!(toml_key("ticket_create"), "ticket_create");
@@ -258,8 +497,6 @@ fn keys_and_values_are_written_as_toml() {
     assert_eq!(toml_string("tab\there"), r#""tab\u0009here""#);
 }
 
-/// The file `sync` writes has to load, or the whole workspace configuration
-/// fails with it.
 #[test]
 fn the_synced_file_parses_with_a_quoted_key() {
     let dir = Utf8TempDir::new().unwrap();

@@ -1,68 +1,59 @@
-//! `jp vite init`: set up a VitePress site in the source directory.
+//! `jp vite init`: initialize a VitePress site in the source directory.
 //!
-//! Writes the project's own files, which `jp vite sync` never touches again:
-//! `package.json`, `.vitepress/config.mts`, the theme entry, and a homepage.
-//! The configuration merges in the fragment `sync` writes, and the theme entry
-//! renders what the RFD and ticket pages add above a document.
-//! A file that exists is left as it is, so running it again only adds what is
-//! missing.
-//!
-//! The title and description go into the configuration and the homepage.
+//! Writes the project-owned site files (`package.json`,
+//! `.vitepress/config.mts`, `.vitepress/theme/index.js`, and `index.md`), which
+//! `jp vite sync` never modifies.
+//! Re-running `init` overwrites existing files with different contents only
+//! when git can restore them or `--force` is passed (see [`overwrite`]).
 
 use std::{fs, io::Write as _};
 
 use camino::Utf8Path;
+use overwrite::Existing;
 
 use crate::settings::below;
 
-/// A file `init` writes, below the source directory.
+/// A template file written by `jp vite init`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Template {
-    /// Where it goes, below the source directory.
+    /// Path relative to the VitePress source directory.
     pub path: &'static str,
 
-    /// What it holds, before [`Fill`] is applied.
+    /// Raw template contents before [`Fill`] substitution.
     pub contents: &'static str,
-
-    /// Whether it names the site's title and description.
-    pub titled: bool,
 }
 
-/// The files `init` writes.
 pub(crate) const TEMPLATES: [Template; 4] = [
     Template {
         path: "package.json",
         contents: include_str!("../init/package.json"),
-        titled: false,
     },
     Template {
         path: ".vitepress/config.mts",
         contents: include_str!("../init/config.mts"),
-        titled: true,
     },
     Template {
         path: ".vitepress/theme/index.js",
         contents: include_str!("../init/theme.js"),
-        titled: false,
     },
     Template {
         path: "index.md",
         contents: include_str!("../init/index.md"),
-        titled: true,
     },
 ];
 
-/// What a template's placeholders are filled with.
+/// Placeholder values substituted into [`TEMPLATES`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Fill {
     pub title: String,
     pub description: String,
 
-    /// The navigation bar's links after Home, as label and site path.
+    /// Navigation bar links after `Home`, as `(label, link)` pairs.
     pub nav: Vec<(String, String)>,
 }
 
-/// The templates whose files `site_dir` doesn't have yet.
+/// Return the templates from [`TEMPLATES`] whose target files do not exist in
+/// `site_dir`.
 pub(crate) fn missing(site_dir: &Utf8Path) -> Vec<Template> {
     TEMPLATES
         .into_iter()
@@ -70,10 +61,24 @@ pub(crate) fn missing(site_dir: &Utf8Path) -> Vec<Template> {
         .collect()
 }
 
-/// `template` with its placeholders filled.
+/// Render each template with `fill` and compare it against the file in
+/// `site_dir`.
+pub(crate) fn plan(site_dir: &Utf8Path, fill: &Fill) -> Result<Vec<(Template, Existing)>, String> {
+    TEMPLATES
+        .into_iter()
+        .map(|template| {
+            let path = site_dir.join(template.path);
+            let existing = overwrite::existing(&path, render(&template, fill).as_bytes())?;
+
+            Ok((template, existing))
+        })
+        .collect()
+}
+
+/// Render `template` with `fill`.
 ///
-/// The title and description are written as quoted strings, which both the
-/// configuration and the homepage's front matter read, whatever they hold.
+/// `title` and `description` are JSON-quoted, which is valid in both the
+/// TypeScript config and YAML front matter.
 pub(crate) fn render(template: &Template, fill: &Fill) -> String {
     let quoted = |text: &str| serde_json::to_string(text).expect("a string serializes");
 
@@ -93,32 +98,45 @@ pub(crate) fn render(template: &Template, fill: &Fill) -> String {
         .replace("@@nav@@", &nav)
 }
 
-/// Write `templates` below `site_dir`, refusing to replace a file that appeared
-/// since they were picked.
+/// Write the missing or differing templates from `planned` into `site_dir`.
 ///
-/// Returns each file written, relative to `root`.
+/// Files that were missing during planning are opened with `create_new` so a
+/// file created in the meantime is not overwritten.
+/// Returns a status line (`Created <path>` or `Overwrote <path>`, relative to
+/// `root`) for each file written.
 pub(crate) fn write(
     root: &Utf8Path,
     site_dir: &Utf8Path,
-    templates: &[Template],
+    planned: &[(Template, Existing)],
     fill: &Fill,
 ) -> Result<Vec<String>, String> {
     let mut written = vec![];
 
-    for template in templates {
+    for (template, existing) in planned {
         let path = site_dir.join(template.path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("{parent}: {error}"))?;
-        }
+        let contents = render(template, fill);
+        let verb = match existing {
+            Existing::Same => continue,
+            Existing::Differs => {
+                fs::write(&path, contents).map_err(|error| format!("{path}: {error}"))?;
+                "Overwrote"
+            }
+            Existing::Missing => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).map_err(|error| format!("{parent}: {error}"))?;
+                }
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut file| file.write_all(contents.as_bytes()))
+                    .map_err(|error| format!("{path}: {error}"))?;
+                "Created"
+            }
+        };
 
-        fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .and_then(|mut file| file.write_all(render(template, fill).as_bytes()))
-            .map_err(|error| format!("{path}: {error}"))?;
-
-        written.push(below(root, &path).unwrap_or_else(|| path.to_string()));
+        let shown = below(root, &path).unwrap_or_else(|| path.to_string());
+        written.push(format!("{verb} {shown}"));
     }
 
     Ok(written)

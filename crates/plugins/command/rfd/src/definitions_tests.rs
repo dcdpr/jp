@@ -132,7 +132,7 @@ fn sync_offers_the_categories_to_draft_and_list() {
         }
     });
 
-    let output = sync(dir.path(), &config, &categories()).unwrap();
+    let output = sync(dir.path(), &config, &categories(), false).unwrap();
 
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(
