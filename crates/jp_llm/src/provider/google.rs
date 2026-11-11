@@ -1,4 +1,4 @@
-// qual:allow(srp, file_length=1200) reason: "provider, request building, stream mapping and model catalogue in one file; split in T-1hb8d4m"
+// qual:allow(srp, file_length=1200) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4m"
 use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
 use async_stream::stream;

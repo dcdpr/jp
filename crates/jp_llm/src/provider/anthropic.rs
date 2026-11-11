@@ -1,4 +1,4 @@
-// qual:allow(srp, file_length=2400) reason: "provider, request building, stream mapping and model catalogue in one file; split in T-1hb8d4j"
+// qual:allow(srp, file_length=2400) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4j"
 pub mod acp;
 pub mod auth;
 mod http;

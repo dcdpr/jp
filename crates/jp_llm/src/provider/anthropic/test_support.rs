@@ -111,12 +111,9 @@ impl ProviderTestSupport for AnthropicTestSupport {
     }
 }
 
-/// Drop the identity line a bearer request has to lead with, and the block that
-/// bounds it.
-///
-/// A request left holding nothing but those two ends up with an empty `system`,
-/// while a request that never had a system prompt omits the field.
-/// Both say the same thing and have to read the same way.
+/// Remove the Claude Code identity line block from `system`, and omit `system`
+/// entirely if no blocks remain so the request matches one built without a
+/// system prompt.
 fn strip_identity_line(body: &mut Value) {
     let Some(system) = body.get_mut("system").and_then(Value::as_array_mut) else {
         return;
@@ -137,12 +134,8 @@ fn strip_identity_line(body: &mut Value) {
     }
 }
 
-/// Erase what the model contributed to one content block of an assistant turn.
-///
-/// The Messages dialect files it three ways, and `input` here holds a tool
-/// call's arguments.
-/// Other dialects use the same key for the entire conversation, which is why
-/// this reading belongs to Anthropic alone.
+/// Replace model-generated fields in an assistant content block with fixed
+/// placeholders for snapshot comparison.
 fn erase_model_output(block: &mut Value) {
     match block
         .get("type")
@@ -168,9 +161,6 @@ fn erase_model_output(block: &mut Value) {
     }
 }
 
-/// Replace the string at `key` with `placeholder`.
-///
-/// A missing key, or a value that is not a string, is left as it is.
 fn replace_string(block: &mut Value, key: &str, placeholder: &str) {
     if let Some(value) = block.get_mut(key)
         && value.is_string()

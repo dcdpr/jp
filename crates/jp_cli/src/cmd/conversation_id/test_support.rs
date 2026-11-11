@@ -1,5 +1,5 @@
-//! Constructors that build the conversation ID argument types without parsing a
-//! command line, for the tests of the commands that hold them.
+//! Test constructors for building [`PositionalIds`] and [`FlagIds`] directly
+//! without CLI parsing.
 
 use super::{FlagIds, PositionalIds};
 use crate::cmd::target::ConversationTarget;

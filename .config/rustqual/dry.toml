@@ -30,10 +30,10 @@ exclude_files = [
     "**/tests/**",
 ]
 
-# `DRY-004` (wildcard import) is `clippy::wildcard_imports`, which the workspace
-# runs through `clippy::pedantic`. The workspace allows `clippy::enum_glob_use`
-# on purpose, and enum globs are all `DRY-004` reported (10 of 10 on
-# 2026-11-11). A rule that clippy covers as well or better is off (T-0yh5m6r).
+# `DRY-004` (wildcard imports) is covered by `clippy::wildcard_imports` (enabled
+# via `clippy::pedantic`). The workspace explicitly allows
+# `clippy::enum_glob_use`, and all 10 `DRY-004` findings on 2026-11-11 were enum
+# glob imports (T-0yh5m6r).
 [duplicates]
 enabled                 = true
 detect_wildcard_imports = false

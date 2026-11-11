@@ -1,4 +1,4 @@
-// qual:allow(srp, file_length=2900) reason: "provider, request building, stream mapping and model catalogue in one file; split in T-1hb8d4k"
+// qual:allow(srp, file_length=2900) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4k"
 use std::{
     sync::{Arc, LazyLock, Mutex, PoisonError},
     time::Duration,

@@ -57,8 +57,7 @@ impl Openai {
         }
     }
 
-    /// Shorten the wait for a redeemed reset, so a test pinning it runs in
-    /// milliseconds rather than the minute production allows.
+    /// Override the rate-limit reset retry budget and polling interval.
     pub(crate) fn with_reset_timing(mut self, budget: Duration, interval: Duration) -> Self {
         self.reset_budget = budget;
         self.reset_interval = interval;
@@ -100,10 +99,7 @@ pub(crate) fn catalog_model_details(name: &str) -> ModelDetails {
     map_model(ModelResponse::named(name.to_owned())).expect("a valid OpenAI model id")
 }
 
-/// `OpenAI`'s recorded-test routes.
-///
-/// The only provider so far billed two ways, so the only one whose fixtures are
-/// recorded twice and compared.
+/// `OpenAI`'s recorded-test routes (API key and `ChatGPT` subscription).
 pub(crate) static TEST_SUPPORT: OpenaiTestSupport = OpenaiTestSupport;
 
 pub(crate) struct OpenaiTestSupport;
@@ -133,11 +129,9 @@ static API_ROUTE: ApiTestRoute = ApiTestRoute {
     use_replay_credentials: |config| {
         config.openai.api_key_env = replay_credential_env().into();
     },
-    // The same model the subscription route records against, read from the
-    // catalog rather than restated here. Comparing two recordings only says
-    // something about the wire dialects when everything else about the request
-    // is held equal, and the model drives reasoning shape, cache handling, and
-    // sampling.
+    // Use `SHARED_TEST_MODEL` from the catalog so the API and subscription
+    // routes record with identical model settings (reasoning, caching, and
+    // sampling).
     model: || catalog_model_details(SHARED_TEST_MODEL),
 };
 
@@ -164,11 +158,10 @@ impl ProviderTestRoute for SubscriptionTestRoute {
     }
 
     fn set_base_url(&self, config: &mut LlmProviderConfig, url: String) {
-        // The recording server forwards a request's path onto the target's
-        // host and drops whatever path the target URL carried. This is the only
-        // endpoint JP addresses below a path, so the path is restated here to
-        // survive the round trip and reach `…/backend-api/codex/responses`
-        // rather than the web app's front door.
+        // The recording proxy forwards only the request path to the upstream
+        // host and drops any path prefix on the target URL. Include
+        // `/backend-api/codex` in `codex_base_url` so requests reach
+        // `/backend-api/codex/responses`.
         config.openai.codex_base_url = format!("{url}/backend-api/codex");
     }
 

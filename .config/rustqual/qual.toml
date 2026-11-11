@@ -6,31 +6,31 @@
 
 # Rules that never fail the gate and are omitted from reports.
 #
-# A rule that a clippy lint covers as well or better is off: one check per
-# concern, and clippy sees types where rustqual sees syntax. Where rustqual has
-# a switch, the rule is disabled in `config.toml` or `dry.toml`; the rules
-# below have none. Decided in T-0yh5m6r.
+# Rules covered by Clippy or prone to AST-only false positives are disabled
+# (T-0yh5m6r). Rules with a config toggle are disabled in `config.toml` or
+# `dry.toml`; rules without a toggle are exempted here.
 exempt = [
     # rustqual cannot disable it, and the 862 existing violations (6.2% of
     # functions) exceed the 5% `max_suppression_ratio`, so per-function
     # suppressions are not an option.
     "iosp/violation",
 
-    # Parameter count: `clippy::too_many_arguments`, at the
-    # `too-many-arguments-threshold` that `.clippy.toml` sets.
+    # Parameter count: covered by `clippy::too_many_arguments`, configured via
+    # `too-many-arguments-threshold` in `.clippy.toml`.
     "SRP-003",
 
-    # Manual `Default`: `clippy::derivable_impls`.
+    # Manual `Default` impls: covered by `clippy::derivable_impls`.
     "BP-005",
 
-    # Mixed error types in a module. Fires on serde `serialize`/`deserialize`
-    # pairs, whose error types the traits dictate. Remove once the vendored
-    # rustqual skips trait impls (T-1dhk659).
+    # Inconsistent error types in a module. False-positives on serde
+    # `serialize`/`deserialize` functions, whose error types are fixed by the
+    # serde traits. Re-enable once the vendored rustqual skips trait-signature
+    # error types (T-1dhk659).
     "IET",
 
-    # Trivial `Display`. Fires on `write!` with several values and on
-    # padding-aware delegation as well as on newtype boilerplate. Remove once
-    # the vendored rustqual tells them apart (T-1dhk659).
+    # Trivial `Display` impls. False-positives on multi-value `write!` calls and
+    # format-preserving delegation alongside genuine newtype boilerplate.
+    # Re-enable once the vendored rustqual distinguishes them (T-1dhk659).
     "BP-002",
 ]
 

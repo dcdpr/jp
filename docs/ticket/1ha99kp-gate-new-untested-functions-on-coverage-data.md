@@ -6,47 +6,50 @@
 - **Label**: domain=tooling
 - **Label**: type=task
 
-Two things check today that new code is tested, and neither does it well:
+Two CI checks currently guard test coverage for new code, and both have gaps:
 
-- The `coverage` job measures coverage (`just coverage-ci` writes `lcov.info`)
-  and uploads it to Coveralls, which blocks a pull request only when total
+- The `coverage` job runs `just coverage-ci` to produce `lcov.info` and uploads
+  it to Coveralls, which blocks a pull request only when total workspace
   coverage drops below a threshold.
-  It doesn't name the function that lacks a test, and a large tested change can
-  carry an untested one.
-- rustqual's `TQ-003` gates through `qual diff`: it fails on a production
-  function the base lacks and no test calls.
-  It follows direct calls only, so a function reached through `#[serde(default
-  = "…")]`, clap or a derive reads as untested (`default_true` in
+  It does not identify which function lacks tests, and coverage from tested code
+  in a large PR can mask an untested function.
+- `rustqual`'s `TQ-003` (run via `qual diff`) fails when a new production
+  function is not called by any test.
+  Because `TQ-003` only traces direct calls in the AST, functions invoked
+  through `#[serde(default = "…")]`, `clap`, or derive macros are reported as
+  untested (for example, `default_true` in
   `crates/jp_config/src/conversation/label.rs`).
-  The 94 existing findings haven't been sorted into real and indirect ones, so
-  `TQ-003` stays out of the burn-down (T-0yh5sy9) until this ticket lands.
+  The 94 existing `TQ-003` findings have not been triaged to separate genuine
+  gaps from indirect callers, so `TQ-003` is excluded from the burn-down
+  (T-0yh5sy9) until this ticket lands.
 
-rustqual has two rules that read coverage instead of the call graph, given
-`--coverage <lcov>`:
+When passed `--coverage <lcov>`, `rustqual` evaluates two LCOV-based rules
+instead of the static call graph:
 
-- `TQ-004`: a production function with no covered line.
-- `TQ-005`: a covered function with uncovered lines.
+- `TQ-004`: a production function with zero covered lines.
+- `TQ-005`: a partially covered production function with uncovered lines.
 
-Run through `qual diff`, both would fail only on a function the base lacks, and
-name it.
+Run through `qual diff`, both rules fail only on newly added functions and
+identify the untested function by name.
 
 ## Decide
 
-- Whether the `qual` job should consume `lcov.info`.
-  It needs the file for both the head and the base, and the `coverage` job is
-  the slowest in the workflow; `qual` takes seconds today.
-  Options: `qual` downloads the `coverage` job's artifact for the head and a
-  cached one for the base, or the coverage rules run as a step of the `coverage`
-  job.
-- Whether `TQ-005` is wanted at all, or only `TQ-004`.
-- Whether this replaces the Coveralls upload or sits beside it.
-- `cargo_check` can't run it locally without a coverage run, so the finding
-  would first show up on CI.
+- Where to run the coverage-based rules.
+  `qual diff` needs `lcov.info` for both the head and base revisions, and the
+  `coverage` job is the slowest step in CI whereas `qual` finishes in seconds.
+  Either `qual` downloads the head `lcov.info` artifact from `coverage` and a
+  cached artifact for `base`, or the coverage rules run as a step inside the
+  `coverage` job.
+- Whether to enable both `TQ-004` and `TQ-005`, or only `TQ-004`.
+- Whether this check replaces the Coveralls upload or runs alongside it.
+- How to handle local runs, since `cargo_check` does not generate coverage data
+  and findings would only surface in CI.
 
 ## Then
 
-- [ ] Sample `TQ-004` on `main` and check it against the 94 `TQ-003` findings of
-      2026-11-11: the serde and clap callers should be gone.
-- [ ] Wire the chosen option into `just qual-ci`.
-- [ ] Keep `TQ-003` only if it adds something `TQ-004` doesn't; otherwise
-      exempt it in `.config/rustqual/qual.toml`.
+- [ ] Run `TQ-004` on `main` and compare its output against the 94 `TQ-003`
+      findings from 2026-11-11 to verify that serde- and clap-invoked functions
+      are no longer flagged.
+- [ ] Wire the chosen workflow into `just qual-ci`.
+- [ ] Exempt `TQ-003` in `.config/rustqual/qual.toml` unless it catches cases
+      that `TQ-004` misses.

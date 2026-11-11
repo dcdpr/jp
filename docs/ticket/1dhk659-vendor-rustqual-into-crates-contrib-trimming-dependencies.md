@@ -100,19 +100,19 @@ Keep the rule cards: they supply the rule titles in the SARIF rules table, and
 
 ## Exemptions to lift
 
-`.config/rustqual/qual.toml` exempts two rules only because rustqual can't yet
-tell their real findings from the wrong ones (T-0yh5m6r).
-Each comes out of `exempt` in the commit that fixes its analyzer:
+`.config/rustqual/qual.toml` exempts two rules because `rustqual` currently
+produces false positives on valid patterns (T-0yh5m6r).
+Remove each rule from `exempt` in the commit that fixes its analyzer:
 
-- `BP-002`, once it flags newtype boilerplate and leaves `write!` with several
-  values and padding-aware delegation alone.
-- `IET`, once it skips trait impls whose error type the trait dictates (serde's
-  `serialize`/`deserialize`).
+- `BP-002`, once it flags newtype `Display` boilerplate without false-positiving
+  on multi-value `write!` calls or format-preserving delegation.
+- `IET`, once it ignores functions whose error type is fixed by a trait
+  signature (such as serde's `serialize` and `deserialize`).
 
-`config.toml` also sets `[srp] max_independent_clusters` out of reach, which
-turns off the cluster half of `SRP-002`.
-It goes back to the default once a finding names the functions in each cluster
-(T-0yh5j3r item 10).
+`config.toml` also sets `[srp] max_independent_clusters = 1_000_000` to disable
+the independent-cluster check in `SRP-002`.
+Restore the default (`2`) once `SRP-002` findings list the functions in each
+cluster (T-0yh5j3r item 10).
 
 ## Next: fold `qual` into rustqual
 

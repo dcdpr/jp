@@ -6,8 +6,9 @@
 - **Label**: domain=tooling
 - **Label**: type=task
 
-The convention: a module's tests live in `<module>_tests.rs`, and the only
-`#[cfg(test)]` in `<module>.rs` is the last item of the file:
+By convention, a module's unit tests live in `<module>_tests.rs`, and the only
+`#[cfg(test)]` attribute in `<module>.rs` is on the trailing `mod tests;`
+declaration at the end of the file:
 
 ```rust
 #[cfg(test)]
@@ -15,53 +16,55 @@ The convention: a module's tests live in `<module>_tests.rs`, and the only
 mod tests;
 ```
 
-Nothing checks it.
-Production files carry other `#[cfg(test)]` items above that one:
-`crates/jp_llm/src/provider/openai.rs` has 18 `#[cfg(test)]` lines,
-`anthropic.rs` 13, `google.rs` 4, `crates/jp_cli/src/cmd/conversation_id.rs` 3.
-The sites in those four files are of three kinds:
+This convention is not yet enforced by CI.
+Several production files place `#[cfg(test)]` items earlier in the file:
+`crates/jp_llm/src/provider/openai.rs` has 18 `#[cfg(test)]` attributes,
+`anthropic.rs` has 13, `google.rs` has 4, and
+`crates/jp_cli/src/cmd/conversation_id.rs` has 3.
+Those items fall into three categories:
 
 - test-only constructors and `impl` blocks on production types
   (`Openai::with_credential`, `#[cfg(test)] impl Google`);
-- test-support statics and types that other modules' tests use (`TEST_SUPPORT`,
+- test-support statics and types used by other modules' tests (`TEST_SUPPORT`,
   `API_ROUTE`);
-- further test modules declared at the top of the file (`openai.rs` declares six
-  `#[path = "openai/…_tests.rs"]` modules).
+- additional test modules declared near the top of the file (`openai.rs`
+  declares six `#[path = "openai/…_tests.rs"]` modules).
 
-It matters beyond style: rustqual counts a file's production lines up to the
-first `#[cfg(test)]`, so `anthropic.rs` (about 3,700 lines) counts as 22 and
-passes the 800-line `SRP-002` limit (T-0yh5j3r item 9).
+Beyond style consistency, early `#[cfg(test)]` attributes break `rustqual`'s
+file-length check: `rustqual` stops counting production lines at the first
+`#[cfg(test)]` in a file, causing `anthropic.rs` (~3,700 lines) to count as 22
+production lines and pass the 800-line `SRP-002` limit (T-0yh5j3r item 9).
 
 ## The rule
 
-- A `#[cfg(test)]` attribute appears once per file, on a `#[path =
-  "…_tests.rs"] mod tests;` item.
-- No item follows that one.
-- No inline `#[cfg(test)] mod tests { … }`.
+- Every `#[cfg(test)]` attribute in a production file must be on a trailing
+  module declaration (`#[path = "…_tests.rs"] mod tests;` or `mod
+  test_support;`).
+- No non-test items may follow the first `#[cfg(test)]` module declaration.
+- No inline `#[cfg(test)] mod tests { … }` blocks.
 
-clippy doesn't cover it: `items_after_test_module` skips out-of-line modules,
-and `tests_outside_test_module` is about `#[test]` functions.
+Clippy does not cover this: `items_after_test_module` ignores out-of-line
+`#[path = "..."] mod tests;` declarations, and `tests_outside_test_module` only
+checks `#[test]` functions.
 
 ## Decide
 
-- Where each of the three kinds goes.
-  A test-only constructor needs access to private fields, so it can't simply
-  move to the tests file of another module.
-- Whether a module may have several tests files, and if so whether all of them
-  are declared together at the end.
-- How to enforce it: a text check in `just lint-ci`, next to the ones already
-  there, or a lint in the dylint library of T-1dhk8ac, which already lists the
-  inline-module case.
-  The text check needs no new tooling.
+- Where to place each of the three categories of test-only items.
+  Test-only constructors need access to private fields on the parent type, so
+  they cannot move into an unrelated module's test file.
+- Whether a module may declare multiple test files, and whether all of them must
+  appear at the end of the file.
+- How to enforce the rule: a text check in `just lint-ci` alongside the existing
+  checks, or a custom lint in the `dylint` library (T-1dhk8ac, which already
+  tracks inline test modules).
 - Whether `cfg(any(test, …))` and `cfg_attr(test, …)` are in scope.
 
 ## Then
 
-- [ ] Count the existing sites across the workspace.
-- [ ] Move them, or mark the ones that must stay.
-- [ ] Add the check.
-- [ ] State the rule in the `rust-development` skill, which only says tests go
-      in a `_tests` file.
+- [ ] Audit existing `#[cfg(test)]` sites across the workspace.
+- [ ] Move them to trailing module declarations, or exempt any that must stay.
+- [ ] Add the enforcement check to CI.
+- [ ] Document the rule in the `rust-development` skill.
 
 ## Comments
 
@@ -70,46 +73,47 @@ and `tests_outside_test_module` is about `#[test]` functions.
 - **From**: jp
 - **Date**: 2026-11-11T13:54:56Z
 
-Done on 2026-11-11 for `openai.rs`, `anthropic.rs`, `google.rs`
-(`crates/jp_llm/src/provider/`) and `crates/jp_cli/src/cmd/conversation_id.rs`,
-which settles two of the points under *Decide* by example:
+Applied on 2026-11-11 to `openai.rs`, `anthropic.rs`, and `google.rs` in
+`crates/jp_llm/src/provider/`, and to
+`crates/jp_cli/src/cmd/conversation_id.rs`, resolving the first two design
+questions:
 
-- **Test-only code that isn't a test goes in a `test_support` child module**,
-  `<module>/test_support.rs`: constructors and `impl` blocks on production
+- **Non-test support code lives in a `test_support` child module**
+  (`<module>/test_support.rs`): constructors and `impl` blocks on production
   types, recorded-test statics, and their helpers.
-  A child module reaches the parent's private fields, so a test-only constructor
-  can live there.
-  Other modules name it by path, such as `openai::test_support::TEST_SUPPORT`.
-- **A module may declare several `#[cfg(test)]` modules, all at the end of the
-  file**, with `tests` last and nothing after it.
-  Nesting the extra test modules under `tests` would rename every test in them,
-  and with that their snapshots.
+  Because `test_support` is a child module, it can access private fields on the
+  parent module's types, and sibling modules can reference items via
+  `<module>::test_support::*` (such as `openai::test_support::TEST_SUPPORT`).
+- **A module may declare multiple `#[cfg(test)]` submodules at the end of the
+  file**, with `mod tests;` last and no items after it.
+  Keeping sibling `*_tests` modules on the parent rather than nesting them under
+  `tests` preserves their module paths and `insta` snapshot names.
 
-So the rule a check enforces is: every `#[cfg(test)]` in a production file sits
-on a `mod` declaration, and only `#[cfg(test)]` module declarations follow the
-first one.
+The rule to enforce is: every `#[cfg(test)]` in a production file sits on a
+`mod` declaration at the end of the file, with no non-`#[cfg(test)]` items after
+the first one.
 
-Still open in the rest of the workspace: at least 26 sites in 17 files that are
-indented or sit on a non-module item (found by text search, which misses a
-`#[cfg(test)]` line directly above an unindented item), and every other
-provider's `TEST_SUPPORT` block (`cerebras.rs`, `llamacpp.rs`, `ollama.rs`,
-`openrouter.rs`, `vllm.rs`, `mock.rs`) plus the test-support traits in
-`provider.rs`.
-`crates/jp_llm/src/provider/openai/parity.rs` also has an inline `mod tests { …
-}`.
+Remaining across the workspace: at least 26 sites in 17 files where
+`#[cfg(test)]` is indented or attached to a non-module item, plus the
+`TEST_SUPPORT` blocks in the other LLM providers (`cerebras.rs`, `llamacpp.rs`,
+`ollama.rs`, `openrouter.rs`, `vllm.rs`, `mock.rs`), the test-support traits in
+`provider.rs`, and an inline `mod tests { … }` in
+`crates/jp_llm/src/provider/openai/parity.rs`.
 
-Two things the move showed about the gate:
+Moving the early `#[cfg(test)]` items surfaced two interactions with the `qual`
+gate:
 
-- With the count no longer cut short, `anthropic.rs` (2287 production lines),
-  `openai.rs` (2754) and `google.rs` (1129) are over the 800-line `SRP-002`
-  limit, and `qual diff` reports each as new, because the base counted them as
-  22, 52 and 134.
-  Every file fixed under this ticket that is over 800 lines will do the same.
-- `qual diff` keys a finding by `(rule, file, symbol)` and maps whole-file
-  renames only, so a function that moves to another file with an existing
-  finding is reported as new.
-  `Openai::with_credential` (`BP-008`) did; `erase_model_output` (`CX-002`) did
-  too and was simplified instead.
+- With the line count no longer truncated early, `anthropic.rs` (2,287
+  production lines), `openai.rs` (2,754), and `google.rs` (1,129) exceed the
+  800-line `SRP-002` limit.
+  Because the base revision counted them as 22, 52, and 134 lines, `qual diff`
+  reports each file as a new `SRP-002` finding.
+  Any other file over 800 production lines will trigger `SRP-002` when its early
+  `#[cfg(test)]` items are moved.
+- `qual diff` originally keyed findings by `(rule, file, symbol)` and only
+  mapped whole-file renames, so moving a function with an existing finding into
+  `test_support.rs` reported that finding as new (`Openai::with_credential` hit
+  `BP-008`, and `erase_model_output` hit `CX-002` and was refactored).
 
 -----
 
@@ -117,13 +121,15 @@ Two things the move showed about the gate:
 - **Date**: 2026-11-11T14:12:42Z
 - **Re**: #1
 
-Both gate problems from the comment above are handled:
+Both `qual` gate interactions from the comment above are resolved:
 
-- The three provider files carry a `qual:allow(srp, file_length=N)` pin (2400,
-  2900, 1200), each naming the ticket that splits the file: T-1hb8d4j,
-  T-1hb8d4k, T-1hb8d4m.
-  A file fixed under this ticket that turns out to be over 800 lines gets the
-  same: a pin within 10% of its count, and a ticket.
-- `qual diff` follows a finding to another file by rule and symbol, so moving a
-  function into `test_support.rs` reports nothing.
-  File-level findings have no symbol and don't follow.
+- The three provider files carry `qual:allow(srp, file_length=N)` pins (2400,
+  2900, and 1200) referencing the tickets that split them (T-1hb8d4j, T-1hb8d4k,
+  and T-1hb8d4m).
+  Any other file that exceeds 800 lines after moving its `#[cfg(test)]` items
+  should receive a `file_length` pin within ~10% of its line count and a
+  follow-up split ticket.
+- `qual diff` now matches symbol-scoped findings across files by `(rule,
+  symbol)`, so moving a function into `test_support.rs` does not report its
+  existing findings as new.
+  File-level findings have an empty symbol and remain scoped to their file.

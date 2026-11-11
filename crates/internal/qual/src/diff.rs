@@ -74,9 +74,8 @@ pub struct NewFinding {
     #[serde(flatten)]
     pub finding: Finding,
 
-    /// Present when the base revision accounts for some of the findings with
-    /// the same [`Finding::key`]: findings it had under that key, or findings
-    /// that moved in from another file.
+    /// Present when the base revision already had findings for this
+    /// [`Finding::key`], either in the same file or moved from another file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared: Option<Shared>,
 }
@@ -127,11 +126,11 @@ impl Verdict {
 /// Exempt rules are excluded, and base findings in renamed files are mapped to
 /// their paths in `head` before comparison.
 ///
-/// A finding follows its symbol to another file: when a `(rule, symbol)` pair
-/// has fewer findings in one file than at the base, that many findings of the
-/// same pair in other files are not new.
-/// A function moved between files therefore keeps the findings it had.
-/// Findings without a symbol are tied to their file and never follow.
+/// Symbol-scoped findings are matched across files: if a `(rule, symbol)` pair
+/// has fewer findings in a file than at `base`, the decrease offsets findings
+/// for the same `(rule, symbol)` in other files.
+/// Moving a function to another file therefore preserves its baseline.
+/// File-level findings (empty `symbol`) are compared only within the same file.
 #[must_use]
 pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy) -> Verdict {
     let gating = |finding: &&Finding| policy.gates(&finding.rule);
@@ -149,9 +148,8 @@ pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy)
         groups.entry(finding.key()).or_default().push(finding);
     }
 
-    // How many findings of each `(rule, symbol)` pair left a file they were in
-    // at the base. Empty symbols are skipped: a file-level finding that goes
-    // away in one file says nothing about the same rule firing in another.
+    // Track per-`(rule, symbol)` decreases from `base` so they can offset
+    // findings for the same symbol in other files.
     let mut departed = BTreeMap::<_, usize>::new();
     for (&(rule, file, symbol), &had) in &was {
         let has = groups.get(&(rule, file, symbol)).map_or(0, Vec::len);

@@ -156,8 +156,6 @@ fn a_finding_that_moved_to_another_file_with_its_symbol_is_not_new() {
 
 #[test]
 fn a_moved_finding_does_not_cover_one_the_base_still_has() {
-    // `src/a.rs` keeps its finding, so nothing left that file for `src/b.rs` to
-    // have received.
     let base = vec![finding("CX-001", "src/a.rs", "Parser::run", 10)];
     let head = vec![
         finding("CX-001", "src/a.rs", "Parser::run", 10),
@@ -235,8 +233,6 @@ fn another_rule_or_symbol_is_not_a_move() {
     ]);
 }
 
-/// A file-level finding has no symbol to follow: one long file made shorter
-/// doesn't pay for another made too long.
 #[test]
 fn a_file_level_finding_is_never_a_move() {
     let base = vec![finding("SRP-002", "src/a.rs", "", 1)];
