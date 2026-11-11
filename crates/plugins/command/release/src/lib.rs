@@ -69,11 +69,11 @@ use jp_plugin::message::{
     ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin, InitMessage, OutputFormat,
     PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
+use release_build::{BUILDS, Profile};
 use semver::Version;
 use serde_json::Value;
 
 use crate::{
-    build::Profile,
     edit::Host,
     entry::{Fragments, HIGHLIGHTS},
     options::{Options, no_address},
@@ -805,7 +805,7 @@ fn builds(init: &InitMessage) -> Option<Utf8PathBuf> {
     init.paths
         .user_workspace
         .as_ref()
-        .map(|storage| storage.join(build::BUILDS))
+        .map(|storage| storage.join(BUILDS))
 }
 
 /// The time now, in seconds since the Unix epoch.

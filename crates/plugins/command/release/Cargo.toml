@@ -23,6 +23,7 @@ doc = { workspace = true }
 jp_md = { workspace = true }
 jp_plugin = { workspace = true }
 jp_tool = { workspace = true }
+release-build = { workspace = true }
 tool-definitions = { workspace = true }
 
 camino = { workspace = true, features = ["serde1"] }
@@ -33,7 +34,6 @@ humantime = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
-sha2 = { workspace = true }
 shlex = { workspace = true }
 
 [dev-dependencies]

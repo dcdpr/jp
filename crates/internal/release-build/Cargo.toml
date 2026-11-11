@@ -1,0 +1,29 @@
+[package]
+description = "A release's build: the files a project's build command made for one release, their checksums, and the manifest listing them, and the rules that hold them to that format."
+name = "release-build"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+camino = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

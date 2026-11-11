@@ -2190,10 +2190,10 @@ dependencies = [
  "jp_md",
  "jp_plugin",
  "jp_tool",
+ "release-build",
  "semver",
  "serde",
  "serde_json",
- "sha2",
  "shlex",
  "strip-ansi-escapes",
  "toml",
@@ -4023,6 +4023,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "release-build"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
