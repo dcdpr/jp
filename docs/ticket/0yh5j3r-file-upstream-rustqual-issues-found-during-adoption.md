@@ -81,36 +81,39 @@ newer release has fixed.
     Reporting `ORPHAN-001` is accurate, but the message ("no finding in window")
     does not indicate that `const` and `static` items are already exempt from
     `CX-003`.
-12. **SARIF messages leave out what the analyzer knows.** Found while writing
-    the guidance files (T-0yh8q2s), which now carry the missing facts by hand:
-    - `CX-001`, `CX-002`, `CX-004` and `CX-005` give the value and not the
-      threshold (`ComplexityFinding` has both).
-    - `A20` gives a count ("error-handling smells 1") and not which of
-      `unwrap`, `expect`, `panic!` or `todo!` it found.
-    - `DRY-001`, `DRY-003` and `DRY-005` say "N other function(s)" without
-      naming them, although each finding holds its `participants`; only the
-      text report lists them.
-    - `DRY-002` drops the `uncalled` / `testonly` kind and the suggestion.
-13. **`DRY-002` and `DRY-006` count calls, not uses.** A function passed as a
-    value is reported as dead: `http_handler` in
-    `crates/jp_attachment_http_content/src/lib.rs` (the initializer of a
+12. **SARIF messages omit fields the analyzer already computes.** The guidance
+    files (T-0yh8q2s) hardcode the missing context:
+    - `CX-001`, `CX-002`, `CX-004`, and `CX-005` report the measured value
+      without the threshold (`ComplexityFinding` stores both).
+    - `A20` reports only a count ("error-handling smells 1") without naming
+      whether `unwrap`, `expect`, `panic!`, `unreachable!`, or `todo!` triggered
+      it.
+    - `DRY-001`, `DRY-003`, and `DRY-005` report "N other function(s)" without
+      listing them, even though each finding stores its `participants` (only the
+      text report prints them).
+    - `DRY-002` omits the `uncalled` / `testonly` classification and the
+      remediation suggestion.
+13. **`DRY-002` and `DRY-006` count calls, not references.** A function passed
+    as a value is flagged as dead code: `http_handler` in
+    `crates/jp_attachment_http_content/src/lib.rs` (used to initialize a
     `static`) and `parse_spec` in `crates/jp_cli/src/cmd/compact_flag.rs` (a
     clap value parser).
-    So is a `static` registered through `#[distributed_slice(HANDLERS)]`
-    (`HANDLER` in the attachment crates), which only the linker reads.
-    Neither can be silenced with `qual:allow`, and `qual:api` is rejected on a
-    private item.
+    A `static` registered via `#[distributed_slice(HANDLERS)]` (`HANDLER` in the
+    attachment crates), which is read by the linker, is also flagged.
+    Neither rule accepts `qual:allow`, and `qual:api` is rejected on private
+    items.
 14. **`DRY-005` groups unrelated enums under `Self`.** "repeated match on Self
-    (6 occurrences)" lists `PathRoot::as_str` in `bookworm` next to
-    `<Status as Display>::fmt` in the `ticket` crate.
-    A `match self` whose type rustqual can't name is keyed as `Self` or
-    `(unknown)`, whatever the type is.
-15. **`TQ-001` passes any test that makes a call.** `detect_assertion_free_tests`
-    (`src/adapters/analyzers/tq/assertions.rs`) treats a function or method call
-    anywhere in the body as an implicit assertion, so `#[test] fn it_works() {
-    run_thing(); }`, the book's own example of what the rule catches, is not
-    reported.
-    Only a body with no assertion macro and no call at all is.
+    (6 occurrences)" groups `PathRoot::as_str` in `bookworm` with `<Status as
+    Display>::fmt` in `ticket`.
+    Any `match self` whose type rustqual cannot resolve is keyed under `Self` or
+    `(unknown)`, merging matches across unrelated types.
+15. **`TQ-001` passes any test that contains a function call.**
+    `detect_assertion_free_tests` (`src/adapters/analyzers/tq/assertions.rs`)
+    treats any function or method call in the test body as an implicit
+    assertion.
+    As a result, `#[test] fn it_works() { run_thing(); }` (the rustqual
+    documentation's own example of what `TQ-001` catches) passes, and only tests
+    with neither assertion macros nor calls are reported.
 
 ## Comments
 

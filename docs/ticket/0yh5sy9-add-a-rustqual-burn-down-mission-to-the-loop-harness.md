@@ -30,28 +30,30 @@ This keeps every branch uniform: one rule, reviewed once.
 
 ## Before a run
 
-A rule's guidance file is checked against that rule's findings when its run
-starts, not for every rule up front (T-0yh8q2s wrote the files; nobody has read
-most of them next to a real finding).
+Validate each rule's guidance file against a sample of real findings when
+starting that rule's burn-down run (T-0yh8q2s drafted the files, and most have
+not yet been reviewed alongside live findings).
 
 The mission refuses to start when:
 
 - the rule is in `exempt` in `.config/rustqual/qual.toml`;
 - `.config/rustqual/guidance/<RULE>.md` doesn't exist.
 
-Whoever starts the run then does what the harness can't:
+Before launching the loop, perform a manual check:
 
-- Render five or so of the rule's findings with their guidance (`qual report
-  --format ai`), spread over crates, and read each as the model will: does it
-  say what to change without looking anything else up?
-- Fix the guidance file where it doesn't, in a commit of its own before the
-  run.
-- Where rustqual's own message is what falls short, add the case to T-0yh5j3r.
-- Where most of the sample is findings the guidance says to leave alone, don't
-  run: the rule goes back to the policy for a decision.
+- Render roughly five findings for the rule with their guidance (`qual report
+  --format ai`) across different crates, and verify that each rendered finding
+  gives enough information to make the fix without further lookup.
+- Update the guidance file in a standalone commit before the run if any
+  instructions are unclear or incomplete.
+- If rustqual's own diagnostic message is missing needed context, record the
+  issue in T-0yh5j3r.
+- If most sampled findings are false positives that the guidance says to leave
+  alone, abort the run and revisit the rule's policy in
+  `.config/rustqual/qual.toml`.
 
-After the run, the reasons in `rejected.jsonl` are the second check: a reason
-that recurs becomes a line in the guidance file.
+After the run, review `rejected.jsonl` and fold any recurring rejection reasons
+into the guidance file.
 
 ## `next-target`
 
