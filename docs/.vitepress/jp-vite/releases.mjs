@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 import { SETTINGS_FILE, SRC_DIR, readSettings } from './settings.mjs'
 
@@ -22,9 +22,11 @@ import { SETTINGS_FILE, SRC_DIR, readSettings } from './settings.mjs'
 // draft, so its notes can be read as they will appear; the built site never
 // has them.
 //
-// The site therefore builds without `jp`, but `changelog` has to be on `PATH`
-// wherever the site is built or served, in a clone that isn't shallow. When it
-// can't render a release, the build fails rather than leave the release out.
+// Under `jp vite serve` and `jp vite build`, `changelog` is the `jp-vite`
+// binary itself, run as `jp-vite changelog`; a `vitepress build` started by
+// hand, as JP's own docs build is, runs the `changelog` binary on `PATH`.
+// Either needs a clone that isn't shallow. When a release can't be rendered,
+// the build fails rather than leave the release out.
 //
 // A tree without the fragments directory has no release pages: a release
 // branch, or a release's tag, whose notes live on the main branch.
@@ -199,28 +201,46 @@ function pages(ctx) {
     return [{ version: null, release: model(ctx, null) }, ...releases(ctx)]
 }
 
+// The program that renders release pages, and the arguments it takes before
+// `changelog`'s own: the `jp-vite` binary `jp vite serve` and `jp vite build`
+// name in `JP_VITE_BIN` of the environment `env`, or else the `changelog`
+// binary on `PATH`.
+export function renderer(env = process.env) {
+    if (env.JP_VITE_BIN) return { program: env.JP_VITE_BIN, prefix: ['changelog'] }
+    return { program: 'changelog', prefix: [] }
+}
+
 // What `changelog` printed, run with `args` in the workspace root.
 //
 // Throws when it can't be run or fails, saying why.
 function changelog(ctx, args) {
+    const { program, prefix } = renderer()
     try {
-        return execFileSync('changelog', args, {
+        return execFileSync(program, [...prefix, ...args], {
             cwd: ctx.root,
             encoding: 'utf-8',
             stdio: ['ignore', 'pipe', 'pipe'],
             maxBuffer: 64 * 1024 * 1024,
         })
     } catch (error) {
-        if (error.code === 'ENOENT') {
-            throw new Error(
-                'The release pages are rendered by the `changelog` binary, which isn\'t on `PATH`. '
-                + 'Build it from JP\'s repository, where it is `crates/internal/changelog`.',
-            )
-        }
+        if (error.code === 'ENOENT') throw new Error(missingRenderer(program))
 
         const said = String(error.stderr ?? '').trim() || error.message
-        throw new Error(`\`changelog ${args.join(' ')}\` failed: ${said}`)
+        const command = [basename(program), ...prefix, ...args].join(' ')
+        throw new Error(`\`${command}\` failed: ${said}`)
     }
+}
+
+// Why the release pages can't be rendered, when `program`, which renders them,
+// isn't there to run.
+export function missingRenderer(program) {
+    if (program !== 'changelog') {
+        return `The release pages are rendered by ${program}, which can't be run.`
+    }
+
+    return 'The release pages are rendered by the `changelog` binary, which isn\'t on `PATH`. '
+        + 'Build the site with `jp vite build`, which renders them itself, or build '
+        + '`changelog` from JP\'s repository, where it is `crates/internal/changelog`.'
 }
 
 // The release `version`, or what no tag ships yet when it is `null`, as the

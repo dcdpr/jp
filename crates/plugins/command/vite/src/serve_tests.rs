@@ -1,3 +1,5 @@
+use std::ffi::OsStr;
+
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
@@ -250,6 +252,55 @@ fn vitepress_runs_through_the_package_manager_the_project_names() {
     )
     .unwrap();
     assert_eq!(runner(dir.path()), ["yarn", "vitepress"]);
+}
+
+/// The loaders render release pages with the binary named in `JP_VITE_BIN`, and
+/// nothing the site reads from `jp vite` is taken from this process.
+#[test]
+fn vitepress_is_told_which_binary_renders_releases() {
+    let dir = Utf8TempDir::new().unwrap();
+    let renderer = Utf8PathBuf::from("/opt/jp/jp-vite");
+
+    let command = vitepress_command(
+        dir.path(),
+        "build",
+        &["--outDir".to_owned(), "out".to_owned()],
+        Some(renderer.as_std_path()),
+    );
+
+    assert_eq!(command.get_program(), "npx");
+    assert_eq!(command.get_args().collect::<Vec<_>>(), [
+        "vitepress",
+        "build",
+        "--outDir",
+        "out"
+    ]);
+    assert_eq!(command.get_current_dir(), Some(dir.path().as_std_path()));
+    let mut envs: Vec<_> = command.get_envs().collect();
+    envs.sort();
+    assert_eq!(envs, [
+        (
+            OsStr::new("JP_VITE_BIN"),
+            Some(OsStr::new("/opt/jp/jp-vite"))
+        ),
+        (OsStr::new("JP_VITE_PROBLEM"), None),
+        (OsStr::new("JP_VITE_SERVE"), None),
+    ]);
+}
+
+/// Without a binary to name, the loaders run `changelog` from `PATH`, as they
+/// do under a `vitepress build` started by hand.
+#[test]
+fn without_a_known_binary_none_is_named() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let command = vitepress_command(dir.path(), "dev", &[], None);
+
+    assert!(
+        command
+            .get_envs()
+            .any(|(key, value)| key == "JP_VITE_BIN" && value.is_none())
+    );
 }
 
 fn settings(root: &Utf8TempDir) -> Settings {

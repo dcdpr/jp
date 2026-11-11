@@ -3,11 +3,13 @@ import { test } from 'node:test'
 
 import {
     drafting,
+    missingRenderer,
     notesContent,
     notesPath,
     released,
     releaseVersions,
     renderArgs,
+    renderer,
     shown,
     upgradeContent,
     upgradePath,
@@ -105,6 +107,31 @@ test('only a release a tag has made gets pages of its own', () => {
 test('only the dev server shows drafts', () => {
     assert.equal(drafting({ JP_VITE_SERVE: '/work' }), true)
     assert.equal(drafting({}), false)
+})
+
+// `jp vite serve` and `jp vite build` name their own binary in `JP_VITE_BIN`.
+test('the binary jp vite names renders the release pages', () => {
+    assert.deepEqual(renderer({ JP_VITE_BIN: '/opt/jp/jp-vite' }), {
+        program: '/opt/jp/jp-vite',
+        prefix: ['changelog'],
+    })
+})
+
+test('a build vitepress runs by itself renders with changelog from PATH', () => {
+    assert.deepEqual(renderer({}), { program: 'changelog', prefix: [] })
+})
+
+test('a missing changelog points at jp vite build', () => {
+    assert.equal(
+        missingRenderer('changelog'),
+        'The release pages are rendered by the `changelog` binary, which isn\'t on `PATH`. '
+            + 'Build the site with `jp vite build`, which renders them itself, or build '
+            + '`changelog` from JP\'s repository, where it is `crates/internal/changelog`.',
+    )
+    assert.equal(
+        missingRenderer('/opt/jp/jp-vite'),
+        'The release pages are rendered by /opt/jp/jp-vite, which can\'t be run.',
+    )
 })
 
 test('under the dev server, a release in preparation gets pages of its own too', () => {

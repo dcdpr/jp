@@ -706,7 +706,7 @@ The only run a workflow starts is the site build for a release's tag, through
 ### On the site
 
 Releases are a third workflow for `jp vite` ([RFD 116]), next to tickets and
-RFDs, and the site builds without `jp`.
+RFDs.
 `jp vite sync` writes `fragments_dir`, `forge`, `repository`, and `headings`
 into its settings snapshot with the other plugins' settings.
 The releases loader runs `changelog render --format json` for each version's
@@ -724,8 +724,19 @@ Where they go is `jp vite`'s choice: JP serves them under `/releases/`, with an
 index of releases and their dates, and replaces the navigation's "Change Log"
 entry with "Releases".
 
-The docs build compiles and installs the `changelog` crate binary in place of
-`jilu`, without compiling the rest of the workspace.
+Under `jp vite serve`, and under `jp vite build`, which builds the site as
+`vitepress build` does, the loader renders with the `jp-vite` binary itself, run
+as `jp-vite changelog render`, which `jp vite` names to it in `JP_VITE_BIN`.
+A workspace then needs nothing but `jp` and its plugins to build its site, and
+the release pages are rendered by the release of `jp vite` that wrote the site's
+files.
+`jp vite build` brings the settings snapshot up to date first, as `serve` does,
+and refuses while a file `jp vite sync` writes is out of date.
+A `vitepress build` started by hand runs the `changelog` binary on `PATH`.
+
+JP's docs build runs `vitepress build` directly, so it needs no `jp`; it
+compiles and installs the `changelog` crate binary in place of `jilu`, without
+compiling the rest of the workspace.
 The docs workflow already fetches full Git history, which credit resolution
 requires.
 
@@ -967,6 +978,13 @@ Depends on Phase 2.
 
 The `repository` option, wherever notes are rendered and in `jp vite`'s
 snapshot, and draft pages for releases in preparation under `jp vite serve`.
+Depends on Phase 4.
+
+### Phase 8: Sites built with `jp vite`
+
+`jp vite build`, and the `jp-vite` binary rendering the release pages under
+`serve` and `build`, as `jp-vite changelog`, so only a `vitepress build` started
+by hand, as JP's docs build is, needs the `changelog` binary.
 Depends on Phase 4.
 
 ## References

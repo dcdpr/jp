@@ -13,7 +13,7 @@
 //!
 //! Neither reads configuration, so CI can run them without `jp`.
 
-use std::process::ExitCode;
+use std::{env, ffi::OsString, process::ExitCode};
 
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -254,11 +254,25 @@ fn heading(text: &str) -> Result<(Type, String), String> {
 
 /// Run the binary with the process's arguments.
 #[must_use]
+pub fn main() -> ExitCode {
+    run(env::args_os())
+}
+
+/// Run the binary with `args`, the first of which names it, as the process's
+/// arguments do.
+///
+/// Help, a version, or arguments it can't parse end the process, as they do the
+/// binary.
+#[must_use]
 // The binary's output: the report or the release on stdout, a failure on
 // stderr.
 #[allow(clippy::print_stdout, clippy::print_stderr)]
-pub fn main() -> ExitCode {
-    match Cli::parse().command {
+pub fn run<I, T>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    match Cli::parse_from(args).command {
         Command::Check { dir } => match directory::check(&dir) {
             Ok(report) => {
                 println!("{report}");

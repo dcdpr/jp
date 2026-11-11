@@ -1,15 +1,15 @@
-//! `jp-vite`: set up, sync, and serve the VitePress site for a workspace's
-//! RFDs, tickets, and wiki pages.
+//! `jp-vite`: set up, sync, serve, and build the VitePress site for a
+//! workspace's RFDs, tickets, wiki pages, and releases.
 //!
-//! Provides three subcommands: `jp vite init`, `jp vite sync`, and `jp vite
-//! serve`.
+//! Provides four subcommands: `jp vite init`, `jp vite sync`, `jp vite serve`,
+//! and `jp vite build`.
 //! The `site` module embeds the files owned by `jp-vite`: data loaders, Vue
 //! components, styles, dev-server middleware, a VitePress config fragment
 //! (written to `.vitepress/jp-vite/` alongside the `settings` snapshot), and
 //! default landing pages for the RFD, ticket, and wiki directories.
 //! `init` writes the project-owned scaffolding files, `sync` writes the
-//! `jp-vite`-owned files and creates any missing landing pages, and `serve`
-//! runs the dev server.
+//! `jp-vite`-owned files and creates any missing landing pages, `serve` runs
+//! the dev server, and `build` builds the site for publishing.
 //! Both `init` and `sync` overwrite existing files with different contents only
 //! when git can restore them or `--force` is passed (see [`overwrite`]).
 //!
@@ -19,6 +19,7 @@
 //! See: `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`, "Site", and
 //! `docs/rfd/127-in-repo-project-wiki.md`, "Site Integration"
 
+mod build;
 mod git;
 mod init;
 mod options;
@@ -60,7 +61,7 @@ const VERSION: &str = concat!(
 #[command(
     name = "jp vite",
     version = VERSION,
-    about = "Set up, sync, and serve the site that renders RFDs and tickets."
+    about = "Set up, sync, serve, and build the site that renders RFDs and tickets."
 )]
 struct Args {
     #[command(subcommand)]
@@ -120,6 +121,19 @@ enum Command {
     /// Arguments after `--` go to `vitepress dev`.
     Serve {
         /// Arguments for `vitepress dev`, such as `--open`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        vitepress: Vec<String>,
+    },
+
+    /// Build the site for publishing, as `vitepress build` does.
+    ///
+    /// Keeps the site's settings in step with the configuration, as `serve`
+    /// does, and refuses while a file `sync` writes is out of date.
+    /// The release pages are rendered by `jp vite` itself, so the build needs
+    /// no `changelog` binary.
+    /// Arguments after `--` go to `vitepress build`.
+    Build {
+        /// Arguments for `vitepress build`, such as `--outDir`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         vitepress: Vec<String>,
     },
@@ -260,6 +274,11 @@ where
         Command::Serve { vitepress } => {
             let Session { stdin, mut stdout } = session;
             let result = serve::serve(stdin, &mut stdout, root, &options, &init.config, &vitepress);
+            return finish(&mut stdout, result.map(|()| String::new()));
+        }
+        Command::Build { vitepress } => {
+            let Session { stdin, mut stdout } = session;
+            let result = build::build(stdin, &mut stdout, root, &options, &init.config, &vitepress);
             return finish(&mut stdout, result.map(|()| String::new()));
         }
     };

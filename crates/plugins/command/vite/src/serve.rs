@@ -14,6 +14,8 @@
 //! it in place of their content, and the dev server refuses writes.
 //! Writes are accepted only under `JP_VITE_SERVE`, which names the workspace
 //! root the middleware runs `jp` in.
+//! The release pages are rendered by this binary, which [`BIN`] names to the
+//! site's loaders.
 //!
 //! While the site runs, serve asks the host for the configuration again every
 //! [`POLL`] and rewrites the snapshot when the settings in it change, so a
@@ -22,11 +24,12 @@
 //! checks `sync` makes before overwriting a file.
 
 use std::{
-    fs,
+    env, fs,
     io::{BufRead, BufReader, Read, Write},
+    path::Path,
     process::{Child, Command, ExitStatus, Stdio},
     sync::mpsc::{self, RecvTimeoutError, Sender},
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -48,7 +51,14 @@ pub(crate) const POLL: Duration = Duration::from_secs(2);
 
 /// How long the loop waits for something to happen before checking on the dev
 /// server and the clock.
-const TICK: Duration = Duration::from_millis(200);
+pub(crate) const TICK: Duration = Duration::from_millis(200);
+
+/// The environment variable naming this binary to the site's loaders, which
+/// render the release pages with it, as `jp-vite changelog render`.
+///
+/// Without it, as under a `vitepress build` run by hand, the loaders run the
+/// `changelog` binary on `PATH` instead.
+pub(crate) const BIN: &str = "JP_VITE_BIN";
 
 /// Where `cargo install` finds the plugins.
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
@@ -79,7 +89,14 @@ where
     let remote = git::remote(root);
     let (mut settings, problem) = prepare(stdout, root, options, config, &remote)?;
 
-    let mut child = start(root, &site_dir, vitepress, problem.as_deref())?;
+    let renderer = env::current_exe().ok();
+    let mut child = start(
+        root,
+        &site_dir,
+        vitepress,
+        problem.as_deref(),
+        renderer.as_deref(),
+    )?;
 
     let (events, received) = mpsc::channel();
     if let Some(output) = child.stdout.take() {
@@ -247,7 +264,7 @@ fn report(
 }
 
 /// What happened while the site runs.
-enum Event {
+pub(crate) enum Event {
     /// A line the dev server printed, for the host's `channel`.
     Output { text: String, channel: &'static str },
 
@@ -255,8 +272,13 @@ enum Event {
     Host(Result<HostToPlugin, String>),
 }
 
-/// Forward each line of `output` to the host's `channel`.
-fn forward(output: impl Read + Send + 'static, channel: &'static str, events: Sender<Event>) {
+/// Forward each line of `output` to the host's `channel`, on a thread that ends
+/// with `output`.
+pub(crate) fn forward(
+    output: impl Read + Send + 'static,
+    channel: &'static str,
+    events: Sender<Event>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break };
@@ -265,11 +287,11 @@ fn forward(output: impl Read + Send + 'static, channel: &'static str, events: Se
                 break;
             }
         }
-    });
+    })
 }
 
 /// Pass on what the host says, until it stops saying anything.
-fn listen(mut stdin: impl BufRead + Send + 'static, events: Sender<Event>) {
+pub(crate) fn listen(mut stdin: impl BufRead + Send + 'static, events: Sender<Event>) {
     thread::spawn(move || {
         loop {
             let message = read_message(&mut stdin);
@@ -281,42 +303,70 @@ fn listen(mut stdin: impl BufRead + Send + 'static, events: Sender<Event>) {
     });
 }
 
-/// Start `vitepress dev` in the source directory.
-///
-/// Its stdin is closed, since the plugin's own carries the protocol, and its
-/// output is forwarded to the host, which owns the terminal.
+/// Start `vitepress dev` in the source directory, with the workspace root in
+/// `JP_VITE_SERVE` and the site's problem, if any, in `JP_VITE_PROBLEM`.
 fn start(
     root: &Utf8Path,
     site_dir: &Utf8Path,
     vitepress: &[String],
     problem: Option<&str>,
+    renderer: Option<&Path>,
 ) -> Result<Child, String> {
-    let runner = runner(site_dir);
-    let mut command = Command::new(runner[0]);
-    command
-        .args(&runner[1..])
-        .arg("dev")
-        .args(vitepress)
-        .current_dir(site_dir)
-        .env("JP_VITE_SERVE", root.as_str())
-        .env_remove("JP_VITE_PROBLEM")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut command = vitepress_command(site_dir, "dev", vitepress, renderer);
+    command.env("JP_VITE_SERVE", root.as_str());
     if let Some(problem) = problem {
         command.env("JP_VITE_PROBLEM", problem);
     }
 
+    command.spawn().map_err(|error| {
+        format!(
+            "`{} dev` couldn't be started: {error}",
+            runner(site_dir).join(" ")
+        )
+    })
+}
+
+/// The command running `vitepress <subcommand>` with `args` in `site_dir`,
+/// through the project's package manager, with `renderer`, the `jp-vite`
+/// binary, in [`BIN`] when it is known.
+///
+/// `JP_VITE_SERVE`, `JP_VITE_PROBLEM`, and [`BIN`] are never passed on from
+/// this process's environment: they are set here, or by [`start`] for the dev
+/// server.
+/// Its stdin is closed, since the plugin's own carries the protocol, and its
+/// output is piped, for the plugin to forward to the host, which owns the
+/// terminal.
+pub(crate) fn vitepress_command(
+    site_dir: &Utf8Path,
+    subcommand: &str,
+    args: &[String],
+    renderer: Option<&Path>,
+) -> Command {
+    let runner = runner(site_dir);
+    let mut command = Command::new(runner[0]);
     command
-        .spawn()
-        .map_err(|error| format!("`{} dev` couldn't be started: {error}", runner.join(" ")))
+        .args(&runner[1..])
+        .arg(subcommand)
+        .args(args)
+        .current_dir(site_dir)
+        .env_remove("JP_VITE_SERVE")
+        .env_remove("JP_VITE_PROBLEM")
+        .env_remove(BIN)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(renderer) = renderer {
+        command.env(BIN, renderer);
+    }
+
+    command
 }
 
 /// Stop the dev server.
 ///
 /// What it started goes with the plugin: the host ends the plugin's whole
 /// process tree once it exits.
-fn stop(child: &mut Child) {
+pub(crate) fn stop(child: &mut Child) {
     drop(child.kill());
     drop(child.wait());
 }
@@ -397,7 +447,7 @@ pub(crate) fn runner(site_dir: &Utf8Path) -> Vec<&'static str> {
 
 /// Write the snapshot when it differs from `previous`, or from the file when
 /// there is no previous one, returning a note saying so.
-fn write_snapshot(
+pub(crate) fn write_snapshot(
     root: &Utf8Path,
     settings: &Settings,
     previous: Option<&Settings>,

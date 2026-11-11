@@ -49,6 +49,11 @@ Tracking ticket for [RFD 122].
       rendered and in `jp vite`'s snapshot, and draft pages for releases in
       preparation under `jp vite serve`.
       Depends on Phase 4.
+- [x] **Sites built with `jp vite`**: Adds `jp vite build`, and has the
+      `jp-vite` binary render the release pages under `serve` and `build`, as
+      `jp-vite changelog`, so only a `vitepress build` started by hand needs the
+      `changelog` binary.
+      Depends on Phase 4.
 
 The repository settings the plan names, protecting `release/*` branches and `v*`
 tags, are [T-1f2jmb7].

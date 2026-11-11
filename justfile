@@ -1989,9 +1989,10 @@ release-due *FLAGS:
 # Runs through `jp vite serve`, which keeps the site's settings in step with the
 # configuration and is the only dev server the RFD, ticket, and wiki pages
 # accept edits from. It checks `jp ticket`, `jp rfd`, and `jp wiki` were built
-# from the same site files as `jp vite`, so all four are installed first.
+# from the same site files as `jp vite`, so all four are installed first. `jp
+# vite` renders the release pages itself.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins _install-changelog
+develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
     jp vite serve -- {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
@@ -2001,7 +2002,7 @@ develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _i
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage: _docs-install _install-jp _install-site-plugins _install-changelog
+rfd-manage: _docs-install _install-jp _install-site-plugins
     jp vite serve -- --host --allowedHosts --open /rfd/priority
 
 # Test the documentation site's own tooling.
@@ -2020,8 +2021,9 @@ test-docs *FLAGS:
 
 # Build the statically built documentation.
 #
-# The release pages are rendered by the `changelog` binary, so it is installed
-# first.
+# Runs `vitepress build` itself, as JP's docs workflow does, which needs no `jp`:
+# the release pages are then rendered by the `changelog` binary, so it is
+# installed first. `jp vite build` would render them without it.
 [group('docs')]
 build-docs: _install-changelog (_docs "build")
 
@@ -2658,7 +2660,8 @@ _install-release *args:
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/release --debug {{args}}
 
 # Build and install the `changelog` binary the site's release pages are
-# rendered with, from this checkout: no release publishes it.
+# rendered with by a `vitepress build` started without `jp vite`, from this
+# checkout: no release publishes it.
 #
 # Always rebuilt, unlike the other tools: the site renders this checkout's
 # fragments, which a `changelog` built from another revision may not read. A
