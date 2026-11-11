@@ -205,6 +205,9 @@ fn git(root: &Utf8Path, args: &[&str]) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|error| format!("git printed non-UTF-8: {error}"))
 }
 
+/// Width of an entry's `XY ` status prefix in `git status --porcelain=v1`.
+const STATUS_PREFIX: usize = 3;
+
 /// Parse paths from `git status --porcelain=v1 -z` output.
 ///
 /// For renames (`R`) and copies (`C`), includes both the destination path and
@@ -215,10 +218,12 @@ pub(crate) fn changed_paths(status: &str) -> Vec<String> {
     let mut fields = status.split('\0').filter(|field| !field.is_empty());
 
     while let Some(entry) = fields.next() {
-        let Some(path) = entry.get(3..) else { continue };
+        let Some(path) = entry.get(STATUS_PREFIX..) else {
+            continue;
+        };
         paths.push(path.to_owned());
 
-        let code = &entry[..2];
+        let code = &entry[..STATUS_PREFIX - 1];
         if code.contains('R') || code.contains('C') {
             paths.extend(fields.next().map(ToOwned::to_owned));
         }

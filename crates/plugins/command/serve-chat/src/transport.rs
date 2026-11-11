@@ -15,20 +15,14 @@ pub(crate) enum Chat {
     Group(String),
 }
 
-impl Chat {
-    /// Stable key (`direct:<id>` or `group:<id>`) used in `state.json` and
-    /// logs.
-    pub(crate) fn key(&self) -> String {
-        match self {
-            Self::Direct(id) => format!("direct:{id}"),
-            Self::Group(id) => format!("group:{id}"),
-        }
-    }
-}
-
+/// The stable key `direct:<id>` or `group:<id>`, which `state.json` and the
+/// logs use.
 impl fmt::Display for Chat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.key())
+        match self {
+            Self::Direct(id) => write!(f, "direct:{id}"),
+            Self::Group(id) => write!(f, "group:{id}"),
+        }
     }
 }
 

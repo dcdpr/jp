@@ -26,6 +26,8 @@ use jp_plugin::message::{
 use serde_json::{Map, Value};
 use tokio::sync::{oneshot, watch};
 
+use crate::lock;
+
 /// Timeout for non-turn host requests (`created` handshake and `read_events`).
 const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
@@ -54,11 +56,14 @@ pub(crate) enum ReplyError {
     Broken(String),
 }
 
+/// Severity of a log line sent to the host, spelled as the protocol takes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Level {
-    Info,
-    Warn,
-    Error,
+pub(crate) struct Level(&'static str);
+
+impl Level {
+    pub(crate) const INFO: Self = Self("info");
+    pub(crate) const WARN: Self = Self("warn");
+    pub(crate) const ERROR: Self = Self("error");
 }
 
 /// Host operations used by the bridge.
@@ -118,38 +123,42 @@ pub(crate) struct HostClient {
 }
 
 impl HostClient {
-    /// Spawn the stdin reader thread and return a [`HostClient`] and shutdown
-    /// receiver.
-    ///
-    /// The receiver becomes `true` when the host sends `shutdown` or closes
-    /// stdin.
-    pub(crate) fn start(
-        stdin: impl BufRead + Send + 'static,
-        stdout: impl Write + Send + 'static,
-    ) -> (Self, watch::Receiver<bool>) {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let client = Self {
+    /// A client writing to `stdout`, which reads no answers until
+    /// [`Self::listen`] is called.
+    pub(crate) fn new(stdout: impl Write + Send + 'static) -> Self {
+        Self {
             writer: Arc::new(Mutex::new(Box::new(stdout))),
             pending: Arc::default(),
             next_id: Arc::new(AtomicU64::new(1)),
-        };
+        }
+    }
 
-        let pending = Arc::clone(&client.pending);
+    /// Read the host's messages from `stdin` on a thread of its own, and hand
+    /// each answer to the request waiting for it.
+    ///
+    /// The returned receiver becomes `true` when the host sends `shutdown` or
+    /// closes stdin.
+    pub(crate) fn listen(
+        &self,
+        stdin: impl BufRead + Send + 'static,
+    ) -> Result<watch::Receiver<bool>, String> {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let pending = Arc::clone(&self.pending);
         thread::Builder::new()
             .name("host-reader".into())
             .spawn(move || read_host(stdin, &pending, &shutdown_tx))
-            .expect("failed to spawn the host reader thread");
+            .map_err(|error| format!("failed to start the host reader: {error}"))?;
 
-        (client, shutdown_rx)
+        Ok(shutdown_rx)
     }
 
     /// Send an `exit` message to the host.
-    pub(crate) fn exit(&self, code: u8, reason: Option<String>) {
-        drop(self.send(&PluginToHost::Exit(ExitMessage {
+    pub(crate) fn exit(&self, code: u8, reason: Option<String>) -> Result<(), String> {
+        self.send(&PluginToHost::Exit(ExitMessage {
             code,
             reason,
             expected: false,
-        })));
+        }))
     }
 
     fn next_id(&self) -> String {
@@ -158,9 +167,7 @@ impl HostClient {
 
     fn register(&self, id: &str) -> oneshot::Receiver<HostToPlugin> {
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .expect("pending lock poisoned")
+        lock(&self.pending)
             .entry(id.to_owned())
             .or_default()
             .push_back(tx);
@@ -168,15 +175,13 @@ impl HostClient {
     }
 
     fn forget(&self, id: &str) {
-        self.pending
-            .lock()
-            .expect("pending lock poisoned")
-            .remove(id);
+        lock(&self.pending).remove(id);
     }
 
-    fn send(&self, message: &PluginToHost) -> Result<(), String> {
+    /// Write `message` to the host as one line.
+    pub(crate) fn send(&self, message: &PluginToHost) -> Result<(), String> {
         let json = serde_json::to_string(message).map_err(|error| error.to_string())?;
-        let mut writer = self.writer.lock().expect("writer lock poisoned");
+        let mut writer = lock(&self.writer);
         writeln!(writer, "{json}")
             .and_then(|()| writer.flush())
             .map_err(|error| format!("failed to write to the host: {error}"))
@@ -383,14 +388,8 @@ impl Host for HostClient {
     }
 
     fn log(&self, level: Level, message: &str) {
-        let level = match level {
-            Level::Info => "info",
-            Level::Warn => "warn",
-            Level::Error => "error",
-        };
-
         drop(self.send(&PluginToHost::Log(LogMessage {
-            level: level.to_owned(),
+            level: level.0.to_owned(),
             message: message.to_owned(),
             fields: Map::new(),
         })));
@@ -458,7 +457,7 @@ fn read_host(reader: impl BufRead, pending: &Pending, shutdown: &watch::Sender<b
         let Some(id) = id else { continue };
 
         let waiter = {
-            let mut pending = pending.lock().expect("pending lock poisoned");
+            let mut pending = lock(pending);
             let waiter = pending.get_mut(&id).and_then(VecDeque::pop_front);
             if pending.get(&id).is_some_and(VecDeque::is_empty) {
                 pending.remove(&id);
@@ -471,6 +470,6 @@ fn read_host(reader: impl BufRead, pending: &Pending, shutdown: &watch::Sender<b
     }
 
     // The host is gone: every waiter resolves as closed rather than hanging.
-    pending.lock().expect("pending lock poisoned").clear();
+    lock(pending).clear();
     let _ = shutdown.send(true);
 }

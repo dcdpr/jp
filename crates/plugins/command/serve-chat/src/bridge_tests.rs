@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeSet,
+    env,
     future::{self, Future},
     sync::Mutex,
 };
@@ -299,14 +300,14 @@ fn fixture() -> Fixture {
     let today = Arc::new(Mutex::new(november(7)));
 
     let clock = Arc::clone(&today);
-    let bridge = Bridge::new(
+    let mut bridge = Bridge::new(
         host.clone(),
         Arc::clone(&outbox) as Arc<dyn Outbox>,
         checkout.clone(),
         options(),
         State::in_memory(),
-    )
-    .with_today(move || *clock.lock().unwrap());
+    );
+    bridge.today = Box::new(move || *clock.lock().unwrap());
 
     Fixture {
         bridge,
@@ -356,9 +357,10 @@ impl Fixture {
 
     /// Process the next task event and advance the queue.
     async fn settle(&mut self) {
-        let event = tokio::time::timeout(Duration::from_secs(5), self.bridge.next_event())
+        let event = tokio::time::timeout(Duration::from_secs(5), self.bridge.events_rx.recv())
             .await
-            .expect("no task reported within 5 seconds");
+            .expect("no task reported within 5 seconds")
+            .expect("the bridge holds a sender");
         self.bridge.handle(event).await;
         self.bridge.advance();
     }
@@ -626,7 +628,7 @@ fn extra_cfg_follows_the_persona() {
         "assistant.model.parameters.reasoning=off".to_owned(),
     ];
 
-    let cfg = f.bridge.cfg("client");
+    let cfg = cfg(&f.bridge.options, "client");
 
     assert_eq!(cfg[..3], [
         "personas/planner",
@@ -640,7 +642,7 @@ fn extra_cfg_follows_the_persona() {
 fn the_bridge_sets_one_key_per_cfg_entry() {
     let f = fixture();
 
-    let cfg = f.bridge.cfg("client");
+    let cfg = cfg(&f.bridge.options, "client");
 
     for entry in &cfg[1..] {
         assert!(
@@ -1001,7 +1003,7 @@ async fn a_shutdown_stops_the_running_turn_and_waits_for_it() {
 /// `.jp/config`.
 #[test]
 fn the_planner_persona_enables_only_its_own_tools_over_a_permissive_base() {
-    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let root = Utf8PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../..");
     let mut base = load_partial_at_path(root.join(".jp/config.toml").as_std_path())
         .unwrap()
         .unwrap();
@@ -1052,7 +1054,7 @@ fn the_planner_persona_enables_only_its_own_tools_over_a_permissive_base() {
     };
 
     let f = fixture();
-    let cfg = f.bridge.cfg("client");
+    let cfg = cfg(&f.bridge.options, "client");
 
     // The persona alone doesn't override a tool another layer enables.
     let unguarded = enabled(&resolve(cfg.clone()));

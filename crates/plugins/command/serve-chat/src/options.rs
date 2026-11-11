@@ -35,6 +35,10 @@ const DEFAULT_PULL_INTERVAL: Duration = Duration::from_mins(5);
 
 const DEFAULT_WRITABLE: [&str; 3] = ["docs/ticket", "docs/rfd", "docs/wiki"];
 
+const DAY: Duration = Duration::from_hours(24);
+
+const DAYS_PER_WEEK: u32 = 7;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Options {
     /// Configuration value passed via `--cfg` on every turn.
@@ -117,19 +121,15 @@ impl Rollover {
     pub(crate) fn start(self, today: NaiveDate) -> NaiveDate {
         match self {
             Self::Daily => today,
-            Self::Weekly(day) => {
-                let back =
-                    (7 + today.weekday().num_days_from_monday() - day.num_days_from_monday()) % 7;
-                today - Days::new(u64::from(back))
-            }
+            Self::Weekly(day) => today - Days::new(u64::from(today.weekday().days_since(day))),
         }
     }
 
     /// Duration of one rollover period.
     fn length(self) -> Duration {
         match self {
-            Self::Daily => Duration::from_hours(24),
-            Self::Weekly(_) => Duration::from_hours(7 * 24),
+            Self::Daily => DAY,
+            Self::Weekly(_) => DAY * DAYS_PER_WEEK,
         }
     }
 }
@@ -196,29 +196,7 @@ impl Options {
         }
 
         let rollover = rollover(raw.rollover.as_deref())?;
-        let conversation_ttl = raw.conversation_ttl.unwrap_or_else(|| {
-            match rollover {
-                Rollover::Daily => DEFAULT_DAILY_TTL,
-                Rollover::Weekly(_) => DEFAULT_WEEKLY_TTL,
-            }
-            .to_owned()
-        });
-        let ttl = humantime::parse_duration(&conversation_ttl)
-            .map_err(|error| format!("`{KEY}.conversation_ttl` is invalid: {error}."))?;
-        if ttl < rollover.length() {
-            return Err(format!(
-                "`{KEY}.conversation_ttl` is `{conversation_ttl}`, shorter than a conversation \
-                 lasts: it would be removed while the chat still uses it. Make it at least `{}`.",
-                humantime::format_duration(rollover.length())
-            ));
-        }
-
-        let account = raw
-            .signal
-            .account
-            .map(|account| account.trim().to_owned())
-            .filter(|account| !account.is_empty())
-            .ok_or_else(|| format!("`{KEY}.signal.account` is required: the account to run as."))?;
+        let conversation_ttl = conversation_ttl(raw.conversation_ttl, rollover)?;
 
         Ok(Self {
             persona: raw.persona.filter(|persona| !persona.trim().is_empty()),
@@ -232,18 +210,7 @@ impl Options {
             conversation_ttl,
             people,
             checkout: checkout(raw.checkout)?,
-            signal: SignalOptions {
-                account,
-                account_id: raw
-                    .signal
-                    .account_id
-                    .map(|id| id.trim().to_owned())
-                    .filter(|id| !id.is_empty()),
-                command: raw
-                    .signal
-                    .command
-                    .unwrap_or_else(|| "signal-cli".to_owned()),
-            },
+            signal: signal(raw.signal)?,
         })
     }
 
@@ -274,6 +241,46 @@ fn rollover(raw: Option<&str>) -> Result<Rollover, String> {
             "`{KEY}.rollover` is `{raw}`; use `daily`, or the day of the week a new conversation \
              starts on, such as `sunday`."
         )
+    })
+}
+
+/// Read `conversation_ttl`, defaulting by `rollover`, and refuse one shorter
+/// than a conversation lasts.
+fn conversation_ttl(raw: Option<String>, rollover: Rollover) -> Result<String, String> {
+    let conversation_ttl = raw.unwrap_or_else(|| {
+        match rollover {
+            Rollover::Daily => DEFAULT_DAILY_TTL,
+            Rollover::Weekly(_) => DEFAULT_WEEKLY_TTL,
+        }
+        .to_owned()
+    });
+    let ttl = humantime::parse_duration(&conversation_ttl)
+        .map_err(|error| format!("`{KEY}.conversation_ttl` is invalid: {error}."))?;
+    if ttl < rollover.length() {
+        return Err(format!(
+            "`{KEY}.conversation_ttl` is `{conversation_ttl}`, shorter than a conversation lasts: \
+             it would be removed while the chat still uses it. Make it at least `{}`.",
+            humantime::format_duration(rollover.length())
+        ));
+    }
+
+    Ok(conversation_ttl)
+}
+
+fn signal(raw: RawSignal) -> Result<SignalOptions, String> {
+    let account = raw
+        .account
+        .map(|account| account.trim().to_owned())
+        .filter(|account| !account.is_empty())
+        .ok_or_else(|| format!("`{KEY}.signal.account` is required: the account to run as."))?;
+
+    Ok(SignalOptions {
+        account,
+        account_id: raw
+            .account_id
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty()),
+        command: raw.command.unwrap_or_else(|| "signal-cli".to_owned()),
     })
 }
 

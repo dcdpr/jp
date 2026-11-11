@@ -5,21 +5,22 @@
 //! each turn under the configured persona and configuration, just like `jp
 //! query`.
 //!
-//! - [`transport`] defines the chat transport interface; [`signal`] implements
-//!   it over `signal-cli` in JSON-RPC mode.
-//! - [`bridge`] routes messages from allowed senders to conversations and
-//!   schedules turns.
-//! - [`checkout`] locks the git checkout during turns, pulls when clean, and
+//! - `transport` defines the chat transport interface; `signal` implements it
+//!   over `signal-cli` in JSON-RPC mode.
+//! - `bridge` routes messages from allowed senders to conversations and
+//!   schedules turns, with `queue` holding the messages that wait for one.
+//! - `checkout` locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable
 //!   directories.
-//! - [`host`] implements the `jp` plugin protocol over stdin and stdout.
-//! - [`options`] parses `plugins.command.serve-chat.options`.
+//! - `host` implements the `jp` plugin protocol over stdin and stdout.
+//! - `options` parses `plugins.command.serve-chat.options`.
 
 mod answer;
 mod bridge;
 mod checkout;
 mod host;
 mod options;
+mod queue;
 mod signal;
 mod state;
 mod text;
@@ -27,16 +28,16 @@ mod transport;
 
 use std::{
     io::{BufRead, Write},
-    sync::Arc,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use camino::Utf8PathBuf;
-use jp_plugin::message::{DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost};
+use jp_plugin::message::{DescribeResponse, HostToPlugin, InitMessage, PluginToHost};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
     bridge::Bridge,
-    checkout::{Checkout, GitCheckout, Unguarded},
+    checkout::{GitCheckout, Unguarded},
     host::{Host as _, HostClient, Level},
     options::Options,
     signal::{Logger, Signal},
@@ -52,7 +53,7 @@ const REQUIRED_PROTOCOL: u32 = 11;
 
 /// Embedded plugin manifest read by `jp` for binary discovery.
 ///
-/// `protocol` must match [`REQUIRED_PROTOCOL`].
+/// `protocol` must match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 11,
     description: "Relay chat messages to JP turns, and the answers back",
@@ -88,66 +89,65 @@ Nothing a turn writes is committed. Take it for review from the checkout, under
 the lock at `git rev-parse --git-path jp-serve-chat.lock`; the bridge pulls
 again once the tree is clean.";
 
+/// How many received chat messages can wait for the bridge before the
+/// transport's reader blocks.
+const INBOUND_CAPACITY: usize = 64;
+
 /// Run one plugin session over `stdin` and `stdout`.
 ///
 /// Answers `describe` and exits, or handles `init` by running the bridge until
 /// the host requests shutdown or the transport exits.
 pub fn run(
     mut stdin: impl BufRead + Send + 'static,
-    mut stdout: impl Write + Send + 'static,
+    stdout: impl Write + Send + 'static,
 ) -> Result<(), String> {
-    match read_message(&mut stdin)? {
-        HostToPlugin::Describe => send_describe(&mut stdout),
-        HostToPlugin::Init(init) => {
-            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
-                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
-                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
-            }
+    let client = HostClient::new(stdout);
 
-            if init.tool.is_some() {
-                return send_exit(&mut stdout, 1, "`jp serve chat` serves no tools.");
-            }
-            match init.args.first().map(String::as_str) {
-                None => {}
-                Some("-h" | "--help") => {
-                    send(
-                        &mut stdout,
-                        &PluginToHost::Print(jp_plugin::message::PrintMessage {
-                            text: format!("{HELP_TEXT}\n"),
-                            channel: "content".to_owned(),
-                            format: "plain".to_owned(),
-                            language: None,
-                        }),
-                    )?;
-                    return send(
-                        &mut stdout,
-                        &PluginToHost::Exit(ExitMessage {
-                            code: 0,
-                            reason: None,
-                            expected: false,
-                        }),
-                    );
-                }
-                Some(other) => {
-                    return send_exit(
-                        &mut stdout,
-                        2,
-                        &format!("`jp serve chat` takes no arguments, got `{other}`."),
-                    );
-                }
-            }
+    let init = match first_message(&mut stdin)? {
+        HostToPlugin::Describe => return client.send(&PluginToHost::Describe(describe()?)),
+        HostToPlugin::Init(init) => init,
+        other => return Err(format!("expected init or describe, got: {other:?}")),
+    };
 
-            let (client, shutdown) = HostClient::start(stdin, stdout);
-            let result = serve(&init, &client, shutdown);
-            match &result {
-                Ok(()) => client.exit(0, None),
-                Err(reason) => client.exit(1, Some(reason.clone())),
-            }
-
-            Ok(())
-        }
-        other => Err(format!("expected init or describe, got: {other:?}")),
+    match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
+        Ok(ready) => client.send(&PluginToHost::Ready(ready))?,
+        Err(exit) => return client.send(&PluginToHost::Exit(exit)),
     }
+    if init.tool.is_some() {
+        return client.exit(1, Some("`jp serve chat` serves no tools.".to_owned()));
+    }
+    match init.args.first().map(String::as_str) {
+        None => {}
+        Some("-h" | "--help") => {
+            client.print(HELP_TEXT);
+            return client.exit(0, None);
+        }
+        Some(other) => {
+            return client.exit(
+                2,
+                Some(format!(
+                    "`jp serve chat` takes no arguments, got `{other}`."
+                )),
+            );
+        }
+    }
+
+    let shutdown = client.listen(stdin)?;
+    match serve(&init, &client, shutdown) {
+        Ok(()) => client.exit(0, None),
+        Err(reason) => client.exit(1, Some(reason)),
+    }
+}
+
+/// Read the host's first message: `describe`, or `init` to start a run.
+fn first_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
+    let line = stdin
+        .lines()
+        .next()
+        .ok_or("The host stopped responding before sending init.")?
+        .map_err(|error| format!("failed to read from the host: {error}"))?;
+
+    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
 }
 
 fn serve(
@@ -165,7 +165,7 @@ fn serve(
         .map_err(|error| format!("failed to start the async runtime: {error}"))?;
 
     runtime.block_on(async {
-        let (inbound_tx, inbound) = mpsc::channel(64);
+        let (inbound_tx, inbound) = mpsc::channel(INBOUND_CAPACITY);
         let log_client = client.clone();
         let log: Logger = Arc::new(move |level, message| log_client.log(level, &message));
         let (signal, _process) = Signal::spawn(&options.signal, log, inbound_tx)?;
@@ -182,32 +182,19 @@ fn serve(
             }
         ));
         client.log(
-            Level::Info,
+            Level::INFO,
             &format!("Bridge state is kept in {}", state_dir(init)?),
         );
 
-        if options.checkout.enabled {
-            let checkout =
-                GitCheckout::open(&init.workspace.root, options.checkout.writable.clone())?;
-            relay(client, outbox, checkout, options, state, inbound, shutdown).await
-        } else {
-            relay(client, outbox, Unguarded, options, state, inbound, shutdown).await
+        if !options.checkout.enabled {
+            let bridge = Bridge::new(client.clone(), outbox, Unguarded, options, state);
+            return bridge.run(inbound, shutdown).await;
         }
-    })
-}
 
-async fn relay<C: Checkout>(
-    client: &HostClient,
-    outbox: Arc<dyn Outbox>,
-    checkout: C,
-    options: Options,
-    state: State,
-    inbound: mpsc::Receiver<transport::Inbound>,
-    shutdown: watch::Receiver<bool>,
-) -> Result<(), String> {
-    Bridge::new(client.clone(), outbox, checkout, options, state)
-        .run(inbound, shutdown)
-        .await
+        let checkout = GitCheckout::open(&init.workspace.root, options.checkout.writable.clone())?;
+        let bridge = Bridge::new(client.clone(), outbox, checkout, options, state);
+        bridge.run(inbound, shutdown).await
+    })
 }
 
 /// Directory where the bridge persists its chat-to-conversation mapping.
@@ -225,7 +212,8 @@ fn state_dir(init: &InitMessage) -> Result<Utf8PathBuf, String> {
     Err("JP reported no user data directory to keep the bridge's state in.".to_owned())
 }
 
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
+/// The `describe` answer: the manifest, this version, and the help text.
+fn describe() -> Result<DescribeResponse, String> {
     let mut describe = DescribeResponse::from_manifest(
         MANIFEST,
         "serve-chat",
@@ -237,37 +225,14 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
     describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
     describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
 
-    send(stdout, &PluginToHost::Describe(describe))
+    Ok(describe)
 }
 
-fn send_exit(stdout: &mut impl Write, code: u8, reason: &str) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: Some(reason.to_owned()),
-            expected: false,
-        }),
-    )
-}
-
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    let read = stdin
-        .read_line(&mut line)
-        .map_err(|error| format!("failed to read from the host: {error}"))?;
-    if read == 0 {
-        return Err("The host stopped responding before sending init.".to_owned());
-    }
-
-    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
-}
-
-fn send(stdout: &mut impl Write, message: &PluginToHost) -> Result<(), String> {
-    let json =
-        serde_json::to_string(message).map_err(|error| format!("serialize error: {error}"))?;
-    writeln!(stdout, "{json}").map_err(|error| format!("write error: {error}"))?;
-    stdout
-        .flush()
-        .map_err(|error| format!("flush error: {error}"))
+/// Lock `mutex`, taking it over if a thread panicked while holding it.
+///
+/// Each mutex in this crate guards a writer or a map of waiters, which stay
+/// usable after a panic elsewhere; refusing the lock instead would turn one
+/// panic into a panic on every later message.
+pub(crate) fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

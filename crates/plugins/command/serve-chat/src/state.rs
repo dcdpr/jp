@@ -23,7 +23,7 @@ struct Entry {
     conversation: String,
 }
 
-/// Map from [`Chat::key`] to its latest conversation.
+/// Map from a chat's key (its `Display` form) to its latest conversation.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Chats {
     chats: BTreeMap<String, Entry>,
@@ -70,7 +70,7 @@ impl State {
     pub(crate) fn conversation(&self, chat: &Chat, period: NaiveDate) -> Option<&str> {
         self.chats
             .chats
-            .get(&chat.key())
+            .get(&chat.to_string())
             .filter(|entry| entry.date == period)
             .map(|entry| entry.conversation.as_str())
     }
@@ -85,7 +85,7 @@ impl State {
         period: NaiveDate,
         conversation: &str,
     ) -> Result<(), String> {
-        self.chats.chats.insert(chat.key(), Entry {
+        self.chats.chats.insert(chat.to_string(), Entry {
             date: period,
             conversation: conversation.to_owned(),
         });

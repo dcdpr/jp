@@ -25,6 +25,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     host::Level,
+    lock,
     options::SignalOptions,
     text::{chunks, styled},
     transport::{Chat, Inbound, Outbox},
@@ -83,9 +84,11 @@ impl Signal {
             .spawn()
             .map_err(|error| format!("failed to start `{}`: {error}", options.command))?;
 
-        let stdin = child.stdin.take().expect("stdin piped");
-        let stdout = child.stdout.take().expect("stdout piped");
-        let stderr = child.stderr.take().expect("stderr piped");
+        // Piped above, so each is there; a `None` would be a bug in that setup.
+        let missing = |pipe: &str| format!("`{}` started without its {pipe}", options.command);
+        let stdin = child.stdin.take().ok_or_else(|| missing("stdin"))?;
+        let stdout = child.stdout.take().ok_or_else(|| missing("stdout"))?;
+        let stderr = child.stderr.take().ok_or_else(|| missing("stderr"))?;
 
         let reader_log = Arc::clone(&log);
         let own_ids = options.own_ids();
@@ -101,7 +104,7 @@ impl Signal {
             .name("signal-stderr".into())
             .spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    stderr_log(Level::Info, format!("signal-cli: {line}"));
+                    stderr_log(Level::INFO, format!("signal-cli: {line}"));
                 }
             })
             .map_err(|error| format!("failed to start the Signal log reader: {error}"))?;
@@ -119,10 +122,10 @@ impl Signal {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let line = request(id, method, params);
 
-        let mut stdin = self.stdin.lock().expect("signal stdin lock poisoned");
+        let mut stdin = lock(&self.stdin);
         if let Err(error) = writeln!(stdin, "{line}").and_then(|()| stdin.flush()) {
             (self.log)(
-                Level::Error,
+                Level::ERROR,
                 format!("failed to write to signal-cli: {error}"),
             );
         }
@@ -250,44 +253,49 @@ fn message(envelope: &Value, own_ids: &[String]) -> Option<Inbound> {
         return None;
     }
 
-    let field = |name: &str| {
-        envelope
-            .get(name)
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-    };
-    let mut sender: Vec<String> = vec![];
-    for id in ["sourceUuid", "sourceNumber", "source"]
-        .into_iter()
-        .filter_map(field)
-    {
-        if !sender.contains(&id) {
-            sender.push(id);
-        }
-    }
-
+    let sender = sender(envelope);
     let group = data
         .pointer("/groupInfo/groupId")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
     let chat = match group {
         Some(group) => Chat::Group(group),
-        None => Chat::Direct(
-            field("sourceUuid")
-                .or_else(|| field("sourceNumber"))
-                .or_else(|| field("source"))?,
-        ),
+        None => Chat::Direct(sender.first()?.clone()),
     };
 
     Some(Inbound {
         chat,
         sender,
-        name: field("sourceName"),
+        name: field(envelope, "sourceName"),
         addressed: mentioned || replied,
         text,
         attachments,
     })
+}
+
+/// The non-empty string at `name` in `envelope`.
+fn field(envelope: &Value, name: &str) -> Option<String> {
+    envelope
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// The sender's identifiers in `envelope`, most stable first and without
+/// repeats: the account UUID, then the phone number, which a sender may hide.
+fn sender(envelope: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = vec![];
+    for id in ["sourceUuid", "sourceNumber", "source"]
+        .into_iter()
+        .filter_map(|name| field(envelope, name))
+    {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+
+    ids
 }
 
 /// Return whether the `number` or `uuid` field of `value` matches any ID in
@@ -357,12 +365,12 @@ fn read_messages(
                     return;
                 }
             }
-            Line::Failed(error) => log(Level::Warn, format!("signal-cli request failed: {error}")),
+            Line::Failed(error) => log(Level::WARN, format!("signal-cli request failed: {error}")),
             Line::Ignored => {}
         }
     }
 
-    log(Level::Error, "signal-cli exited.".to_owned());
+    log(Level::ERROR, "signal-cli exited.".to_owned());
 }
 
 #[cfg(test)]

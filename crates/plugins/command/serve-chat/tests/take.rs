@@ -16,7 +16,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use sha2::{Digest as _, Sha256};
 
-const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/take.sh");
+/// `take.sh`, found at run time: a test binary built in another worktree that
+/// shares the target directory would otherwise run that worktree's copy.
+fn script() -> Utf8PathBuf {
+    Utf8PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("take.sh")
+}
 
 /// A bridge checkout with one commit, and a directory of stub commands that
 /// goes first on `PATH`.
@@ -65,7 +69,7 @@ impl Server {
         let path = format!("{}:{}", self.bin.path(), env::var("PATH").unwrap());
 
         Command::new("sh")
-            .arg(SCRIPT)
+            .arg(script())
             .args(args)
             .env("PATH", path)
             .output()

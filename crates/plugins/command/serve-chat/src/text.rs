@@ -14,6 +14,9 @@
 //! measures: styling removes markup but turns each `- ` bullet into the larger
 //! `• `.
 
+/// The most `#`s a Markdown heading opens with.
+const MAX_HEADING_LEVEL: usize = 6;
+
 /// Plain text and `start:length:STYLE` UTF-16 ranges for `signal-cli`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Styled {
@@ -114,7 +117,7 @@ pub(crate) fn styled(markdown: &str) -> Styled {
         let trimmed = line.trim_start();
         let indent = &line[..line.len() - trimmed.len()];
         let hashes = trimmed.chars().take_while(|c| *c == '#').count();
-        if (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ') {
+        if (1..=MAX_HEADING_LEVEL).contains(&hashes) && trimmed[hashes..].starts_with(' ') {
             let start = out.units;
             out.inline(trimmed[hashes..].trim());
             out.style(start, "BOLD");
