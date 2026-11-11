@@ -118,18 +118,20 @@ fn fan_out_value(text: &str) -> Option<toml::Value> {
         .cloned()
 }
 
-/// Reads batch freely; writes batch one at a time, in the order written, since
-/// two writes to one ticket would race for its file.
-/// `list` filters already, so it doesn't batch.
-/// JP's own definitions say the same as the ones `tools init` writes.
+/// Read tools fan out concurrently; write tools run batched operations
+/// sequentially in call order so each step sees the previous step's writes.
+/// Concurrent tool calls across separate invocations are serialized by
+/// `.board.lock` rather than `fan_out`.
+/// `list` already accepts filters, so it does not use `fan_out`.
 #[test]
 fn tools_batch_as_far_as_they_safely_can() {
     let one_at_a_time = fan_out_value("{ concurrency = 1 }");
     let expected = vec![
         ("comment".to_owned(), one_at_a_time.clone()),
         ("create".to_owned(), one_at_a_time.clone()),
-        ("edit".to_owned(), one_at_a_time),
+        ("edit".to_owned(), one_at_a_time.clone()),
         ("list".to_owned(), None),
+        ("move".to_owned(), one_at_a_time),
         ("show".to_owned(), fan_out_value("true")),
     ];
 
@@ -151,7 +153,7 @@ fn enum_values(tool: &toml::Value, parameter: &str) -> Vec<String> {
 /// is hidden.
 fn assert_advertised_values_match_the_parser(routed: &[(String, String, toml::Value)]) {
     for (name, key, tool) in routed {
-        if !matches!(name.as_str(), "edit" | "list") {
+        if !matches!(name.as_str(), "edit" | "list" | "move") {
             continue;
         }
 

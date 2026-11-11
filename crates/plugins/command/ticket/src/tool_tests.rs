@@ -1900,7 +1900,7 @@ fn an_unknown_tool_names_the_ones_served() {
     assert_eq!(
         error_message(run_tool(&dir, "frobnicate", json!({}))),
         "`jp ticket` serves no tool named `frobnicate`. It serves: comment, create, edit, list, \
-         show."
+         move, show."
     );
 }
 
@@ -2441,4 +2441,269 @@ fn list_counts_the_checklist() {
         "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\nT-02wt0kz Todo         \
          No checklist here\n"
     );
+}
+
+fn three_in_todo(dir: &Utf8TempDir) -> [TicketId; 3] {
+    [
+        write_ticket_as(dir, "T-02wt0k1", "First"),
+        write_ticket_as(dir, "T-02wt0k2", "Second"),
+        write_ticket_as(dir, "T-02wt0k3", "Third"),
+    ]
+}
+
+fn board_file(dir: &Utf8TempDir) -> String {
+    fs::read_to_string(tickets(dir).dir.join(board::BOARD_FILE)).unwrap()
+}
+
+#[test]
+fn move_changes_the_column_and_says_where_the_ticket_landed() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k2", "status": "in progress" })
+        )),
+        "Moved T-02wt0k2:\n- status: Todo -> In Progress\n- place: 1 of 1 in In Progress\n"
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k2", "status": "in progress" })
+        )),
+        "Moved T-02wt0k2:\n- status: already In Progress\n- place: 1 of 1 in In Progress\n"
+    );
+    // Changing status without a placement does not create `.board.json`.
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
+}
+
+#[test]
+fn move_places_a_ticket_before_or_after_another() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "before": "T-02wt0k1" })
+        )),
+        "Moved T-02wt0k3:\n- place: 1 of 3 in Todo, at the top\n"
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k1", "after": "T-02wt0k2" })
+        )),
+        "Moved T-02wt0k1:\n- place: 3 of 3 in Todo, below T-02wt0k2\n"
+    );
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({}))),
+        "T-02wt0k3 Todo         Third\nT-02wt0k2 Todo         Second\nT-02wt0k1 Todo         \
+         First\n"
+    );
+}
+
+/// Moving to `bottom` anchors after the last ticket in the column, which writes
+/// every preceding ticket in that column into `.board.json`.
+#[test]
+fn move_to_the_top_and_the_bottom_of_a_column() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "position": "top" })
+        )),
+        "Moved T-02wt0k3:\n- place: 1 of 3 in Todo, at the top\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k3\"\n  ],\n  \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "position": "bottom" })
+        )),
+        "Moved T-02wt0k3:\n- place: 3 of 3 in Todo, below T-02wt0k2\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k1\",\n    \"T-02wt0k2\",\n    \"T-02wt0k3\"\n  ],\n  \
+         \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+}
+
+/// Moving a ranked ticket to another column and back without a placement drops
+/// its previous rank, placing it below the column's ranked tickets.
+#[test]
+fn move_out_of_a_column_and_back_forgets_the_rank() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k3", "position": "top" }),
+    );
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k1", "after": "T-02wt0k3" }),
+    );
+
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k3", "status": "in progress" }),
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "status": "todo" })
+        )),
+        "Moved T-02wt0k3:\n- status: In Progress -> Todo\n- place: 3 of 3 in Todo, below \
+         T-02wt0k2\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k1\"\n  ],\n  \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+}
+
+#[test]
+fn move_to_another_column_and_a_place_in_it_at_once() {
+    let dir = Utf8TempDir::new().unwrap();
+    let [first, ..] = three_in_todo(&dir);
+    store::set_status(
+        &tickets(&dir).dir,
+        &Formatting::default(),
+        first,
+        Status::InProgress,
+    )
+    .unwrap();
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "status": "in progress", "position": "top" })
+        )),
+        "Moved T-02wt0k3:\n- status: Todo -> In Progress\n- place: 1 of 2 in In Progress, at the \
+         top\n"
+    );
+}
+
+#[test]
+fn move_next_to_a_ticket_in_another_column_changes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    let [_, second, _] = three_in_todo(&dir);
+    store::set_status(
+        &tickets(&dir).dir,
+        &Formatting::default(),
+        second,
+        Status::Done,
+    )
+    .unwrap();
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k1", "after": "T-02wt0k2" })
+        )),
+        "T-02wt0k2 is Done, not Todo; a ticket is placed next to one in the column it moves to."
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k1", "before": "T-02wt0k1" })
+        )),
+        "T-02wt0k1 can't be ranked against itself."
+    );
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
+}
+
+#[test]
+fn move_closing_a_parent_with_open_children_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (parent, ..) = family(&dir);
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "move",
+            json!({ "id": FIXED_ID, "status": "done", "position": "top" }),
+        )),
+        "T-02wt0kx has open children: T-02wt0m0. Close them, or move them out from under \
+         T-02wt0kx, first."
+    );
+    let path = store::locate_ticket(&tickets(&dir).dir, parent).unwrap();
+    let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.status, Status::Todo);
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
+}
+
+#[test]
+fn move_closing_a_ticket_warns_about_unchecked_items() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": FIXED_ID, "status": "done" })
+        )),
+        "Moved T-02wt0kx:\n- status: Todo -> Done\n- place: 1 of 1 in Done\n- warning: closed \
+         with 2 of 3 checklist items unchecked: \"Cover a second tool call\", \"Cover parallel \
+         calls\". Check the ones that are done, and remove the rest with a comment saying why.\n"
+    );
+}
+
+#[test]
+fn move_refuses_arguments_that_name_no_single_place() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+    let refused = |arguments: Value| error_message(run_tool(&dir, "move", arguments));
+
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1" })),
+        "Name where to move it: `status`, or one of `before`, `after`, and `position`."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "before": "T-02wt0k2", "position": "top" })),
+        "Name one of `before`, `after`, and `position`, not several."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "position": "middle" })),
+        "`position` must be one of: top, bottom."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "status": "blocked" })),
+        "`status` must be one of: todo, in progress, done."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "after": 7 })),
+        "`after`: `7` is not a ticket id."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-0zzzzzz", "position": "top" })),
+        "No T-0zzzzzz."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "after": "T-0zzzzzz" })),
+        "No ticket T-0zzzzzz."
+    );
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
 }

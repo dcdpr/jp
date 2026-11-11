@@ -21,6 +21,7 @@ pub(crate) const DEFINITIONS: Definitions = Definitions {
         ("create.toml", include_str!("../tools/create.toml")),
         ("edit.toml", include_str!("../tools/edit.toml")),
         ("list.toml", include_str!("../tools/list.toml")),
+        ("move.toml", include_str!("../tools/move.toml")),
         ("show.toml", include_str!("../tools/show.toml")),
     ],
     offers: "labels",
