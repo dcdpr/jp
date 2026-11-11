@@ -134,6 +134,28 @@ fn serve_passes_its_arguments_to_vitepress() {
     }
 }
 
+/// The `package.json` `jp vite init` writes runs `jp vite serve --` and `jp
+/// vite build --`, and a package manager appends whatever follows `npm run dev
+/// --`.
+#[test]
+fn the_scripts_init_writes_pass_their_arguments_on() {
+    for (args, expected) in [
+        (["serve", "--"].as_slice(), [].as_slice()),
+        (["build", "--"].as_slice(), [].as_slice()),
+        (["serve", "--", "--open"].as_slice(), ["--open"].as_slice()),
+        (
+            ["build", "--", "--outDir", "dist"].as_slice(),
+            ["--outDir", "dist"].as_slice(),
+        ),
+    ] {
+        let vitepress = match parse(args).unwrap().command {
+            Command::Serve { vitepress } | Command::Build { vitepress } => vitepress,
+            other => panic!("expected serve or build, got {other:?}"),
+        };
+        assert_eq!(vitepress, expected, "{args:?}");
+    }
+}
+
 /// `--check` writes nothing, so there is nothing to force or confirm.
 #[test]
 fn check_takes_neither_force_nor_yes() {

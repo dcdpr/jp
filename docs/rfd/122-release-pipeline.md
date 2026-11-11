@@ -732,6 +732,8 @@ the release pages are rendered by the release of `jp vite` that wrote the site's
 files.
 `jp vite build` brings the settings snapshot up to date first, as `serve` does,
 and refuses while a file `jp vite sync` writes is out of date.
+The `package.json` `jp vite init` writes runs both, as its `dev` and `build`
+scripts.
 A `vitepress build` started by hand runs the `changelog` binary on `PATH`.
 
 JP's docs build runs `vitepress build` directly, so it needs no `jp`; it
@@ -985,6 +987,8 @@ Depends on Phase 4.
 `jp vite build`, and the `jp-vite` binary rendering the release pages under
 `serve` and `build`, as `jp-vite changelog`, so only a `vitepress build` started
 by hand, as JP's docs build is, needs the `changelog` binary.
+`jp vite init`'s `package.json` runs `serve` and `build` as its `dev` and
+`build` scripts.
 Depends on Phase 4.
 
 ## References
