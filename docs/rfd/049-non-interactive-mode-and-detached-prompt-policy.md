@@ -260,9 +260,17 @@ later as an alias alongside `--non-interactive`.
   (stdout, stderr, `/dev/tty`, and log file).
   This RFD consumes `/dev/tty` availability without defining the output
   architecture.
+
 - **Background execution and prompt queuing.** Running conversations as detached
   background processes, the `queue`/`defer` detached policy, and attach IPC are
   future work.
+
+  > [!NOTE]
+  > T-1hetcnt gives a turn that a command plugin starts someone to ask: the
+  > plugin.
+  > It answers the prompts it can and declines the rest, and a declined prompt
+  > gets the non-interactive behaviour this RFD defines.
+
 - **New prompt variants.** This RFD uses the `Prompt` enum from [RFD 018] as-is.
 
 ## Risks and Open Questions

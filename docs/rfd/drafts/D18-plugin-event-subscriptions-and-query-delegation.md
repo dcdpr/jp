@@ -111,6 +111,12 @@ JP also removes all active subscriptions when the plugin exits.
 
 ### Interactive Events
 
+> [!NOTE]
+> T-1hetcnt plans this section on its own, for turns a plugin starts with
+> `query` and without subscriptions, using the `tool_approval` and `inquiry`
+> shapes below.
+> It adds a `decline` answer, which makes JP do what it does with nobody there.
+
 Pushed events without a `respond` field are informational: the plugin observes
 them and does not reply.
 Events that require user input carry a `respond` field naming the expected
