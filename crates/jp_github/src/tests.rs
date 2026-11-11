@@ -1,7 +1,7 @@
-use jp_test::mock::{DELETE, GET, MockServer, POST};
+use jp_test::mock::{DELETE, GET, MockServer, PATCH, POST};
 use serde_json::{Value, json};
 
-use crate::{Error, Octocrab, params};
+use crate::{Error, Octocrab, models, params};
 
 fn test_client(base_url: &str, token: Option<&str>) -> Octocrab {
     Octocrab::with_base_url(base_url, token)
@@ -1023,5 +1023,205 @@ async fn graphql_surfaces_top_level_errors_as_error() {
         ),
         other => panic!("unexpected error variant: {other:?}"),
     }
+    mock.assert();
+}
+
+fn release_json(base_url: &str, id: u64, tag: &str, draft: bool) -> Value {
+    json!({
+        "id": id,
+        "tag_name": tag,
+        "name": format!("Release {}", tag.trim_start_matches('v')),
+        "body": "The notes.",
+        "draft": draft,
+        "prerelease": false,
+        "html_url": format!("https://github.com/acme/widgets/releases/tag/{tag}"),
+        "upload_url": format!("{base_url}/uploads/repos/acme/widgets/releases/{id}/assets{{?name,label}}"),
+        "assets": [{
+            "id": 7,
+            "name": "checksums.txt",
+            "browser_download_url": format!(
+                "https://github.com/acme/widgets/releases/download/{tag}/checksums.txt"
+            )
+        }]
+    })
+}
+
+/// A client the builder made goes where it was told, as a client for GitHub
+/// Enterprise or a test would.
+#[tokio::test]
+async fn a_built_client_sends_requests_to_its_base_url() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/user")
+                .header("authorization", "Bearer token");
+            then.status(200).json_body(json!({ "login": "alice" }));
+        })
+        .await;
+
+    let client = Octocrab::builder()
+        .personal_token("token")
+        .base_url(format!("{}/", server.base_url()))
+        .build()
+        .expect("client");
+    let user = client.current().user().await.expect("user");
+
+    assert_eq!(user.login, "alice");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn releases_list_reads_drafts_and_their_assets() {
+    let server = MockServer::start_async().await;
+    let base = server.base_url();
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/releases")
+                .query_param("per_page", "100")
+                .query_param("page", "1");
+            then.status(200).json_body(json!([
+                release_json(&base, 2, "v0.2.0", true),
+                release_json(&base, 1, "v0.1.0", false),
+            ]));
+        })
+        .await;
+
+    let client = test_client(&base, None);
+    let releases = client
+        .releases("acme", "widgets")
+        .list()
+        .await
+        .expect("list releases");
+
+    assert_eq!(
+        releases
+            .iter()
+            .map(|release| (release.tag_name.as_str(), release.draft))
+            .collect::<Vec<_>>(),
+        [("v0.2.0", true), ("v0.1.0", false)]
+    );
+    assert_eq!(releases[1].assets[0].name, "checksums.txt");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn releases_create_sends_the_release() {
+    let server = MockServer::start_async().await;
+    let base = server.base_url();
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/repos/acme/widgets/releases")
+                .json_body(json!({
+                    "tag_name": "v0.2.0",
+                    "name": "Release 0.2.0",
+                    "body": "The notes.",
+                    "draft": true
+                }));
+            then.status(201)
+                .json_body(release_json(&base, 2, "v0.2.0", true));
+        })
+        .await;
+
+    let client = test_client(&base, None);
+    let release = client
+        .releases("acme", "widgets")
+        .create(&params::NewRelease {
+            tag_name: "v0.2.0".to_owned(),
+            name: "Release 0.2.0".to_owned(),
+            body: "The notes.".to_owned(),
+            draft: true,
+            make_latest: None,
+        })
+        .await
+        .expect("create release");
+
+    assert_eq!(release.id, 2);
+    mock.assert();
+}
+
+/// Only what the update names is sent, so the rest of the release stays.
+#[tokio::test]
+async fn releases_update_sends_only_what_changes() {
+    let server = MockServer::start_async().await;
+    let base = server.base_url();
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(PATCH)
+                .path("/repos/acme/widgets/releases/2")
+                .json_body(json!({ "draft": false, "make_latest": "true" }));
+            then.status(200)
+                .json_body(release_json(&base, 2, "v0.2.0", false));
+        })
+        .await;
+
+    let client = test_client(&base, None);
+    let release = client
+        .releases("acme", "widgets")
+        .update(2, &params::ReleaseUpdate {
+            draft: Some(false),
+            make_latest: Some(params::MakeLatest::True),
+            ..params::ReleaseUpdate::default()
+        })
+        .await
+        .expect("update release");
+
+    assert!(!release.draft);
+    mock.assert();
+}
+
+/// Uploads go to the address the release names, not below the API's.
+#[tokio::test]
+async fn releases_upload_asset_posts_the_file_to_the_release_upload_url() {
+    let server = MockServer::start_async().await;
+    let base = server.base_url();
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/uploads/repos/acme/widgets/releases/2/assets")
+                .query_param("name", "jp.tar.xz")
+                .header("content-type", "application/octet-stream")
+                .body("an archive\n");
+            then.status(201).json_body(json!({
+                "id": 9,
+                "name": "jp.tar.xz",
+                "browser_download_url": "https://github.com/acme/widgets/releases/download/v0.2.0/jp.tar.xz"
+            }));
+        })
+        .await;
+    let release: models::releases::Release =
+        serde_json::from_value(release_json(&base, 2, "v0.2.0", true)).expect("release");
+
+    let client = test_client(&base, None);
+    let asset = client
+        .releases("acme", "widgets")
+        .upload_asset(&release, "jp.tar.xz", b"an archive\n".to_vec())
+        .await
+        .expect("upload asset");
+
+    assert_eq!(asset.id, 9);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn releases_delete_asset_treats_204_as_success() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(DELETE)
+                .path("/repos/acme/widgets/releases/assets/7");
+            then.status(204);
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    client
+        .releases("acme", "widgets")
+        .delete_asset(7)
+        .await
+        .expect("delete asset");
+
     mock.assert();
 }

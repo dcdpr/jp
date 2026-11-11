@@ -1040,6 +1040,79 @@ impl ReposHandler {
     }
 }
 
+/// A repository's releases, and the files attached to them.
+pub struct ReleasesHandler {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+}
+
+impl ReleasesHandler {
+    /// Every release of the repository, newest first; drafts are listed for a
+    /// token that can push to it.
+    pub async fn list(&self) -> Result<Vec<models::releases::Release>> {
+        self.client
+            .get_paginated(
+                &format!("/repos/{}/{}/releases", self.owner, self.repo),
+                vec![],
+                100,
+            )
+            .await
+    }
+
+    pub async fn create(&self, release: &params::NewRelease) -> Result<models::releases::Release> {
+        self.client
+            .post_json(
+                &format!("/repos/{}/{}/releases", self.owner, self.repo),
+                release,
+            )
+            .await
+    }
+
+    /// Change the release with `id` as `update` says.
+    pub async fn update(
+        &self,
+        id: u64,
+        update: &params::ReleaseUpdate,
+    ) -> Result<models::releases::Release> {
+        self.client
+            .patch_json(
+                &format!("/repos/{}/{}/releases/{id}", self.owner, self.repo),
+                update,
+            )
+            .await
+    }
+
+    /// Attach `contents` to `release` as the file `name`.
+    ///
+    /// GitHub refuses a second file of one name, so delete an earlier one
+    /// first.
+    pub async fn upload_asset(
+        &self,
+        release: &models::releases::Release,
+        name: &str,
+        contents: Vec<u8>,
+    ) -> Result<models::releases::Asset> {
+        let url = release
+            .upload_url
+            .split('{')
+            .next()
+            .unwrap_or(&release.upload_url);
+
+        self.client.upload(url, name, contents).await
+    }
+
+    /// Delete the file attached to a release with `id`.
+    pub async fn delete_asset(&self, id: u64) -> Result<()> {
+        self.client
+            .delete_no_content(&format!(
+                "/repos/{}/{}/releases/assets/{id}",
+                self.owner, self.repo
+            ))
+            .await
+    }
+}
+
 pub struct RepoContentBuilder {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,

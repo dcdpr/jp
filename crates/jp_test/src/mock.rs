@@ -7,7 +7,7 @@ use std::{
 use httpmock::RecordingRuleBuilder;
 pub use httpmock::{
     MockServer,
-    prelude::{DELETE, GET, POST},
+    prelude::{DELETE, GET, PATCH, POST},
 };
 use saphyr::{LoadableYamlNode, Yaml, YamlEmitter};
 
