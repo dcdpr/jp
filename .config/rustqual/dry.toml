@@ -18,14 +18,11 @@
 # collects only `DRY-*` rules from this pass, so the CI gate takes both rules
 # from the main pass alone.
 #
-# Disabling `[complexity]` also produces three `ORPHAN_SUPPRESSION` findings
-# here, on the `qual:allow(complexity, magic_numbers)` markers in the provider
-# model catalogs: `rustqual` sees no complexity findings to match those markers
-# against and reports them as orphaned, even though `MAGIC_NUMBER` still fires.
-# The markers work as intended in the main pass (498 findings down to 193), and
-# the CI gate ignores `ORPHAN_SUPPRESSION` findings from this pass because only
-# `DRY-*` rules are collected here. Keeping the provider files in this pass
-# preserves DRY coverage on them.
+# With `[complexity]` disabled, `rustqual` has no complexity finding to match a
+# `qual:allow(complexity, …)` marker against, so this pass reports every such
+# marker as `ORPHAN_SUPPRESSION`, even though `MAGIC_NUMBER` still fires. The CI
+# gate ignores those because only `DRY-*` rules are collected here; whether a
+# marker is stale is decided in the main pass.
 
 exclude_files = [
     "**/*_tests.rs",
@@ -33,8 +30,13 @@ exclude_files = [
     "**/tests/**",
 ]
 
+# `DRY-004` (wildcard import) is `clippy::wildcard_imports`, which the workspace
+# runs through `clippy::pedantic`. The workspace allows `clippy::enum_glob_use`
+# on purpose, and enum globs are all `DRY-004` reported (10 of 10 on
+# 2026-11-11). A rule that clippy covers as well or better is off (T-0yh5m6r).
 [duplicates]
-enabled = true
+enabled                 = true
+detect_wildcard_imports = false
 
 [boilerplate]
 enabled = false

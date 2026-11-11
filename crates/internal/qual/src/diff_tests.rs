@@ -144,6 +144,113 @@ fn a_finding_in_a_renamed_file_is_not_new() {
 }
 
 #[test]
+fn a_finding_that_moved_to_another_file_with_its_symbol_is_not_new() {
+    let base = vec![finding("CX-001", "src/a.rs", "Parser::run", 10)];
+    let head = vec![finding("CX-001", "src/a/support.rs", "Parser::run", 4)];
+
+    let verdict = compare(base, head);
+
+    assert!(verdict.passed());
+    assert_eq!(verdict.new, vec![]);
+}
+
+#[test]
+fn a_moved_finding_does_not_cover_one_the_base_still_has() {
+    // `src/a.rs` keeps its finding, so nothing left that file for `src/b.rs` to
+    // have received.
+    let base = vec![finding("CX-001", "src/a.rs", "Parser::run", 10)];
+    let head = vec![
+        finding("CX-001", "src/a.rs", "Parser::run", 10),
+        finding("CX-001", "src/b.rs", "Parser::run", 4),
+    ];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("CX-001", "src/b.rs", "Parser::run", 4),
+        shared: None,
+    }]);
+}
+
+#[test]
+fn a_moved_finding_covers_as_many_as_left_the_other_file() {
+    let base = vec![finding("CX-003", "src/a.rs", "run", 10)];
+    let head = vec![
+        finding("CX-003", "src/b.rs", "run", 4),
+        finding("CX-003", "src/b.rs", "run", 6),
+    ];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![
+        NewFinding {
+            finding: finding("CX-003", "src/b.rs", "run", 4),
+            shared: Some(Shared { new: 1, of: 2 }),
+        },
+        NewFinding {
+            finding: finding("CX-003", "src/b.rs", "run", 6),
+            shared: Some(Shared { new: 1, of: 2 }),
+        },
+    ]);
+}
+
+#[test]
+fn a_moved_finding_covers_one_file_only() {
+    let base = vec![finding("CX-001", "src/a.rs", "run", 10)];
+    let head = vec![
+        finding("CX-001", "src/b.rs", "run", 4),
+        finding("CX-001", "src/c.rs", "run", 4),
+    ];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("CX-001", "src/c.rs", "run", 4),
+        shared: None,
+    }]);
+}
+
+#[test]
+fn another_rule_or_symbol_is_not_a_move() {
+    let base = vec![
+        finding("CX-001", "src/a.rs", "run", 10),
+        finding("CX-004", "src/a.rs", "parse", 30),
+    ];
+    let head = vec![
+        finding("CX-001", "src/b.rs", "parse", 4),
+        finding("CX-002", "src/b.rs", "run", 4),
+    ];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![
+        NewFinding {
+            finding: finding("CX-001", "src/b.rs", "parse", 4),
+            shared: None,
+        },
+        NewFinding {
+            finding: finding("CX-002", "src/b.rs", "run", 4),
+            shared: None,
+        },
+    ]);
+}
+
+/// A file-level finding has no symbol to follow: one long file made shorter
+/// doesn't pay for another made too long.
+#[test]
+fn a_file_level_finding_is_never_a_move() {
+    let base = vec![finding("SRP-002", "src/a.rs", "", 1)];
+    let head = vec![finding("SRP-002", "src/b.rs", "", 1)];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("SRP-002", "src/b.rs", "", 1),
+        shared: None,
+    }]);
+}
+
+#[test]
 fn an_exempt_rule_neither_gates_nor_counts() {
     let head = vec![finding("iosp/violation", "src/a.rs", "run", 10)];
 

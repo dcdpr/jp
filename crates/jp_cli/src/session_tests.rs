@@ -10,18 +10,6 @@ fn from_env_returns_none_for_unset_var() {
 }
 
 #[test]
-fn from_env_source_is_env_with_key() {
-    // We can't safely set env vars in Rust 2024 without unsafe, so test the
-    // source construction via the SessionSource type directly.
-    let source = SessionSource::Env {
-        key: "TMUX_PANE".to_owned(),
-    };
-    assert_eq!(source, SessionSource::Env {
-        key: "TMUX_PANE".to_owned(),
-    });
-}
-
-#[test]
 fn session_id_rejects_empty_string() {
     assert!(SessionId::new("").is_none());
 }

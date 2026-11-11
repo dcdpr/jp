@@ -98,6 +98,22 @@ Keep the rule cards: they supply the rule titles in the SARIF rules table, and
   change can't show up as findings appearing or disappearing.
   Remove `rustqual_version` and `_install-rustqual`.
 
+## Exemptions to lift
+
+`.config/rustqual/qual.toml` exempts two rules only because rustqual can't yet
+tell their real findings from the wrong ones (T-0yh5m6r).
+Each comes out of `exempt` in the commit that fixes its analyzer:
+
+- `BP-002`, once it flags newtype boilerplate and leaves `write!` with several
+  values and padding-aware delegation alone.
+- `IET`, once it skips trait impls whose error type the trait dictates (serde's
+  `serialize`/`deserialize`).
+
+`config.toml` also sets `[srp] max_independent_clusters` out of reach, which
+turns off the cluster half of `SRP-002`.
+It goes back to the default once a finding names the functions in each cluster
+(T-0yh5j3r item 10).
+
 ## Next: fold `qual` into rustqual
 
 Do this in follow-up ticket(s) after vendoring lands and before the analyzer

@@ -50,6 +50,35 @@ newer release has fixed.
    too.
    Reproduce that second case before filing, and propose limiting the exemption
    to a body that is a single literal expression.
+8. **`TQ-002` doesn't follow calls through trait impls.** A test that reaches
+   the code under test through `.into()` (`From`) or `to_string()` (`Display`)
+   is reported as calling no production function: `from_datetime` in
+   `crates/jp_cli/src/cmd/time_tests.rs` and
+   `initialize_timeout_display_includes_timeout_command_and_stderr` in
+   `crates/jp_mcp/src/client_tests.rs`, both marked `qual:allow(test_quality,
+   no_sut)`.
+   Two neighbouring tests in `client_tests.rs` assert on `to_string()` the same
+   way and are not reported; find out what differs before filing.
+9. **Item 1, measured.** `crates/jp_llm/src/provider/anthropic.rs` is about
+   3,700 lines and counts as 22 production lines, because a `#[cfg(test)]`
+   import sits on line 25.
+   `openai.rs` counts as 52 and `google.rs` as 134.
+   The largest files in the workspace pass the `SRP-002` length check.
+   JP's own convention puts `#[cfg(test)]` on the last item of a file only, so
+   the count is right for JP once T-1haqsmg enforces that; the upstream bug
+   stands for workspaces without the convention.
+10. **`SRP-002` doesn't name its clusters.** The SARIF message gives "N
+    independent clusters" without the functions in each, although the analyzer
+    has them (`cluster_names`).
+    `crates/jp_cli/src/bootstrap.rs` is reported with 3 and reads as one
+    responsibility; without the names the finding can't be checked or acted on.
+    The cluster half is off in `.config/rustqual/config.toml` until it does.
+11. **`qual:allow(complexity, magic_numbers)` above a `static` is always
+    stale.** rustqual records no magic number in a `const` or `static`
+    initializer, so the marker has nothing to match and is reported as
+    `ORPHAN-001`.
+    Correct, but the message ("no finding in window") doesn't say that the item
+    kind is never checked.
 
 ## Comments
 

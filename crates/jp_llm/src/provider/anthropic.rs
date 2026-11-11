@@ -1,3 +1,4 @@
+// qual:allow(srp, file_length=2400) reason: "provider, request building, stream mapping and model catalogue in one file; split in T-1hb8d4j"
 pub mod acp;
 pub mod auth;
 mod http;
@@ -21,8 +22,6 @@ use camino::Utf8PathBuf;
 use chrono::{NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
-#[cfg(test)]
-use jp_config::providers::llm::anthropic::AuthEntry;
 use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
@@ -243,22 +242,6 @@ impl Anthropic {
         }
 
         Ok(provider)
-    }
-
-    /// Build a provider around an explicit credential, bypassing the chain.
-    ///
-    /// Test seam: no environment or store access, no preflight.
-    #[cfg(test)]
-    pub(crate) fn with_credential(config: &AnthropicConfig, credential: Credential) -> Self {
-        Anthropic {
-            config: config.clone(),
-            beta: BetaFeatures(config.beta_headers.clone()),
-            chain_on_max_tokens: config.chain_on_max_tokens,
-            store: None,
-            fixed_credential: Some(credential),
-            client_cache: http::Clients::default(),
-            seen_notices: resolve::SeenNotices::default(),
-        }
     }
 
     /// Resolve the credential for a request against `model`.
@@ -1741,23 +1724,6 @@ fn resolve_cache_control(policy: CachePolicy) -> Option<types::CacheControl> {
         kind: types::CacheControlKind::Ephemeral,
         ttl: Some(ttl),
     })
-}
-
-#[cfg(test)]
-impl Anthropic {
-    /// Build the Anthropic wire request for `query` and serialize it to JSON
-    /// without sending.
-    /// Test-only seam for snapshotting request construction (notably compaction
-    /// projection) across providers.
-    pub(crate) fn request_value(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<serde_json::Value> {
-        let bearer = matches!(self.fixed_credential, Some(Credential::Bearer(_)));
-        let (request, ..) = create_request(model, query, true, &self.beta, bearer)?;
-        Ok(serde_json::to_value(request)?)
-    }
 }
 
 #[expect(clippy::too_many_lines)]
@@ -3532,216 +3498,8 @@ impl From<AnthropicError> for StreamError {
     }
 }
 
-/// Anthropic's recorded-test routes.
-///
-/// Both reach the same host; a subscription request differs by its bearer
-/// token, the Claude Code fingerprint, and the identity line leading its system
-/// content.
 #[cfg(test)]
-pub(crate) static TEST_SUPPORT: AnthropicTestSupport = AnthropicTestSupport;
-
-#[cfg(test)]
-pub(crate) struct AnthropicTestSupport;
-
-#[cfg(test)]
-impl super::ProviderTestSupport for AnthropicTestSupport {
-    fn api(&self) -> &'static dyn super::ProviderTestRoute {
-        &API_ROUTE
-    }
-
-    fn subscription(&self) -> Option<&'static dyn super::ProviderTestRoute> {
-        Some(&SUBSCRIPTION_ROUTE)
-    }
-
-    /// Strip the transport-mandated identity line, then erase what the model
-    /// authored.
-    fn project_request(&self, body: &serde_json::Value) -> serde_json::Value {
-        let mut body = body.clone();
-
-        strip_identity_line(&mut body);
-
-        // Only an assistant turn holds the model's words. A `text` block in
-        // `system` is JP's own prompt and stays compared.
-        for message in body
-            .get_mut("messages")
-            .and_then(Value::as_array_mut)
-            .into_iter()
-            .flatten()
-        {
-            if message.get("role").and_then(Value::as_str) != Some("assistant") {
-                continue;
-            }
-
-            for block in message
-                .get_mut("content")
-                .and_then(Value::as_array_mut)
-                .into_iter()
-                .flatten()
-            {
-                erase_model_output(block);
-            }
-        }
-
-        // `id` names a tool call, `tool_use_id` is how its result answers it.
-        // Both are minted by the host.
-        super::number_ids(&mut body, &["id", "tool_use_id"]);
-
-        body
-    }
-}
-
-/// Drop the identity line a bearer request has to lead with, and the block that
-/// bounds it.
-///
-/// A request left holding nothing but those two ends up with an empty `system`,
-/// while a request that never had a system prompt omits the field.
-/// Both say the same thing and have to read the same way.
-#[cfg(test)]
-fn strip_identity_line(body: &mut Value) {
-    let Some(system) = body.get_mut("system").and_then(Value::as_array_mut) else {
-        return;
-    };
-
-    system.retain(|block| {
-        let text = block
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        text != CLAUDE_CODE_IDENTITY_LINE && text != IDENTITY_LINE_OVERRIDE
-    });
-
-    if system.is_empty()
-        && let Some(body) = body.as_object_mut()
-    {
-        body.remove("system");
-    }
-}
-
-/// Erase what the model contributed to one content block of an assistant turn.
-///
-/// The Messages dialect files it three ways, and `input` here holds a tool
-/// call's arguments.
-/// Other dialects use the same key for the entire conversation, which is why
-/// this reading belongs to Anthropic alone.
-#[cfg(test)]
-fn erase_model_output(block: &mut Value) {
-    match block
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-    {
-        "text" => {
-            if let Some(text) = block.get_mut("text")
-                && text.is_string()
-            {
-                *text = Value::from("<model prose>");
-            }
-        }
-
-        // The thinking text is the model's; the signature is that text in a
-        // form only the host can verify.
-        "thinking" => {
-            if let Some(thinking) = block.get_mut("thinking")
-                && thinking.is_string()
-            {
-                *thinking = Value::from("<model prose>");
-            }
-            if let Some(signature) = block.get_mut("signature")
-                && signature.is_string()
-            {
-                *signature = Value::from("<opaque>");
-            }
-        }
-
-        "tool_use" => {
-            if let Some(input) = block.get_mut("input") {
-                *input = Value::from("<model arguments>");
-            }
-        }
-
-        _ => {}
-    }
-}
-
-#[cfg(test)]
-static SUBSCRIPTION_ROUTE: SubscriptionTestRoute = SubscriptionTestRoute;
-
-/// The direct HTTP subscription route.
-///
-/// Recording authenticates exactly as a user's own machine does: through the
-/// credential store, resolved by the same chain a real request walks.
-/// Logging in is a one-time `jp provider llm auth login anthropic`, and refresh
-/// and rotation are then the production code's problem rather than the
-/// harness's.
-#[cfg(test)]
-pub(crate) struct SubscriptionTestRoute;
-
-#[cfg(test)]
-impl super::ProviderTestRoute for SubscriptionTestRoute {
-    fn base_url(&self, config: &jp_config::providers::llm::LlmProviderConfig) -> String {
-        config.anthropic.base_url.clone()
-    }
-
-    fn set_base_url(&self, config: &mut jp_config::providers::llm::LlmProviderConfig, url: String) {
-        config.anthropic.base_url = url;
-    }
-
-    fn provider(
-        &self,
-        config: &jp_config::providers::llm::LlmProviderConfig,
-        recording: bool,
-    ) -> std::result::Result<Box<dyn super::Provider>, String> {
-        // A replayed cassette answers without authenticating, so the token only
-        // has to exist. Reading the store on replay would make the suite
-        // depend on the machine running it.
-        if !recording {
-            return Ok(Box::new(Anthropic::with_credential(
-                &config.anthropic,
-                Credential::Bearer("test-token".to_owned()),
-            )));
-        }
-
-        let profile = super::first_stored_profile(jp_credentials::PROVIDER_ANTHROPIC).ok_or(
-            "recording needs a stored Claude subscription; run `jp provider llm auth login \
-             anthropic` once",
-        )?;
-
-        let mut config = config.anthropic.clone();
-        config.auth = vec![AuthEntry::Subscription(Some(profile))];
-        config.subscription_flow = SubscriptionFlow::Direct;
-
-        Anthropic::new(&config)
-            .map(|provider| Box::new(provider) as Box<dyn super::Provider>)
-            .map_err(|error| error.to_string())
-    }
-
-    fn model(&self) -> ModelDetails {
-        API_ROUTE.model()
-    }
-}
-
-#[cfg(test)]
-static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
-    id: ProviderId::Anthropic,
-    base_url: |config| config.anthropic.base_url.clone(),
-    set_base_url: |config, url| config.anthropic.base_url = url,
-    use_replay_credentials: |config| {
-        config.anthropic.api_key_env = super::replay_credential_env().into();
-    },
-    model: || ModelDetails {
-        id: "anthropic/claude-haiku-4-5".parse().unwrap(),
-        display_name: None,
-        context_window: Some(200_000),
-        max_output_tokens: Some(64_000),
-        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        subscription: None,
-        features: vec!["interleaved-thinking", "context-editing"],
-    },
-};
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "anthropic/fallback_tests.rs"]

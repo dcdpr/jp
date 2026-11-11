@@ -113,3 +113,65 @@ Still open:
 
 The `qual-report.json` behind these numbers is not committed; regenerate with
 `qual report --format json`.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T12:54:27Z
+
+Decided on 2026-11-11, applied in `.config/rustqual/`:
+
+- **Clippy first.** When a clippy lint does what a rustqual rule does, as well
+  or better, the rustqual rule is off.
+  That includes lints not yet enabled, nightly-only ones too.
+  Off under this rule: `SLM` (`unused_self`), `NMS`
+  (`needless_pass_by_ref_mut`), `DRY-004` (`wildcard_imports`; all 10 findings
+  were enum globs, which the workspace allows on purpose), `BP-005`
+  (`derivable_impls`), `SRP-003` (`too_many_arguments`, which `.clippy.toml`
+  sets to 10 where rustqual fired above 5).
+  The rules that need a lint turned on first are in T-1haa4rr.
+- **`TQ-002`: kept.** Of the three findings, one was right:
+  `from_env_source_is_env_with_key` in `crates/jp_cli/src/session_tests.rs`
+  built a value and compared it with an identical literal, so it is deleted.
+  The other two reach the code under test through `From` and `Display` and carry
+  `qual:allow(test_quality, no_sut)` (T-0yh5j3r item 8).
+- **`TQ-003`: exempt.** T-1ha99kp replaces it with a gate on coverage data.
+- **`IET` and `BP-002`: exempt** until the vendored rustqual fixes them;
+  T-1dhk659 lists both under *Exemptions to lift*.
+
+Still open: `SRP-001` and `SRP-002`.
+
+- `SRP-001` (50): 39 are LCOM4 = 2.
+  The score is `0.4 × lcom4 + 0.25 × fields/12
+  - 0.15 × methods/20 + 0.2 × fan_out/10`, firing at 0.6, and with
+    `lcom4_threshold = 2`any LCOM4 of 2 or more scores the full 0.4. A one-field
+    clap command whose`run`doesn't read`self` and calls ten functions fires
+    (`Show`, `Unarchive`).
+- `SRP-002` (46): 24 over 800 lines, 22 on clusters alone.
+  The length count is wrong for files with an early `#[cfg(test)]` (T-0yh5j3r
+  item 9).
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T13:47:04Z
+
+Decided later on 2026-11-11:
+
+- **`TQ-003`: gating again.** Coveralls only blocks when total coverage drops
+  below a threshold, so `TQ-003` is the one check that names a new untested
+  function.
+  It is out of `exempt`, and stays out of the burn-down until T-1ha99kp moves
+  the check onto coverage data.
+- **`SRP-001`: `lcom4_threshold = 3`.**
+- **`SRP-002`: length half kept, cluster half off** (`max_independent_clusters`
+  out of reach) until a finding names its clusters.
+  The length count stops at the first `#[cfg(test)]`, which is right under JP's
+  convention once T-1haqsmg enforces it.
+- **Stale markers removed.** The three `qual:allow(complexity, magic_numbers)`
+  markers on the provider model catalogues sat above `static` items, where
+  rustqual records no magic number.
+  Removing them added no finding.
+
+Nothing under *To decide* is open now.
+The clippy side continues in T-1haqqbv and T-1haa4rr.

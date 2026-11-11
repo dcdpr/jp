@@ -4,6 +4,8 @@
 //! tree and a base revision, keys each finding by `(rule, file, symbol)`, and
 //! reports findings introduced since the base revision along with any findings
 //! for enforced rules.
+//! A finding whose symbol moved to another file is followed there, so moving a
+//! function introduces nothing.
 //!
 //! [`Workspace`] is the entry point.
 //! The core modules are pure: [`sarif`] parses `rustqual` SARIF output,

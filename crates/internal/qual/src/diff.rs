@@ -60,7 +60,8 @@ impl Renames {
 /// base revision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Shared {
-    /// Net increase in findings for this key compared to the base revision.
+    /// Net increase in findings for this key compared to the base revision,
+    /// after subtracting findings that moved in from another file.
     pub new: usize,
 
     /// Total findings with this key in the target tree.
@@ -73,8 +74,9 @@ pub struct NewFinding {
     #[serde(flatten)]
     pub finding: Finding,
 
-    /// Present when the base revision already had at least one finding with the
-    /// same [`Finding::key`].
+    /// Present when the base revision accounts for some of the findings with
+    /// the same [`Finding::key`]: findings it had under that key, or findings
+    /// that moved in from another file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared: Option<Shared>,
 }
@@ -124,6 +126,12 @@ impl Verdict {
 ///
 /// Exempt rules are excluded, and base findings in renamed files are mapped to
 /// their paths in `head` before comparison.
+///
+/// A finding follows its symbol to another file: when a `(rule, symbol)` pair
+/// has fewer findings in one file than at the base, that many findings of the
+/// same pair in other files are not new.
+/// A function moved between files therefore keeps the findings it had.
+/// Findings without a symbol are tied to their file and never follow.
 #[must_use]
 pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy) -> Verdict {
     let gating = |finding: &&Finding| policy.gates(&finding.rule);
@@ -141,9 +149,27 @@ pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy)
         groups.entry(finding.key()).or_default().push(finding);
     }
 
+    // How many findings of each `(rule, symbol)` pair left a file they were in
+    // at the base. Empty symbols are skipped: a file-level finding that goes
+    // away in one file says nothing about the same rule firing in another.
+    let mut departed = BTreeMap::<_, usize>::new();
+    for (&(rule, file, symbol), &had) in &was {
+        let has = groups.get(&(rule, file, symbol)).map_or(0, Vec::len);
+        if !symbol.is_empty() && had > has {
+            *departed.entry((rule, symbol)).or_default() += had - has;
+        }
+    }
+
     let mut new = Vec::new();
     for (key, group) in groups {
-        let had = was.get(&key).copied().unwrap_or(0);
+        let mut had = was.get(&key).copied().unwrap_or(0);
+        if group.len() > had
+            && let Some(departed) = departed.get_mut(&(key.0, key.2))
+        {
+            let moved = (*departed).min(group.len() - had);
+            *departed -= moved;
+            had += moved;
+        }
         if group.len() <= had {
             continue;
         }

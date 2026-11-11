@@ -6,10 +6,33 @@
 
 # Rules that never fail the gate and are omitted from reports.
 #
-# IOSP is exempt because rustqual cannot disable it, and the 862 existing
-# violations (6.2% of functions) exceed the 5% `max_suppression_ratio`, so
-# per-function suppressions are not an option.
-exempt = ["iosp/violation"]
+# A rule that a clippy lint covers as well or better is off: one check per
+# concern, and clippy sees types where rustqual sees syntax. Where rustqual has
+# a switch, the rule is disabled in `config.toml` or `dry.toml`; the rules
+# below have none. Decided in T-0yh5m6r.
+exempt = [
+    # rustqual cannot disable it, and the 862 existing violations (6.2% of
+    # functions) exceed the 5% `max_suppression_ratio`, so per-function
+    # suppressions are not an option.
+    "iosp/violation",
+
+    # Parameter count: `clippy::too_many_arguments`, at the
+    # `too-many-arguments-threshold` that `.clippy.toml` sets.
+    "SRP-003",
+
+    # Manual `Default`: `clippy::derivable_impls`.
+    "BP-005",
+
+    # Mixed error types in a module. Fires on serde `serialize`/`deserialize`
+    # pairs, whose error types the traits dictate. Remove once the vendored
+    # rustqual skips trait impls (T-1dhk659).
+    "IET",
+
+    # Trivial `Display`. Fires on `write!` with several values and on
+    # padding-aware delegation as well as on newtype boilerplate. Remove once
+    # the vendored rustqual tells them apart (T-1dhk659).
+    "BP-002",
+]
 
 # Rules with zero findings on `main`. Any finding for an enforced rule fails the
 # gate, even if it already existed at the base revision. Rules are only ever

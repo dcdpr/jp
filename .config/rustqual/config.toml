@@ -27,8 +27,21 @@ enabled = false
 # at the first `#[cfg(test)]` in the file. `SRP-002` also fires on the
 # independent-cluster cohesion check, so raising the line limit alone does not
 # eliminate all `SRP-002` findings. Decided in T-0yh5m6r.
+#
+# `lcom4_threshold`: `SRP-001` scores a struct on cohesion (LCOM4, weight 0.4),
+# field count, method count and fan-out, and fires at 0.6. At rustqual's default
+# of 2, two method groups already score the full 0.4, so a one-field command
+# struct whose `run` doesn't read `self` fires on fan-out alone. At 3, two
+# groups score half of that and three or more score all of it.
+#
+# `max_independent_clusters`: the cluster half of `SRP-002` is off, set far
+# beyond any real file because rustqual has no switch for it. A finding gives a
+# count and doesn't name the clusters, so there is nothing to act on. Restore
+# the default of 2 once the vendored rustqual names them (T-1dhk659).
 [srp]
-file_length = 800
+file_length              = 800
+lcom4_threshold          = 3
+max_independent_clusters = 1_000_000
 
 # `.expect()` counts as an error-handling finding (`A20`), the same as
 # `.unwrap()`, `panic!` and `unreachable!`. A deliberate `.expect()` with a
@@ -53,3 +66,19 @@ allow_expect = false
 [tests]
 file_length        = 1_000_000
 max_function_lines = 150
+
+# A rule that clippy covers as well or better is off (T-0yh5m6r):
+#
+# - `SLM` (a method that never uses `self`) is `clippy::unused_self`, which the
+#   workspace runs through `clippy::pedantic`. rustqual ignores
+#   `#[expect(clippy::unused_self)]`, so every deliberate case would need a
+#   second marker.
+# - `NMS` (`&mut self` that is never mutated) is
+#   `clippy::needless_pass_by_ref_mut`. rustqual reads syntax, so it reports a
+#   method that hands out `&mut` to a field, or mutates through a method call.
+#   Run over the workspace on 2026-11-11, the clippy lint reported none of the
+#   22 `NMS` findings and 20 parameters that `NMS` missed. T-1haa4rr tracks
+#   enabling it.
+[structural]
+check_slm = false
+check_nms = false

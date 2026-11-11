@@ -216,7 +216,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::provider::openai::{SHARED_TEST_MODEL, catalog_model_details};
+    use crate::provider::openai::test_support::{SHARED_TEST_MODEL, catalog_model_details};
 
     #[test]
     fn plain_request_has_semantic_parity() {
