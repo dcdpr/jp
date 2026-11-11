@@ -66,14 +66,25 @@ Each decision source converts its server's wire format into these types so
 answers have a uniform representation regardless of which server produced them,
 matching how `jp_llm` providers convert wire formats into `ChatResponse` and
 `ToolCallRequest`.
-Their JSON serialization matches the System One schema, so plugin authors can
-reference the System One documentation directly.
+Their JSON serialization matches the System One schema within the subset below,
+so plugin authors can reference the System One documentation for it.
 
-Where System One servers differ in request validation, JP's types enforce the
-strictest common requirements.
-Every question requires non-empty `instructions` (optional in TypeSafe, required
-by Ollama); `choice` and `score` require at least two options (TypeSafe accepts
-one); and the state cannot be empty (rejected by Ollama).
+Where System One servers differ in what they accept, JP's types accept only what
+every server accepts:
+
+- **State and instructions:** a non-blank string, an object, or an array.
+  Empty objects and arrays are allowed.
+  Every question requires `instructions` (optional in TypeSafe, required by
+  Ollama).
+- **Criterion descriptions:** strings only, for `choice`, `score`, and `noul`.
+  A `choice` option may also have no description (`null`).
+  TypeSafe also accepts structured descriptions, which these types reject.
+- **Option counts:** 2 to 255 for `choice` and 2 to 10 for `score` (TypeSafe
+  accepts one).
+
+Limits that depend on the server or model, such as the number of questions in a
+request or the characters a question name may use on Ollama's cloud, are not
+enforced by JP; the server reports a violation as a provider error.
 
 ### Configuration
 
@@ -137,9 +148,14 @@ the request fails:
 ```
 
 - `questions` and `answers` use the `jp_conversation::event::decision` types.
-- `cfg` layers over the plugin's configuration for that single request, matching
-  `--cfg` on the CLI.
-  If `decision.model.id` remains unset after applying `cfg`, the host replies
+- A `decide` runs under the configuration the plugin last read: the one the host
+  started the plugin with, replaced by each successful `read_config` reload.
+  A failed reload leaves it unchanged.
+- Each request captures that configuration when the host accepts it, and `cfg`
+  layers over the request's own copy, matching `--cfg` on the CLI.
+  Neither a later reload nor another request's `cfg` changes a decision already
+  accepted.
+- If `decision.model.id` remains unset after applying `cfg`, the host replies
   with an `error` naming `decision.model.id`.
 - A `decide` request does not read or modify any conversation, and the host
   resolves provider credentials just as it does for `query`.
@@ -237,9 +253,9 @@ protocol documentation notes this risk.
 
 **Divergence across System One servers.** Implementations of System One differ
 in request validation, option limits, and confidence calculation.
-For example, Ollama requires `instructions` and a non-empty `state`, caps cloud
-requests at 64 questions, and echoes the requested model name where TypeSafe
-returns the resolved model version.
+For example, Ollama requires `instructions` and a non-blank string `state`, caps
+cloud requests at 64 questions, and echoes the requested model name where
+TypeSafe returns the resolved model version.
 JP's types enforce the requirements shared by all servers, and any
 server-specific rejection is returned as a provider error.
 JP forwards the server's answers as returned and makes no guarantee that

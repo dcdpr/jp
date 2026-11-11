@@ -120,9 +120,9 @@ self-contained, an empty state on the CLI usually indicates a mistake (such as
 an unpiped command or an empty `git diff --cached`).
 `jp decide` therefore rejects missing or empty state unless `--no-state` is
 passed explicitly.
-Because [RFD 133] forbids empty state on the wire (which Ollama rejects),
-`--no-state` sends the literal string `"(none)"` and records that value in the
-`Decision` event.
+Because [RFD 133] forbids a blank string state on the wire (which Ollama
+rejects), `--no-state` sends the literal string `"(none)"` and records that
+value in the `Decision` event.
 
 #### Output and exit status
 
