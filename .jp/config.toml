@@ -133,9 +133,8 @@ values = [
 [plugins.command.rfd]
 run = "allow"
 
-# Drafts the assistant writes through the `rfd_draft` tool are attributed to
-# `jp`, and RFDs are laid out in the style of `.comfort.toml` as they are
-# written.
+# Drafts created by the `rfd_draft` tool are attributed to `jp`, and RFDs are
+# formatted with `.comfort.toml` on write.
 [plugins.command.rfd.options]
 assistant = "jp"
 format_on_write = true

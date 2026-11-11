@@ -1,20 +1,19 @@
-//! The tools this plugin serves, answered when the host's `init` carries a tool
-//! call.
+//! Tool call dispatch for `jp-rfd`, invoked when `init` carries a tool call.
 //!
-//! The host names a tool the way its `source` does, without the `rfd_` prefix
-//! the assistant knows it by: `list`, `show`, `draft`, and so on.
-//! Each call runs once and ends with its outcome.
-//! The host closed stdin after `init`, so nothing here asks it anything, and a
-//! missing argument is an error naming the argument.
+//! The host passes the tool name from `source` without the `rfd_` prefix (for
+//! example, `list`, `show`, or `draft`).
+//! The host closes stdin after `init`, so tools cannot prompt interactively;
+//! missing arguments return an error naming the argument.
 //!
-//! The call's access policy is enforced before a tool reads or writes: the RFD
-//! directory, and the ticket directory when the tool touches tickets, have to
-//! be inside the workspace and allow what the tool does to them.
+//! Each tool checks the call's access policy before reading or writing: the RFD
+//! directory (and the ticket directory when accessed) must be inside the
+//! workspace and grant the required capabilities.
 //!
-//! Tracking an RFD is ticket work, done with the ticket tools: a tracking
-//! ticket is filed with `ticket_create`, carrying the labels `show` and
-//! `promote` name, and started or stopped by moving it with `ticket_edit`.
-//! With nothing to ask, `promote` offers no tracking ticket.
+//! RFD tracking is managed through the ticket tools: `show` and `promote` print
+//! the labels required to file a tracking ticket with `ticket_create`, and
+//! `ticket_edit` moves the ticket to start or stop work.
+//! Because tool calls cannot prompt interactively, `promote` skips the tracking
+//! ticket prompt.
 
 use std::error;
 
@@ -40,11 +39,10 @@ use crate::{
 
 type Error = Box<dyn error::Error + Send + Sync>;
 
-/// What a tool answers: its outcome, or a failure that becomes an error outcome
-/// on the way out.
 type Answer = Result<Outcome, Error>;
 
-/// The tools this plugin serves, by the name a `source` gives them, sorted.
+/// Tool names served by this plugin, without the `rfd_` prefix, in sorted
+/// order.
 pub(crate) const TOOLS: &[&str] = &[
     "abandon",
     "draft",
@@ -58,10 +56,7 @@ pub(crate) const TOOLS: &[&str] = &[
     "supersede",
 ];
 
-/// Answer one tool call.
-///
-/// Every failure becomes an error outcome, so the assistant reads what went
-/// wrong and can correct the call.
+/// Execute a tool call and convert any failure into an error [`Outcome`].
 pub(crate) fn run(init: &InitMessage, call: &ToolCall, options: &Options) -> Outcome {
     match answer(init, call, options) {
         Ok(outcome) => outcome,
@@ -113,7 +108,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     }
 }
 
-/// A call that can't go ahead, with what the assistant can do about it.
+/// Tool execution failure with a message returned to the assistant.
 struct Refusal(String);
 
 impl From<String> for Refusal {
@@ -128,41 +123,38 @@ impl From<Error> for Refusal {
     }
 }
 
-/// What a tool answers before the refusal is turned into an outcome.
 type Reply = Result<Outcome, Refusal>;
 
-/// A directory a tool works in, for the access policy.
+/// Workspace directory checked against the tool's access policy.
 #[derive(Debug, Clone, Copy)]
 enum Dir {
     Rfds,
     Tickets,
 }
 
-/// Where a call works, and the access policy it works under.
+/// Resolved workspace paths and access policy context for a tool call.
 struct Place<'a> {
     name: &'a str,
     paths: Paths,
 
-    /// The RFD directory, relative to the workspace root, as the policy reads
-    /// paths.
+    /// RFD directory relative to the workspace root, for access policy checks.
     rfds: Utf8PathBuf,
 
-    /// The ticket directory, likewise.
+    /// Ticket directory relative to the workspace root, for access policy
+    /// checks.
     tickets: Utf8PathBuf,
 
-    /// The keys tickets name RFDs under.
+    /// Label keys used to link tickets to RFDs.
     links: Links,
 
     ctx: Context,
 }
 
 impl<'a> Place<'a> {
-    /// Resolve the directories a call works in and read its access policy.
+    /// Resolve the directories for a tool call and parse its access policy.
     ///
-    /// A policy the plugin can't read refuses the call rather than reading as
-    /// unrestricted, and a directory outside the workspace is refused whatever
-    /// the policy says.
-    /// The error is the refusal, for the assistant.
+    /// Rejects unreadable access policies and directories outside the
+    /// workspace.
     fn open(init: &InitMessage, call: &'a ToolCall, options: &Options) -> Result<Self, String> {
         let root = init.workspace.root.as_path();
         let rfds = workspace_relative(root, &options.dir, "RFD")?;
@@ -191,7 +183,7 @@ impl<'a> Place<'a> {
         })
     }
 
-    /// Refuse the call unless the policy allows each of `capabilities` on
+    /// Reject the call unless the access policy grants all `capabilities` on
     /// `dir`.
     fn require(&self, dir: Dir, capabilities: &[Capability]) -> Result<(), String> {
         let (path, what) = match dir {
@@ -202,8 +194,8 @@ impl<'a> Place<'a> {
         self.require_at(path, what, capabilities)
     }
 
-    /// Refuse the call unless the policy allows each of `capabilities` on the
-    /// workspace-relative `path`, the `what` directory.
+    /// Reject the call unless the access policy grants all `capabilities` on
+    /// the workspace-relative `path`.
     fn require_at(
         &self,
         path: &Utf8Path,
@@ -219,7 +211,7 @@ impl<'a> Place<'a> {
         Ok(())
     }
 
-    /// Like [`Self::require`] for the ticket directory, when there is one.
+    /// Check `capabilities` on the ticket directory if it exists.
     fn require_tickets(&self, capabilities: &[Capability]) -> Result<(), String> {
         if self.paths.tickets.is_dir() {
             self.require(Dir::Tickets, capabilities)?;
@@ -228,17 +220,12 @@ impl<'a> Place<'a> {
         Ok(())
     }
 
-    /// Whether the policy lets the call search the whole workspace, which
-    /// `renumber` and `rename` do for references they leave behind.
+    /// Return whether the access policy allows reading the workspace root.
     fn reads_workspace(&self) -> bool {
         self.ctx.check_read(Utf8Path::new(".")).is_ok()
     }
 
-    /// Read the board, the way the reading tools start.
-    ///
-    /// The warnings name what couldn't be read, such as a broken board file; a
-    /// tool passes them on, since the board it shows is incomplete without
-    /// them.
+    /// Load the RFD board and its linked tickets.
     fn board(&self) -> Result<Loaded, String> {
         board::load(
             &self.paths.root,
@@ -248,11 +235,10 @@ impl<'a> Place<'a> {
     }
 }
 
-/// A directory as the access policy reads paths: relative to the workspace
-/// root.
+/// Convert `dir` to a path relative to the workspace `root`.
 ///
-/// One configured as an absolute path inside the workspace is taken relative to
-/// it; one outside it is refused, since a tool reaches only the workspace.
+/// Absolute paths inside `root` are stripped to relative paths; paths outside
+/// `root` are rejected because tools can only access the workspace.
 fn workspace_relative(root: &Utf8Path, dir: &Utf8Path, what: &str) -> Result<Utf8PathBuf, String> {
     if !dir.is_absolute() {
         return Ok(dir.to_path_buf());
@@ -267,7 +253,6 @@ fn workspace_relative(root: &Utf8Path, dir: &Utf8Path, what: &str) -> Result<Utf
         })
 }
 
-/// Ask the access policy about one capability on `path`.
 fn check(ctx: &Context, path: &Utf8Path, capability: Capability) -> Result<(), FsAccessError> {
     match capability {
         Capability::Read => ctx.check_read(path),
@@ -279,13 +264,13 @@ fn check(ctx: &Context, path: &Utf8Path, capability: Capability) -> Result<(), F
     .map(drop)
 }
 
-/// A call's arguments, read with errors that name the argument.
+/// Tool call arguments with error messages that name the missing or invalid
+/// key.
 struct Arguments<'a>(&'a Map<String, Value>);
 
 impl Arguments<'_> {
-    /// An argument the call can't do without.
-    ///
-    /// Absent and `null` are both missing.
+    /// Deserialize a required argument, treating absent or `null` values as
+    /// missing.
     fn required<T: DeserializeOwned>(&self, key: &str) -> Result<T, Error> {
         match self.0.get(key) {
             None | Some(Value::Null) => Err(format!("Missing argument `{key}`.").into()),
@@ -294,7 +279,8 @@ impl Arguments<'_> {
         }
     }
 
-    /// An argument the call can do without; absent and `null` are both `None`.
+    /// Deserialize an optional argument, treating absent or `null` values as
+    /// `None`.
     fn optional<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, Error> {
         match self.0.get(key) {
             None | Some(Value::Null) => Ok(None),
@@ -302,20 +288,20 @@ impl Arguments<'_> {
         }
     }
 
-    /// A flag, `false` when absent.
+    /// Deserialize a boolean flag, defaulting to `false` when absent.
     fn flag(&self, key: &str) -> Result<bool, Error> {
         Ok(self.optional(key)?.unwrap_or(false))
     }
 
-    /// An argument holding an RFD id, as a string or, the way a model passes
-    /// `116` as readily, a number.
+    /// Parse an RFD ID argument from a JSON string or integer.
     fn id(&self, key: &str) -> Result<RfdId, Refusal> {
         let text = self.id_text(key)?;
         text.parse::<RfdId>()
             .map_err(|error| Refusal(error.to_string()))
     }
 
-    /// The text of an id argument, unparsed.
+    /// Extract an RFD ID argument as a raw string from a JSON string or
+    /// integer.
     fn id_text(&self, key: &str) -> Result<String, Refusal> {
         match self.required::<Value>(key)? {
             Value::String(id) => Ok(id),
@@ -325,7 +311,7 @@ impl Arguments<'_> {
     }
 }
 
-/// End the call with a message the assistant can act on.
+/// Return a transient error [`Outcome`] with `message`.
 #[expect(clippy::unnecessary_wraps, reason = "every tool returns an `Answer`")]
 fn refuse(message: impl Into<String>) -> Answer {
     Ok(Outcome::Error {
@@ -335,8 +321,8 @@ fn refuse(message: impl Into<String>) -> Answer {
     })
 }
 
-/// What a command reported, as the assistant reads it: what it did, what
-/// changed, then the warnings about what is left to check.
+/// Format command [`Output`] into a tool [`Outcome`]: notes, text, then
+/// warnings.
 fn reported(output: Output) -> Outcome {
     let mut text = String::new();
     for note in output.notes {
@@ -350,7 +336,6 @@ fn reported(output: Output) -> Outcome {
     text.into()
 }
 
-/// Add `line` to `text` on a line of its own.
 fn push_line(text: &mut String, line: &str) {
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
@@ -359,7 +344,6 @@ fn push_line(text: &mut String, line: &str) {
     text.push('\n');
 }
 
-/// List the board, the way `jp rfd list` prints it.
 fn list(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     place.require(Dir::Rfds, &[Capability::Read])?;
     place.require_tickets(&[Capability::Read])?;
@@ -381,7 +365,6 @@ fn list(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     }))
 }
 
-/// Show one RFD, the way `jp rfd show` prints it.
 fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     place.require(Dir::Rfds, &[Capability::Read])?;
     place.require_tickets(&[Capability::Read])?;
@@ -403,9 +386,8 @@ fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     };
 
     let shown = render::show_text(&board, entry, body.as_deref());
-    // The terminal keys syntax highlighting off a leading code fence, so the
-    // fence is what gets the RFD displayed as markdown rather than as a flat
-    // wall of text.
+    // Wrap the output in a markdown code fence so the terminal syntax-highlights
+    // the RFD instead of rendering plain text.
     let mut text = fenced(shown.trim_end());
     if let Some(untracked) = untracked(&place.paths, &place.links, entry) {
         text.push_str(&format!("\n{untracked}"));
@@ -418,8 +400,7 @@ fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     }))
 }
 
-/// `text` in a markdown code fence longer than any run of backticks inside it,
-/// so a fence in an RFD's body doesn't close the outer one.
+/// Wrap `text` in a markdown code fence longer than any backtick run inside it.
 fn fenced(text: &str) -> String {
     let longest = text
         .split(|c| c != '`')
@@ -431,8 +412,8 @@ fn fenced(text: &str) -> String {
     format!("{fence}markdown\n{text}\n{fence}")
 }
 
-/// Write a new draft, from a ticket when the call names one, attributed to the
-/// `assistant` option.
+/// Create a new draft (optionally seeded from a ticket) attributed to
+/// `options.assistant`.
 fn draft(place: &Place<'_>, args: &Arguments<'_>, options: &Options) -> Reply {
     let category = args.required::<String>("category")?;
     let ticket = args
@@ -468,11 +449,11 @@ fn draft(place: &Place<'_>, args: &Arguments<'_>, options: &Options) -> Reply {
     Ok(reported(output))
 }
 
-/// Advance an RFD one status.
+/// Advance an RFD to its next status.
 ///
-/// What the call has to be allowed depends on the step, which the RFD's status
-/// says: publishing a draft moves its file and rewrites the references to it,
-/// tickets included.
+/// Promoting a draft moves its file and rewrites references in RFDs and
+/// tickets, so it requires `Create` and `Delete` on the RFD directory and
+/// `Update` on the ticket directory.
 fn promote(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     let id = args.id("id")?;
     place.require(Dir::Rfds, &[Capability::Read, Capability::Update])?;
@@ -496,7 +477,7 @@ fn promote(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     Ok(reported(output))
 }
 
-/// Record a relationship between the RFD `id` names and the one `other` names.
+/// Record a relationship between two RFDs.
 fn relate(
     place: &Place<'_>,
     args: &Arguments<'_>,
@@ -518,8 +499,8 @@ fn abandon(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     Ok(reported(cmd::abandon::abandon(&place.paths, id, &reason)?))
 }
 
-/// The capabilities moving an RFD's file takes: one name goes, another is
-/// created, and the references to it are rewritten.
+/// Capabilities required when moving an RFD file and rewriting references to
+/// it.
 const MOVE: [Capability; 4] = [
     Capability::Read,
     Capability::Create,
@@ -553,7 +534,8 @@ fn rename(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     let id = args.id("id")?;
     let title = args.required::<String>("title")?;
     place.require(Dir::Rfds, &MOVE)?;
-    // Links name the file, so they are rewritten wherever they are.
+    // Renaming changes the file slug, so links in every documentation directory
+    // must be rewritten.
     for dir in place.paths.linking() {
         let what = if dir == place.paths.tickets {
             "ticket"

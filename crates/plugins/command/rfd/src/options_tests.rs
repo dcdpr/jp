@@ -53,8 +53,6 @@ fn the_assistant_is_a_name_on_one_line() {
     assert!(read(json!({ "assistant": "  " })).is_err());
 }
 
-/// A board names its link labels its own way, and says what else a tracking
-/// ticket carries.
 #[test]
 fn the_link_keys_and_tracking_labels_are_configurable() {
     let options = read(json!({
@@ -89,8 +87,6 @@ fn a_link_key_has_to_be_a_label_key() {
     assert!(read(json!({ "relevant": { "key": "" } })).is_err());
 }
 
-/// The same key both ways would make every ticket naming an RFD its tracking
-/// ticket.
 #[test]
 fn the_two_link_keys_have_to_differ() {
     assert_eq!(
@@ -116,8 +112,6 @@ fn the_tracking_labels_cannot_hold_a_link() {
     assert!(read(json!({ "tracking": { "labels": ["relevant-rfd"] } })).is_err());
 }
 
-/// A category names a template file and a filter value, so it is read the one
-/// way both can use.
 #[test]
 fn categories_are_lowercased_and_named_once() {
     let options = read(json!({ "categories": ["Design", " design ", "ADR"] })).unwrap();
@@ -178,8 +172,6 @@ fn an_empty_directory_is_refused() {
     );
 }
 
-/// The ticket directory is `jp ticket`'s setting, read where that plugin reads
-/// it.
 #[test]
 fn the_ticket_directory_comes_from_the_ticket_plugins_options() {
     assert_eq!(ticket_dir(&json!({})), Ok(Utf8PathBuf::from("docs/ticket")));
@@ -201,8 +193,6 @@ fn the_ticket_directory_comes_from_the_ticket_plugins_options() {
     );
 }
 
-/// The label vocabulary is `jp ticket`'s setting too: a tracking ticket carries
-/// a label the ticket board has to define.
 #[test]
 fn the_ticket_vocabulary_comes_from_the_ticket_plugins_options() {
     assert!(ticket_vocabulary(&json!({})).unwrap().is_empty());
