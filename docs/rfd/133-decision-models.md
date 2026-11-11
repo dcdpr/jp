@@ -150,6 +150,11 @@ request fails:
 - The host answers requests as they complete, not in the order they arrived.
   A plugin classifying a backlog keeps many in flight, and that only pays off if
   the host runs them concurrently.
+- `decide` requires an `id`, which the host echoes on `decided` and `error`, as
+  [RFD 072] requires one on `query` and `interrupt`, whose replies also arrive
+  out of order.
+  A `decide` without one is answered at once with an `error` and never reaches
+  the provider.
 - A request still outstanding when the plugin invocation ends is cancelled, with
   no reply: when the plugin exits, closes its output, or the host shuts down.
   Delegated turns are awaited past the plugin's exit because they persist the
@@ -253,8 +258,10 @@ JP passes answers through and claims nothing about comparing them across models.
    response tests against recorded responses, as `jp_llm`'s providers have.
    Depends on 1.
    Merges alone.
-3. **Plugins.** The runner, `decide` and `decided`, concurrent handling, and the
-   protocol version.
+3. **Plugins.** The runner, `decide` and `decided`, concurrent handling, the
+   required `id`, and the protocol version.
+   [RFD 072]'s Request IDs section gains `decide` next to `query` and
+   `interrupt`.
    Depends on 2.
 4. **Documentation.** A configuration guide section, and glossary entries for
    Decision and Decision Model, each noting that a decision is not an inquiry.
