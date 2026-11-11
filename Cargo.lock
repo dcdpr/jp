@@ -2191,10 +2191,12 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "humantime",
+ "jp_config",
  "jp_plugin",
  "pretty_assertions",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 

@@ -27,8 +27,14 @@ serde_json = { workspace = true, features = ["std"] }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# Resolves the workspace's own planner persona under the bridge's per-turn
+# settings, the way the host layers them.
+jp_config = { workspace = true }
+
 camino-tempfile = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
+# Hashes a snapshot the way `just chat-take` does, in the `take.sh` tests.
+sha2 = { workspace = true }
 
 [lints]
 workspace = true

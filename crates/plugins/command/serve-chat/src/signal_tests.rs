@@ -173,22 +173,32 @@ fn a_failed_request_is_reported() {
     );
 }
 
+/// Compared as parsed JSON: key order depends on whether another crate in the
+/// build enables `serde_json`'s `preserve_order`.
 #[test]
 fn a_send_names_its_recipient_and_carries_the_styles() {
+    let parsed = |line: String| serde_json::from_str::<Value>(&line).unwrap();
+
     assert_eq!(
-        request(
+        parsed(request(
             3,
             "send",
             &send_params(&Chat::Direct("+33123456789".to_owned()), "Filed **T-1**")
-        ),
-        r#"{"id":"3","jsonrpc":"2.0","method":"send","params":{"message":"Filed T-1","recipient":["+33123456789"],"textStyle":["6:3:BOLD"]}}"#
+        )),
+        parsed(
+            r#"{"id":"3","jsonrpc":"2.0","method":"send","params":{"message":"Filed T-1","recipient":["+33123456789"],"textStyle":["6:3:BOLD"]}}"#
+                .to_owned()
+        )
     );
     assert_eq!(
-        request(
+        parsed(request(
             4,
             "send",
             &send_params(&Chat::Group("Z3JvdXA=".to_owned()), "Hi")
-        ),
-        r#"{"id":"4","jsonrpc":"2.0","method":"send","params":{"groupId":"Z3JvdXA=","message":"Hi"}}"#
+        )),
+        parsed(
+            r#"{"id":"4","jsonrpc":"2.0","method":"send","params":{"groupId":"Z3JvdXA=","message":"Hi"}}"#
+                .to_owned()
+        )
     );
 }

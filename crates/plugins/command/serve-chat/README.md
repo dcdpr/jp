@@ -21,18 +21,26 @@ and the bridge sends the turn's final response back to the chat.
   senders are dropped and logged without their text.
 - Each chat gets one conversation per day, or per week with `rollover` set to a
   weekday, local-only and expiring after `conversation_ttl`.
-- One turn runs at a time.
-  If another message arrives from the same chat while its turn is running, the
-  bridge injects it into the active turn as a reply (like `[r] Reply` in the
-  terminal).
-  Messages from other chats, or messages that arrive after the turn finishes,
-  are queued and batched into the chat's next turn.
+- One turn runs at a time, as the person whose message started it.
+  A later message from that person in the same chat is injected into the running
+  turn as a reply (like `[r] Reply` in the terminal), one reply at a time and in
+  the order the messages were sent.
+  Any other message is queued: consecutive messages from one person in one chat
+  become one turn, and a different person's message becomes a turn of its own.
 - Each turn sets `user.name` to the sender's name and sets the `assistant`
   option on `jp ticket`, `jp rfd`, and `jp wiki` to `<Name> via jp` (for
   example, `Ada Client via jp`).
 - Turns run non-interactively, so tools configured with `run = "ask"` execute
   without prompting.
-  The tools enabled by the persona are the only permission boundary.
+  Before each turn the bridge reads the configured tools from the host, and the
+  turn's `--cfg` disables every one of them before applying the persona, so the
+  tools the persona enables by name are the only ones the turn has, whatever a
+  user or workspace config enables.
+  A turn doesn't start when the tool list can't be read, or holds a tool whose
+  name contains a `.`, which a `--cfg` key can't address.
+- When `jp serve chat` is stopped, or `signal-cli` exits, during a turn, the
+  bridge stops the turn (on a stop) or lets it finish (when `signal-cli` exits),
+  checks what it wrote, and only then exits and releases the checkout.
 
 ## Group chats
 
@@ -58,7 +66,9 @@ into a local review worktree with `just chat-take`, which then resets the
 bridge's working tree.
 
 - A turn holds the lock at `git rev-parse --git-path jp-serve-chat.lock`; `just
-  chat-take` takes the same lock.
+  chat-take` takes the same lock, through `take.sh`, which it runs on the
+  bridge's host and which stops at the first failing command, before discarding
+  anything.
 - The clone is pulled (`--ff-only`) before a turn and every `pull_interval`,
   only while the working tree is clean.
 - After each turn, every modified or untracked path must be under

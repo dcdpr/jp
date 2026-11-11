@@ -61,9 +61,10 @@ fn a_long_answer_splits_at_paragraphs() {
     ]);
 }
 
+/// Fences aren't sent, so they don't count toward the budget.
 #[test]
 fn a_code_block_stays_together() {
-    assert_eq!(chunks("intro\n\n```\na\n\nb\n```", 13), vec![
+    assert_eq!(chunks("intro\n\n```\na\n\nb\n```", 6), vec![
         "intro".to_owned(),
         "```\na\n\nb\n```".to_owned()
     ]);
@@ -77,4 +78,25 @@ fn a_paragraph_too_long_for_one_message_splits_at_lines_then_characters() {
         "ccccc".to_owned(),
         "ccc".to_owned()
     ]);
+}
+
+/// Signal limits a message's UTF-8 size, so a short text in a multi-byte script
+/// still splits.
+#[test]
+fn the_budget_counts_utf8_bytes_not_characters() {
+    // Five characters, ten bytes.
+    assert_eq!(chunks("ééééé", 6), vec![
+        "ééé".to_owned(),
+        "éé".to_owned()
+    ]);
+}
+
+/// A `- ` bullet styles to the three-byte `•`, so a list is measured after
+/// styling: here seven bytes of Markdown become eleven.
+#[test]
+fn the_budget_counts_the_styled_text() {
+    let parts = chunks("- a\n- b", 8);
+
+    assert_eq!(parts, vec!["- a".to_owned(), "- b".to_owned()]);
+    assert_eq!(styled(&parts[0]).text, "• a");
 }

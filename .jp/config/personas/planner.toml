@@ -3,7 +3,9 @@
 #
 # Bridge turns run unattended, so tools configured with `run = "ask"` execute
 # without prompting. The tools enabled in this file are the only permission
-# boundary on a turn. Each tool is enabled by name. This file does not extend
+# boundary on a turn: the bridge disables every configured tool before applying
+# this persona, and the `'*'` block alone wouldn't override a tool another layer
+# enables. Each tool is enabled by name. This file does not extend
 # `skill/rfd.toml` because that skill also enables `fs_modify_file` and (via
 # `skill/project-discourse.toml`) the GitHub tools; the `rfd_*` tools are
 # enabled directly below instead.

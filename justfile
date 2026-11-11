@@ -1952,7 +1952,9 @@ ticket-import NNN *ARGS: _install-ticket
 # After the patch applies locally, a second locked SSH call resets the remote
 # checkout only if `HEAD` and the diff's SHA-256 hash are unchanged; if a turn
 # or pull ran in the meantime, the remote checkout is left untouched so you can
-# run `just chat-take` again.
+# run `just chat-take` again. Both calls run
+# `crates/plugins/command/serve-chat/take.sh` on HOST, which stops at the first
+# failing command.
 #
 #   just chat-take bridge-host src/jp
 [group('ticket')]
@@ -1964,15 +1966,8 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
     trap 'rm -f "$patch"' EXIT
 
     # Pass the script via stdin so HOST's login shell only needs to invoke `sh`.
-    ssh {{quote(HOST)}} sh -s -- {{quote(DIR)}} > "$patch" <<'EOF'
-    set -eu
-    cd "$1"
-    exec flock "$(git rev-parse --git-path jp-serve-chat.lock)" sh -c '
-        git rev-parse HEAD
-        git add -A
-        git diff --cached --binary -M HEAD
-    '
-    EOF
+    take={{quote(justfile_directory() + "/crates/plugins/command/serve-chat/take.sh")}}
+    ssh {{quote(HOST)}} sh -s -- snapshot {{quote(DIR)}} < "$take" > "$patch"
 
     base="$(head -n 1 "$patch")"
     if [ "$(wc -l < "$patch")" -le 1 ]; then
@@ -1991,23 +1986,7 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
     git worktree add --quiet -b "$branch" {{quote(WORKTREE)}} "$base"
     tail -n +2 "$patch" | git -C {{quote(WORKTREE)}} apply --index
 
-    ssh {{quote(HOST)}} sh -s -- {{quote(DIR)}} "$base" "$sum" <<'EOF'
-    set -eu
-    cd "$1"
-    exec flock "$(git rev-parse --git-path jp-serve-chat.lock)" sh -c '
-        if [ "$(git rev-parse HEAD)" != "$1" ]; then
-            echo "The bridge pulled since the take; its checkout is left alone." >&2
-            exit 1
-        fi
-        git add -A
-        if [ "$(git diff --cached --binary -M HEAD | sha256sum | cut -d " " -f 1)" != "$2" ]; then
-            echo "New changes arrived since the take; its checkout is left alone. Take again." >&2
-            exit 1
-        fi
-        git reset --quiet --hard
-        git clean --quiet -fd
-    ' sh "$2" "$3"
-    EOF
+    ssh {{quote(HOST)}} sh -s -- reset {{quote(DIR)}} "$base" "$sum" < "$take"
 
     echo "Taken into {{WORKTREE}} on $branch, staged. The bridge's checkout is clean again."
 

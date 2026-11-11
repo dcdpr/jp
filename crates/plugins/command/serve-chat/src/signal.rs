@@ -30,7 +30,8 @@ use crate::{
     transport::{Chat, Inbound, Outbox},
 };
 
-/// Maximum characters per outbound Signal message before splitting.
+/// Maximum UTF-8 bytes of styled text per outbound Signal message before
+/// splitting.
 ///
 /// Signal converts message bodies over 2,000 bytes into file attachments, which
 /// some clients do not render inline.

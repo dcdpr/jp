@@ -1,18 +1,22 @@
 //! Turn scheduling and message routing between the chat transport and the `jp`
 //! host.
 //!
-//! The bridge runs one turn at a time.
-//! While a turn is running for a chat, incoming messages from that same chat
-//! are injected into the turn as interrupt replies (like `[r] Reply` in the
-//! terminal).
-//! If the turn has already finished, or if the message is from another chat, it
-//! is queued and batched into the chat's next query.
+//! The bridge runs one turn at a time, as the person whose message started it.
+//! While a turn is running, a message from that person in that chat is injected
+//! into the turn as an interrupt reply (like `[r] Reply` in the terminal), one
+//! reply at a time, and never ahead of an earlier message from the same chat.
+//! Any other message is queued: consecutive messages from one person in one
+//! chat become one query, and a different person's become a turn of their own,
+//! so what a turn writes is attributed to whoever asked for it.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
-//! Every query passes `--cfg` overrides for the configured persona and the
-//! sender's identity so that tickets, RFDs, and wiki pages created during the
-//! turn are attributed to the sender.
+//! Every query passes `--cfg` overrides that disable every configured tool,
+//! then apply the configured persona, which enables the tools it names, then
+//! the sender's identity so that tickets, RFDs, and wiki pages created during
+//! the turn are attributed to the sender.
+//! When the bridge stops while a turn runs, it waits for the turn to end, and
+//! checks what it wrote, before letting go of the checkout.
 //!
 //! The repository checkout is locked for the duration of each turn and
 //! inspected when the turn ends.
@@ -26,6 +30,7 @@ use std::{
 };
 
 use chrono::{Local, NaiveDate};
+use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
@@ -56,13 +61,12 @@ const TEXT_ONLY: &str = "I can only read text, so I didn't get the attachment.";
 const PAUSED: &str = "Changes are paused until the last ones have been reviewed. I'll answer as \
                       soon as that's done.";
 
-/// Queued messages for a single chat awaiting the next turn.
+/// Consecutive queued messages from one person in one chat, awaiting a turn.
 #[derive(Debug)]
 struct Waiting {
     chat: Chat,
 
-    /// Key of the most recent sender in `options.people`, used as the turn's
-    /// identity.
+    /// Key of the sender in `options.people`, used as the turn's identity.
     person: String,
 
     texts: Vec<String>,
@@ -73,15 +77,17 @@ struct Waiting {
 struct Running {
     chat: Chat,
 
-    /// Conversation ID, or `None` while the host is still creating a new
-    /// conversation.
+    /// Key in `options.people` of the person the turn runs as.
+    person: String,
+
+    /// Conversation ID, or `None` until the host has the turn's request.
     conversation: Option<String>,
 }
 
 /// Completion event from a spawned host task.
 #[derive(Debug)]
 pub(crate) enum Event {
-    /// The host created the new conversation for the active turn.
+    /// The host has the active turn's request, on this conversation.
     Started {
         conversation: String,
     },
@@ -105,10 +111,19 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     checkout: C,
     options: Options,
     state: State,
-    today: Box<dyn Fn() -> NaiveDate + Send>,
+    today: Box<dyn Fn() -> NaiveDate + Send + Sync>,
 
     queue: VecDeque<Waiting>,
     running: Option<Running>,
+
+    /// The chat of the reply in flight to the host, if any.
+    ///
+    /// One reply at a time, and no new turn until it is answered, so a reply
+    /// the host refuses can still go ahead of the messages that came after it.
+    replying: Option<Chat>,
+
+    /// Set once the bridge is stopping: no turn starts and no reply is sent.
+    closing: bool,
 
     /// Paths outside the writable directories that paused the bridge.
     paused: Option<Vec<String>>,
@@ -143,6 +158,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             today: Box::new(|| Local::now().date_naive()),
             queue: VecDeque::new(),
             running: None,
+            replying: None,
+            closing: false,
             paused: None,
             told: vec![],
             strangers: HashSet::new(),
@@ -153,7 +170,10 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
     /// Override the clock used for conversation rollover.
     #[cfg(test)]
-    pub(crate) fn with_today(mut self, today: impl Fn() -> NaiveDate + Send + 'static) -> Self {
+    pub(crate) fn with_today(
+        mut self,
+        today: impl Fn() -> NaiveDate + Send + Sync + 'static,
+    ) -> Self {
         self.today = Box::new(today);
         self
     }
@@ -181,17 +201,64 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
         loop {
             tokio::select! {
-                message = inbound.recv() => match message {
-                    Some(message) => self.receive(message),
-                    None => return Err("The chat transport stopped.".to_owned()),
-                },
+                message = inbound.recv() => {
+                    let Some(message) = message else {
+                        self.finish(false).await;
+                        return Err("The chat transport stopped.".to_owned());
+                    };
+                    self.receive(message);
+                }
                 Some(event) = self.events_rx.recv() => self.handle(event).await,
                 _ = typing.tick() => self.renew_typing(),
                 _ = pull.tick() => self.idle(),
-                _ = shutdown.changed() => return Ok(()),
+                _ = shutdown.changed() => {
+                    self.finish(true).await;
+                    return Ok(());
+                }
             }
 
             self.advance();
+        }
+    }
+
+    /// Wait for the running turn to end before the bridge exits.
+    ///
+    /// The host keeps running a turn after the plugin that asked for it exits,
+    /// so exiting first would release the checkout's lock while the turn still
+    /// writes, and skip the check of what it wrote.
+    /// With `stop`, the turn is asked to stop; otherwise it runs to its end.
+    pub(crate) async fn finish(&mut self, stop: bool) {
+        self.closing = true;
+        if self.running.is_some() {
+            self.host.log(
+                Level::Info,
+                "Waiting for the running turn to end before exiting.",
+            );
+        }
+
+        let mut stopping = false;
+        while let Some(running) = &self.running {
+            if stop
+                && !stopping
+                && let Some(conversation) = &running.conversation
+            {
+                stopping = true;
+                let request = self.host.stop(conversation);
+                let host = self.host.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = request.await {
+                        host.log(
+                            Level::Warn,
+                            &format!("Failed to stop the running turn: {error}"),
+                        );
+                    }
+                });
+            }
+
+            let Some(event) = self.events_rx.recv().await else {
+                break;
+            };
+            self.handle(event).await;
         }
     }
 
@@ -237,11 +304,14 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         }
 
+        // Only the person the turn runs as, so what it writes stays theirs, and
+        // only with nothing earlier from this chat still waiting.
         let conversation = self
             .running
             .as_ref()
-            .filter(|running| running.chat == message.chat)
-            .and_then(|running| running.conversation.clone());
+            .filter(|running| running.chat == message.chat && running.person == key)
+            .and_then(|running| running.conversation.clone())
+            .filter(|_| self.replying.is_none() && !self.has_waiting(&message.chat));
         match conversation {
             Some(conversation) => self.reply(message.chat, key, text, &conversation),
             None => self.wait(message.chat, key, text),
@@ -250,7 +320,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
     /// Deliver `text` as an interrupt reply to the active turn on
     /// `conversation`.
-    fn reply(&self, chat: Chat, person: String, text: String, conversation: &str) {
+    fn reply(&mut self, chat: Chat, person: String, text: String, conversation: &str) {
+        self.replying = Some(chat.clone());
         let reply = self.host.reply(conversation, &text);
         let events = self.events_tx.clone();
 
@@ -265,19 +336,77 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         });
     }
 
-    /// Append `text` to the pending message batch for `chat`.
+    /// Queue `text` after everything waiting, joining the last batch for `chat`
+    /// if `person` wrote it.
     fn wait(&mut self, chat: Chat, person: String, text: String) {
-        match self.queue.iter_mut().find(|waiting| waiting.chat == chat) {
-            Some(waiting) => {
-                waiting.person = person;
-                waiting.texts.push(text);
-            }
-            None => self.queue.push_back(Waiting {
+        match self.queue.iter().rposition(|waiting| waiting.chat == chat) {
+            Some(index) if self.queue[index].person == person => self.queue[index].texts.push(text),
+            _ => self.queue.push_back(Waiting {
                 chat,
                 person,
                 texts: vec![text],
             }),
         }
+    }
+
+    /// Queue `text` ahead of everything waiting for `chat`, for a reply the
+    /// host didn't take: it came before them.
+    fn requeue(&mut self, chat: Chat, person: String, text: String) {
+        let waiting = Waiting {
+            chat,
+            person,
+            texts: vec![text],
+        };
+
+        match self
+            .queue
+            .iter()
+            .position(|queued| queued.chat == waiting.chat)
+        {
+            Some(index) if self.queue[index].person == waiting.person => {
+                self.queue[index].texts.splice(0..0, waiting.texts);
+            }
+            Some(index) => self.queue.insert(index, waiting),
+            None => self.queue.push_front(waiting),
+        }
+    }
+
+    fn has_waiting(&self, chat: &Chat) -> bool {
+        self.queue.iter().any(|waiting| waiting.chat == *chat)
+    }
+
+    /// Hand the running turn the first batch waiting for its chat, when that
+    /// batch is from the person the turn runs as and no reply is in flight.
+    fn hand_over(&mut self) {
+        if self.closing || self.replying.is_some() {
+            return;
+        }
+        let Some(running) = &self.running else {
+            return;
+        };
+        let Some(conversation) = running.conversation.clone() else {
+            return;
+        };
+        let Some(index) = self
+            .queue
+            .iter()
+            .position(|waiting| waiting.chat == running.chat)
+        else {
+            return;
+        };
+        if self.queue[index].person != running.person {
+            return;
+        }
+
+        let Some(waiting) = self.queue.remove(index) else {
+            return;
+        };
+        self.reply(
+            waiting.chat,
+            waiting.person,
+            waiting.texts.join("\n\n"),
+            &conversation,
+        );
     }
 
     #[cfg(test)]
@@ -295,10 +424,15 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 let Some(running) = &mut self.running else {
                     return;
                 };
-                if let Err(error) = self.state.set(&running.chat, period, &conversation) {
+                running.conversation = Some(conversation.clone());
+                let chat = running.chat.clone();
+
+                if self.state.conversation(&chat, period) != Some(conversation.as_str())
+                    && let Err(error) = self.state.set(&chat, period, &conversation)
+                {
                     self.host.log(Level::Error, &error);
                 }
-                running.conversation = Some(conversation);
+                self.hand_over();
             }
 
             Event::Ended { result } => {
@@ -315,17 +449,22 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 person,
                 text,
                 result,
-            } => match result {
-                Ok(()) => {}
-                Err(ReplyError::Refused(_)) => self.wait(chat, person, text),
-                Err(ReplyError::Broken(error)) => {
-                    self.host.log(
-                        Level::Error,
-                        &format!("Failed to hand over a reply: {error}"),
-                    );
-                    self.wait(chat, person, text);
+            } => {
+                self.replying = None;
+                match result {
+                    Ok(()) => self.hand_over(),
+                    // The turn ended before taking it, so it waits for the next
+                    // one, ahead of what came after it.
+                    Err(ReplyError::Refused(_)) => self.requeue(chat, person, text),
+                    Err(ReplyError::Broken(error)) => {
+                        self.host.log(
+                            Level::Error,
+                            &format!("Failed to hand over a reply: {error}"),
+                        );
+                        self.requeue(chat, person, text);
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -399,7 +538,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     /// Start the next queued turn if no turn is running and the bridge is not
     /// paused.
     pub(crate) fn advance(&mut self) {
-        if self.running.is_some() {
+        if self.closing || self.running.is_some() || self.replying.is_some() {
             return;
         }
         if self.paused.is_some() {
@@ -440,54 +579,34 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     /// the conversation if needed.
     fn start(&mut self, waiting: Waiting) {
         let period = self.period();
-        let content = waiting.texts.join("\n\n");
-        let cfg = self.cfg(&waiting.person);
-        let events = self.events_tx.clone();
-
-        self.outbox.typing(&waiting.chat, true);
-
         let conversation = self
             .state
             .conversation(&waiting.chat, period)
             .map(ToOwned::to_owned);
-        if let Some(conversation) = conversation {
-            let turn = self.host.query(&conversation, &content, cfg);
-            tokio::spawn(async move {
-                drop(events.send(Event::Ended { result: turn.await }));
-            });
-
-            self.running = Some(Running {
-                chat: waiting.chat,
-                conversation: Some(conversation),
-            });
-            return;
-        }
-
-        let new = NewTurn {
-            content,
+        let request = TurnRequest {
+            content: waiting.texts.join("\n\n"),
             title: self.title(&waiting, period),
-            cfg,
+            cfg: self.cfg(&waiting.person),
             expires_in: self.options.conversation_ttl.clone(),
         };
         let host = self.host.clone();
-        tokio::spawn(async move {
-            let result = match host.start(new).await {
-                Ok((conversation, turn)) => {
-                    drop(events.send(Event::Started { conversation }));
-                    turn.await
-                }
-                Err(error) => Err(error),
-            };
-            drop(events.send(Event::Ended { result }));
-        });
+        let events = self.events_tx.clone();
 
+        self.outbox.typing(&waiting.chat, true);
         self.running = Some(Running {
             chat: waiting.chat,
+            person: waiting.person,
             conversation: None,
+        });
+
+        tokio::spawn(async move {
+            let result = run_turn(&host, conversation, request, &events).await;
+            drop(events.send(Event::Ended { result }));
         });
     }
 
-    /// Build the `--cfg` arguments for a turn triggered by `person`.
+    /// Build the `--cfg` arguments for a turn triggered by `person`, which
+    /// [`turn_cfg`] puts after the entry disabling every tool.
     ///
     /// Applies the configured persona, sets `user.name` and the plugin
     /// `assistant` attribution to `<Name> via jp`, and forces
@@ -570,6 +689,91 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             self.outbox.send(&Chat::Direct(account), text);
         }
     }
+}
+
+/// What a turn asks the host for, besides the conversation it runs on.
+struct TurnRequest {
+    content: String,
+
+    /// Title for a conversation the turn creates.
+    title: String,
+
+    /// [`Bridge::cfg`], before [`turn_cfg`] adds the tool entry.
+    cfg: Vec<String>,
+
+    /// Expiry for a conversation the turn creates.
+    expires_in: String,
+}
+
+/// Start a turn on `conversation`, or on a new one when it is `None`, and wait
+/// for it to end.
+///
+/// Sends [`Event::Started`] once the host has the request.
+/// A turn whose tool list can't be read doesn't start: running it without
+/// disabling the configured tools would let them through.
+async fn run_turn<H: Host>(
+    host: &H,
+    conversation: Option<String>,
+    request: TurnRequest,
+    events: &mpsc::UnboundedSender<Event>,
+) -> Result<(), String> {
+    let tools = host
+        .tools()
+        .await
+        .map_err(|error| format!("couldn't read the configured tools: {error}"))?;
+    let cfg = turn_cfg(&tools, request.cfg)?;
+
+    let (conversation, turn) = match conversation {
+        Some(conversation) => {
+            let turn = host.query(&conversation, &request.content, cfg);
+            (conversation, turn)
+        }
+        None => {
+            host.start(NewTurn {
+                content: request.content,
+                title: request.title,
+                cfg,
+                expires_in: request.expires_in,
+            })
+            .await?
+        }
+    };
+    drop(events.send(Event::Started { conversation }));
+
+    turn.await
+}
+
+/// The `--cfg` arguments for a turn: an entry disabling every one of `tools`,
+/// then `cfg`.
+///
+/// A tool's own `enable` wins over the `*` defaults, and the per-tool table
+/// merges key by key across layers, so a tool a user or workspace config
+/// enables stays enabled under a persona that doesn't name it.
+/// Disabling every configured tool first leaves enabled exactly the tools that
+/// `cfg` enables by name.
+///
+/// # Errors
+///
+/// A tool name holding a `.` can't be addressed by a `--cfg` key, so it can't
+/// be disabled, and the turn is refused.
+pub(crate) fn turn_cfg(tools: &[String], cfg: Vec<String>) -> Result<Vec<String>, String> {
+    if let Some(name) = tools.iter().find(|name| name.contains('.')) {
+        return Err(format!(
+            "the tool `{name}` can't be disabled, because a `.` in its name splits a `--cfg` key"
+        ));
+    }
+
+    let mut out = vec![];
+    if !tools.is_empty() {
+        let disabled: Map<String, Value> = tools
+            .iter()
+            .map(|name| (name.clone(), json!({ "enable": false })))
+            .collect();
+        out.push(json!({ "conversation": { "tools": disabled } }).to_string());
+    }
+    out.extend(cfg);
+
+    Ok(out)
 }
 
 /// Return whether `answer` matches the [`SILENT`] (`NO_REPLY`) sentinel.

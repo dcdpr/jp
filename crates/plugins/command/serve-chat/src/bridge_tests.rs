@@ -1,17 +1,22 @@
 use std::{
+    collections::BTreeSet,
     future::{self, Future},
     sync::Mutex,
 };
 
+use camino::Utf8PathBuf;
 use chrono::Weekday;
+use jp_config::{
+    AppConfig, PartialConfig as _,
+    assignment::{AssignKeyValue as _, KvAssignment},
+    util::{build, load_partial_at_path},
+};
 use pretty_assertions::assert_eq;
-use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use super::*;
-use crate::host::Turn;
+use crate::host::{Turn, tool_names};
 
-#[derive(Default)]
 struct HostLog {
     calls: Vec<String>,
     turns: Vec<oneshot::Sender<Result<(), String>>>,
@@ -23,6 +28,28 @@ struct HostLog {
     /// Custom response text returned instead of `"Answer from
     /// <conversation>."`.
     answer: Option<String>,
+
+    /// The `--cfg` of every turn started, in order.
+    cfgs: Vec<Vec<String>>,
+
+    /// What [`Host::tools`] answers.
+    tools: Result<Vec<String>, String>,
+}
+
+impl Default for HostLog {
+    fn default() -> Self {
+        Self {
+            calls: vec![],
+            turns: vec![],
+            conversations: 0,
+            refuse_replies: false,
+            logs: vec![],
+            prints: vec![],
+            answer: None,
+            cfgs: vec![],
+            tools: Ok(vec![]),
+        }
+    }
 }
 
 /// Fake [`Host`] whose turns complete when triggered by the test and whose
@@ -48,6 +75,18 @@ impl FakeHost {
         self.0.lock().unwrap().prints.clone()
     }
 
+    fn cfgs(&self) -> Vec<Vec<String>> {
+        self.0.lock().unwrap().cfgs.clone()
+    }
+
+    fn set_tools(&self, tools: Result<Vec<String>, String>) {
+        self.0.lock().unwrap().tools = tools;
+    }
+
+    fn turns_running(&self) -> usize {
+        self.0.lock().unwrap().turns.len()
+    }
+
     fn refuse_replies(&self) {
         self.0.lock().unwrap().refuse_replies = true;
     }
@@ -68,18 +107,19 @@ impl Host for FakeHost {
                 "start {:?} titled {:?}, expiring in {}, with {:?}",
                 turn.content, turn.title, turn.expires_in, turn.cfg
             ));
+            log.cfgs.push(turn.cfg);
             format!("c{}", log.conversations)
         };
 
         future::ready(Ok((conversation, self.turn())))
     }
 
-    fn query(&self, conversation: &str, content: &str, _cfg: Vec<String>) -> Turn {
-        self.0
-            .lock()
-            .unwrap()
-            .calls
-            .push(format!("query {conversation} {content:?}"));
+    fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn {
+        {
+            let mut log = self.0.lock().unwrap();
+            log.calls.push(format!("query {conversation} {content:?}"));
+            log.cfgs.push(cfg);
+        }
         self.turn()
     }
 
@@ -97,6 +137,22 @@ impl Host for FakeHost {
         };
 
         future::ready(result)
+    }
+
+    fn stop(
+        &self,
+        conversation: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send + 'static {
+        self.0
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("stop {conversation}"));
+        future::ready(Ok(()))
+    }
+
+    fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send {
+        future::ready(self.0.lock().unwrap().tools.clone())
     }
 
     fn events(
@@ -272,6 +328,26 @@ fn from(sender: &str, text: &str) -> Inbound {
     }
 }
 
+const GROUP: &str = "Z3JvdXA=";
+
+fn in_group(sender: &str, text: &str) -> Inbound {
+    Inbound {
+        chat: Chat::Group(GROUP.to_owned()),
+        ..from(sender, text)
+    }
+}
+
+/// Wait until `condition` holds, failing after five seconds.
+async fn eventually(condition: impl Fn() -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !condition() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the condition didn't hold within 5 seconds");
+}
+
 impl Fixture {
     fn receive(&mut self, message: Inbound) {
         self.bridge.receive(message);
@@ -324,6 +400,7 @@ async fn later_messages_that_day_continue_the_conversation() {
     f.end_turn().await;
 
     f.receive(from(CLIENT, "Second"));
+    f.settle().await;
     f.end_turn().await;
 
     *f.today.lock().unwrap() = november(8);
@@ -363,6 +440,7 @@ async fn a_reply_the_turn_refused_starts_the_next_turn() {
     f.receive(from(CLIENT, "Oops, second"));
     f.settle().await;
     f.end_turn().await;
+    f.settle().await;
 
     assert_eq!(f.host.calls()[1..], [
         "reply c1 \"Oops, second\"",
@@ -510,6 +588,7 @@ async fn a_change_outside_the_writable_directories_pauses_until_taken() {
 
     f.checkout.take();
     f.bridge.advance();
+    f.settle().await;
 
     assert_eq!(
         f.host.calls()[1],
@@ -641,6 +720,7 @@ async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
 
     *f.today.lock().unwrap() = november(14);
     f.receive(from(CLIENT, "Next Saturday"));
+    f.settle().await;
     f.end_turn().await;
 
     let calls = f.host.calls();
@@ -657,4 +737,361 @@ async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
         calls[1]
     );
     assert_eq!(calls[2], "query c2 \"Next Saturday\"");
+}
+
+/// "Move it to the top", then "actually second" while the conversation is still
+/// being created, then "actually third" once it exists: the turn gets the
+/// corrections in the order they were sent, one reply at a time.
+#[tokio::test]
+async fn corrections_reach_the_turn_in_the_order_they_were_sent() {
+    let mut f = fixture();
+    f.receive(from(CLIENT, "Move T to the top"));
+    f.receive(from(CLIENT, "Actually second"));
+    f.settle().await;
+
+    f.receive(from(CLIENT, "Actually third"));
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+
+    assert_eq!(f.host.calls()[1..], [
+        "reply c1 \"Actually second\"",
+        "reply c1 \"Actually third\"",
+    ]);
+}
+
+/// A reply the turn didn't take goes to the next turn ahead of the message that
+/// arrived while it was in flight.
+#[tokio::test]
+async fn a_refused_reply_goes_ahead_of_what_came_after_it() {
+    let mut f = fixture();
+    f.host.refuse_replies();
+    f.receive(from(CLIENT, "Move T to the top"));
+    f.settle().await;
+
+    f.receive(from(CLIENT, "Actually second"));
+    f.receive(from(CLIENT, "Actually third"));
+    f.settle().await;
+    f.end_turn().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls()[1..], [
+        "reply c1 \"Actually second\"",
+        "query c1 \"Actually second\\n\\nActually third\"",
+    ]);
+}
+
+/// A group message from someone other than the person a turn runs as waits for
+/// a turn of its own, so what it asks for is attributed to them; the next
+/// message from the first person waits behind it.
+#[tokio::test]
+async fn another_persons_message_gets_a_turn_of_its_own() {
+    let mut f = fixture();
+    f.receive(in_group(CLIENT, "File a bug about search"));
+    f.settle().await;
+
+    f.receive(in_group(MAINTAINER, "And one about the board"));
+    f.receive(in_group(CLIENT, "Make it high priority"));
+    f.end_turn().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls()[1..], [
+        "query c1 \"Max Maintainer: And one about the board\"",
+        "query c1 \"Ada Client: Make it high priority\"",
+    ]);
+    let names: Vec<String> = f
+        .host
+        .cfgs()
+        .iter()
+        .filter_map(|cfg| {
+            cfg.iter()
+                .find(|entry| entry.starts_with("user.name="))
+                .cloned()
+        })
+        .collect();
+    assert_eq!(names, [
+        "user.name=Ada Client",
+        "user.name=Max Maintainer",
+        "user.name=Ada Client"
+    ]);
+}
+
+#[test]
+fn a_turn_disables_every_configured_tool_before_the_persona() {
+    let cfg = turn_cfg(&["bash".to_owned(), "ticket_list".to_owned()], vec![
+        "personas/planner".to_owned(),
+    ])
+    .unwrap();
+
+    assert_eq!(cfg.len(), 2);
+    assert_eq!(
+        serde_json::from_str::<Value>(&cfg[0]).unwrap(),
+        json!({ "conversation": { "tools": {
+            "bash": { "enable": false },
+            "ticket_list": { "enable": false },
+        } } })
+    );
+    assert_eq!(cfg[1], "personas/planner");
+}
+
+#[test]
+fn a_tool_no_cfg_key_can_name_refuses_the_turn() {
+    assert_eq!(
+        turn_cfg(&["search.web".to_owned()], vec![]),
+        Err(
+            "the tool `search.web` can't be disabled, because a `.` in its name splits a `--cfg` \
+             key"
+            .to_owned()
+        )
+    );
+}
+
+#[tokio::test]
+async fn every_turn_disables_the_configured_tools() {
+    let mut f = fixture();
+    f.host.set_tools(Ok(vec!["bash".to_owned()]));
+
+    f.receive(from(CLIENT, "First"));
+    f.settle().await;
+    f.end_turn().await;
+    f.receive(from(CLIENT, "Second"));
+    f.settle().await;
+    f.end_turn().await;
+
+    let cfgs = f.host.cfgs();
+    assert_eq!(cfgs.len(), 2);
+    for cfg in cfgs {
+        assert_eq!(
+            serde_json::from_str::<Value>(&cfg[0]).unwrap(),
+            json!({ "conversation": { "tools": { "bash": { "enable": false } } } })
+        );
+        assert_eq!(cfg[1], "personas/planner");
+    }
+}
+
+/// Without the tool list there is nothing to disable, and a turn run anyway
+/// would have whatever tools the base configuration enables.
+#[tokio::test]
+async fn a_turn_whose_tools_cant_be_read_does_not_start() {
+    let mut f = fixture();
+    f.host
+        .set_tools(Err("config path not found: conversation".to_owned()));
+
+    f.receive(from(CLIENT, "Hi"));
+    f.settle().await;
+
+    assert!(f.host.calls().is_empty());
+    assert_eq!(f.outbox.take(), vec![
+        "typing direct:+31611111111 on".to_owned(),
+        "typing direct:+31611111111 off".to_owned(),
+        format!("send direct:+31611111111: {FAILED}"),
+    ]);
+    assert_eq!(f.host.logs(), vec![
+        "A turn for direct:+31611111111 failed: couldn't read the configured tools: config path \
+         not found: conversation"
+    ]);
+    assert_eq!(f.checkout.calls(), vec!["begin", "end"]);
+}
+
+#[test]
+fn tool_names_skip_the_defaults_and_unwrap_a_strategy() {
+    assert_eq!(
+        tool_names(Some(
+            &json!({ "*": { "run": "ask" }, "bash": {}, "fs_read_file": {} })
+        )),
+        Ok(vec!["bash".to_owned(), "fs_read_file".to_owned()])
+    );
+    assert_eq!(
+        tool_names(Some(
+            &json!({ "value": { "bash": {} }, "strategy": "replace" })
+        )),
+        Ok(vec!["bash".to_owned()])
+    );
+    assert_eq!(tool_names(None), Ok(vec![]));
+    assert_eq!(
+        tool_names(Some(&json!("bash"))),
+        Err("`conversation.tools` is not a table: \"bash\"".to_owned())
+    );
+}
+
+/// The transport stopping mid-turn doesn't end the turn: the host runs it to
+/// its end after the plugin exits.
+/// The bridge keeps the checkout locked until then, and checks what the turn
+/// wrote.
+#[tokio::test]
+async fn the_transport_stopping_waits_for_the_running_turn() {
+    let Fixture {
+        bridge,
+        host,
+        checkout,
+        ..
+    } = fixture();
+    let (inbound_tx, inbound_rx) = mpsc::channel(8);
+    let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+    inbound_tx.send(from(CLIENT, "File a bug")).await.unwrap();
+    drop(inbound_tx);
+
+    let run = tokio::spawn(bridge.run(inbound_rx, shutdown_rx));
+    eventually(|| host.turns_running() == 1).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(
+        !run.is_finished(),
+        "the bridge exited with its turn running"
+    );
+    assert_eq!(checkout.calls(), vec!["begin"]);
+
+    host.end_turn(Ok(()));
+    let result = tokio::time::timeout(Duration::from_secs(5), run)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result, Err("The chat transport stopped.".to_owned()));
+    assert_eq!(checkout.calls(), vec!["begin", "end"]);
+    assert!(!host.calls().iter().any(|call| call.starts_with("stop")));
+}
+
+/// A shutdown asks the running turn to stop, and keeps the checkout locked
+/// until it has.
+#[tokio::test]
+async fn a_shutdown_stops_the_running_turn_and_waits_for_it() {
+    let Fixture {
+        bridge,
+        host,
+        checkout,
+        ..
+    } = fixture();
+    let (inbound_tx, inbound_rx) = mpsc::channel(8);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    inbound_tx.send(from(CLIENT, "File a bug")).await.unwrap();
+
+    let run = tokio::spawn(bridge.run(inbound_rx, shutdown_rx));
+    eventually(|| host.turns_running() == 1).await;
+    shutdown_tx.send(true).unwrap();
+    eventually(|| host.calls().contains(&"stop c1".to_owned())).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(
+        !run.is_finished(),
+        "the bridge exited with its turn running"
+    );
+    assert_eq!(checkout.calls(), vec!["begin"]);
+
+    host.end_turn(Ok(()));
+    let result = tokio::time::timeout(Duration::from_secs(5), run)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(checkout.calls(), vec!["begin", "end"]);
+    drop(inbound_tx);
+}
+
+/// The workspace's planner persona, under the bridge's per-turn settings and
+/// layered the way the host layers `--cfg`, leaves enabled exactly the tools
+/// the persona names, over a configuration that enables a file-writing tool and
+/// a shell.
+///
+/// `--cfg` entries are applied as `jp` reads them: a JSON object at the root,
+/// `key=value` as one assignment, and anything else as a file under
+/// `.jp/config`.
+#[test]
+fn the_planner_persona_enables_only_its_own_tools_over_a_permissive_base() {
+    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let mut base = load_partial_at_path(root.join(".jp/config.toml").as_std_path())
+        .unwrap()
+        .unwrap();
+    for key in [
+        "conversation.tools.fs_modify_file.enable=true",
+        "conversation.tools.bash.enable=true",
+    ] {
+        base.assign(key.parse::<KvAssignment>().unwrap()).unwrap();
+    }
+
+    let tools = tool_names(
+        serde_json::to_value(&base)
+            .unwrap()
+            .pointer("/conversation/tools"),
+    )
+    .unwrap();
+    let resolve = |cfg: Vec<String>| -> AppConfig {
+        let mut partial = base.clone();
+        for entry in cfg {
+            if entry.starts_with('{') {
+                let value = serde_json::from_str(&entry).unwrap();
+                partial.assign(KvAssignment::root_json(value)).unwrap();
+            } else if entry.contains('=') {
+                partial
+                    .assign(entry.parse::<KvAssignment>().unwrap())
+                    .unwrap();
+            } else {
+                let file = load_partial_at_path(root.join(".jp/config").join(&entry).as_std_path())
+                    .unwrap()
+                    .unwrap();
+                partial.merge(&(), file).unwrap();
+            }
+        }
+        build(partial).unwrap()
+    };
+    let enabled = |config: &AppConfig| -> BTreeSet<String> {
+        tools
+            .iter()
+            .filter(|name| {
+                config
+                    .conversation
+                    .tools
+                    .get(name)
+                    .is_some_and(|tool| tool.is_enabled())
+            })
+            .cloned()
+            .collect()
+    };
+
+    let f = fixture();
+    let cfg = f.bridge.cfg("client");
+
+    // The persona alone doesn't override a tool another layer enables.
+    let unguarded = enabled(&resolve(cfg.clone()));
+    assert!(
+        unguarded.contains("bash") && unguarded.contains("fs_modify_file"),
+        "{unguarded:?}"
+    );
+
+    let guarded = enabled(&resolve(turn_cfg(&tools, cfg).unwrap()));
+    assert_eq!(
+        guarded,
+        BTreeSet::from(
+            [
+                "fs_grep_files",
+                "fs_grep_user_docs",
+                "fs_list_files",
+                "fs_read_file",
+                "rfd_abandon",
+                "rfd_draft",
+                "rfd_extend",
+                "rfd_list",
+                "rfd_promote",
+                "rfd_rename",
+                "rfd_renumber",
+                "rfd_require",
+                "rfd_show",
+                "rfd_supersede",
+                "ticket_comment",
+                "ticket_create",
+                "ticket_edit",
+                "ticket_list",
+                "ticket_move",
+                "ticket_show",
+                "wiki_create",
+                "wiki_edit",
+                "wiki_list",
+                "wiki_show",
+            ]
+            .map(ToOwned::to_owned)
+        )
+    );
 }

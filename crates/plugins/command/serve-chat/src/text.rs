@@ -10,6 +10,9 @@
 //!
 //! [`chunks`] splits long Markdown at paragraph boundaries before styling so
 //! style ranges never cross message boundaries.
+//! It budgets the UTF-8 size of each chunk's styled text, which is what Signal
+//! measures: styling removes markup but turns each `- ` bullet into the larger
+//! `• `.
 
 /// Plain text and `start:length:STYLE` UTF-16 ranges for `signal-cli`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,17 +136,21 @@ pub(crate) fn styled(markdown: &str) -> Styled {
     }
 }
 
-/// Split `markdown` into chunks of at most `max` characters, preferring
-/// paragraph breaks outside code blocks, then line breaks, then character
-/// boundaries.
+/// UTF-8 size in bytes of `markdown` once [`styled`].
+fn size(markdown: &str) -> usize {
+    styled(markdown).text.len()
+}
+
+/// Split `markdown` into chunks whose styled text is at most `max` bytes,
+/// preferring paragraph breaks outside code blocks, then line breaks, then
+/// character boundaries.
 pub(crate) fn chunks(markdown: &str, max: usize) -> Vec<String> {
     let mut chunks: Vec<String> = vec![];
     let mut current = String::new();
 
     for block in blocks(markdown.trim()) {
         for piece in fit(&block, max) {
-            let joined = current.chars().count() + 2 + piece.chars().count();
-            if !current.is_empty() && joined > max {
+            if !current.is_empty() && size(&format!("{current}\n\n{piece}")) > max {
                 chunks.push(std::mem::take(&mut current));
             }
             if !current.is_empty() {
@@ -186,10 +193,10 @@ fn blocks(markdown: &str) -> Vec<String> {
     blocks
 }
 
-/// Split `block` into pieces of at most `max` characters along line or
-/// character boundaries.
+/// Split `block` into pieces whose styled text is at most `max` bytes, along
+/// line or character boundaries.
 fn fit(block: &str, max: usize) -> Vec<String> {
-    if block.chars().count() <= max {
+    if size(block) <= max {
         return vec![block.to_owned()];
     }
 
@@ -197,11 +204,8 @@ fn fit(block: &str, max: usize) -> Vec<String> {
     let mut current = String::new();
     for line in block.lines() {
         let mut line = line.to_owned();
-        while line.chars().count() > max {
-            let cut = line
-                .char_indices()
-                .nth(max)
-                .map_or(line.len(), |(index, _)| index);
+        while size(&line) > max {
+            let cut = cut(&line, max);
             if !current.is_empty() {
                 pieces.push(std::mem::take(&mut current));
             }
@@ -209,7 +213,7 @@ fn fit(block: &str, max: usize) -> Vec<String> {
             line = line[cut..].to_owned();
         }
 
-        if !current.is_empty() && current.chars().count() + 1 + line.chars().count() > max {
+        if !current.is_empty() && size(&format!("{current}\n{line}")) > max {
             pieces.push(std::mem::take(&mut current));
         }
         if !current.is_empty() {
@@ -222,6 +226,21 @@ fn fit(block: &str, max: usize) -> Vec<String> {
     }
 
     pieces
+}
+
+/// The largest character boundary in `line` whose prefix styles to at most
+/// `max` bytes, and at least one character so a split always makes progress.
+fn cut(line: &str, max: usize) -> usize {
+    let mut cut = line.floor_char_boundary(max.min(line.len()));
+    while cut > 0 && size(&line[..cut]) > max {
+        cut = line.floor_char_boundary(cut - 1);
+    }
+
+    if cut == 0 {
+        line.chars().next().map_or(line.len(), char::len_utf8)
+    } else {
+        cut
+    }
 }
 
 #[cfg(test)]

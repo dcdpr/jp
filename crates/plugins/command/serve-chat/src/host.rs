@@ -1,7 +1,8 @@
 //! Client for the `jp` host plugin protocol over stdin and stdout.
 //!
 //! [`Host`] defines the operations the bridge uses: starting a turn, sending an
-//! in-turn reply, reading a conversation's events, and logging.
+//! in-turn reply, stopping a turn, reading a conversation's events and the
+//! configured tools, and logging.
 //! [`HostClient`] implements [`Host`] over JSON-lines stdio; tests use a fake
 //! implementation instead.
 
@@ -20,7 +21,7 @@ use std::{
 
 use jp_plugin::message::{
     ExitMessage, HostToPlugin, InterruptRequest, LogMessage, PluginToHost, PrintMessage,
-    QueryRequest, ReadEventsRequest,
+    QueryRequest, ReadConfigRequest, ReadEventsRequest,
 };
 use serde_json::{Map, Value};
 use tokio::sync::{oneshot, watch};
@@ -69,6 +70,10 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// finishes.
     fn start(&self, turn: NewTurn) -> impl Future<Output = Result<(String, Turn), String>> + Send;
 
+    /// Start a turn on an existing `conversation`.
+    ///
+    /// The request reaches the host before this returns, so a reply sent after
+    /// it reaches the host after it.
     fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn;
 
     /// Inject `content` into the running turn on `conversation` as a user
@@ -79,8 +84,19 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
         content: &str,
     ) -> impl Future<Output = Result<(), ReplyError>> + Send + 'static;
 
+    /// Stop the running turn on `conversation`, keeping what it produced.
+    ///
+    /// Resolves once the turn has acted on it, or with an error when no turn
+    /// was left to reach.
+    fn stop(&self, conversation: &str)
+    -> impl Future<Output = Result<(), String>> + Send + 'static;
+
     fn events(&self, conversation: &str)
     -> impl Future<Output = Result<Vec<Value>, String>> + Send;
+
+    /// Names of the tools the host's configuration defines, read from disk
+    /// again.
+    fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send;
 
     fn log(&self, level: Level, message: &str);
 
@@ -257,8 +273,7 @@ impl Host for HostClient {
     }
 
     fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn {
-        let client = self.clone();
-        let id = client.next_id();
+        let id = self.next_id();
         let message = PluginToHost::Query(QueryRequest {
             id: Some(id.clone()),
             conversation: conversation.to_owned(),
@@ -270,8 +285,16 @@ impl Host for HostClient {
             expires_in: None,
         });
 
+        // Written now rather than when the turn is first awaited, so it precedes
+        // any reply the bridge sends once it knows the turn is running.
+        let rx = self.register(&id);
+        if let Err(error) = self.send(&message) {
+            self.forget(&id);
+            return Box::pin(async move { Err(error) });
+        }
+
         // No deadline: a turn takes as long as the assistant does.
-        Box::pin(async move { finished(client.request(&id, &message, None).await) })
+        Box::pin(async move { finished(rx.await.map_err(|_| closed())) })
     }
 
     fn reply(
@@ -295,6 +318,44 @@ impl Host for HostClient {
                     "unexpected answer to a reply: {other:?}"
                 ))),
                 Err(error) => Err(ReplyError::Broken(error)),
+            }
+        }
+    }
+
+    fn stop(
+        &self,
+        conversation: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send + 'static {
+        let client = self.clone();
+        let id = client.next_id();
+        let message = PluginToHost::Interrupt(
+            InterruptRequest::stop(conversation.to_owned()).with_id(id.clone()),
+        );
+
+        async move {
+            match client.request(&id, &message, None).await? {
+                HostToPlugin::Done(_) => Ok(()),
+                HostToPlugin::Error(error) => Err(error.message),
+                other => Err(format!("unexpected answer to a stop: {other:?}")),
+            }
+        }
+    }
+
+    fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send {
+        let client = self.clone();
+
+        async move {
+            let id = client.next_id();
+            let message = PluginToHost::ReadConfig(ReadConfigRequest {
+                id: Some(id.clone()),
+                path: Some("conversation".to_owned()),
+                reload: true,
+            });
+
+            match client.request(&id, &message, Some(REQUEST_TIMEOUT)).await? {
+                HostToPlugin::Config(config) => tool_names(config.data.get("tools")),
+                HostToPlugin::Error(error) => Err(error.message),
+                other => Err(format!("unexpected answer to read_config: {other:?}")),
             }
         }
     }
@@ -345,6 +406,30 @@ impl Host for HostClient {
     }
 }
 
+/// The tool names in a serialized `conversation.tools` table.
+///
+/// The table holds the `*` defaults beside one entry per tool, or, for a map
+/// that states its merge strategy, the entries under `value`.
+/// No table means no tools; anything else is an error rather than an empty
+/// list, since a caller disables the tools it names.
+pub(crate) fn tool_names(tools: Option<&Value>) -> Result<Vec<String>, String> {
+    let table = match tools {
+        None | Some(Value::Null) => return Ok(vec![]),
+        Some(Value::Object(table)) => table,
+        Some(other) => return Err(format!("`conversation.tools` is not a table: {other}")),
+    };
+    let entries = match table.get("value") {
+        Some(Value::Object(value)) if table.contains_key("strategy") => value,
+        _ => table,
+    };
+
+    Ok(entries
+        .keys()
+        .filter(|name| *name != "*")
+        .cloned()
+        .collect())
+}
+
 /// Read JSON-lines messages from the host and dispatch responses to waiting
 /// callers.
 fn read_host(reader: impl BufRead, pending: &Pending, shutdown: &watch::Sender<bool>) {
@@ -363,6 +448,7 @@ fn read_host(reader: impl BufRead, pending: &Pending, shutdown: &watch::Sender<b
                 continue;
             }
             HostToPlugin::Events(answer) => answer.id.clone(),
+            HostToPlugin::Config(answer) => answer.id.clone(),
             HostToPlugin::QueryComplete(answer) => answer.id.clone(),
             HostToPlugin::Created(answer) => answer.id.clone(),
             HostToPlugin::Done(answer) => answer.id.clone(),
