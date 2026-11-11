@@ -1,8 +1,17 @@
 use assert_matches::assert_matches;
+use relative_path::RelativePathBuf;
 use serde_json::json;
 
 use super::*;
-use crate::types::{json_value::JsonValue, map::MergedMapStrategy};
+use crate::{
+    PartialAppConfig,
+    plugins::command::{PartialCommandPluginConfig, RunPolicy},
+    types::{
+        json_value::JsonValue,
+        map::{MergedMap, MergedMapStrategy},
+        vec::{MergedVec, MergedVecStrategy},
+    },
+};
 
 #[test]
 fn test_kv_assignment_from_str() {
@@ -15,6 +24,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::String("bar".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo+=bar", KvAssignment {
             key: KvKey {
@@ -24,6 +34,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::String("bar".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo.bar=baz", KvAssignment {
             key: KvKey {
@@ -33,6 +44,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::String("baz".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo.bar+=baz", KvAssignment {
             key: KvKey {
@@ -42,6 +54,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::String("baz".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo.bar.1=qux", KvAssignment {
             key: KvKey {
@@ -51,6 +64,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::String("qux".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo.bar.1+=qux", KvAssignment {
             key: KvKey {
@@ -60,6 +74,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::String("qux".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo:=true", KvAssignment {
             key: KvKey {
@@ -69,6 +84,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::Json(true.into()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo:=42", KvAssignment {
             key: KvKey {
@@ -78,6 +94,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::Json(42.into()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         (r#"foo+:=["bar"]"#, KvAssignment {
             key: KvKey {
@@ -87,6 +104,7 @@ fn test_kv_assignment_from_str() {
             },
             value: KvValue::Json(vec!["bar".to_owned()].into()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
     ];
 
@@ -133,6 +151,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::String("bar".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo", "+", "bar", KvAssignment {
             key: KvKey {
@@ -142,6 +161,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::String("bar".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo.bar", "", "baz", KvAssignment {
             key: KvKey {
@@ -151,6 +171,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::String("baz".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo.bar", "+", "baz", KvAssignment {
             key: KvKey {
@@ -160,6 +181,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::String("baz".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo.bar.1", "", "qux", KvAssignment {
             key: KvKey {
@@ -169,6 +191,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::String("qux".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo.bar.1", "+", "qux", KvAssignment {
             key: KvKey {
@@ -178,6 +201,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::String("qux".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo", ":", r#""quux""#, KvAssignment {
             key: KvKey {
@@ -187,6 +211,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::Json("quux".into()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo", "+:", r#"["quux"]"#, KvAssignment {
             key: KvKey {
@@ -196,6 +221,7 @@ fn test_kv_assignment_try_from_cli_env() {
             },
             value: KvValue::Json(vec!["quux".to_owned()].into()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
     ];
 
@@ -223,6 +249,7 @@ fn test_kv_assignment_try_from_cli_env_escaped_chars() {
             },
             value: KvValue::String("bar".to_owned()),
             strategy: Strategy::Merge,
+            source: KeySource::Written,
         }),
         ("foo=\\+bar", KvAssignment {
             key: KvKey {
@@ -232,6 +259,7 @@ fn test_kv_assignment_try_from_cli_env_escaped_chars() {
             },
             value: KvValue::String("+bar".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo=\\:bar", KvAssignment {
             key: KvKey {
@@ -241,6 +269,7 @@ fn test_kv_assignment_try_from_cli_env_escaped_chars() {
             },
             value: KvValue::String(":bar".to_owned()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
         ("foo=:true", KvAssignment {
             key: KvKey {
@@ -250,6 +279,7 @@ fn test_kv_assignment_try_from_cli_env_escaped_chars() {
             },
             value: KvValue::Json(true.into()),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }),
     ];
 
@@ -774,4 +804,182 @@ fn test_assign_to_entry_scalar_with_empty_key_errors() {
     let kv = KvAssignment::try_from_cli(":", r#""scalar""#).unwrap();
     let err = kv.assign_to_entry(&mut map).unwrap_err();
     assert!(err.to_string().contains("type error"), "got: {err}");
+}
+
+fn plugins_allowed_by_files() -> PartialAppConfig {
+    let mut config = PartialAppConfig::empty();
+    for key in ["plugins.command.ticket.run", "plugins.command.wiki.run"] {
+        config
+            .assign(KvAssignment::try_from_cli(key, "allow").unwrap())
+            .unwrap();
+    }
+
+    config
+}
+
+fn allowed() -> PartialCommandPluginConfig {
+    PartialCommandPluginConfig {
+        run: Some(RunPolicy::Allow),
+        ..Default::default()
+    }
+}
+
+fn allowed_with_assistant() -> PartialCommandPluginConfig {
+    PartialCommandPluginConfig {
+        run: Some(RunPolicy::Allow),
+        options: MergeableMap::Map(IndexMap::from([(
+            "assistant".to_owned(),
+            JsonValue(json!("Ada via jp")),
+        )])),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_root_object_naming_one_map_entry_keeps_the_others() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(KvAssignment::root_json(json!({
+            "plugins": { "command": { "ticket": { "options": { "assistant": "Ada via jp" } } } }
+        })))
+        .unwrap();
+
+    assert_eq!(
+        config.plugins.command,
+        MergeableMap::Map(IndexMap::from([
+            ("ticket".to_owned(), allowed_with_assistant()),
+            ("wiki".to_owned(), allowed()),
+        ]))
+    );
+}
+
+#[test]
+fn an_object_assigned_to_a_block_keeps_the_entries_of_maps_inside_it() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(
+            KvAssignment::try_from_cli(
+                "plugins:",
+                r#"{"command": {"ticket": {"options": {"assistant": "Ada via jp"}}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        config.plugins.command,
+        MergeableMap::Map(IndexMap::from([
+            ("ticket".to_owned(), allowed_with_assistant()),
+            ("wiki".to_owned(), allowed()),
+        ]))
+    );
+}
+
+#[test]
+fn an_object_assigned_to_a_map_replaces_it() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(
+            KvAssignment::try_from_cli(
+                "plugins.command:",
+                r#"{"ticket": {"options": {"assistant": "Ada via jp"}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        config.plugins.command,
+        MergeableMap::Map(IndexMap::from([(
+            "ticket".to_owned(),
+            PartialCommandPluginConfig {
+                options: MergeableMap::Map(IndexMap::from([(
+                    "assistant".to_owned(),
+                    JsonValue(json!("Ada via jp")),
+                )])),
+                ..Default::default()
+            },
+        )]))
+    );
+}
+
+#[test]
+fn a_map_strategy_in_a_root_object_combines_with_the_entries_already_there() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(KvAssignment::root_json(json!({
+            "plugins": { "command": {
+                "value": { "ticket": { "options": { "assistant": "Ada via jp" } } },
+                "strategy": "deep_merge",
+            } }
+        })))
+        .unwrap();
+
+    assert_eq!(
+        config.plugins.command,
+        MergeableMap::Merged(MergedMap {
+            value: IndexMap::from([
+                ("ticket".to_owned(), allowed_with_assistant()),
+                ("wiki".to_owned(), allowed()),
+            ]),
+            strategy: Some(MergedMapStrategy::DeepMerge),
+            discard_when_merged: false,
+        })
+    );
+}
+
+#[test]
+fn a_list_strategy_in_a_root_object_combines_with_the_items_already_there() {
+    let mut config = PartialAppConfig::empty();
+    config.config_load_paths = Some(vec![RelativePathBuf::from("a")].into());
+
+    config
+        .assign(KvAssignment::root_json(json!({
+            "config_load_paths": { "value": ["b"], "strategy": "append" }
+        })))
+        .unwrap();
+
+    assert_eq!(
+        config.config_load_paths,
+        Some(MergeableVec::Merged(MergedVec {
+            value: vec![RelativePathBuf::from("a"), RelativePathBuf::from("b")],
+            strategy: Some(MergedVecStrategy::Append),
+            dedup: None,
+            discard_when_merged: false,
+        }))
+    );
+}
+
+#[test]
+fn a_list_in_a_root_object_replaces_the_list() {
+    let mut config = PartialAppConfig::empty();
+    config.config_load_paths = Some(vec![RelativePathBuf::from("a")].into());
+
+    config
+        .assign(KvAssignment::root_json(
+            json!({ "config_load_paths": ["b"] }),
+        ))
+        .unwrap();
+
+    assert_eq!(
+        config.config_load_paths,
+        Some(MergeableVec::Vec(vec![RelativePathBuf::from("b")]))
+    );
+}
+
+#[test]
+fn null_in_a_root_object_clears_the_map() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(KvAssignment::root_json(
+            json!({ "plugins": { "command": null } }),
+        ))
+        .unwrap();
+
+    assert_eq!(config.plugins.command, MergeableMap::default());
 }

@@ -77,6 +77,10 @@ pub struct KvAssignment {
     /// Whether the value should be merged with the existing value, or replaced
     /// entirely.
     strategy: Strategy,
+
+    /// Whether the key was written directly with an operator or expanded from a
+    /// JSON object.
+    source: KeySource,
 }
 
 impl FromStr for KvAssignment {
@@ -214,6 +218,18 @@ impl KvAssignment {
         matches!(self.strategy, Strategy::Merge)
     }
 
+    /// Whether this assignment replaces a target map or strategy wrapper
+    /// instead of merging into it.
+    ///
+    /// Returns `true` only when `Strategy::Set` (`=` or `:=`) was written
+    /// directly on the target key (`KeySource::Written`).
+    /// When a map or `{ value, strategy }` wrapper is reached by expanding an
+    /// enclosing JSON object (`KeySource::Spelled`), it merges with existing
+    /// entries instead of clearing them.
+    const fn replaces_collection(&self) -> bool {
+        matches!(self.strategy, Strategy::Set) && matches!(self.source, KeySource::Written)
+    }
+
     /// Create an assignment that clears the field at `path`.
     ///
     /// The value is JSON `null`, which every leaf setter already reads as "no
@@ -235,6 +251,7 @@ impl KvAssignment {
             },
             value: KvValue::Json(Value::Null),
             strategy: Strategy::Set,
+            source: KeySource::Written,
         }
     }
 
@@ -244,7 +261,8 @@ impl KvAssignment {
     /// keys are iterated and each is assigned individually via
     /// [`try_merge_object`].
     /// This allows `--cfg '{"assistant": {"name": "dev"}}'` to work like `--cfg
-    /// assistant.name=dev`.
+    /// assistant.name=dev`, including merging into existing map entries rather
+    /// than replacing the map.
     ///
     /// [`try_merge_object`]: Self::try_merge_object
     #[must_use]
@@ -257,6 +275,7 @@ impl KvAssignment {
             },
             value: KvValue::Json(value),
             strategy: Strategy::Set,
+            source: KeySource::Spelled,
         }
     }
 
@@ -279,17 +298,18 @@ impl KvAssignment {
         self.trim_prefix(segment)
     }
 
-    /// Assign a key-value pair to an entry (or entries) of a map.
+    /// Assign a key-value pair to one or more entries of a map.
     ///
-    /// With a key segment present (`foo.KEY=…`), the value is assigned to that
-    /// single entry.
-    /// With no segment left (`foo:={…}`), the object is distributed across
-    /// entries, mirroring [`try_vec`]: `:=` (Set) replaces the whole map, `:+=`
-    /// (Merge) merges the entries into it.
-    /// A scalar value with no key segment, or any non-object whole-collection
-    /// value, is a type error.
+    /// When a key segment remains (`foo.KEY=…`), the value is assigned to that
+    /// entry.
+    /// When no key segment remains (`foo:={…}`), the JSON object's keys are
+    /// distributed across map entries: `:=` (`Strategy::Set`) replaces the map
+    /// when written directly on the map's key, while `:+=` (`Strategy::Merge`)
+    /// or an object expanded from a parent key (`KeySource::Spelled`) merges
+    /// into existing entries.
     ///
-    /// [`try_vec`]: Self::try_vec
+    /// Returns a type error if no key segment remains and the value is not a
+    /// JSON object.
     pub(crate) fn assign_to_entry<V>(mut self, map: &mut IndexMap<String, V>) -> AssignResult
     where
         V: AssignKeyValue + Default,
@@ -322,17 +342,19 @@ impl KvAssignment {
         // Whole-collection form, e.g. `aliases:={ ... }`: no map key remains to
         // consume, so distribute the object's top-level keys across entries.
         if self.key.is_empty() {
+            let replaces = self.replaces_collection();
             let Self {
                 key,
                 value,
                 strategy,
+                ..
             } = self;
 
             let KvValue::Json(Value::Object(obj)) = value else {
                 return type_error(&key, &value, &["object"]).map_err(Into::into);
             };
 
-            if !matches!(strategy, Strategy::Merge) {
+            if replaces {
                 map.clear();
             }
 
@@ -351,6 +373,7 @@ impl KvAssignment {
                     },
                     value: KvValue::Json(v),
                     strategy,
+                    source: KeySource::Spelled,
                 };
                 map.entry(k).or_default().assign(entry)?;
             }
@@ -365,36 +388,30 @@ impl KvAssignment {
         Ok(())
     }
 
-    /// Whether this assignment names a whole map and carries the wrapper that
-    /// states how that map merges.
+    /// Whether this assignment targets the whole map with a `{ value, strategy
+    /// }` merge wrapper.
     ///
-    /// The test is the one the map's own deserializer uses, so a strategy
-    /// written on the command line and one written in a config file mean the
-    /// same thing: an object carrying `value` beside `strategy` is the wrapper.
-    /// An entry named `value` needs the sibling `strategy` before it reads as
-    /// one, which keeps a tool called `value` assignable.
+    /// Matches [`MergeableMap`]'s serde format: a JSON object at the map root
+    /// is treated as a strategy wrapper only when it contains both `"value"`
+    /// and `"strategy"` keys, so a map entry named `"value"` remains assignable
+    /// on its own.
     pub(crate) fn states_map_strategy(&self) -> bool {
         self.key.is_empty()
             && matches!(&self.value, KvValue::Json(Value::Object(object))
                 if object.contains_key("value") && object.contains_key("strategy"))
     }
 
-    /// Assign a key-value pair to an entry of a map that carries its own merge
-    /// strategy.
+    /// Assign a key-value pair to a [`MergeableMap`].
     ///
-    /// Mirrors [`Self::assign_to_entry`], with one more shape to tell apart: a
-    /// whole-map object carrying `value` beside `strategy` is the wrapper that
-    /// states how the map merges, not two entries named after those keys.
-    /// See [`Self::states_map_strategy`] for how the two are told apart.
+    /// If the assignment is a `{ value, strategy }` wrapper at the map root
+    /// (see [`Self::states_map_strategy`]), it is deserialized as a
+    /// [`MergeableMap`].
+    /// When `:=` is written directly on the map's key, the wrapper replaces the
+    /// map; when assigned with `:+=` or expanded from an enclosing JSON object,
+    /// it merges into the existing map using the wrapper's strategy.
     ///
-    /// A wrapper assigned with `:=` states the map outright.
-    /// One assigned with `:+=` combines with what is already there, under the
-    /// strategy the wrapper names — which is what keeps a merge assignment
-    /// from dropping the entries earlier layers contributed.
-    ///
-    /// Anything else is an entry, and lands inside whatever wrapper the map
-    /// already carries: naming one entry says nothing about how the map
-    /// combines.
+    /// All other assignments delegate to [`Self::assign_to_entry`], preserving
+    /// the map's existing merge strategy.
     pub(crate) fn assign_to_mergeable_entry<V>(self, map: &mut MergeableMap<V>) -> AssignResult
     where
         V: AssignKeyValue
@@ -413,7 +430,7 @@ impl KvAssignment {
         let value = self.value.clone().into_value();
         let next = serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
 
-        if !self.is_merge() {
+        if self.replaces_collection() {
             *map = next;
             return Ok(());
         }
@@ -499,6 +516,7 @@ impl KvAssignment {
             } else {
                 Strategy::Set
             },
+            source: KeySource::Written,
         })
     }
 
@@ -565,6 +583,7 @@ impl KvAssignment {
             } else {
                 Strategy::Set
             },
+            source: KeySource::Written,
         })
     }
 
@@ -655,6 +674,7 @@ impl KvAssignment {
             key,
             value,
             strategy,
+            ..
         } = self;
 
         let KvValue::Json(Value::Object(obj)) = value else {
@@ -676,6 +696,7 @@ impl KvAssignment {
                 },
                 value: KvValue::Json(v),
                 strategy,
+                source: KeySource::Spelled,
             })?;
         }
 
@@ -1138,7 +1159,7 @@ impl KvAssignment {
     }
 
     /// Convenience method for [`Self::try_vec_of_strings`] that wraps the `Ok`
-    /// value into
+    /// value into `Some`.
     pub(crate) fn try_some_vec_of_strings<T>(
         self,
         vec: &mut Option<Vec<T>>,
@@ -1157,14 +1178,16 @@ impl KvAssignment {
         self.try_vec_of_strings(vec.get_or_insert_default())
     }
 
-    /// Assign to a list that carries its own merge strategy.
+    /// Assign to a [`MergeableVec`] field.
     ///
-    /// Accepts either the list itself or a `{ value, strategy }` object, which
-    /// is how the user declares a strategy for the field.
-    /// The two are told apart by shape, the same way [`MergeableVec`]'s own
-    /// deserializer does it: a sequence cannot be a table.
-    /// Merge-assigned objects use the field's `merge` function; appends and
-    /// indexed edits preserve the existing wrapper metadata.
+    /// Accepts either a list value (JSON array, comma-separated string, or
+    /// indexed element) or a `{ value, strategy }` JSON object.
+    ///
+    /// When given a `{ value, strategy }` object, `:=` written directly on the
+    /// field's key replaces the [`MergeableVec`]; `:+=` or an object expanded
+    /// from an enclosing JSON object merges into the existing list via `merge`.
+    /// Appends (`+=`, `:+=`) and indexed edits modify the elements while
+    /// preserving the existing wrapper's merge strategy.
     pub(crate) fn try_some_mergeable_vec<T>(
         self,
         vec: &mut Option<MergeableVec<T>>,
@@ -1189,7 +1212,7 @@ impl KvAssignment {
         {
             let next = serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
 
-            *vec = if self.is_merge()
+            *vec = if !self.replaces_collection()
                 && let Some(prev) = vec.as_ref()
             {
                 merge(prev.clone(), next, &()).or_else(|error| {
@@ -1254,6 +1277,7 @@ impl KvAssignment {
                         KvValue::Json(Value::Object(obj)) => {
                             for (k, v) in obj {
                                 let mut kv = self.clone();
+                                kv.source = KeySource::Spelled;
                                 kv.key.full_path = [self.key.full_path.as_str(), k.as_str()]
                                     .join(kv.key.delim.as_str());
                                 kv.key.path = k;
@@ -1293,6 +1317,7 @@ impl KvAssignment {
                     let mut item = T::default();
                     for (k, v) in obj {
                         let mut nested_kv = kv.clone();
+                        nested_kv.source = KeySource::Spelled;
                         nested_kv.key.full_path =
                             [kv.key.full_path.as_str(), k.as_str()].join(kv.key.delim.as_str());
                         nested_kv.key.path = k;
@@ -1423,6 +1448,27 @@ enum Strategy {
 
     /// The value should be set, overwriting any existing value.
     Set,
+}
+
+/// How an assignment's key was specified.
+///
+/// An assignment operator (`=`, `:=`, `+=`, `:+=`) applies directly only to the
+/// key it is written on.
+/// When a JSON object is expanded into per-key assignments, child assignments
+/// keep the parent's [`Strategy`] (so leaf lists still replace on `Set` and
+/// append on `Merge`), but their `KeySource` is [`Spelled`] so maps and `{
+/// value, strategy }` wrappers they reach merge into existing entries instead
+/// of replacing them.
+///
+/// [`Spelled`]: Self::Spelled
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeySource {
+    /// Written directly with an operator, e.g. `plugins.command:={…}`.
+    Written,
+
+    /// Expanded from a JSON object key, or the empty root key of
+    /// [`KvAssignment::root_json`].
+    Spelled,
 }
 
 /// A key in a configuration.
