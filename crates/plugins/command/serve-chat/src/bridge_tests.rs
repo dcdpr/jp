@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::{
-    decide::Decision,
+    decide::{Action, Decision, Verdict},
     host::{Turn, tool_names},
     options::DecideOptions,
 };
@@ -782,7 +782,7 @@ async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
 /// what it was asked.
 #[derive(Default)]
 struct FakeDecider {
-    answers: Mutex<Vec<Result<f64, String>>>,
+    answers: Mutex<Vec<Result<Verdict, String>>>,
     asked: Mutex<Vec<String>>,
 }
 
@@ -794,8 +794,15 @@ impl Decide for FakeDecider {
     }
 }
 
+fn verdict(action: Action, probability: f64) -> Verdict {
+    Verdict {
+        action,
+        probability,
+    }
+}
+
 /// A fixture whose bridge asks a decider, answering in turn with `answers`.
-fn deciding(answers: Vec<Result<f64, String>>) -> (Fixture, Arc<FakeDecider>) {
+fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>) {
     let mut f = fixture();
     let decider = Arc::new(FakeDecider {
         answers: Mutex::new(answers),
@@ -804,9 +811,9 @@ fn deciding(answers: Vec<Result<f64, String>>) -> (Fixture, Arc<FakeDecider>) {
     f.bridge.options.decide = Some(DecideOptions {
         url: "https://decide.invalid".to_owned(),
         model: "jev-latest".to_owned(),
-        api_key_env: "JEV_API_KEY".to_owned(),
+        api_key_env: None,
         threshold: 0.5,
-        instructions: "Is this for the assistant?".to_owned(),
+        instructions: "What should the assistant do?".to_owned(),
     });
     f.bridge
         .inbox
@@ -816,8 +823,8 @@ fn deciding(answers: Vec<Result<f64, String>>) -> (Fixture, Arc<FakeDecider>) {
 }
 
 #[tokio::test]
-async fn a_group_message_the_decider_rejects_gets_no_turn() {
-    let (mut f, decider) = deciding(vec![Ok(0.1)]);
+async fn a_group_message_the_decider_ignores_gets_no_turn() {
+    let (mut f, decider) = deciding(vec![Ok(verdict(Action::Ignore, 0.9))]);
 
     f.receive(in_group(CLIENT, "Thanks!"));
     f.settle().await;
@@ -832,8 +839,8 @@ async fn a_group_message_the_decider_rejects_gets_no_turn() {
 }
 
 #[tokio::test]
-async fn a_group_message_the_decider_accepts_starts_a_turn() {
-    let (mut f, _) = deciding(vec![Ok(0.9)]);
+async fn a_group_message_the_decider_answers_starts_a_turn() {
+    let (mut f, _) = deciding(vec![Ok(verdict(Action::Answer, 0.9))]);
 
     f.receive(in_group(CLIENT, "What's next?"));
     f.settle().await;
@@ -846,50 +853,125 @@ async fn a_group_message_the_decider_accepts_starts_a_turn() {
     );
 }
 
-/// A message that mentions the assistant, or comes in a direct chat, is for it
-/// already, so nothing asks.
+/// A message sent to the assistant, by mentioning it or in a direct chat, is
+/// answered even when the model would ignore it.
 #[tokio::test]
-async fn an_addressed_or_direct_message_is_not_decided() {
-    let (mut f, decider) = deciding(vec![]);
+async fn a_message_sent_to_the_assistant_is_never_ignored() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Ignore, 0.95)),
+        Ok(verdict(Action::Ignore, 0.95)),
+    ]);
+
+    f.receive(Inbound {
+        addressed: true,
+        ..in_group(CLIENT, "thanks!")
+    });
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.receive(from(MAINTAINER, "Hi"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls().len(), 2, "{:?}", f.host.calls());
+    assert!(f.host.logs().is_empty(), "{:?}", f.host.logs());
+}
+
+/// A wasted turn costs less than a question nobody answers.
+#[tokio::test]
+async fn an_unsure_or_failed_decision_answers_the_message() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Ignore, 0.4)),
+        Err("the decide API answered 503".to_owned()),
+    ]);
+
+    f.receive(in_group(CLIENT, "Hmm"));
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.receive(in_group(CLIENT, "What's next?"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls().len(), 2, "{:?}", f.host.calls());
+    assert_eq!(f.host.logs(), vec![
+        "The decide API failed, so the message is answered: the decide API answered 503"
+    ]);
+}
+
+/// "@JP start over" gets no turn of its own: the chat's next turn runs in a new
+/// conversation instead of the current one.
+#[tokio::test]
+async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::NewConversation, 0.9)),
+        Ok(verdict(Action::Answer, 0.9)),
+    ]);
+    f.receive(Inbound {
+        addressed: true,
+        ..in_group(CLIENT, "what's next?")
+    });
+    f.settle().await;
+    f.settle().await;
+    f.end_turn().await;
+    f.outbox.take();
+
+    f.receive(Inbound {
+        addressed: true,
+        ..in_group(CLIENT, "start over")
+    });
+    f.settle().await;
+
+    assert_eq!(f.outbox.take(), vec![format!(
+        "send group:Z3JvdXA=: {NEW_CONVERSATION}"
+    )]);
+    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
 
     f.receive(Inbound {
         addressed: true,
         ..in_group(CLIENT, "what's next?")
     });
     f.settle().await;
-    f.end_turn().await;
-    f.receive(from(MAINTAINER, "Hi"));
     f.settle().await;
 
-    assert!(decider.asked.lock().unwrap().is_empty());
-    assert_eq!(f.host.calls().len(), 2, "{:?}", f.host.calls());
+    let calls = f.host.calls();
+    assert!(calls[1].starts_with("start "), "{calls:?}");
 }
 
-/// A wasted turn costs less than a question nobody answers.
+/// Two people talking about starting over don't reset the assistant's
+/// conversation: only a message sent to it can.
 #[tokio::test]
-async fn a_failed_decision_answers_the_message() {
-    let (mut f, _) = deciding(vec![Err("the decide API answered 503".to_owned())]);
+async fn talk_between_people_cannot_start_a_new_conversation() {
+    let (mut f, _) = deciding(vec![Ok(verdict(Action::NewConversation, 0.9))]);
 
-    f.receive(in_group(CLIENT, "What's next?"));
+    f.receive(in_group(CLIENT, "let's start over on the design"));
     f.settle().await;
     f.settle().await;
 
-    assert_eq!(f.host.calls().len(), 1);
-    assert_eq!(f.host.logs(), vec![
-        "The decide API failed, so the message is answered: the decide API answered 503"
-    ]);
+    assert!(
+        f.outbox
+            .take()
+            .iter()
+            .all(|sent| !sent.contains(NEW_CONVERSATION))
+    );
+    assert_eq!(f.host.calls().len(), 1, "{:?}", f.host.calls());
 }
 
 /// "Rank it first", then, while the turn runs, an unaddressed "actually
 /// second": once the decider says it is for the assistant, it goes into the
 /// running turn.
 #[tokio::test]
-async fn a_correction_the_decider_accepts_goes_into_the_running_turn() {
-    let (mut f, _) = deciding(vec![Ok(0.9)]);
+async fn a_correction_the_decider_answers_goes_into_the_running_turn() {
+    let (mut f, _) = deciding(vec![
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Answer, 0.9)),
+    ]);
     f.receive(Inbound {
         addressed: true,
         ..in_group(CLIENT, "rank T-1 first")
     });
+    f.settle().await;
     f.settle().await;
 
     f.receive(in_group(CLIENT, "actually second"));
@@ -905,22 +987,26 @@ async fn a_correction_the_decider_accepts_goes_into_the_running_turn() {
 /// follow-up such as "why?" refers to.
 #[tokio::test]
 async fn a_decision_reads_the_assistants_last_answer() {
-    let (mut f, decider) = deciding(vec![Ok(0.9)]);
+    let (mut f, decider) = deciding(vec![
+        Ok(verdict(Action::Answer, 0.9)),
+        Ok(verdict(Action::Answer, 0.9)),
+    ]);
     f.receive(Inbound {
         addressed: true,
         ..in_group(CLIENT, "what's next?")
     });
+    f.settle().await;
     f.settle().await;
     f.end_turn().await;
 
     f.receive(in_group(CLIENT, "why?"));
     f.settle().await;
 
-    assert_eq!(*decider.asked.lock().unwrap(), vec![
+    assert_eq!(
+        decider.asked.lock().unwrap()[1],
         "Earlier messages, oldest first:\nAda Client (to you): what's next?\nAssistant: Answer \
          from c1.\n\nLast message:\nAda Client: why?"
-            .to_owned()
-    ]);
+    );
 }
 
 /// "Move it to the top", then "actually second" while the conversation is still

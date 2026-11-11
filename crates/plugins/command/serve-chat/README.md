@@ -53,32 +53,40 @@ A turn that answers with exactly `NO_REPLY` sends nothing back, which is how the
 assistant stays out of a conversation between people; the typing indicator still
 shows while the turn runs, and the turn still costs a model call.
 
-With `decide`, the bridge first asks a small model whether the message is meant
-for the assistant, and runs no turn for one that isn't:
+With `decide`, the bridge first asks a small model what to do with each message,
+and runs a turn only for the ones it should answer:
 
 ```toml
 [plugins.command.serve-chat.options.decide]
-# The token is read from this environment variable; the bridge refuses to start
-# without it.
+# Any server that takes System One requests, such as a local model.
+url = "https://api.typesafe.ai/v1/systemone"
+model = "jev-latest"
+# The token is read from this environment variable, and the bridge refuses to
+# start without it. Set it to "" for a server that asks for no token.
 api_key_env = "JEV_API_KEY"
 threshold = 0.5
-instructions = """
-Should the assistant answer the last message in this group chat? It answers \
-questions about the project's work: tickets, RFDs, the wiki, and what is being \
-worked on. Answer no for messages between the people, such as thanks or \
-small talk."""
 ```
 
-- Only group messages that don't mention the assistant or reply to it are asked
-  about; direct messages and addressed messages always get a turn.
+The model answers one `choice` question, picking one of:
+
+| Action             | What the bridge does                                        |
+| ------------------ | ----------------------------------------------------------- |
+| `answer`           | Runs a turn for the message, or hands it to the running one |
+| `ignore`           | Nothing; the message is for the other people in the chat    |
+| `new_conversation` | Replies that the next message starts a new conversation     |
+
+- The bridge takes the action only when the model gives it at least `threshold`;
+  otherwise, and when the API fails, the message is answered, and a failure is
+  logged.
+- A message sent to the assistant (a direct message, a mention, or a reply to
+  it) is never ignored, and only such a message can start a new conversation, so
+  two people talking about starting over don't reset it.
 - The model reads the chat's last eight lines, the assistant's answers included,
   so a follow-up such as "why?" can count as meant for it.
   Those lines leave the machine: they go to `decide.url`.
-- A message is answered when the probability of "yes" is at least `threshold`.
-  When the API fails, the message is answered, and the failure is logged.
 - Messages wait for a decision in the order they arrived, so a correction can't
   overtake the message it corrects.
-  A correction the model accepts goes into the running turn, like any other
+  A correction the model answers goes into the running turn, like any other
   message from the person the turn runs as.
 - The persona's `NO_REPLY` rule still applies to the messages that get through.
 
@@ -236,9 +244,9 @@ turn even within an existing conversation.
 | `signal.attachments_dir` | `signal-cli`'s attachments directory   |
 | `decide.url`             | `https://api.typesafe.ai/v1/systemone` |
 | `decide.model`           | `jev-latest`                           |
-| `decide.api_key_env`     | `JEV_API_KEY`                          |
+| `decide.api_key_env`     | `JEV_API_KEY`; `""` sends no token     |
 | `decide.threshold`       | `0.5`                                  |
-| `decide.instructions`    | a generic "is this for the assistant?" |
+| `decide.instructions`    | "What should the assistant do...?"     |
 | `people.<key>.name`      | required                               |
 | `people.<key>.signal`    | none                                   |
 | `checkout.enabled`       | `true`                                 |

@@ -6,9 +6,9 @@
 //! into the turn as an interrupt reply (like `[r] Reply` in the terminal), one
 //! reply at a time, and never ahead of an earlier message from the same chat.
 //! Any other message waits in the [`Queue`].
-//! Before either, a group message that doesn't address the assistant can wait
-//! in the [`Inbox`] for a model to decide it is meant for the assistant; one
-//! that isn't gets no turn.
+//! Before either, a message can wait in the [`Inbox`] for a model to decide
+//! what to do with it: answer it, ignore it, or start the chat's next turn in a
+//! new conversation.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
@@ -33,7 +33,7 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     answer::last_answer,
     checkout::Checkout,
-    decide::Decide,
+    decide::{Action, Decide, Verdict},
     host::{Host, Level, NewTurn, ReplyError},
     inbox::{Inbox, Incoming, Next},
     options::{Options, Rollover},
@@ -55,6 +55,8 @@ const SILENT: &str = "NO_REPLY";
 
 /// User-facing message sent when a turn fails; the underlying error is logged.
 const FAILED: &str = "Sorry, that didn't work. The bridge's log says why.";
+
+const NEW_CONVERSATION: &str = "Your next message starts a new conversation.";
 
 const PAUSED: &str = "Changes are paused until the last ones have been reviewed. I'll answer as \
                       soon as that's done.";
@@ -83,10 +85,9 @@ pub(crate) enum Event {
         result: Result<(), String>,
     },
 
-    /// The probability that the first message in the inbox is meant for the
-    /// assistant.
+    /// What to do with the first message in the inbox.
     Decided {
-        result: Result<f64, String>,
+        result: Result<Verdict, String>,
     },
 
     /// Outcome of delivering an in-turn reply to the host.
@@ -262,9 +263,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         };
 
-        let decide =
-            matches!(message.chat, Chat::Group(_)) && !message.addressed && self.inbox.decides();
-        self.inbox.push(message.chat, key, text, decide);
+        let addressed = message.addressed || matches!(message.chat, Chat::Direct(_));
+        self.inbox.push(message.chat, key, text, addressed);
         self.pump();
     }
 
@@ -287,34 +287,32 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 
     /// Act on a decision about the first message in the inbox, then go on.
-    ///
-    /// A decision that failed lets the message through: a wasted turn costs
-    /// less than a question nobody answers.
-    fn decided(&mut self, result: Result<f64, String>) {
+    fn decided(&mut self, result: Result<Verdict, String>) {
+        if let Err(error) = &result {
+            self.host.log(
+                Level::WARN,
+                &format!("The decide API failed, so the message is answered: {error}"),
+            );
+        }
         let threshold = self
             .options
             .decide
             .as_ref()
             .map_or(0.0, |decide| decide.threshold);
-        let answer = match result {
-            Ok(probability) => probability >= threshold,
-            Err(error) => {
-                self.host.log(
-                    Level::WARN,
-                    &format!("The decide API failed, so the message is answered: {error}"),
-                );
-                true
-            }
-        };
 
         if let Some(incoming) = self.inbox.decided() {
-            if answer {
-                self.route(incoming);
-            } else {
-                self.host.log(
+            match action(result.ok(), &incoming, threshold) {
+                Action::Answer => self.route(incoming),
+                Action::Ignore => self.host.log(
                     Level::INFO,
                     &format!("A message in {} isn't for the assistant.", incoming.chat),
-                );
+                ),
+                Action::NewConversation => {
+                    if let Err(error) = self.state.forget(&incoming.chat) {
+                        self.host.log(Level::ERROR, &error);
+                    }
+                    self.outbox.send(&incoming.chat, NEW_CONVERSATION);
+                }
             }
         }
         self.pump();
@@ -602,6 +600,25 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         if let Some(account) = account {
             self.outbox.send(&Chat::Direct(account), text);
         }
+    }
+}
+
+/// What the bridge does with `incoming`, given the model's `verdict`.
+///
+/// When the model is unsure, or there is no verdict because the decide API
+/// failed, the message is answered: a wasted turn costs less than a question
+/// nobody answers.
+/// A message sent to the assistant is never ignored, and only such a message
+/// can start a new conversation, so talk between people can't reset it.
+fn action(verdict: Option<Verdict>, incoming: &Incoming, threshold: f64) -> Action {
+    let Some(verdict) = verdict.filter(|verdict| verdict.probability >= threshold) else {
+        return Action::Answer;
+    };
+
+    match verdict.action {
+        Action::Ignore if incoming.addressed => Action::Answer,
+        Action::NewConversation if !incoming.addressed => Action::Answer,
+        action => action,
     }
 }
 

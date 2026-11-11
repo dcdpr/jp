@@ -42,6 +42,23 @@ fn the_state_survives_a_restart() {
     );
 }
 
+/// Forgotten on disk too, so a restart doesn't bring the old conversation back.
+#[test]
+fn a_forgotten_chat_has_no_conversation_after_a_restart() {
+    let dir = Utf8TempDir::new().unwrap();
+    let chat = Chat::Group("Z3JvdXA=".to_owned());
+    let other = Chat::Direct("+31600000000".to_owned());
+    let mut state = State::open(dir.path()).unwrap();
+    state.set(&chat, day(7), "17624160000").unwrap();
+    state.set(&other, day(7), "17624160001").unwrap();
+
+    state.forget(&chat).unwrap();
+
+    let reopened = State::open(dir.path()).unwrap();
+    assert_eq!(reopened.conversation(&chat, day(7)), None);
+    assert_eq!(reopened.conversation(&other, day(7)), Some("17624160001"));
+}
+
 #[test]
 fn an_unreadable_state_file_is_an_error() {
     let dir = Utf8TempDir::new().unwrap();

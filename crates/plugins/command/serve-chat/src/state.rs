@@ -77,8 +77,6 @@ impl State {
 
     /// Record `conversation` as `chat`'s active conversation for the period
     /// starting on `period`.
-    ///
-    /// Writes atomically via a temporary file and rename.
     pub(crate) fn set(
         &mut self,
         chat: &Chat,
@@ -90,6 +88,22 @@ impl State {
             conversation: conversation.to_owned(),
         });
 
+        self.save()
+    }
+
+    /// Forget `chat`'s conversation, so its next turn starts a new one.
+    ///
+    /// The conversation itself is kept, and expires as usual.
+    pub(crate) fn forget(&mut self, chat: &Chat) -> Result<(), String> {
+        if self.chats.chats.remove(&chat.to_string()).is_none() {
+            return Ok(());
+        }
+
+        self.save()
+    }
+
+    /// Write the mapping atomically, via a temporary file and a rename.
+    fn save(&self) -> Result<(), String> {
         let Some(path) = &self.path else {
             return Ok(());
         };

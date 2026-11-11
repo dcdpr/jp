@@ -48,13 +48,10 @@ const DEFAULT_DECIDE_KEY_ENV: &str = "JEV_API_KEY";
 
 const DEFAULT_DECIDE_THRESHOLD: f64 = 0.5;
 
-/// The question the decide API answers for a group message, unless
+/// The question the decide API answers for each message, unless
 /// `decide.instructions` replaces it.
 pub(crate) const DEFAULT_DECIDE_INSTRUCTIONS: &str =
-    "Should the assistant answer the last message in this group chat? Answer yes if the last \
-     message mentions the assistant, asks it a question, asks it to do something, or corrects or \
-     follows up on its previous answer. Answer no if it is meant for the other people in the \
-     chat, such as thanks, small talk, or arrangements between them.";
+    "What should the assistant do with the last message in this chat?";
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Options {
@@ -86,16 +83,19 @@ pub(crate) struct Options {
     pub decide: Option<DecideOptions>,
 }
 
-/// The decide API: a model answering a yes-or-no question with a probability.
+/// A decide API in the System One request format: a model answering a question
+/// about a chat with a probability.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DecideOptions {
     pub url: String,
     pub model: String,
 
-    /// The environment variable holding the API token.
-    pub api_key_env: String,
+    /// The environment variable holding the API token; `None` sends no token,
+    /// for a server that asks for none.
+    pub api_key_env: Option<String>,
 
-    /// The least probability of "yes" at which a message is answered.
+    /// The least probability at which the bridge takes the action the model
+    /// chose; below it, the message is answered.
     pub threshold: f64,
 
     /// The question asked about each message.
@@ -304,15 +304,13 @@ fn decide(raw: RawDecide) -> Result<DecideOptions, String> {
             "`{KEY}.decide.threshold` is `{threshold}`; it is a probability, from 0 to 1."
         ));
     }
+    // Empty names no variable: the server, such as a local model, asks for no
+    // token.
     let api_key_env = raw.api_key_env.map_or_else(
         || DEFAULT_DECIDE_KEY_ENV.to_owned(),
         |name| name.trim().to_owned(),
     );
-    if api_key_env.is_empty() {
-        return Err(format!(
-            "`{KEY}.decide.api_key_env` is empty; name the environment variable holding the token."
-        ));
-    }
+    let api_key_env = (!api_key_env.is_empty()).then_some(api_key_env);
 
     Ok(DecideOptions {
         url: raw.url.unwrap_or_else(|| DEFAULT_DECIDE_URL.to_owned()),

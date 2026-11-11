@@ -43,7 +43,7 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     bridge::Bridge,
     checkout::{GitCheckout, Unguarded},
-    decide::{Decide, Jev},
+    decide::{Decide, SystemOne},
     host::{Host as _, HostClient, Level},
     options::Options,
     signal::{Logger, Signal},
@@ -86,8 +86,9 @@ Configuration (`plugins.command.serve-chat.options`):
   signal.account_id  The account's id, to recognize mentions of it.
   signal.command     The signal-cli executable. Default: signal-cli.
   signal.attachments_dir  Where signal-cli saves attachments.
-  decide             Ask a model whether a group message is for the assistant:
-                     `url`, `model`, `api_key_env` (default JEV_API_KEY),
+  decide             Ask a model what to do with each message: answer it,
+                     ignore it, or start a new conversation. `url`, `model`,
+                     `api_key_env` (default JEV_API_KEY; empty for no token),
                      `threshold` (default 0.5), `instructions`.
   people.<key>       Who is answered: `name`, and their `signal` account.
   checkout.enabled   Lock, pull, and check the checkout. Default: true.
@@ -209,22 +210,27 @@ fn serve(
 }
 
 /// The decider `decide` configures, with its token from the environment
-/// variable `decide.api_key_env` names.
+/// variable `decide.api_key_env` names, or none when that is empty.
 fn decider(options: &Options) -> Result<Option<Arc<dyn Decide>>, String> {
     let Some(decide) = &options.decide else {
         return Ok(None);
     };
-    let token = env::var(&decide.api_key_env)
-        .ok()
-        .filter(|token| !token.trim().is_empty())
-        .ok_or_else(|| {
-            format!(
-                "`decide` is configured, but the environment variable `{}` holds no API token.",
-                decide.api_key_env
-            )
-        })?;
+    let token = match &decide.api_key_env {
+        None => None,
+        Some(name) => Some(
+            env::var(name)
+                .ok()
+                .filter(|token| !token.trim().is_empty())
+                .ok_or_else(|| {
+                    format!(
+                        "`decide` is configured, but the environment variable `{name}` holds no \
+                         API token. Set `decide.api_key_env = \"\"` for a server that needs none."
+                    )
+                })?,
+        ),
+    };
 
-    Ok(Some(Arc::new(Jev::new(decide.clone(), token)?)))
+    Ok(Some(Arc::new(SystemOne::new(decide.clone(), token)?)))
 }
 
 /// Directory where the bridge persists its chat-to-conversation mapping.

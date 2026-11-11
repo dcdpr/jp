@@ -1,9 +1,8 @@
 //! Messages from configured people, in the order they arrived, until the bridge
 //! takes them.
 //!
-//! With a decider configured, a group message that neither mentions the
-//! assistant nor replies to it waits for the decider to say whether it is meant
-//! for the assistant; a message that is not is dropped.
+//! With a decider configured, each message waits for the decider to say what
+//! the bridge does with it.
 //! Every message behind it waits too, so the bridge takes a chat's messages in
 //! the order they were sent.
 //!
@@ -37,6 +36,10 @@ pub(crate) struct Incoming {
     /// What the turn reads, with the sender's name in a group.
     pub text: String,
 
+    /// Whether it was sent to the assistant: in a direct chat, or mentioning it
+    /// or replying to it in a group.
+    pub addressed: bool,
+
     /// What a decision about it reads, for a message that waits for one.
     pub context: Option<String>,
 }
@@ -67,14 +70,9 @@ pub(crate) struct Inbox {
 }
 
 impl Inbox {
-    /// Ask `decider` about group messages that don't address the assistant.
+    /// Ask `decider` what to do with each message.
     pub(crate) fn decide_with(&mut self, decider: Option<Arc<dyn Decide>>) {
         self.decider = decider;
-    }
-
-    /// Whether messages that don't address the assistant wait for a decision.
-    pub(crate) fn decides(&self) -> bool {
-        self.decider.is_some()
     }
 
     /// Record `id` as reported, returning whether it wasn't before.
@@ -91,15 +89,16 @@ impl Inbox {
         }
     }
 
-    /// Queue `text` from `person` in `chat`, to wait for a decision when
-    /// `decide` is set.
-    pub(crate) fn push(&mut self, chat: Chat, person: String, text: String, decide: bool) {
-        let context = decide.then(|| self.context(&chat, &text));
+    /// Queue `text` from `person` in `chat`, to wait for a decision when there
+    /// is a decider.
+    pub(crate) fn push(&mut self, chat: Chat, person: String, text: String, addressed: bool) {
+        let context = self.decider.is_some().then(|| self.context(&chat, &text));
         self.remember(&chat, &text);
         self.pending.push_back(Incoming {
             chat,
             person,
             text,
+            addressed,
             context,
         });
     }

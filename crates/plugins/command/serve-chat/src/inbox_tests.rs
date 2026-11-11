@@ -3,15 +3,21 @@ use std::sync::Mutex;
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::decide::{Action, Verdict};
 
-/// Records what it was asked, and answers every question with `0.0`.
+/// Records what it was asked, and answers every question with "answer".
 #[derive(Default)]
 struct Recorder(Mutex<Vec<String>>);
 
 impl Decide for Recorder {
     fn decide(&self, state: String) -> Decision {
         self.0.lock().unwrap().push(state);
-        Box::pin(async { Ok(0.0) })
+        Box::pin(async {
+            Ok(Verdict {
+                action: Action::Answer,
+                probability: 1.0,
+            })
+        })
     }
 }
 
@@ -19,11 +25,12 @@ fn group() -> Chat {
     Chat::Group("Z3JvdXA=".to_owned())
 }
 
-fn incoming(text: &str, context: Option<&str>) -> Incoming {
+fn incoming(text: &str, addressed: bool, context: Option<&str>) -> Incoming {
     Incoming {
         chat: group(),
         person: "ada".to_owned(),
         text: text.to_owned(),
+        addressed,
         context: context.map(ToOwned::to_owned),
     }
 }
@@ -43,24 +50,24 @@ fn take(inbox: &mut Inbox) -> Option<Incoming> {
 }
 
 #[test]
-fn a_message_that_needs_no_decision_is_taken_at_once() {
-    let (mut inbox, recorder) = inbox();
+fn without_a_decider_a_message_is_taken_at_once() {
+    let mut inbox = Inbox::default();
     inbox.push(
         group(),
         "ada".to_owned(),
-        "Ada Client (to you): hi".to_owned(),
+        "Ada Client: thanks!".to_owned(),
         false,
     );
 
     assert_eq!(
         take(&mut inbox),
-        Some(incoming("Ada Client (to you): hi", None))
+        Some(incoming("Ada Client: thanks!", false, None))
     );
-    assert!(recorder.0.lock().unwrap().is_empty());
 }
 
 /// "Rank it first", then "actually second" before the first is decided: the
-/// second waits, even though it needs no decision, so it can't overtake.
+/// second waits for its own decision until the first's is in, so it can't
+/// overtake.
 #[test]
 fn a_message_waits_behind_one_being_decided() {
     let (mut inbox, recorder) = inbox();
@@ -68,30 +75,29 @@ fn a_message_waits_behind_one_being_decided() {
         group(),
         "ada".to_owned(),
         "Ada Client: rank it first".to_owned(),
-        true,
+        false,
     );
     inbox.push(
         group(),
         "ada".to_owned(),
         "Ada Client (to you): actually second".to_owned(),
-        false,
+        true,
     );
 
     assert!(matches!(inbox.next(), Some(Next::Decide(_))));
     assert!(inbox.next().is_none(), "a message overtook the decision");
+    assert_eq!(recorder.0.lock().unwrap().len(), 1);
 
     assert_eq!(
         inbox.decided(),
         Some(incoming(
             "Ada Client: rank it first",
+            false,
             Some("Last message:\nAda Client: rank it first")
         ))
     );
-    assert_eq!(
-        take(&mut inbox),
-        Some(incoming("Ada Client (to you): actually second", None))
-    );
-    assert_eq!(recorder.0.lock().unwrap().len(), 1);
+    assert!(matches!(inbox.next(), Some(Next::Decide(_))));
+    assert_eq!(recorder.0.lock().unwrap().len(), 2);
 }
 
 /// A decision reads what was said before the message, including the assistant's
@@ -104,13 +110,13 @@ fn a_decision_reads_the_lines_before_its_message() {
         group(),
         "ada".to_owned(),
         "Ada Client: thanks!".to_owned(),
-        true,
+        false,
     );
     inbox.push(
         group(),
         "max".to_owned(),
         "Max Maintainer: lunch?".to_owned(),
-        true,
+        false,
     );
 
     drop(inbox.next());
@@ -132,7 +138,7 @@ fn a_chat_keeps_only_its_last_lines() {
         group(),
         "ada".to_owned(),
         "Ada Client: last".to_owned(),
-        true,
+        false,
     );
 
     drop(inbox.next());
@@ -140,23 +146,6 @@ fn a_chat_keeps_only_its_last_lines() {
     let context = recorder.0.lock().unwrap()[0].clone();
     assert!(!context.contains("Ada Client: 1\n"), "{context}");
     assert!(context.contains("Ada Client: 2\n"), "{context}");
-}
-
-#[test]
-fn without_a_decider_nothing_waits() {
-    let mut inbox = Inbox::default();
-    inbox.push(
-        group(),
-        "ada".to_owned(),
-        "Ada Client: thanks!".to_owned(),
-        true,
-    );
-
-    assert!(!inbox.decides());
-    assert_eq!(
-        take(&mut inbox).map(|incoming| incoming.text),
-        Some("Ada Client: thanks!".to_owned())
-    );
 }
 
 #[test]

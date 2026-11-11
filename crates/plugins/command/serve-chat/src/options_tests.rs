@@ -62,11 +62,23 @@ fn an_empty_decide_table_asks_jev_with_the_default_question() {
         Some(DecideOptions {
             url: "https://api.typesafe.ai/v1/systemone".to_owned(),
             model: "jev-latest".to_owned(),
-            api_key_env: "JEV_API_KEY".to_owned(),
+            api_key_env: Some("JEV_API_KEY".to_owned()),
             threshold: 0.5,
             instructions: DEFAULT_DECIDE_INSTRUCTIONS.to_owned(),
         })
     );
+}
+
+/// A local server that asks for no token.
+#[test]
+fn an_empty_decide_api_key_env_sends_no_token() {
+    let mut options = minimal();
+    options["decide"] = json!({ "url": "http://127.0.0.1:8080/v1/systemone", "api_key_env": "" });
+
+    let decide = read(options).unwrap().decide.unwrap();
+
+    assert_eq!(decide.url, "http://127.0.0.1:8080/v1/systemone");
+    assert_eq!(decide.api_key_env, None);
 }
 
 #[test]
