@@ -35,6 +35,13 @@ where
         return Ok(Some(with_dedup_flag(next, dedup)));
     }
 
+    // A layer that leaves the list alone contributes nothing, so there is no
+    // second source to deduplicate against. Deduplicating `prev` here would
+    // drop repeats from every list a config delta does not touch.
+    if next.is_empty() {
+        return Ok(Some(prev));
+    }
+
     let mut prev_value = match prev {
         MergeableVec::Vec(v) => v,
         MergeableVec::Merged(v) => v.value,

@@ -380,6 +380,25 @@ fn test_discarded_default_preserves_duplicates_in_the_replacement() {
 }
 
 #[test]
+fn test_empty_next_leaves_prev_untouched() {
+    // A layer that does not mention the list contributes nothing, so there is
+    // no second source to deduplicate against. A conversation folds every
+    // config delta over its whole state, and a list the delta leaves alone must
+    // come out as it went in.
+    let prev = MergeableVec::Merged(MergedVec {
+        value: vec![1, 2, 1],
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    });
+
+    let result = vec_with_strategy(prev.clone(), MergeableVec::Vec(vec![]), &())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, prev);
+}
+
+#[test]
 fn test_dedup_collapses_repeated_source() {
     // The same source applied twice (an `extends` diamond, or `--cfg` supplied
     // again on a conversation that already merged it) contributes its entries

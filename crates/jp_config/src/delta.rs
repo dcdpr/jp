@@ -68,6 +68,7 @@ pub fn path(prefix: &str, name: &str) -> String {
 
 /// Calculate the delta between two strategy-carrying lists.
 ///
+/// An unchanged list is no change, and the delta is empty.
 /// Appending reaches `next` exactly when `next` starts with `prev` and repeats
 /// no element, and the delta is then the tail, carried as a plain list so the
 /// fold appends it.
@@ -85,7 +86,7 @@ pub fn delta_mergeable_vec<T: Clone + PartialEq>(
     prev: &MergeableVec<T>,
     next: MergeableVec<T>,
 ) -> MergeableVec<T> {
-    if next.starts_with(prev) && !repeats_an_element(&next) {
+    if next.starts_with(prev) && (next.len() == prev.len() || !repeats_an_element(&next)) {
         return next.iter().skip(prev.len()).cloned().collect();
     }
 

@@ -76,7 +76,10 @@ impl ToPartial for InstructionsConfig {
         Self::Partial {
             title: partial_opts(self.title.as_ref(), defaults.title),
             description: partial_opts(self.description.as_ref(), defaults.description),
-            position: partial_opt(&self.position, defaults.position),
+            // The declared default, so resolved instructions compare equal to
+            // the same instructions read from a file that leaves `position`
+            // out, and list deduplication recognizes the two.
+            position: partial_opt(&self.position, Some(0)),
             items: partial_opt(&self.items, defaults.items),
             examples: self.examples.iter().map(ToPartial::to_partial).collect(),
         }

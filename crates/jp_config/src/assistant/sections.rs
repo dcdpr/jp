@@ -185,7 +185,10 @@ impl ToPartial for SectionConfig {
             tag: partial_opts(self.tag.as_ref(), defaults.tag),
             title: partial_opts(self.title.as_ref(), defaults.title),
             content: partial_opt(&self.content, defaults.content),
-            position: partial_opt(&self.position, defaults.position),
+            // The declared default, so a resolved section compares equal to the
+            // same section read from a file that leaves `position` out, and
+            // list deduplication recognizes the two.
+            position: partial_opt(&self.position, Some(0)),
         }
     }
 }

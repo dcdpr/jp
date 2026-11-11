@@ -460,3 +460,59 @@ fn test_assistant_config_deserialize() {
         assert_eq!(result.unwrap(), expected);
     }
 }
+
+/// A section a config file declares again, on top of a resolved config that
+/// already holds it, appears once.
+///
+/// This is the shape of `--cfg skill/x` on a conversation that already loaded
+/// it: the conversation layer is a resolved config turned back into a partial,
+/// and the file is a partial that leaves `position` unset.
+#[test]
+fn redeclared_section_on_a_resolved_config_is_deduplicated() {
+    let file = || {
+        let mut partial = crate::PartialAppConfig::empty();
+        partial.assistant.system_prompt_sections = MergeableVec::Vec(vec![PartialSectionConfig {
+            content: Some("read git history".into()),
+            tag: Some("git_reading_skill".into()),
+            ..Default::default()
+        }]);
+        partial
+    };
+
+    let mut base = crate::AppConfig::new_test().to_partial();
+    base.merge(&(), file()).unwrap();
+    let resolved = crate::util::build(base).unwrap();
+    assert_eq!(resolved.assistant.system_prompt_sections.len(), 1);
+
+    let mut partial = resolved.to_partial();
+    partial.merge(&(), file()).unwrap();
+    let resolved = crate::util::build(partial).unwrap();
+
+    assert_eq!(resolved.assistant.system_prompt_sections.len(), 1);
+}
+
+/// Instructions a config file declares again, on top of a resolved config that
+/// already holds them, appear once.
+#[test]
+fn redeclared_instructions_on_a_resolved_config_are_deduplicated() {
+    let file = || {
+        let mut partial = crate::PartialAppConfig::empty();
+        partial.assistant.instructions = MergeableVec::Vec(vec![PartialInstructionsConfig {
+            title: Some("Git Staging".into()),
+            items: Some(vec!["stage related hunks only".into()]),
+            ..Default::default()
+        }]);
+        partial
+    };
+
+    let mut base = crate::AppConfig::new_test().to_partial();
+    base.merge(&(), file()).unwrap();
+    let resolved = crate::util::build(base).unwrap();
+    let count = resolved.assistant.instructions.len();
+
+    let mut partial = resolved.to_partial();
+    partial.merge(&(), file()).unwrap();
+    let resolved = crate::util::build(partial).unwrap();
+
+    assert_eq!(resolved.assistant.instructions.len(), count);
+}
