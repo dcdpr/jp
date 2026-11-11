@@ -1940,6 +1940,77 @@ ticket-import NNN *ARGS: _install-ticket
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
 
+# Pull uncommitted changes from the chat bridge (`jp serve chat`) on HOST into a
+# local review worktree and reset the remote checkout.
+#
+# DIR is the bridge's repository checkout on HOST. The recipe captures the
+# remote `HEAD` and a binary diff of all uncommitted changes (including
+# untracked files) under `jp-serve-chat.lock`, creates a local worktree at that
+# base commit, and stages the diff there. Commit the changes as your own, rebase
+# onto `origin/main`, and open a pull request.
+#
+# After the patch applies locally, a second locked SSH call resets the remote
+# checkout only if `HEAD` and the diff's SHA-256 hash are unchanged; if a turn
+# or pull ran in the meantime, the remote checkout is left untouched so you can
+# run `just chat-take` again.
+#
+#   just chat-take bridge-host src/jp
+[group('ticket')]
+chat-take HOST DIR WORKTREE="../jp-chat-take":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    patch="$(mktemp)"
+    trap 'rm -f "$patch"' EXIT
+
+    # Pass the script via stdin so HOST's login shell only needs to invoke `sh`.
+    ssh {{quote(HOST)}} sh -s -- {{quote(DIR)}} > "$patch" <<'EOF'
+    set -eu
+    cd "$1"
+    exec flock "$(git rev-parse --git-path jp-serve-chat.lock)" sh -c '
+        git rev-parse HEAD
+        git add -A
+        git diff --cached --binary -M HEAD
+    '
+    EOF
+
+    base="$(head -n 1 "$patch")"
+    if [ "$(wc -l < "$patch")" -le 1 ]; then
+        echo "Nothing to take: the bridge's checkout is clean."
+        exit 0
+    fi
+    sum="$(tail -n +2 "$patch" | shasum -a 256 | cut -d ' ' -f 1)"
+
+    git fetch --quiet origin
+    if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+        echo "The bridge's checkout is at $base, which isn't here after fetching origin." >&2
+        exit 1
+    fi
+
+    branch="chat-take-$(date +%Y%m%d-%H%M%S)"
+    git worktree add --quiet -b "$branch" {{quote(WORKTREE)}} "$base"
+    tail -n +2 "$patch" | git -C {{quote(WORKTREE)}} apply --index
+
+    ssh {{quote(HOST)}} sh -s -- {{quote(DIR)}} "$base" "$sum" <<'EOF'
+    set -eu
+    cd "$1"
+    exec flock "$(git rev-parse --git-path jp-serve-chat.lock)" sh -c '
+        if [ "$(git rev-parse HEAD)" != "$1" ]; then
+            echo "The bridge pulled since the take; its checkout is left alone." >&2
+            exit 1
+        fi
+        git add -A
+        if [ "$(git diff --cached --binary -M HEAD | sha256sum | cut -d " " -f 1)" != "$2" ]; then
+            echo "New changes arrived since the take; its checkout is left alone. Take again." >&2
+            exit 1
+        fi
+        git reset --quiet --hard
+        git clean --quiet -fd
+    ' sh "$2" "$3"
+    EOF
+
+    echo "Taken into {{WORKTREE}} on $branch, staged. The bridge's checkout is clean again."
+
 # Locally develop the documentation, with hot-reloading.
 #
 # Runs through `jp vite serve`, which keeps the site's settings in step with the
@@ -2588,6 +2659,21 @@ _install-wiki *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/wiki --debug {{args}}
+
+# Build and install the `jp-serve-chat` command plugin that backs `jp serve
+# chat`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`;
+# the machine running the bridge approves it with
+# `plugins.command.serve-chat.run = "allow"`.
+_install-serve-chat *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-serve-chat >/dev/null 2>&1; then
+        echo "Skipping jp-serve-chat rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/serve-chat --debug {{args}}
 
 # Install the four plugins the site needs, from this checkout.
 #
