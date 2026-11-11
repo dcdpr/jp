@@ -3,14 +3,17 @@
 //! `signal-cli -a <account> jsonRpc` reads requests from stdin and writes
 //! responses and inbound message notifications as JSON lines on stdout
 //! (`signal-cli-jsonrpc(5)`).
-//! The transport forwards incoming text messages to the bridge and sends
-//! replies and typing indicators; attachments, avatars, stickers, and stories
-//! are not downloaded.
+//! The transport forwards incoming messages to the bridge and sends replies and
+//! typing indicators.
+//! `signal-cli` saves received attachments in its attachments directory, and a
+//! message carries their paths; avatars, stickers, and stories are not
+//! downloaded.
 //!
 //! Outbound JSON-RPC requests are fire-and-forget: if a send fails, the error
 //! response is logged when it arrives on stdout.
 
 use std::{
+    env,
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
@@ -20,6 +23,7 @@ use std::{
     thread,
 };
 
+use camino::Utf8PathBuf;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
@@ -28,7 +32,7 @@ use crate::{
     lock,
     options::SignalOptions,
     text::{chunks, styled},
-    transport::{Chat, Inbound, Outbox},
+    transport::{Attachment, Chat, Inbound, Outbox},
 };
 
 /// Maximum UTF-8 bytes of styled text per outbound Signal message before
@@ -39,6 +43,45 @@ use crate::{
 const MAX_MESSAGE: usize = 1800;
 
 pub(crate) type Logger = Arc<dyn Fn(Level, String) + Send + Sync>;
+
+/// The bridge's own Signal account, as reading its messages needs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Account {
+    /// The account's phone number and UUID, which mark a mention of the bridge
+    /// or a reply to it.
+    pub ids: Vec<String>,
+
+    /// Where `signal-cli` saves the attachments it receives.
+    pub attachments: Utf8PathBuf,
+}
+
+impl Account {
+    fn new(options: &SignalOptions) -> Result<Self, String> {
+        let attachments = options
+            .attachments_dir
+            .clone()
+            .or_else(default_attachments_dir)
+            .ok_or(
+                "Neither `XDG_DATA_HOME` nor `HOME` is set, so where `signal-cli` saves \
+                 attachments is unknown; set `signal.attachments_dir`.",
+            )?;
+
+        Ok(Self {
+            ids: options.own_ids(),
+            attachments,
+        })
+    }
+}
+
+/// `signal-cli`'s default attachments directory, under its data directory.
+fn default_attachments_dir() -> Option<Utf8PathBuf> {
+    let non_empty = |name: &str| env::var(name).ok().filter(|value| !value.is_empty());
+    let data = non_empty("XDG_DATA_HOME")
+        .map(Utf8PathBuf::from)
+        .or_else(|| non_empty("HOME").map(|home| Utf8PathBuf::from(home).join(".local/share")))?;
+
+    Some(data.join("signal-cli/attachments"))
+}
 
 /// Handle to the `signal-cli` child process; kills and reaps the child on drop.
 pub(crate) struct SignalProcess {
@@ -69,10 +112,10 @@ impl Signal {
         log: Logger,
         inbound: mpsc::Sender<Inbound>,
     ) -> Result<(Arc<Self>, SignalProcess), String> {
+        let account = Account::new(options)?;
         let mut child = Command::new(&options.command)
             .args(["-a", &options.account, "jsonRpc"])
             .args([
-                "--ignore-attachments",
                 "--ignore-avatars",
                 "--ignore-stickers",
                 "--ignore-stories",
@@ -91,11 +134,10 @@ impl Signal {
         let stderr = child.stderr.take().ok_or_else(|| missing("stderr"))?;
 
         let reader_log = Arc::clone(&log);
-        let own_ids = options.own_ids();
         thread::Builder::new()
             .name("signal-reader".into())
             .spawn(move || {
-                read_messages(BufReader::new(stdout), &own_ids, &inbound, &reader_log);
+                read_messages(BufReader::new(stdout), &account, &inbound, &reader_log);
             })
             .map_err(|error| format!("failed to start the Signal reader: {error}"))?;
 
@@ -199,11 +241,8 @@ pub(crate) enum Line {
     Ignored,
 }
 
-/// Parse one line of `signal-cli` stdout.
-///
-/// `own_ids` lists the bridge account's phone number and UUID so mentions of or
-/// replies to the bridge set `Inbound::addressed = true`.
-pub(crate) fn parse(line: &str, own_ids: &[String]) -> Line {
+/// Parse one line of `signal-cli` stdout, received by `account`.
+pub(crate) fn parse(line: &str, account: &Account) -> Line {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Line::Ignored;
     };
@@ -225,13 +264,14 @@ pub(crate) fn parse(line: &str, own_ids: &[String]) -> Line {
         .or_else(|| params.and_then(|params| params.pointer("/result/envelope")));
 
     envelope
-        .and_then(|envelope| message(envelope, own_ids))
+        .and_then(|envelope| message(envelope, account))
         .map_or(Line::Ignored, Line::Message)
 }
 
 /// Extract an [`Inbound`] message from a `signal-cli` `envelope`, if it
 /// contains a `dataMessage` with text or attachments.
-fn message(envelope: &Value, own_ids: &[String]) -> Option<Inbound> {
+fn message(envelope: &Value, account: &Account) -> Option<Inbound> {
+    let own_ids = &account.ids;
     let data = envelope.get("dataMessage")?;
     let raw = data
         .get("message")
@@ -245,11 +285,8 @@ fn message(envelope: &Value, own_ids: &[String]) -> Option<Inbound> {
     let replied = data
         .get("quote")
         .is_some_and(|quote| is_own(quote, "authorNumber", "authorUuid", own_ids));
-    let attachments = data
-        .get("attachments")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    if text.trim().is_empty() && attachments == 0 {
+    let attachments = attachments(data, account);
+    if text.trim().is_empty() && attachments.is_empty() {
         return None;
     }
 
@@ -271,6 +308,37 @@ fn message(envelope: &Value, own_ids: &[String]) -> Option<Inbound> {
         text,
         attachments,
     })
+}
+
+/// The attachments of a `dataMessage`, with where `signal-cli` saved each.
+///
+/// `signal-cli` names the saved file by the attachment's `id`, using only
+/// letters, digits, `_`, `.`, and `-`; an `id` holding anything else, or none,
+/// gets no path rather than one that could point outside the directory.
+fn attachments(data: &Value, account: &Account) -> Vec<Attachment> {
+    let Some(attachments) = data.get("attachments").and_then(Value::as_array) else {
+        return vec![];
+    };
+
+    attachments
+        .iter()
+        .map(|attachment| Attachment {
+            content_type: field(attachment, "contentType")
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+            name: field(attachment, "filename"),
+            path: field(attachment, "id")
+                .filter(|id| is_file_name(id))
+                .map(|id| account.attachments.join(id)),
+        })
+        .collect()
+}
+
+/// Whether `id` is a plain file name in `signal-cli`'s spelling.
+fn is_file_name(id: &str) -> bool {
+    !id.starts_with('.')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 /// The non-empty string at `name` in `envelope`.
@@ -354,12 +422,12 @@ fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (Stri
 /// Read `signal-cli` stdout lines and forward messages to `inbound` until EOF.
 fn read_messages(
     reader: impl BufRead,
-    own_ids: &[String],
+    account: &Account,
     inbound: &mpsc::Sender<Inbound>,
     log: &Logger,
 ) {
     for line in reader.lines().map_while(Result::ok) {
-        match parse(&line, own_ids) {
+        match parse(&line, account) {
             Line::Message(message) => {
                 if inbound.blocking_send(message).is_err() {
                     return;

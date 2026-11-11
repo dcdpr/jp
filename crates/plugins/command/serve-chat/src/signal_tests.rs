@@ -9,8 +9,15 @@ fn own() -> Vec<String> {
     ]
 }
 
+fn account() -> Account {
+    Account {
+        ids: own(),
+        attachments: "/data/signal-cli/attachments".into(),
+    }
+}
+
 fn read(line: &str) -> Line {
-    parse(line, &own())
+    parse(line, &account())
 }
 
 /// Direct message notification in `signal-cli jsonRpc` default receive mode
@@ -30,7 +37,7 @@ fn a_direct_message_is_from_its_sender_in_a_chat_of_their_own() {
             name: Some("name".to_owned()),
             addressed: false,
             text: "What is being worked on?".to_owned(),
-            attachments: 0,
+            attachments: vec![],
         })
     );
 }
@@ -47,7 +54,11 @@ fn a_group_message_in_subscription_mode_is_in_the_group() {
             name: None,
             addressed: false,
             text: "See attached".to_owned(),
-            attachments: 1,
+            attachments: vec![Attachment {
+                content_type: "image/png".to_owned(),
+                name: None,
+                path: None,
+            }],
         })
     );
 }
@@ -66,9 +77,42 @@ fn a_sender_with_a_hidden_number_is_named_by_account_id() {
             name: Some("Ada Client".to_owned()),
             addressed: false,
             text: "ping".to_owned(),
-            attachments: 0,
+            attachments: vec![],
         })
     );
+}
+
+/// `signal-cli` saves an attachment in its attachments directory under the
+/// attachment's `id`, and reports the sender's file name separately.
+#[test]
+fn an_attachment_is_where_signal_cli_saved_it() {
+    let line = r#"{"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"33333333-3333-4333-8333-333333333333","dataMessage":{"message":null,"attachments":[{"contentType":"image/png","filename":"crash.png","id":"Xd9f-2a_k.png","size":2048}]}},"account":"+31600000000"}}"#;
+
+    let Line::Message(message) = read(line) else {
+        panic!("not a message: {:?}", read(line));
+    };
+
+    assert_eq!(message.attachments, vec![Attachment {
+        content_type: "image/png".to_owned(),
+        name: Some("crash.png".to_owned()),
+        path: Some("/data/signal-cli/attachments/Xd9f-2a_k.png".into()),
+    }]);
+}
+
+/// An `id` that isn't a plain file name could name a file outside the
+/// directory, so it gets no path.
+#[test]
+fn an_attachment_id_that_is_not_a_file_name_gets_no_path() {
+    for id in ["../../.ssh/id_ed25519", ".hidden", "a/b.png"] {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","method":"receive","params":{{"envelope":{{"sourceUuid":"u","dataMessage":{{"attachments":[{{"contentType":"image/png","id":"{id}"}}]}}}}}}}}"#
+        );
+
+        let Line::Message(message) = read(&line) else {
+            panic!("not a message: {:?}", read(&line));
+        };
+        assert_eq!(message.attachments[0].path, None, "{id}");
+    }
 }
 
 #[test]

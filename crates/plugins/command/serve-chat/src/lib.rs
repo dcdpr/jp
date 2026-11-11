@@ -8,7 +8,9 @@
 //! - `transport` defines the chat transport interface; `signal` implements it
 //!   over `signal-cli` in JSON-RPC mode.
 //! - `bridge` routes messages from allowed senders to conversations and
-//!   schedules turns, with `queue` holding the messages that wait for one.
+//!   schedules turns, with `queue` holding the messages that wait for one and
+//!   `inbox` the ones that wait for `decide` to say they are meant for the
+//!   assistant.
 //! - `checkout` locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable
 //!   directories.
@@ -18,7 +20,9 @@
 mod answer;
 mod bridge;
 mod checkout;
+mod decide;
 mod host;
+mod inbox;
 mod options;
 mod queue;
 mod signal;
@@ -27,6 +31,7 @@ mod text;
 mod transport;
 
 use std::{
+    env,
     io::{BufRead, Write},
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
@@ -38,6 +43,7 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     bridge::Bridge,
     checkout::{GitCheckout, Unguarded},
+    decide::{Decide, Jev},
     host::{Host as _, HostClient, Level},
     options::Options,
     signal::{Logger, Signal},
@@ -79,6 +85,10 @@ Configuration (`plugins.command.serve-chat.options`):
   signal.account     The Signal account to run as. Required.
   signal.account_id  The account's id, to recognize mentions of it.
   signal.command     The signal-cli executable. Default: signal-cli.
+  signal.attachments_dir  Where signal-cli saves attachments.
+  decide             Ask a model whether a group message is for the assistant:
+                     `url`, `model`, `api_key_env` (default JEV_API_KEY),
+                     `threshold` (default 0.5), `instructions`.
   people.<key>       Who is answered: `name`, and their `signal` account.
   checkout.enabled   Lock, pull, and check the checkout. Default: true.
   checkout.writable  Directories a turn may change.
@@ -156,6 +166,7 @@ fn serve(
     shutdown: watch::Receiver<bool>,
 ) -> Result<(), String> {
     let options = Options::read(&init.options)?;
+    let decider = decider(&options)?;
     let state = State::open(&state_dir(init)?)?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -188,13 +199,32 @@ fn serve(
 
         if !options.checkout.enabled {
             let bridge = Bridge::new(client.clone(), outbox, Unguarded, options, state);
-            return bridge.run(inbound, shutdown).await;
+            return bridge.with_decider(decider).run(inbound, shutdown).await;
         }
 
         let checkout = GitCheckout::open(&init.workspace.root, options.checkout.writable.clone())?;
         let bridge = Bridge::new(client.clone(), outbox, checkout, options, state);
-        bridge.run(inbound, shutdown).await
+        bridge.with_decider(decider).run(inbound, shutdown).await
     })
+}
+
+/// The decider `decide` configures, with its token from the environment
+/// variable `decide.api_key_env` names.
+fn decider(options: &Options) -> Result<Option<Arc<dyn Decide>>, String> {
+    let Some(decide) = &options.decide else {
+        return Ok(None);
+    };
+    let token = env::var(&decide.api_key_env)
+        .ok()
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "`decide` is configured, but the environment variable `{}` holds no API token.",
+                decide.api_key_env
+            )
+        })?;
+
+    Ok(Some(Arc::new(Jev::new(decide.clone(), token)?)))
 }
 
 /// Directory where the bridge persists its chat-to-conversation mapping.

@@ -45,8 +45,42 @@ fn unset_options_take_their_defaults() {
                 account: "+31600000000".to_owned(),
                 account_id: None,
                 command: "signal-cli".to_owned(),
+                attachments_dir: None,
             },
+            decide: None,
         })
+    );
+}
+
+#[test]
+fn an_empty_decide_table_asks_jev_with_the_default_question() {
+    let mut options = minimal();
+    options["decide"] = json!({});
+
+    assert_eq!(
+        read(options).unwrap().decide,
+        Some(DecideOptions {
+            url: "https://api.typesafe.ai/v1/systemone".to_owned(),
+            model: "jev-latest".to_owned(),
+            api_key_env: "JEV_API_KEY".to_owned(),
+            threshold: 0.5,
+            instructions: DEFAULT_DECIDE_INSTRUCTIONS.to_owned(),
+        })
+    );
+}
+
+#[test]
+fn a_decide_threshold_is_a_probability() {
+    let mut options = minimal();
+    options["decide"] = json!({ "threshold": 1.5 });
+
+    assert_eq!(
+        read(options),
+        Err(
+            "`plugins.command.serve-chat.options.decide.threshold` is `1.5`; it is a probability, \
+             from 0 to 1."
+                .to_owned()
+        )
     );
 }
 

@@ -16,7 +16,11 @@ use pretty_assertions::assert_eq;
 use tokio::sync::oneshot;
 
 use super::*;
-use crate::host::{Turn, tool_names};
+use crate::{
+    decide::Decision,
+    host::{Turn, tool_names},
+    options::DecideOptions,
+};
 
 struct HostLog {
     calls: Vec<String>,
@@ -325,7 +329,7 @@ fn from(sender: &str, text: &str) -> Inbound {
         name: None,
         addressed: false,
         text: text.to_owned(),
-        attachments: 0,
+        attachments: vec![],
     }
 }
 
@@ -490,7 +494,7 @@ async fn a_group_message_names_its_sender() {
         name: Some("Ada".to_owned()),
         addressed: false,
         text: "Is anything planned for search?".to_owned(),
-        attachments: 0,
+        attachments: vec![],
     });
     f.settle().await;
     f.end_turn().await;
@@ -518,7 +522,7 @@ async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
         name: Some("José O'Brien".to_owned()),
         addressed: false,
         text: "Hello?".to_owned(),
-        attachments: 0,
+        attachments: vec![],
     };
 
     f.receive(stranger.clone());
@@ -539,19 +543,52 @@ async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
     assert!(f.host.calls().is_empty());
 }
 
+/// The model can't open an image, but it can write where it is into a ticket,
+/// so a maintainer can copy it off the bridge's machine.
 #[tokio::test]
-async fn an_attachment_is_answered_with_what_the_bridge_can_read() {
+async fn an_attachment_reaches_the_turn_as_where_it_was_saved() {
     let mut f = fixture();
 
     f.receive(Inbound {
-        attachments: 1,
+        attachments: vec![Attachment {
+            content_type: "image/png".to_owned(),
+            name: Some("crash.png".to_owned()),
+            path: Some("/data/signal-cli/attachments/abc123.png".into()),
+        }],
+        ..in_group(CLIENT, "Search crashes like this")
+    });
+    f.settle().await;
+
+    assert!(
+        f.host.calls()[0].starts_with(
+            "start \"Ada Client: Search crashes like this\\n[Attached crash.png (image/png), \
+             saved on the bridge's machine at /data/signal-cli/attachments/abc123.png]\""
+        ),
+        "{:?}",
+        f.host.calls()
+    );
+}
+
+#[tokio::test]
+async fn an_attachment_alone_is_a_message() {
+    let mut f = fixture();
+
+    f.receive(Inbound {
+        attachments: vec![Attachment {
+            content_type: "image/jpeg".to_owned(),
+            name: None,
+            path: None,
+        }],
         ..from(CLIENT, "")
     });
+    f.settle().await;
 
-    assert!(f.host.calls().is_empty());
-    assert_eq!(f.outbox.take(), vec![format!(
-        "send direct:+31611111111: {TEXT_ONLY}"
-    )]);
+    assert!(
+        f.host.calls()[0]
+            .starts_with("start \"[Attached image/jpeg, which the bridge couldn't save]\""),
+        "{:?}",
+        f.host.calls()
+    );
 }
 
 #[tokio::test]
@@ -662,7 +699,7 @@ async fn an_addressed_group_message_says_it_is_to_the_assistant() {
         name: Some("Ada".to_owned()),
         addressed: true,
         text: " what's next?".to_owned(),
-        attachments: 0,
+        attachments: vec![],
     });
     f.settle().await;
 
@@ -684,7 +721,7 @@ async fn a_silent_answer_sends_nothing() {
         name: Some("Ada".to_owned()),
         addressed: false,
         text: "Lunch at one?".to_owned(),
-        attachments: 0,
+        attachments: vec![],
     });
     f.settle().await;
     f.end_turn().await;
@@ -739,6 +776,151 @@ async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
         calls[1]
     );
     assert_eq!(calls[2], "query c2 \"Next Saturday\"");
+}
+
+/// Answers each question with the next of its scripted results, and records
+/// what it was asked.
+#[derive(Default)]
+struct FakeDecider {
+    answers: Mutex<Vec<Result<f64, String>>>,
+    asked: Mutex<Vec<String>>,
+}
+
+impl Decide for FakeDecider {
+    fn decide(&self, state: String) -> Decision {
+        self.asked.lock().unwrap().push(state);
+        let answer = self.answers.lock().unwrap().remove(0);
+        Box::pin(future::ready(answer))
+    }
+}
+
+/// A fixture whose bridge asks a decider, answering in turn with `answers`.
+fn deciding(answers: Vec<Result<f64, String>>) -> (Fixture, Arc<FakeDecider>) {
+    let mut f = fixture();
+    let decider = Arc::new(FakeDecider {
+        answers: Mutex::new(answers),
+        asked: Mutex::default(),
+    });
+    f.bridge.options.decide = Some(DecideOptions {
+        url: "https://decide.invalid".to_owned(),
+        model: "jev-latest".to_owned(),
+        api_key_env: "JEV_API_KEY".to_owned(),
+        threshold: 0.5,
+        instructions: "Is this for the assistant?".to_owned(),
+    });
+    f.bridge
+        .inbox
+        .decide_with(Some(Arc::clone(&decider) as Arc<dyn Decide>));
+
+    (f, decider)
+}
+
+#[tokio::test]
+async fn a_group_message_the_decider_rejects_gets_no_turn() {
+    let (mut f, decider) = deciding(vec![Ok(0.1)]);
+
+    f.receive(in_group(CLIENT, "Thanks!"));
+    f.settle().await;
+
+    assert!(f.host.calls().is_empty());
+    assert_eq!(*decider.asked.lock().unwrap(), vec![
+        "Last message:\nAda Client: Thanks!".to_owned()
+    ]);
+    assert_eq!(f.host.logs(), vec![
+        "A message in group:Z3JvdXA= isn't for the assistant."
+    ]);
+}
+
+#[tokio::test]
+async fn a_group_message_the_decider_accepts_starts_a_turn() {
+    let (mut f, _) = deciding(vec![Ok(0.9)]);
+
+    f.receive(in_group(CLIENT, "What's next?"));
+    f.settle().await;
+    f.settle().await;
+
+    assert!(
+        f.host.calls()[0].starts_with("start \"Ada Client: What's next?\""),
+        "{:?}",
+        f.host.calls()
+    );
+}
+
+/// A message that mentions the assistant, or comes in a direct chat, is for it
+/// already, so nothing asks.
+#[tokio::test]
+async fn an_addressed_or_direct_message_is_not_decided() {
+    let (mut f, decider) = deciding(vec![]);
+
+    f.receive(Inbound {
+        addressed: true,
+        ..in_group(CLIENT, "what's next?")
+    });
+    f.settle().await;
+    f.end_turn().await;
+    f.receive(from(MAINTAINER, "Hi"));
+    f.settle().await;
+
+    assert!(decider.asked.lock().unwrap().is_empty());
+    assert_eq!(f.host.calls().len(), 2, "{:?}", f.host.calls());
+}
+
+/// A wasted turn costs less than a question nobody answers.
+#[tokio::test]
+async fn a_failed_decision_answers_the_message() {
+    let (mut f, _) = deciding(vec![Err("the decide API answered 503".to_owned())]);
+
+    f.receive(in_group(CLIENT, "What's next?"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls().len(), 1);
+    assert_eq!(f.host.logs(), vec![
+        "The decide API failed, so the message is answered: the decide API answered 503"
+    ]);
+}
+
+/// "Rank it first", then, while the turn runs, an unaddressed "actually
+/// second": once the decider says it is for the assistant, it goes into the
+/// running turn.
+#[tokio::test]
+async fn a_correction_the_decider_accepts_goes_into_the_running_turn() {
+    let (mut f, _) = deciding(vec![Ok(0.9)]);
+    f.receive(Inbound {
+        addressed: true,
+        ..in_group(CLIENT, "rank T-1 first")
+    });
+    f.settle().await;
+
+    f.receive(in_group(CLIENT, "actually second"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(f.host.calls()[1..], [
+        "reply c1 \"Ada Client: actually second\""
+    ]);
+}
+
+/// The decider reads the assistant's last answer, which is what a short
+/// follow-up such as "why?" refers to.
+#[tokio::test]
+async fn a_decision_reads_the_assistants_last_answer() {
+    let (mut f, decider) = deciding(vec![Ok(0.9)]);
+    f.receive(Inbound {
+        addressed: true,
+        ..in_group(CLIENT, "what's next?")
+    });
+    f.settle().await;
+    f.end_turn().await;
+
+    f.receive(in_group(CLIENT, "why?"));
+    f.settle().await;
+
+    assert_eq!(*decider.asked.lock().unwrap(), vec![
+        "Earlier messages, oldest first:\nAda Client (to you): what's next?\nAssistant: Answer \
+         from c1.\n\nLast message:\nAda Client: why?"
+            .to_owned()
+    ]);
 }
 
 /// "Move it to the top", then "actually second" while the conversation is still

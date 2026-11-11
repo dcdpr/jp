@@ -2194,6 +2194,7 @@ dependencies = [
  "jp_config",
  "jp_plugin",
  "pretty_assertions",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

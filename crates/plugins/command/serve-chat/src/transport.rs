@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use camino::Utf8PathBuf;
+
 /// Chat destination where a message originated and where replies are sent.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Chat {
@@ -45,8 +47,20 @@ pub(crate) struct Inbound {
     /// Message text; empty if the message contained only attachments.
     pub text: String,
 
-    /// Number of attachments on the message.
-    pub attachments: usize,
+    pub attachments: Vec<Attachment>,
+}
+
+/// A file received with a message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Attachment {
+    /// The MIME type the sender's app reported.
+    pub content_type: String,
+
+    /// The file name the sender's app reported, if any.
+    pub name: Option<String>,
+
+    /// Where the transport saved it on this machine, if it did.
+    pub path: Option<Utf8PathBuf>,
 }
 
 /// Outbound interface for sending messages and typing indicators to a chat app.

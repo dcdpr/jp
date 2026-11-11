@@ -21,6 +21,7 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
+use camino::Utf8PathBuf;
 use chrono::{Datelike as _, Days, NaiveDate, Weekday};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -39,7 +40,23 @@ const DAY: Duration = Duration::from_hours(24);
 
 const DAYS_PER_WEEK: u32 = 7;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+const DEFAULT_DECIDE_URL: &str = "https://api.typesafe.ai/v1/systemone";
+
+const DEFAULT_DECIDE_MODEL: &str = "jev-latest";
+
+const DEFAULT_DECIDE_KEY_ENV: &str = "JEV_API_KEY";
+
+const DEFAULT_DECIDE_THRESHOLD: f64 = 0.5;
+
+/// The question the decide API answers for a group message, unless
+/// `decide.instructions` replaces it.
+pub(crate) const DEFAULT_DECIDE_INSTRUCTIONS: &str =
+    "Should the assistant answer the last message in this group chat? Answer yes if the last \
+     message mentions the assistant, asks it a question, asks it to do something, or corrects or \
+     follows up on its previous answer. Answer no if it is meant for the other people in the \
+     chat, such as thanks, small talk, or arrangements between them.";
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Options {
     /// Configuration value passed via `--cfg` on every turn.
     pub persona: Option<String>,
@@ -63,6 +80,26 @@ pub(crate) struct Options {
 
     /// Additional `--cfg` values applied after `persona` on every turn.
     pub cfg: Vec<String>,
+
+    /// The model asked whether a group message is meant for the assistant, if
+    /// any; without one, every message is.
+    pub decide: Option<DecideOptions>,
+}
+
+/// The decide API: a model answering a yes-or-no question with a probability.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DecideOptions {
+    pub url: String,
+    pub model: String,
+
+    /// The environment variable holding the API token.
+    pub api_key_env: String,
+
+    /// The least probability of "yes" at which a message is answered.
+    pub threshold: f64,
+
+    /// The question asked about each message.
+    pub instructions: String,
 }
 
 /// An allowed sender.
@@ -97,6 +134,9 @@ pub(crate) struct SignalOptions {
     pub account_id: Option<String>,
 
     pub command: String,
+
+    /// Where `signal-cli` saves received attachments; `None` for its default.
+    pub attachments_dir: Option<Utf8PathBuf>,
 }
 
 impl SignalOptions {
@@ -146,6 +186,17 @@ struct Raw {
     people: BTreeMap<String, RawPerson>,
     checkout: RawCheckout,
     signal: RawSignal,
+    decide: Option<RawDecide>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RawDecide {
+    url: Option<String>,
+    model: Option<String>,
+    api_key_env: Option<String>,
+    threshold: Option<f64>,
+    instructions: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -169,6 +220,7 @@ struct RawSignal {
     account: Option<String>,
     account_id: Option<String>,
     command: Option<String>,
+    attachments_dir: Option<Utf8PathBuf>,
 }
 
 impl Options {
@@ -211,6 +263,7 @@ impl Options {
             people,
             checkout: checkout(raw.checkout)?,
             signal: signal(raw.signal)?,
+            decide: raw.decide.map(decide).transpose()?,
         })
     }
 
@@ -241,6 +294,35 @@ fn rollover(raw: Option<&str>) -> Result<Rollover, String> {
             "`{KEY}.rollover` is `{raw}`; use `daily`, or the day of the week a new conversation \
              starts on, such as `sunday`."
         )
+    })
+}
+
+fn decide(raw: RawDecide) -> Result<DecideOptions, String> {
+    let threshold = raw.threshold.unwrap_or(DEFAULT_DECIDE_THRESHOLD);
+    if !(0.0..=1.0).contains(&threshold) {
+        return Err(format!(
+            "`{KEY}.decide.threshold` is `{threshold}`; it is a probability, from 0 to 1."
+        ));
+    }
+    let api_key_env = raw.api_key_env.map_or_else(
+        || DEFAULT_DECIDE_KEY_ENV.to_owned(),
+        |name| name.trim().to_owned(),
+    );
+    if api_key_env.is_empty() {
+        return Err(format!(
+            "`{KEY}.decide.api_key_env` is empty; name the environment variable holding the token."
+        ));
+    }
+
+    Ok(DecideOptions {
+        url: raw.url.unwrap_or_else(|| DEFAULT_DECIDE_URL.to_owned()),
+        model: raw.model.unwrap_or_else(|| DEFAULT_DECIDE_MODEL.to_owned()),
+        api_key_env,
+        threshold,
+        instructions: raw
+            .instructions
+            .filter(|instructions| !instructions.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_DECIDE_INSTRUCTIONS.to_owned()),
     })
 }
 
@@ -281,6 +363,7 @@ fn signal(raw: RawSignal) -> Result<SignalOptions, String> {
             .map(|id| id.trim().to_owned())
             .filter(|id| !id.is_empty()),
         command: raw.command.unwrap_or_else(|| "signal-cli".to_owned()),
+        attachments_dir: raw.attachments_dir,
     })
 }
 

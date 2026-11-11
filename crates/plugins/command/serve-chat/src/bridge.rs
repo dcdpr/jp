@@ -6,6 +6,9 @@
 //! into the turn as an interrupt reply (like `[r] Reply` in the terminal), one
 //! reply at a time, and never ahead of an earlier message from the same chat.
 //! Any other message waits in the [`Queue`].
+//! Before either, a group message that doesn't address the assistant can wait
+//! in the [`Inbox`] for a model to decide it is meant for the assistant; one
+//! that isn't gets no turn.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
@@ -21,7 +24,7 @@
 //! If a turn modifies or creates any file outside the configured writable
 //! directories, the bridge pauses until the working tree is clean again.
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use chrono::{Local, NaiveDate};
 use serde_json::{Map, Value, json};
@@ -30,11 +33,13 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     answer::last_answer,
     checkout::Checkout,
+    decide::Decide,
     host::{Host, Level, NewTurn, ReplyError},
+    inbox::{Inbox, Incoming, Next},
     options::{Options, Rollover},
     queue::{Queue, Waiting},
     state::State,
-    transport::{Chat, Inbound, Outbox},
+    transport::{Attachment, Chat, Inbound, Outbox},
 };
 
 /// How often the typing indicator is renewed while a turn runs.
@@ -50,8 +55,6 @@ const SILENT: &str = "NO_REPLY";
 
 /// User-facing message sent when a turn fails; the underlying error is logged.
 const FAILED: &str = "Sorry, that didn't work. The bridge's log says why.";
-
-const TEXT_ONLY: &str = "I can only read text, so I didn't get the attachment.";
 
 const PAUSED: &str = "Changes are paused until the last ones have been reviewed. I'll answer as \
                       soon as that's done.";
@@ -80,6 +83,12 @@ pub(crate) enum Event {
         result: Result<(), String>,
     },
 
+    /// The probability that the first message in the inbox is meant for the
+    /// assistant.
+    Decided {
+        result: Result<f64, String>,
+    },
+
     /// Outcome of delivering an in-turn reply to the host.
     Replied {
         chat: Chat,
@@ -106,9 +115,7 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     /// already told so.
     paused: Option<Vec<Chat>>,
 
-    /// Primary sender IDs of unconfigured senders already printed during this
-    /// run, so each unknown sender is reported at most once.
-    strangers: HashSet<String>,
+    inbox: Inbox,
 
     events_tx: mpsc::UnboundedSender<Event>,
     events_rx: mpsc::UnboundedReceiver<Event>,
@@ -134,10 +141,17 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             queue: Queue::default(),
             running: None,
             paused: None,
-            strangers: HashSet::new(),
+            inbox: Inbox::default(),
             events_tx,
             events_rx,
         }
+    }
+
+    /// Ask `decider` whether a group message that doesn't address the assistant
+    /// is meant for it, before running a turn for it.
+    pub(crate) fn with_decider(mut self, decider: Option<Arc<dyn Decide>>) -> Self {
+        self.inbox.decide_with(decider);
+        self
     }
 
     /// Process inbound messages and turn events until shutdown or transport
@@ -168,7 +182,11 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     self.receive(message);
                 }
                 Some(event) = self.events_rx.recv() => self.handle(event).await,
-                _ = typing.tick() => self.renew_typing(),
+                _ = typing.tick() => {
+                    if let Some(running) = &self.running {
+                        self.outbox.typing(&running.chat, true);
+                    }
+                }
                 _ = pull.tick() => self.idle(),
                 _ = shutdown.changed() => {
                     self.finish(true).await;
@@ -233,33 +251,87 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 ),
             );
             if let Some(id) = message.sender.first()
-                && self.strangers.insert(id.clone())
+                && self.inbox.first_sighting(id)
             {
                 self.host.print(&stranger(&message, id));
             }
             return;
         };
-        let (key, name) = (key.to_owned(), person.name.clone());
-
-        if message.attachments > 0 {
-            self.outbox.send(&message.chat, TEXT_ONLY);
-        }
-        let text = message.text.trim();
-        if text.is_empty() {
+        let key = key.to_owned();
+        let Some(text) = content(&message, &person.name) else {
             return;
-        }
-        let text = match message.chat {
-            Chat::Group(_) if message.addressed => format!("{name} (to you): {text}"),
-            Chat::Group(_) => format!("{name}: {text}"),
-            Chat::Direct(_) => text.to_owned(),
         };
 
-        if let Some(told) = &mut self.paused {
-            if !told.contains(&message.chat) {
-                self.outbox.send(&message.chat, PAUSED);
-                told.push(message.chat.clone());
+        let decide =
+            matches!(message.chat, Chat::Group(_)) && !message.addressed && self.inbox.decides();
+        self.inbox.push(message.chat, key, text, decide);
+        self.pump();
+    }
+
+    /// Take every message the inbox can release, or start the decision the
+    /// first one waits for.
+    fn pump(&mut self) {
+        while let Some(next) = self.inbox.next() {
+            match next {
+                Next::Take(incoming) => self.route(incoming),
+                Next::Decide(decision) => {
+                    let events = self.events_tx.clone();
+                    tokio::spawn(async move {
+                        drop(events.send(Event::Decided {
+                            result: decision.await,
+                        }));
+                    });
+                }
             }
-            self.queue.push(message.chat, key, text);
+        }
+    }
+
+    /// Act on a decision about the first message in the inbox, then go on.
+    ///
+    /// A decision that failed lets the message through: a wasted turn costs
+    /// less than a question nobody answers.
+    fn decided(&mut self, result: Result<f64, String>) {
+        let threshold = self
+            .options
+            .decide
+            .as_ref()
+            .map_or(0.0, |decide| decide.threshold);
+        let answer = match result {
+            Ok(probability) => probability >= threshold,
+            Err(error) => {
+                self.host.log(
+                    Level::WARN,
+                    &format!("The decide API failed, so the message is answered: {error}"),
+                );
+                true
+            }
+        };
+
+        if let Some(incoming) = self.inbox.decided() {
+            if answer {
+                self.route(incoming);
+            } else {
+                self.host.log(
+                    Level::INFO,
+                    &format!("A message in {} isn't for the assistant.", incoming.chat),
+                );
+            }
+        }
+        self.pump();
+    }
+
+    /// Hand `incoming` to the running turn, or queue it for a turn of its own.
+    fn route(&mut self, incoming: Incoming) {
+        let Incoming {
+            chat, person, text, ..
+        } = incoming;
+
+        if let Some(told) = &mut self.paused {
+            if !told.contains(&chat) {
+                self.outbox.send(&chat, PAUSED);
+                told.push(chat.clone());
+            }
+            self.queue.push(chat, person, text);
             return;
         }
 
@@ -267,13 +339,13 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         let conversation = self
             .running
             .as_ref()
-            .filter(|running| running.chat == message.chat && running.person == key)
+            .filter(|running| running.chat == chat && running.person == person)
             .and_then(|running| running.conversation.clone());
         match conversation {
-            Some(conversation) if self.queue.try_reply(&message.chat) => {
-                self.reply(message.chat, key, text, &conversation);
+            Some(conversation) if self.queue.try_reply(&chat) => {
+                self.reply(chat, person, text, &conversation);
             }
-            _ => self.queue.push(message.chat, key, text),
+            _ => self.queue.push(chat, person, text),
         }
     }
 
@@ -337,9 +409,14 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     return;
                 };
                 self.outbox.typing(&running.chat, false);
-                self.answer(&running, result).await;
+                if let Some(sent) = self.answer(&running, result).await {
+                    self.inbox
+                        .remember(&running.chat, &format!("Assistant: {sent}"));
+                }
                 self.after_turn();
             }
+
+            Event::Decided { result } => self.decided(result),
 
             Event::Replied {
                 chat,
@@ -366,20 +443,18 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 
     /// Read the completed turn's final response from the host and send it to
-    /// the chat.
-    async fn answer(&self, running: &Running, result: Result<(), String>) {
+    /// the chat, returning what the assistant said, if anything.
+    async fn answer(&self, running: &Running, result: Result<(), String>) -> Option<String> {
         if let Err(error) = result {
             self.host.log(
                 Level::ERROR,
                 &format!("A turn for {} failed: {error}", running.chat),
             );
             self.outbox.send(&running.chat, FAILED);
-            return;
+            return None;
         }
 
-        let Some(conversation) = &running.conversation else {
-            return;
-        };
+        let conversation = running.conversation.as_ref()?;
         match self.host.events(conversation).await {
             Ok(events) => match last_answer(&events) {
                 Some(answer) if is_silent(&answer) => {
@@ -387,10 +462,13 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                         Level::INFO,
                         &format!("The turn for {} chose not to answer.", running.chat),
                     );
+                    None
                 }
-                answer => self
-                    .outbox
-                    .send(&running.chat, answer.as_deref().unwrap_or(NO_ANSWER)),
+                answer => {
+                    let answer = answer.unwrap_or_else(|| NO_ANSWER.to_owned());
+                    self.outbox.send(&running.chat, &answer);
+                    Some(answer)
+                }
             },
             Err(error) => {
                 self.host.log(
@@ -398,6 +476,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     &format!("Failed to read conversation {conversation}: {error}"),
                 );
                 self.outbox.send(&running.chat, FAILED);
+                None
             }
         }
     }
@@ -500,12 +579,6 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         self.options.rollover.start((self.today)())
     }
 
-    fn renew_typing(&self) {
-        if let Some(running) = &self.running {
-            self.outbox.typing(&running.chat, true);
-        }
-    }
-
     fn idle(&mut self) {
         if self.running.is_some() {
             return;
@@ -529,6 +602,45 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         if let Some(account) = account {
             self.outbox.send(&Chat::Direct(account), text);
         }
+    }
+}
+
+/// What a turn reads for `message` from `name`: its text, then a line for each
+/// attachment, after the sender's name in a group.
+///
+/// `None` for a message with neither.
+fn content(message: &Inbound, name: &str) -> Option<String> {
+    let mut parts: Vec<String> = vec![];
+    let text = message.text.trim();
+    if !text.is_empty() {
+        parts.push(text.to_owned());
+    }
+    parts.extend(message.attachments.iter().map(describe));
+    if parts.is_empty() {
+        return None;
+    }
+
+    let body = parts.join("\n");
+    Some(match message.chat {
+        Chat::Group(_) if message.addressed => format!("{name} (to you): {body}"),
+        Chat::Group(_) => format!("{name}: {body}"),
+        Chat::Direct(_) => body,
+    })
+}
+
+/// The line a turn reads for an attachment: what it is, and where it is saved.
+///
+/// The model can't open the file; the path is for writing into a ticket, so a
+/// maintainer can copy the file off the bridge's machine.
+fn describe(attachment: &Attachment) -> String {
+    let what = match &attachment.name {
+        Some(name) => format!("{name} ({})", attachment.content_type),
+        None => attachment.content_type.clone(),
+    };
+
+    match &attachment.path {
+        Some(path) => format!("[Attached {what}, saved on the bridge's machine at {path}]"),
+        None => format!("[Attached {what}, which the bridge couldn't save]"),
     }
 }
 
