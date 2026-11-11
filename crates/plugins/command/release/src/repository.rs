@@ -370,6 +370,14 @@ impl<'a> Repository<'a> {
     ///
     /// [`tip`]: Self::tip
     pub(crate) fn releases(&self) -> Result<Releases, String> {
+        self.releases_and_tags().map(|(releases, _)| releases)
+    }
+
+    /// [`releases`], and the tags they were read from, for a command that needs
+    /// both without asking `origin` for the tags twice.
+    ///
+    /// [`releases`]: Self::releases
+    pub(crate) fn releases_and_tags(&self) -> Result<(Releases, Tags), String> {
         let tags = self.tags()?;
         let published = releases::versions(tags.origin.keys());
         let tagged = releases::versions(tags.local.keys())
@@ -398,11 +406,13 @@ impl<'a> Repository<'a> {
             });
         }
 
-        Ok(Releases {
+        let releases = Releases {
             tagged,
             published,
             lines,
-        })
+        };
+
+        Ok((releases, tags))
     }
 
     /// When the tag `tag` was made, in seconds since the Unix epoch: an

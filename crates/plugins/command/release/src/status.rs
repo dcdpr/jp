@@ -37,8 +37,7 @@ pub(crate) fn status(
     let repo = &pipeline.repo;
     repo.refuse_shallow()?;
     repo.fetch()?;
-    let releases = repo.releases()?;
-    let tags = repo.tags()?;
+    let (releases, tags) = repo.releases_and_tags()?;
     let checkout = repo.checked_out()?;
 
     let mut paragraphs = vec![];
@@ -53,9 +52,17 @@ pub(crate) fn status(
     }
     paragraphs.extend(unpublished(pipeline, &checkout, &tags)?);
 
-    let main = repo.worktree("status", &checkout.head)?;
-    for line in releases.lines.values() {
-        if let Some(version) = releases.in_preparation(line) {
+    let in_preparation: Vec<(&Line, &Version)> = releases
+        .lines
+        .values()
+        .filter_map(|line| Some((line, releases.in_preparation(line)?)))
+        .collect();
+    // A worktree is a checkout of the whole repository, so one is made only to
+    // read the notes of a release in preparation, and is removed before `due`
+    // checks out its own.
+    if !in_preparation.is_empty() {
+        let main = repo.worktree("status", &checkout.head)?;
+        for (line, version) in in_preparation {
             paragraphs.push(preparing(
                 pipeline, &releases, line, version, &checkout, &main,
             )?);

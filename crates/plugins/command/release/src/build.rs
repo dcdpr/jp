@@ -169,7 +169,8 @@ pub(crate) fn build(
     let repo = &pipeline.repo;
     repo.refuse_shallow()?;
     repo.fetch()?;
-    let target = target(&repo.releases()?, &repo.tags()?, version)?;
+    let (releases, tags) = repo.releases_and_tags()?;
+    let target = target(&releases, &tags, version)?;
     // A tag only `origin` has can name a commit no branch here holds.
     if !repo.has_commit(&target.commit)? {
         repo.fetch_tag(&releases::tag(version))?;
