@@ -1940,13 +1940,14 @@ ticket-import NNN *ARGS: _install-ticket
 #   just release cut
 #   just release pick 0.3.1 4e1f0a2
 #   just release finalize 0.3.0
+#   just release github publish 0.3.0
 #
 # Runs the `jp` this checkout builds, from the target directory, and installs
-# this checkout's `jp-release` with `_install-release`, as `release-due` does:
-# `jp` refuses a command two plugin binaries claim, so the plugin replaces any
-# other installed copy rather than sitting beside it on `PATH`. Also installs
-# `cargo set-version` from cargo-edit, which `cut` and `pick` run to write the
-# new version.
+# this checkout's `jp-release` and `jp-release-github`, as `release-due` and
+# `release-sync` do: `jp` refuses a command two plugin binaries claim, so each
+# plugin replaces any other installed copy rather than sitting beside it on
+# `PATH`. Also installs `cargo set-version` from cargo-edit, which `cut` and
+# `pick` run to write the new version.
 #
 # Cargo is asked where the target directory is: a Cargo configuration file can
 # move it, and `CARGO_TARGET_DIR` doesn't say so.
@@ -1957,6 +1958,7 @@ release *ARGS: (_install "cargo-edit@" + edit_version)
     set -eu
 
     JP_INSTALL=1 just _install-release
+    JP_INSTALL=1 just _install-release-github
     cargo build {{quiet_flag}} --locked --package jp_cli
     target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
     exec "$target/debug/jp" release "$@"
@@ -1983,6 +1985,24 @@ release-due *FLAGS:
     cargo build {{quiet_flag}} --locked --package jp_cli
     target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
     exec "$target/debug/jp" "$@" release due
+
+# Rewrite the description of each GitHub Release whose notes changed, as JP's
+# workflow does when a released version's notes change on `main`:
+#
+#   just release-sync
+#
+# Needs a token that can write the repository's contents, in `JP_GITHUB_TOKEN`
+# or `GITHUB_TOKEN`. Runs the `jp` this checkout builds and installs its
+# `jp-release-github`, as `release` does.
+[group('release')]
+release-sync:
+    #!/usr/bin/env sh
+    set -eu
+
+    JP_INSTALL=1 just _install-release-github
+    cargo build {{quiet_flag}} --locked --package jp_cli
+    target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
+    exec "$target/debug/jp" release github sync
 
 # Locally develop the documentation, with hot-reloading.
 #
@@ -2658,6 +2678,20 @@ _install-release *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/release --debug {{args}}
+
+# Build and install the `jp-release-github` command plugin that backs `jp
+# release github`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.release-github.run` in `.jp/config.toml` approves it).
+_install-release-github *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-release-github >/dev/null 2>&1; then
+        echo "Skipping jp-release-github rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/release-github --debug {{args}}
 
 # Build and install the `changelog` binary the site's release pages are
 # rendered with by a `vitepress build` started without `jp vite`, from this

@@ -216,6 +216,20 @@ cadence = "2w"
 added = "New features"
 fixed = "Bug fixes"
 
+# `jp release github` publishes a release's build and notes as its GitHub
+# Release, installed with `just _install-release-github`.
+[plugins.command.release-github]
+run = "allow"
+
+# Every Release carries the install scripts, filled in with its download
+# address, and ends with the commands that run them. Breaking entries link to
+# the release's upgrade guide on the site, since GitHub gives a description's
+# headings no anchors to link to.
+[plugins.command.release-github.options]
+assets = [".config/release/install.sh", ".config/release/install.ps1"]
+upgrade_guide = "https://jp.computer/releases/{version}/upgrade"
+footer = ".config/release/github.md"
+
 [providers.llm.aliases]
 # Anthropic aliases
 fable = "anthropic/claude-fable-5-2"
