@@ -73,7 +73,13 @@ pub trait Provider: Send + Sync {
         })
     }
 
-    /// Get details of a model.
+    /// Look up capability metadata for `name`.
+    ///
+    /// Remote metadata queries are advisory: if a lookup fails, times out, or
+    /// does not list `name`, the provider falls back to built-in metadata or
+    /// [`ModelDetails::empty`].
+    /// Returns an error only when a pre-request check fails, such as credential
+    /// resolution or a model unsupported by the active credential.
     async fn model_details(&self, name: &Name) -> Result<ModelDetails>;
 
     /// Get a list of available models.

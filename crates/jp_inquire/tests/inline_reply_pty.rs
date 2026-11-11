@@ -27,7 +27,7 @@ fn a_seeded_buffer_is_shown_without_redrawing_the_screen() {
     let terminal = Terminal::pty(Size::new(10, 80))
         .expect("a pty")
         .with_timeout(TIMEOUT);
-    let _probe = terminal
+    let mut probe = terminal
         .spawn(CommandBuilder::new(PROBE))
         .expect("the probe to start");
 
@@ -66,5 +66,13 @@ fn a_seeded_buffer_is_shown_without_redrawing_the_screen() {
         screen.row(3),
         r#"outcome: Submit("result \u{1b}[1A\u{1b}[2Kmid\u{1b}]0;pwned\u{7} end")"#,
         "{screen}"
+    );
+
+    // `"outcome:"` appears before `main` returns. Wait for the process to exit
+    // so `Child::drop` does not kill it while `atexit` flushes coverage data.
+    assert_eq!(
+        probe.wait_within(TIMEOUT).expect("the exit check"),
+        Some(true),
+        "the probe exits successfully once the reply is submitted"
     );
 }

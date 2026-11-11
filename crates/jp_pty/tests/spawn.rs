@@ -76,7 +76,7 @@ fn a_child_is_given_the_size_the_terminal_was_opened_with() {
 
 #[test]
 fn keystrokes_reach_the_child() {
-    let Some((terminal, _child)) = spawn_probe(Size::new(24, 80)) else {
+    let Some((terminal, mut child)) = spawn_probe(Size::new(24, 80)) else {
         return;
     };
     terminal
@@ -90,13 +90,22 @@ fn keystrokes_reach_the_child() {
             screen.contains("you typed: hello")
         })
         .expect("the probe to read what was typed");
+
+    // Exit cleanly before `child` drops so `Child::drop` does not kill the
+    // probe while `atexit` flushes coverage data.
+    terminal.send("quit\r").expect("the keystrokes to arrive");
+    assert_eq!(
+        child.wait_within(TIMEOUT).expect("the exit check"),
+        Some(true),
+        "the probe exits successfully once told to quit"
+    );
 }
 
 #[test]
 fn a_resize_reaches_a_running_child() {
     // The case with no in-process equivalent: the new size has to travel
     // through the kernel to a process that is already running.
-    let Some((terminal, _child)) = spawn_probe(Size::new(24, 80)) else {
+    let Some((terminal, mut child)) = spawn_probe(Size::new(24, 80)) else {
         return;
     };
     terminal
@@ -113,4 +122,11 @@ fn a_resize_reaches_a_running_child() {
             screen.contains("size 10x40")
         })
         .expect("the resize to reach the probe");
+
+    terminal.send("quit\r").expect("the keystrokes to arrive");
+    assert_eq!(
+        child.wait_within(TIMEOUT).expect("the exit check"),
+        Some(true),
+        "the probe exits successfully once told to quit"
+    );
 }
