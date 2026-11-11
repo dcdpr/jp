@@ -461,58 +461,86 @@ fn test_assistant_config_deserialize() {
     }
 }
 
-/// A section a config file declares again, on top of a resolved config that
-/// already holds it, appears once.
+/// Load `file` onto the test config, then apply it again on top of the resolved
+/// result, and return the config each pass resolves to.
 ///
 /// This is the shape of `--cfg skill/x` on a conversation that already loaded
 /// it: the conversation layer is a resolved config turned back into a partial,
-/// and the file is a partial that leaves `position` unset.
-#[test]
-fn redeclared_section_on_a_resolved_config_is_deduplicated() {
-    let file = || {
-        let mut partial = crate::PartialAppConfig::empty();
-        partial.assistant.system_prompt_sections = MergeableVec::Vec(vec![PartialSectionConfig {
-            content: Some("read git history".into()),
-            tag: Some("git_reading_skill".into()),
-            ..Default::default()
-        }]);
-        partial
-    };
-
+/// and the file is a partial as written.
+fn apply_twice(file: &crate::PartialAppConfig) -> (crate::AppConfig, crate::AppConfig) {
     let mut base = crate::AppConfig::new_test().to_partial();
-    base.merge(&(), file()).unwrap();
-    let resolved = crate::util::build(base).unwrap();
-    assert_eq!(resolved.assistant.system_prompt_sections.len(), 1);
+    base.merge(&(), file.clone()).unwrap();
+    let once = crate::util::build(base).unwrap();
 
-    let mut partial = resolved.to_partial();
-    partial.merge(&(), file()).unwrap();
-    let resolved = crate::util::build(partial).unwrap();
+    let mut partial = once.to_partial();
+    partial.merge(&(), file.clone()).unwrap();
+    let twice = crate::util::build(partial).unwrap();
 
-    assert_eq!(resolved.assistant.system_prompt_sections.len(), 1);
+    (once, twice)
+}
+
+fn section_file(position: Option<i32>) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial.assistant.system_prompt_sections = MergeableVec::Vec(vec![PartialSectionConfig {
+        content: Some("read git history".into()),
+        tag: Some("git_reading_skill".into()),
+        title: None,
+        position,
+    }]);
+    partial
+}
+
+fn instructions_file(position: Option<isize>) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial.assistant.instructions = MergeableVec::Vec(vec![PartialInstructionsConfig {
+        title: Some("Git Staging".into()),
+        items: Some(vec!["stage related hunks only".into()]),
+        position,
+        ..Default::default()
+    }]);
+    partial
+}
+
+/// A section a config file declares again, on top of a resolved config that
+/// already holds it, appears once.
+#[test]
+fn redeclared_section_without_position_is_deduplicated() {
+    let (once, twice) = apply_twice(&section_file(None));
+
+    assert_eq!(once.assistant.system_prompt_sections.len(), 1);
+    assert_eq!(twice.assistant.system_prompt_sections.len(), 1);
+}
+
+/// A file spelling out the default position declares the same section as one
+/// leaving it out.
+#[test]
+fn redeclared_section_with_default_position_is_deduplicated() {
+    let (once, twice) = apply_twice(&section_file(Some(0)));
+
+    assert_eq!(once.assistant.system_prompt_sections.len(), 1);
+    assert_eq!(twice.assistant.system_prompt_sections.len(), 1);
 }
 
 /// Instructions a config file declares again, on top of a resolved config that
 /// already holds them, appear once.
 #[test]
-fn redeclared_instructions_on_a_resolved_config_are_deduplicated() {
-    let file = || {
-        let mut partial = crate::PartialAppConfig::empty();
-        partial.assistant.instructions = MergeableVec::Vec(vec![PartialInstructionsConfig {
-            title: Some("Git Staging".into()),
-            items: Some(vec!["stage related hunks only".into()]),
-            ..Default::default()
-        }]);
-        partial
-    };
+fn redeclared_instructions_without_position_are_deduplicated() {
+    let (once, twice) = apply_twice(&instructions_file(None));
 
-    let mut base = crate::AppConfig::new_test().to_partial();
-    base.merge(&(), file()).unwrap();
-    let resolved = crate::util::build(base).unwrap();
-    let count = resolved.assistant.instructions.len();
+    assert_eq!(
+        twice.assistant.instructions.len(),
+        once.assistant.instructions.len()
+    );
+}
 
-    let mut partial = resolved.to_partial();
-    partial.merge(&(), file()).unwrap();
-    let resolved = crate::util::build(partial).unwrap();
+/// A file spelling out the default position declares the same instructions as
+/// one leaving it out.
+#[test]
+fn redeclared_instructions_with_default_position_are_deduplicated() {
+    let (once, twice) = apply_twice(&instructions_file(Some(0)));
 
-    assert_eq!(resolved.assistant.instructions.len(), count);
+    assert_eq!(
+        twice.assistant.instructions.len(),
+        once.assistant.instructions.len()
+    );
 }

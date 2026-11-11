@@ -12,6 +12,7 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, KvAssignment, missing_key},
     assistant::sections::SectionConfig,
+    internal::merge::CanonicalItem,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -76,12 +77,20 @@ impl ToPartial for InstructionsConfig {
         Self::Partial {
             title: partial_opts(self.title.as_ref(), defaults.title),
             description: partial_opts(self.description.as_ref(), defaults.description),
-            // The declared default, so resolved instructions compare equal to
-            // the same instructions read from a file that leaves `position`
-            // out, and list deduplication recognizes the two.
+            // Omitted at the declared default: the spelling `CanonicalItem`
+            // reduces all instructions to before list deduplication.
             position: partial_opt(&self.position, Some(0)),
             items: partial_opt(&self.items, defaults.items),
             examples: self.examples.iter().map(ToPartial::to_partial).collect(),
+        }
+    }
+}
+
+impl CanonicalItem for PartialInstructionsConfig {
+    /// An explicit `position = 0` is the default, spelled out.
+    fn canonicalize(&mut self) {
+        if self.position == Some(0) {
+            self.position = None;
         }
     }
 }

@@ -125,6 +125,34 @@ where
     vec_with_strategy(prev, next, context)
 }
 
+/// A list item whose partial can spell the same value more than one way.
+///
+/// A field left unset and the same field set to its declared default resolve
+/// identically, but compare unequal as partials, so deduplication keeps both.
+pub trait CanonicalItem {
+    /// Rewrite `self` to the single spelling every equivalent partial shares.
+    fn canonicalize(&mut self);
+}
+
+/// Merge two lists of items that have more than one spelling.
+///
+/// Identical to [`vec_with_strategy`], except that both sides are brought to
+/// their [`CanonicalItem`] spelling first, so deduplication recognizes an item
+/// whichever way each layer wrote it.
+pub fn canonical_vec_with_strategy<T>(
+    mut prev: MergeableVec<T>,
+    mut next: MergeableVec<T>,
+    context: &(),
+) -> MergeResult<MergeableVec<T>>
+where
+    T: CanonicalItem + Clone + PartialEq + Serialize + DeserializeOwned + Schematic,
+{
+    prev.iter_mut().for_each(CanonicalItem::canonicalize);
+    next.iter_mut().for_each(CanonicalItem::canonicalize);
+
+    vec_with_strategy(prev, next, context)
+}
+
 /// Extract the explicit dedup flag from a `MergeableVec`.
 const fn dedup_flag<T>(v: &MergeableVec<T>) -> Option<bool> {
     match v {

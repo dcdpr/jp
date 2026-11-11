@@ -20,6 +20,7 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    internal::merge::CanonicalItem,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -185,10 +186,18 @@ impl ToPartial for SectionConfig {
             tag: partial_opts(self.tag.as_ref(), defaults.tag),
             title: partial_opts(self.title.as_ref(), defaults.title),
             content: partial_opt(&self.content, defaults.content),
-            // The declared default, so a resolved section compares equal to the
-            // same section read from a file that leaves `position` out, and
-            // list deduplication recognizes the two.
+            // Omitted at the declared default: the spelling `CanonicalItem`
+            // reduces every section to before list deduplication.
             position: partial_opt(&self.position, Some(0)),
+        }
+    }
+}
+
+impl CanonicalItem for PartialSectionConfig {
+    /// An explicit `position = 0` is the default, spelled out.
+    fn canonicalize(&mut self) {
+        if self.position == Some(0) {
+            self.position = None;
         }
     }
 }
