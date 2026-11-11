@@ -234,9 +234,12 @@ items = [
     divide by 3 tickets per week, and add that to "Current Date".
     """,
     """
-    Write "Requested for pickup around YYYY-MM-DD" in the description of a \
-    ticket you file this way, then place it with `ticket_move`. For an existing \
-    ticket, add that line with `ticket_comment` and place it with `ticket_move`.
+    Record the target date as a `due=YYYY-MM-DD` label, then place the ticket \
+    with `ticket_move`: on a ticket you file, in `ticket_create`'s `labels`; on \
+    an existing one, with `ticket_edit`'s `add_labels`, removing its old `due` \
+    label in the same call. Always write a date, never a relative value such \
+    as `1w`, since a date is what `ticket_list` can filter on. When asked what \
+    is due, resolve any relative `due` you find against the ticket's `Date`.
     """,
     """
     Report the ticket's position in the queue and the approximate pickup date as \

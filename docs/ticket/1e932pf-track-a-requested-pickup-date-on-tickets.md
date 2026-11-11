@@ -1,6 +1,6 @@
 # Track a requested pickup date on tickets
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-05
 - **Label**: domain=plugins
@@ -22,3 +22,16 @@ Two options to evaluate:
 Either approach turns a requested pickup date into a visible board field, so we
 should decide whether we want the board to surface date commitments before
 implementing one.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T19:28:16Z
+
+Done as an open-valued `due` label, at most one per ticket: a date,
+`due=2026-11-25`, or a duration after the ticket's `Date`, `due=1w`.
+The planner persona always writes a date, since that is what a `ticket_list`
+label filter can find.
+No board field or code change; a field stays possible if dates need sorting.
