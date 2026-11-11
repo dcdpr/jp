@@ -17,7 +17,7 @@ Tracking ticket for [RFD 123].
       Sets JP's `build` option and release toolchain, and makes `jp --version`
       read `SOURCE_DATE_EPOCH`.
       Depends on RFD 122's building phase.
-- [ ] **Add install scripts**: Adds `install.sh` and `install.ps1` to
+- [x] **Add install scripts**: Adds `install.sh` and `install.ps1` to
       `.config/release/`, with the `{download}` placeholder a publisher fills in
       and `JP_DOWNLOAD` to try them, and replaces the "no binaries" warning in
       `docs/installation.md` with them, manual download and checksum
