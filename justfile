@@ -1941,9 +1941,12 @@ ticket-import NNN *ARGS: _install-ticket
 #   just release pick 0.3.1 4e1f0a2
 #   just release finalize 0.3.0
 #
-# Builds `jp` and `jp-release` from this checkout and runs them from the target
-# directory, as `release-due` does, and installs `cargo set-version` from
-# cargo-edit, which `cut` and `pick` run to write the new version.
+# Runs the `jp` this checkout builds, from the target directory, and installs
+# this checkout's `jp-release` with `_install-release`, as `release-due` does:
+# `jp` refuses a command two plugin binaries claim, so the plugin replaces any
+# other installed copy rather than sitting beside it on `PATH`. Also installs
+# `cargo set-version` from cargo-edit, which `cut` and `pick` run to write the
+# new version.
 #
 # Cargo is asked where the target directory is: a Cargo configuration file can
 # move it, and `CARGO_TARGET_DIR` doesn't say so.
@@ -1953,9 +1956,10 @@ release *ARGS: (_install "cargo-edit@" + edit_version)
     #!/usr/bin/env sh
     set -eu
 
-    cargo build {{quiet_flag}} --locked --package jp_cli --package jp-release
+    JP_INSTALL=1 just _install-release
+    cargo build {{quiet_flag}} --locked --package jp_cli
     target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
-    PATH="$target/debug:$PATH" exec jp release "$@"
+    exec "$target/debug/jp" release "$@"
 
 # Ask whether the next release should be cut, as JP's daily workflow does.
 #
@@ -1966,18 +1970,19 @@ release *ARGS: (_install "cargo-edit@" + edit_version)
 #   just release-due
 #   just release-due --format json
 #
-# Builds `jp` and `jp-release` from this checkout and runs them from the target
-# directory, since no release publishes them yet, and an installed `jp` or
-# plugin may be another build.
+# Runs the `jp` this checkout builds and installs its `jp-release`, as `release`
+# does, since no release publishes them yet, and an installed `jp` or plugin
+# may be another build.
 [group('release')]
 [positional-arguments]
 release-due *FLAGS:
     #!/usr/bin/env sh
     set -eu
 
-    cargo build {{quiet_flag}} --locked --package jp_cli --package jp-release
+    JP_INSTALL=1 just _install-release
+    cargo build {{quiet_flag}} --locked --package jp_cli
     target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
-    PATH="$target/debug:$PATH" exec jp "$@" release due
+    exec "$target/debug/jp" "$@" release due
 
 # Locally develop the documentation, with hot-reloading.
 #
