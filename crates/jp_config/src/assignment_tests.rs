@@ -806,8 +806,6 @@ fn test_assign_to_entry_scalar_with_empty_key_errors() {
     assert!(err.to_string().contains("type error"), "got: {err}");
 }
 
-/// A partial whose `ticket` and `wiki` plugins may run, as the config files
-/// leave it before `--cfg` is applied.
 fn plugins_allowed_by_files() -> PartialAppConfig {
     let mut config = PartialAppConfig::empty();
     for key in ["plugins.command.ticket.run", "plugins.command.wiki.run"] {
@@ -837,9 +835,6 @@ fn allowed_with_assistant() -> PartialCommandPluginConfig {
     }
 }
 
-/// A root object works like the dotted keys it spells out:
-/// `plugins.command.ticket.options.assistant=…` leaves the other plugins, and
-/// the ticket plugin's `run`, as the files set them.
 #[test]
 fn a_root_object_naming_one_map_entry_keeps_the_others() {
     let mut config = plugins_allowed_by_files();
@@ -859,8 +854,6 @@ fn a_root_object_naming_one_map_entry_keeps_the_others() {
     );
 }
 
-/// `:=` written on a block spells out its keys the way a root object does, so a
-/// map inside the block keeps the entries it already had.
 #[test]
 fn an_object_assigned_to_a_block_keeps_the_entries_of_maps_inside_it() {
     let mut config = plugins_allowed_by_files();
@@ -884,7 +877,6 @@ fn an_object_assigned_to_a_block_keeps_the_entries_of_maps_inside_it() {
     );
 }
 
-/// `:=` written on the map itself still states the whole map.
 #[test]
 fn an_object_assigned_to_a_map_replaces_it() {
     let mut config = plugins_allowed_by_files();
@@ -914,8 +906,6 @@ fn an_object_assigned_to_a_map_replaces_it() {
     );
 }
 
-/// A strategy wrapper inside a root object combines with the map under the
-/// strategy it names, as the same wrapper does in a config file.
 #[test]
 fn a_map_strategy_in_a_root_object_combines_with_the_entries_already_there() {
     let mut config = plugins_allowed_by_files();
@@ -942,7 +932,6 @@ fn a_map_strategy_in_a_root_object_combines_with_the_entries_already_there() {
     );
 }
 
-/// A list strategy inside a root object combines the same way.
 #[test]
 fn a_list_strategy_in_a_root_object_combines_with_the_items_already_there() {
     let mut config = PartialAppConfig::empty();
@@ -965,8 +954,6 @@ fn a_list_strategy_in_a_root_object_combines_with_the_items_already_there() {
     );
 }
 
-/// A list inside a root object replaces the list, as `config_load_paths:=[…]`
-/// does: a list has no keys to spell out.
 #[test]
 fn a_list_in_a_root_object_replaces_the_list() {
     let mut config = PartialAppConfig::empty();
@@ -984,7 +971,6 @@ fn a_list_in_a_root_object_replaces_the_list() {
     );
 }
 
-/// `null` inside a root object still clears the map it names.
 #[test]
 fn null_in_a_root_object_clears_the_map() {
     let mut config = plugins_allowed_by_files();
