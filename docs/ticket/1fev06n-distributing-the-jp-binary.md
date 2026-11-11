@@ -23,10 +23,12 @@ Tracking ticket for [RFD 123].
       `docs/installation.md` with them, manual download and checksum
       verification, the macOS quarantine note, and building from source.
       Depends on Phase 1.
-- [ ] **Add `jp release github`**: Creates the plugin with `publish`, its
-      `assets` setting, and `sync`, adds GitHub's Releases API to `jp_github`,
-      sets JP's `assets` to its install scripts, and runs `sync` in JP's CI on
-      pushes to `main` that change a version's directory.
+- [x] **Add `jp release github`**: Creates the plugin with `publish`, its
+      `assets`, `upgrade_guide`, and `footer` settings, and `sync`, adds
+      GitHub's Releases API to `jp_github`, sets JP's settings to its install
+      scripts, its site's upgrade guides, and a footer with the install
+      commands, and runs `sync` in JP's CI on pushes to `main` that change a
+      version's directory.
       Depends on Phases 1 and 2.
 - [ ] **Release JP's history**: Adds `just backfill` with `init`, `next`,
       `proceed`, `revert`, and `publish`, and runs the trial; its `publish` is
