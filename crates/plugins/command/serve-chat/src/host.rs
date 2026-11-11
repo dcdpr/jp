@@ -473,3 +473,7 @@ fn read_host(reader: impl BufRead, pending: &Pending, shutdown: &watch::Sender<b
     lock(pending).clear();
     let _ = shutdown.send(true);
 }
+
+#[cfg(test)]
+#[path = "host_tests.rs"]
+mod tests;
