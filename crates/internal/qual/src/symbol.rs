@@ -59,6 +59,12 @@ impl Symbols {
             .map(|scope| scope.path.clone())
             .unwrap_or_default()
     }
+
+    /// Return `true` if the file has a named item whose path is `symbol`.
+    #[must_use]
+    pub fn contains(&self, symbol: &str) -> bool {
+        self.scopes.iter().any(|scope| scope.path == symbol)
+    }
 }
 
 #[derive(Default)]

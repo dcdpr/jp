@@ -42,8 +42,34 @@ fn report(findings: Vec<Finding>) -> Report {
 }
 
 fn compare(base: Vec<Finding>, head: Vec<Finding>) -> Verdict {
+    compare_relocated(base, head, &[])
+}
+
+/// Compare with the items in `moved`, each a `(symbol, from, to)`, confirmed as
+/// relocated.
+fn compare_relocated(
+    base: Vec<Finding>,
+    head: Vec<Finding>,
+    moved: &[(&str, &str, &str)],
+) -> Verdict {
     let policy = Policy::parse(POLICY).unwrap();
-    verdict(&report(base), &report(head), &Renames::default(), &policy)
+    let relocations = moved
+        .iter()
+        .map(|(symbol, from, to)| Relocation::new(symbol, from, to))
+        .collect();
+
+    verdict(
+        &report(base),
+        &report(head),
+        &Renames::default(),
+        &relocations,
+        &policy,
+    )
+}
+
+fn candidates(base: Vec<Finding>, head: Vec<Finding>) -> BTreeSet<Relocation> {
+    let policy = Policy::parse(POLICY).unwrap();
+    relocation_candidates(&report(base), &report(head), &Renames::default(), &policy)
 }
 
 #[test]
@@ -138,31 +164,73 @@ fn a_finding_in_a_renamed_file_is_not_new() {
     let head = report(vec![finding("CX-001", "src/new.rs", "run", 10)]);
     let renames = Renames::from_name_status("R100\0src/old.rs\0src/new.rs\0").unwrap();
 
-    let verdict = verdict(&base, &head, &renames, &policy);
+    let verdict = verdict(&base, &head, &renames, &BTreeSet::new(), &policy);
 
     assert!(verdict.passed());
 }
 
+/// Symbols are file-relative, so unrelated functions share one: every provider
+/// has a `create_request`.
+/// Both stay where they are here; a finding fixed in one doesn't pay for a
+/// finding added to the other.
 #[test]
-fn a_finding_that_moved_to_another_file_with_its_symbol_is_not_new() {
+fn a_same_named_function_in_another_file_is_not_a_move() {
+    let base = vec![finding("CX-004", "src/a.rs", "create_request", 10)];
+    let head = vec![finding("CX-004", "src/b.rs", "create_request", 10)];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("CX-004", "src/b.rs", "create_request", 10),
+        shared: None,
+    }]);
+}
+
+/// The same change the other way around: the function that lost its finding is
+/// still in its file, simplified.
+#[test]
+fn a_function_fixed_in_place_does_not_cover_its_namesake() {
+    let base = vec![
+        finding("CX-004", "src/a.rs", "create_request", 10),
+        finding("CX-001", "src/a.rs", "create_request", 10),
+    ];
+    let head = vec![
+        finding("CX-001", "src/a.rs", "create_request", 10),
+        finding("CX-004", "src/b.rs", "create_request", 10),
+    ];
+
+    let verdict = compare(base, head);
+
+    assert_eq!(verdict.new, vec![NewFinding {
+        finding: finding("CX-004", "src/b.rs", "create_request", 10),
+        shared: None,
+    }]);
+}
+
+#[test]
+fn a_relocated_item_keeps_its_finding() {
     let base = vec![finding("CX-001", "src/a.rs", "Parser::run", 10)];
     let head = vec![finding("CX-001", "src/a/support.rs", "Parser::run", 4)];
 
-    let verdict = compare(base, head);
+    let verdict = compare_relocated(base, head, &[(
+        "Parser::run",
+        "src/a.rs",
+        "src/a/support.rs",
+    )]);
 
     assert!(verdict.passed());
     assert_eq!(verdict.new, vec![]);
 }
 
 #[test]
-fn a_moved_finding_does_not_cover_one_the_base_still_has() {
+fn a_relocation_does_not_cover_a_finding_the_source_file_still_has() {
     let base = vec![finding("CX-001", "src/a.rs", "Parser::run", 10)];
     let head = vec![
         finding("CX-001", "src/a.rs", "Parser::run", 10),
         finding("CX-001", "src/b.rs", "Parser::run", 4),
     ];
 
-    let verdict = compare(base, head);
+    let verdict = compare_relocated(base, head, &[("Parser::run", "src/a.rs", "src/b.rs")]);
 
     assert_eq!(verdict.new, vec![NewFinding {
         finding: finding("CX-001", "src/b.rs", "Parser::run", 4),
@@ -171,14 +239,14 @@ fn a_moved_finding_does_not_cover_one_the_base_still_has() {
 }
 
 #[test]
-fn a_moved_finding_covers_as_many_as_left_the_other_file() {
+fn a_relocation_covers_as_many_findings_as_left_the_source_file() {
     let base = vec![finding("CX-003", "src/a.rs", "run", 10)];
     let head = vec![
         finding("CX-003", "src/b.rs", "run", 4),
         finding("CX-003", "src/b.rs", "run", 6),
     ];
 
-    let verdict = compare(base, head);
+    let verdict = compare_relocated(base, head, &[("run", "src/a.rs", "src/b.rs")]);
 
     assert_eq!(verdict.new, vec![
         NewFinding {
@@ -193,14 +261,17 @@ fn a_moved_finding_covers_as_many_as_left_the_other_file() {
 }
 
 #[test]
-fn a_moved_finding_covers_one_file_only() {
+fn a_departed_finding_is_carried_to_one_file_only() {
     let base = vec![finding("CX-001", "src/a.rs", "run", 10)];
     let head = vec![
         finding("CX-001", "src/b.rs", "run", 4),
         finding("CX-001", "src/c.rs", "run", 4),
     ];
 
-    let verdict = compare(base, head);
+    let verdict = compare_relocated(base, head, &[
+        ("run", "src/a.rs", "src/b.rs"),
+        ("run", "src/a.rs", "src/c.rs"),
+    ]);
 
     assert_eq!(verdict.new, vec![NewFinding {
         finding: finding("CX-001", "src/c.rs", "run", 4),
@@ -208,8 +279,35 @@ fn a_moved_finding_covers_one_file_only() {
     }]);
 }
 
+/// `run` left both `a.rs` and `c.rs`, and only the move out of `a.rs` is
+/// confirmed, so `b.rs` is owed one finding and not two.
 #[test]
-fn another_rule_or_symbol_is_not_a_move() {
+fn a_relocation_carries_findings_from_its_own_source_file_only() {
+    let base = vec![
+        finding("CX-001", "src/a.rs", "run", 10),
+        finding("CX-001", "src/c.rs", "run", 10),
+    ];
+    let head = vec![
+        finding("CX-001", "src/b.rs", "run", 4),
+        finding("CX-001", "src/b.rs", "run", 8),
+    ];
+
+    let verdict = compare_relocated(base, head, &[("run", "src/a.rs", "src/b.rs")]);
+
+    assert_eq!(verdict.new, vec![
+        NewFinding {
+            finding: finding("CX-001", "src/b.rs", "run", 4),
+            shared: Some(Shared { new: 1, of: 2 }),
+        },
+        NewFinding {
+            finding: finding("CX-001", "src/b.rs", "run", 8),
+            shared: Some(Shared { new: 1, of: 2 }),
+        },
+    ]);
+}
+
+#[test]
+fn a_relocation_carries_no_finding_of_another_rule_or_symbol() {
     let base = vec![
         finding("CX-001", "src/a.rs", "run", 10),
         finding("CX-004", "src/a.rs", "parse", 30),
@@ -219,7 +317,10 @@ fn another_rule_or_symbol_is_not_a_move() {
         finding("CX-002", "src/b.rs", "run", 4),
     ];
 
-    let verdict = compare(base, head);
+    let verdict = compare_relocated(base, head, &[
+        ("run", "src/a.rs", "src/b.rs"),
+        ("parse", "src/a.rs", "src/b.rs"),
+    ]);
 
     assert_eq!(verdict.new, vec![
         NewFinding {
@@ -234,16 +335,51 @@ fn another_rule_or_symbol_is_not_a_move() {
 }
 
 #[test]
-fn a_file_level_finding_is_never_a_move() {
+fn a_file_level_finding_is_never_carried() {
     let base = vec![finding("SRP-002", "src/a.rs", "", 1)];
     let head = vec![finding("SRP-002", "src/b.rs", "", 1)];
 
-    let verdict = compare(base, head);
+    assert_eq!(candidates(base.clone(), head.clone()), BTreeSet::new());
+
+    let verdict = compare_relocated(base, head, &[("", "src/a.rs", "src/b.rs")]);
 
     assert_eq!(verdict.new, vec![NewFinding {
         finding: finding("SRP-002", "src/b.rs", "", 1),
         shared: None,
     }]);
+}
+
+#[test]
+fn candidates_pair_a_file_that_lost_a_finding_with_one_that_gained_it() {
+    let base = vec![
+        finding("CX-001", "src/a.rs", "run", 10),
+        finding("CX-001", "src/c.rs", "run", 10),
+        finding("CX-004", "src/a.rs", "parse", 30),
+        finding("CX-004", "src/d.rs", "keep", 30),
+    ];
+    let head = vec![
+        finding("CX-001", "src/b.rs", "run", 4),
+        // Another rule than the one `parse` lost, and a finding nothing lost.
+        finding("CX-002", "src/b.rs", "parse", 9),
+        finding("CX-004", "src/d.rs", "keep", 30),
+        finding("CX-004", "src/e.rs", "fresh", 3),
+    ];
+
+    assert_eq!(
+        candidates(base, head),
+        BTreeSet::from([
+            Relocation::new("run", "src/a.rs", "src/b.rs"),
+            Relocation::new("run", "src/c.rs", "src/b.rs"),
+        ])
+    );
+}
+
+#[test]
+fn reads_the_base_path_of_a_renamed_file() {
+    let renames = Renames::from_name_status("R100\0src/old.rs\0src/new.rs\0").unwrap();
+
+    assert_eq!(renames.old_path("src/new.rs"), "src/old.rs");
+    assert_eq!(renames.old_path("src/a.rs"), "src/a.rs");
 }
 
 #[test]

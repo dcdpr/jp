@@ -4,9 +4,8 @@
 //! tree and a base revision, keys each finding by `(rule, file, symbol)`, and
 //! reports findings introduced since the base revision along with any findings
 //! for enforced rules.
-//! Symbol-scoped findings are also matched across files by `(rule, symbol)`, so
-//! moving a function to another file does not report its existing findings as
-//! new.
+//! An item that moved to another file keeps its findings' baseline, once the
+//! source of both trees confirms the move.
 //!
 //! [`Workspace`] is the entry point.
 //! The core modules are pure: [`sarif`] parses `rustqual` SARIF output,
@@ -29,7 +28,7 @@ pub mod run;
 pub mod sarif;
 pub mod symbol;
 
-pub use diff::{NewFinding, Renames, Shared, Verdict};
+pub use diff::{NewFinding, Relocation, Renames, Shared, Verdict};
 pub use policy::Policy;
 pub use render::{Format, Guidance};
 pub use run::{Error, Workspace};
