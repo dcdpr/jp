@@ -13,8 +13,8 @@
 
 Before every turn, inquiry, and title generation, JP queries the provider for
 model metadata via `Provider::model_details`.
-Previously, a failed lookup aborted the entire request, even though the metadata
-it returns (context window, output token limit, reasoning support) is optional.
+A failed lookup aborted the entire request, even though the metadata it returns
+(context window, output token limit, reasoning support) is optional.
 
 This broke:
 
@@ -50,15 +50,15 @@ models.
   The Claude Code subscription route omits `thinking` so Claude Code chooses the
   mode.
 - OpenAI: skips the network lookup entirely.
-  `GET /v1/models/{id}` returns only the model ID, so `CAPABILITIES` was already
-  the sole source of metadata.
+  `GET /v1/models/{id}` returns only the model ID, so `CAPABILITIES` is the sole
+  source of metadata.
 
 Pre-request checks outside the metadata lookup still fail fast: credential
 resolution, OpenAI's check that a ChatGPT subscription supports the model, and
 Claude Code runtime and login checks on the ACP route.
 
-Lookups no longer fail the turn when a provider does not serve the requested
-model, so the chat request reaches the provider and surfaces its refusal.
+Lookups do not fail the turn when a provider does not serve the requested model,
+so the chat request reaches the provider and surfaces its refusal.
 PR #1298 classifies that refusal as an unknown-model error, lists the served
 models, and offers the interactive model picker.
 
