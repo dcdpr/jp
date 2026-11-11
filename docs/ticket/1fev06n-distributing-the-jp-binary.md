@@ -10,7 +10,7 @@ Tracking ticket for [RFD 123].
 
 ## Implementation plan
 
-- [ ] **Write the build script**: Turns the build spike into
+- [x] **Write the build script**: Turns the build spike into
       `.config/release/build.sh`: the five targets, the release toolchain from
       `[workspace.metadata.release]`, the `release` and `quick` profiles, the
       archives, `checksums.txt`, and `manifest.json`.
