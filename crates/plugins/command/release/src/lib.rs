@@ -220,6 +220,7 @@ enum Command {
     /// user-workspace`, replacing an earlier build of that version.
     /// Publishers take only a build made with the release profile from the
     /// commit the release's tag names.
+    #[command(after_long_help = build::CONTRACT)]
     Build {
         /// The release, such as `0.3.0`.
         #[arg(value_parser = parse_version)]

@@ -47,6 +47,48 @@ const CHECKSUMS: &str = "checksums.txt";
 /// The version of [`Manifest`] this plugin reads.
 const FORMAT: u64 = 1;
 
+/// What a `build` command is given and has to leave behind, shown after the
+/// options of `jp release build --help`.
+// A string rather than part of the command's doc comment: clap joins each
+// paragraph of a doc comment into one line, which a list or an example can't
+// survive.
+pub(crate) const CONTRACT: &str = r#"The build command:
+  `plugins.command.release.options.build` runs from the workspace root, not
+  from {source}, so an old release builds with today's scripts. It is split
+  into words the way a shell splits a command, but no shell runs it: for pipes
+  or variables, run a script. These are filled in first:
+
+    {version}  The release's version, such as 0.3.0
+    {source}   The workspace root, in a checkout of the commit being built
+    {out}      An empty directory for what the build makes
+    {profile}  `quick` with --quick, and `release` otherwise
+
+  It has to name {source} and {out}.
+
+What it leaves in {out}:
+  - The files the release ships, such as archives or an installer, at most
+    one for each target.
+  - checksums.txt: each of those files' SHA-256 and no other's, in the format
+    `sha256sum` and `shasum -a 256` write.
+  - manifest.json: the version, the commit {source} is at, the profile, and
+    each file with a target of the build's choosing, such as a Rust target:
+
+      {
+        "format": 1,
+        "version": "0.3.0",
+        "commit": "8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
+        "profile": "release",
+        "artifacts": [
+          {
+            "file": "app-aarch64-apple-darwin.tar.xz",
+            "target": "aarch64-apple-darwin"
+          }
+        ]
+      }
+
+  Nothing else may be left there. A build that fails, or whose {out} breaks
+  any of this, isn't kept, and every problem with it is named."#;
+
 /// How a release is built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Profile {

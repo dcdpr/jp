@@ -836,6 +836,21 @@ fn building(root: &Utf8Path, args: &[&str], storage: &Utf8Path, options: Value) 
     message
 }
 
+/// `--help` says what a `build` command is given and has to leave, for whoever
+/// writes one; `-h` keeps to the summary.
+#[test]
+fn the_build_help_says_what_a_build_command_does() {
+    let root = workspace();
+
+    let long = command(root.path(), &["build", "--help"], &[]);
+    let short = command(root.path(), &["build", "-h"], &[]);
+
+    assert_eq!(exit(&long).code, 0);
+    assert!(printed(&long).contains(build::CONTRACT));
+    assert_eq!(exit(&short).code, 0);
+    assert!(!printed(&short).contains("The build command:"));
+}
+
 #[test]
 fn building_needs_user_local_storage() {
     let root = workspace();
