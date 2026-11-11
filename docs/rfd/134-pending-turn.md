@@ -30,8 +30,8 @@ up at the tail of the previous turn:
 Config resolution is unaffected: deltas apply in stream order, and as Global
 entries they survive pruning.
 But projection numbers them with the previous turn (`assign_turn_indices`), and
-`jp conversation print` shows them after that turn's answer, so every view that
-groups by turn attributes the change to a turn it did not affect.
+so does any tool that reads `events.json` and groups by turn, attributing the
+change to a turn it did not affect.
 
 For an entry the model reads, the previous turn is the wrong owner in every
 operation that works on turns.
@@ -103,12 +103,24 @@ Without a marker, `start_turn` appends a `TurnStart` as it does today.
   does not see them.
 - `retain_last_turns` counts `TurnStart`s and keeps everything after its cut, so
   `--fork N` keeps the last N turns and the pending entries without a change.
+- `retain_turns`, which `jp conversation fork --first N` and other turn ranges
+  use (`fork.rs:184-185`), treats the pending section as part of the last turn.
+  When the selection keeps the last turn, the pending entries stay with it.
+  When it does not, the turn-scoped pending entries go, and the marker stays if
+  Global entries follow it: those config deltas apply to the fork's next turn,
+  which is still pending.
+  Without this rule, the marker would inherit the keep decision of the turn
+  before it and be dropped, leaving its config deltas at the tail of a turn they
+  did not affect.
 - `sanitize` inserts a `TurnStart` at the start of a stream that has no
   `ChatRequest` (`stream.rs:1168-1191`).
   It treats the marker as a turn boundary instead, so a stream holding only
   pending entries gets no empty turn ahead of them.
-- `jp conversation print` shows pending entries after the last turn, under a
-  "pending" heading instead of a turn number.
+- `jp conversation print` shows the pending section after the last turn, under a
+  "pending" heading instead of a turn number, when its turn selection includes
+  the last turn, and always for a conversation with no turns.
+  It renders conversation events, not config deltas, so the section is empty
+  until a turn-scoped pending entry type exists.
   Plugin `read_events` returns the marker like any other event.
 
 ### Replay
@@ -131,8 +143,33 @@ With config deltas as the only between-turn entries today, replay behaves as it
 does now.
 
 `trim_trailing_empty_turn` changes with it: a turn left without a `ChatRequest`
-(after `--no-edit` pops a request) becomes a marker again, and a marker with
-nothing after it is removed.
+becomes a marker again, and a marker with nothing after it is removed.
+
+### Retrying an unanswered request
+
+`jp query --no-edit` re-sends the last request when it is the last event of its
+turn, and sends "continue" otherwise (`query.rs:929-937`).
+A failed query followed by `jp config set -i` leaves `[TS ReqB] [P Δ]`, and the
+marker is a turn-scoped entry, so two rules change:
+
+- The retry looks at the last *started* turn: `last_turn_event` stops at the
+  marker and returns the last turn-scoped entry before it.
+  `ReqB` is found and re-sent, as it is today.
+- The deferred removal targets the selected request by event ID, rather than
+  popping whatever is last.
+  `jp query --no-edit --cfg …` records its delta, and opens the marker, after
+  selecting the request and before removing it; a pop would find the marker,
+  remove nothing, and send `ReqB` a second time.
+
+The turn the removal leaves without a request becomes a marker again, and the
+marker after it merges into it, keeping the earlier position and every pending
+entry in stream order:
+
+```text
+before:  [TS ReqA RespA] [TS ReqB] [P Δ]
+remove:  [TS ReqA RespA] [P Δ]
+then:    [TS ReqA RespA] [TS Δ ReqB' RespB']
+```
 
 ### Repair
 
@@ -161,8 +198,8 @@ verbatim, and appends its next turn after it.
   today, and nothing catches it.
 - Between a write by an older `jp` and the next load by a newer one, the stream
   holds an invalid shape that only the newer binary repairs.
-- Config deltas move to a different turn in `print`, in projection's turn
-  numbering, and in any tool that reads `events.json` and groups by turn.
+- Config deltas move to a different turn in projection's turn numbering, and in
+  any tool that reads `events.json` and groups by turn.
 
 ## Alternatives
 
@@ -220,14 +257,17 @@ A new command that records between turns has to know to open the marker.
 
 1. **Marker and stream API.** `EventKind::PendingTurn`, its `TYPE_TAGS` entry
    and `encode_event` arm, `open_pending`, `pending`, the `start_turn` change,
-   turn iteration and counting, and projection numbering.
+   turn iteration and counting, projection numbering, and `retain_turns`.
    Unit tests over stream shapes.
    Merges alone: nothing writes a marker yet.
-2. **Trim and repair.** `trim_last_turn` from the first request,
-   `trim_trailing_empty_turn` back to pending, and load-time repair.
+2. **Trim, retry, and repair.** `trim_last_turn` from the first request,
+   `trim_trailing_empty_turn` back to pending, `last_turn_event` stopping at the
+   marker, removal of the retried request by event ID with the marker merge, and
+   load-time repair.
    Depends on 1.
 3. **Writers and display.** `jp query`, `jp config set -i`, and plugin `query`
-   delegation open the marker; `print` shows the pending section.
+   delegation open the marker; `print` shows the pending section under its turn
+   selection.
    Depends on 2.
 4. **Documentation.** A glossary entry for Pending Turn (not a turn: no request,
    not counted), and the Turn entry and `TurnStart` doc gain that a turn's
