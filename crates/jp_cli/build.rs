@@ -1,6 +1,6 @@
-use std::process::Command;
+use std::{env, process::Command};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 fn main() {
     let git_hash = Command::new("git")
@@ -11,7 +11,17 @@ fn main() {
         .map(|s| s.trim().to_owned())
         .unwrap_or_default();
 
-    let build_date = Utc::now().format("%Y-%m-%d").to_string();
+    // A release build sets `SOURCE_DATE_EPOCH` to the time of the commit it
+    // builds, so the version names the day the release was cut, and two builds
+    // of one commit agree. No `rerun-if-env-changed`: any `rerun-if` directive
+    // stops Cargo from running this script again when the package's files
+    // change, which keeps the hash above current.
+    let built = env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|seconds| seconds.trim().parse().ok())
+        .and_then(|seconds| DateTime::from_timestamp(seconds, 0))
+        .unwrap_or_else(Utc::now);
+    let build_date = built.format("%Y-%m-%d").to_string();
     let pkg_version = env!("CARGO_PKG_VERSION");
 
     println!("cargo:rustc-env=LONG_VERSION=v{pkg_version}-{git_hash} ({build_date})");
