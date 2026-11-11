@@ -7,7 +7,7 @@
 //!
 //! - [`transport`] defines the chat transport interface; [`signal`] implements
 //!   it over `signal-cli` in JSON-RPC mode.
-//! - [`bridge`] routes messages from allowed senders to daily conversations and
+//! - [`bridge`] routes messages from allowed senders to conversations and
 //!   schedules turns.
 //! - [`checkout`] locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable

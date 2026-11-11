@@ -197,8 +197,8 @@ pub(crate) enum Line {
 
 /// Parse one line of `signal-cli` stdout.
 ///
-/// `own_ids` are the ids of the bridge's own account, which mark a message as
-/// addressed to it.
+/// `own_ids` lists the bridge account's phone number and UUID so mentions of or
+/// replies to the bridge set `Inbound::addressed = true`.
 pub(crate) fn parse(line: &str, own_ids: &[String]) -> Line {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Line::Ignored;
@@ -289,8 +289,8 @@ fn message(envelope: &Value, own_ids: &[String]) -> Option<Inbound> {
     })
 }
 
-/// Whether the number or the uuid field of `value` names the bridge's own
-/// account.
+/// Return whether the `number` or `uuid` field of `value` matches any ID in
+/// `own_ids`.
 fn is_own(value: &Value, number: &str, uuid: &str, own_ids: &[String]) -> bool {
     [number, uuid]
         .into_iter()
@@ -298,14 +298,16 @@ fn is_own(value: &Value, number: &str, uuid: &str, own_ids: &[String]) -> bool {
         .any(|id| own_ids.iter().any(|own| own == id))
 }
 
-/// `text` with each mention's placeholder replaced, and whether one of them
-/// mentions the bridge's own account.
+/// Replace Signal mention placeholders in `text` and report whether any mention
+/// targets `own_ids`.
 ///
-/// Signal writes a mention as one placeholder character, and names who it
-/// mentions beside the text, by `start` and `length` in UTF-16 code units.
-/// A mention of the bridge's account is dropped, since the bridge says whom a
-/// message is to on its own; anyone else's becomes `@` and their number, or
-/// `@someone` when only their account id is known.
+/// Signal encodes each mention in the message body as a `U+FFFC` placeholder
+/// accompanied by a `{start, length, number, uuid}` entry measured in UTF-16
+/// code units.
+/// Mentions of the bridge's own account are stripped (the caller marks the
+/// message with `(to you)` via `Inbound::addressed`); mentions of other
+/// accounts are rendered as `@<number>`, or `@someone` when only a UUID is
+/// present.
 fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (String, bool) {
     let mut units: Vec<u16> = text.encode_utf16().collect();
     let mut spans: Vec<(usize, usize, &Value)> = mentions
@@ -316,7 +318,7 @@ fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (Stri
             Some((start, length, mention))
         })
         .collect();
-    // Replaced from the end, so an earlier span's offsets still hold.
+    // Splice in reverse offset order so earlier UTF-16 indices remain valid.
     spans.sort_by_key(|(start, ..)| std::cmp::Reverse(*start));
 
     let mut mentioned = false;

@@ -116,8 +116,8 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     /// Chats that have already been notified about the current pause.
     told: Vec<Chat>,
 
-    /// Unconfigured senders that have written since the bridge started, by
-    /// their first id, so each is printed once.
+    /// Primary sender IDs of unconfigured senders already printed during this
+    /// run, so each unknown sender is reported at most once.
     strangers: HashSet<String>,
 
     events_tx: mpsc::UnboundedSender<Event>,
@@ -151,7 +151,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Override the clock used for daily conversation rollover.
+    /// Override the clock used for conversation rollover.
     #[cfg(test)]
     pub(crate) fn with_today(mut self, today: impl Fn() -> NaiveDate + Send + 'static) -> Self {
         self.today = Box::new(today);
@@ -503,9 +503,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
         let mut cfg: Vec<String> = self.options.persona.iter().cloned().collect();
         cfg.extend(self.options.cfg.iter().cloned());
-        // One dotted key per setting, so each changes exactly that field: the
-        // `run` policy the workspace sets for each plugin has to survive, or
-        // the turn runs without the plugins' tools.
+        // Pass each plugin option as a dotted key=value assignment so merging
+        // preserves the plugin's `run` policy from the workspace config.
         cfg.extend([
             format!("user.name={name}"),
             "conversation.start_local=true".to_owned(),
@@ -536,7 +535,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// The day the current conversation of every chat started on.
+    /// Start date of the current rollover period.
     fn period(&self) -> NaiveDate {
         self.options.rollover.start((self.today)())
     }
@@ -573,10 +572,10 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 }
 
-/// Whether `answer` is the turn choosing to send nothing.
+/// Return whether `answer` matches the [`SILENT`] (`NO_REPLY`) sentinel.
 ///
-/// A trailing period, or quotes or backticks around it, are tolerated: a model
-/// told to answer with the bare word doesn't always.
+/// Tolerates surrounding whitespace, quotes, backticks, and a trailing period
+/// in case the model wraps the token.
 fn is_silent(answer: &str) -> bool {
     answer
         .trim()
@@ -585,8 +584,8 @@ fn is_silent(answer: &str) -> bool {
         == SILENT
 }
 
-/// What the bridge prints the first time someone it doesn't answer writes to
-/// it: who they are, and the configuration that would answer them.
+/// Format the notice and TOML allowlist snippet printed the first time an
+/// unconfigured sender writes to the bridge.
 fn stranger(message: &Inbound, id: &str) -> String {
     let name = message
         .name
@@ -610,8 +609,8 @@ fn stranger(message: &Inbound, id: &str) -> String {
     )
 }
 
-/// A configuration key for a person named `name`: lowercase ASCII letters and
-/// digits, with anything else between them as one `-`.
+/// Derive a TOML table key from `name` by lowercasing ASCII alphanumerics and
+/// collapsing runs of other characters to `-`.
 fn person_key(name: &str) -> String {
     let mut key = String::new();
     for c in name.chars() {

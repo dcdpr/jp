@@ -6,14 +6,19 @@
 - **Label**: domain=plugins
 - **Label**: type=enhancement
 
-A ticket filed for pickup "in about two weeks" records that date only in its
-description, as the `planner` persona writes it (T-1e92tft), and its rank drifts
-later as tickets are inserted above it.
-Nothing can answer "what is due this week?" or notice a ticket slipping past its
-date.
+When the `planner` persona schedules a ticket for pickup around a target date
+(T-1e92tft), it records that date only in the ticket description and ranks the
+ticket in Todo.
+As other tickets are inserted above it, its position drifts, and nothing in `jp
+ticket` can query which tickets are due soon or flag tickets that have slipped
+past their requested date.
 
-One option is an open-valued label key in
-`plugins.command.ticket.options.labels`, which needs no code and is filterable;
-another is a metadata field the board can show.
-Either turns a requested date into something the board shows as a commitment,
-which is the decision to make before building it.
+Two options to evaluate:
+
+- An open-valued label key in `plugins.command.ticket.options.labels`, which
+  requires no code changes and supports filtering.
+- A dedicated metadata field rendered on the board.
+
+Either approach turns a requested pickup date into a visible board field, so we
+should decide whether we want the board to surface date commitments before
+implementing one.

@@ -7,20 +7,19 @@
 - **Label**: type=task
 - **Parent**: T-1e92tft
 
-Moves what the bot wrote on the server into a fresh worktree on a maintainer's
-machine, and leaves the server clean, so it can pull again.
+Copy uncommitted changes from the chat bridge's server checkout into a local
+review worktree on a maintainer's machine, then reset the server checkout so it
+can resume pulling.
 
-One `ssh` call does the server half under the bridge's lock: print `HEAD`, then
-`git add -A && git diff --cached --binary -M HEAD`, then `git reset --hard` and
-`git clean -fd`.
-Locally, the worktree starts at that `HEAD` and the diff is applied there with
-`git apply --index`, not on `origin/main`: work taken earlier and still in
-review isn't in the server's base, so applying the diff on `main` would undo it
-in `.board.json`.
-Rebasing onto `origin/main` afterwards puts any real overlap through a three-way
-merge.
-A diff also carries renames (a retitled ticket) and deletions, which copying
-changed files misses.
+Under `jp-serve-chat.lock` over SSH, capture the server's `HEAD` commit and `git
+add -A && git diff --cached --binary -M HEAD`.
+Locally, create a worktree at that base `HEAD` commit and apply the patch with
+`git apply --index` rather than applying directly onto `origin/main`: changes
+from an earlier take that are still in review may not be in the server's base
+commit yet, so rebasing the worktree onto `origin/main` afterwards resolves any
+`.board.json` overlap via a three-way merge.
+Using a binary git diff also preserves file renames (such as retitled tickets)
+and deletions.
 
 ```sh
 ssh "$host" "cd $dir && flock \"\$(git rev-parse --git-path jp-serve-chat.lock)\" sh -c '

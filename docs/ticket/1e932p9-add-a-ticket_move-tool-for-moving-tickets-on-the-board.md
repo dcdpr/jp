@@ -16,29 +16,29 @@ Editing `docs/ticket/.board.json` by hand skips the checks the board code makes.
 `ticket_move` moves a ticket to another column, reorders it within a column, or
 both:
 
-- `id`: the ticket.
-- `status`: `todo`, `in progress`, or `done`; omitted, it stays in its column.
-- One of `before` or `after` (a ticket id in the target column), or `position`
+- `id`: target ticket ID.
+- `status`: `todo`, `in progress`, or `done`.
+  When omitted, the ticket stays in its current column.
+- One of `before` or `after` (a ticket ID in the target column), or `position`
   (`top` or `bottom`).
 - At least one of `status` and a placement is required.
 
-Built on what `jp ticket status` and `jp ticket rank` already use:
-`board::move_to` for a column change with an optional anchor, `board::rank`
-within a column.
-A column change goes through `store::set_status` and `relate`, so it keeps the
-parent rules `ticket_edit`'s `status` keeps.
+`ticket_move` reuses the primitives behind `jp ticket status` and `jp ticket
+rank`: `board::move_to` for a column change with an optional anchor, and
+`board::rank` for reordering within a column.
+Column changes go through `store::set_status` and `relate` to enforce the same
+parent-child status rules as `ticket_edit`.
 
-- `top` is before the first ticket of the column as it is shown, `bottom` after
-  the last.
-  `bottom` needs that last ticket as an explicit anchor: `move_to` without one
-  only changes the status.
+- `top` places the ticket before the first displayed ticket in the column;
+  `bottom` places it after the last.
+  `bottom` resolves that last ticket as an explicit `after` anchor because
+  `move_to` without an anchor only updates the status.
 
-- Unranked tickets sort below ranked ones, so moving a ticket to the bottom
-  writes every ticket above it into `.board.json`.
-  Expected, not a bug.
+- Because unranked tickets sort below ranked ones, moving a ticket to `bottom`
+  records every preceding ticket in `.board.json`.
 
-- `status` stays on `ticket_edit` too: it changes status and parent in one
-  checked write, which this tool doesn't.
+- `ticket_edit` retains its `status` parameter so callers can still update
+  `status` and `parent` together in a single validated call.
 
 - [x] `move` handled in `crates/plugins/command/ticket/src/tool.rs`, with its
       capabilities (including creating `.board.json` on a board that has none)

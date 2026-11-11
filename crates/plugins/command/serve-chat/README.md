@@ -44,9 +44,11 @@ A turn that answers with exactly `NO_REPLY` sends nothing back, which is how the
 assistant stays out of a conversation between people; the typing indicator still
 shows while the turn runs.
 
-A mention can name the bridge's account by its account id alone.
-Set `signal.account_id` so it's recognized: it's the `sourceUuid` on messages
-from the bridge's own number in `signal-cli -o json receive`.
+Signal mentions may reference the bridge's account by UUID (ACI) instead of
+phone number.
+Set `signal.account_id` to the bridge account's UUID so those mentions are
+recognized (look for `sourceUuid` on messages from the bridge's number in
+`signal-cli -o json receive`).
 
 ## The checkout
 
@@ -124,9 +126,9 @@ take.
 
 ## Adding someone
 
-The first time someone who isn't configured writes, in a direct chat or a group
-the bridge's account is in, the bridge prints who they are and the configuration
-that would answer them:
+The first time an unconfigured sender writes in a direct chat or group, the
+bridge prints their identity and a
+`[plugins.command.serve-chat.options.people.<key>]` snippet to allowlist them:
 
 ```text
 Ada Client (33333333-3333-4333-8333-333333333333) wrote in group:Z3JvdXA=, and isn't configured, …
@@ -136,21 +138,23 @@ name = "Ada Client"
 signal = "33333333-3333-4333-8333-333333333333"
 ```
 
-Copy it into the configuration, edit the name if needed, and restart the bridge.
-The `signal` value is the account id rather than the phone number, since a
-sender can hide their number.
-Each sender is printed once per run.
+Copy the snippet into `bridge.toml`, adjust `name` if needed, and restart the
+bridge.
+The `signal` field uses the sender's account UUID when available so the
+allowlist still matches if the sender hides their phone number.
+Each unknown sender is printed at most once per run.
 
 ## Options
 
-`rollover` is `daily`, or the day of the week a new conversation starts on, such
-as `sunday`; a weekly conversation keeps the week's context.
-`conversation_ttl` has to be at least as long as one conversation lasts.
+`rollover` controls when each chat starts a new conversation: `daily` (default)
+or a weekday name such as `sunday` for weekly rollover.
+`conversation_ttl` must be at least as long as the rollover period (`24h` for
+daily, `7d` for weekly).
 
-`cfg` is a list of extra configurations every turn runs under, after the
-persona, as `--cfg` takes them.
-It changes how turns run without editing tracked files in the bridge's checkout,
-which would pause it:
+`cfg` is a list of extra `--cfg` overrides applied after `persona` on every
+turn.
+Use it to tune turn settings in `bridge.toml` without modifying tracked files in
+the bridge's checkout (which would pause the bridge):
 
 ```toml
 [plugins.command.serve-chat.options]
@@ -158,7 +162,8 @@ persona = "personas/planner"
 cfg = ["assistant.model.id=haiku", "assistant.model.parameters.reasoning=off"]
 ```
 
-It applies from the next message on, today's conversation included.
+Overrides in `cfg` are passed on every query, so they take effect on the next
+turn even within an existing conversation.
 
 | Option                   | Default                                |
 | ------------------------ | -------------------------------------- |

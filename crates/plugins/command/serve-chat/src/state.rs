@@ -1,9 +1,9 @@
 //! Persistent mapping from each chat to its active conversation for the current
-//! period: a day, or a week with a weekly `rollover`.
+//! rollover period (daily or weekly).
 //!
 //! Each chat uses at most one conversation per period so persona changes take
-//! effect in the next one and conversation context stays bounded.
-//! An entry records the day its period started.
+//! effect at the next rollover and conversation context stays bounded.
+//! Each entry records the start date of its period.
 //! The mapping is stored in `state.json` in the user data directory, outside
 //! the repository checkout.
 

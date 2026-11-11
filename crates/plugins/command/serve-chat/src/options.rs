@@ -87,15 +87,17 @@ pub(crate) struct SignalOptions {
     /// Signal account identifier passed to `signal-cli -a`.
     pub account: String,
 
-    /// The account's id (ACI), which a mention or a reply can name in place of
-    /// its number.
+    /// Account UUID (ACI) for the bridge's own Signal account, used to detect
+    /// mentions and replies that reference the account by UUID rather than
+    /// phone number.
     pub account_id: Option<String>,
 
     pub command: String,
 }
 
 impl SignalOptions {
-    /// Every id the bridge's own account goes by.
+    /// Return all configured identifiers (`account` and `account_id`) for the
+    /// bridge's Signal account.
     pub(crate) fn own_ids(&self) -> Vec<String> {
         let mut ids = vec![self.account.clone()];
         ids.extend(self.account_id.clone());
@@ -106,15 +108,12 @@ impl SignalOptions {
 /// How often a chat starts a new conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Rollover {
-    /// Every day.
     Daily,
-
-    /// Every week, on this day.
     Weekly(Weekday),
 }
 
 impl Rollover {
-    /// The day the conversation that `today` belongs to starts.
+    /// Return the start date of the rollover period containing `today`.
     pub(crate) fn start(self, today: NaiveDate) -> NaiveDate {
         match self {
             Self::Daily => today,
@@ -126,7 +125,7 @@ impl Rollover {
         }
     }
 
-    /// How long one conversation lasts at most.
+    /// Duration of one rollover period.
     fn length(self) -> Duration {
         match self {
             Self::Daily => Duration::from_hours(24),
@@ -260,8 +259,8 @@ impl Options {
     }
 }
 
-/// Read `rollover`: `daily`, or the day of the week a new conversation starts
-/// on, such as `sunday`.
+/// Parse `rollover` from `"daily"` (default) or a weekday name such as
+/// `"sunday"`.
 fn rollover(raw: Option<&str>) -> Result<Rollover, String> {
     let Some(raw) = raw.map(str::trim) else {
         return Ok(Rollover::Daily);

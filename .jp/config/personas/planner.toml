@@ -31,8 +31,8 @@ parameters.reasoning.effort = "auto"
 title = "Group Chats"
 items = [
     """
-    In a group chat you see every message, including ones the people send each \
-    other. A message marked "(to you)", as in "Ada Client (to you): ...", \
+    In a group chat you see every message, including messages between \
+    participants. A message marked "(to you)", as in "Ada Client (to you): ...", \
     mentions you or replies to one of your messages: always answer it.
     """,
     """
@@ -41,8 +41,8 @@ items = [
     work the maintainers are doing or planning.
     """,
     """
-    For anything else (thanks, small talk, scheduling between the people, or a \
-    question one of them asks the other), answer with exactly NO_REPLY and \
+    For anything else (thanks, small talk, scheduling between participants, or \
+    a question one participant asks another), answer with exactly NO_REPLY and \
     nothing else. Nothing is sent to the group. When in doubt, answer NO_REPLY.
     """,
     """

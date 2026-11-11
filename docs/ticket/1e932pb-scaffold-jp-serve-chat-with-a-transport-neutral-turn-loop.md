@@ -7,11 +7,12 @@
 - **Label**: type=feature
 - **Parent**: T-1e92tft
 
-A command plugin at `crates/plugins/command/serve-chat`, binary `jp-serve-chat`,
-command `jp serve chat`, built like `jp-serve-web`: it runs no model and no
-tool, and every turn it starts the host runs.
-This ticket is the plugin without a real transport, driven through a fake one in
-tests.
+Create the `jp-serve-chat` command plugin (`jp serve chat`) under
+`crates/plugins/command/serve-chat`.
+Like `jp-serve-web`, the plugin does not call models or execute tools itself;
+the host runs every turn.
+This ticket covers the transport-neutral turn loop and fake-transport test
+suite.
 
 ```toml
 [plugins.command.serve-chat.options]
@@ -28,33 +29,34 @@ name = "<name>"
 signal = "<account id>"
 ```
 
-- **Transport.** A trait over inbound messages (chat, sender, text, whether it
-  carried attachments), sending text to a chat, and a typing indicator.
-  Replies always go to the chat the message came from; the model never picks a
+- **Transport.** Define a transport interface for inbound messages (chat, sender
+  IDs, text, attachment count), outbound replies, and typing indicators.
+  Replies always go back to the originating chat; the model cannot choose a
   recipient.
 
-- **People.** A message from a sender who isn't configured is dropped, and
-  logged without its text.
-  A person's name reaches the turn as `user.name`, and as
-  `plugins.command.ticket.options.assistant` and
-  `plugins.command.wiki.options.assistant` ("<name> via jp"), through the
-  query's `cfg`, beside the persona.
+- **People.** Drop messages from unconfigured senders and log the sender ID
+  without the message body.
+  Pass the sender's display name on each query via `--cfg` as `user.name` and as
+  `<Name> via jp` for the `ticket`, `rfd`, and `wiki` plugin `assistant` options
+  alongside the configured `persona`.
 
-- **Conversations.** One per chat per day, created with `new`, a title naming
-  the chat and the date, and an `expires_in`.
-  The mapping survives a restart.
+- **Conversations.** Route each chat to one conversation per rollover period,
+  created with `new = true`, a title naming the chat and period date, and
+  `expires_in`.
+  Persist the chat-to-conversation mapping across restarts.
 
-- **One turn at a time.** A message arriving during a turn goes out as
-  `interrupt` with `action = "reply"` and an `id`; on an `error` answer (the
-  turn had ended) it is sent as the next `query`.
-  Messages waiting between turns go out together as one `query`.
+- **One turn at a time.** Forward messages arriving during an active turn on the
+  same chat as `interrupt` requests (`action = "reply"`).
+  If the host rejects the interrupt because the turn already finished, queue the
+  message for the next `query`.
+  Batch messages queued between turns into a single `query`.
 
-- **Answers.** After `query_complete`, read the turn's events with `read_events`
-  and send the assistant's text.
-  A failed turn sends a short message to the chat; the detail goes to the log.
+- **Answers.** When `query_complete` arrives, fetch the conversation events via
+  `read_events` and send the assistant's final response to the chat.
+  On turn failure, send a brief error notice to the chat and log the full error.
 
-- An attachment gets a reply that the bot reads text only, rather than being
-  dropped silently.
+- Reply to messages with attachments explaining that the bridge only reads text,
+  rather than dropping attachments silently.
 
 - [x] Tests through a fake transport and a scripted host: allow-list, daily
       rollover, interrupt delivered, interrupt refused and resent as a query,

@@ -1207,8 +1207,8 @@ fn an_id_object_replaces_the_id_in_every_json_form() {
     );
 }
 
-/// Setting one plugin option with a dotted key leaves that plugin's other
-/// settings, and every other plugin, as earlier layers configured them.
+/// Assigning a nested plugin option via a dotted key preserves the plugin's
+/// other fields and sibling plugins configured in earlier layers.
 #[test]
 fn a_dotted_plugin_option_keeps_the_run_policy() {
     let configured = || {

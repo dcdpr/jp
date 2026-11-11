@@ -50,8 +50,6 @@ fn unset_options_take_their_defaults() {
     );
 }
 
-/// A weekday name starts a new conversation every week on that day, and keeps
-/// conversations long enough to outlive their week.
 #[test]
 fn a_weekday_rolls_over_weekly() {
     let mut options = minimal();
@@ -78,8 +76,6 @@ fn an_unknown_rollover_is_refused() {
     );
 }
 
-/// A conversation removed while its chat still uses it would fail every turn
-/// after that.
 #[test]
 fn a_ttl_shorter_than_the_rollover_is_refused() {
     let mut options = minimal();
@@ -97,8 +93,6 @@ fn a_ttl_shorter_than_the_rollover_is_refused() {
     );
 }
 
-/// A weekly conversation belongs to the most recent rollover day, today
-/// included.
 #[test]
 fn a_weekly_conversation_starts_on_the_last_rollover_day() {
     let day = |day| NaiveDate::from_ymd_opt(2026, 11, day).unwrap();

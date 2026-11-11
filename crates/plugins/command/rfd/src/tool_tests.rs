@@ -443,13 +443,13 @@ fn draft_writes_a_draft() {
     let draft = fs::read_to_string(root.path().join("docs/rfd/drafts/D01-tool-limits.md")).unwrap();
     // Tool-created drafts use `options.assistant` rather than `user.name`.
     assert_eq!(
-    draft,
-    format!(
-        "# RFD D01: Tool Limits\n\n- **Status**: Draft\n- **Category**: Design\n- \
-         **Authors**: jp\n- **Date**: {}\n\n## Summary\n\nWhat.\n",
-        today()
-    )
-);
+        draft,
+        format!(
+            "# RFD D01: Tool Limits\n\n- **Status**: Draft\n- **Category**: Design\n- \
+             **Authors**: jp\n- **Date**: {}\n\n## Summary\n\nWhat.\n",
+            today()
+        )
+    );
 }
 
 #[test]

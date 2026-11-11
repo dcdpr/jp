@@ -20,7 +20,8 @@ struct HostLog {
     logs: Vec<String>,
     prints: Vec<String>,
 
-    /// What every turn answers, in place of `Answer from <conversation>.`.
+    /// Custom response text returned instead of `"Answer from
+    /// <conversation>."`.
     answer: Option<String>,
 }
 
@@ -425,8 +426,6 @@ async fn a_group_message_names_its_sender() {
     ]);
 }
 
-/// Someone not configured is printed once per run, with the configuration that
-/// would answer them, so it can be copied into the bridge's configuration.
 #[tokio::test]
 async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
     let mut f = fixture();
@@ -538,8 +537,8 @@ async fn the_admin_is_told_what_paused_the_bridge() {
                                        turn:\n- README.md"]);
 }
 
-/// Extra configuration lands between the persona, which it overrides, and the
-/// sender's identity, which it can't.
+/// `options.cfg` entries are applied after `persona` and before the sender
+/// attribution overrides.
 #[test]
 fn extra_cfg_follows_the_persona() {
     let mut f = fixture();
@@ -558,8 +557,6 @@ fn extra_cfg_follows_the_persona() {
     assert_eq!(cfg.len(), 8);
 }
 
-/// Every setting the bridge adds names one key, so it changes that field alone
-/// and leaves each plugin's `run` policy as the workspace sets it.
 #[test]
 fn the_bridge_sets_one_key_per_cfg_entry() {
     let f = fixture();
@@ -574,7 +571,6 @@ fn the_bridge_sets_one_key_per_cfg_entry() {
     }
 }
 
-/// In a group, a message that mentions the assistant or replies to it says so.
 #[tokio::test]
 async fn an_addressed_group_message_says_it_is_to_the_assistant() {
     let mut f = fixture();
@@ -596,7 +592,6 @@ async fn an_addressed_group_message_says_it_is_to_the_assistant() {
     );
 }
 
-/// A turn that decides a message wasn't for it sends nothing back.
 #[tokio::test]
 async fn a_silent_answer_sends_nothing() {
     let mut f = fixture();
@@ -629,8 +624,6 @@ fn only_the_bare_silent_word_is_silent() {
     }
 }
 
-/// With a weekly rollover, every day up to the next rollover day continues the
-/// week's conversation.
 #[tokio::test]
 async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
     let mut f = fixture();
