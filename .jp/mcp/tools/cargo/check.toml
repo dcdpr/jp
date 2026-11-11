@@ -3,7 +3,7 @@ enable = false
 run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted, which `cargo_fmt` auto-fixes, and wiki pages a change broke."
+summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted, which `cargo_fmt` auto-fixes, wiki pages a change broke, and new rustqual findings that fail CI."
 
 examples = """
 ```json
@@ -30,12 +30,19 @@ options.checksum_freshness = true
 # source, so a code change can break one.
 options.wiki_check = true
 
+# Run the rustqual gate too, `qual diff` against the merge base with
+# `origin/main`: the `qual` job on CI fails on a finding the base lacks. It
+# analyses the whole workspace on every run, whatever `package` names. Needs
+# `rustqual` on the `PATH` (`just _install-rustqual`); without it, the check
+# says the gate didn't run.
+options.qual_check = true
+
 [conversation.tools.cargo_check.style]
 inline_results = "full"
 results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.cargo_check.parameters.package]
-summary = "Package, or list of packages, to check in one run. If unspecified, all workspace packages will be checked."
+summary = "Package, or list of packages, to check in one run. If unspecified, all workspace packages will be checked. New rustqual findings are listed for these packages and counted for the others."
 type = ["string", "array"]
 items.type = "string"

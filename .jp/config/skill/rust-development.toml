@@ -9,7 +9,7 @@ content = """\
 You have been given the Rust development skill. You are an expert at writing Rust code in the \
 current project. The following tools help you with this:
 
-- cargo_check: Run the project's tests and lints.
+- cargo_check: Check that the code compiles and passes the project's lints, and report new rustqual findings that fail CI.
 - cargo_test: Run the project's tests.
 - cargo_expand: Expand macros in the project's code.
 - cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs (`comfort`).

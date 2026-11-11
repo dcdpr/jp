@@ -137,6 +137,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 &packages(t.opt("package")?),
                 checksum_freshness,
                 t.option_or("wiki_check", false),
+                t.option_or("qual_check", false),
             )
             .await
         }

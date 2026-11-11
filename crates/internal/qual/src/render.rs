@@ -1,12 +1,15 @@
 //! Formatting [`Verdict`] and [`Report`] output.
 //!
-//! Text, GitHub, Markdown, and AI formats include `rustqual`'s message for each
-//! finding and any matching rule [`Guidance`].
+//! Every format of a verdict includes `rustqual`'s message for each finding and
+//! any matching rule [`Guidance`].
+//! The JSON of a report is its list of findings alone.
 
 use std::{
     collections::BTreeMap,
     fmt::{self, Write as _},
 };
+
+use serde::Serialize;
 
 use crate::{Finding, Report, Shared, Verdict};
 
@@ -26,7 +29,8 @@ pub enum Format {
     /// Markdown grouped by rule, with the guidance after each group.
     Ai,
 
-    /// JSON serialization of the verdict or findings, without guidance.
+    /// JSON: a verdict with the title and guidance of each rule it reports, or
+    /// the findings of a report.
     Json,
 }
 
@@ -64,7 +68,7 @@ impl FromIterator<(String, String)> for Guidance {
 #[must_use]
 pub fn verdict(verdict: &Verdict, guidance: &Guidance, format: Format) -> String {
     if format == Format::Json {
-        return json(verdict);
+        return json(&VerdictJson::new(verdict, guidance));
     }
 
     if verdict.passed() {
@@ -148,7 +152,41 @@ impl Level {
     }
 }
 
-fn json(value: &impl serde::Serialize) -> String {
+/// A [`Verdict`] with a `rules` object next to its own fields, holding an entry
+/// for each rule the verdict reports a finding for.
+#[derive(Serialize)]
+struct VerdictJson<'a> {
+    #[serde(flatten)]
+    verdict: &'a Verdict,
+    rules: BTreeMap<&'a str, RuleJson<'a>>,
+}
+
+#[derive(Serialize)]
+struct RuleJson<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    guidance: Option<&'a str>,
+}
+
+impl<'a> VerdictJson<'a> {
+    fn new(verdict: &'a Verdict, guidance: &'a Guidance) -> Self {
+        let rules = verdict
+            .rules()
+            .into_iter()
+            .map(|rule| {
+                let title = verdict.titles.get(rule).map(String::as_str);
+                let guidance = guidance.get(rule);
+                (rule, RuleJson { title, guidance })
+            })
+            .collect();
+
+        Self { verdict, rules }
+    }
+}
+
+fn json(value: &impl Serialize) -> String {
     // Serializing derived `Serialize` types into a string cannot fail.
     let mut out = serde_json::to_string_pretty(value).unwrap_or_default();
     out.push('\n');

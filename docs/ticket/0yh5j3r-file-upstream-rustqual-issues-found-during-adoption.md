@@ -38,6 +38,18 @@ newer release has fixed.
    call only std methods and do arithmetic.
    Confirm with `--verbose` that a method name matched a project function before
    filing.
+7. **`CX-003` skips functions classified as trivial.** A function with no logic
+   and no calls into the project is `Trivial`, and `attach_metrics`
+   (`src/adapters/analyzers/iosp/classify.rs`) drops every complexity metric of
+   a trivial function, magic numbers included.
+   `pub fn probe() -> u32 { 4242 }` produced no `CX-003` in CI, only `DRY-002`.
+   For a function that only returns the literal this is defensible: the function
+   name does the job of a `const` name.
+   The same classification covers any straight-line body, though, so a literal
+   passed to a std or third-party call in such a function should go unreported
+   too.
+   Reproduce that second case before filing, and propose limiting the exemption
+   to a body that is a single literal expression.
 
 ## Comments
 
