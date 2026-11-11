@@ -7,24 +7,25 @@
 # Excluding test files here is safe because nothing in this pass depends on
 # them: `[test_quality]` is off, so TQ-003 cannot mistake an untested-looking
 # function for a real finding, and DRY-002 already ignores calls from
-# `#[cfg(test)]` code when deciding deadness — the dead-code count is identical
-# (256) with and without these globs. What the exclusion removes is ~2038
-# DRY-003 fragments and ~210 DRY-001 duplicate test functions, both of which
-# are the deliberate self-contained-test shape rather than copy-paste.
+# `#[cfg(test)]` code when deciding deadness (the dead-code count is 256 with
+# and without these globs). What the exclusion removes is ~2038 DRY-003
+# fragments and ~210 DRY-001 duplicate test functions, both of which are the
+# deliberate self-contained-test shape rather than copy-paste.
 #
-# Two dimensions cannot be disabled and will appear in this pass as well as in
-# the main one: IOSP has no `enabled` key, and MAGIC_NUMBER survives
-# `[complexity] enabled = false` (every other complexity rule is correctly
-# silenced). `qual.toml` reads only the `DRY-*` rules from this pass, so the
-# gate takes both from the main pass alone.
+# Two non-DRY rules still fire in this pass: IOSP (`iosp/violation`) has no
+# `enabled` key, and `CX-003` (`MAGIC_NUMBER`) survives `[complexity] enabled =
+# false` even though every other complexity rule is silenced. `qual.toml`
+# collects only `DRY-*` rules from this pass, so the CI gate takes both rules
+# from the main pass alone.
 #
-# The same inconsistency produces three `ORPHAN_SUPPRESSION` findings here, on
-# the `qual:allow(complexity, magic_numbers)` markers in the provider model
-# catalogues. With `[complexity]` off, rustqual sees no complexity finding to
-# match them against and calls them stale — while MAGIC_NUMBER fires anyway.
-# They suppress correctly in the main pass (498 findings down to 193). The gate
-# ignores them for the same reason: they are not `DRY-*` rules. Not worth
-# excluding the provider files from DRY detection to silence.
+# Disabling `[complexity]` also produces three `ORPHAN_SUPPRESSION` findings
+# here, on the `qual:allow(complexity, magic_numbers)` markers in the provider
+# model catalogs: `rustqual` sees no complexity findings to match those markers
+# against and reports them as orphaned, even though `MAGIC_NUMBER` still fires.
+# The markers work as intended in the main pass (498 findings down to 193), and
+# the CI gate ignores `ORPHAN_SUPPRESSION` findings from this pass because only
+# `DRY-*` rules are collected here. Keeping the provider files in this pass
+# preserves DRY coverage on them.
 
 exclude_files = [
     "**/*_tests.rs",

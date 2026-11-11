@@ -56,15 +56,14 @@ rustqual's own command later touches only that call.
 
 Two things differ from the description:
 
-- **No-base case:** `qual report` never fails, so `qual diff --base <rev>` takes
-  git's null object ID (all zeros, at full length) as "no base".
-  It analyses the working tree only and fails only on enforced rules.
-  The workflow passes `github.event.before` through unchanged, and the recipe
-  stays one command with no branch in shell.
-- **History on push:** fetching the `before` sha on top of a depth-1 checkout
-  leaves `git merge-base HEAD <before>` without a common ancestor, so the `qual`
-  task checks out the full history on push (`fetch-depth: 0`) and a depth of 2
-  on pull requests.
+- **No-base case:** `qual report` does not fail on enforced-rule findings, so
+  `qual diff --base <rev>` accepts git's null object ID (40 or 64 zeros) as "no
+  base": it analyzes only the working tree and fails only on enforced rules.
+  The workflow passes `github.event.before` through unchanged, without branching
+  on the null object ID in shell or workflow YAML.
+- **History on push:** fetching only the `before` SHA on top of a `fetch-depth:
+  1` checkout leaves `git merge-base HEAD <before>` without a common ancestor,
+  so the `qual` task uses `fetch_depth: '0'` on push and `'2'` on pull requests.
 
-A force-push to `main` whose old tip is no longer reachable makes `git
-merge-base` fail, and `qual` exits 2: an error, not a pass.
+If a force-push to `main` leaves the previous tip unreachable in the clone, `git
+merge-base` fails and `qual` exits with code 2, failing the job.

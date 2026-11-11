@@ -2257,20 +2257,17 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 
 # Check structural code quality on CI.
 #
-# Fails on a rustqual finding that the merge base of `HEAD` and `BASE` lacks,
-# and on any finding of a rule that `.config/rustqual/qual.toml` enforces. The
-# workspace carries known findings; the bar for new code is that it adds none.
-# `qual` (`crates/internal/qual`) analyses both trees in the same run, so no
-# baseline is committed.
+# Runs `qual` (`crates/internal/qual`) to fail on any `rustqual` finding
+# introduced since the merge base of `HEAD` and `BASE`, as well as any finding
+# for an enforced rule in `.config/rustqual/qual.toml`. Pre-existing findings in
+# non-enforced rules pass.
 #
-# When `BASE` is git's null object ID, which GitHub reports as the previous
-# commit of a push that creates the branch, `qual` compares nothing and checks
-# the enforced rules only.
+# When `BASE` is git's null object ID (sent by GitHub when a push creates a
+# branch), `qual` skips the base comparison and checks only enforced rules.
 #
-# Each new finding becomes an `::error` annotation, and the job summary gets the
-# same findings as a table with the guidance for each rule. The second run of
-# `qual diff` reads the base report that the first one cached, and analyses the
-# working tree again.
+# Emits `::error` workflow annotations to stdout and, when
+# `$GITHUB_STEP_SUMMARY` is set, appends a Markdown summary with per-rule
+# remediation guidance.
 [group('ci')]
 qual-ci BASE="origin/main": _install-rustqual _install_ci_matchers
     #!/usr/bin/env sh
@@ -2281,11 +2278,12 @@ qual-ci BASE="origin/main": _install-rustqual _install_ci_matchers
     status=0
     $qual diff --base "{{BASE}}" --format github || status=$?
 
-    # `qual` exits 1 on a failing verdict. Any other failure means it reached
-    # no verdict, so there is nothing to summarise.
+    # Exit code 1 means a failing verdict (still summarized below); exit codes
+    # > 1 mean `qual` errored before producing a verdict.
     if [ "$status" -gt 1 ]; then
         echo "::error::qual could not compare the workspace against {{BASE}} (exit code $status)"
     elif [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        # Reuses the base report cached by the first `qual diff` call above.
         $qual diff --base "{{BASE}}" --format markdown >> "$GITHUB_STEP_SUMMARY" || true
     fi
 

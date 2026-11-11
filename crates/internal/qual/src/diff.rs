@@ -79,8 +79,8 @@ pub struct NewFinding {
     pub shared: Option<Shared>,
 }
 
-/// Result of comparing a target report against a base report under a
-/// [`Policy`].
+/// Result of evaluating a target report under a [`Policy`], optionally compared
+/// against a base report.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct Verdict {
     /// New findings for non-enforced gating rules.
@@ -90,8 +90,8 @@ pub struct Verdict {
     /// existed at the base revision.
     pub enforced: Vec<Finding>,
 
-    /// Gating finding count per pass at the base revision, or `None` when the
-    /// target tree was judged without a base revision.
+    /// Gating finding count per pass at the base revision, or `None` when
+    /// evaluated without a base revision.
     pub base: Option<BTreeMap<String, usize>>,
 
     /// Gating finding count per pass in the target tree.
@@ -168,9 +168,10 @@ pub fn verdict(base: &Report, head: &Report, renames: &Renames, policy: &Policy)
     }
 }
 
-/// Judge `head` under `policy` without a base revision to compare it against.
+/// Evaluate `head` under `policy` without a base revision.
 ///
-/// No finding counts as new, so only findings for enforced rules fail the
+/// Because there is no base report, [`Verdict::new`] is empty and
+/// [`Verdict::base`] is `None`; only findings for enforced rules fail the
 /// verdict.
 #[must_use]
 pub fn enforced_only(head: &Report, policy: &Policy) -> Verdict {

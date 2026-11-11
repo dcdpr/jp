@@ -23,7 +23,6 @@ const POLICY: &str = indoc! {r#"
     rules = ["*"]
 "#};
 
-/// Git's null object ID for SHA-1 repositories.
 const NULL_OID: &str = "0000000000000000000000000000000000000000";
 
 // Line numbers in the reports below refer to this source: `run` spans lines 1
@@ -364,9 +363,9 @@ fn diff_against_the_null_object_id_analyses_only_the_working_tree() {
 
     let verdict = workspace.diff(&runner, NULL_OID).unwrap();
 
-    // The working tree's `DRY-002` finding would be new against any base, and
-    // `DRY-002` is not enforced, so the verdict passes only when nothing was
-    // compared.
+    // `diff_responder` reports an unenforced `DRY-002` finding in the working
+    // tree that is absent from the base, so `verdict.passed()` holds only
+    // because base comparison was skipped.
     assert!(verdict.passed());
     assert_eq!(verdict.base, None);
     assert_eq!(

@@ -132,6 +132,7 @@ This ticket closes when T-0yh5npc lands.
 - **From**: jp
 - **Date**: 2026-11-11T08:22:12Z
 
-Closed by T-0yh5npc: `qual-ci` calls `qual diff`, which analyses the working
-tree and its merge base in the same run.
-The committed baselines, `regressions.jq` and `just qual-baseline` are gone.
+Closed by T-0yh5npc: `just qual-ci` runs `qual diff`, which analyzes the working
+tree and its merge base in the same job.
+The committed baselines, `regressions.jq`, and `just qual-baseline` have been
+removed.

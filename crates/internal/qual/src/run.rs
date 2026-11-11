@@ -35,7 +35,7 @@ const CACHE_VERSION: &str = "1";
 /// reported at line 1.
 const FILE_RULES: &[&str] = &["SRP-002"];
 
-/// Hex digit counts of a full SHA-1 and a full SHA-256 object ID.
+/// Hex lengths of full SHA-1 and SHA-256 git object IDs.
 const OID_DIGIT_COUNTS: [usize; 2] = [40, 64];
 
 /// Errors returned while running `rustqual`, `git`, or reading workspace files.
@@ -160,10 +160,9 @@ impl Workspace {
     /// commit SHA, the `rustqual` version, and the policy and pass config
     /// contents.
     ///
-    /// When `base` is git's null object ID (all zeros at full length), which
-    /// git reports as the previous value of a newly created ref, there is no
-    /// base revision.
-    /// Only the working tree is analyzed, no finding counts as new, and only
+    /// When `base` is git's null object ID (40 or 64 `'0'` digits), only the
+    /// working tree is analyzed (see [`diff::enforced_only`]):
+    /// [`Verdict::base`] is `None`, [`Verdict::new`] is empty, and only
     /// findings for enforced rules fail the verdict.
     ///
     /// # Errors
@@ -360,11 +359,10 @@ fn locate(tree: &Utf8Path, raw: Vec<(String, RawFinding)>) -> Result<Vec<Finding
     Ok(findings)
 }
 
-/// Return `true` if `rev` is git's null object ID: a full-length object ID of
-/// only zeros.
+/// Return `true` if `rev` is a full-length SHA-1 or SHA-256 null object ID.
 ///
-/// An abbreviation such as `0000000` is not the null object ID, because it can
-/// name a real commit.
+/// Abbreviated all-zero prefixes (such as `0000000`) are rejected because they
+/// can match real commits.
 fn is_null_oid(rev: &str) -> bool {
     OID_DIGIT_COUNTS.contains(&rev.len()) && rev.bytes().all(|byte| byte == b'0')
 }
