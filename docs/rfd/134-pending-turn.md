@@ -133,13 +133,28 @@ When the stream has no `PendingTurn` marker, `start_turn` appends a new
   Because `print` renders conversation events rather than config deltas, the
   pending section produces no output until turn-scoped pending events are added.
   Plugin `read_events` returns `PendingTurn` like any other event.
+- A conversation whose stream holds only pending entries has no turns, and
+  counts as empty wherever a command decides whether a conversation is new, such
+  as whether to give its first query a title.
+  `ConversationStream::is_empty` counts any conversation event, the marker
+  included, so `jp query` and plugin `query` delegation, which record a config
+  delta before deciding on a title, would otherwise leave such a conversation
+  untitled.
 
 ### Replay
 
 `trim_last_turn` removes entries starting from the last turn's first
 `ChatRequest` to the end of the stream (rather than starting from its
 `TurnStart`), and converts that `TurnStart` back into a `PendingTurn` marker.
-Global entries are retained, matching existing behavior.
+Config deltas and patch overlays are retained, matching existing behavior.
+A compaction overlay is retained only if its range ends before the replayed
+turn; one that reaches the replayed turn or beyond is dropped, as
+`ConversationStream::retain` drops overlays a removal could invalidate ([RFD
+097]).
+Without that rule, the pending section would keep the replayed turn's index, and
+a summary covering it would replace the replayed request in the next request to
+the model.
+`trim_last_turn` keeps such overlays today, which T-1hbzetp fixes on its own.
 
 ```text
 before:  [TS ReqA RespA] [TS X1 ReqB RespB] [P X2]
@@ -172,6 +187,8 @@ and `PendingTurn` is a turn-scoped entry, two rules change:
   `PendingTurn` marker) after selecting `ReqB` and before removing it; popping
   the tail entry would hit the marker, leave `ReqB` in place, and send `ReqB` a
   second time.
+- Removing the request drops compaction overlays that reach its turn, by the
+  same rule as replay.
 
 Converting the now-requestless turn back into a `PendingTurn` marker and merging
 the trailing `PendingTurn` marker into it preserves the earlier marker position
@@ -291,10 +308,13 @@ also call `open_pending()`.
    `PendingTurn`, `last_turn_event` to stop at the marker, retry request removal
    to delete by event ID and merge markers, and `from_parts` to repair invalid
    marker ordering on load.
-   This phase depends on Phase 1.
+   Both removals drop compaction overlays that reach the removed turn.
+   This phase depends on Phase 1 and on T-1hbzetp.
 3. **Writers and display.** Call `open_pending()` in `jp query`, `jp config set
    -i`, and plugin `query` delegation, and update `jp conversation print` to
    render the pending section when its turn selection includes the last turn.
+   Title decisions in `jp query` and plugin `query` delegation treat a
+   pending-only stream as empty.
    This phase depends on Phase 2.
 4. **Documentation.** Add a glossary entry for Pending Turn (noting that it has
    no request and is not counted as a turn), and update the Turn glossary entry

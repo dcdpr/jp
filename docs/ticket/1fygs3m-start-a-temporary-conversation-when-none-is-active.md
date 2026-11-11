@@ -46,3 +46,17 @@ Open questions:
   finds an empty event stream (`crates/jp_cli/src/cmd/query.rs:604`).
   `jp query` would also need to generate a title when starting the first turn of
   a conversation that contains only pending entries.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T15:20:36Z
+
+The "Titles" question is settled for pending-only conversations by RFD 134: a
+stream holding only pending entries has no turns and counts as empty wherever a
+command decides whether a conversation is new, so its first `jp query` titles
+it.
+A temporary conversation that `jp decide` starts under this ticket gets its
+title the same way.
