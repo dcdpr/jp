@@ -9,7 +9,6 @@ use std::{env, mem, ops::RangeInclusive, sync::LazyLock, time::Duration};
 use async_anthropic::{
     Client,
     errors::AnthropicError,
-    messages::DEFAULT_MAX_TOKENS,
     types::{
         self, Effort, JsonOutputFormat, ListModelsResponse, OutputConfig, System, Thinking,
         ToolBash, ToolCodeExecution, ToolComputerUse, ToolTextEditor, ToolWebSearch,
@@ -77,6 +76,15 @@ static PROVIDER: ProviderId = ProviderId::Anthropic;
 /// See:
 /// <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
 const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
+
+/// Fallback `max_tokens` sent when neither configuration nor [`ModelDetails`]
+/// specifies an output limit.
+///
+/// The Messages API requires `max_tokens` on every request, and the limit
+/// covers both thinking and response tokens.
+/// Models with a lower ceiling reject the request unless
+/// `assistant.model.parameters.max_tokens` is configured.
+const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 32_000;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
@@ -1993,11 +2001,11 @@ fn create_request(
         .unwrap_or_else(|| {
             warn!(
                 %model.id,
-                %DEFAULT_MAX_TOKENS,
+                %DEFAULT_MAX_OUTPUT_TOKENS,
                 "HTTP request serialization has no configured or reported output limit; using its fallback."
             );
 
-            DEFAULT_MAX_TOKENS as u32
+            DEFAULT_MAX_OUTPUT_TOKENS
         });
 
     let reasoning_config =
@@ -2322,15 +2330,7 @@ fn create_request(
 
 /// Derive reasoning support from the API-reported model capabilities.
 ///
-/// This is the sole source of reasoning support: every model goes through it,
-/// and the override table carries no mode or ladder of its own, only an
-/// `always_on` flag applied to the result.
-/// A model newer than this binary therefore still receives an explicit thinking
-/// configuration rather than falling back to the provider default, which bills
-/// for thinking tokens the caller never sees.
-///
-/// Returns `None` when the capabilities report nothing about thinking, leaving
-/// support genuinely unknown.
+/// Returns `None` when `capabilities` does not specify thinking support.
 fn derive_reasoning(capabilities: &types::ModelCapabilities) -> Option<ReasoningDetails> {
     let thinking = &capabilities.thinking;
 
@@ -2419,11 +2419,14 @@ const BETWEEN_TOOLS_THINKING: &str = "between-tools-thinking";
 /// them with a 400, so they are only sent when this flag is present.
 const SAMPLING_PARAMETERS: &str = "sampling-parameters";
 
-/// Model facts the capabilities API does not report.
+/// Static model metadata not reported by `/v1/models`, plus a fallback snapshot
+/// of the fields `/v1/models` does report.
 ///
-/// Everything else (token limits, reasoning mode and effort ladder, structured
-/// output, feature flags) is derived from the API, so a newly released model
-/// only needs an entry here when one of these facts differs from the defaults.
+/// Token limits, reasoning support, and structured output come from the live
+/// `/v1/models/{id}` lookup when it succeeds, and fall back to [`reported`]
+/// when the lookup fails or times out.
+///
+/// [`reported`]: Self::reported
 #[derive(Debug, Clone)]
 struct ModelOverrides {
     /// The model's canonical id.
@@ -2455,11 +2458,26 @@ struct ModelOverrides {
     /// Sonnet 5.5, rather than to omitting the thinking field.
     /// Only meaningful together with `always_on`.
     between_tools: bool,
+
+    /// Snapshot of capabilities from `/v1/models/{id}`, used when the live
+    /// model lookup fails or times out.
+    reported: Option<Reported>,
+}
+
+/// Capabilities reported by `/v1/models/{id}`, stored as a static fallback for
+/// [`ModelOverrides`].
+#[derive(Debug, Clone)]
+struct Reported {
+    context_window: u32,
+    max_output_tokens: u32,
+
+    /// Reasoning support before [`ModelOverrides::always_on`] is applied.
+    reasoning: ReasoningDetails,
+
+    structured_output: bool,
 }
 
 impl ModelOverrides {
-    /// Overrides for `id` that change nothing: no known cutoff, active, and
-    /// every flag off.
     fn new(id: &'static str) -> Self {
         Self {
             id,
@@ -2469,6 +2487,7 @@ impl ModelOverrides {
             sampling: false,
             always_on: false,
             between_tools: false,
+            reported: None,
         }
     }
 }
@@ -2479,20 +2498,36 @@ impl Cataloged for ModelOverrides {
     }
 }
 
-/// Look up the facts the capabilities API cannot supply.
-///
-/// Returns `None` for a model absent from [`MODEL_OVERRIDES`], leaving its
-/// cutoff and deprecation status unknown rather than asserting defaults for a
-/// model this binary predates.
+/// Look up the [`MODEL_OVERRIDES`] entry for `id` (by canonical ID or alias).
 fn model_overrides(id: &str) -> Option<&'static ModelOverrides> {
     MODEL_OVERRIDES.get(id)
 }
 
-/// The facts the capabilities API cannot supply, per model.
+/// Static model catalog for Anthropic models.
+///
+/// `reported` entries mirror the recorded `/v1/models` response in
+/// `tests/fixtures/anthropic/test_models.yml`.
 // qual:allow(complexity, magic_numbers) reason: "model catalogue: cutoff dates
-// are data maintained by hand against Anthropic's published documentation"
+// and limits are data maintained by hand against Anthropic's published
+// documentation and recorded API responses"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
     let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);
+    let adaptive = |xhigh, max| {
+        Some(Reported {
+            context_window: 1_000_000,
+            max_output_tokens: 128_000,
+            reasoning: ReasoningDetails::adaptive(xhigh, max),
+            structured_output: true,
+        })
+    };
+    let budgetted = |context_window| {
+        Some(Reported {
+            context_window,
+            max_output_tokens: 64_000,
+            reasoning: ReasoningDetails::budgetted(1_024, None),
+            structured_output: true,
+        })
+    };
 
     Catalog::new(vec![
         Entry {
@@ -2500,6 +2535,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5-2")
             },
         },
@@ -2508,6 +2544,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5-1")
             },
         },
@@ -2516,6 +2553,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5")
             },
         },
@@ -2524,6 +2562,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-5-5")
             },
         },
@@ -2531,6 +2570,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 5),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-5")
             },
         },
@@ -2542,6 +2582,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
                 between_tools: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-sonnet-5-5")
             },
         },
@@ -2549,13 +2590,23 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-sonnet-5")
+            },
+        },
+        // Knowledge cutoff not yet known; accepts `thinking: disabled`.
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                reported: adaptive(true, true),
+                ..ModelOverrides::new("claude-haiku-5-5")
             },
         },
         Entry {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-4-8")
             },
         },
@@ -2563,6 +2614,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &["claude-opus-4-7-20260416"],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-4-7")
             },
         },
@@ -2571,6 +2623,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
                 sampling: true,
+                reported: adaptive(false, true),
                 ..ModelOverrides::new("claude-sonnet-4-6")
             },
         },
@@ -2579,6 +2632,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
                 sampling: true,
+                reported: adaptive(false, true),
                 ..ModelOverrides::new("claude-opus-4-6")
             },
         },
@@ -2588,6 +2642,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 8),
                 prefill: true,
                 sampling: true,
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-opus-4-5")
             },
         },
@@ -2597,6 +2652,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
                 sampling: true,
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-haiku-4-5")
             },
         },
@@ -2606,6 +2662,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
                 sampling: true,
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-sonnet-4-5")
             },
         },
@@ -2656,7 +2713,21 @@ fn table_details(name: &Name) -> Result<ModelDetails> {
         return Ok(ModelDetails::empty(id));
     };
 
+    let reported = overrides.reported.as_ref();
+    let reasoning = reported.map(|reported| &reported.reasoning);
+
+    // Mirror the feature flags that `derive_features` derives from live capabilities.
     let mut features = vec![];
+    if reasoning.is_some_and(|reasoning| !reasoning.is_unsupported()) {
+        features.push("interleaved-thinking");
+    }
+    if let Some(ReasoningDetails::Supported {
+        mode: ReasoningMode::Adaptive { .. },
+        ..
+    }) = reasoning
+    {
+        features.push("adaptive-thinking");
+    }
     if overrides.between_tools {
         features.push(BETWEEN_TOOLS_THINKING);
     }
@@ -2664,15 +2735,20 @@ fn table_details(name: &Name) -> Result<ModelDetails> {
         features.push(SAMPLING_PARAMETERS);
     }
 
+    let mut reasoning = reasoning.copied();
+    if overrides.always_on {
+        reasoning = reasoning.map(ReasoningDetails::always_on);
+    }
+
     Ok(ModelDetails {
         id,
         display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
+        context_window: reported.map(|reported| reported.context_window),
+        max_output_tokens: reported.map(|reported| reported.max_output_tokens),
+        reasoning,
         knowledge_cutoff: overrides.knowledge_cutoff,
         deprecated: Some(overrides.deprecated.clone()),
-        structured_output: None,
+        structured_output: reported.map(|reported| reported.structured_output),
         prefill: Some(overrides.prefill),
         subscription: None,
         features,

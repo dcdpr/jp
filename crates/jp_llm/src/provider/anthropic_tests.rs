@@ -12,6 +12,7 @@ use jp_test::{
     Result, function_name,
     mock::{GET, MockServer, POST},
 };
+use saphyr::{LoadableYamlNode as _, Yaml};
 use serde_json::Map;
 use test_log::test;
 
@@ -58,7 +59,98 @@ async fn a_failed_model_lookup_falls_back_to_the_table() {
         NaiveDate::from_ymd_opt(2025, 8, 1)
     );
     assert_eq!(details.prefill, Some(true));
-    assert_eq!(details.features, vec![SAMPLING_PARAMETERS]);
+    assert_eq!(details.context_window, Some(200_000));
+    assert_eq!(details.max_output_tokens, Some(64_000));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::budgetted(1_024, None))
+    );
+    assert_eq!(details.features, vec![
+        "interleaved-thinking",
+        SAMPLING_PARAMETERS
+    ]);
+}
+
+#[test]
+fn the_table_fallback_matches_the_recorded_listing() {
+    let path = jp_test::fixtures_dir().join("anthropic/test_models.yml");
+    let fixture = Yaml::load_from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let body = fixture[0]
+        .as_mapping_get("then")
+        .and_then(|then| then.as_mapping_get("json_body_str"))
+        .and_then(Yaml::as_str)
+        .expect("the recorded listing body");
+    let listing: ListModelsResponse = serde_json::from_str(body).unwrap();
+
+    for model in listing.data {
+        let mut reported = map_model(model).unwrap();
+        // `table_details` omits `context-editing` because request construction
+        // does not read that feature flag.
+        reported
+            .features
+            .retain(|feature| *feature != "context-editing");
+        let table = table_details(&reported.id.name).unwrap();
+
+        assert_eq!(
+            (
+                table.context_window,
+                table.max_output_tokens,
+                &table.reasoning,
+                table.structured_output,
+                &table.features,
+            ),
+            (
+                reported.context_window,
+                reported.max_output_tokens,
+                &reported.reasoning,
+                reported.structured_output,
+                &reported.features,
+            ),
+            "{}",
+            reported.id
+        );
+    }
+}
+
+#[test]
+fn every_active_model_in_the_table_records_what_the_listing_reported() {
+    let missing: Vec<_> = MODEL_OVERRIDES
+        .values()
+        .filter(|overrides| overrides.deprecated == ModelDeprecation::Active)
+        .filter(|overrides| overrides.reported.is_none())
+        .map(|overrides| overrides.id)
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "re-record tests/fixtures/anthropic/test_models.yml and add `reported` for: {missing:?}"
+    );
+}
+
+#[test]
+fn an_unknown_output_limit_falls_back_to_the_default() {
+    let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
+    let provider = Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()));
+    let model = ModelDetails::empty(
+        (PROVIDER, "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017")
+            .try_into()
+            .unwrap(),
+    );
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let body = provider.request_value(&model, query).unwrap();
+
+    assert_eq!(body["max_tokens"], 32_000);
 }
 
 #[test(tokio::test)]
