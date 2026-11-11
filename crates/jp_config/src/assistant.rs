@@ -24,7 +24,7 @@ use crate::{
         PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_at, delta_opt_partial, path,
     },
     fill::{FillDefaults, fill_opt},
-    internal::merge::{string_with_strategy, vec_with_strategy},
+    internal::merge::{canonical_vec_with_strategy, string_with_strategy},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
     types::{
@@ -60,7 +60,7 @@ pub struct AssistantConfig {
         nested,
         partial_via = MergeableVec::<SectionConfig>,
         default = default_sections,
-        merge = vec_with_strategy,
+        merge = canonical_vec_with_strategy,
     )]
     pub system_prompt_sections: Vec<SectionConfig>,
 
@@ -74,7 +74,7 @@ pub struct AssistantConfig {
         nested,
         partial_via = MergeableVec::<InstructionsConfig>,
         default = default_instructions,
-        merge = vec_with_strategy,
+        merge = canonical_vec_with_strategy,
     )]
     pub instructions: Vec<InstructionsConfig>,
 

@@ -20,6 +20,7 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    internal::merge::CanonicalItem,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -185,7 +186,18 @@ impl ToPartial for SectionConfig {
             tag: partial_opts(self.tag.as_ref(), defaults.tag),
             title: partial_opts(self.title.as_ref(), defaults.title),
             content: partial_opt(&self.content, defaults.content),
-            position: partial_opt(&self.position, defaults.position),
+            // `defaults.position` is `None` on the partial type, but the schema
+            // default is `0`. Passing `Some(0)` maps the default position back
+            // to `None` so it matches a config that omitted `position`.
+            position: partial_opt(&self.position, Some(0)),
+        }
+    }
+}
+
+impl CanonicalItem for PartialSectionConfig {
+    fn canonicalize(&mut self) {
+        if self.position == Some(0) {
+            self.position = None;
         }
     }
 }

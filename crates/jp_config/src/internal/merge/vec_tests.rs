@@ -380,6 +380,23 @@ fn test_discarded_default_preserves_duplicates_in_the_replacement() {
 }
 
 #[test]
+fn test_empty_next_leaves_prev_untouched() {
+    // Merging an empty `next` (an unset field in a partial layer) must return
+    // `prev` without deduplicating its existing elements.
+    let prev = MergeableVec::Merged(MergedVec {
+        value: vec![1, 2, 1],
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    });
+
+    let result = vec_with_strategy(prev.clone(), MergeableVec::Vec(vec![]), &())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, prev);
+}
+
+#[test]
 fn test_dedup_collapses_repeated_source() {
     // The same source applied twice (an `extends` diamond, or `--cfg` supplied
     // again on a conversation that already merged it) contributes its entries

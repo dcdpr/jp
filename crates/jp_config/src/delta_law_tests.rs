@@ -380,6 +380,23 @@ fn law_holds_for_a_repeated_rule() {
 }
 
 #[test]
+fn law_holds_for_an_unchanged_list_that_repeats() {
+    assert_law(&["A", "B", "A"], &["A", "B", "A"]);
+}
+
+/// `assert_law` passes even if the delta uses `replace`; verify that the delta
+/// is actually empty.
+#[test]
+fn an_unchanged_list_that_repeats_has_an_empty_delta() {
+    let prev = snapshot(&["A", "B", "A"]);
+    let next = snapshot(&["A", "B", "A"]);
+
+    let delta = prev.delta(next);
+
+    assert!(delta.env.is_empty(), "{:?}", delta.env);
+}
+
+#[test]
 fn law_holds_for_an_append_onto_a_list_that_already_repeats() {
     assert_law(&["A", "B", "A"], &["A", "B", "A", "C"]);
 }
