@@ -100,14 +100,26 @@ Keep the rule cards: they supply the rule titles in the SARIF rules table, and
 
 ## Exemptions to lift
 
-`.config/rustqual/qual.toml` exempts two rules because `rustqual` currently
-produces false positives on valid patterns (T-0yh5m6r).
+`.config/rustqual/qual.toml` exempts rules because `rustqual` currently produces
+false positives on valid patterns (T-0yh5m6r, T-0yh8q2s).
 Remove each rule from `exempt` in the commit that fixes its analyzer:
 
 - `BP-002`, once it flags newtype `Display` boilerplate without false-positiving
   on multi-value `write!` calls or format-preserving delegation.
 - `IET`, once it ignores functions whose error type is fixed by a trait
   signature (such as serde's `serialize` and `deserialize`).
+- `BP-009` and `BP-010`, once boilerplate rules can skip test code: 49 of 85 and
+  14 of 32 findings on 2026-11-11 were in test files, where repeated explicit
+  setup is the house style.
+- `BP-001` and `BP-007`, once `BP-007` fires on error enums only (it flags
+  `EventKind`) and `BP-001` on a `From` that `#[from]` can replace.
+- `BP-003`, `BP-004`, `BP-006` and `BP-008`, once each is checked against its
+  findings: hand-written setters and `with_*` methods, a `match` that maps one
+  crate's enum to another's, and a constructor that clones out of a borrowed
+  config all have no derive to move to.
+  A rule that turns out to have no real findings stays off.
+
+Each rule that comes back needs a guidance file in `.config/rustqual/guidance/`.
 
 `config.toml` also sets `[srp] max_independent_clusters = 1_000_000` to disable
 the independent-cluster check in `SRP-002`.

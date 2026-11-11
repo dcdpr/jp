@@ -81,6 +81,36 @@ newer release has fixed.
     Reporting `ORPHAN-001` is accurate, but the message ("no finding in window")
     does not indicate that `const` and `static` items are already exempt from
     `CX-003`.
+12. **SARIF messages leave out what the analyzer knows.** Found while writing
+    the guidance files (T-0yh8q2s), which now carry the missing facts by hand:
+    - `CX-001`, `CX-002`, `CX-004` and `CX-005` give the value and not the
+      threshold (`ComplexityFinding` has both).
+    - `A20` gives a count ("error-handling smells 1") and not which of
+      `unwrap`, `expect`, `panic!` or `todo!` it found.
+    - `DRY-001`, `DRY-003` and `DRY-005` say "N other function(s)" without
+      naming them, although each finding holds its `participants`; only the
+      text report lists them.
+    - `DRY-002` drops the `uncalled` / `testonly` kind and the suggestion.
+13. **`DRY-002` and `DRY-006` count calls, not uses.** A function passed as a
+    value is reported as dead: `http_handler` in
+    `crates/jp_attachment_http_content/src/lib.rs` (the initializer of a
+    `static`) and `parse_spec` in `crates/jp_cli/src/cmd/compact_flag.rs` (a
+    clap value parser).
+    So is a `static` registered through `#[distributed_slice(HANDLERS)]`
+    (`HANDLER` in the attachment crates), which only the linker reads.
+    Neither can be silenced with `qual:allow`, and `qual:api` is rejected on a
+    private item.
+14. **`DRY-005` groups unrelated enums under `Self`.** "repeated match on Self
+    (6 occurrences)" lists `PathRoot::as_str` in `bookworm` next to
+    `<Status as Display>::fmt` in the `ticket` crate.
+    A `match self` whose type rustqual can't name is keyed as `Self` or
+    `(unknown)`, whatever the type is.
+15. **`TQ-001` passes any test that makes a call.** `detect_assertion_free_tests`
+    (`src/adapters/analyzers/tq/assertions.rs`) treats a function or method call
+    anywhere in the body as an implicit assertion, so `#[test] fn it_works() {
+    run_thing(); }`, the book's own example of what the rule catches, is not
+    reported.
+    Only a body with no assertion macro and no call at all is.
 
 ## Comments
 

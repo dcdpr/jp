@@ -32,6 +32,24 @@ exempt = [
     # format-preserving delegation alongside genuine newtype boilerplate.
     # Re-enable once the vendored rustqual distinguishes them (T-1dhk659).
     "BP-002",
+
+    # The rest of the boilerplate rules. Of the 256 findings on 2026-11-11, 65
+    # are in test files (`BP-009` repeated struct construction, `BP-010`
+    # repeated format strings), where each test spelling out its own setup is
+    # deliberate. The others mostly ask for a derive the workspace doesn't have
+    # or that doesn't apply: `BP-007` treats any enum with several `From` impls
+    # as an error enum, `BP-006` flags a mapping between two crates' enums, and
+    # `BP-003`/`BP-004` flag hand-written setters and `with_*` methods.
+    # Re-enable rule by rule once the vendored rustqual skips test code for
+    # them and tells these cases apart (T-1dhk659).
+    "BP-001",
+    "BP-003",
+    "BP-004",
+    "BP-006",
+    "BP-007",
+    "BP-008",
+    "BP-009",
+    "BP-010",
 ]
 
 # Rules with zero findings on `main`. Any finding for an enforced rule fails the
