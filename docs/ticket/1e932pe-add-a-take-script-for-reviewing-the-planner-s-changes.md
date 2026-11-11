@@ -11,29 +11,31 @@ Copy uncommitted changes from the chat bridge's server checkout into a local
 review worktree on a maintainer's machine, then reset the server checkout so it
 can resume pulling.
 
-Under `jp-serve-chat.lock` over SSH, capture the server's `HEAD` commit and `git
-add -A && git diff --cached --binary -M HEAD`.
-Locally, create a worktree at that base `HEAD` commit and apply the patch with
-`git apply --index` rather than applying directly onto `origin/main`: changes
-from an earlier take that are still in review may not be in the server's base
-commit yet, so rebasing the worktree onto `origin/main` afterwards resolves any
-`.board.json` overlap via a three-way merge.
-Using a binary git diff also preserves file renames (such as retitled tickets)
-and deletions.
+`just chat-take HOST DIR` does this.
+It sends `crates/plugins/command/serve-chat/take.sh` to the server over SSH and
+runs it there twice:
 
-```sh
-ssh "$host" "cd $dir && flock \"\$(git rev-parse --git-path jp-serve-chat.lock)\" sh -c '
-  git rev-parse HEAD
-  git add -A && git diff --cached --binary -M HEAD
-  git reset -q --hard && git clean -qfd'" > take.patch
-git fetch origin
-git worktree add -b planner-take ../jp-take "$(head -1 take.patch)"
-tail -n +2 take.patch | git -C ../jp-take apply --index
-```
+1. `snapshot`: under the bridge's lock (`flock` on `$(git rev-parse --git-path
+   jp-serve-chat.lock)`), print the checkout's `HEAD` and a binary diff of every
+   change (`git add -A && git diff --cached --binary -M HEAD`), which keeps
+   renames (retitled tickets) and deletions.
+2. Locally, create a worktree at that base commit and `git apply --index` the
+   diff there, rather than onto `origin/main`: changes from an earlier take that
+   are still in review may not be on the server's base yet, so rebasing onto
+   `origin/main` afterwards resolves any `.board.json` overlap with a three-way
+   merge.
+3. `reset`: under the same lock, check that `HEAD` and the diff's hash are
+   unchanged since the snapshot, then `git reset --hard` and `git clean -fd`.
+   If either changed, a turn wrote in the meantime, and the checkout is left
+   alone to be taken again.
 
-Untested as written.
-A `just` recipe taking the host and the remote directory is one place for it.
-Nothing is taken when the server's tree is clean.
+The script runs under `set -eu` with `pipefail` where the shell has it, so a
+failing `git add` (a full disk, say) stops it before anything is discarded.
+`crates/plugins/command/serve-chat/tests/take.rs` runs it against real
+repositories, including that failure.
+
+- [x] Recipe and server-side script
+- [ ] First real take from the server
 
 ## Comments
 

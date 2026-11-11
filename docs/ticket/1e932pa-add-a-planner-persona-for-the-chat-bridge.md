@@ -1,6 +1,6 @@
 # Add a planner persona for the chat bridge
 
-- **Status**: In Progress
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-05
 - **Label**: domain=tooling
