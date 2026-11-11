@@ -98,7 +98,7 @@ run = "allow"
 
 [plugins.command.ticket.options]
 dir = "docs/ticket"
-# The author written on tickets and comments filed through a tool.
+# Author recorded on tickets and comments filed via a tool.
 assistant = "jp"
 # How many Done tickets a board shows.
 board.done_limit = 8
@@ -113,11 +113,13 @@ run = "allow"
 [plugins.command.rfd.options]
 dir = "docs/rfd"
 categories = ["design", "decision", "guide", "process"]
-# The label a tracking ticket names its RFD under, and the labels it is filed
-# with besides.
+# Author recorded on drafts created via a tool.
+assistant = "jp"
+# Label key linking a tracking ticket to its RFD, and extra labels added when
+# filing a tracking ticket.
 tracking.key = "tracking-rfd"
 tracking.labels = ["type=tracking"]
-# The label any other ticket names an RFD its work belongs to under.
+# Label key linking any other ticket to a related RFD.
 relevant.key = "relevant-rfd"
 
 [plugins.command.vite]
