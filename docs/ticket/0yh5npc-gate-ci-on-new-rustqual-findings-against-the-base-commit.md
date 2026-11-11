@@ -1,6 +1,6 @@
 # Gate CI on new rustqual findings against the base commit
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -46,3 +46,24 @@ rustqual's own command later touches only that call.
 - Check the `justfile`, the configs and `docs/` for any other references to the
   baselines.
   Keep `just qual` as the exploratory entry point.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T08:22:12Z
+
+Two things differ from the description:
+
+- **No-base case:** `qual report` does not fail on enforced-rule findings, so
+  `qual diff --base <rev>` accepts git's null object ID (40 or 64 zeros) as "no
+  base": it analyzes only the working tree and fails only on enforced rules.
+  The workflow passes `github.event.before` through unchanged, without branching
+  on the null object ID in shell or workflow YAML.
+- **History on push:** fetching only the `before` SHA on top of a `fetch-depth:
+  1` checkout leaves `git merge-base HEAD <before>` without a common ancestor,
+  so the `qual` task uses `fetch_depth: '0'` on push and `'2'` on pull requests.
+
+If a force-push to `main` leaves the previous tip unreachable in the clone, `git
+merge-base` fails and `qual` exits with code 2, failing the job.

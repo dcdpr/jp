@@ -37,8 +37,10 @@ enum Command {
     ///
     /// Exits with code 1 if any new or enforced findings are present.
     Diff {
-        /// Base revision to compare against.
-        /// Compared at `git merge-base HEAD <base>`.
+        /// Base revision to compare against (at `git merge-base HEAD <base>`).
+        ///
+        /// Passing git's null object ID (40 or 64 zeros) skips the base
+        /// comparison and reports only findings for enforced rules.
         #[arg(long)]
         base: String,
 

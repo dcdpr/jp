@@ -23,6 +23,8 @@ const POLICY: &str = indoc! {r#"
     rules = ["*"]
 "#};
 
+const NULL_OID: &str = "0000000000000000000000000000000000000000";
+
 // Line numbers in the reports below refer to this source: `run` spans lines 1
 // to 3, `unused` is line 5.
 const LIB: &str = indoc! {"
@@ -352,6 +354,89 @@ fn diff_rejects_a_base_that_is_not_a_commit() {
     let error = workspace.diff(&runner, "nope").unwrap_err();
 
     assert!(matches!(error, Error::Command { .. }), "{error:?}");
+}
+
+#[test]
+fn diff_against_the_null_object_id_analyses_only_the_working_tree() {
+    let (dir, workspace) = workspace();
+    let runner = diff_responder(dir.path().to_owned());
+
+    let verdict = workspace.diff(&runner, NULL_OID).unwrap();
+
+    // `diff_responder` reports an unenforced `DRY-002` finding in the working
+    // tree that is absent from the base, so `verdict.passed()` holds only
+    // because base comparison was skipped.
+    assert!(verdict.passed());
+    assert_eq!(verdict.base, None);
+    assert_eq!(
+        verdict.head,
+        BTreeMap::from([("dry".to_owned(), 1), ("main".to_owned(), 1)])
+    );
+
+    let programs: Vec<_> = runner
+        .calls()
+        .into_iter()
+        .map(|spec| spec.program)
+        .collect();
+    assert_eq!(programs, vec!["rustqual", "rustqual"]);
+}
+
+#[test]
+fn diff_against_the_null_object_id_fails_on_an_enforced_rule() {
+    let (dir, workspace) = workspace();
+    let policy = indoc! {r#"
+        enforced = ["DRY-002"]
+
+        [[pass]]
+        name = "dry"
+        config = "dry.toml"
+        rules = ["DRY-*"]
+
+        [[pass]]
+        name = "main"
+        config = "config.toml"
+        rules = ["*"]
+    "#};
+    fs::write(dir.path().join(CONFIG_DIR).join("qual.toml"), policy).unwrap();
+    let runner = diff_responder(dir.path().to_owned());
+
+    let verdict = workspace.diff(&runner, NULL_OID).unwrap();
+
+    assert!(!verdict.passed());
+    assert_eq!(verdict.new, vec![]);
+    assert_eq!(verdict.enforced, vec![finding(
+        "src/lib.rs",
+        5,
+        "DRY-002",
+        "unused",
+        "dead code: unused"
+    )]);
+}
+
+#[test]
+fn diff_resolves_an_abbreviated_run_of_zeros_as_a_revision() {
+    let (_dir, workspace) = workspace();
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&["merge-base", "HEAD", "0000000"])
+        .returns_error("fatal: Not a valid object name 0000000");
+
+    let error = workspace.diff(&runner, "0000000").unwrap_err();
+
+    assert!(matches!(error, Error::Command { .. }), "{error:?}");
+}
+
+#[test]
+fn recognises_the_null_object_id_at_full_length_only() {
+    assert!(is_null_oid(NULL_OID));
+    assert!(is_null_oid(
+        "0000000000000000000000000000000000000000000000000000000000000000"
+    ));
+
+    assert!(!is_null_oid(""));
+    assert!(!is_null_oid("0000000"));
+    assert!(!is_null_oid("0000000000000000000000000000000000000001"));
+    assert!(!is_null_oid("00000000000000000000000000000000000000000"));
 }
 
 #[test]

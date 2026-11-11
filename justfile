@@ -2012,16 +2012,6 @@ qual *FLAGS: _install-rustqual
     rustqual -c .config/rustqual/config.toml --no-fail {{FLAGS}}
     rustqual -c .config/rustqual/dry.toml --no-fail {{FLAGS}}
 
-# Re-record the rustqual baselines that `qual-ci` gates against.
-#
-# Run after a change that deliberately moves the finding count — a refactor
-# that removes findings, or an accepted batch of new ones — and commit the
-# result alongside it, so the diff shows what moved and why.
-[group('check')]
-qual-baseline: _install-rustqual
-    rustqual -c .config/rustqual/config.toml --no-fail --save-baseline .config/rustqual/baseline.json
-    rustqual -c .config/rustqual/dry.toml --no-fail --save-baseline .config/rustqual/baseline-dry.json
-
 # Run tests, using nextest.
 [group('check')]
 [group('main')]
@@ -2267,95 +2257,36 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 
 # Check structural code quality on CI.
 #
-# Gates on per-category regression against the committed baselines rather than
-# on an absolute score. The workspace carries known findings; the bar for new
-# code is "no worse than what is already there". Refresh with
-# `just qual-baseline`.
+# Runs `qual` (`crates/internal/qual`) to fail on any `rustqual` finding
+# introduced since the merge base of `HEAD` and `BASE`, as well as any finding
+# for an enforced rule in `.config/rustqual/qual.toml`. Pre-existing findings in
+# non-enforced rules pass.
 #
-# rustqual's own `--compare --fail-on-regression` is deliberately unused. It
-# prints a finding delta, but defines a regression as `quality_score` dropping,
-# and that score is a ratio over every function in the workspace: a change that
-# adds compliant code alongside a new finding dilutes the score enough to hold
-# it level, and the gate passes. A baseline it cannot parse is worse — rustqual
-# prints the error, reports "not regressed", and exits 0 under `--no-fail`.
+# When `BASE` is git's null object ID (sent by GitHub when a push creates a
+# branch), `qual` skips the base comparison and checks only enforced rules.
 #
-# So rustqual runs only as a report generator, into a temp file, and
-# `regressions.jq` decides the verdict: any count above its baseline fails the
-# job, and a baseline that cannot be compared is an error rather than a pass.
-#
-# Output is captured. Each pass prints every baselined finding on every run,
-# which buries the verdict; on success only the totals are shown, on failure the
-# categories that moved. `--format github` is deliberately absent: it annotates
-# all baselined findings rather than the new ones, and GitHub caps the display
-# at ten, so the annotations would hide the regression behind existing findings.
-#
-# Needs `jq`, which GitHub's runners ship.
+# Emits `::error` workflow annotations to stdout and, when
+# `$GITHUB_STEP_SUMMARY` is set, appends a Markdown summary with per-rule
+# remediation guidance.
 [group('ci')]
-qual-ci: _install-rustqual _install_ci_matchers
+qual-ci BASE="origin/main": _install-rustqual _install_ci_matchers
     #!/usr/bin/env sh
     set -eu
 
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/rustqual.XXXXXX")
-    trap 'rm -rf "$tmp"' EXIT
-
-    filter=.config/rustqual/regressions.jq
-    main=.config/rustqual/baseline.json
-
-    # Prove the gate can still fail before trusting it to pass. A gate that has
-    # broken open is invisible by definition, so both directions are checked on
-    # every run: a baseline one finding below the current one has to read as a
-    # regression, and an unparseable baseline has to be an error.
-    canary() {
-        jq '.magic_number_warnings = (.magic_number_warnings // 0) - 1' \
-            "$main" > "$tmp/lowered.json" || return 1
-        out=$(jq -nr -f "$filter" \
-            --slurpfile old "$tmp/lowered.json" --slurpfile new "$main" 2>&1) || {
-            echo "::error::the regression filter errored on its canary input"
-            printf '%s\n' "$out"
-            return 1
-        }
-        [ -n "$out" ] || {
-            echo "::error::the regression filter reported nothing for a known regression"
-            return 1
-        }
-        printf 'not json\n' > "$tmp/broken.json" || return 1
-        if jq -nr -f "$filter" \
-            --slurpfile old "$tmp/broken.json" --slurpfile new "$main" >/dev/null 2>&1
-        then
-            echo "::error::the regression filter accepted a malformed baseline"
-            return 1
-        fi
-    }
-
-    qual_pass() {
-        base=".config/rustqual/$2"
-        fresh="$tmp/$2"
-        log=$(rustqual -c ".config/rustqual/$1" --no-fail --save-baseline "$fresh" 2>&1) || {
-            echo "::error::rustqual could not analyse the workspace in the $1 pass"
-            printf '%s\n' "$log"
-            return 1
-        }
-        over=$(jq -nr -f "$filter" --slurpfile old "$base" --slurpfile new "$fresh" 2>&1) || {
-            echo "::error::cannot compare the $1 pass against $base"
-            printf '%s\n' "$over"
-            return 1
-        }
-        totals=$(jq -nr --slurpfile old "$base" --slurpfile new "$fresh" \
-            '"findings \($old[0].total_findings) -> \($new[0].total_findings)"') || return 1
-        [ -z "$over" ] || {
-            echo "::error::rustqual regression in the $1 pass ($totals)"
-            printf '%s\n' "$over"
-            echo "Fix the findings above, or run \`just qual-baseline\` and commit the result when the new count is deliberate."
-            return 1
-        }
-        echo "$1: no category above baseline ($totals)"
-    }
-
-    canary
+    qual="cargo run {{quiet_flag}} --locked --package qual --"
 
     status=0
-    qual_pass config.toml baseline.json || status=1
-    qual_pass dry.toml baseline-dry.json || status=1
+    $qual diff --base "{{BASE}}" --format github || status=$?
+
+    # Exit code 1 means a failing verdict (still summarized below); exit codes
+    # > 1 mean `qual` errored before producing a verdict.
+    if [ "$status" -gt 1 ]; then
+        echo "::error::qual could not compare the workspace against {{BASE}} (exit code $status)"
+    elif [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        # Reuses the base report cached by the first `qual diff` call above.
+        $qual diff --base "{{BASE}}" --format markdown >> "$GITHUB_STEP_SUMMARY" || true
+    fi
+
     exit "$status"
 
 # Check code formatting on CI.

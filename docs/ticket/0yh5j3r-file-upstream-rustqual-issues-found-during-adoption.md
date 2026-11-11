@@ -22,7 +22,6 @@ newer release has fixed.
    hold it level.
    A baseline that can't be parsed reports "not regressed" and exits 0 under
    `--no-fail`.
-   Details are in the `qual-ci` recipe comment in the `justfile`.
 3. **Dimensions that can't be disabled.** IOSP has no `enabled` key, and
    `MAGIC_NUMBER` still fires under `[complexity] enabled = false`.
    Disabling a dimension then reports its matching `qual:allow` markers as

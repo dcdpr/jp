@@ -159,13 +159,24 @@ fn passed(verdict: &Verdict, format: Format) -> String {
     let counts = verdict
         .head
         .iter()
-        .map(|(pass, head)| {
-            let base = verdict.base.get(pass).copied().unwrap_or(0);
-            format!("{pass} {base} -> {head}")
+        .map(|(pass, head)| match &verdict.base {
+            Some(base) => {
+                let base = base.get(pass).copied().unwrap_or(0);
+                format!("{pass} {base} -> {head}")
+            }
+            None => format!("{pass} {head}"),
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let line = format!("No new rustqual findings. Findings per pass, base -> head: {counts}.");
+    let line = match verdict.base {
+        Some(_) => {
+            format!("No new rustqual findings. Findings per pass, base -> head: {counts}.")
+        }
+        None => format!(
+            "No base revision to compare against, and no rustqual findings in enforced rules. \
+             Findings per pass: {counts}."
+        ),
+    };
 
     match format {
         Format::Github => format!("::notice::{}\n", escape_data(&line)),

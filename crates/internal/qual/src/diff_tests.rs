@@ -182,12 +182,49 @@ fn counts_gating_findings_per_pass() {
 
     assert_eq!(
         verdict.base,
-        BTreeMap::from([("dry".to_owned(), 0), ("main".to_owned(), 1)])
+        Some(BTreeMap::from([
+            ("dry".to_owned(), 0),
+            ("main".to_owned(), 1)
+        ]))
     );
     assert_eq!(
         verdict.head,
         BTreeMap::from([("dry".to_owned(), 1), ("main".to_owned(), 1)])
     );
+}
+
+#[test]
+fn without_a_base_a_finding_in_an_enforced_rule_fails() {
+    let policy = Policy::parse(POLICY).unwrap();
+    let head = report(vec![
+        finding("CX-004", "src/a.rs", "parse", 40),
+        finding("DRY-004", "src/a.rs", "", 3),
+    ]);
+
+    let verdict = enforced_only(&head, &policy);
+
+    assert!(!verdict.passed());
+    assert_eq!(verdict.new, vec![]);
+    assert_eq!(verdict.enforced, vec![finding(
+        "DRY-004", "src/a.rs", "", 3
+    )]);
+    assert_eq!(verdict.base, None);
+    assert_eq!(
+        verdict.head,
+        BTreeMap::from([("dry".to_owned(), 1), ("main".to_owned(), 1)])
+    );
+}
+
+#[test]
+fn without_a_base_findings_in_other_rules_pass() {
+    let policy = Policy::parse(POLICY).unwrap();
+    let head = report(vec![finding("CX-004", "src/a.rs", "parse", 40)]);
+
+    let verdict = enforced_only(&head, &policy);
+
+    assert!(verdict.passed());
+    assert_eq!(verdict.new, vec![]);
+    assert_eq!(verdict.enforced, vec![]);
 }
 
 #[test]

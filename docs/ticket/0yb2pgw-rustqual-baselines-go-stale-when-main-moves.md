@@ -1,6 +1,6 @@
 # Rustqual baselines go stale when main moves
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -126,3 +126,13 @@ CI compares the merge ref against `HEAD^1` in the same job (T-0yh5npc), so the
 measured tree and the base always match and the interim `checkout_ref`
 workaround isn't needed.
 This ticket closes when T-0yh5npc lands.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T08:22:12Z
+
+Closed by T-0yh5npc: `just qual-ci` runs `qual diff`, which analyzes the working
+tree and its merge base in the same job.
+The committed baselines, `regressions.jq`, and `just qual-baseline` have been
+removed.
