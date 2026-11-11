@@ -1,6 +1,6 @@
 # Run one command without the active conversation
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-08
 - **Label**: client=cli
@@ -45,3 +45,18 @@ Open questions:
   `jp query` always has one, and under T-1fygs3m it starts a temporary one where
   it has none, so `--id=none` there would either mean a new temporary
   conversation or be refused.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T13:18:23Z
+
+The design moved into RFD 112: `none` is now a target on both axes.
+`jp w use none` and `jp c use none` replace `--clear`, and `-w none` and
+`--id=none` run one command without a workspace or conversation.
+RFD 135 uses `-i none` for a single `jp decide` run without the active
+conversation.
+The work is tracked by RFD 112's tracking ticket once it is accepted, so this
+ticket closes.
