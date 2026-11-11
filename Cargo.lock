@@ -2201,6 +2201,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-release-github"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "changelog",
+ "clap",
+ "doc",
+ "indoc",
+ "jp_github",
+ "jp_plugin",
+ "jp_test",
+ "release-build",
+ "semver",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "jp-rfd"
 version = "0.1.0"
 dependencies = [

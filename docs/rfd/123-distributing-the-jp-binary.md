@@ -164,23 +164,33 @@ A workspace that doesn't install it publishes nothing to GitHub but its tags.
   version as the latest.
   Each of those files is uploaded with every `{download}` in it replaced by the
   address GitHub serves the release's files from.
+  It refuses unless GitHub has the tag, at the commit the build is of: a Release
+  of a tag GitHub lacks would make the tag, at the tip of the default branch.
 - `jp release github sync` rewrites the description of each Release whose notes
   changed on `main`, and JP's CI runs it on pushes to `main` that change a
   version's directory.
 
-The install scripts install `jp` alone, so they are JP's to list, and a
-workspace releasing something else lists its own files or none:
+The install scripts install `jp` alone, so they are JP's to list, as is the
+footer that runs them, and a workspace releasing something else names its own
+files or none:
 
 ```toml
 [plugins.command.release-github.options]
 assets = [".config/release/install.sh", ".config/release/install.ps1"]
+upgrade_guide = "https://jp.computer/releases/{version}/upgrade"
+footer = ".config/release/github.md"
 ```
 
-A Release's description is the release's notes, rendered from `main` as the site
-renders them, followed by the commands that install that release.
-Breaking entries link to the upgrade guide on JP's site rather than include it,
-as the tag's message does: GitHub gives a description no heading anchors, so
-links to its own sections would go nowhere ([GitHub discussion 48311]).
+A Release's description is the release's notes, rendered from the checkout as
+`jp release render` renders them, then the Markdown file `footer` names, with
+`{version}` and `{download}` filled in; JP's holds the commands that install
+that release.
+Breaking entries link to the release's upgrade guide at `upgrade_guide`, an
+address with `{version}` in it, rather than include it, as the tag's message
+does: GitHub gives a description no heading anchors, so links to its own
+sections would go nowhere ([GitHub discussion 48311]).
+A workspace without such an address gets the guide after the notes, where the
+links can't reach it but nothing is missing.
 The description follows `main`, while the tag keeps the notes the release was
 tagged with.
 
@@ -191,10 +201,13 @@ GitHub makes a newly published Release the latest unless told otherwise, so
 
 `publish` reads its token from `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` and talks to
 GitHub's API through `jp_github`.
-GitHub's immutable releases stay off.
-With them on, `publish` would upload to a draft before publishing it, since an
-immutable Release takes no assets afterwards, and artifact attestations would
-come from a remote builder on GitHub Actions.
+It creates a new Release as a draft, attaches its files, and then publishes it,
+so a Release never shows without them; publishing again updates the Release in
+place, replacing each file of a name it attaches and leaving files of other
+names.
+GitHub's immutable releases stay off; with them on, the draft is what lets a
+Release take its files, and artifact attestations would come from a remote
+builder on GitHub Actions.
 
 ### JP's history
 
@@ -349,9 +362,11 @@ Depends on Phase 1.
 
 ### Phase 3: `jp release github`
 
-Create the plugin with `publish`, its `assets` setting, and `sync`, add GitHub's
-Releases API to `jp_github`, set JP's `assets` to its install scripts, and run
-`sync` in JP's CI on pushes to `main` that change a version's directory.
+Create the plugin with `publish`, its `assets`, `upgrade_guide`, and `footer`
+settings, and `sync`, add GitHub's Releases API to `jp_github`, set JP's
+settings to its install scripts, its site's upgrade guides, and a footer with
+the install commands, and run `sync` in JP's CI on pushes to `main` that change
+a version's directory.
 Depends on Phases 1 and 2.
 
 ### Phase 4: JP's history
