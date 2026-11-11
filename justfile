@@ -1944,6 +1944,9 @@ ticket-import NNN *ARGS: _install-ticket
 # Builds `jp` and `jp-release` from this checkout and runs them from the target
 # directory, as `release-due` does, and installs `cargo set-version` from
 # cargo-edit, which `cut` and `pick` run to write the new version.
+#
+# Cargo is asked where the target directory is: a Cargo configuration file can
+# move it, and `CARGO_TARGET_DIR` doesn't say so.
 [group('release')]
 [positional-arguments]
 release *ARGS: (_install "cargo-edit@" + edit_version)
@@ -1951,7 +1954,8 @@ release *ARGS: (_install "cargo-edit@" + edit_version)
     set -eu
 
     cargo build {{quiet_flag}} --locked --package jp_cli --package jp-release
-    PATH="${CARGO_TARGET_DIR:-$PWD/target}/debug:$PATH" exec jp release "$@"
+    target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
+    PATH="$target/debug:$PATH" exec jp release "$@"
 
 # Ask whether the next release should be cut, as JP's daily workflow does.
 #
@@ -1972,7 +1976,8 @@ release-due *FLAGS:
     set -eu
 
     cargo build {{quiet_flag}} --locked --package jp_cli --package jp-release
-    PATH="${CARGO_TARGET_DIR:-$PWD/target}/debug:$PATH" exec jp "$@" release due
+    target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
+    PATH="$target/debug:$PATH" exec jp "$@" release due
 
 # Locally develop the documentation, with hot-reloading.
 #
