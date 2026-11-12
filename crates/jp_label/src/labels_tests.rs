@@ -118,8 +118,6 @@ fn a_comparison_matches_dates_on_its_side_of_the_operand() {
     assert!(!matches("other<2027-01-01"));
 }
 
-/// A value that isn't a date has no place in an order of dates, so a ticket
-/// carrying one is found by an exact or bare filter rather than a comparison.
 #[test]
 fn a_comparison_never_matches_a_value_that_is_not_a_date() {
     let labels = Labels::from_iter([("due", ["1w"])]);

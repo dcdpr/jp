@@ -1,8 +1,8 @@
-//! The kinds of value a vocabulary key can hold its values to.
+//! Value types for open vocabulary keys.
 //!
-//! A key that takes any value takes free text unless its entry names a `type`,
-//! which [`Vocabulary::resolve`] then holds every value written under the key
-//! to.
+//! An open key (`values = []`) accepts arbitrary text by default.
+//! When its declaration sets `type`, [`Vocabulary::resolve`] validates every
+//! value written under that key against the [`ValueType`].
 //!
 //! [`Vocabulary::resolve`]: crate::Vocabulary::resolve
 
@@ -11,21 +11,22 @@ use std::fmt;
 use chrono::NaiveDate;
 use serde::Deserialize;
 
-/// How a date is written: the only spelling a date-typed value takes.
+/// `chrono` format string for [`ValueType::Date`] values (`YYYY-MM-DD`).
 ///
-/// Fixed-width and zero-padded, so two dates order the same way as text.
+/// Fixed-width and zero-padded so lexicographic order matches chronological
+/// order.
 pub(crate) const DATE_FORMAT: &str = "%Y-%m-%d";
 
-/// The kind of value a key holds.
+/// Expected format for values of an open vocabulary key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ValueType {
-    /// A calendar date, written `YYYY-MM-DD`.
+    /// Calendar date in zero-padded `YYYY-MM-DD` format.
     Date,
 }
 
 impl ValueType {
-    /// The spelling a declaration uses: `date`.
+    /// Type name used in vocabulary declarations (for example, `"date"`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -33,8 +34,8 @@ impl ValueType {
         }
     }
 
-    /// What a value of this type looks like, in words: `a date, written
-    /// YYYY-MM-DD`.
+    /// Human-readable description of the expected format (for example, `"a
+    /// date, written YYYY-MM-DD"`).
     #[must_use]
     pub const fn describe(self) -> &'static str {
         match self {
@@ -42,8 +43,7 @@ impl ValueType {
         }
     }
 
-    /// Whether `value` is a value of this type, spelled the one way the type
-    /// spells it.
+    /// Whether `value` is a valid, canonically formatted value of this type.
     #[must_use]
     pub fn accepts(self, value: &str) -> bool {
         match self {
@@ -58,10 +58,11 @@ impl fmt::Display for ValueType {
     }
 }
 
-/// Whether `value` is a calendar date written `YYYY-MM-DD`.
+/// Whether `value` is a valid calendar date in zero-padded `YYYY-MM-DD` format.
 ///
-/// Only the zero-padded spelling is a date: `2026-1-5` parses, but would order
-/// after `2026-10-01` as text, so it is refused.
+/// `NaiveDate::parse_from_str` accepts unpadded components like `2026-1-5`,
+/// which would sort after `2026-10-01` lexicographically.
+/// Re-formatting checks that the input is zero-padded.
 pub(crate) fn is_date(value: &str) -> bool {
     NaiveDate::parse_from_str(value, DATE_FORMAT)
         .is_ok_and(|date| date.format(DATE_FORMAT).to_string() == value)

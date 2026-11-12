@@ -2996,7 +2996,6 @@ fn labelling_two_tickets_with_one_unique_label_is_refused() {
     assert!(labels_of(&dir, first).is_empty());
 }
 
-/// A board whose `due` key takes a date.
 fn dated_board() -> Options {
     let Value::Object(options) = json!({ "labels": {
         "due": { "description": "When the work is wanted.", "values": [], "max": 1, "type": "date" }
@@ -3007,7 +3006,6 @@ fn dated_board() -> Options {
     Options::read(&options).unwrap()
 }
 
-/// File a ticket on [`dated_board`] and hand back its id.
 fn add_dated(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<TicketId, String> {
     run_with_options(
         dir.path(),
@@ -3039,8 +3037,6 @@ fn a_label_that_is_not_of_its_key_s_type_is_refused() {
     assert!(store::list(dir.path()).unwrap().is_empty());
 }
 
-/// A comparison narrows to the dates on its side, which is how "what is due
-/// before Friday" is asked.
 #[test]
 fn listing_narrows_on_a_date_comparison() {
     let dir = Utf8TempDir::new().unwrap();

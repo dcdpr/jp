@@ -49,15 +49,15 @@
 //!
 //! Leaving `values` out makes a bare key instead, which takes none.
 //!
-//! A key that takes any value can hold its values to one kind with `type`, so a
-//! write is refused a value of any other kind:
+//! An open key can restrict its values to a [`ValueType`] with `type`,
+//! rejecting values of any other format on write:
 //!
 //! ```json
 //! { "due": { "description": "When the work is wanted.", "values": [], "type": "date" } }
 //! ```
 //!
-//! `date` is the only type: a calendar date written `YYYY-MM-DD`, which a
-//! [`Selector`] can compare with `<`, `<=`, `>`, and `>=`.
+//! `date` is the only supported type: a calendar date in `YYYY-MM-DD` format,
+//! which a [`Selector`] can compare with `<`, `<=`, `>`, and `>=`.
 //!
 //! A key can also be held to one item across a collection, with `unique`:
 //! `"key"` lets one item carry the key at all, and `"key-value"` lets one item
@@ -150,7 +150,6 @@ pub struct Facet {
     min: usize,
     max: Option<usize>,
     unique: Option<Unique>,
-    /// The kind of value an open key holds, declared as `type`.
     value_type: Option<ValueType>,
 }
 
@@ -184,9 +183,9 @@ impl Facet {
         self.open
     }
 
-    /// The kind of value this key holds, or `None` for free text.
+    /// Value type constraint for this key, or `None` for unrestricted text.
     ///
-    /// Only a key that takes any value has one.
+    /// Only open keys (`values = []`) can have a value type.
     #[must_use]
     pub fn value_type(&self) -> Option<ValueType> {
         self.value_type
@@ -485,8 +484,8 @@ impl Vocabulary {
     /// The tokens are the item's whole set, so each key's `min` and `max` are
     /// checked against them.
     ///
-    /// A key that takes any value keeps the value as given, once it is of the
-    /// key's `type`.
+    /// An open key preserves the value's original spelling after validating any
+    /// configured `type`.
     /// An empty vocabulary accepts every well-formed token, spelled as given.
     /// Neither checks `unique`, which needs the rest of the collection; see
     /// [`Vocabulary::clashes`].
@@ -536,8 +535,8 @@ impl Vocabulary {
                 continue;
             };
 
-            // `check` allows a `type` only on a key taking any value, so this
-            // never refuses a listed value.
+            // `check` only allows `type` on open keys (`values = []`), so this
+            // never rejects an explicitly listed value.
             if let Some(expected) = facet.value_type.filter(|kind| !kind.accepts(&value)) {
                 mistyped.push(Mistyped {
                     key: key.to_owned(),
@@ -872,7 +871,7 @@ pub struct Rejected {
     pub unknown_values: Vec<String>,
     /// Retired, and not already on the item.
     pub retired: Vec<String>,
-    /// A value that isn't of its key's `type`.
+    /// Values that do not match their key's `type`.
     pub mistyped: Vec<Mistyped>,
     /// Keys the item would carry too few or too many values of.
     pub miscounted: Vec<Miscount>,
@@ -882,7 +881,7 @@ pub struct Rejected {
     pub open_keys: Vec<String>,
 }
 
-/// A value that isn't of the kind its key's `type` holds it to.
+/// A label value that does not match its key's [`ValueType`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mistyped {
     pub key: String,
@@ -999,9 +998,9 @@ impl fmt::Display for Rejected {
             sentence(f, mistyped.to_string())?;
         }
 
-        // The whole set is offered only for a label the vocabulary refused; a
-        // miscount offers the values of its own key, and a mistyped value names
-        // its type.
+        // Only list the full vocabulary when a key or value is unknown or
+        // retired; miscounts list their own key's values, and mistyped values
+        // state the expected format.
         let refused = !self.malformed.is_empty()
             || !self.unknown_keys.is_empty()
             || !self.unknown_values.is_empty()

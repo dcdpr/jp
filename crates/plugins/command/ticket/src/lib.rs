@@ -349,8 +349,8 @@ enum Command {
         #[arg(long)]
         status: Option<Status>,
 
-        /// Only tickets carrying this label, as `key` or `key=value`, or a date
-        /// compared with `<`, `<=`, `>`, or `>=`, as `due<2026-12-01`.
+        /// Only tickets carrying this label, as `key`, `key=value`, or a date
+        /// comparison with `<`, `<=`, `>`, or `>=` (e.g. `due<2026-12-01`).
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,

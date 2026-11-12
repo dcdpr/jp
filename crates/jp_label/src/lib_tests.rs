@@ -102,8 +102,8 @@ fn a_selector_reads_its_condition() {
     });
 }
 
-/// The first `=` ends the key, so a value may hold `<` or `>` and still be
-/// matched exactly.
+/// The first `=` ends the key, so a value may contain `<` or `>` and still
+/// match.
 #[test]
 fn an_equals_before_a_comparison_makes_a_pair() {
     assert_eq!(

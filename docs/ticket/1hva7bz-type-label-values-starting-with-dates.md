@@ -1,6 +1,6 @@
 # Type label values, starting with dates
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-12
 - **Label**: domain=tooling
@@ -23,19 +23,21 @@ max = 1
 type = "date"
 ```
 
-- **Declaration.** `type` is allowed only on a key that takes any value (`values
-  = []`); on a key with listed values, or a bare key, it is a declaration error.
+- **Declaration.** `type` is allowed only on an open key (`values = []`); on a
+  key with listed values, or a bare key, it is a declaration error.
 - **Validation.** A write is refused when a value isn't a `YYYY-MM-DD` calendar
-  date, and `jp ticket check` and `jp wiki check` report existing ones that
-  aren't.
-  Checked in `Vocabulary::resolve_against`, so every consumer gets it.
+  date, and `jp ticket check` and `jp wiki check` report existing invalid
+  values.
+  `Vocabulary::resolve_against` performs this check, so every consumer inherits
+  it.
 - **Filters.** `Selector` gains `<`, `<=`, `>`, and `>=`, as in
   `due<2026-12-01`.
   The operand must be a date, or the filter is refused; a stored value that
   isn't a date doesn't match.
   Filters stay vocabulary-free, so a ticket with a malformed value can still be
   found.
-  `YYYY-MM-DD` sorts bytewise, so comparison needs no clock.
+  `YYYY-MM-DD` sorts lexicographically, so comparison needs no date parsing
+  beyond validation.
 - **Absolute only.** Values are stored and compared as dates.
   Relative input (`1w`, `+3d`) is out of scope; it can be added later as write-
   and filter-time syntax resolved against today, without changing what is

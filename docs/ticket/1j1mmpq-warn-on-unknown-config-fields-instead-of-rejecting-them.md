@@ -29,14 +29,14 @@ A config loading strictness setting, with two levels:
   A configuration targeting a newer JP still loads.
 - **Strict.** An unknown field is an error, so a typo is caught where it is
   made.
-  A field the running JP doesn't know yet is an error too, unless its path is
-  listed as allowed, which is how a strict user opts into a newer field ahead of
-  upgrading.
+  Fields from a newer JP version also fail unless their paths are explicitly
+  allowed, letting strict users opt into newer fields before upgrading.
 
-Some fields are strict whatever the setting, because dropping a misspelled one
-widens what is allowed rather than narrowing it.
-`PolicySpec` rejects unknown keys today for this reason: a dropped `oer = "1MB"`
-applies the policy to every item instead of the large ones.
+Some types remain strict regardless of the setting, because ignoring a
+misspelled key would widen permissions rather than narrow them.
+`PolicySpec` rejects unknown keys for this reason: ignoring a typo like `oer =
+"1MB"` (for `over = "1MB"`) applies the policy to every item instead of only
+large ones.
 Tool access rules are in the same position.
 The config schema marks these types, and both levels reject unknown fields
 inside them.
@@ -52,21 +52,21 @@ allow_unknown = ["providers.llm.newprovider"]
 ## Design notes
 
 - **Detection stays out of the type tree.** The `#[derive(Config)]` types accept
-  unknown fields, and unknown keys are found where a partial is read
-  (`jp_config::util` for files, the `--cfg` path, `JP_CFG_*`) and returned as
-  paths for the shell to report or refuse.
+  unknown fields, and the loader (`jp_config::util` for files, the `--cfg`
+  parser, `JP_CFG_*`) detects unknown keys when reading a partial and returns
+  their paths for the CLI to warn on or reject.
   The schema walk in `jp_conversation::compat` (`strip_unknown_fields`) already
   finds unknown paths for stored conversation configs; reuse it rather than
   adding `serde_ignored`.
-  Keys a flattened map collects on purpose, such as `ParametersConfig::other`,
-  are not unknown.
+  Keys captured by an intentional catch-all map, such as
+  `ParametersConfig::other`, are not treated as unknown.
 - **The strict marker** replaces `allow_unknown_fields` in `schematic_macros`:
   types are lenient unless marked, the inverse of today.
-- **Where the setting is read.** It governs the loading of the layers it lives
-  in, so it has to be read from the raw layers before they are checked, or from
-  an environment variable.
-  Settle which, and whether a later layer can loosen what an earlier one made
-  strict.
+- **Where the setting is read.** Because the setting governs how config layers
+  are loaded, it must be extracted from the raw layers before validation or read
+  from an environment variable.
+  Decide which mechanism to use and whether a later layer can relax a strict
+  setting from an earlier layer.
 - **Stored conversation config** keeps its own recovery in
   `jp_conversation::compat`: a conversation written by a newer JP has to load
   whatever the setting says.

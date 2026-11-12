@@ -233,9 +233,10 @@ impl Labels {
 
     /// Whether every selector matches.
     ///
-    /// Requiring all of them rather than any composes with other filters: each
-    /// selector narrows the result.
-    /// A comparison matches when any value under its key compares that way.
+    /// Requiring all selectors to match lets multiple filters narrow the
+    /// result.
+    /// A comparison selector matches if any value under its key satisfies the
+    /// comparison.
     #[must_use]
     pub fn matches(&self, selectors: &[Selector]) -> bool {
         selectors.iter().all(|selector| match &selector.condition {

@@ -90,8 +90,8 @@ fn open_and_unique_keys_are_described_in_words() {
     );
 }
 
-/// A typed key's values are described to the tools that write them, and a
-/// filter is told how to compare them.
+/// Write tools describe the expected value format; filter tools also list
+/// comparison operators.
 #[test]
 fn a_typed_key_is_described_with_its_type() {
     let vocabulary =

@@ -7,10 +7,10 @@
 //! A tool filtering by labels is also offered retired values and a bare key per
 //! facet, which is how a filter asks for any value under it.
 //!
-//! A vocabulary with a key that takes any value gets no list at all: a list
-//! holds only the values it names, so it would refuse that key's.
-//! Its labels are described in words instead, along with the `type` a key holds
-//! its values to, and for a filter, how a date-typed key is compared.
+//! A vocabulary with an open key (`values = []`) cannot use a JSON Schema
+//! `enum`, which would reject unlisted values for that key.
+//! Instead, it describes the accepted labels in prose, including any
+//! [`ValueType`] constraints and, for filters, the date comparison operators.
 
 use jp_label::{Unique, ValueType, Vocabulary};
 
@@ -135,10 +135,11 @@ fn summary(tokens: &[String], open: &[&str], rules: Option<&str>, filter: bool) 
     Some(summary)
 }
 
-/// What the vocabulary's typed keys hold their values to, as sentences, or
-/// `None` when no key has a `type`.
+/// Prose describing the [`ValueType`] constraints on the vocabulary's keys, or
+/// `None` if no key is typed.
 ///
-/// A `filter` is also told how to compare them.
+/// When `filter` is `true`, includes the comparison operators for date-typed
+/// keys.
 fn types(vocabulary: &Vocabulary, filter: bool) -> Option<String> {
     let sentences: Vec<String> = vocabulary
         .facets()

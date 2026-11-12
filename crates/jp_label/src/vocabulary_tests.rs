@@ -545,7 +545,6 @@ fn a_required_key_taking_any_value_says_how_to_add_one() {
     );
 }
 
-/// A board whose `due` key takes a date, beside a key taking any text.
 fn typed() -> Vocabulary {
     Vocabulary::parse(
         r#"{
@@ -572,8 +571,8 @@ fn a_typed_key_takes_values_of_its_type() {
     assert_eq!(labels.to_tokens(), ["due=2026-12-01", "rfd=friday"]);
 }
 
-/// The refusal names the type rather than offering every label, since the key
-/// is right and only the value is wrong.
+/// Rejecting a mistyped value reports the expected format without listing every
+/// valid label in the vocabulary.
 #[test]
 fn a_value_of_another_type_is_refused() {
     let error = typed()
@@ -599,8 +598,6 @@ fn a_value_of_another_type_is_refused() {
     );
 }
 
-/// A listed value already says what it is, and a bare key holds no value, so
-/// neither takes a `type`.
 #[test]
 fn a_type_on_a_key_not_taking_any_value_is_an_error() {
     let error = Vocabulary::parse(r#"{"due": {"values": ["soon"], "type": "date"}}"#).unwrap_err();

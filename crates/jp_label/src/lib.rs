@@ -23,9 +23,9 @@
 //! ]);
 //! ```
 //!
-//! [`Vocabulary`] is the optional other half: a declaration of which keys exist
-//! and which values each accepts, and, for a key taking any value, the
-//! [`ValueType`] those values hold to.
+//! [`Vocabulary`] is the optional other half: a declaration of which keys
+//! exist, which values each key accepts, and, for an open key, the
+//! [`ValueType`] its values must match.
 //! A consumer that wants free-form labels ignores it; one that wants a closed
 //! set resolves through it, which is what turns a user-supplied string into a
 //! [`Labels`] a write can trust.
@@ -187,20 +187,21 @@ pub struct Selector {
     pub condition: Condition,
 }
 
-/// What a [`Selector`] asks of the values under its key.
+/// Value predicate in a [`Selector`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Condition {
-    /// Any value, written as a bare `key`.
+    /// Key is present with any value (`key`).
     Present,
-    /// Exactly this value, written `key=value`.
+    /// Key has this exact value (`key=value`).
     Equals(String),
-    /// A date that compares to this one, written `key<2026-12-01`.
+    /// Key has a `YYYY-MM-DD` date value satisfying the comparison (for
+    /// example, `key<2026-12-01`).
     ///
-    /// A value under the key that isn't a date never matches.
+    /// Non-date values under the key never match.
     Compare(Comparison, String),
 }
 
-/// How a [`Condition::Compare`] orders a label's value against its operand.
+/// Relational operator for [`Condition::Compare`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Comparison {
     /// `<`
@@ -214,7 +215,7 @@ pub enum Comparison {
 }
 
 impl Comparison {
-    /// The operator a token writes: `<`, `<=`, `>`, or `>=`.
+    /// Operator symbol (`<`, `<=`, `>`, or `>=`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -225,16 +226,17 @@ impl Comparison {
         }
     }
 
-    /// Whether the date `value` compares to the date `operand` this way.
+    /// Whether `value` is a `YYYY-MM-DD` date that satisfies this comparison
+    /// against `operand`.
     ///
-    /// A `value` that isn't a date written `YYYY-MM-DD` compares to nothing.
+    /// Returns `false` if `value` is not a zero-padded `YYYY-MM-DD` date.
     #[must_use]
     pub fn holds(self, value: &str, operand: &str) -> bool {
         if !is_date(value) {
             return false;
         }
 
-        // Both sides are zero-padded dates, so they order as text.
+        // Zero-padded YYYY-MM-DD dates sort lexicographically.
         let ordering = value.cmp(operand);
         match self {
             Self::Less => ordering.is_lt(),
@@ -244,7 +246,8 @@ impl Comparison {
         }
     }
 
-    /// Split a comparison off the front of `text`, returning it and the rest.
+    /// Strip a leading comparison operator from `text`, returning the operator
+    /// and remainder.
     fn strip(text: &str) -> Option<(Self, &str)> {
         [
             Self::LessOrEqual,
@@ -261,18 +264,18 @@ impl Comparison {
 }
 
 impl Selector {
-    /// Read a selector from a token: `key`, `key=value`, or a comparison such
-    /// as `key<2026-12-01`.
+    /// Parse a selector from a `key`, `key=value`, or comparison token (such as
+    /// `key<2026-12-01`).
     ///
-    /// The key grammar holds none of `=`, `<`, and `>`, so the first of them
-    /// ends the key.
-    /// A comparison takes `<`, `<=`, `>`, or `>=`, and its operand is a date
-    /// written `YYYY-MM-DD`.
+    /// Because label keys cannot contain `=`, `<`, or `>`, the first delimiter
+    /// terminates the key.
+    /// Comparison operators (`<`, `<=`, `>`, `>=`) require a `YYYY-MM-DD` date
+    /// operand.
     ///
     /// # Errors
     ///
-    /// Returns an error when the key can't be used as written, or a
-    /// comparison's operand isn't a date.
+    /// Returns an error if the key is invalid or if a comparison operand is not
+    /// a valid `YYYY-MM-DD` date.
     pub fn parse(token: &str) -> Result<Self, KeyError> {
         let token = token.trim();
         let compared = token

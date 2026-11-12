@@ -80,8 +80,8 @@ values = []
 max = 1
 unique = "key-value"
 
-# When the work is wanted, as a date such as `2026-11-25`. A label filter
-# compares it: `due<2026-12-01`.
+# Target date for the work (`YYYY-MM-DD`, e.g. `2026-11-25`). Supports
+# comparison filters such as `due<2026-12-01`.
 [plugins.command.ticket.options.labels.due]
 description = "When the work is wanted, as a date: YYYY-MM-DD."
 values = []

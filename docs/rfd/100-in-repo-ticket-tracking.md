@@ -216,12 +216,13 @@ type = "date"
   Combining `unique = "key"` with `min >= 1` is rejected because no two tickets
   could satisfy both.
 
-- **Value type (`type`)**: `type` holds every value of an open key to one kind.
-  `type = "date"` takes a calendar date written `YYYY-MM-DD`, zero-padded so
-  that two dates order the same way as text, and refuses anything else, such as
-  `1w` or `2026-1-5`.
-  `date` is the only type.
-  A key that lists its values, or a bare key, has no `type`.
+- **Value type (`type`)**: `type` restricts the values of an open key to a
+  specific format.
+  `type = "date"` requires a zero-padded `YYYY-MM-DD` calendar date (so
+  lexicographic order matches chronological order) and rejects other values such
+  as `1w` or `2026-1-5`.
+  `date` is the only supported type.
+  Setting `type` on a closed key or a bare key is a vocabulary error.
 
 - **Validation (`jp ticket check` and writes)**: Every label write validates the
   ticket against the vocabulary.
@@ -230,10 +231,10 @@ type = "date"
   Reading is permissive: a ticket always lists the labels written in its file,
   and undeclared labels are reported by validation rather than hidden.
   `jp ticket check` (and the docs build) checks every ticket against all write
-  rules: unparseable ticket files, undeclared keys or values, values that aren't
-  of their key's `type`, `min` and `max` violations, duplicate `unique` labels
-  across tickets (such as after a hand edit or merge), duplicate ticket IDs
-  across files, and legacy four-digit filenames from before [RFD 102] that
+  rules: unparseable ticket files, undeclared keys or values, values that do not
+  match their key's `type`, `min` and `max` violations, duplicate `unique`
+  labels across tickets (such as after a hand edit or merge), duplicate ticket
+  IDs across files, and legacy four-digit filenames from before [RFD 102] that
   commands ignore.
   `jp ticket check` exits with status 1 on any violation so it can run in CI.
 
@@ -242,12 +243,14 @@ package=jp_cli` matches that exact value, while `--label package` matches any
 value under `package`.
 Repeating `--label` narrows results further, requiring every specified filter to
 match.
-A date is also compared with `<`, `<=`, `>`, or `>=`: `--label 'due<2026-12-01'`
-matches every ticket whose `due` is a date before the 1st.
-The operand has to be a date, and a value under the key that isn't one never
-matches.
-A filter reads labels as written rather than through the vocabulary, so a ticket
-carrying a malformed value is still found by its key.
+Date values also support `<`, `<=`, `>`, and `>=` comparisons: `--label
+'due<2026-12-01'` matches every ticket whose `due` label is a date before
+2026-12-01.
+The comparison operand must be a `YYYY-MM-DD` date, and non-date values under
+the key never match.
+Filters inspect labels as written in the ticket file rather than validating
+through the vocabulary, so a ticket with a malformed value can still be found
+with a bare key filter.
 
 Label subcommands add and remove individual labels rather than overwriting the
 full list, so a write never drops unrelated labels:
