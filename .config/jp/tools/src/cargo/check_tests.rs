@@ -751,7 +751,7 @@ fn new_findings_are_listed_under_their_rule_with_its_guidance() {
 
             Fix each finding. Don't silence one with a marker, a changed threshold, or an edit under `.config/rustqual/` unless the user asked for that in this conversation. If a finding looks wrong, say so. The markers rustqual accepts:
 
-            - `// qual:allow(<dimension>) reason: "<why>"` above an item suppresses that dimension's findings in it.
+            - `// qual:allow(<dimension>, <target>) reason: "<why>"` above an item suppresses that kind of finding in it.
             - `// qual:api` above a public item whose callers live outside the workspace.
             - `// qual:test_helper` above an item used only from tests."#});
 }
@@ -802,7 +802,7 @@ fn package_selects_the_findings_listed_and_counts_the_rest() {
 
             Fix each finding. Don't silence one with a marker, a changed threshold, or an edit under `.config/rustqual/` unless the user asked for that in this conversation. If a finding looks wrong, say so. The markers rustqual accepts:
 
-            - `// qual:allow(<dimension>) reason: "<why>"` above an item suppresses that dimension's findings in it.
+            - `// qual:allow(<dimension>, <target>) reason: "<why>"` above an item suppresses that kind of finding in it.
             - `// qual:api` above a public item whose callers live outside the workspace.
             - `// qual:test_helper` above an item used only from tests."#});
 }

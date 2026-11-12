@@ -1,6 +1,6 @@
 # Write per-rule rustqual guidance for tier 1 and 2 rules
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -21,16 +21,26 @@ Rule IDs are the ones rustqual's SARIF output uses (`CX-004`, `DRY-002`,
 
 ## Rules to cover
 
-Tier 1 and tier 2, the rules the burn-down mission (T-0yh5sy9) works on:
+Every rule that fails the gate, since a pull request author reads the guidance
+whether or not the burn-down mission (T-0yh5sy9) ever works on the rule.
+The list started as the mission's tier 1 and tier 2:
 
-- dead code and dead types;
-- wildcard imports;
-- magic numbers;
-- boilerplate (`BP-*`);
-- function length, cognitive and cyclomatic complexity, nesting;
-- duplicates and fragments;
-- untested functions;
-- error handling (`unwrap`, `expect`, `panic!`).
+- dead code and dead types (`DRY-002`, `DRY-006`);
+- wildcard imports: `DRY-004` is off, clippy covers it;
+- magic numbers (`CX-003`);
+- boilerplate (`BP-*`): not written.
+  All ten rules are exempt in `.config/rustqual/qual.toml`, and T-1dhk659 lists
+  what brings each back;
+- function length, cognitive and cyclomatic complexity, nesting (`CX-004`,
+  `CX-001`, `CX-002`, `CX-005`);
+- duplicates and fragments (`DRY-001`, `DRY-003`, `DRY-005`);
+- untested functions (`TQ-003`);
+- error handling (`A20`).
+
+Also cover the remaining gating rules outside the burn-down mission: `SRP-001`,
+`SRP-002`, `DEH`, `TQ-001`, and `TQ-002`.
+`CX-006` (`unsafe`) is deferred until T-1haa4rr defines the required annotation
+format.
 
 Skip rules that T-0yh5m6r exempts, and write the guidance against the thresholds
 that ticket sets: `.config/rustqual/config.toml` records them, including the
@@ -57,8 +67,40 @@ Every file covers:
 
 ## Verify
 
-Render a sample of real findings for each rule through `qual diff --format ai`
-and check that each message gives enough to act on without looking anything else
-up.
-Where rustqual's own message falls short (no threshold, no actual value), add
-the case to T-0yh5j3r.
+The files were written from rustqual's source and the 2026-11-11 workspace
+findings, and three (`A20`, `CX-003`, `DRY-002`) were verified against real
+findings via `cargo_check`.
+
+Sampling findings for the remaining rules happens at the start of each rule's
+burn-down run (T-0yh5sy9, *Before a run*), with `rejected.jsonl` providing a
+second pass after the run.
+The five rules outside the burn-down mission will be refined as pull requests
+trigger them.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T21:36:34Z
+
+Closed on 2026-11-11 with 17 files in `.config/rustqual/guidance/`: `A20`,
+`CX-001` to `CX-005`, `DRY-001`, `DRY-002`, `DRY-003`, `DRY-005`, `DRY-006`,
+`SRP-001`, `SRP-002`, `DEH`, `TQ-001`, `TQ-002`, and `TQ-003`.
+
+Not written, and tracked elsewhere:
+
+- `BP-*`: all ten rules are exempt.
+  T-1dhk659 (*Exemptions to lift*) lists the conditions for re-enabling each
+  rule, and each returning rule will need a guidance file.
+- `CX-006` (`unsafe`): waits on T-1haa4rr, which defines the required annotation
+  format.
+
+Only `A20`, `CX-003`, and `DRY-002` were verified against real findings via
+`cargo_check`.
+The remaining 14 rules are checked per rule when their burn-down run starts
+(T-0yh5sy9, *Before a run*), and the five rules outside the burn-down mission
+will be refined as pull requests trigger them.
+
+Diagnostic fields omitted from rustqual's SARIF messages are tracked in
+T-0yh5j3r (items 12 to 15).

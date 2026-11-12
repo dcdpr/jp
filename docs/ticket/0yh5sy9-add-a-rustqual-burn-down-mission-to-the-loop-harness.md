@@ -28,6 +28,33 @@ Running tier by tier means running the harness once per rule, in the tier order
 below.
 This keeps every branch uniform: one rule, reviewed once.
 
+## Before a run
+
+Validate each rule's guidance file against a sample of real findings when
+starting that rule's burn-down run (T-0yh8q2s drafted the files, and most have
+not yet been reviewed alongside live findings).
+
+The mission refuses to start when:
+
+- the rule is in `exempt` in `.config/rustqual/qual.toml`;
+- `.config/rustqual/guidance/<RULE>.md` doesn't exist.
+
+Before launching the loop, perform a manual check:
+
+- Render roughly five findings for the rule with their guidance (`qual report
+  --format ai`) across different crates, and verify that each rendered finding
+  gives enough information to make the fix without further lookup.
+- Update the guidance file in a standalone commit before the run if any
+  instructions are unclear or incomplete.
+- If rustqual's own diagnostic message is missing needed context, record the
+  issue in T-0yh5j3r.
+- If most sampled findings are false positives that the guidance says to leave
+  alone, abort the run and revisit the rule's policy in
+  `.config/rustqual/qual.toml`.
+
+After the run, review `rejected.jsonl` and fold any recurring rejection reasons
+into the guidance file.
+
 ## `next-target`
 
 Read `qual report` and print the next finding of the run's rule, one file at a
@@ -65,6 +92,11 @@ The loop never acts on them itself.
 | 1    | dead code and types, wildcard imports, magic numbers, remaining boilerplate                                 | ~800          |
 | 2    | function length, cognitive and cyclomatic complexity, nesting, duplicates and fragments, untested functions | ~800          |
 | 2    | error handling (`unwrap` → `?`): reviewed as behaviour changes, because the failure mode changes            | 194           |
+
+The boilerplate rules (`BP-*`, 256 of the tier 1 findings) are exempt in
+`.config/rustqual/qual.toml` and out of the burn-down until T-1dhk659 brings
+them back.
+`TQ-003` (untested functions) waits on T-1ha99kp.
 
 Out of scope: SRP struct and module splits, coupling, and anything tier 3.
 Those are human-led and get their own tickets, one per file, once the burn-down
