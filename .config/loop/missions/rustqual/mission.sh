@@ -30,7 +30,7 @@
 # shellcheck source=lib.sh
 source "$MISSION_DIR/lib.sh"
 
-MODEL=astra
+MODEL=sol
 ROTATE_COMMITS=10
 ROTATE_EVENTS=40
 COMPACT='r+t:..-3'       # strip reasoning + tool calls outside the last 2 turns
