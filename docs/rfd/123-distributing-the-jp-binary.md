@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-14
-- **Requires**: [RFD 122]
 - **Summary**: JP's script builds release binaries for five targets on the
   releasing Mac, and `jp release github` publishes them with their notes.
 

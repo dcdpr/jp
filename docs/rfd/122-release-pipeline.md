@@ -1,11 +1,10 @@
 # RFD 122: Release Pipeline
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
 - **Extends**: [RFD 116]
-- **Required by**: [RFD 123]
 - **Summary**: The `jp release` plugin cuts, tags, and builds releases on the
   releasing machine, keeping their notes on `main`, for the person releasing to
   publish.
