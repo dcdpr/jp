@@ -12,8 +12,8 @@
 
 This RFD defines two plain Markdown formats under `changelog.d/` for recording
 user-facing changes in pull requests: short per-change **changelog fragments**
-grouped by impact type, whose filename holds the type, and editorial
-**highlight notes** for major features, which open with their title.
+grouped by impact type, whose filename holds the type, and editorial **highlight
+notes** for major features, which open with their title.
 A `jp release` command plugin creates and validates both formats in the user's
 editor and exposes fragment creation as an assistant tool.
 A CI check requires every pull request to either add a fragment or carry the
@@ -58,8 +58,8 @@ also use.
 
 Both formats are plain Markdown files stored in the fragments directory
 (`changelog.d/`).
-Anything besides their text is held in the filename or in a metadata block of
-`- **Key**: value` lines, the same block RFDs and tickets use:
+Anything besides their text is held in the filename or in a metadata block of `-
+**Key**: value` lines, the same block RFDs and tickets use:
 
 - A **changelog fragment** records one user-visible change per file.
   Fragments are terse, categorized by impact type, and exhaustive: every
@@ -357,8 +357,8 @@ running the command again on the same branch reopens the same fragment.
 On `main`, whose name describes no change, the command asks for a slug.
 The editor is the host's `editor.cmd`, opened through the plugin protocol's
 `edit_files` request.
-When the editor closes, the file is validated with the same check as `jp
-release check`, both as written and as formatted.
+When the editor closes, the file is validated with the same check as `jp release
+check`, both as written and as formatted.
 A file that fails validation reopens in the editor, and abandoning it undoes the
 change.
 A fragment saved empty is removed.
@@ -366,8 +366,8 @@ A new highlight note opens with a `# Title` line to fill in and the user
 credited as its author, and is named after its title once saved; `jp release
 highlight <slug>` opens `highlights/<slug>.md` instead.
 
-Writing a fragment is also exposed as a plugin tool, `add`, configured in JP like
-`ticket_create`:
+Writing a fragment is also exposed as a plugin tool, `add`, configured in JP
+like `ticket_create`:
 
 ```toml
 [conversation.tools.changelog_add]

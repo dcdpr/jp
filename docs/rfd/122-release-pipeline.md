@@ -194,8 +194,8 @@ which updates `[workspace.package] version`, every crate that inherits it, and
 versioned crates under `crates/contrib/` untouched.
 Passing `--workspace` would overwrite those `crates/contrib/` versions as well.
 JP's maintainers run these commands through `just release`, which installs a
-pinned `cargo-edit`, builds `jp` and `jp-release` from the checkout, and runs `jp
-release` with the given arguments.
+pinned `cargo-edit`, builds `jp` and `jp-release` from the checkout, and runs
+`jp release` with the given arguments.
 
 ### Cutting a release
 
@@ -532,7 +532,8 @@ adds both when publishing the document.
 ### The release model
 
 The `changelog` crate builds and serializes a release model from a
-`changelog.d/<version>/` directory or from everything no finalized release ships.
+`changelog.d/<version>/` directory or from everything no finalized release
+ships.
 That unreleased model holds the fragments at the root of `changelog.d/` and the
 directory of every release without a tag, so a release's entries count as
 unreleased until it is tagged, however early its notes branch merged.
@@ -924,8 +925,8 @@ Depends on [RFD 121] Phases 2 and 3.
 Implement version computation from tags and release branches, the `bump` hook,
 release branch and notes branch creation in the local repository from the
 checked-out commit (printing the `git push` that publishes them), `pick`
-(including fragment moves and copies onto the notes branch), patch releases,
-and `finalize` (with the release notes as the tag message).
+(including fragment moves and copies onto the notes branch), patch releases, and
+`finalize` (with the release notes as the tag message).
 Configure `bump` for JP, and enable CI checks on pushes to `release/*`.
 Depends on Phase 1.
 

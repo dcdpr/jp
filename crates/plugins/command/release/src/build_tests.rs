@@ -2,7 +2,7 @@ use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{cut::cut, finalize::finalize, options::Options, repository_testing::Fixture};
+use crate::{cut::cut, options::Options, repository_testing::Fixture};
 
 /// A `bump` that writes the version into `VERSION`, wherever git runs.
 const BUMP: &str = "git config --file VERSION version.current {version}";
@@ -16,10 +16,6 @@ const COMMIT: &str = "8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b";
 
 /// The archive the tests' builds write.
 const ARCHIVE: &str = "jp-x86_64-unknown-linux-gnu.tar.xz";
-
-/// The SHA-256 of `an archive\n`, which the tests' builds write into
-/// [`ARCHIVE`], as `shasum -a 256` gives it.
-const HASH: &str = "4cd36b3ca046f7c17e81e1aa31bf2dc6a91b98c94238810db57456b4904d3a22";
 
 /// The platform [`ARCHIVE`] is for.
 const TARGET: &str = "x86_64-unknown-linux-gnu";
@@ -79,17 +75,6 @@ fn cut_0_1_0() -> Fixture {
     fixture.commit("fix: Retry (#1)");
     fixture.push();
     run(&fixture, |pipeline| cut(pipeline, None, None)).unwrap();
-
-    fixture
-}
-
-/// [`cut_0_1_0`], with its notes merged, finalized, and everything published.
-fn finalized_0_1_0() -> Fixture {
-    let fixture = cut_0_1_0();
-    fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
-    fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0");
-    run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
-    fixture.publish(&["v0.1.0"]);
 
     fixture
 }
@@ -202,6 +187,23 @@ fn a_release_neither_tagged_nor_in_preparation_is_not_built() {
 #[cfg(unix)]
 mod built {
     use super::*;
+    use crate::finalize::finalize;
+
+    /// The SHA-256 of `an archive\n`, which the tests' builds write into
+    /// [`ARCHIVE`], as `shasum -a 256` gives it.
+    const HASH: &str = "4cd36b3ca046f7c17e81e1aa31bf2dc6a91b98c94238810db57456b4904d3a22";
+
+    /// [`cut_0_1_0`], with its notes merged, finalized, and everything
+    /// published.
+    fn finalized_0_1_0() -> Fixture {
+        let fixture = cut_0_1_0();
+        fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
+        fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0");
+        run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
+        fixture.publish(&["v0.1.0"]);
+
+        fixture
+    }
 
     /// A build script that prints a line on stdout and one on stderr, then
     /// writes [`ARCHIVE`], its checksum, and a manifest naming what it was

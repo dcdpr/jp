@@ -2,8 +2,8 @@
 //! opened in the user's editor and checked when the editor closes.
 //!
 //! The editor runs on the host, which owns the terminal ([`Host`]).
-//! [`fragment`] and [`highlight`] reach it through [`Editing`], so what happens
-//! after an edit can be tested without one.
+//! [`fragment()`] and [`highlight()`] reach it through [`Editing`], so what
+//! happens after an edit can be tested without one.
 //!
 //! A file that doesn't follow its format is offered back to the editor, and one
 //! given up on is undone: a new file is removed, and an existing one restored.
