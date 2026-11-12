@@ -419,21 +419,21 @@ fn zero_count_on_one_side_leaves_the_other_window() {
 fn turn_open_ended_ranges_cover_both_ends() {
     // `--turn 3..` is turn 3 through the last turn.
     let onward = TurnSelection {
-        turn: Some(TurnSpec::Range(Some(TurnPos::Absolute(3)), None)),
+        turn: vec![TurnSpec::Range(Some(TurnPos::Absolute(3)), None)],
         ..Default::default()
     };
     assert_eq!(windows(&onward, 5), vec![(2, 4)]);
 
     // `--turn ..3` is the first three turns.
     let up_to = TurnSelection {
-        turn: Some(TurnSpec::Range(None, Some(TurnPos::Absolute(3)))),
+        turn: vec![TurnSpec::Range(None, Some(TurnPos::Absolute(3)))],
         ..Default::default()
     };
     assert_eq!(windows(&up_to, 5), vec![(0, 2)]);
 
     // `--turn ..` is the whole conversation.
     let all = TurnSelection {
-        turn: Some(TurnSpec::Range(None, None)),
+        turn: vec![TurnSpec::Range(None, None)],
         ..Default::default()
     };
     assert_eq!(windows(&all, 5), vec![(0, 4)]);
@@ -686,17 +686,17 @@ fn validate_allows_equal_keep_and_count_on_both_windows() {
 #[test]
 fn check_turn_range_rejects_endpoints_past_the_conversation() {
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Single(TurnPos::Absolute(7))),
+        turn: vec![TurnSpec::Single(TurnPos::Absolute(7))],
         ..Default::default()
     };
     assert!(selection.check_turn_range(5).is_err());
     assert!(selection.check_turn_range(7).is_ok());
 
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Range(
+        turn: vec![TurnSpec::Range(
             Some(TurnPos::Absolute(2)),
             Some(TurnPos::Absolute(9)),
-        )),
+        )],
         ..Default::default()
     };
     assert!(selection.check_turn_range(5).is_err());
@@ -704,7 +704,7 @@ fn check_turn_range_rejects_endpoints_past_the_conversation() {
     // A from-end endpoint is checked against the same count, and the error
     // quotes it as written.
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Single(TurnPos::FromEnd(6))),
+        turn: vec![TurnSpec::Single(TurnPos::FromEnd(6))],
         ..Default::default()
     };
     assert_eq!(
@@ -727,13 +727,121 @@ fn the_turns_alias_parses_the_same_value_as_turn() {
     let parse = |flag: &str| parse(&[flag, "2..4"]).unwrap().turn;
 
     assert_eq!(parse("--turn"), parse("--turns"));
+    assert_eq!(parse("--turns"), vec![TurnSpec::Range(
+        Some(TurnPos::Absolute(2)),
+        Some(TurnPos::Absolute(4))
+    )]);
+}
+
+#[test]
+fn turn_list_parses_from_one_value_or_from_repeated_flags() {
+    let expected = vec![
+        TurnSpec::Single(TurnPos::Absolute(1)),
+        TurnSpec::Range(Some(TurnPos::Absolute(3)), Some(TurnPos::Absolute(10))),
+        TurnSpec::Single(TurnPos::Absolute(15)),
+    ];
+
+    assert_eq!(parse(&["--turn=1,3..10,15"]).unwrap().turn, expected);
+    assert_eq!(parse(&["--turn", "1,3..10,15"]).unwrap().turn, expected);
     assert_eq!(
-        parse("--turns"),
-        Some(TurnSpec::Range(
-            Some(TurnPos::Absolute(2)),
-            Some(TurnPos::Absolute(4))
-        ))
+        parse(&["--turn", "1", "--turn", "3..10", "--turn", "15"])
+            .unwrap()
+            .turn,
+        expected
     );
+}
+
+#[test]
+fn turn_list_rejects_an_empty_or_malformed_item() {
+    assert!(parse(&["--turn=1,,3"]).is_err());
+    assert!(parse(&["--turn=1,0"]).is_err());
+    assert!(parse(&["--turn=1,x"]).is_err());
+}
+
+/// A list that starts with a from-end position needs `=`: clap only reads a
+/// separate `-N` word as a value when the whole word is a number.
+#[test]
+fn turn_list_starting_with_a_from_end_position_needs_an_equals_sign() {
+    assert_eq!(parse(&["--turn=-3,-1"]).unwrap().turn, vec![
+        TurnSpec::Single(TurnPos::FromEnd(3)),
+        TurnSpec::Single(TurnPos::FromEnd(1)),
+    ]);
+    assert!(parse(&["--turn", "-3,-1"]).is_err());
+}
+
+#[test]
+fn turn_list_selects_every_item() {
+    let selection = parse(&["--turn=1,3..4,6"]).unwrap();
+    assert_eq!(windows(&selection, 8), vec![(0, 0), (2, 3), (5, 5)]);
+
+    // Items are a set: their order does not matter, and a from-end position
+    // sorts by the turn it resolves to.
+    let selection = parse(&["--turn=-1,1"]).unwrap();
+    assert_eq!(windows(&selection, 5), vec![(0, 0), (4, 4)]);
+}
+
+/// The bounds of each window `selection.windows` returns for `count` turns,
+/// before keep-trimming and before `TurnSet` coalesces them.
+fn base_windows(selection: &TurnSelection, count: usize) -> Vec<(usize, usize)> {
+    let events = stream(count);
+    selection
+        .windows(&events)
+        .iter()
+        .filter_map(|window| resolve_window(window, &events))
+        .map(|w| (w.from, w.to))
+        .collect()
+}
+
+/// A command that acts per window, like `compact`, must not act twice on a turn
+/// two list items share.
+#[test]
+fn turn_list_items_that_share_a_turn_are_one_window() {
+    let selection = parse(&["--turn=1..4,3..6"]).unwrap();
+    assert_eq!(base_windows(&selection, 8), vec![(0, 5)]);
+
+    // A from-end item overlaps by the turn it resolves to: `-2` is turn 7.
+    let selection = parse(&["--turn=5..7,-2.."]).unwrap();
+    assert_eq!(base_windows(&selection, 8), vec![(4, 7)]);
+
+    // An item inside another adds nothing.
+    let selection = parse(&["--turn=1..6,3"]).unwrap();
+    assert_eq!(base_windows(&selection, 8), vec![(0, 5)]);
+}
+
+/// Items that only abut are two regions to a command that acts per window, and
+/// still one run of turns once resolved into a `TurnSet`.
+#[test]
+fn turn_list_items_that_abut_stay_separate_windows() {
+    let selection = parse(&["--turn=1..3,4..6"]).unwrap();
+
+    assert_eq!(base_windows(&selection, 8), vec![(0, 2), (3, 5)]);
+    assert_eq!(windows(&selection, 8), vec![(0, 5)]);
+}
+
+#[test]
+fn check_turn_range_checks_every_item_of_a_list() {
+    let selection = parse(&["--turn=1,9"]).unwrap();
+    assert_eq!(
+        selection.check_turn_range(5).unwrap_err(),
+        "turn 9 out of range (conversation has 5 turns)"
+    );
+    assert!(selection.check_turn_range(9).is_ok());
+
+    let selection = parse(&["--turn=1,4..2"]).unwrap();
+    assert_eq!(
+        selection.check_turn_range(5).unwrap_err(),
+        "range 4..2 is not valid: turn 2 comes before turn 4"
+    );
+}
+
+#[test]
+fn turn_list_conflicts_with_the_other_base_selectors() {
+    assert!(parse(&["--turn=1,3", "--first", "2"]).is_err());
+    assert!(parse(&["--turn=1,3", "--from", "2"]).is_err());
+
+    // Keep flags still compose, trimming every window.
+    let selection = parse(&["--turn=1..2,5..8", "--keep-last", "2"]).unwrap();
+    assert_eq!(windows(&selection, 8), vec![(0, 1), (4, 5)]);
 }
 
 /// A backward range names no turn in any conversation, so it is malformed
@@ -742,10 +850,10 @@ fn the_turns_alias_parses_the_same_value_as_turn() {
 #[test]
 fn check_turn_range_rejects_a_range_that_ends_before_it_starts() {
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Range(
+        turn: vec![TurnSpec::Range(
             Some(TurnPos::Absolute(2)),
             Some(TurnPos::Absolute(1)),
-        )),
+        )],
         ..Default::default()
     };
 
@@ -763,10 +871,10 @@ fn check_turn_range_rejects_a_range_that_ends_before_it_starts() {
 #[test]
 fn check_turn_range_resolves_from_end_positions_before_comparing_them() {
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Range(
+        turn: vec![TurnSpec::Range(
             Some(TurnPos::FromEnd(1)),
             Some(TurnPos::FromEnd(3)),
-        )),
+        )],
         ..Default::default()
     };
 
@@ -777,10 +885,10 @@ fn check_turn_range_resolves_from_end_positions_before_comparing_them() {
 
     // The ascending spelling of the same pair is fine.
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Range(
+        turn: vec![TurnSpec::Range(
             Some(TurnPos::FromEnd(3)),
             Some(TurnPos::FromEnd(1)),
-        )),
+        )],
         ..Default::default()
     };
     assert!(selection.check_turn_range(5).is_ok());
@@ -798,7 +906,7 @@ fn check_turn_range_accepts_every_range_with_an_open_end() {
         TurnSpec::Range(Some(TurnPos::Absolute(3)), Some(TurnPos::Absolute(3))),
     ] {
         let selection = TurnSelection {
-            turn: Some(spec.clone()),
+            turn: vec![spec.clone()],
             ..Default::default()
         };
         assert!(
