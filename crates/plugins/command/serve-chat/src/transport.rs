@@ -44,8 +44,7 @@ pub(crate) struct Inbound {
     /// of its messages.
     pub addressed: bool,
 
-    /// Whether the message starts by mentioning the bridge's own account, as a
-    /// command to it does.
+    /// Whether the message begins with a mention of the bridge's own account.
     pub leading_mention: bool,
 
     /// Message text; empty if the message contained only attachments.
@@ -54,16 +53,16 @@ pub(crate) struct Inbound {
     pub attachments: Vec<Attachment>,
 }
 
-/// A file received with a message.
+/// File attachment on an [`Inbound`] message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Attachment {
-    /// The MIME type the sender's app reported.
+    /// MIME type reported by the transport.
     pub content_type: String,
 
-    /// The file name the sender's app reported, if any.
+    /// Original filename, if reported.
     pub name: Option<String>,
 
-    /// Where the transport saved it on this machine, if it did.
+    /// Local path where the transport saved the attachment, if available.
     pub path: Option<Utf8PathBuf>,
 }
 

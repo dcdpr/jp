@@ -688,9 +688,8 @@ async fn build_compaction_for_range(
 /// summarizer request, so a rule that turns out to be unsatisfiable cannot
 /// strand a paid request made for an earlier one.
 ///
-/// `printer` receives progress output and may be omitted; `notices` receives
-/// the summarizer's provider notices, such as a switch onto another credential,
-/// and cannot be.
+/// `printer` receives progress output when present; `notices` receives provider
+/// notices from the summarizer (such as credential fallbacks).
 pub(crate) async fn build_compaction_events(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,

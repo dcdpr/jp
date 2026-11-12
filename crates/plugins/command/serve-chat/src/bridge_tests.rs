@@ -33,17 +33,9 @@ struct HostLog {
     /// Custom response text returned instead of `"Answer from
     /// <conversation>."`.
     answer: Option<String>,
-
-    /// The `--cfg` of every turn started, in order.
     cfgs: Vec<Vec<String>>,
-
-    /// What [`Host::tools`] answers.
     tools: Result<Vec<String>, String>,
-
-    /// Compactions waiting for the test to finish them, in order.
     compactions: Vec<oneshot::Sender<Result<Vec<StoredCompaction>, String>>>,
-
-    /// What every compaction asked for, in order.
     compacted: Vec<Vec<Compaction>>,
 }
 
@@ -354,7 +346,6 @@ fn fixture() -> Fixture {
     }
 }
 
-/// Conversations kept in memory, on the date `today` holds.
 fn clocked(today: &Arc<Mutex<NaiveDate>>, rollover: Rollover) -> Conversations {
     let clock = Arc::clone(today);
     Conversations::with_clock(State::in_memory(), rollover, move || *clock.lock().unwrap())
@@ -381,7 +372,6 @@ fn in_group(sender: &str, text: &str) -> Inbound {
     }
 }
 
-/// Wait until `condition` holds, failing after five seconds.
 async fn eventually(condition: impl Fn() -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
         while !condition() {
@@ -584,8 +574,6 @@ async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
     assert!(f.host.calls().is_empty());
 }
 
-/// The model can't open an image, but it can write where it is into a ticket,
-/// so a maintainer can copy it off the bridge's machine.
 #[tokio::test]
 async fn an_attachment_reaches_the_turn_as_where_it_was_saved() {
     let mut f = fixture();
@@ -821,8 +809,6 @@ async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
     assert_eq!(calls[2], "query c2 \"Next Saturday\"");
 }
 
-/// Answers each question with the next of its scripted results, and records
-/// what it was asked and which actions it was offered.
 #[derive(Default)]
 struct FakeDecider {
     answers: Mutex<Vec<Result<Verdict, String>>>,
@@ -839,7 +825,6 @@ impl Decide for FakeDecider {
     }
 }
 
-/// A group message that starts by mentioning the assistant, as a command does.
 fn command(sender: &str, text: &str) -> Inbound {
     Inbound {
         addressed: true,
@@ -855,7 +840,6 @@ fn verdict(action: Action, probability: f64) -> Verdict {
     }
 }
 
-/// A fixture whose bridge asks a decider, answering in turn with `answers`.
 fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>) {
     let mut f = fixture();
     let decider = Arc::new(FakeDecider {
@@ -907,10 +891,6 @@ async fn a_group_message_the_decider_answers_starts_a_turn() {
     );
 }
 
-/// Commands are offered only for a message that starts by mentioning the
-/// assistant, or one in a direct chat.
-/// A mention later in the message, or a reply to the assistant, is offered
-/// answering or ignoring it.
 #[tokio::test]
 async fn only_a_message_that_may_give_a_command_is_offered_the_commands() {
     let (mut f, decider) = deciding(vec![
@@ -940,8 +920,6 @@ async fn only_a_message_that_may_give_a_command_is_offered_the_commands() {
     ]);
 }
 
-/// The decider decides, even for a message that mentions the assistant: nothing
-/// overrides an `ignore`.
 #[tokio::test]
 async fn a_message_the_decider_ignores_gets_no_turn_even_when_it_names_the_assistant() {
     let (mut f, _) = deciding(vec![Ok(verdict(Action::Ignore, 0.95))]);
@@ -952,7 +930,6 @@ async fn a_message_the_decider_ignores_gets_no_turn_even_when_it_names_the_assis
     assert!(f.host.calls().is_empty(), "{:?}", f.host.calls());
 }
 
-/// A wasted turn costs less than a question nobody answers.
 #[tokio::test]
 async fn an_unsure_or_failed_decision_answers_the_message() {
     let (mut f, _) = deciding(vec![
@@ -974,8 +951,6 @@ async fn an_unsure_or_failed_decision_answers_the_message() {
     ]);
 }
 
-/// "@JP start over" gets no turn of its own: the chat's next turn runs in a new
-/// conversation instead of the current one.
 #[tokio::test]
 async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
     let (mut f, _) = deciding(vec![
@@ -1005,10 +980,7 @@ async fn asking_for_a_new_conversation_starts_the_next_turn_in_one() {
     assert!(calls[1].starts_with("start "), "{calls:?}");
 }
 
-/// "@JP compact" compacts the chat's conversation through the host, gets no
-/// turn of its own, and is answered with what was compacted.
-/// A message sent meanwhile waits for the compaction, rather than finding the
-/// conversation locked.
+// Messages arriving during compaction stay queued until compaction finishes.
 #[tokio::test]
 async fn asking_to_compact_compacts_the_conversation_and_says_what_changed() {
     let (mut f, _) = deciding(vec![
@@ -1091,8 +1063,6 @@ async fn a_compaction_the_host_refuses_says_why() {
                                   compact in conversation c1."]);
 }
 
-/// The running turn holds the conversation, so a compaction would find it
-/// locked.
 #[tokio::test]
 async fn asking_to_compact_during_a_turn_in_that_chat_waits_for_the_answer() {
     let (mut f, _) = deciding(vec![
@@ -1138,9 +1108,6 @@ async fn asking_to_compact_before_any_conversation_says_there_is_none() {
     assert!(f.host.calls().is_empty());
 }
 
-/// "Rank it first", then, while the turn runs, an unaddressed "actually
-/// second": once the decider says it is for the assistant, it goes into the
-/// running turn.
 #[tokio::test]
 async fn a_correction_the_decider_answers_goes_into_the_running_turn() {
     let (mut f, _) = deciding(vec![
@@ -1160,8 +1127,6 @@ async fn a_correction_the_decider_answers_goes_into_the_running_turn() {
     ]);
 }
 
-/// The decider reads the assistant's last answer, which is what a short
-/// follow-up such as "why?" refers to.
 #[tokio::test]
 async fn a_decision_reads_the_assistants_last_answer() {
     let (mut f, decider) = deciding(vec![
@@ -1183,9 +1148,6 @@ async fn a_decision_reads_the_assistants_last_answer() {
     );
 }
 
-/// "Move it to the top", then "actually second" while the conversation is still
-/// being created, then "actually third" once it exists: the turn gets the
-/// corrections in the order they were sent, one reply at a time.
 #[tokio::test]
 async fn corrections_reach_the_turn_in_the_order_they_were_sent() {
     let mut f = fixture();
@@ -1204,8 +1166,6 @@ async fn corrections_reach_the_turn_in_the_order_they_were_sent() {
     ]);
 }
 
-/// A reply the turn didn't take goes to the next turn ahead of the message that
-/// arrived while it was in flight.
 #[tokio::test]
 async fn a_refused_reply_goes_ahead_of_what_came_after_it() {
     let mut f = fixture();
@@ -1225,9 +1185,6 @@ async fn a_refused_reply_goes_ahead_of_what_came_after_it() {
     ]);
 }
 
-/// A group message from someone other than the person a turn runs as waits for
-/// a turn of its own, so what it asks for is attributed to them; the next
-/// message from the first person waits behind it.
 #[tokio::test]
 async fn another_persons_message_gets_a_turn_of_its_own() {
     let mut f = fixture();
@@ -1315,8 +1272,6 @@ async fn every_turn_disables_the_configured_tools() {
     }
 }
 
-/// Without the tool list there is nothing to disable, and a turn run anyway
-/// would have whatever tools the base configuration enables.
 #[tokio::test]
 async fn a_turn_whose_tools_cant_be_read_does_not_start() {
     let mut f = fixture();
@@ -1360,10 +1315,6 @@ fn tool_names_skip_the_defaults_and_unwrap_a_strategy() {
     );
 }
 
-/// The transport stopping mid-turn doesn't end the turn: the host runs it to
-/// its end after the plugin exits.
-/// The bridge keeps the checkout locked until then, and checks what the turn
-/// wrote.
 #[tokio::test]
 async fn the_transport_stopping_waits_for_the_running_turn() {
     let Fixture {
@@ -1398,8 +1349,6 @@ async fn the_transport_stopping_waits_for_the_running_turn() {
     assert!(!host.calls().iter().any(|call| call.starts_with("stop")));
 }
 
-/// A shutdown asks the running turn to stop, and keeps the checkout locked
-/// until it has.
 #[tokio::test]
 async fn a_shutdown_stops_the_running_turn_and_waits_for_it() {
     let Fixture {
@@ -1435,14 +1384,6 @@ async fn a_shutdown_stops_the_running_turn_and_waits_for_it() {
     drop(inbound_tx);
 }
 
-/// The workspace's planner persona, under the bridge's per-turn settings and
-/// layered the way the host layers `--cfg`, leaves enabled exactly the tools
-/// the persona names, over a configuration that enables a file-writing tool and
-/// a shell.
-///
-/// `--cfg` entries are applied as `jp` reads them: a JSON object at the root,
-/// `key=value` as one assignment, and anything else as a file under
-/// `.jp/config`.
 #[test]
 fn the_planner_persona_enables_only_its_own_tools_over_a_permissive_base() {
     let root = Utf8PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../..");

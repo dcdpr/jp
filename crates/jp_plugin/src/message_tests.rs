@@ -527,7 +527,6 @@ fn turn(n: i64) -> NonZeroI64 {
     NonZeroI64::new(n).unwrap()
 }
 
-/// Two differently shaped compactions in one request, every policy spelled out.
 #[test]
 fn a_compact_request_carries_its_compactions() {
     let json = r#"{"type":"compact","id":"c1","conversation":"123","compactions":[{"from":2,"to":-2,"reasoning":{"over_bytes":16384},"tool_calls":{"mode":"strip_responses","over_bytes":1048576}},{"from":1,"to":12,"summary":{"generate":{"model":"haiku","context":"the decisions"}}},{"from":-3,"to":-1,"reasoning":{},"summary":{"text":"We agreed on the design."}}]}"#;
@@ -579,8 +578,7 @@ fn a_compact_request_carries_its_compactions() {
     assert_eq!(serde_json::to_string(&msg).unwrap(), json);
 }
 
-/// A field the host doesn't know would be dropped, and the plugin would get a
-/// compaction other than the one it asked for.
+// Unknown fields are rejected so typos do not silently alter the compaction.
 #[test]
 fn a_compact_request_with_an_unknown_field_is_refused() {
     for json in [

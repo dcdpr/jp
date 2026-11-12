@@ -1,13 +1,9 @@
-//! Messages from configured people, in the order they arrived, until the bridge
-//! takes them.
+//! Ordered buffer of inbound messages awaiting pre-turn classification.
 //!
-//! With a decider configured, each message waits for the decider to say what
-//! the bridge does with it.
-//! Every message behind it waits too, so the bridge takes a chat's messages in
-//! the order they were sent.
-//!
-//! The inbox also keeps each chat's last few lines, which a decision reads as
-//! context, and the senders the bridge has already reported as unknown.
+//! When a [`Decide`] client is configured, messages are classified one at a
+//! time in arrival order so later messages cannot overtake earlier ones.
+//! [`Inbox`] also tracks recent chat lines for classification context and the
+//! set of unconfigured sender IDs that have already been reported.
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -19,13 +15,13 @@ use crate::{
     transport::Chat,
 };
 
-/// How many recent lines of a chat a decision reads.
+/// Maximum number of recent lines retained per chat for decision context.
 const RECENT_LINES: usize = 8;
 
-/// The most characters of one line a decision reads.
+/// Maximum characters per line retained in decision context.
 const MAX_LINE: usize = 500;
 
-/// A message on its way to the bridge.
+/// Inbound message buffered in the [`Inbox`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Incoming {
     pub chat: Chat,
@@ -33,25 +29,23 @@ pub(crate) struct Incoming {
     /// Key of the sender in `options.people`.
     pub person: String,
 
-    /// What the turn reads, with the sender's name in a group.
+    /// Formatted message text, prefixed with the sender's name in group chats.
     pub text: String,
 
-    /// Whether it may give the assistant a command, such as starting a new
-    /// conversation: it was sent in a direct chat, or starts by mentioning the
-    /// assistant in a group.
+    /// Whether the message can issue a command (sent in a direct chat, or
+    /// starting with a bot mention in a group).
     pub commands: bool,
 
-    /// What a decision about it reads, for a message that waits for one.
+    /// Recent chat transcript passed to the decider, if configured.
     pub context: Option<String>,
 }
 
-/// What the bridge does next with the inbox.
+/// Next step for the front message in the [`Inbox`].
 pub(crate) enum Next {
-    /// Take this message.
+    /// Route the message immediately.
     Take(Incoming),
 
-    /// Wait for this decision about the first message, and pass its result to
-    /// [`Inbox::decided`].
+    /// Await this decision for the front message, then call [`Inbox::decided`].
     Decide(Decision),
 }
 
@@ -71,17 +65,16 @@ pub(crate) struct Inbox {
 }
 
 impl Inbox {
-    /// Ask `decider` what to do with each message.
     pub(crate) fn decide_with(&mut self, decider: Option<Arc<dyn Decide>>) {
         self.decider = decider;
     }
 
-    /// Record `id` as reported, returning whether it wasn't before.
+    /// Record `id` as seen and return `true` if this is the first sighting.
     pub(crate) fn first_sighting(&mut self, id: &str) -> bool {
         self.strangers.insert(id.to_owned())
     }
 
-    /// Add `line` to what was said in `chat`.
+    /// Append `line` to the recent transcript for `chat`.
     pub(crate) fn remember(&mut self, chat: &Chat, line: &str) {
         let lines = self.recent.entry(chat.clone()).or_default();
         lines.push_back(line.chars().take(MAX_LINE).collect());
@@ -90,8 +83,7 @@ impl Inbox {
         }
     }
 
-    /// Queue `text` from `person` in `chat`, to wait for a decision when there
-    /// is a decider.
+    /// Enqueue a message from `person` in `chat`.
     pub(crate) fn push(&mut self, chat: Chat, person: String, text: String, commands: bool) {
         let context = self.decider.is_some().then(|| self.context(&chat, &text));
         self.remember(&chat, &text);
@@ -104,10 +96,8 @@ impl Inbox {
         });
     }
 
-    /// What to do next: take the first message, or wait for a decision about
-    /// it.
-    ///
-    /// `None` while a decision is in flight, or nothing is waiting.
+    /// Return the next action for the front message, or `None` if empty or a
+    /// decision is already in flight.
     pub(crate) fn next(&mut self) -> Option<Next> {
         if self.deciding {
             return None;
@@ -124,14 +114,14 @@ impl Inbox {
         }
     }
 
-    /// The message the decision in flight was about.
+    /// Pop and return the message whose in-flight decision just completed.
     pub(crate) fn decided(&mut self) -> Option<Incoming> {
         self.deciding = false;
         self.pending.pop_front()
     }
 
-    /// What a decision about `text` in `chat` reads: the lines before it, then
-    /// it.
+    /// Format the decision prompt state for `text` using recent lines from
+    /// `chat`.
     fn context(&self, chat: &Chat, text: &str) -> String {
         let mut context = String::new();
         if let Some(lines) = self.recent.get(chat).filter(|lines| !lines.is_empty()) {

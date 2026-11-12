@@ -13,7 +13,6 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 
-/// A conversation of `turns` turns, each a question and an answer.
 fn workspace_with_turns(turns: usize) -> (Workspace, ConversationId, Utf8TempDir) {
     let tmp = tempdir().unwrap();
     let fs = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
@@ -53,7 +52,6 @@ fn lock(ws: &Workspace, id: ConversationId) -> ConversationLock {
     lock
 }
 
-/// The 0-based turn ranges stored as compactions, in order.
 fn compacted(ws: &Workspace, id: ConversationId) -> Vec<(usize, usize)> {
     lock(ws, id).with_events(|events| {
         events
@@ -94,8 +92,6 @@ fn tool_calls(from: i64, to: i64, mode: ToolCallsMode) -> Compaction {
     }
 }
 
-/// Two differently shaped compactions in one request, stored in the order they
-/// were asked for, with the turns they resolved to.
 #[tokio::test]
 async fn compactions_are_stored_in_order_with_their_turns() {
     let (ws, id, _tmp) = workspace_with_turns(6);
@@ -136,7 +132,6 @@ async fn compactions_are_stored_in_order_with_their_turns() {
     assert_eq!(compacted(&ws, id), [(1, 4), (4, 5)]);
 }
 
-/// Each mode is stored as the mode asked for, and reported back as it.
 #[tokio::test]
 async fn every_tool_calls_mode_is_stored_as_asked() {
     let (ws, id, _tmp) = workspace_with_turns(4);
@@ -165,8 +160,8 @@ async fn every_tool_calls_mode_is_stored_as_asked() {
     );
 }
 
-/// The first compaction is fine, and is still not stored: the request is
-/// refused as a whole.
+// When a later compaction fails validation, earlier valid compactions in the
+// same request are not stored.
 #[tokio::test]
 async fn a_compaction_with_nothing_to_do_refuses_the_whole_request() {
     let (ws, id, _tmp) = workspace_with_turns(3);
@@ -246,9 +241,8 @@ async fn a_blank_summary_text_is_refused() {
     assert_eq!(compacted(&ws, id), []);
 }
 
-/// The second summary would split the first, which a summary can't stand in
-/// for: refused before anything is stored, and without the command's flag
-/// advice.
+// Overlapping verbatim summaries are rejected before persistence, with CLI
+// flag suggestions omitted.
 #[tokio::test]
 async fn a_summary_that_would_split_an_earlier_one_is_refused() {
     let (ws, id, _tmp) = workspace_with_turns(6);
@@ -295,8 +289,6 @@ async fn an_unknown_summary_model_is_refused() {
     );
 }
 
-/// Only the id changes: a summary model named in the request keeps the
-/// conversation's model parameters, as `--model` does.
 #[test]
 fn a_named_summary_model_keeps_the_conversations_model_settings() {
     let config = AppConfig::new_test();

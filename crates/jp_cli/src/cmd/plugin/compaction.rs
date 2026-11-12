@@ -1,11 +1,10 @@
-//! Compactions a plugin asks the host to add to a conversation.
+//! Handler for plugin `compact` requests.
 //!
-//! A `compact` request carries typed compactions, each a turn range and the
-//! policies to apply to it.
-//! Each becomes the rule an inline `--compact SPEC` produces, and is planned
-//! and built by the same code as `jp conversation compact`.
-//! The request is refused as a whole: nothing is stored unless every compaction
-//! in it can be.
+//! Converts each [`Compaction`] in a `compact` request into a
+//! [`CompactionRuleConfig`] and runs it through the same planning and execution
+//! pipeline as `jp conversation compact`.
+//! Validation is atomic: no compactions are persisted unless every entry in the
+//! request succeeds.
 
 use std::{num::NonZeroI64, slice};
 
@@ -32,20 +31,16 @@ use crate::cmd::{
     turn_selection::TurnSelection,
 };
 
-/// Add `compactions` to the conversation `lock` holds, in order.
+/// Apply `compactions` in order to the locked conversation.
 ///
-/// `config` is the conversation's configuration: a summary model named by alias
-/// resolves through its aliases, and a summary without a model uses its
-/// assistant model.
+/// Resolves model aliases and the default summarizer model against `config`.
 ///
 /// # Errors
 ///
-/// Returns why the request was refused, naming the compaction at fault by its
-/// 1-based position: one with no policy, an unknown model, a range that selects
-/// no turns, a blank summary text, or a summary that would overlap one stored
-/// already.
-/// A summarizer that fails, or a conversation that can't be written, is an
-/// error too.
+/// Returns an error if the request is empty, if any compaction (identified by
+/// its 1-based index) has no policy, names an unknown model, selects no turns,
+/// provides blank summary text, or overlaps an existing summary, or if summary
+/// generation or persistence fails.
 pub(crate) async fn compact(
     compactions: &[Compaction],
     config: &AppConfig,
@@ -83,8 +78,8 @@ pub(crate) async fn compact(
         }
     }
 
-    // Plans every compaction together before the first summary is generated,
-    // so an overlap between two of them is refused before a model is paid.
+    // Plan all compactions together before generating summaries so overlaps
+    // between rules are caught before calling a model.
     let notices = NoticeSink::new(|notice| warn!(%notice, "Compaction notice."));
     let built = build_compaction_events(&events, config, &rules, &selection, None, &notices)
         .await
@@ -100,8 +95,7 @@ pub(crate) async fn compact(
     Ok(stored)
 }
 
-/// The rule compaction `number` asks for, as the equivalent inline spec
-/// produces it.
+/// Convert the 1-based compaction `number` into a [`CompactionRuleConfig`].
 fn rule(
     number: usize,
     compaction: &Compaction,
@@ -144,8 +138,8 @@ fn rule(
         .resolve(&config.providers.llm.aliases)
         .map_err(|error| format!("compaction {number}: unknown model `{model}`: {error}"))?;
 
-    // The conversation's model settings with only the id changed, as `jp
-    // conversation compact --model` does.
+    // Keep the conversation's model parameters and override only the model ID,
+    // matching `jp conversation compact --model`.
     let mut summary_model = config.assistant.model.clone();
     summary_model.id = ModelIdOrAliasConfig::Id(id);
     if let Some(summary) = rule.summary.as_mut() {
@@ -155,8 +149,8 @@ fn rule(
     Ok(rule)
 }
 
-/// A turn on the wire as a rule bound: `n` is the 1-based turn `n`, `-n` the
-/// `n`th turn from the last.
+/// Convert a wire turn index into a [`RuleBound`] (`n` is 1-based from the
+/// start; `-n` is `n`th from the end).
 fn bound(turn: NonZeroI64) -> RuleBound {
     let count = usize::try_from(turn.get().unsigned_abs()).unwrap_or(usize::MAX);
 
@@ -176,7 +170,7 @@ fn rule_mode(mode: ToolCallsMode) -> RuleToolCallsMode {
     }
 }
 
-/// The summary settings of a rule; the model is set once the rule is built.
+/// Build partial summary settings; `rule` resolves the model after finalizing.
 fn summary(summary: &SummaryCompaction) -> PartialSummaryConfig {
     match summary {
         SummaryCompaction::Text(text) => PartialSummaryConfig {
@@ -191,7 +185,7 @@ fn summary(summary: &SummaryCompaction) -> PartialSummaryConfig {
     }
 }
 
-/// A stored compaction as the reply reports it, with 1-based turns.
+/// Convert a stored compaction event to its 1-based wire representation.
 fn stored(compaction: &StoredEvent) -> StoredCompaction {
     let turn = |index: usize| u64::try_from(index + 1).unwrap_or(u64::MAX);
 
@@ -235,11 +229,8 @@ fn wire_mode(policy: &ToolCallPolicy) -> Option<ToolCallsMode> {
     }
 }
 
-/// A refusal as `jp conversation compact` reports it: what went wrong, then
-/// what the error adds, such as why a summary would overlap.
-///
-/// A suggestion is left out: it names the command's flags, which a plugin can't
-/// pass.
+/// Format a compaction error with its metadata details, omitting CLI flag
+/// suggestions (`suggestion`) that do not apply to plugin requests.
 fn describe(error: &cmd::Error) -> String {
     let Some(message) = &error.message else {
         return error.to_string();

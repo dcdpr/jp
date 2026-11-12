@@ -44,14 +44,14 @@ const MAX_MESSAGE: usize = 1800;
 
 pub(crate) type Logger = Arc<dyn Fn(Level, String) + Send + Sync>;
 
-/// The bridge's own Signal account, as reading its messages needs it.
+/// Identifiers and attachment directory for the bridge's Signal account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Account {
-    /// The account's phone number and UUID, which mark a mention of the bridge
-    /// or a reply to it.
+    /// Account phone number and UUID used to detect mentions of and replies to
+    /// the bridge.
     pub ids: Vec<String>,
 
-    /// Where `signal-cli` saves the attachments it receives.
+    /// Directory where `signal-cli` saves received attachments.
     pub attachments: Utf8PathBuf,
 }
 
@@ -311,11 +311,13 @@ fn message(envelope: &Value, account: &Account) -> Option<Inbound> {
     })
 }
 
-/// The attachments of a `dataMessage`, with where `signal-cli` saved each.
+/// Extract attachments from a `dataMessage`, resolving each local file path
+/// under `account.attachments`.
 ///
-/// `signal-cli` names the saved file by the attachment's `id`, using only
-/// letters, digits, `_`, `.`, and `-`; an `id` holding anything else, or none,
-/// gets no path rather than one that could point outside the directory.
+/// `signal-cli` names saved files after the attachment `id` (ASCII
+/// alphanumerics, `_`, `.`, and `-`).
+/// Any `id` with other characters or a leading `.` is rejected so paths cannot
+/// escape the attachments directory.
 fn attachments(data: &Value, account: &Account) -> Vec<Attachment> {
     let Some(attachments) = data.get("attachments").and_then(Value::as_array) else {
         return vec![];
@@ -334,7 +336,7 @@ fn attachments(data: &Value, account: &Account) -> Vec<Attachment> {
         .collect()
 }
 
-/// Whether `id` is a plain file name in `signal-cli`'s spelling.
+/// Return whether `id` is a safe `signal-cli` attachment filename.
 fn is_file_name(id: &str) -> bool {
     !id.starts_with('.')
         && id
@@ -342,7 +344,6 @@ fn is_file_name(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
-/// The non-empty string at `name` in `envelope`.
 fn field(envelope: &Value, name: &str) -> Option<String> {
     envelope
         .get(name)
@@ -351,8 +352,8 @@ fn field(envelope: &Value, name: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-/// The sender's identifiers in `envelope`, most stable first and without
-/// repeats: the account UUID, then the phone number, which a sender may hide.
+/// Extract deduplicated sender identifiers from `envelope` (UUID first, then
+/// phone number).
 fn sender(envelope: &Value) -> Vec<String> {
     let mut ids: Vec<String> = vec![];
     for id in ["sourceUuid", "sourceNumber", "source"]

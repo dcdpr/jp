@@ -63,7 +63,6 @@ fn unset_options_take_their_defaults() {
     );
 }
 
-/// Read in the request's own shape, as a TOML array of tables gives it.
 #[test]
 fn compact_names_the_compactions_to_ask_for() {
     let mut options = minimal();
@@ -112,8 +111,8 @@ fn an_empty_compact_list_is_refused() {
     );
 }
 
-/// `jp` would refuse the field anyway; refusing it here makes a typo fail when
-/// the bridge starts, not when someone first asks to compact.
+// Unknown fields are rejected at startup rather than when a user requests
+// compaction.
 #[test]
 fn a_compaction_with_an_unknown_field_is_refused() {
     let mut options = minimal();
@@ -146,7 +145,6 @@ fn an_empty_decide_table_asks_jev_with_the_default_question() {
     );
 }
 
-/// A local server that asks for no token.
 #[test]
 fn an_empty_decide_api_key_env_sends_no_token() {
     let mut options = minimal();

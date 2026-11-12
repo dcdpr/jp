@@ -9,40 +9,39 @@
 - **Label**: relevant-rfd=049
 - **Label**: type=pre-rfd
 
-D18 (Plugin Event Subscriptions and Query Delegation) bundles two things: live
-event streaming to plugins, and letting a plugin answer the prompts a turn it
-started would put to a person.
-The second is wanted on its own: it is what T-1hetcnt needs to ask for tool-call
-approval over the chat bridge.
-Take it out into its own RFD, and leave D18 with the event subscriptions.
+D18 (Plugin Event Subscriptions and Query Delegation) bundles two features: live
+event streaming to plugins, and forwarding interactive prompts from a
+plugin-delegated turn back to the plugin.
+Prompt forwarding is needed independently by T-1hetcnt to support tool-call
+approvals over the chat bridge.
+Split interactive plugin prompts into a dedicated RFD and narrow D18 to event
+subscriptions.
 
 What is settled so far:
 
-- **Interactive means someone answers every question.** A turn a plugin starts
-  runs as interactive, and the plugin is that someone.
-  It is asked every question the host would ask a person at a terminal, and may
-  answer any of them with a fixed reply: answering some for real and the rest
-  with fixed replies is the plugin's choice.
-- **A question says what it is.** A prompt carries its kind (a tool approval, a
-  tool's own question, a result review), the question, and its answers.
-  Each answer has a name, an optional description, and a short key, so a
-  terminal can show keys and a chat can show names.
-  A raw menu of `y/Y/n/N/p/r/e` keys means nothing to a plugin.
-- **Declining.** Every prompt can be declined.
-  A question with a default takes it; one without fails the way RFD 049
-  describes for nobody being there (a tool approval is refused, and the turn
-  continues).
-- **Secrets never leave the host.** A plugin is never sent a secret prompt; the
-  host declines it.
-- **No opt-in flag.** The host sends prompts only to plugins built for the
-  protocol version that adds them.
-  `jp-serve-web` moves to that version and declines everything, which keeps its
-  behaviour unchanged.
+- **Delegated turns run interactively through the plugin.** The host sends every
+  prompt it would show at a terminal to the plugin, and the plugin chooses which
+  prompts to present to the user and which to answer automatically or decline.
+- **Structured prompt kinds.** Each prompt carries its kind (tool approval, tool
+  question, or result review), the question text, and the candidate answers.
+  Each answer has a name, an optional description, and a short key so a terminal
+  UI can display keys while a chat UI displays names, rather than exposing raw
+  `y/Y/n/N/p/r/e` terminal menu keys.
+- **Declining.** Every prompt can be answered with `decline`.
+  A question with a default uses that default; otherwise the host applies the
+  detached prompt fallback from RFD 049 (refusing the tool approval and
+  continuing the turn).
+- **Secrets stay on the host.** Secret prompts are never sent over the plugin
+  protocol; the host declines them directly.
+- **Protocol-version gated.** The host sends prompts only to plugins that
+  declare the protocol version introducing them.
+  `jp-serve-web` moves to that version and declines all prompts, preserving its
+  current behavior.
 
-Open: the answer shapes (D18 has `approve` / `reject` / `modify` for approvals
-and `answer` for inquiries), how long the host waits before declining on the
-plugin's behalf, and which other paths that read `interactive` need a prompt
-kind of their own.
+Open questions: the exact response payloads (D18 uses `approve` / `reject` /
+`modify` for approvals and `answer` for inquiries), the host timeout before
+declining on the plugin's behalf, and which other `interactive` checks in the
+turn loop need a dedicated prompt kind.
 
 Related: RFD 049 (non-interactive prompt policy), D60 (the reverse direction: a
 plugin asking the host), D18.

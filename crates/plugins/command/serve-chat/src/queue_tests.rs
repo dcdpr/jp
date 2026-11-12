@@ -31,8 +31,6 @@ fn consecutive_messages_from_one_person_form_one_batch() {
     assert_eq!(queue.next_turn(), None);
 }
 
-/// A message sent during a compaction waits for it, rather than finding the
-/// conversation locked.
 #[test]
 fn a_held_queue_starts_no_turn_until_released() {
     let mut queue = Queue::default();
@@ -49,8 +47,6 @@ fn a_held_queue_starts_no_turn_until_released() {
     );
 }
 
-/// Two compactions in two chats: the first to finish doesn't let a turn start
-/// on the conversation the second is still compacting.
 #[test]
 fn a_queue_held_twice_waits_for_both_releases() {
     let mut queue = Queue::default();
@@ -68,7 +64,6 @@ fn a_queue_held_twice_waits_for_both_releases() {
     );
 }
 
-/// A batch is attributed to one person, so a turn writes as whoever asked.
 #[test]
 fn another_person_starts_a_batch_of_their_own() {
     let mut queue = Queue::default();
@@ -92,7 +87,6 @@ fn a_reply_is_claimed_once_until_it_is_answered() {
     assert!(queue.try_reply(&direct("a")));
 }
 
-/// A message sent after one still waiting would overtake it.
 #[test]
 fn a_reply_waits_behind_an_earlier_message_from_its_chat() {
     let mut queue = Queue::default();
@@ -133,7 +127,6 @@ fn the_next_reply_is_the_first_batch_for_the_chat_from_the_turns_person() {
     assert_eq!(queue.next_turn(), None);
 }
 
-/// A reply the turn refused was sent before what is waiting, so it goes first.
 #[test]
 fn a_refused_reply_goes_ahead_of_its_chat() {
     let mut queue = Queue::default();

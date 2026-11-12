@@ -62,14 +62,11 @@ const DEFAULT_DECIDE_KEY_ENV: &str = "JEV_API_KEY";
 
 const DEFAULT_DECIDE_THRESHOLD: f64 = 0.5;
 
-/// The second turn, where the default compaction starts.
 const SECOND_TURN: NonZeroI64 = NonZeroI64::new(2).unwrap();
 
-/// The second-to-last turn, where the default compaction ends.
 const SECOND_TO_LAST_TURN: NonZeroI64 = NonZeroI64::new(-2).unwrap();
 
-/// The question the decide API answers for each message, unless
-/// `decide.instructions` replaces it.
+/// Default prompt sent to the decide API when `decide.instructions` is unset.
 pub(crate) const DEFAULT_DECIDE_INSTRUCTIONS: &str =
     "What should the assistant do with the last message in this chat?";
 
@@ -98,30 +95,28 @@ pub(crate) struct Options {
     /// Additional `--cfg` values applied after `persona` on every turn.
     pub cfg: Vec<String>,
 
-    /// The model asked whether a group message is meant for the assistant, if
-    /// any; without one, every message is.
+    /// Optional pre-turn message classifier configuration.
     pub decide: Option<DecideOptions>,
 
-    /// The compactions a request to compact asks `jp` for, in order.
+    /// Compaction rules sent to the host when a user requests compaction.
     pub compact: Vec<Compaction>,
 }
 
-/// A decide API in the System One request format: a model answering a question
-/// about a chat with a probability.
+/// Configuration for the System One decide API.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DecideOptions {
     pub url: String,
     pub model: String,
 
-    /// The environment variable holding the API token; `None` sends no token,
-    /// for a server that asks for none.
+    /// Environment variable holding the bearer token, or `None` for
+    /// unauthenticated endpoints.
     pub api_key_env: Option<String>,
 
-    /// The least probability at which the bridge takes the action the model
-    /// chose; below it, the message is answered.
+    /// Minimum probability required to act on the model's choice; below this
+    /// threshold, the bridge defaults to answering.
     pub threshold: f64,
 
-    /// The question asked about each message.
+    /// Question prompt sent to the decide model.
     pub instructions: String,
 }
 
@@ -304,9 +299,9 @@ impl Options {
     }
 }
 
-/// The compactions `compact` names, or the default: reasoning and tool calls
-/// stripped from every turn but the first and the last, as the built-in
-/// `conversation.compaction.rules` rule does.
+/// Validate `compact`, defaulting to stripping reasoning and tool calls from
+/// turns `2..-2` (matching the built-in `conversation.compaction.rules`
+/// default).
 fn compact(raw: Option<Vec<Compaction>>) -> Result<Vec<Compaction>, String> {
     let Some(compactions) = raw else {
         return Ok(vec![Compaction {
@@ -374,8 +369,8 @@ fn decide(raw: RawDecide) -> Result<DecideOptions, String> {
     })
 }
 
-/// Read `conversation_ttl`, defaulting by `rollover`, and refuse one shorter
-/// than a conversation lasts.
+/// Validate `conversation_ttl`, defaulting based on `rollover` and rejecting
+/// durations shorter than the rollover period.
 fn conversation_ttl(raw: Option<String>, rollover: Rollover) -> Result<String, String> {
     let conversation_ttl = raw.unwrap_or_else(|| {
         match rollover {

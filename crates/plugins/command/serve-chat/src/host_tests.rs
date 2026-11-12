@@ -1,5 +1,4 @@
-//! `HostClient` against an in-process host: what it writes is captured, and the
-//! test writes the host's answers into a pipe the client reads.
+//! Unit tests for [`HostClient`] over in-memory pipes.
 
 use std::{
     io::{self, BufReader, PipeWriter},
@@ -15,7 +14,6 @@ use serde_json::json;
 
 use super::*;
 
-/// What the client wrote to the host, one message per line.
 #[derive(Clone, Default)]
 struct Written(Arc<Mutex<Vec<u8>>>);
 
@@ -61,13 +59,11 @@ fn fixture() -> Fixture {
     }
 }
 
-/// Write `message` to the client as the host.
 fn answer(host: &Mutex<PipeWriter>, message: &HostToPlugin) {
     let mut host = host.lock().unwrap();
     writeln!(host, "{}", serde_json::to_string(message).unwrap()).unwrap();
 }
 
-/// Wait until `condition` holds, failing after five seconds.
 async fn eventually(condition: impl Fn() -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
         while !condition() {
@@ -106,8 +102,6 @@ fn done(id: &str) -> HostToPlugin {
     })
 }
 
-/// The bridge sends a reply only once a turn is known to run, so the query has
-/// to reach the host before `query` returns, not when the turn is awaited.
 #[tokio::test]
 async fn a_query_is_written_before_its_turn_is_awaited() {
     let f = fixture();
@@ -143,9 +137,6 @@ async fn a_query_the_host_refuses_fails_with_its_message() {
     assert_eq!(within(turn).await, Err("conversation is locked".to_owned()));
 }
 
-/// The host can answer `created` and `query_complete` back to back: both
-/// waiters are registered before the request goes out, so neither answer is
-/// dropped for arriving before something listens for it.
 #[tokio::test]
 async fn start_takes_created_and_the_turns_end_sent_back_to_back() {
     let f = fixture();
@@ -201,8 +192,6 @@ async fn start_reports_the_hosts_refusal() {
     assert_eq!(result.err(), Some("unknown persona".to_owned()));
 }
 
-/// The host answers a reply with `done` once the turn took it, or with an error
-/// when no turn was left to take it, which the bridge queues instead.
 #[tokio::test]
 async fn a_reply_is_taken_or_refused() {
     let f = fixture();
@@ -238,8 +227,6 @@ fn stripped() -> StoredCompaction {
     }
 }
 
-/// The compactions go out as given, and the ones stored come back as the host
-/// reported them.
 #[tokio::test]
 async fn compact_sends_the_compactions_and_returns_the_stored_ones() {
     let f = fixture();
@@ -304,8 +291,6 @@ async fn stop_asks_the_running_turn_to_stop() {
     )]);
 }
 
-/// The tool names come from the configuration as it is on disk now, not as it
-/// was when the bridge started.
 #[tokio::test]
 async fn tools_reads_the_configuration_again() {
     let f = fixture();
@@ -357,8 +342,6 @@ async fn events_returns_the_transcript() {
     assert_eq!(events, Ok(vec![json!({ "type": "turn_start" })]));
 }
 
-/// When the host goes away, a turn waiting on it ends rather than hanging, and
-/// the bridge is told to shut down.
 #[tokio::test]
 async fn a_closed_host_ends_every_waiting_request_and_shuts_down() {
     let Fixture {
@@ -389,8 +372,6 @@ async fn a_shutdown_message_shuts_down() {
         .unwrap();
 }
 
-/// An answer nobody waits for, such as one for a request that timed out, is
-/// dropped without disturbing the requests that are still waiting.
 #[tokio::test]
 async fn an_answer_nobody_waits_for_is_dropped() {
     let f = fixture();

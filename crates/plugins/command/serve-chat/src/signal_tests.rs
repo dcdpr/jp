@@ -85,8 +85,6 @@ fn a_sender_with_a_hidden_number_is_named_by_account_id() {
     );
 }
 
-/// `signal-cli` saves an attachment in its attachments directory under the
-/// attachment's `id`, and reports the sender's file name separately.
 #[test]
 fn an_attachment_is_where_signal_cli_saved_it() {
     let line = r#"{"jsonrpc":"2.0","method":"receive","params":{"envelope":{"sourceUuid":"33333333-3333-4333-8333-333333333333","dataMessage":{"message":null,"attachments":[{"contentType":"image/png","filename":"crash.png","id":"Xd9f-2a_k.png","size":2048}]}},"account":"+31600000000"}}"#;
@@ -102,8 +100,6 @@ fn an_attachment_is_where_signal_cli_saved_it() {
     }]);
 }
 
-/// An `id` that isn't a plain file name could name a file outside the
-/// directory, so it gets no path.
 #[test]
 fn an_attachment_id_that_is_not_a_file_name_gets_no_path() {
     for id in ["../../.ssh/id_ed25519", ".hidden", "a/b.png"] {
@@ -146,7 +142,6 @@ fn leading_mention(line: &str) -> bool {
     }
 }
 
-/// "@bot compact" can be a command; "so @bot, compact" is talk about it.
 #[test]
 fn only_a_message_starting_with_a_mention_of_the_bridge_leads_with_it() {
     let leading = group_message(

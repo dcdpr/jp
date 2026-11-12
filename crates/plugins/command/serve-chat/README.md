@@ -32,15 +32,15 @@ and the bridge sends the turn's final response back to the chat.
   example, `Ada Client via jp`).
 - Turns run non-interactively, so tools configured with `run = "ask"` execute
   without prompting.
-  Before each turn the bridge reads the configured tools from the host, and the
-  turn's `--cfg` disables every one of them before applying the persona, so the
-  tools the persona enables by name are the only ones the turn has, whatever a
-  user or workspace config enables.
-  A turn doesn't start when the tool list can't be read, or holds a tool whose
-  name contains a `.`, which a `--cfg` key can't address.
-- When `jp serve chat` is stopped, or `signal-cli` exits, during a turn, the
-  bridge stops the turn (on a stop) or lets it finish (when `signal-cli` exits),
-  checks what it wrote, and only then exits and releases the checkout.
+  Before each turn, the bridge reads the configured tools from the host and
+  prepends a `--cfg` override that disables all of them before applying the
+  persona, so only the tools enabled by name in the persona are active.
+  If the tool list cannot be read or contains a tool name with a `.` (which
+  `--cfg` key assignment cannot address), the turn is refused.
+- If `jp serve chat` receives a shutdown signal or `signal-cli` exits while a
+  turn is running, the bridge stops the turn (on shutdown) or waits for it to
+  finish (when `signal-cli` exits), verifies the working tree, and only then
+  releases the checkout lock and exits.
 
 ## Group chats
 
@@ -82,11 +82,12 @@ They are offered only for a message that starts by mentioning the bot, such as
 Any other message is answered or ignored, so two people talking about starting
 over don't reset the bot's conversation.
 
-Compacting sends `jp` the compactions in `compact`, each a range of turns and
-what to do to it, and the bot replies with what was compacted.
-A turn is counted from 1, or from -1 at the end, and both ends are inclusive.
-The default strips reasoning and tool calls from every turn but the first and
-the last, without calling a model:
+`compact` sends the host the compaction rules configured in `options.compact`
+and replies with a summary of the compacted turns.
+Turn indices are 1-based from the start of the conversation or negative from the
+end (`-1` is the last turn), and both bounds are inclusive.
+By default, it strips reasoning and tool calls from turns `2` through `-2`
+without calling a model:
 
 ```toml
 [[plugins.command.serve-chat.options.compact]]
@@ -111,29 +112,30 @@ to = -2
 tool_calls = { mode = "strip_responses", over_bytes = 4096 }
 ```
 
-`tool_calls.mode` is `strip`, `strip_requests`, `strip_responses`, or `omit`.
-`summary` is `{ text = "..." }` to give the summary yourself, or `{ generate = {
-model, instructions, context } }`, every key optional, to have a model write it.
-If any compaction can't be applied, such as one whose range selects no turns,
-none is.
+`tool_calls.mode` accepts `strip`, `strip_requests`, `strip_responses`, or
+`omit`.
+`summary` accepts `{ text = "..." }` for a verbatim summary or `{ generate = {
+model, instructions, context } }` (all keys optional) to generate one with a
+model.
+Compaction is atomic: if any rule fails (for example, because its range selects
+no turns), none of the rules are applied.
 
-A message sent while a compaction runs waits for it; a request to compact while
-the bot is answering in that chat is turned down, since the turn holds the
-conversation.
+Messages arriving while a compaction is running stay queued until it finishes; a
+compaction request sent while a turn is already running in that chat is refused
+because the turn holds the conversation lock.
 
-- The bridge takes the action only when the model gives it at least `threshold`;
-  otherwise, and when the API fails, the message is answered, and a failure is
-  logged.
-- The model's choice is final: a message it ignores gets no turn, even one that
-  mentions the bot.
-- The model reads the chat's last eight lines, the assistant's answers included,
-  so a follow-up such as "why?" can count as meant for it.
-  Those lines leave the machine: they go to `decide.url`.
-- Messages wait for a decision in the order they arrived, so a correction can't
-  overtake the message it corrects.
-  A correction the model answers goes into the running turn, like any other
-  message from the person the turn runs as.
-- The persona's `NO_REPLY` rule still applies to the messages that get through.
+- The bridge applies the chosen action only when its probability is at least
+  `threshold`; below that threshold, or if the decide API fails, the bridge
+  defaults to answering (and logs API failures).
+- A message classified as `ignore` starts no turn, even if it mentions the bot.
+- Each decide request includes the chat's last eight lines (including the
+  assistant's answers) so short follow-ups such as "why?" have context.
+  Those lines are sent to `decide.url`.
+- Messages are classified one at a time in arrival order so a follow-up cannot
+  overtake an earlier message.
+  A follow-up from the active turn's sender that is classified as `answer` is
+  delivered as an in-turn reply.
+- The persona's `NO_REPLY` sentinel still applies to turns that run.
 
 Signal mentions may reference the bridge's account by UUID (ACI) instead of
 phone number.
@@ -148,10 +150,10 @@ Files written by a turn stay uncommitted in the working tree until you pull them
 into a local review worktree with `just chat-take`, which then resets the
 bridge's working tree.
 
-- A turn holds the lock at `git rev-parse --git-path jp-serve-chat.lock`; `just
-  chat-take` takes the same lock, through `take.sh`, which it runs on the
-  bridge's host and which stops at the first failing command, before discarding
-  anything.
+- Each turn holds an exclusive `flock` on `git rev-parse --git-path
+  jp-serve-chat.lock`.
+  `just chat-take` acquires the same lock via `take.sh` on the remote host and
+  aborts on any command failure before resetting the checkout.
 - The clone is pulled (`--ff-only`) before a turn and every `pull_interval`,
   only while the working tree is clean.
 - After each turn, every modified or untracked path must be under

@@ -1412,13 +1412,12 @@ async fn prepare_turn(
     Ok((inputs, stream))
 }
 
-/// Add the compactions a plugin asked for to a conversation.
+/// Spawn a task to apply a plugin's `compact` request to a conversation.
 ///
-/// `None` means the compaction is under way and will send its own reply,
-/// correlated by the request's id.
-/// It runs on a task of its own because a compaction that generates a summary
-/// calls a model, and the message loop has to keep answering meanwhile.
-/// Anything returned is a failure that happened before it started.
+/// Returns `None` once the background task is spawned; the task sends the
+/// correlated reply when compaction finishes.
+/// Returns `Some` if locking or config resolution fails before the task can
+/// start.
 fn run_compact(
     ctx: &Ctx,
     request: CompactRequest,

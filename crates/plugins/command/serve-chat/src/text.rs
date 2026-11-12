@@ -14,7 +14,7 @@
 //! measures: styling removes markup but turns each `- ` bullet into the larger
 //! `• `.
 
-/// The most `#`s a Markdown heading opens with.
+/// Maximum `#` prefix length for a Markdown heading.
 const MAX_HEADING_LEVEL: usize = 6;
 
 /// Plain text and `start:length:STYLE` UTF-16 ranges for `signal-cli`.
@@ -139,7 +139,7 @@ pub(crate) fn styled(markdown: &str) -> Styled {
     }
 }
 
-/// UTF-8 size in bytes of `markdown` once [`styled`].
+/// Byte length of `markdown` after [`styled`] conversion.
 fn size(markdown: &str) -> usize {
     styled(markdown).text.len()
 }
@@ -231,8 +231,8 @@ fn fit(block: &str, max: usize) -> Vec<String> {
     pieces
 }
 
-/// The largest character boundary in `line` whose prefix styles to at most
-/// `max` bytes, and at least one character so a split always makes progress.
+/// Return the largest character boundary in `line` whose styled prefix is at
+/// most `max` bytes (always advancing by at least one character).
 fn cut(line: &str, max: usize) -> usize {
     let mut cut = line.floor_char_boundary(max.min(line.len()));
     while cut > 0 && size(&line[..cut]) > max {

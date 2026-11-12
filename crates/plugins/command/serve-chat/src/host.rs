@@ -57,7 +57,7 @@ pub(crate) enum ReplyError {
     Broken(String),
 }
 
-/// Severity of a log line sent to the host, spelled as the protocol takes it.
+/// Log severity level for `log` protocol messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Level(&'static str);
 
@@ -78,12 +78,12 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
 
     /// Start a turn on an existing `conversation`.
     ///
-    /// The request reaches the host before this returns, so a reply sent after
-    /// it reaches the host after it.
+    /// Sends the `query` request synchronously before returning the [`Turn`]
+    /// future.
     fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn;
 
-    /// Add `compactions` to `conversation`, resolving with the compactions
-    /// stored, or why none was.
+    /// Compact `conversation` with `compactions` and return the stored
+    /// compactions.
     fn compact(
         &self,
         conversation: &str,
@@ -98,18 +98,16 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
         content: &str,
     ) -> impl Future<Output = Result<(), ReplyError>> + Send + 'static;
 
-    /// Stop the running turn on `conversation`, keeping what it produced.
-    ///
-    /// Resolves once the turn has acted on it, or with an error when no turn
-    /// was left to reach.
+    /// Stop the active turn on `conversation`, keeping the output produced so
+    /// far.
     fn stop(&self, conversation: &str)
     -> impl Future<Output = Result<(), String>> + Send + 'static;
 
     fn events(&self, conversation: &str)
     -> impl Future<Output = Result<Vec<Value>, String>> + Send;
 
-    /// Names of the tools the host's configuration defines, read from disk
-    /// again.
+    /// Reload the host configuration from disk and return the configured tool
+    /// names.
     fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send;
 
     fn log(&self, level: Level, message: &str);
@@ -132,8 +130,8 @@ pub(crate) struct HostClient {
 }
 
 impl HostClient {
-    /// A client writing to `stdout`, which reads no answers until
-    /// [`Self::listen`] is called.
+    /// Create a client that writes requests to `stdout`.
+    /// Call [`Self::listen`] to start reading responses.
     pub(crate) fn new(stdout: impl Write + Send + 'static) -> Self {
         Self {
             writer: Arc::new(Mutex::new(Box::new(stdout))),
@@ -142,8 +140,8 @@ impl HostClient {
         }
     }
 
-    /// Read the host's messages from `stdin` on a thread of its own, and hand
-    /// each answer to the request waiting for it.
+    /// Spawn a background thread to read host messages from `stdin` and
+    /// dispatch responses to waiting callers.
     ///
     /// The returned receiver becomes `true` when the host sends `shutdown` or
     /// closes stdin.
@@ -299,8 +297,8 @@ impl Host for HostClient {
             expires_in: None,
         });
 
-        // Written now rather than when the turn is first awaited, so it precedes
-        // any reply the bridge sends once it knows the turn is running.
+        // Send the request immediately so any subsequent in-turn reply is ordered
+        // after it.
         let rx = self.register(&id);
         if let Err(error) = self.send(&message) {
             self.forget(&id);
@@ -371,8 +369,7 @@ impl Host for HostClient {
                 compactions,
             });
 
-            // No deadline: a compaction that generates a summary calls a model,
-            // which takes as long as it takes.
+            // No timeout: summary compactions call an LLM.
             match client.request(&id, &message, None).await? {
                 HostToPlugin::Compacted(compacted) => Ok(compacted.compactions),
                 HostToPlugin::Error(error) => Err(error.message),
@@ -440,12 +437,10 @@ impl Host for HostClient {
     }
 }
 
-/// The tool names in a serialized `conversation.tools` table.
+/// Extract configured tool names from a serialized `conversation.tools` value.
 ///
-/// The table holds the `*` defaults beside one entry per tool, or, for a map
-/// that states its merge strategy, the entries under `value`.
-/// No table means no tools; anything else is an error rather than an empty
-/// list, since a caller disables the tools it names.
+/// Skips the `*` defaults entry and unwraps `{ value, strategy }` merge tables.
+/// Returns an error if `tools` is present but not an object.
 pub(crate) fn tool_names(tools: Option<&Value>) -> Result<Vec<String>, String> {
     let table = match tools {
         None | Some(Value::Null) => return Ok(vec![]),

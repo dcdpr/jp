@@ -117,10 +117,9 @@ impl State {
     }
 }
 
-/// The clock that decides which rollover period today falls in.
 type Clock = Box<dyn Fn() -> NaiveDate + Send + Sync>;
 
-/// Which conversation each chat is on in the current rollover period.
+/// Active conversation tracker for each chat in the current rollover period.
 pub(crate) struct Conversations {
     state: State,
     rollover: Rollover,
@@ -138,7 +137,6 @@ impl Conversations {
         }
     }
 
-    /// Track conversations in `state`, with today's date read from `today`.
     #[cfg(test)]
     pub(crate) fn with_clock(
         state: State,
@@ -161,14 +159,14 @@ impl Conversations {
         self.rollover.start((self.today)())
     }
 
-    /// The conversation `chat` is on in the current period, if it has one.
+    /// Return the active conversation ID for `chat` in the current period, if
+    /// any.
     pub(crate) fn current(&self, chat: &Chat) -> Option<&str> {
         self.state.conversation(chat, self.period())
     }
 
-    /// Record `conversation` as `chat`'s conversation for the current period.
-    ///
-    /// Writes nothing when it already is.
+    /// Record `conversation` as `chat`'s active conversation for the current
+    /// period, skipping the disk write if unchanged.
     pub(crate) fn record(&mut self, chat: &Chat, conversation: &str) -> Result<(), String> {
         let period = self.period();
         if self.state.conversation(chat, period) == Some(conversation) {
@@ -178,7 +176,7 @@ impl Conversations {
         self.state.set(chat, period, conversation)
     }
 
-    /// Forget `chat`'s conversation, so its next turn starts a new one.
+    /// Clear `chat`'s recorded conversation so its next turn starts a new one.
     pub(crate) fn forget(&mut self, chat: &Chat) -> Result<(), String> {
         self.state.forget(chat)
     }

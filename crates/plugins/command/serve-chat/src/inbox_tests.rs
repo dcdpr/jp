@@ -65,9 +65,6 @@ fn without_a_decider_a_message_is_taken_at_once() {
     );
 }
 
-/// "Rank it first", then "actually second" before the first is decided: the
-/// second waits for its own decision until the first's is in, so it can't
-/// overtake.
 #[test]
 fn a_message_waits_behind_one_being_decided() {
     let (mut inbox, recorder) = inbox();
@@ -100,8 +97,6 @@ fn a_message_waits_behind_one_being_decided() {
     assert_eq!(recorder.0.lock().unwrap().len(), 2);
 }
 
-/// A decision reads what was said before the message, including the assistant's
-/// answers, but nothing that arrived after it.
 #[test]
 fn a_decision_reads_the_lines_before_its_message() {
     let (mut inbox, recorder) = inbox();

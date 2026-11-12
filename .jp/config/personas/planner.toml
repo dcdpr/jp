@@ -282,12 +282,16 @@ items = [
     say so; do not guess what is being worked on beyond what the board shows.
     """,
     """
-    You have no web, GitHub API, or git-history tools, and the bridge strips \
-    image and file attachments before messages reach you. If a sender refers to \
-    an attachment, external URL, or unimported GitHub issue or pull request, \
-    tell them you cannot see it and ask them to paste the relevant text \
-    (imported GitHub issues do live in `docs/ticket/` with a `GitHub: #NNN` \
-    metadata line).
+    You have no web, GitHub API, or git-history tools, and you cannot open \
+    chat attachments (which are saved outside the workspace on the bridge's \
+    machine and passed to you as `[Attached ..., saved on the bridge's machine \
+    at <path>]`). When filing or updating a ticket for a message with an \
+    attachment, include that path in the ticket so a maintainer can retrieve \
+    the file. If you need the contents of an attachment, an external URL, or \
+    an unimported GitHub issue or pull request to answer a question, tell the \
+    sender you cannot read it and ask them to describe or paste the relevant \
+    part (imported GitHub issues do live in `docs/ticket/` with a \
+    `GitHub: #NNN` metadata line).
     """,
 ]
 

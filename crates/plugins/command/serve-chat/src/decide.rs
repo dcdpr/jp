@@ -1,14 +1,13 @@
-//! Asking a model what to do with a message, before a turn is spent on it.
+//! Pre-turn message classification via a System One decide API.
 //!
-//! [`SystemOne`] calls a decide API in the System One request format
-//! (`decide.url`, Jev by default; local servers speak it too): one `choice`
-//! question about the chat, answered with the [`Action`] the model picks and
-//! the probability it gives that action.
-//! The bridge takes the action only when that probability reaches
-//! `decide.threshold`.
+//! [`SystemOne`] sends a single `choice` question about recent chat messages to
+//! `decide.url` and returns the chosen [`Action`] and its probability.
+//! The bridge applies the action when its probability meets `decide.threshold`,
+//! and falls back to [`Action::Answer`] otherwise.
 //!
-//! Only a message that may give a command is offered the commands, such as
-//! starting a new conversation; any other is answered or ignored.
+//! Command actions (`new_conversation`, `compact`) are offered only when the
+//! message is eligible to issue commands (direct chats, or group messages that
+//! start with a mention of the bot).
 
 use std::{future::Future, pin::Pin, time::Duration};
 
@@ -16,23 +15,22 @@ use serde_json::{Map, Value, json};
 
 use crate::options::DecideOptions;
 
-/// The name the question is asked and answered under.
+/// Question key in the System One request and response.
 const QUESTION: &str = "action";
 
-/// How long a decision may take; a message waits for it, and every message
-/// after it in the same bridge does too.
+/// HTTP request timeout for a decide API call.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How much of an error response is quoted in the log.
+/// Maximum characters of an error response body included in log messages.
 const MAX_ERROR_BODY: usize = 300;
 
-/// What the bridge can do with a message.
+/// Action the bridge can take on an incoming message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Action {
-    /// Nothing: the message is for the other people in the chat.
+    /// Ignore the message because it is addressed to other participants.
     Ignore,
 
-    /// Run a turn for it, or hand it to the running one.
+    /// Run a turn for the message, or deliver it to the active turn as a reply.
     Answer,
 
     /// Start the chat's next turn in a new conversation.
@@ -43,10 +41,10 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    /// What a message that can't give a command may lead to.
+    /// Actions offered for ordinary group messages.
     const MESSAGE: &[Self] = &[Self::Ignore, Self::Answer];
 
-    /// What a message that may give a command may lead to.
+    /// Actions offered when the message can issue a command.
     const COMMAND: &[Self] = &[
         Self::Ignore,
         Self::Answer,
@@ -54,8 +52,7 @@ impl Action {
         Self::Compact,
     ];
 
-    /// The actions offered for a message, which include the commands when
-    /// `commands` is set.
+    /// Return the candidate actions for a message.
     pub(crate) fn offered(commands: bool) -> &'static [Self] {
         if commands {
             Self::COMMAND
@@ -64,7 +61,7 @@ impl Action {
         }
     }
 
-    /// The option's name in the question and the answer.
+    /// Wire key for this action in the decide API request and response.
     fn key(self) -> &'static str {
         match self {
             Self::Ignore => "ignore",
@@ -74,7 +71,7 @@ impl Action {
         }
     }
 
-    /// What the option means, as the model reads it.
+    /// Criterion description sent to the decide model.
     fn description(self) -> &'static str {
         match self {
             Self::Ignore => {
@@ -97,24 +94,22 @@ impl Action {
     }
 }
 
-/// The model's answer: the action it picked, and the probability it gave it.
+/// Action selected by the decide model and its probability.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Verdict {
     pub action: Action,
     pub probability: f64,
 }
 
-/// A decision in flight.
 pub(crate) type Decision = Pin<Box<dyn Future<Output = Result<Verdict, String>> + Send>>;
 
-/// Decides what the bridge does with the last message in a chat.
+/// Classifier that selects an [`Action`] for the latest message in a chat.
 pub(crate) trait Decide: Send + Sync {
-    /// Which of `actions` to take for the last message in `state`, a chat's
-    /// recent messages.
+    /// Choose one of `actions` for the chat transcript in `state`.
     fn decide(&self, state: String, actions: &'static [Action]) -> Decision;
 }
 
-/// A decide API over HTTP, with a bearer token when it asks for one.
+/// HTTP client for a System One decide endpoint.
 pub(crate) struct SystemOne {
     client: reqwest::Client,
     options: DecideOptions,
@@ -168,8 +163,7 @@ impl Decide for SystemOne {
     }
 }
 
-/// The request asking `options.instructions` about `state`, with `actions` as
-/// the options.
+/// Build the System One JSON request body for `state` and `actions`.
 pub(crate) fn request_body(options: &DecideOptions, state: &str, actions: &[Action]) -> Value {
     let criteria: Map<String, Value> = actions
         .iter()
@@ -188,8 +182,7 @@ pub(crate) fn request_body(options: &DecideOptions, state: &str, actions: &[Acti
     })
 }
 
-/// Which of `actions` a decide API answer picks, and the probability it gives
-/// it.
+/// Parse the chosen [`Action`] and its probability from a System One response.
 pub(crate) fn verdict(body: &Value, actions: &[Action]) -> Result<Verdict, String> {
     let answer = body
         .pointer(&format!("/answers/{QUESTION}"))

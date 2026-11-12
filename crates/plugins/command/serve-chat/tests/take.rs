@@ -1,11 +1,9 @@
-//! `take.sh`, the server half of `just chat-take`, run against a real git
-//! repository.
+//! Integration tests for `take.sh` (the remote helper invoked by `just
+//! chat-take`).
 //!
-//! `flock` is replaced by a stub on `PATH`, since macOS has none; the lock
-//! itself is the bridge's concern and is tested there.
-//!
-//! Git runs without the user's or the system's configuration, both here and in
-//! the script, which can ask for a signature on every commit.
+//! Stubs `flock` on `PATH` because macOS does not ship `flock(1)` (locking is
+//! tested in `checkout_tests.rs`), and clears global/system git config so
+//! commit signing settings on the host do not affect test commits.
 
 #![cfg(unix)]
 
@@ -19,8 +17,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use sha2::{Digest as _, Sha256};
 
-/// `take.sh`, found at run time: a test binary built in another worktree that
-/// shares the target directory would otherwise run that worktree's copy.
+/// Resolve `take.sh` at runtime via `CARGO_MANIFEST_DIR` so shared `target/`
+/// directories across worktrees use the current worktree's script.
 fn script() -> Utf8PathBuf {
     Utf8PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("take.sh")
 }
@@ -155,9 +153,8 @@ fn a_change_after_the_snapshot_keeps_the_checkout() {
     assert!(server.exists("docs/ticket/b.md"));
 }
 
-/// A `git add` that fails leaves the snapshot's changes staged, whose diff
-/// still matches the hash: a reset that went on would delete the ticket written
-/// after the snapshot, which was never taken.
+// If `git add` fails during `reset`, the index still matches the snapshot
+// hash; `reset` must abort rather than discarding newly written files.
 #[test]
 fn a_failing_git_add_discards_nothing() {
     let server = Server::new();

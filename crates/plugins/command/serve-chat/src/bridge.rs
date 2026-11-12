@@ -16,8 +16,8 @@
 //! then apply the configured persona, which enables the tools it names, then
 //! the sender's identity so that tickets, RFDs, and wiki pages created during
 //! the turn are attributed to the sender.
-//! When the bridge stops while a turn runs, it waits for the turn to end, and
-//! checks what it wrote, before letting go of the checkout.
+//! If the bridge stops while a turn is running, it waits for the turn to finish
+//! and verifies the working tree before releasing the checkout lock.
 //!
 //! The repository checkout is locked for the duration of each turn and
 //! inspected when the turn ends.
@@ -95,8 +95,7 @@ pub(crate) enum Event {
         result: Result<Verdict, String>,
     },
 
-    /// A compaction of `chat`'s conversation finished, with what the host
-    /// stored.
+    /// Compaction of `chat`'s conversation completed.
     Compacted {
         chat: Chat,
         result: Result<Vec<StoredCompaction>, String>,
@@ -120,8 +119,8 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     queue: Queue,
     running: Option<Running>,
 
-    /// While paused by changes outside the writable directories, the chats
-    /// already told so.
+    /// Chats already notified of the pause while out-of-scope changes are
+    /// present.
     paused: Option<Vec<Chat>>,
 
     inbox: Inbox,
@@ -156,8 +155,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Ask `decider` whether a group message that doesn't address the assistant
-    /// is meant for it, before running a turn for it.
+    /// Configure the [`Decide`] client used to classify incoming messages.
     pub(crate) fn with_decider(mut self, decider: Option<Arc<dyn Decide>>) -> Self {
         self.inbox.decide_with(decider);
         self
@@ -207,12 +205,12 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Wait for the running turn to end before the bridge exits.
+    /// Wait for the active turn to finish before exiting.
     ///
-    /// The host keeps running a turn after the plugin that asked for it exits,
-    /// so exiting first would release the checkout's lock while the turn still
-    /// writes, and skip the check of what it wrote.
-    /// With `stop`, the turn is asked to stop; otherwise it runs to its end.
+    /// Because the host continues running a delegated turn after the plugin
+    /// exits, exiting early would release the checkout lock while the turn is
+    /// still writing and skip the post-turn working-tree check.
+    /// When `stop` is `true`, sends a stop interrupt to the active turn first.
     pub(crate) async fn finish(&mut self, stop: bool) {
         self.queue.close();
         if self.running.is_some() {
@@ -271,15 +269,15 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         };
 
-        // A command has to start by naming the assistant in a group; in a direct
-        // chat, every message is to it.
+        // Commands require a leading @mention in group chats; in direct chats
+        // every message is eligible.
         let commands = message.leading_mention || matches!(message.chat, Chat::Direct(_));
         self.inbox.push(message.chat, key, text, commands);
         self.pump();
     }
 
-    /// Take every message the inbox can release, or start the decision the
-    /// first one waits for.
+    /// Drain ready messages from the inbox, or spawn a decision task for the
+    /// front message.
     fn pump(&mut self) {
         while let Some(next) = self.inbox.next() {
             match next {
@@ -296,7 +294,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Act on a decision about the first message in the inbox, then go on.
+    /// Apply the decision for the front inbox message and advance the inbox.
     fn decided(&mut self, result: Result<Verdict, String>) {
         if let Err(error) = &result {
             self.host.log(
@@ -380,8 +378,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Deliver `text` as an interrupt reply to the active turn on
-    /// `conversation`, as the reply the queue has in flight.
+    /// Spawn a task to deliver `text` as an in-turn reply on `conversation`.
     fn reply(&self, chat: Chat, person: String, text: String, conversation: &str) {
         let reply = self.host.reply(conversation, &text);
         let events = self.events_tx.clone();
@@ -397,7 +394,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         });
     }
 
-    /// Hand the running turn the next batch the queue holds for it, if any.
+    /// Send the next queued reply batch from the active turn's sender, if any.
     fn hand_over(&mut self) {
         let Some(running) = &self.running else {
             return;
@@ -457,8 +454,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 self.queue.replied();
                 match result {
                     Ok(()) => self.hand_over(),
-                    // The turn ended before taking it, so it waits for the next
-                    // one, ahead of what came after it.
+                    // The turn ended before accepting the reply; requeue it at
+                    // the front of the chat's queue.
                     Err(ReplyError::Refused(_)) => self.queue.push_first(chat, person, text),
                     Err(ReplyError::Broken(error)) => {
                         self.host.log(
@@ -472,8 +469,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Let the turns held back by a compaction start, and tell the chat what
-    /// the compaction did or why it failed.
+    /// Release the queue hold after compaction and report the result to `chat`.
     fn compacted(&mut self, chat: &Chat, result: Result<Vec<StoredCompaction>, String>) {
         self.queue.release();
         let reply = match result {
@@ -651,20 +647,18 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 }
 
-/// What the bridge does with a message, given the model's `verdict`.
+/// Resolve the action to take from the decider's `verdict`.
 ///
-/// The model's choice, which was only offered the commands for a message that
-/// may give one, unless it is unsure or there is no verdict because the decide
-/// API failed: then the message is answered, since a wasted turn costs less
-/// than a question nobody answers.
+/// Falls back to [`Action::Answer`] when the request failed or the verdict's
+/// probability is below `threshold`.
 fn action(verdict: Option<Verdict>, threshold: f64) -> Action {
     verdict
         .filter(|verdict| verdict.probability >= threshold)
         .map_or(Action::Answer, |verdict| verdict.action)
 }
 
-/// Add `compactions` to `conversation` on the host, sending
-/// [`Event::Compacted`] for `chat` when it finishes.
+/// Spawn a task to compact `conversation` on the host and emit
+/// [`Event::Compacted`].
 fn compact<H: Host>(
     host: &H,
     events: &mpsc::UnboundedSender<Event>,
@@ -681,7 +675,7 @@ fn compact<H: Host>(
     });
 }
 
-/// The chat's answer to a compaction: a line for each compaction stored.
+/// Format a user-facing summary of the stored compactions.
 fn describe_compactions(stored: &[StoredCompaction]) -> String {
     let mut text = "Compacted this conversation:".to_owned();
     for compaction in stored {
@@ -716,10 +710,10 @@ fn describe_compactions(stored: &[StoredCompaction]) -> String {
     text
 }
 
-/// What a turn reads for `message` from `name`: its text, then a line for each
-/// attachment, after the sender's name in a group.
+/// Format the prompt text for `message` from `name`, appending attachment
+/// notices and prefixing the sender's name in group chats.
 ///
-/// `None` for a message with neither.
+/// Returns `None` if the message has neither text nor attachments.
 fn content(message: &Inbound, name: &str) -> Option<String> {
     let mut parts: Vec<String> = vec![];
     let text = message.text.trim();
@@ -739,10 +733,11 @@ fn content(message: &Inbound, name: &str) -> Option<String> {
     })
 }
 
-/// The line a turn reads for an attachment: what it is, and where it is saved.
+/// Format an attachment notice with its MIME type and local path.
 ///
-/// The model can't open the file; the path is for writing into a ticket, so a
-/// maintainer can copy the file off the bridge's machine.
+/// The planner persona cannot read arbitrary filesystem paths, but can record
+/// the path in a ticket so a maintainer can retrieve the file from the bridge
+/// host.
 fn describe(attachment: &Attachment) -> String {
     let what = match &attachment.name {
         Some(name) => format!("{name} ({})", attachment.content_type),
@@ -755,13 +750,11 @@ fn describe(attachment: &Attachment) -> String {
     }
 }
 
-/// The log line for a checkout whose state couldn't be read.
 fn check_failed(error: &str) -> String {
     format!("Failed to check the checkout: {error}")
 }
 
-/// Build the `--cfg` arguments for a turn triggered by `person`, which
-/// [`turn_cfg`] puts after the entry disabling every tool.
+/// Build the `--cfg` arguments for a turn triggered by `person`.
 ///
 /// Applies the configured persona, sets `user.name` and the plugin `assistant`
 /// attribution to `<Name> via jp`, and forces `conversation.start_local = true`
@@ -788,8 +781,8 @@ pub(crate) fn cfg(options: &Options, person: &str) -> Vec<String> {
     cfg
 }
 
-/// Title for the conversation a turn for `waiting` creates in the `rollover`
-/// period starting on `period`.
+/// Format the conversation title for `waiting` in the rollover period starting
+/// on `period`.
 fn title(options: &Options, rollover: Rollover, waiting: &Waiting, period: NaiveDate) -> String {
     let when = match rollover {
         Rollover::Daily => period.to_string(),
@@ -808,26 +801,23 @@ fn title(options: &Options, rollover: Rollover, waiting: &Waiting, period: Naive
     }
 }
 
-/// What a turn asks the host for, besides the conversation it runs on.
+/// Parameters for running a turn on the host.
 struct TurnRequest {
     content: String,
-
-    /// Title for a conversation the turn creates.
     title: String,
 
-    /// [`cfg()`], before [`turn_cfg`] adds the tool entry.
+    /// [`cfg()`], before [`turn_cfg`] prepends the tool-disabling override.
     cfg: Vec<String>,
 
-    /// Expiry for a conversation the turn creates.
     expires_in: String,
 }
 
-/// Start a turn on `conversation`, or on a new one when it is `None`, and wait
-/// for it to end.
+/// Run a turn on `conversation` (or create a new conversation when `None`) and
+/// await its completion.
 ///
-/// Sends [`Event::Started`] once the host has the request.
-/// A turn whose tool list can't be read doesn't start: running it without
-/// disabling the configured tools would let them through.
+/// Emits [`Event::Started`] once the host accepts the request.
+/// Fails before starting the turn if the configured tool list cannot be read,
+/// so a turn never runs without first disabling unapproved tools.
 async fn run_turn<H: Host>(
     host: &H,
     conversation: Option<String>,
@@ -860,19 +850,18 @@ async fn run_turn<H: Host>(
     turn.await
 }
 
-/// The `--cfg` arguments for a turn: an entry disabling every one of `tools`,
-/// then `cfg`.
+/// Prepend a `--cfg` JSON override that disables every tool in `tools` before
+/// applying `cfg`.
 ///
-/// A tool's own `enable` wins over the `*` defaults, and the per-tool table
-/// merges key by key across layers, so a tool a user or workspace config
-/// enables stays enabled under a persona that doesn't name it.
-/// Disabling every configured tool first leaves enabled exactly the tools that
-/// `cfg` enables by name.
+/// Because per-tool `enable = true` settings in user or workspace configs take
+/// precedence over `conversation.tools.'*'` defaults and merge key-by-key,
+/// explicitly disabling every configured tool first ensures that only the tools
+/// re-enabled by `cfg` (the persona) remain active.
 ///
 /// # Errors
 ///
-/// A tool name holding a `.` can't be addressed by a `--cfg` key, so it can't
-/// be disabled, and the turn is refused.
+/// Returns an error if any tool name contains `.`, which would be split as a
+/// path separator by `--cfg` assignment.
 pub(crate) fn turn_cfg(tools: &[String], cfg: Vec<String>) -> Result<Vec<String>, String> {
     if let Some(name) = tools.iter().find(|name| name.contains('.')) {
         return Err(format!(

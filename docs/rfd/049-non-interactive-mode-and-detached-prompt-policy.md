@@ -266,10 +266,11 @@ later as an alias alongside `--non-interactive`.
   future work.
 
   > [!NOTE]
-  > T-1hetcnt gives a turn that a command plugin starts someone to ask: the
-  > plugin.
-  > It answers the prompts it can and declines the rest, and a declined prompt
-  > gets the non-interactive behaviour this RFD defines.
+  > T-1hetcnt routes prompts from plugin-delegated turns (`query`) to the plugin
+  > itself.
+  > The plugin answers the prompts it handles and declines the rest, and
+  > declined prompts fall back to the detached prompt policy defined in this
+  > RFD.
 
 - **New prompt variants.** This RFD uses the `Prompt` enum from [RFD 018] as-is.
 

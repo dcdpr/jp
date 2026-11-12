@@ -13,7 +13,6 @@ fn options() -> DecideOptions {
     }
 }
 
-/// The options a request offers, sorted.
 fn offered(body: &Value) -> Vec<&String> {
     let mut options: Vec<&String> = body["questions"]["action"]["criteria"]
         .as_object()
@@ -61,7 +60,6 @@ fn any_other_message_is_offered_answering_or_ignoring_it() {
     assert_eq!(offered(&body), ["answer", "ignore"]);
 }
 
-/// Shaped like the `choice` answer in Jev's documentation.
 #[test]
 fn the_answer_is_the_chosen_action_and_its_probability() {
     let body = json!({
@@ -116,7 +114,6 @@ fn an_answer_the_bridge_cant_act_on_is_an_error() {
     }
 }
 
-/// A command the message wasn't offered isn't taken, even if a server picks it.
 #[test]
 fn a_command_that_wasnt_offered_is_an_error() {
     let body = json!({ "answers": { "action": { "choice": "compact", "probabilities": { "compact": 0.9 } } } });

@@ -8,9 +8,8 @@
 //! - `transport` defines the chat transport interface; `signal` implements it
 //!   over `signal-cli` in JSON-RPC mode.
 //! - `bridge` routes messages from allowed senders to conversations and
-//!   schedules turns, with `queue` holding the messages that wait for one and
-//!   `inbox` the ones that wait for `decide` to say they are meant for the
-//!   assistant.
+//!   schedules turns, with `inbox` buffering messages awaiting a `decide`
+//!   verdict and `queue` batching messages awaiting a turn.
 //! - `checkout` locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable
 //!   directories.
@@ -214,8 +213,8 @@ fn serve(
     })
 }
 
-/// The decider `decide` configures, with its token from the environment
-/// variable `decide.api_key_env` names, or none when that is empty.
+/// Build the [`Decide`] client from `options.decide`, reading its bearer token
+/// from the environment variable named by `decide.api_key_env` (if set).
 fn decider(options: &Options) -> Result<Option<Arc<dyn Decide>>, String> {
     let Some(decide) = &options.decide else {
         return Ok(None);
@@ -253,7 +252,6 @@ fn state_dir(init: &InitMessage) -> Result<Utf8PathBuf, String> {
     Err("JP reported no user data directory to keep the bridge's state in.".to_owned())
 }
 
-/// The `describe` answer: the manifest, this version, and the help text.
 fn describe() -> Result<DescribeResponse, String> {
     let mut describe = DescribeResponse::from_manifest(
         MANIFEST,
@@ -269,11 +267,7 @@ fn describe() -> Result<DescribeResponse, String> {
     Ok(describe)
 }
 
-/// Lock `mutex`, taking it over if a thread panicked while holding it.
-///
-/// Each mutex in this crate guards a writer or a map of waiters, which stay
-/// usable after a panic elsewhere; refusing the lock instead would turn one
-/// panic into a panic on every later message.
+/// Acquire `mutex`, recovering the guard if a previous holder panicked.
 pub(crate) fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
