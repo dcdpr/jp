@@ -1,6 +1,6 @@
 # Hold a turn's writes briefly so a correction can stop them
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-11
 - **Label**: domain=plugins
@@ -21,3 +21,14 @@ chance to cancel the call before it writes.
 Cheaper than the approval flow in its sibling ticket, and weaker: it only helps
 a correction sent within the window, and every write gets slower.
 Worth doing only if the approval flow is far off.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-12T12:54:32Z
+
+Dropped: not pursuing a delay on writes.
+Approvals over the chat (T-1hetcnt) are the fix for a correction that arrives
+mid-call.

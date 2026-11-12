@@ -112,10 +112,11 @@ JP also removes all active subscriptions when the plugin exits.
 ### Interactive Events
 
 > [!NOTE]
-> T-1hetcnt plans this section on its own, for turns a plugin starts with
-> `query` and without subscriptions, using the `tool_approval` and `inquiry`
-> shapes below.
+> This section is moving into an RFD of its own (T-1hva7by), for turns a plugin
+> starts with `query` and without subscriptions, using the `tool_approval` and
+> `inquiry` shapes below.
 > It adds a `decline` answer, which makes JP do what it does with nobody there.
+> T-1hetcnt builds on it for approvals over the chat bridge.
 
 Pushed events without a `respond` field are informational: the plugin observes
 them and does not reply.

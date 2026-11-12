@@ -8,7 +8,6 @@
 - **Label**: package=jp_plugin
 - **Label**: relevant-rfd=049
 - **Label**: type=feature
-- **Parent**: T-1e92tft
 
 A turn the bridge starts runs as if nobody is there to ask, so every tool the
 persona enables runs without asking: `prepare_turn` in `dispatch.rs` passes
@@ -36,6 +35,7 @@ fixed replies is the plugin's choice.
 
 This is the "answer interactive prompts" part of RFD D18, without D18's live
 event subscriptions.
+Its design is to be settled in an RFD of its own first: T-1hva7by.
 Use D18's message shapes, a `tool_approval` answered `approve`, `reject`, or
 `modify` with new arguments, and an `inquiry` answered with an `answer`, so the
 two designs don't drift apart.
@@ -66,10 +66,6 @@ two designs don't drift apart.
   - No answer in time denies.
   - Secret prompts are always declined, so a password never goes into a chat;
     other kinds are declined at first.
-- **Persona.** Write tools to `run = "ask"`: T-1hg18ev.
-
-This replaces delaying writes (T-1hetcnv) as the fix for corrections that arrive
-mid-call: an approval waits as long as the person needs.
 
 Noted in RFD 049 (a delegated turn gets someone to ask), and in D60 and D18.
 
