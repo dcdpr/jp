@@ -194,6 +194,8 @@ pub fn estimate_chars(events: &ConversationStream) -> usize {
 /// Char-based estimate of a single event's contribution to the window.
 ///
 /// Events with no provider-visible payload count as zero.
+/// The match lists every [`EventKind`], so adding a kind fails to compile until
+/// its contribution is decided here.
 fn estimate_event_chars(event: &ConversationEvent) -> usize {
     match &event.kind {
         EventKind::ChatRequest(r) => r.content.len(),
@@ -207,7 +209,7 @@ fn estimate_event_chars(event: &ConversationEvent) -> usize {
             r.result.as_ref().map_or(0, String::len)
                 + r.result.as_ref().err().map_or(0, String::len)
         }
-        _ => 0,
+        EventKind::TurnStart(_) | EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => 0,
     }
 }
 
