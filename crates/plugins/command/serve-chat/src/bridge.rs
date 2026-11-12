@@ -454,20 +454,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
             Event::Decided { result } => self.decided(result),
 
-            Event::Compacted { chat, result } => {
-                self.queue.release();
-                let reply = match result {
-                    Ok(stored) => describe_compactions(&stored),
-                    Err(error) => {
-                        self.host.log(
-                            Level::ERROR,
-                            &format!("Compacting the conversation in {chat} failed: {error}"),
-                        );
-                        format!("I couldn't compact this conversation: {error}")
-                    }
-                };
-                self.outbox.send(&chat, &reply);
-            }
+            Event::Compacted { chat, result } => self.compacted(&chat, result),
 
             Event::Replied {
                 chat,
@@ -491,6 +478,23 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 }
             }
         }
+    }
+
+    /// Let the turns held back by a compaction start, and tell the chat what
+    /// the compaction did or why it failed.
+    fn compacted(&mut self, chat: &Chat, result: Result<Vec<StoredCompaction>, String>) {
+        self.queue.release();
+        let reply = match result {
+            Ok(stored) => describe_compactions(&stored),
+            Err(error) => {
+                self.host.log(
+                    Level::ERROR,
+                    &format!("Compacting the conversation in {chat} failed: {error}"),
+                );
+                format!("I couldn't compact this conversation: {error}")
+            }
+        };
+        self.outbox.send(chat, &reply);
     }
 
     /// Read the completed turn's final response from the host and send it to

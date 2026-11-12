@@ -11,7 +11,7 @@ use std::{
     pin::Pin,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -1455,7 +1455,9 @@ fn run_compact(
             }
         };
 
-        let mut writer = stdin.lock().expect("stdin lock poisoned");
+        // A writer that panicked mid-message leaves the lock poisoned. The pipe
+        // itself is still usable, and the plugin is waiting on this reply.
+        let mut writer = stdin.lock().unwrap_or_else(PoisonError::into_inner);
         drop(write_message(&mut *writer, &reply));
     });
 
