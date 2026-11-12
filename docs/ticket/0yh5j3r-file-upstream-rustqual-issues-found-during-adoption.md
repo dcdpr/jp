@@ -30,6 +30,14 @@ newer release has fixed.
 4. **`DRY` is all-or-nothing.** Turning off `[duplicates]` also turns off
    dead-code (`DRY-002`) and dead-type detection.
    A per-rule switch would remove the need for a second pass.
+   With two passes, a `qual:allow(dry, duplicate)` marker suppresses its finding
+   in the DRY pass, and the main pass, where `[duplicates]` is off, reports the
+   marker as `ORPHAN-001` (item 3).
+   `qual:allow(dry, fragment)` behaves the same, so a `DRY-001` or `DRY-003`
+   finding can't be suppressed with a reason (checked with probe markers on
+   2026-11-12).
+   The guidance files say so until the second pass goes; `qual:inverse` pairs
+   are not affected.
 5. **`ai-json` lacks the stable rule ID and the threshold/actual values** (for
    example `length=72 > 60`).
    Agents need both to fix a finding without a second lookup.
@@ -102,11 +110,21 @@ newer release has fixed.
     attachment crates), which is read by the linker, is also flagged.
     Neither rule accepts `qual:allow`, and `qual:api` is rejected on private
     items.
-14. **`DRY-005` groups unrelated enums under `Self`.** "repeated match on Self
-    (6 occurrences)" groups `PathRoot::as_str` in `bookworm` with `<Status as
-    Display>::fmt` in `ticket`.
-    Any `match self` whose type rustqual cannot resolve is keyed under `Self` or
-    `(unknown)`, merging matches across unrelated types.
+14. **`DRY-005` groups `match` expressions by shape, whatever type they match.**
+    `group_repeated_patterns` (`src/adapters/analyzers/dry/match_patterns.rs`)
+    groups by a hash of the normalized `match` alone.
+    Normalization drops path patterns and erases literal values, so every
+    `match` that maps the same number of unit variants to string literals lands
+    in one group, whatever enum it matches.
+    "repeated match on Self (6 occurrences)" holds `PathRoot::as_str` in
+    `bookworm`, whose arms are `PathRoot::…`, and `<Status as Display>::fmt` in
+    `ticket`: the name is the second-to-last path segment of an arm of one
+    `match` in the group (`extract_enum_name`), not a key.
+    Propose keying the group on the matched type, with `Self` resolved to the
+    `impl` type, and skipping a `match` whose type can't be read from its arms.
+    The detector also ignores `[duplicates] enabled = false`: `run_dry_pass`
+    (`src/app/secondary.rs`) gates it on `detect_repeated_matches` alone, so
+    JP's main pass runs it too.
 15. **`TQ-001` passes any test that contains a function call.**
     `detect_assertion_free_tests` (`src/adapters/analyzers/tq/assertions.rs`)
     treats any function or method call in the test body as an implicit
