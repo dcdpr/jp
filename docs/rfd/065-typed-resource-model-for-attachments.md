@@ -311,6 +311,12 @@ invocation:
   Any declared attachment whose URI does not appear in the forked stream is
   resolved fresh for the fork's first turn.
 
+> [!TIP]
+> [RFD 135] stores resource snapshots on `Decision` events as well: `jp decide
+> -a` resolves an attachment for a decision and records it there.
+> A URI on a `Decision` event counts as appearing in the conversation history,
+> so the next `jp query` does not resolve that attachment again.
+
 ### Config and `--attach`
 
 `conversation.attachments` remains the declaration mechanism, and `--attach` on
