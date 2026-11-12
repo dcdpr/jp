@@ -160,9 +160,13 @@ Where the mission departs from the description:
   overwriting earlier entries.
   A rejection that also changed files is recorded, and the changes are
   discarded.
-- **Markers.** The gate refuses `qual:api` and `qual:test_helper` as well as
-  `qual:allow`, counted as added minus removed so a marker that moves with its
-  item passes.
+- **Markers.** The gate refuses any `qual:` annotation the commit adds or
+  changes, not only `qual:allow`: `qual:api`, `qual:test_helper`,
+  `qual:inverse`, and an edit to an existing marker, such as a raised
+  `file_length=N`.
+  Marker lines are compared as a multiset, so a marker that moves with its item
+  passes.
+  `lib-test.sh` holds the cases, and every run starts by running them.
 - **`.config/loop/`** is off limits along with `.config/rustqual/`, since the
   gate runs from the working tree.
 - **Stopping early.** `next-target` ends the run with status 1 after 8 failed

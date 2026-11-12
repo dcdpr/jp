@@ -56,6 +56,12 @@ if ! cargo nextest --version >/dev/null 2>&1; then
     die "cargo-nextest is not installed; the gate runs the tests with it"
 fi
 
+# The gate relies on `new_markers` to notice a suppression. Its tests take
+# milliseconds, so they run before every run, with the `jq` the gate will use.
+if ! marker_tests=$(bash "$MISSION_DIR/lib-test.sh" 2>&1); then
+    die "the marker check fails its own tests: $marker_tests"
+fi
+
 parse_option() {
     case $1 in
         --rule)
@@ -160,10 +166,13 @@ the next turn. A finding gets one attempt.
 
 Hard rules:
 
-- Never add a `qual:allow`, `qual:api`, or `qual:test_helper` marker, and never
-  change anything under `.config/rustqual/` or `.config/loop/`. The guidance
-  mentions suppression markers only for interactive sessions where a user
-  requests one; in this unattended loop, reject the finding instead.
+- Never add a `qual:` marker of any kind (`qual:allow`, `qual:api`,
+  `qual:test_helper`, `qual:inverse`), and never edit an existing one, for
+  example to raise the limit in a `qual:allow(srp, file_length=N)`. Removing a
+  marker your fix makes unnecessary is allowed. The guidance mentions
+  suppression markers only for interactive sessions where a user requests one;
+  in this unattended loop, reject the finding instead.
+- Never change anything under `.config/rustqual/` or `.config/loop/`.
 - Change only what the fix needs. Don't tidy nearby code, and don't fix other
   findings you notice along the way.
 - Never stage or commit anything under `@STATE@/`. The harness owns that

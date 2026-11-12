@@ -6,8 +6,8 @@
 #
 # - it is one commit, with a subject in the repository's convention, and
 #   nothing is left uncommitted;
-# - it changes nothing under `.config/rustqual/` or `.config/loop/`, and adds no
-#   `qual:` marker;
+# - it changes nothing under `.config/rustqual/` or `.config/loop/`, and neither
+#   adds nor changes a `qual:` marker;
 # - `cargo check --workspace --all-targets` passes;
 # - `qual report` no longer lists the target;
 # - `qual diff` against the base reports no new finding;
@@ -129,16 +129,13 @@ if [[ -n $config ]]; then
 $config"
 fi
 
-# Count net new markers (added minus removed) so moving an existing marker with
-# its item does not fail the check.
-markers=$(git diff --unified=0 "$base" HEAD -- '*.rs' | awk '
-    /^\+\+\+ / || /^--- / { next }
-    /^\+.*qual:(allow|api|test_helper)/ { n++ }
-    /^-.*qual:(allow|api|test_helper)/ { n-- }
-    END { print n + 0 }
-')
-if [[ $markers -gt 0 ]]; then
-    fail "the commit adds a \`qual:\` marker; a finding that shouldn't be fixed is rejected, not suppressed"
+# A marker that moves with its item passes. A new marker fails, and so does an
+# existing one whose text changed: a raised limit suppresses the target as
+# surely as a new marker does.
+markers=$(git diff --unified=0 "$base" HEAD -- '*.rs' | new_markers)
+if [[ -n $markers ]]; then
+    fail "the commit adds or changes a \`qual:\` marker; a finding that shouldn't be fixed is rejected, not suppressed:
+$markers"
 fi
 
 if ! output=$(cargo check --locked --workspace --all-targets --message-format short 2>&1); then
