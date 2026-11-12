@@ -3,6 +3,8 @@
 //! Messages are exchanged as JSON-lines (one JSON object per line) over stdin
 //! (host→plugin) and stdout (plugin→host).
 
+use std::num::NonZeroI64;
+
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -633,12 +635,14 @@ pub struct QueryRequest {
     pub expires_in: Option<String>,
 }
 
-/// Ask the host to compact a conversation, as `jp conversation compact` does.
+/// Ask the host to add compactions to a conversation.
 ///
-/// Answered with [`HostToPlugin::Compacted`] once the conversation is
-/// compacted, or with [`HostToPlugin::Error`].
-/// A rule that summarizes calls a model, so this can take as long as a turn.
+/// Answered with [`HostToPlugin::Compacted`] once every compaction is stored,
+/// or with [`HostToPlugin::Error`], in which case none is.
+/// A compaction that generates a summary calls a model, so this can take as
+/// long as a turn.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CompactRequest {
     /// Optional request correlation ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -647,14 +651,109 @@ pub struct CompactRequest {
     /// The conversation to compact.
     pub conversation: String,
 
-    /// The arguments `jp conversation compact` takes, without a conversation,
-    /// such as `["--keep-last", "2", "--reasoning"]`.
+    /// The compactions to add, in order: each is stored as one compaction of
+    /// the conversation.
+    pub compactions: Vec<Compaction>,
+}
+
+/// One compaction of a range of turns.
+///
+/// A turn is a 1-based position counted from the first turn, or, when negative,
+/// from the last: `-1` is the last turn.
+/// Both ends are inclusive, and `0` is refused.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Compaction {
+    /// The first turn compacted.
+    pub from: NonZeroI64,
+
+    /// The last turn compacted.
+    pub to: NonZeroI64,
+
+    /// Strip reasoning from the turns in range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningCompaction>,
+
+    /// Strip or drop the tool calls in range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<ToolCallsCompaction>,
+
+    /// Replace the turns in range with a summary.
     ///
-    /// They are read the way that command reads them, so every option it has,
-    /// this request has, including `--dry-run` and `--reset`.
-    /// None applies `conversation.compaction.rules`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub args: Vec<String>,
+    /// Takes precedence over `reasoning` and `tool_calls` for the turns it
+    /// covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<SummaryCompaction>,
+}
+
+/// Strip reasoning blocks.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReasoningCompaction {
+    /// Strip only the blocks larger than this many bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over_bytes: Option<u64>,
+}
+
+/// Strip or drop tool calls.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCallsCompaction {
+    pub mode: ToolCallsMode,
+
+    /// Compact only the calls larger than this many bytes: each half on its own
+    /// size for the `strip` modes, the request and response together for
+    /// `omit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over_bytes: Option<u64>,
+}
+
+/// What compacting a tool call does to it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallsMode {
+    /// Empty the arguments and replace the response with a status line.
+    Strip,
+
+    /// Empty the arguments only.
+    StripRequests,
+
+    /// Replace the response with a status line only.
+    StripResponses,
+
+    /// Remove the call and its response.
+    Omit,
+}
+
+/// Where the summary replacing a range comes from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum SummaryCompaction {
+    /// This text, stored as given.
+    Text(String),
+
+    /// A summary a model writes from the turns in range.
+    Generate(GenerateSummary),
+}
+
+/// How a summary is generated.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateSummary {
+    /// The model to summarize with: an alias or a `provider/name` id.
+    ///
+    /// The conversation's assistant model when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    /// Instructions replacing the summarizer's default ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+
+    /// Guidance added to the summarizer's instructions, such as "focus on the
+    /// decisions".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 /// Response to `compact`.
@@ -667,9 +766,40 @@ pub struct CompactedResponse {
     /// The conversation that was compacted.
     pub conversation: String,
 
-    /// What `jp conversation compact` prints for the same arguments, one line
-    /// each: which turns were kept, and which compacted and how.
-    pub report: Vec<String>,
+    /// The compactions stored, in the order they were asked for.
+    pub compactions: Vec<StoredCompaction>,
+}
+
+/// A compaction as stored, with the turns it resolved to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredCompaction {
+    /// The first turn compacted, 1-based.
+    pub from: u64,
+
+    /// The last turn compacted, 1-based.
+    pub to: u64,
+
+    /// Whether reasoning is stripped.
+    pub reasoning: bool,
+
+    /// What is done to the tool calls, if anything.
+    #[serde(default)]
+    pub tool_calls: Option<ToolCallsMode>,
+
+    /// Where the summary replacing the range came from, if there is one.
+    #[serde(default)]
+    pub summary: Option<SummarySource>,
+}
+
+/// Where a stored summary came from.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SummarySource {
+    /// Text given in the request.
+    Text,
+
+    /// Written by a model.
+    Generated,
 }
 
 /// Ask the host to change what a running turn is doing.

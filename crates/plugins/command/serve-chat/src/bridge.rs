@@ -27,6 +27,7 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::{Local, NaiveDate};
+use jp_plugin::message::{Compaction, StoredCompaction, SummarySource, ToolCallsMode};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, watch};
 
@@ -94,11 +95,11 @@ pub(crate) enum Event {
         result: Result<Verdict, String>,
     },
 
-    /// A compaction of `chat`'s conversation finished, with the report the host
-    /// gave.
+    /// A compaction of `chat`'s conversation finished, with what the host
+    /// stored.
     Compacted {
         chat: Chat,
-        result: Result<Vec<String>, String>,
+        result: Result<Vec<StoredCompaction>, String>,
     },
 
     /// Outcome of delivering an in-turn reply to the host.
@@ -340,7 +341,13 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                         Some(conversation) => {
                             // No turn starts while the conversation is compacted.
                             self.queue.hold();
-                            compact(&self.host, &self.events_tx, incoming.chat, conversation);
+                            compact(
+                                &self.host,
+                                &self.events_tx,
+                                incoming.chat,
+                                conversation,
+                                self.options.compact.clone(),
+                            );
                         }
                     }
                 }
@@ -450,7 +457,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             Event::Compacted { chat, result } => {
                 self.queue.release();
                 let reply = match result {
-                    Ok(report) => format!("Compacted this conversation:\n{}", report.join("\n")),
+                    Ok(stored) => describe_compactions(&stored),
                     Err(error) => {
                         self.host.log(
                             Level::ERROR,
@@ -661,21 +668,57 @@ fn action(verdict: Option<Verdict>, threshold: f64) -> Action {
         .map_or(Action::Answer, |verdict| verdict.action)
 }
 
-/// Compact `conversation` on the host, sending [`Event::Compacted`] for `chat`
-/// when it finishes.
+/// Add `compactions` to `conversation` on the host, sending
+/// [`Event::Compacted`] for `chat` when it finishes.
 fn compact<H: Host>(
     host: &H,
     events: &mpsc::UnboundedSender<Event>,
     chat: Chat,
     conversation: &str,
+    compactions: Vec<Compaction>,
 ) {
-    let compaction = host.compact(conversation);
+    let compaction = host.compact(conversation, compactions);
     let events = events.clone();
 
     tokio::spawn(async move {
         let result = compaction.await;
         drop(events.send(Event::Compacted { chat, result }));
     });
+}
+
+/// The chat's answer to a compaction: a line for each compaction stored.
+fn describe_compactions(stored: &[StoredCompaction]) -> String {
+    let mut text = "Compacted this conversation:".to_owned();
+    for compaction in stored {
+        let turns = if compaction.from == compaction.to {
+            format!("turn {}", compaction.from)
+        } else {
+            format!("turns {} to {}", compaction.from, compaction.to)
+        };
+
+        // A summary replaces the whole range, so nothing else applies to it.
+        let done = match compaction.summary {
+            Some(SummarySource::Generated) => vec!["summarized"],
+            Some(SummarySource::Text) => vec!["replaced by the given summary"],
+            None => {
+                let mut done = vec![];
+                if compaction.reasoning {
+                    done.push("reasoning stripped");
+                }
+                done.extend(compaction.tool_calls.map(|mode| match mode {
+                    ToolCallsMode::Strip => "tool calls stripped",
+                    ToolCallsMode::StripRequests => "tool call arguments stripped",
+                    ToolCallsMode::StripResponses => "tool call results stripped",
+                    ToolCallsMode::Omit => "tool calls removed",
+                }));
+                done
+            }
+        };
+
+        text.push_str(&format!("\n- {turns}: {}", done.join(", ")));
+    }
+
+    text
 }
 
 /// What a turn reads for `message` from `name`: its text, then a line for each

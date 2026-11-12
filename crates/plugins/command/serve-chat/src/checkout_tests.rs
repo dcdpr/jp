@@ -1,4 +1,4 @@
-use std::{fs, sync::mpsc, thread, time::Duration};
+use std::{fs, process::Command, sync::mpsc, thread, time::Duration};
 
 use camino_tempfile::Utf8TempDir;
 
@@ -37,30 +37,44 @@ fn only_paths_under_a_writable_directory_are_allowed() {
     ]);
 }
 
+/// Run git to set up a test, without the user's or the system's git
+/// configuration, which can ask for a signature on every commit.
+fn setup(dir: &Utf8Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn repository() -> (Utf8TempDir, Utf8TempDir) {
     let origin = Utf8TempDir::new().unwrap();
-    let run = |dir: &Utf8Path, args: &[&str]| {
-        git(dir, args).unwrap_or_else(|error| panic!("git {args:?}: {error}"));
-    };
-
-    run(origin.path(), &["init", "-q", "-b", "main"]);
-    run(origin.path(), &["config", "user.email", "test@example.com"]);
-    run(origin.path(), &["config", "user.name", "Test"]);
+    setup(origin.path(), &["init", "-q", "-b", "main"]);
+    setup(origin.path(), &["config", "user.email", "test@example.com"]);
+    setup(origin.path(), &["config", "user.name", "Test"]);
     fs::create_dir_all(origin.path().join("docs/ticket")).unwrap();
     fs::write(origin.path().join("docs/ticket/a.md"), "a\n").unwrap();
-    run(origin.path(), &["add", "."]);
-    run(origin.path(), &["commit", "-q", "-m", "first"]);
+    setup(origin.path(), &["add", "."]);
+    setup(origin.path(), &["commit", "-q", "-m", "first"]);
 
     let clone = Utf8TempDir::new().unwrap();
-    run(clone.path(), &["clone", "-q", origin.path().as_str(), "."]);
+    setup(clone.path(), &["clone", "-q", origin.path().as_str(), "."]);
 
     (origin, clone)
 }
 
 fn commit_upstream(origin: &Utf8Path, file: &str) {
     fs::write(origin.join(file), "upstream\n").unwrap();
-    git(origin, &["add", "."]).unwrap();
-    git(origin, &["commit", "-q", "-m", file]).unwrap();
+    setup(origin, &["add", "."]);
+    setup(origin, &["commit", "-q", "-m", file]);
 }
 
 #[test]

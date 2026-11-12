@@ -20,8 +20,9 @@ use std::{
 };
 
 use jp_plugin::message::{
-    CompactRequest, ExitMessage, HostToPlugin, InterruptRequest, LogMessage, PluginToHost,
-    PrintMessage, QueryRequest, ReadConfigRequest, ReadEventsRequest,
+    CompactRequest, Compaction, ExitMessage, HostToPlugin, InterruptRequest, LogMessage,
+    PluginToHost, PrintMessage, QueryRequest, ReadConfigRequest, ReadEventsRequest,
+    StoredCompaction,
 };
 use serde_json::{Map, Value};
 use tokio::sync::{oneshot, watch};
@@ -81,12 +82,13 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// it reaches the host after it.
     fn query(&self, conversation: &str, content: &str, cfg: Vec<String>) -> Turn;
 
-    /// Compact `conversation` with its configured rules, resolving with the
-    /// report `jp conversation compact` prints.
+    /// Add `compactions` to `conversation`, resolving with the compactions
+    /// stored, or why none was.
     fn compact(
         &self,
         conversation: &str,
-    ) -> impl Future<Output = Result<Vec<String>, String>> + Send + 'static;
+        compactions: Vec<Compaction>,
+    ) -> impl Future<Output = Result<Vec<StoredCompaction>, String>> + Send + 'static;
 
     /// Inject `content` into the running turn on `conversation` as a user
     /// reply.
@@ -356,7 +358,8 @@ impl Host for HostClient {
     fn compact(
         &self,
         conversation: &str,
-    ) -> impl Future<Output = Result<Vec<String>, String>> + Send + 'static {
+        compactions: Vec<Compaction>,
+    ) -> impl Future<Output = Result<Vec<StoredCompaction>, String>> + Send + 'static {
         let client = self.clone();
         let conversation = conversation.to_owned();
 
@@ -365,13 +368,13 @@ impl Host for HostClient {
             let message = PluginToHost::Compact(CompactRequest {
                 id: Some(id.clone()),
                 conversation,
-                args: vec![],
+                compactions,
             });
 
-            // No deadline: a rule that summarizes calls a model, which takes as
-            // long as it takes.
+            // No deadline: a compaction that generates a summary calls a model,
+            // which takes as long as it takes.
             match client.request(&id, &message, None).await? {
-                HostToPlugin::Compacted(compacted) => Ok(compacted.report),
+                HostToPlugin::Compacted(compacted) => Ok(compacted.compactions),
                 HostToPlugin::Error(error) => Err(error.message),
                 other => Err(format!("unexpected answer to compact: {other:?}")),
             }

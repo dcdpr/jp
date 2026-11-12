@@ -1,11 +1,14 @@
 //! `HostClient` against an in-process host: what it writes is captured, and the
 //! test writes the host's answers into a pipe the client reads.
 
-use std::io::{self, BufReader, PipeWriter};
+use std::{
+    io::{self, BufReader, PipeWriter},
+    num::NonZeroI64,
+};
 
 use jp_plugin::message::{
     CompactedResponse, ConfigResponse, CreatedResponse, DoneResponse, ErrorResponse,
-    EventsResponse, InterruptAction, QueryCompleteResponse,
+    EventsResponse, InterruptAction, QueryCompleteResponse, ReasoningCompaction,
 };
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -225,11 +228,28 @@ async fn a_reply_is_taken_or_refused() {
     assert_eq!(request.content.as_deref(), Some("Actually second"));
 }
 
-/// With no arguments the host applies the configured rules, and its report
-/// comes back as it is.
+fn stripped() -> StoredCompaction {
+    StoredCompaction {
+        from: 2,
+        to: 5,
+        reasoning: true,
+        tool_calls: None,
+        summary: None,
+    }
+}
+
+/// The compactions go out as given, and the ones stored come back as the host
+/// reported them.
 #[tokio::test]
-async fn compact_asks_for_the_configured_rules_and_returns_the_report() {
+async fn compact_sends_the_compactions_and_returns_the_stored_ones() {
     let f = fixture();
+    let compactions = vec![Compaction {
+        from: NonZeroI64::new(2).unwrap(),
+        to: NonZeroI64::new(-2).unwrap(),
+        reasoning: Some(ReasoningCompaction::default()),
+        tool_calls: None,
+        summary: None,
+    }];
     let (written, host) = (f.written.clone(), Arc::clone(&f.host));
     tokio::spawn(async move {
         eventually(|| written.messages().len() == 1).await;
@@ -238,19 +258,19 @@ async fn compact_asks_for_the_configured_rules_and_returns_the_report() {
             &HostToPlugin::Compacted(CompactedResponse {
                 id: Some("1".to_owned()),
                 conversation: "c1".to_owned(),
-                report: vec!["Kept turn 1.".to_owned()],
+                compactions: vec![stripped()],
             }),
         );
     });
 
-    let report = within(f.client.compact("c1")).await;
+    let stored = within(f.client.compact("c1", compactions.clone())).await;
 
-    assert_eq!(report, Ok(vec!["Kept turn 1.".to_owned()]));
+    assert_eq!(stored, Ok(vec![stripped()]));
     assert_eq!(f.written.messages(), vec![PluginToHost::Compact(
         CompactRequest {
             id: Some("1".to_owned()),
             conversation: "c1".to_owned(),
-            args: vec![],
+            compactions,
         }
     )]);
 }
@@ -264,9 +284,9 @@ async fn a_compaction_the_host_refuses_fails_with_its_message() {
         answer(&host, &error("1", "No turns to compact"));
     });
 
-    let report = within(f.client.compact("c1")).await;
+    let stored = within(f.client.compact("c1", vec![])).await;
 
-    assert_eq!(report, Err("No turns to compact".to_owned()));
+    assert_eq!(stored, Err("No turns to compact".to_owned()));
 }
 
 #[tokio::test]

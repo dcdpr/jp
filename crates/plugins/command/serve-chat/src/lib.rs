@@ -92,6 +92,9 @@ Configuration (`plugins.command.serve-chat.options`):
                      `url`, `model`,
                      `api_key_env` (default JEV_API_KEY; empty for no token),
                      `threshold` (default 0.5), `instructions`.
+  compact            The compactions \"@bot compact\" asks for: `from`, `to`,
+                     and `reasoning`, `tool_calls`, or `summary`. Default:
+                     reasoning and tool calls stripped from turns 2 to -2.
   people.<key>       Who is answered: `name`, and their `signal` account.
   checkout.enabled   Lock, pull, and check the checkout. Default: true.
   checkout.writable  Directories a turn may change.

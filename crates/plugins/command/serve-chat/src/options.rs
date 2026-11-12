@@ -14,15 +14,29 @@
 //! signal = "+31611111111"
 //! ```
 //!
+//! `compact` lists the compactions "@JP compact" asks `jp` for, in the shape of
+//! the plugin protocol's `compact` request.
+//! It defaults to stripping reasoning and tool calls from every turn but the
+//! first and the last:
+//!
+//! ```toml
+//! [[plugins.command.serve-chat.options.compact]]
+//! from = 2
+//! to = -2
+//! reasoning = {}
+//! tool_calls = { mode = "strip" }
+//! ```
+//!
 //! Only messages from senders in `people` are answered; all other messages are
 //! dropped.
 //! Every option except `people` and `signal.account` is optional.
 //! Unknown keys are ignored.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, num::NonZeroI64, time::Duration};
 
 use camino::Utf8PathBuf;
 use chrono::{Datelike as _, Days, NaiveDate, Weekday};
+use jp_plugin::message::{Compaction, ReasoningCompaction, ToolCallsCompaction, ToolCallsMode};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -47,6 +61,12 @@ const DEFAULT_DECIDE_MODEL: &str = "jev-latest";
 const DEFAULT_DECIDE_KEY_ENV: &str = "JEV_API_KEY";
 
 const DEFAULT_DECIDE_THRESHOLD: f64 = 0.5;
+
+/// The second turn, where the default compaction starts.
+const SECOND_TURN: NonZeroI64 = NonZeroI64::new(2).unwrap();
+
+/// The second-to-last turn, where the default compaction ends.
+const SECOND_TO_LAST_TURN: NonZeroI64 = NonZeroI64::new(-2).unwrap();
 
 /// The question the decide API answers for each message, unless
 /// `decide.instructions` replaces it.
@@ -81,6 +101,9 @@ pub(crate) struct Options {
     /// The model asked whether a group message is meant for the assistant, if
     /// any; without one, every message is.
     pub decide: Option<DecideOptions>,
+
+    /// The compactions a request to compact asks `jp` for, in order.
+    pub compact: Vec<Compaction>,
 }
 
 /// A decide API in the System One request format: a model answering a question
@@ -187,6 +210,7 @@ struct Raw {
     checkout: RawCheckout,
     signal: RawSignal,
     decide: Option<RawDecide>,
+    compact: Option<Vec<Compaction>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -264,6 +288,7 @@ impl Options {
             checkout: checkout(raw.checkout)?,
             signal: signal(raw.signal)?,
             decide: raw.decide.map(decide).transpose()?,
+            compact: compact(raw.compact)?,
         })
     }
 
@@ -277,6 +302,31 @@ impl Options {
                 .then_some((key.as_str(), person))
         })
     }
+}
+
+/// The compactions `compact` names, or the default: reasoning and tool calls
+/// stripped from every turn but the first and the last, as the built-in
+/// `conversation.compaction.rules` rule does.
+fn compact(raw: Option<Vec<Compaction>>) -> Result<Vec<Compaction>, String> {
+    let Some(compactions) = raw else {
+        return Ok(vec![Compaction {
+            from: SECOND_TURN,
+            to: SECOND_TO_LAST_TURN,
+            reasoning: Some(ReasoningCompaction::default()),
+            tool_calls: Some(ToolCallsCompaction {
+                mode: ToolCallsMode::Strip,
+                over_bytes: None,
+            }),
+            summary: None,
+        }]);
+    };
+    if compactions.is_empty() {
+        return Err(format!(
+            "`{KEY}.compact` names no compactions; leave it out for the default."
+        ));
+    }
+
+    Ok(compactions)
 }
 
 /// Parse `rollover` from `"daily"` (default) or a weekday name such as

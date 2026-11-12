@@ -62,6 +62,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::{
     admission::{Official, admit},
     approvals::ApprovalStore,
+    compaction,
     discovery::{self, LocalPlugin},
     help, install, output,
     process_tree::ProcessTree,
@@ -70,15 +71,12 @@ use super::{
 };
 use crate::{
     Ctx, KeyValueOrPath, cmd,
-    cmd::{
-        conversation::compact::Compact,
-        query::{
-            NewTitle, PendingStreamTrim, TurnInputs,
-            interrupt::{
-                Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
-            },
-            last_request_id, resolve_new_title, turn_structured_data,
+    cmd::query::{
+        NewTitle, PendingStreamTrim, TurnInputs,
+        interrupt::{
+            Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
         },
+        last_request_id, resolve_new_title, turn_structured_data,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -1414,13 +1412,12 @@ async fn prepare_turn(
     Ok((inputs, stream))
 }
 
-/// Compact a conversation on the plugin's behalf, as `jp conversation compact`
-/// does with the same arguments.
+/// Add the compactions a plugin asked for to a conversation.
 ///
 /// `None` means the compaction is under way and will send its own reply,
 /// correlated by the request's id.
-/// It runs on a task of its own because a rule that summarizes calls a model,
-/// and the message loop has to keep answering meanwhile.
+/// It runs on a task of its own because a compaction that generates a summary
+/// calls a model, and the message loop has to keep answering meanwhile.
 /// Anything returned is a failure that happened before it started.
 fn run_compact(
     ctx: &Ctx,
@@ -1431,42 +1428,30 @@ fn run_compact(
     let CompactRequest {
         id,
         conversation,
-        args,
+        compactions,
     } = request;
     let failed = |message: String| Some(action_failed(id.clone(), "compact", message));
 
-    let compact = match Compact::from_args(&args) {
-        Ok(compact) => compact,
-        Err(error) => return failed(format!("invalid compaction arguments: {error}")),
-    };
     let lock = match lock_existing(ctx, &conversation) {
         Ok(lock) => lock,
         Err(error) => return failed(error),
     };
-    // `--model` applies to the conversation's configuration, as it does at a
-    // terminal.
-    let model: Vec<String> = compact
-        .model()
-        .map(|model| format!("assistant.model.id={model}"))
-        .into_iter()
-        .collect();
-    let config = match conversation_config(ctx, &lock, &model) {
+    let config = match conversation_config(ctx, &lock, &[]) {
         Ok(config) => config,
         Err(error) => return failed(error),
     };
 
     let stdin = Arc::clone(stdin);
     turns.spawn(async move {
-        let reply = match compact_conversation(&compact, &config, lock).await {
-            Ok(report) => HostToPlugin::Compacted(CompactedResponse {
+        let reply = match compaction::compact(&compactions, &config, lock).await {
+            Ok(compactions) => HostToPlugin::Compacted(CompactedResponse {
                 id,
                 conversation,
-                report,
+                compactions,
             }),
             Err(error) => {
-                let detail = compaction_error(&error);
-                warn!(%conversation, %detail, "A compaction failed.");
-                action_failed(id, "compact", detail)
+                warn!(%conversation, %error, "A compaction failed.");
+                action_failed(id, "compact", error)
             }
         };
 
@@ -1475,40 +1460,6 @@ fn run_compact(
     });
 
     None
-}
-
-/// A failed compaction as `jp conversation compact` reports it: what went
-/// wrong, then what the error adds, such as the range that would resolve an
-/// overlap.
-fn compaction_error(error: &cmd::Error) -> String {
-    let Some(message) = &error.message else {
-        return error_chain(error);
-    };
-
-    let mut text = message.clone();
-    for (_, value) in &error.metadata {
-        text.push(' ');
-        match value.as_str() {
-            Some(value) => text.push_str(value),
-            None => text.push_str(&value.to_string()),
-        }
-    }
-
-    text
-}
-
-/// Compact the conversation `lock` holds as `compact` says, returning the
-/// report `jp conversation compact` prints.
-async fn compact_conversation(
-    compact: &Compact,
-    config: &AppConfig,
-    lock: ConversationLock,
-) -> Result<Vec<String>, cmd::Error> {
-    let notices = NoticeSink::new(|notice| warn!(%notice, "Compaction notice."));
-
-    compact
-        .compact_locked(config, lock.into_mut(), None, &notices)
-        .await
 }
 
 /// Decide how a conversation nobody has named gets a title from its first

@@ -82,12 +82,44 @@ They are offered only for a message that starts by mentioning the bot, such as
 Any other message is answered or ignored, so two people talking about starting
 over don't reset the bot's conversation.
 
-Compacting asks `jp` to run `jp conversation compact` on the chat's
-conversation, which applies `conversation.compaction.rules`.
-The built-in rule strips reasoning and tool calls from every turn but the first
-and the last, without calling a model.
-A message sent while it runs waits for it; a request to compact while the bot is
-answering in that chat is turned down, since the turn holds the conversation.
+Compacting sends `jp` the compactions in `compact`, each a range of turns and
+what to do to it, and the bot replies with what was compacted.
+A turn is counted from 1, or from -1 at the end, and both ends are inclusive.
+The default strips reasoning and tool calls from every turn but the first and
+the last, without calling a model:
+
+```toml
+[[plugins.command.serve-chat.options.compact]]
+from = 2
+to = -2
+reasoning = {}
+tool_calls = { mode = "strip" }
+```
+
+Several compactions can apply at once, such as summarizing the older turns and
+stripping tool results from the rest:
+
+```toml
+[[plugins.command.serve-chat.options.compact]]
+from = 1
+to = -6
+summary = { generate = { model = "haiku" } }
+
+[[plugins.command.serve-chat.options.compact]]
+from = -5
+to = -2
+tool_calls = { mode = "strip_responses", over_bytes = 4096 }
+```
+
+`tool_calls.mode` is `strip`, `strip_requests`, `strip_responses`, or `omit`.
+`summary` is `{ text = "..." }` to give the summary yourself, or `{ generate = {
+model, instructions, context } }`, every key optional, to have a model write it.
+If any compaction can't be applied, such as one whose range selects no turns,
+none is.
+
+A message sent while a compaction runs waits for it; a request to compact while
+the bot is answering in that chat is turned down, since the turn holds the
+conversation.
 
 - The bridge takes the action only when the model gives it at least `threshold`;
   otherwise, and when the API fails, the message is answered, and a failure is

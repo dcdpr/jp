@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, Weekday};
+use jp_plugin::message::{GenerateSummary, SummaryCompaction};
 use serde_json::json;
 
 use super::*;
@@ -48,7 +49,83 @@ fn unset_options_take_their_defaults() {
                 attachments_dir: None,
             },
             decide: None,
+            compact: vec![Compaction {
+                from: NonZeroI64::new(2).unwrap(),
+                to: NonZeroI64::new(-2).unwrap(),
+                reasoning: Some(ReasoningCompaction { over_bytes: None }),
+                tool_calls: Some(ToolCallsCompaction {
+                    mode: ToolCallsMode::Strip,
+                    over_bytes: None,
+                }),
+                summary: None,
+            }],
         })
+    );
+}
+
+/// Read in the request's own shape, as a TOML array of tables gives it.
+#[test]
+fn compact_names_the_compactions_to_ask_for() {
+    let mut options = minimal();
+    options["compact"] = json!([
+        { "from": 1, "to": -3, "summary": { "generate": { "model": "haiku" } } },
+        { "from": -2, "to": -1, "tool_calls": { "mode": "omit" } },
+    ]);
+
+    assert_eq!(read(options).unwrap().compact, [
+        Compaction {
+            from: NonZeroI64::new(1).unwrap(),
+            to: NonZeroI64::new(-3).unwrap(),
+            reasoning: None,
+            tool_calls: None,
+            summary: Some(SummaryCompaction::Generate(GenerateSummary {
+                model: Some("haiku".to_owned()),
+                instructions: None,
+                context: None,
+            })),
+        },
+        Compaction {
+            from: NonZeroI64::new(-2).unwrap(),
+            to: NonZeroI64::new(-1).unwrap(),
+            reasoning: None,
+            tool_calls: Some(ToolCallsCompaction {
+                mode: ToolCallsMode::Omit,
+                over_bytes: None,
+            }),
+            summary: None,
+        },
+    ]);
+}
+
+#[test]
+fn an_empty_compact_list_is_refused() {
+    let mut options = minimal();
+    options["compact"] = json!([]);
+
+    assert_eq!(
+        read(options),
+        Err(
+            "`plugins.command.serve-chat.options.compact` names no compactions; leave it out for \
+             the default."
+                .to_owned()
+        )
+    );
+}
+
+/// `jp` would refuse the field anyway; refusing it here makes a typo fail when
+/// the bridge starts, not when someone first asks to compact.
+#[test]
+fn a_compaction_with_an_unknown_field_is_refused() {
+    let mut options = minimal();
+    options["compact"] = json!([{ "from": 2, "to": -2, "keep_last": 1 }]);
+
+    let error = read(options).unwrap_err();
+
+    assert!(
+        error.starts_with(
+            "`plugins.command.serve-chat.options` is invalid: unknown field `keep_last`"
+        ),
+        "{error}"
     );
 }
 

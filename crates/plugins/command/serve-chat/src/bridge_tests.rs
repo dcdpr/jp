@@ -41,7 +41,10 @@ struct HostLog {
     tools: Result<Vec<String>, String>,
 
     /// Compactions waiting for the test to finish them, in order.
-    compactions: Vec<oneshot::Sender<Result<Vec<String>, String>>>,
+    compactions: Vec<oneshot::Sender<Result<Vec<StoredCompaction>, String>>>,
+
+    /// What every compaction asked for, in order.
+    compacted: Vec<Vec<Compaction>>,
 }
 
 impl Default for HostLog {
@@ -57,6 +60,7 @@ impl Default for HostLog {
             cfgs: vec![],
             tools: Ok(vec![]),
             compactions: vec![],
+            compacted: vec![],
         }
     }
 }
@@ -100,7 +104,11 @@ impl FakeHost {
         self.0.lock().unwrap().refuse_replies = true;
     }
 
-    fn end_compaction(&self, result: Result<Vec<String>, String>) {
+    fn compacted(&self) -> Vec<Vec<Compaction>> {
+        self.0.lock().unwrap().compacted.clone()
+    }
+
+    fn end_compaction(&self, result: Result<Vec<StoredCompaction>, String>) {
         let compaction = self.0.lock().unwrap().compactions.remove(0);
         compaction.send(result).unwrap();
     }
@@ -140,12 +148,14 @@ impl Host for FakeHost {
     fn compact(
         &self,
         conversation: &str,
-    ) -> impl Future<Output = Result<Vec<String>, String>> + Send + 'static {
+        compactions: Vec<Compaction>,
+    ) -> impl Future<Output = Result<Vec<StoredCompaction>, String>> + Send + 'static {
         let (tx, rx) = oneshot::channel();
         {
             let mut log = self.0.lock().unwrap();
             log.calls.push(format!("compact {conversation}"));
             log.compactions.push(tx);
+            log.compacted.push(compactions);
         }
 
         async move { rx.await.unwrap_or_else(|_| Err("dropped".to_owned())) }
@@ -1013,19 +1023,41 @@ async fn asking_to_compact_compacts_the_conversation_and_says_what_changed() {
     f.settle().await;
 
     assert_eq!(f.host.calls()[1..], ["compact c1"]);
+    assert_eq!(f.host.compacted(), [f.bridge.options.compact.clone()]);
 
     f.host.end_compaction(Ok(vec![
-        "Kept turn 1.".to_owned(),
-        "Compacted turns 2..3 (2 total, reasoning + tools).".to_owned(),
+        StoredCompaction {
+            from: 2,
+            to: 5,
+            reasoning: true,
+            tool_calls: Some(ToolCallsMode::Strip),
+            summary: None,
+        },
+        StoredCompaction {
+            from: 6,
+            to: 6,
+            reasoning: false,
+            tool_calls: Some(ToolCallsMode::StripResponses),
+            summary: None,
+        },
+        StoredCompaction {
+            from: 1,
+            to: 4,
+            reasoning: true,
+            tool_calls: None,
+            summary: Some(SummarySource::Generated),
+        },
     ]));
     f.settle().await;
     // The waiting message's turn reports `Started` once the host has it.
     f.settle().await;
 
     assert_eq!(f.outbox.take()[..1], ["send group:Z3JvdXA=: Compacted \
-                                       this conversation:\nKept turn \
-                                       1.\nCompacted turns 2..3 (2 \
-                                       total, reasoning + tools)."]);
+                                       this conversation:\n- turns 2 to \
+                                       5: reasoning stripped, tool calls \
+                                       stripped\n- turn 6: tool call \
+                                       results stripped\n- turns 1 to 4: \
+                                       summarized"]);
     assert_eq!(f.host.calls()[2..], [
         "query c1 \"Ada Client (to you): and now?\""
     ]);

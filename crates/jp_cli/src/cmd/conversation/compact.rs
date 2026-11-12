@@ -28,7 +28,7 @@ use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         compact_flag::{CompactFlag, combine_rules},
-        conversation_id::{ConversationIds as _, PositionalIds},
+        conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
         query::apply_model,
         turn_selection::{
@@ -730,7 +730,7 @@ pub(crate) async fn build_compaction_events(
 ///
 /// Returns the first unresolvable summary overlap, or the first blank verbatim
 /// summary.
-fn plan_compactions<'a>(
+pub(crate) fn plan_compactions<'a>(
     events: &ConversationStream,
     rules: &'a [CompactionRuleConfig],
     selection: &TurnSelection,
@@ -1110,66 +1110,11 @@ impl Compact {
         };
 
         let cfg = ctx.config();
-        let notices = notice_sink(&ctx.printer);
-        let report = self
-            .compact_locked(&cfg, lock.into_mut(), Some(&ctx.printer), &notices)
-            .await?;
-        for line in report {
-            ctx.printer.println(line);
-        }
-
-        Ok(())
-    }
-
-    /// Read `args` the way `jp conversation compact` reads its own, for a
-    /// conversation named elsewhere.
-    ///
-    /// # Errors
-    ///
-    /// Returns what the command would refuse the arguments with, and refuses a
-    /// conversation named among them.
-    pub(crate) fn from_args(args: &[String]) -> Result<Self, String> {
-        let cmd = Self::augment(Command::new("compact").no_binary_name(true));
-        let matches = cmd
-            .try_get_matches_from(args)
-            .map_err(|error| error.to_string().trim_end().to_owned())?;
-        let compact = Self::from_matches(&matches).map_err(|error| error.to_string())?;
-
-        if !compact.target.ids().is_empty() {
-            return Err("the arguments name a conversation; name it in the request".to_owned());
-        }
-        compact.validate()?;
-        compact.range.validate()?;
-
-        Ok(compact)
-    }
-
-    /// The model `--model` names to summarize with, if any.
-    pub(crate) fn model(&self) -> Option<&str> {
-        self.model.as_deref()
-    }
-
-    /// Compact the conversation `conv` holds, returning the report lines the
-    /// command prints.
-    ///
-    /// `cfg` is the conversation's configuration, with `--model` applied.
-    /// `printer` receives the summarizer's progress, and may be omitted.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when nothing is left to compact, a rule can't be
-    /// applied, the summarizer fails, or the conversation can't be written.
-    pub(crate) async fn compact_locked(
-        &self,
-        cfg: &jp_config::AppConfig,
-        mut conv: ConversationMut,
-        printer: Option<&jp_printer::Printer>,
-        notices: &NoticeSink,
-    ) -> std::result::Result<Vec<String>, crate::cmd::Error> {
+        let mut conv = lock.into_mut();
         let events_snapshot = conv.events().clone();
 
         if let Some(index) = self.reset {
-            return self.run_reset(conv, &events_snapshot, index);
+            return self.run_reset(ctx, conv, &events_snapshot, index);
         }
 
         self.range.check_turn_range(events_snapshot.turn_count())?;
@@ -1177,16 +1122,22 @@ impl Compact {
         // The effective rules combine the configured rules with any policy
         // flags / inline DSL (replace, or append under bare `--compact`).
         let rules = self
-            .effective_rules(cfg)
+            .effective_rules(&cfg)
             .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
 
         if self.dry_run {
-            return Self::preview_compaction(conv.id(), &events_snapshot, &rules, &self.range);
+            return Self::preview_compaction(ctx, conv.id(), &events_snapshot, &rules, &self.range);
         }
 
-        let compactions =
-            build_compaction_events(&events_snapshot, cfg, &rules, &self.range, printer, notices)
-                .await?;
+        let compactions = build_compaction_events(
+            &events_snapshot,
+            &cfg,
+            &rules,
+            &self.range,
+            Some(&ctx.printer),
+            &notice_sink(&ctx.printer),
+        )
+        .await?;
 
         // A run that compacts nothing is an error rather than a silent no-op: a
         // rule's bounds can come from config the user never typed, so without
@@ -1214,8 +1165,11 @@ impl Compact {
         // Write before reporting the timeline, so a failed write is an error
         // rather than a confirmation the user cannot trust.
         conv.flush()?;
+        for line in timeline_lines(&segments, last_turn, false) {
+            ctx.printer.println(line);
+        }
 
-        Ok(timeline_lines(&segments, last_turn, false))
+        Ok(())
     }
 
     /// Handle `--reset[=INDEX]`: remove every compaction event, or just the one
@@ -1227,10 +1181,11 @@ impl Compact {
     /// silent no-op (matching `--turn`).
     fn run_reset(
         &self,
+        ctx: &Ctx,
         conv: ConversationMut,
         events: &ConversationStream,
         index: Option<usize>,
-    ) -> std::result::Result<Vec<String>, crate::cmd::Error> {
+    ) -> Output {
         let Some(index) = index else {
             let count = if self.dry_run {
                 events.compactions().count()
@@ -1238,22 +1193,27 @@ impl Compact {
                 conv.update_events_and_flush(ConversationStream::remove_compactions)?
             };
 
-            return Ok(vec![match (count, self.dry_run) {
+            ctx.printer.println(match (count, self.dry_run) {
                 (0, _) => "No compaction events to remove.".to_owned(),
                 (count, true) => format!("Would remove {count} compaction event(s)."),
                 (count, false) => format!("Removed {count} compaction event(s)."),
-            }]);
+            });
+            return Ok(());
         };
 
         let (position, range) = resolve_reset_index(events, index)?;
 
         if self.dry_run {
-            return Ok(vec![format!("Would remove compaction {index} ({range}).")]);
+            ctx.printer
+                .println(format!("Would remove compaction {index} ({range})."));
+            return Ok(());
         }
 
         conv.update_events_and_flush(|stream| stream.remove_compaction(position))?;
+        ctx.printer
+            .println(format!("Removed compaction {index} ({range})."));
 
-        Ok(vec![format!("Removed compaction {index} ({range}).")])
+        Ok(())
     }
 
     /// Preview the compaction timeline without mutating the conversation.
@@ -1264,11 +1224,12 @@ impl Compact {
     /// An overlap that the real run would refuse is refused here too, so a
     /// preview never promises a compaction the run cannot perform.
     fn preview_compaction(
+        ctx: &Ctx,
         id: ConversationId,
         events_snapshot: &ConversationStream,
         rules: &[CompactionRuleConfig],
         selection: &TurnSelection,
-    ) -> std::result::Result<Vec<String>, crate::cmd::Error> {
+    ) -> Output {
         // Range resolution uses the original snapshot for every rule, while
         // `overlap` accumulates this run's summaries so later summary rules
         // preview the same (possibly extended) ranges as the real run.
@@ -1343,8 +1304,11 @@ impl Compact {
         segments.extend(new_segments);
 
         let last_turn = events_snapshot.turn_count().saturating_sub(1);
+        for line in timeline_lines(&segments, last_turn, true) {
+            ctx.printer.println(line);
+        }
 
-        Ok(timeline_lines(&segments, last_turn, true))
+        Ok(())
     }
 }
 

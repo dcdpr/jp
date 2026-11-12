@@ -3,6 +3,9 @@
 //!
 //! `flock` is replaced by a stub on `PATH`, since macOS has none; the lock
 //! itself is the bridge's concern and is tested there.
+//!
+//! Git runs without the user's or the system's configuration, both here and in
+//! the script, which can ask for a signature on every commit.
 
 #![cfg(unix)]
 
@@ -72,6 +75,8 @@ impl Server {
             .arg(script())
             .args(args)
             .env("PATH", path)
+            .env("GIT_CONFIG_GLOBAL", "")
+            .env("GIT_CONFIG_SYSTEM", "")
             .output()
             .unwrap()
     }
@@ -99,6 +104,8 @@ fn git(dir: &Utf8Path, args: &[&str]) -> String {
         .arg(dir)
         .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
         .args(args)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {output:?}");
