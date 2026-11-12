@@ -2004,6 +2004,29 @@ release-sync:
     target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
     exec "$target/debug/jp" release github sync
 
+# Release JP's history after the fact, in a trial from which nothing reaches
+# GitHub until `publish` (RFD 123, "JP's history"):
+#
+#   just backfill init           in this checkout: make the trial
+#   just backfill next           in the trial's clone: cut the next period
+#   just backfill proceed        finalize it, build it, and cut the next
+#   just backfill revert 0.5.0   take back 0.5.0 and every later release
+#   just backfill publish        put every release on GitHub
+#   just backfill draft 1a2b3c4  draft fragments for the changes after 1a2b3c4
+#
+# In the trial's clone, runs the script of the checkout `init` ran in, which
+# also builds `jp` and its plugins, so a fix made there applies at the next
+# command. Installs `cargo set-version` from cargo-edit, which `jp release cut`
+# runs to write each release's version.
+[group('release')]
+[positional-arguments]
+backfill *ARGS: (_install "cargo-edit@" + edit_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    source=$(git config --get jp-backfill.source || pwd)
+    exec bash "$source/.config/release/backfill.sh" "$@"
+
 # Locally develop the documentation, with hot-reloading.
 #
 # Runs through `jp vite serve`, which keeps the site's settings in step with the

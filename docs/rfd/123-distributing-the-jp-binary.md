@@ -220,6 +220,11 @@ trial ends:
 - `just backfill init` clones the repository and points the clone's `origin` at
   a bare repository standing in for GitHub, which holds a copy of GitHub's
   `main` and no tags, and removes every other remote.
+  The clone's `main` merges the branch `init` runs from, which holds the release
+  tooling, and the clone gets a workspace ID of its own, so its conversations
+  and builds stay apart from the checkout's.
+  In the clone, `just backfill` runs the script and builds the tools of that
+  checkout, so a fix made there applies at the next command.
 - `just backfill next` prints the next period's suggested last day, six weeks
   after the previous release's, and reads a line in which another day can be
   typed.
@@ -236,17 +241,22 @@ trial ends:
   finalize` and `jp release build`, runs the pushes they print, and starts the
   next period.
 - `just backfill revert 0.5.0` deletes the stand-in's tags of 0.5.0 and every
-  later release and abandons them, newest first ([RFD 122]), so the next `next`
-  cuts 0.5.0 again with its notes as they were edited.
+  later release and abandons them, newest first ([RFD 122]), and deletes their
+  builds, so the next `next` cuts 0.5.0 again with its notes as they were
+  edited.
 - `just backfill publish` ends the trial.
 
 The stand-in starts without tags, so the first period is release 0.1.0, and
 `next` suggests the commit the old `v0.1.0` named as its end.
 Every period builds with its commit's toolchain and, before [#428], without
 Windows ([Building](#building)).
-Drafting skips changes that already have a fragment, so the last period, which
-ends at `main`'s tip, keeps the fragments written since the gate landed as they
-were written, and becomes JP's first regular release.
+The history runs to GitHub's `main` as `init` found it, and drafting skips
+changes that already have a fragment, so a period taken back and cut again keeps
+its edited notes.
+The branch the trial is made from stays off `main` until `publish`, so its own
+fragments, and the changes that reach GitHub's `main` during the trial, ship in
+the first release cut after the trial's pull request merges; `just backfill
+draft <commit>` drafts fragments for those changes.
 
 `publish` deletes GitHub's old `v0.1.0`, pushes every release branch and tag in
 one push, and runs `jp release github publish` for each release, oldest first.
@@ -371,8 +381,8 @@ Depends on Phases 1 and 2.
 
 ### Phase 4: JP's history
 
-Add `just backfill` with `init`, `next`, `proceed`, `revert`, and `publish`, and
-run the trial.
+Add `just backfill` with `init`, `next`, `proceed`, `revert`, `publish`, and
+`draft`, and run the trial.
 Its `publish` is JP's first release with binaries.
 Depends on Phase 3 and on [RFD 122] Phases 5 to 7.
 
