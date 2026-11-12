@@ -133,13 +133,12 @@ When the stream has no `PendingTurn` marker, `start_turn` appends a new
   Because `print` renders conversation events rather than config deltas, the
   pending section produces no output until turn-scoped pending events are added.
   Plugin `read_events` returns `PendingTurn` like any other event.
-- A conversation whose stream holds only pending entries has no turns, and
-  counts as empty wherever a command decides whether a conversation is new, such
-  as whether to give its first query a title.
-  `ConversationStream::is_empty` counts any conversation event, the marker
-  included, so `jp query` and plugin `query` delegation, which record a config
-  delta before deciding on a title, would otherwise leave such a conversation
-  untitled.
+- A stream that holds only pending entries has `turn_count() == 0` and is
+  treated as a new conversation when deciding whether to generate a title on the
+  first query.
+  Because `ConversationStream::is_empty` counts the `PendingTurn` marker as an
+  event, checking `is_empty` after recording a `--cfg` delta (in `jp query` or
+  plugin `query` delegation) would otherwise skip title generation.
 
 ### Replay
 
@@ -148,13 +147,11 @@ When the stream has no `PendingTurn` marker, `start_turn` appends a new
 `TurnStart`), and converts that `TurnStart` back into a `PendingTurn` marker.
 Config deltas and patch overlays are retained, matching existing behavior.
 A compaction overlay is retained only if its range ends before the replayed
-turn; one that reaches the replayed turn or beyond is dropped, as
-`ConversationStream::retain` drops overlays a removal could invalidate ([RFD
-097]).
-Without that rule, the pending section would keep the replayed turn's index, and
-a summary covering it would replace the replayed request in the next request to
-the model.
-`trim_last_turn` keeps such overlays today, which T-1hbzetp fixes on its own.
+turn; any overlay whose range reaches the replayed turn is dropped, matching
+`ConversationStream::retain` ([RFD 097]).
+Otherwise, a compaction summary covering the replayed turn would still cover the
+resulting pending section and replace the replayed request on the next turn
+(tracked for `trim_last_turn` in T-1hbzetp).
 
 ```text
 before:  [TS ReqA RespA] [TS X1 ReqB RespB] [P X2]
@@ -176,7 +173,7 @@ after it is removed.
 `jp query --no-edit` re-sends the last `ChatRequest` when it is the final event
 of its turn, and sends `"continue"` otherwise (`query.rs:929-937`).
 Because a failed query followed by `jp config set -i` leaves `[TS ReqB] [P Δ]`
-and `PendingTurn` is a turn-scoped entry, two rules change:
+and `PendingTurn` is a turn-scoped entry, three rules change:
 
 - Retry inspection examines the last *started* turn: `last_turn_event` stops at
   any `PendingTurn` marker and returns the last turn-scoped entry before it, so
@@ -187,8 +184,8 @@ and `PendingTurn` is a turn-scoped entry, two rules change:
   `PendingTurn` marker) after selecting `ReqB` and before removing it; popping
   the tail entry would hit the marker, leave `ReqB` in place, and send `ReqB` a
   second time.
-- Removing the request drops compaction overlays that reach its turn, by the
-  same rule as replay.
+- Removing the request also drops any compaction overlay whose range reaches
+  that turn, matching replay.
 
 Converting the now-requestless turn back into a `PendingTurn` marker and merging
 the trailing `PendingTurn` marker into it preserves the earlier marker position
@@ -308,13 +305,14 @@ also call `open_pending()`.
    `PendingTurn`, `last_turn_event` to stop at the marker, retry request removal
    to delete by event ID and merge markers, and `from_parts` to repair invalid
    marker ordering on load.
-   Both removals drop compaction overlays that reach the removed turn.
+   Both `trim_last_turn` and retry request removal drop compaction overlays
+   whose range reaches the removed turn.
    This phase depends on Phase 1 and on T-1hbzetp.
 3. **Writers and display.** Call `open_pending()` in `jp query`, `jp config set
    -i`, and plugin `query` delegation, and update `jp conversation print` to
    render the pending section when its turn selection includes the last turn.
-   Title decisions in `jp query` and plugin `query` delegation treat a
-   pending-only stream as empty.
+   Treat a pending-only stream as empty when deciding whether to generate a
+   conversation title in `jp query` and plugin `query` delegation.
    This phase depends on Phase 2.
 4. **Documentation.** Add a glossary entry for Pending Turn (noting that it has
    no request and is not counted as a turn), and update the Turn glossary entry

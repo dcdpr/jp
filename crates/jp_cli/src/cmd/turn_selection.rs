@@ -254,10 +254,11 @@ fn parse_turn(s: &str) -> Result<TurnSpec, String> {
 }
 
 impl TurnSpec {
-    /// Reject an item a conversation of `count` turns cannot honour.
+    /// Validate that this item's bounds fall within a conversation of `count`
+    /// turns and are ordered `from <= to`.
     ///
-    /// The endpoint check runs first: a from-end position only has a turn
-    /// number once it is known to fall inside the conversation.
+    /// Checks endpoint bounds before ordering because a from-end position only
+    /// resolves to a valid turn number when it is within `count`.
     fn check(&self, count: usize) -> Result<(), String> {
         let ends = match self {
             Self::Single(pos) => [Some(*pos), None],
@@ -315,12 +316,12 @@ impl TurnSpec {
     }
 }
 
-/// Merge the windows of a `--turn` list that share a turn.
+/// Merge overlapping windows from a `--turn` list.
 ///
-/// The windows are resolved against `events` first: `2..-1` and `4` only
-/// compare once the from-end position is a turn index.
-/// Windows that abut stay separate, so `1..3,4..6` names two regions to a
-/// command that acts per window.
+/// Resolves bounds against `events` before comparing so from-end positions
+/// (such as `2..-1` and `4`) can be ordered by turn index.
+/// Adjacent windows that do not share a turn (such as `1..3` and `4..6`) remain
+/// separate.
 fn merge_overlapping(windows: &[BoundWindow], events: &ConversationStream) -> Vec<BoundWindow> {
     let mut resolved: Vec<TurnWindow> = windows
         .iter()
@@ -857,15 +858,12 @@ impl TurnSelection {
         Ok(())
     }
 
-    /// Reject a `--turn` value the conversation cannot honour.
+    /// Validate every `--turn` item against a conversation of `count` turns.
     ///
-    /// Two ways it cannot, checked for every item of a list.
-    /// An endpoint outside the conversation is an error rather than a clamped
-    /// selection, because `--turn` names specific turns (unlike
-    /// `--first`/`--last`).
-    /// A range whose end precedes its start names no turn in any conversation,
-    /// so it is rejected as malformed rather than resolved into an empty
-    /// selection.
+    /// Unlike `--first`/`--last`, which clamp to the conversation length,
+    /// `--turn` rejects endpoints outside the conversation.
+    /// It also rejects inverted ranges (`from > to`) as malformed rather than
+    /// resolving them to an empty selection.
     pub(crate) fn check_turn_range(&self, count: usize) -> Result<(), String> {
         self.turn.iter().try_for_each(|spec| spec.check(count))
     }
@@ -876,18 +874,17 @@ impl TurnSelection {
     /// One window for a single `--turn` item, for `--from`/`--to`, and for no
     /// selector at all (the whole conversation); two when `--first` and
     /// `--last` are combined.
-    /// A `--turn` list contributes one window per item, with items that share a
-    /// turn merged into one.
+    /// A `--turn` list contributes one window per item, with overlapping items
+    /// merged into a single window.
     /// `--first 0` and `--last 0` contribute no window.
     ///
-    /// Keep flags are not applied here — see [`Self::trim`].
+    /// Keep flags are not applied here; see [`Self::trim`].
     pub(crate) fn windows(&self, events: &ConversationStream) -> Vec<BoundWindow> {
         if !self.turn.is_empty() {
             let windows: Vec<_> = self.turn.iter().map(TurnSpec::window).collect();
 
-            // Merged here rather than after resolution, for the reason the
-            // `--first`/`--last` pair is collapsed below: `compact` acts per
-            // window.
+            // Merge overlapping items here rather than in `TurnSet` because
+            // callers such as `compact` operate on each base window separately.
             return match windows.len() {
                 1 => windows,
                 _ => merge_overlapping(&windows, events),

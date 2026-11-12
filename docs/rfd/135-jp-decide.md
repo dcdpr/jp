@@ -13,8 +13,8 @@
 
 `jp decide` asks a decision model ([RFD 133]) one or more questions from the
 shell and prints the answers as JSON.
-The questions are asked about what the invocation supplies: piped input,
-attachments, and any turns of the conversation it selects.
+Questions evaluate only the state provided by the invocation: piped stdin, `-a`
+attachments, and any selected turns from the conversation.
 When the session has an active conversation, `jp decide` applies that
 conversation's configuration and records the decision in the conversation's
 pending turn ([RFD 134]), so the next `jp query` includes it with its request.
@@ -33,14 +33,15 @@ returns a value with no probability.
 [RFD 133] adds decision models and a `decide` protocol request for plugins, but
 exposes no CLI command for shell scripts or interactive terminal sessions.
 
-Many decisions belong to a conversation: whether a diff the assistant just
-produced breaks the public API, whether the issue under discussion belongs to
-another crate, or whether the assistant's last answer addressed the question.
-Most of them judge something the user supplies, such as the diff, and some judge
-the conversation's own turns.
-Either way the assistant needs the result on its next turn, and the user should
-be able to inspect it later in the conversation history rather than pasting JSON
-output into the next query by hand.
+Many decisions also belong to an active conversation, such as checking whether a
+diff the assistant just produced breaks the public API, whether the issue under
+discussion belongs to another crate, or whether the assistant's last response
+answered the user's question.
+Some evaluate external input such as a diff, while others evaluate turns from
+the conversation itself.
+In both cases, the assistant needs the result on its next turn, and the user
+should be able to inspect it later in the conversation history rather than
+pasting JSON output into the next query by hand.
 
 Running inside a conversation also lets `jp decide` inherit conversation-scoped
 configuration: a conversation that sets `--cfg decision.model.id=…` continues
@@ -109,9 +110,8 @@ The positional question argument and `-s` are mutually exclusive.
 
 #### State
 
-The state is what the questions are asked about, and it holds only what the
-invocation supplies.
-`jp decide` sends one JSON object with a key for each part that applies:
+The decision state contains only the inputs provided by the invocation.
+`jp decide` sends a single JSON object containing whichever keys apply:
 
 | Key            | Content                           | Present when             |
 | -------------- | --------------------------------- | ------------------------ |
@@ -119,23 +119,24 @@ invocation supplies.
 | `resources`    | Attachments passed with `-a`      | `-a` is given            |
 | `conversation` | The selected turns, in chat style | A turn selector is given |
 
-Because each part has a name, a question can refer to one:
+Because each input source has a distinct key, questions can reference them by
+name:
 
 ```sh
 git diff | jp decide --last 1 'Does the change in `input` do what `conversation` asked for?'
 ```
 
-A targeted conversation supplies configuration and a place to record the
-decision (see [Which conversation](#which-conversation)).
-None of its content is part of the state unless the invocation selects it.
+A targeted conversation supplies configuration and a destination for recording
+the decision (see [Which conversation](#which-conversation)), but none of its
+history is included in the state unless explicitly selected.
 
 Stdin is always sent as a string, even when its content is valid JSON, so a
 future flag for structured JSON input can be added without changing the behavior
 of existing commands.
 
-**Turns.** `jp decide` takes the turn selectors of `jp conversation print`
-(`--last`, `--first`, `--turn`, `--from`, `--to`, `--keep-first`, and
-`--keep-last`), and they select the same turns:
+**Turns.** `jp decide` accepts the same turn selection flags as `jp conversation
+print` (`--last`, `--first`, `--turn`, `--from`, `--to`, `--keep-first`, and
+`--keep-last`):
 
 ```sh
 jp decide --last 1 'Did the assistant answer the question it was asked?'
@@ -144,86 +145,83 @@ jp decide --turn=1,3..10,15 'Is this conversation about a bug in JP?'
 
 Two rules differ from `print`:
 
-- Without a selector, `print` shows every turn and `jp decide` sends none.
-  `--turn ..` selects the whole conversation.
-- A selector that names no turn, or that is given when no conversation is
-  targeted, is an error.
+- Without a selector, `print` includes every turn whereas `jp decide` includes
+  none; pass `--turn ..` to select the entire conversation.
+- Passing a selector that matches no turns, or passing a turn selector when no
+  conversation is targeted, returns an error.
 
-The selected turns are sent as an array of their events, in stream order and in
-the JSON form `jp_conversation` stores them in.
-The array holds what was said and decided, as the `chat` style of `jp
-conversation print` shows it:
+Selected turns are serialized in stream order as a JSON array of
+`jp_conversation` events.
+Matching the `chat` style of `jp conversation print`, the array includes only
+conversational exchanges and prior decisions:
 
-- Chat requests.
-- The assistant's messages and structured responses.
-- Earlier decisions, with their questions and answers.
+- `ChatRequest` events (without attached `resources`).
+- Assistant `ChatResponse::Message` and `ChatResponse::Structured` events.
+- Prior `Decision` events (with `questions` and `answers`, omitting `input` and
+  `resources`).
 
-Reasoning, tool calls, inquiries, turn markers, and config deltas are left out.
-So is everything attached to those events: the resources on a request or a
-decision, and a decision's `input`.
+Reasoning blocks, tool calls, inquiries, turn markers, and config deltas are
+omitted:
 
-- Turns are sent as stored: compaction does not apply to them, as it does not
-  apply to `print` without `--compacted`.
-- JP does not shorten a selection to fit the model's context window.
-  A state the model cannot hold is the server's to reject.
-- A selection that includes the last turn includes the decisions recorded since,
-  as `print` shows the pending section with the last turn ([RFD 134]).
+- Selected turns are serialized from raw stored events without applying
+  compaction overlays, matching `jp conversation print` without `--compacted`.
+- JP does not truncate selected turns to fit the decision model's context
+  window; oversized states are rejected by the server.
+- Selecting the last turn also includes any pending decisions recorded after it,
+  matching how `print` includes the pending section with the last turn ([RFD
+  134]).
 
-`jp conversation print --style=chat --format=json` with the same selectors
-prints the array `jp decide` sends.
-One function in `jp_conversation` produces it for both commands.
+`jp conversation print --style=chat --format=json` outputs the exact JSON array
+that `jp decide` sends under `conversation`, using a shared serializer in
+`jp_conversation`.
 
-**Turn lists.** `--turn` takes a comma-separated list of turns and ranges:
-`--turn=1,3..10,15` selects turn 1, turns 3 through 10, and turn 15.
-An item outside the conversation is an error, as it is for a single value, and
-items that overlap select a turn once.
-A list that starts with a from-end position needs `=` (`--turn=-3,-1`).
-The list belongs to the shared turn selection, so `jp conversation print`,
-`fork`, and `compact` accept it too.
-It is implemented alongside this RFD, since it does not depend on the rest.
+**Turn lists.** `--turn` accepts a comma-separated list of turn numbers and
+ranges (for example, `--turn=1,3..10,15` selects turn 1, turns 3 through 10, and
+turn 15).
+Out-of-range items return an error, overlapping items are deduplicated, and
+lists starting with a negative index require `=` (`--turn=-3,-1`).
+Because list parsing lives on the shared `TurnSelection` type, `jp conversation
+print`, `fork`, and `compact` accept turn lists as well.
 
-**Attachments.** `-a` accepts what `jp query -a` accepts, resolved by the same
-attachment handlers.
-In a conversation it also records what `jp query -a` records under [RFD 065]:
-the resolved snapshot is stored on the `Decision` event, and a config delta adds
-the declaration to `conversation.attachments`.
-[RFD 065] skips a declared attachment whose URI already appears in the
-conversation; a snapshot on a `Decision` event counts, so the next `jp query`
-does not resolve the attachment again and the assistant receives it with the
-decision.
-Without a conversation there is nothing to attach to, and `-a` applies to that
-invocation only.
+**Attachments.** `-a` resolves attachments through the same handlers as `jp
+query -a`.
+When recording into a conversation, `-a` follows [RFD 065]: the resolved
+`Resource` snapshot is stored on the `Decision` event, and a config delta adds
+the attachment declaration to `conversation.attachments`.
+Because [RFD 065] skips re-resolving any declared attachment whose URI already
+appears in the stream, counting snapshots on `Decision` events ensures the next
+`jp query` reuses the snapshot rather than resolving the attachment a second
+time.
+When running without a conversation, `-a` applies only to that invocation.
 
-The conversation's own attachments are never part of the state, whether declared
-in `conversation.attachments` or attached to one of its requests.
-A workspace often declares attachments for every conversation (the shell, the
-date, a reference document).
-They are context for the assistant, not what a decision is asked about.
-To ask about one, pass it with `-a`.
+Existing attachments on the conversation (whether declared in
+`conversation.attachments` or stored on prior `ChatRequest` events) are never
+included in the decision state automatically.
+Workspaces routinely declare ambient attachments (such as shell environment,
+date, or reference docs) as context for the assistant rather than input for a
+decision; pass `-a` explicitly to include an attachment in a decision.
 
-**Binary resources.** A text attachment is part of the state's JSON.
-A binary one, such as an image or a PDF, appears there as its URI and MIME type
-only, and its bytes travel beside the state to the decision source (the
-`jp_decision` request gains them), which decides how to send them.
-A source sends what its wire format has a field for and leaves it to the server
-to reject what the model cannot read.
-A resource the wire format has no field for fails the request with an error
-naming the resource: a decision's answer is a number, and nothing in it would
-show that an input was missing.
-The `systemone` source has no such field in its first version ([RFD 133]), so
-`-a` with a binary attachment fails there.
+**Binary resources.** Text attachments are inlined into the `resources` JSON
+object.
+Binary attachments (such as images or PDFs) appear in the JSON state as metadata
+only (URI and MIME type), while their raw bytes are passed alongside the state
+on the `jp_decision` request for the provider source to encode.
+If the provider's wire format supports the binary type, the source sends it and
+lets the server validate model support; if the wire format has no field for that
+binary resource, the source fails the request with an error naming the resource
+rather than silently dropping it from a numeric decision.
+Because the initial `systemone` source supports text and JSON only ([RFD 133]),
+passing a binary attachment to `-a` returns an error.
 
-**Empty state.** `jp decide` refuses to run with an empty state (no input, no
+**Empty state.** `jp decide` rejects an empty state (no stdin input, no `-a`
 attachments, and no selected turns) unless `--no-state` is passed, which sends
-an empty object.
-A question can be self-contained, but an empty state is more often a mistake: a
-forgotten pipe, or a question about the conversation asked without selecting any
-of it.
-When a conversation is targeted, the error names the turn selectors.
-Piped input that turns out to be empty is refused the same way, even when
-attachments or turns supply state: a pipe that delivers nothing usually means
-the command feeding it failed or had nothing to report (such as an empty `git
-diff --cached`).
+`{}`.
+Although a question can be self-contained, an empty state on the CLI usually
+indicates a forgotten pipe or a missing turn selector; when a conversation is
+targeted, the error message points to the turn selection flags.
+Empty piped stdin is rejected even when `-a` or turn selectors provide other
+state, because an empty pipe typically means the upstream command failed or
+produced no output (such as an empty `git diff --cached`).
 
 #### Output and exit status
 
@@ -342,15 +340,14 @@ pub struct Decision {
   "decision", …}`) rather than a request/response pair.
   A decision is atomic, and a split pair would introduce a
   request-without-response state for `sanitize` to repair.
-- The event names the turns that were part of the state and does not copy them:
-  they are in the stream already.
-  `turns` holds the event ID ([RFD 097]) of each turn's `TurnStart`, which stays
-  valid when turns are renumbered.
-  When the selection included the pending section, `turns` also holds the
-  pending marker's ID, which becomes the ID of the turn the decision lands in
-  ([RFD 134]).
-  An ID whose turn is gone, after a fork or a trim, is skipped wherever the
-  decision is shown.
+- `turns` records the `EventId` ([RFD 097]) of each selected turn's `TurnStart`
+  rather than copying the turn's events, remaining valid across turn
+  renumbering.
+  If the selection included the pending section, `turns` also includes the
+  `PendingTurn` marker's `EventId`, which becomes the `TurnStart` ID of the turn
+  that absorbs the decision ([RFD 134]).
+  If a referenced turn is later removed by a fork or trim, display paths skip
+  the missing ID.
 - `resources` holds [RFD 065] snapshots, as `ChatRequest.resources` does.
 - `encode_event` encodes `input` using the same representation as
   `ToolCallResponse` content.
@@ -379,13 +376,14 @@ Between those two steps, it converts each `Decision` event into a `Resource` on
 the first `ChatRequest` of that turn:
 
 - `title` names the decision and the model that answered it.
-- The text body lists each question and its answer, the numbers of the turns the
-  decision read, and the decision's `input`.
+- The text body lists each question and its answer, the indices of any selected
+  turns, and the decision's `input`.
 - `uri` identifies the source `Decision` event.
 
 The decision's own `resources` are added to the same `ChatRequest` unchanged, so
 the assistant receives each attachment once.
-Selected turns are named, not repeated: the assistant already has them.
+Selected turns are referenced by turn number rather than duplicated, since the
+assistant already receives the conversation history.
 
 This `Resource` exists only in the in-memory provider request built by
 `Thread::into_parts`.
@@ -395,10 +393,10 @@ user-attached resources.
 directly, and the rendered resource text is deterministic across requests so the
 prompt cache prefix remains stable.
 
-Window estimates count a `Decision` by what the assistant receives for it: its
-questions, answers, `input`, and text resources, after any compaction policy.
-`window::estimate_event_chars` matches every event kind, so `Decision` cannot
-fall through to a zero estimate.
+Context-window estimation counts the content the assistant receives for each
+`Decision` (questions, answers, `input`, and text resources after compaction).
+Because `window::estimate_event_chars` matches exhaustively on `EventKind`,
+`Decision` cannot fall through to a zero estimate.
 
 `sanitize` drops conversation events that precede the stream's first
 `ChatRequest`, keeping only config deltas and `TurnStart` entries
@@ -464,23 +462,22 @@ and answers while omitting its `input` and resources.
 
 The plugin `decide` request ([RFD 133]) gains two optional fields:
 
-- `conversation` names a conversation to run in.
+- `conversation` targets a conversation.
   The host applies that conversation's configuration, records the `Decision`
-  event in its pending turn with the request's `state` as `input`, and persists
-  any `cfg` overrides as a config delta, matching `query`.
-- `turns` selects turns of that conversation as state, in the grammar of
-  `--turn` (`"-1"`, `"1,3..10,15"`).
-  The host then sends an object holding the request's `state` under `input` and
-  the selected turns under `conversation`, as `jp decide` does, and `state`
-  becomes optional.
-  `turns` without `conversation` is an error.
+  event in its pending turn with the request's `state` stored as `input`, and
+  persists any `cfg` overrides as a config delta, matching `query`.
+- `turns` selects turns from that conversation as state using the `--turn`
+  grammar (`"-1"`, `"1,3..10,15"`).
+  When `turns` is set, `state` becomes optional, and the host sends a JSON
+  object with the request's `state` under `input` and the selected turns under
+  `conversation`, matching `jp decide`.
+  Passing `turns` without `conversation` returns an error.
 
-A request with `conversation` writes to that conversation, so the host awaits it
-after the plugin exits, as it awaits a delegated `query`, and sends `decided`
-only after the decision is recorded.
-The cancellation on plugin exit in [RFD 133] applies to requests without
-`conversation`, which write nothing.
-
+Because a `decide` request with `conversation` mutates conversation state, the
+host awaits it after plugin exit (matching delegated `query` turns) and sends
+`decided` only after recording the `Decision` event.
+Requests without `conversation` write no state and are still cancelled when the
+plugin exits ([RFD 133]).
 When `conversation` is omitted, the request neither reads nor writes a
 conversation regardless of `decision.conversation`.
 
@@ -529,24 +526,25 @@ underlying runner.
   conversation both applies its configuration layer and records the decision
   into its stream: `-!` keeps the configuration while skipping the recording,
   and `--cfg decision.conversation=none` skips both.
-- **A decision does not read the conversation it runs in.** `jp query` sends the
-  conversation, and `jp decide` sends none of it without a turn selector.
-  With nothing piped, a question about the conversation fails on the empty
-  state.
-  With input piped it does not: `git diff | jp decide 'Does this do what I asked
-  for?'` is answered from the diff alone, and nothing shows that what was asked
-  for was missing.
-- **The same selectors, a different default.** Without a turn selector, `jp
-  conversation print` shows every turn and `jp decide` sends none.
-- **Answers depend on how turns serialize.** The decision model reads selected
-  turns as chat-style event JSON, so changing which events are included or how
-  they serialize changes the answers for the same turns.
-- **`-a` means two things.** `jp decide -a` records the attachment in a
-  conversation and applies to a single invocation outside one.
-- **A decision's input is re-sent to the assistant.** A decision's `input` and
-  resources reach the assistant with every subsequent turn until a compaction
-  rule strips them; large inputs (such as diffs) consume tokens on every turn
-  unless `strip` is configured.
+- **Conversation history is omitted unless selected.** Unlike `jp query`, which
+  sends the conversation history automatically, `jp decide` sends no turns
+  unless a turn selector is passed.
+  When nothing is piped, asking a question about the conversation fails the
+  empty-state check; when stdin is piped (for example, `git diff | jp decide
+  'Does this do what I asked for?'`), the model answers from the diff alone
+  without seeing the conversation.
+- **Different default for turn selectors.** Without a turn selector, `jp
+  conversation print` selects every turn whereas `jp decide` selects none.
+- **Sensitivity to turn serialization.** Because the decision model evaluates
+  selected turns as serialized chat-style event JSON, changing which events are
+  included or how they serialize can alter model outputs for the same turns.
+- **Context-dependent `-a` persistence.** `jp decide -a` persists the attachment
+  in `conversation.attachments` when targeting a conversation, but applies only
+  to a single invocation when running standalone.
+- **Repeated input tokens until compaction.** A decision's `input` and
+  `resources` are sent to the assistant on every subsequent turn until a
+  compaction rule strips them; large inputs (such as diffs) consume tokens on
+  every turn unless `strip` is configured.
 - **Dependency on [RFD 134] and [RFD 065].** Because `jp decide` records
   decisions into the active conversation from its first release, it cannot ship
   until [RFD 134] and [RFD 065]'s provider migration land.
@@ -566,47 +564,51 @@ probability object with a decision model), breaking scripts when switching
 models.
 
 **Send the conversation with every decision.** Rejected.
-`jp query` works this way, and it would let any question refer to the
-conversation without a selector.
-Three things weigh against it:
+Although sending the conversation automatically matches `jp query` and avoids
+passing a turn selector, it has three problems:
 
-- Jev reads 32k tokens per question, and its long-context mode is slower and
-  less accurate, so a working conversation would rarely fit whole.
-- The failure is silent: unrelated turns shift an answer that looks as valid as
-  any other.
-- A workspace's declared attachments would ride along with every decision.
+- Decision models have smaller effective context windows than chat models (for
+  example, Jev allows 32k tokens per question, and its long-context mode is
+  slower and less accurate), so an active conversation rarely fits in full.
+- Unrelated prior turns can silently skew the returned probabilities without any
+  indication in the output.
+- Ambient workspace attachments declared in `conversation.attachments` would be
+  sent with every decision.
 
-`--turn ..` sends the whole conversation when a question needs it.
+Passing `--turn ..` still sends the full conversation when needed.
 
 **Send the last turn by default.** Rejected.
-The last turn is what most questions about a conversation refer to, but as a
-default it still shifts the answer of `git diff | jp decide …`.
-Sending it only when nothing is piped or attached turns a forgotten pipe into a
-confident answer about the last turn, where the empty-state rule gives an error.
+Although questions about a conversation most often refer to the last turn,
+including it by default would still skew decisions over external input such as
+`git diff | jp decide …`.
+Including the last turn only when no stdin or `-a` attachment is provided would
+turn a forgotten pipe into a confident answer about the last turn instead of an
+empty-state error.
 
-**Fit a selection to the model's context window.** Rejected.
-Dropping the oldest events until the state fits is what tool inquiries do
-(`window::truncate_to_fit`), but it needs a known context window for every
-decision model, and it answers a question from less than what was selected.
-The selection is explicit, so its size is the user's to choose, and the server's
-rejection says when it is too large.
+**Truncate selected turns to fit the model's context window.** Rejected.
+Tool inquiries drop oldest events via `window::truncate_to_fit`, but doing so in
+`jp decide` would require knowing the context window of every decision model and
+would silently answer questions over a subset of the explicitly selected turns.
+Leaving the selection intact lets the server reject oversized states explicitly.
 
-**Copy the selected turns into the `Decision` event.** Rejected.
-A copy would make the record self-contained, but it grows the stream with every
-decision, and a `ChatRequest` does not record the events it was sent with
-either: the turns are in the stream, and the event names them.
+**Copy selected turns into the `Decision` event.** Rejected.
+Storing a copy of the selected turns would make each `Decision` event
+self-contained, but it would duplicate stream history on every decision; like
+`ChatRequest`, `Decision` references existing stream turns by `EventId`.
 
-**Send selected turns in a purpose-built transcript format.** Rejected.
-A second serialization of the conversation would have to be designed,
-documented, and kept in step with the event types, whereas the stored event JSON
-already exists and `jp conversation print` can show it.
+**Serialize selected turns in a custom transcript format.** Rejected.
+Defining a separate transcript format would require maintaining and documenting
+a second conversation serialization, whereas the stored `jp_conversation` event
+JSON already exists and can be inspected directly with `jp conversation print
+--style=chat --format=json`.
 
-**Leave binary resources out of the state with a warning.** Rejected.
-LLM providers skip an attachment their API has no field for and log a warning
-(`anthropic.rs:1856`, `openai.rs:1547`).
-An assistant's reply tends to show that it never saw a file; a probability does
-not, and `--threshold` turns it into an exit status with the warning out of
-sight.
+**Drop unsupported binary attachments with a warning.** Rejected.
+LLM providers log a warning and skip attachments their wire format does not
+support (`anthropic.rs:1856`, `openai.rs:1547`).
+In a chat turn, the assistant's prose response usually reveals that an
+attachment was missing; a decision model returns only probabilities (which
+`--threshold` converts into an exit code), so silently omitting a binary
+attachment would produce an answer over incomplete input.
 
 **Default to no conversation and require `-i .` to record.** Rejected.
 Although scripts and fresh terminals would never touch a conversation by
@@ -683,11 +685,12 @@ final event of its turn.
   `score` questions in one request) and can be added later if needed.
 - **Structured JSON input and inline input flags.** Stdin and `-a` attachments
   cover the initial release.
-- **Images and other binary state.** The request keeps binary resources typed so
-  a source can send them, but the first `systemone` source sends none ([RFD
-  133]).
-- **JSON output for the other `jp conversation print` styles.** This RFD adds it
-  for `chat`, which the decision state uses.
+- **Images and other binary state in `systemone`.** `jp_decision` passes binary
+  resources to the provider source, but the initial `systemone` source supports
+  text and JSON only ([RFD 133]).
+- **JSON output for other `jp conversation print` styles.** This RFD adds
+  `--format=json` only for `--style=chat`, which `jp decide` uses to serialize
+  selected turns.
 - **Recording decisions into a conversation while a turn is running.** The
   conversation lock prevents concurrent CLI writes during a turn, and any future
   built-in `decide` tool returns its answer through `ToolCallResponse`.
@@ -697,10 +700,11 @@ final event of its turn.
 
 ## Future Work
 
-**Selecting more than chat-style turns.** Selected turns are sent in chat style.
-A decision that has to see tool calls (what an edit changed, what a command
-printed) needs a style selector as on `jp conversation print`, or a query
-language over conversation events.
+**Including tool calls in selected turns.** Selected turns are serialized in
+`chat` style, which omits tool calls and responses.
+Decisions that need to inspect tool activity (such as file edits or command
+output) will require either a style flag matching `jp conversation print` or a
+query language over conversation events.
 
 **Starting a temporary conversation when none is active.** Where `jp query`
 currently opens the conversation picker, both `jp query` and `jp decide` could
@@ -726,10 +730,11 @@ Because `Thread::into_parts` builds the `Resource` text in memory per request
 rather than persisting it on disk, the format can be adjusted later at the cost
 of a single prompt-cache miss per conversation.
 
-**The assistant's account, not its work.** Chat style sends what the assistant
-said, and much of what it did is in its tool calls: a decision on whether an
-edit broke the API reads the assistant's description of the edit, not the edit.
-Piping the diff as `input` is the reliable form of that question.
+**Chat-style turns omit tool calls.** Because selected turns include assistant
+messages but omit tool calls and responses, a decision over selected turns
+evaluates the assistant's description of its changes rather than the changes
+themselves.
+Questions about code changes should pipe the actual diff on stdin as `input`.
 
 ## Implementation Plan
 
@@ -761,9 +766,10 @@ Piping the diff as `input` is the reliable form of that question.
    part of the state, and `turns` on the `Decision` event.
    This phase depends on Phases 2 and 5.
 7. **Remaining CLI flags.** Add `--choice`, `--score`, `-s`, `--threshold`, and
-   `-a`, including its snapshot on the `Decision` event, its config delta, the
-   [RFD 065] resolution rule that counts that snapshot, and binary resources on
-   the `jp_decision` request with the `systemone` source's error.
+   `-a` (storing `Resource` snapshots on `Decision`, recording the attachment
+   config delta, counting `Decision` snapshots during [RFD 065] deduplication,
+   and passing binary resources on the `jp_decision` request with the
+   `systemone` source's rejection error).
    This phase depends on Phase 5 and [RFD 065] Phase 3.
 8. **`decision.conversation` configuration.** Add `decision.conversation` and
    pre-conversation layer extraction.

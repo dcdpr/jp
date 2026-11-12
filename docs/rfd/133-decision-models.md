@@ -66,25 +66,25 @@ Each decision source converts its server's wire format into these types so
 answers have a uniform representation regardless of which server produced them,
 matching how `jp_llm` providers convert wire formats into `ChatResponse` and
 `ToolCallRequest`.
-Their JSON serialization matches the System One schema within the subset below,
-so plugin authors can reference the System One documentation for it.
+Their JSON serialization matches the System One schema for the portable subset
+below, so plugin authors can reference the System One documentation directly.
 
-Where System One servers differ in what they accept, JP's types accept only what
-every server accepts:
+Where System One servers differ in request validation, JP's types enforce the
+portable subset accepted by every server:
 
-- **State and instructions:** a non-blank string, an object, or an array.
-  Empty objects and arrays are allowed.
+- **State and instructions:** Must be a non-blank string, a JSON object, or a
+  JSON array (empty objects and arrays are allowed).
   Every question requires `instructions` (optional in TypeSafe, required by
   Ollama).
-- **Criterion descriptions:** strings only, for `choice`, `score`, and `noul`.
-  A `choice` option may also have no description (`null`).
-  TypeSafe also accepts structured descriptions, which these types reject.
-- **Option counts:** 2 to 255 for `choice` and 2 to 10 for `score` (TypeSafe
-  accepts one).
+- **Criterion descriptions:** Must be strings for `choice`, `score`, and `noul`
+  (`choice` options also allow `null` to omit a description).
+  TypeSafe also accepts structured object descriptions, which JP's types reject.
+- **Option counts:** 2 to 255 options for `choice` and 2 to 10 levels for
+  `score` (TypeSafe accepts a single option).
 
-Limits that depend on the server or model, such as the number of questions in a
-request or the characters a question name may use on Ollama's cloud, are not
-enforced by JP; the server reports a violation as a provider error.
+Server- or model-specific limits (such as maximum questions per request or
+allowed characters in question names on Ollama Cloud) are not enforced by JP;
+the server rejects violations and the source returns a provider error.
 
 ### Configuration
 
@@ -148,13 +148,12 @@ the request fails:
 ```
 
 - `questions` and `answers` use the `jp_conversation::event::decision` types.
-- A `decide` runs under the configuration the plugin last read: the one the host
-  started the plugin with, replaced by each successful `read_config` reload.
-  A failed reload leaves it unchanged.
-- Each request captures that configuration when the host accepts it, and `cfg`
-  layers over the request's own copy, matching `--cfg` on the CLI.
-  Neither a later reload nor another request's `cfg` changes a decision already
-  accepted.
+- Each `decide` request snapshots the plugin's current configuration when
+  accepted (the startup configuration, or the latest configuration from a
+  successful `read_config` reload; failed reloads leave it unchanged).
+  Any `cfg` overrides on the request layer over that snapshot alone, matching
+  `--cfg` on the CLI, so subsequent reloads or concurrent requests do not affect
+  in-flight decisions.
 - If `decision.model.id` remains unset after applying `cfg`, the host replies
   with an `error` naming `decision.model.id`.
 - A `decide` request does not read or modify any conversation, and the host
@@ -175,9 +174,11 @@ the request fails:
   A plugin that sends `decide` must declare the new protocol version in `ready`.
 
 > [!TIP]
-> [RFD 135] lets a `decide` request name a conversation to record into.
-> Such a request writes state, so the host awaits it after the plugin exits, as
-> it awaits a delegated `query`, instead of cancelling it.
+> [RFD 135] extends `decide` with an optional `conversation` field to record the
+> decision into a conversation stream.
+> Because recording mutates conversation state, the host awaits those requests
+> after plugin exit (matching delegated `query` turns) instead of cancelling
+> them.
 
 ### Crates
 
@@ -240,9 +241,9 @@ field would bypass the configuration pipeline that every other request uses, and
   deferred to a separate RFD.
 - **A `decide` tool for the assistant.**
 - **`box` questions and image states.** TypeSafe gates both behind opt-in
-  headers and sends images as `assets`, Ollama sends them in a separate `images`
-  field, and JP has no rendering surface for `box` answers.
-  The `systemone` source therefore sends text and JSON only.
+  headers and sends images in an `assets` field, whereas Ollama sends images in
+  a separate `images` field, and JP has no rendering surface for `box` answers.
+  The `systemone` source therefore sends text and JSON states only.
 - **Other decision sources**, such as OpenAI's Decisions API (which has no
   published schema) or an LLM-backed fallback source.
 - **Using decision models inside JP's own internal flows**, such as answering
@@ -263,12 +264,12 @@ in request validation, option limits, and confidence calculation.
 For example, Ollama requires `instructions` and a non-blank string `state`, caps
 cloud requests at 64 questions, and echoes the requested model name where
 TypeSafe returns the resolved model version.
-Context limits differ too: Jev allows 64k tokens per request and 32k per
-question, Ollama's cloud 65,536 tokens, and a local Ollama model 64 KiB of text.
-JP does not track these limits: a state that is too long is the server's to
-reject.
-JP's types enforce the requirements shared by all servers, and any
-server-specific rejection is returned as a provider error.
+Context limits also vary (Jev allows 64k tokens per request and 32k per
+question, Ollama Cloud allows 65,536 tokens, and local Ollama models cap input
+at 64 KiB of text).
+JP's types enforce the requirements shared by all servers, but JP does not track
+server-specific context or question limits; oversized requests are rejected by
+the server and returned as provider errors.
 JP forwards the server's answers as returned and makes no guarantee that
 probabilities or confidence scores are comparable across models.
 

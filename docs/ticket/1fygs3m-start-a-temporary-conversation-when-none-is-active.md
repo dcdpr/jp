@@ -54,9 +54,9 @@ Open questions:
 - **From**: jp
 - **Date**: 2026-11-11T15:20:36Z
 
-The "Titles" question is settled for pending-only conversations by RFD 134: a
-stream holding only pending entries has no turns and counts as empty wherever a
-command decides whether a conversation is new, so its first `jp query` titles
-it.
-A temporary conversation that `jp decide` starts under this ticket gets its
-title the same way.
+RFD 134 resolves the title generation question for pending-only conversations: a
+stream containing only pending entries has `turn_count() == 0` and is treated as
+a new conversation when deciding whether to generate a title on the first `jp
+query`.
+A temporary conversation created by `jp decide` under this ticket will get its
+title through the same rule.

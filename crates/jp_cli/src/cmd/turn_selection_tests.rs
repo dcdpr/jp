@@ -780,8 +780,8 @@ fn turn_list_selects_every_item() {
     assert_eq!(windows(&selection, 5), vec![(0, 0), (4, 4)]);
 }
 
-/// The bounds of each window `selection.windows` returns for `count` turns,
-/// before keep-trimming and before `TurnSet` coalesces them.
+/// Resolve the base windows from `selection.windows` for `count` turns before
+/// keep-trimming or `TurnSet` coalescing.
 fn base_windows(selection: &TurnSelection, count: usize) -> Vec<(usize, usize)> {
     let events = stream(count);
     selection
@@ -792,8 +792,8 @@ fn base_windows(selection: &TurnSelection, count: usize) -> Vec<(usize, usize)> 
         .collect()
 }
 
-/// A command that acts per window, like `compact`, must not act twice on a turn
-/// two list items share.
+/// Overlapping items merge into a single base window so per-window commands
+/// such as `compact` do not process shared turns twice.
 #[test]
 fn turn_list_items_that_share_a_turn_are_one_window() {
     let selection = parse(&["--turn=1..4,3..6"]).unwrap();
@@ -808,8 +808,8 @@ fn turn_list_items_that_share_a_turn_are_one_window() {
     assert_eq!(base_windows(&selection, 8), vec![(0, 5)]);
 }
 
-/// Items that only abut are two regions to a command that acts per window, and
-/// still one run of turns once resolved into a `TurnSet`.
+/// Adjacent items remain separate base windows for per-window commands, while
+/// coalescing into a contiguous run in `TurnSet`.
 #[test]
 fn turn_list_items_that_abut_stay_separate_windows() {
     let selection = parse(&["--turn=1..3,4..6"]).unwrap();
