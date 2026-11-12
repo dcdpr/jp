@@ -119,9 +119,15 @@ shows what remains.
 
 The mission is in `.config/loop/missions/rustqual/` (`mission.sh`,
 `next-target`, `gate`, `lib.sh`).
-No run has happened yet, and the hooks have not been executed: they were written
-without a shell at hand, so the first `--iterations 1` run is also their first
-test.
+
+Its first run, one iteration on `CX-004` with `astra`, passed the gate with one
+commit.
+The commit shortens `response_error` in
+`crates/contrib/async-anthropic/src/client.rs`, 62 lines against a limit of 60,
+by extracting a helper.
+That run executed `preflight`, `next-target`, and the gate's passing path.
+A failed gate (the discard, `attempted.jsonl`, the reason in the next turn's
+prompt), a rejection, and the stop after 8 failed gates have not run yet.
 
 What the ticket left open, and how it was settled:
 
