@@ -22,10 +22,14 @@ fn empty() -> Workspace {
     workspace
 }
 
+/// Run `git` in `dir` isolated from global and system git config, so host
+/// settings such as commit signing and hooks do not affect the test.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
         .args(args)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
 
@@ -42,7 +46,6 @@ fn commit(workspace: &Workspace) {
         git(root, &["init", "--quiet", "--initial-branch=main"]);
         git(root, &["config", "user.name", "Tester"]);
         git(root, &["config", "user.email", "tester@example.com"]);
-        git(root, &["config", "commit.gpgsign", "false"]);
     }
     git(root, &["add", "-A"]);
     git(root, &["commit", "--quiet", "-m", "Commit"]);

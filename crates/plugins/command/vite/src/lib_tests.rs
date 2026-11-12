@@ -76,10 +76,14 @@ fn composed(text: Option<&str>) -> HostToPlugin {
     })
 }
 
+/// Run `git` in `dir` isolated from global and system git config, so host
+/// settings such as commit signing and hooks do not affect the test.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Process::new("git")
         .current_dir(dir)
         .args(args)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
 
@@ -95,7 +99,6 @@ fn project() -> Utf8TempDir {
     git(root.path(), &["init", "--quiet", "--initial-branch=main"]);
     git(root.path(), &["config", "user.name", "Tester"]);
     git(root.path(), &["config", "user.email", "tester@example.com"]);
-    git(root.path(), &["config", "commit.gpgsign", "false"]);
 
     fs::create_dir_all(root.path().join("docs/rfd")).unwrap();
     fs::create_dir_all(root.path().join("docs/ticket")).unwrap();
