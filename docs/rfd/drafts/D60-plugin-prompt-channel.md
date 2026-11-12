@@ -239,6 +239,7 @@ subscriptions) and can ship independently as complementary extensions to [RFD
 
 - **Host-to-plugin interactive events.** Pushing the host's own tool-approval
   and inquiry prompts to a plugin frontend is covered by [RFD D18].
+  T-1hetcnt plans that part for turns a plugin starts.
 - **Recording prompts in the conversation stream.** Plugin prompts are ephemeral
   and are not persisted as `InquiryEvent` records.
 - **Multi-question forms.** One `prompt` asks one question.

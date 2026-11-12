@@ -39,6 +39,12 @@
           "tooling"
         ]
       },
+      "due": {
+        "description": "When the work is wanted: a date, YYYY-MM-DD, or a duration after the ticket's date, such as 1w.",
+        "values": [],
+        "open": true,
+        "max": 1
+      },
       "llm-provider": {
         "description": "The provider related to the ticket, if any",
         "values": [

@@ -3,6 +3,8 @@
 //! Messages are exchanged as JSON-lines (one JSON object per line) over stdin
 //! (host→plugin) and stdout (plugin→host).
 
+use std::num::NonZeroI64;
+
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -80,6 +82,9 @@ pub enum HostToPlugin {
     /// A delegated turn finished.
     QueryComplete(QueryCompleteResponse),
 
+    /// Response to `compact`.
+    Compacted(CompactedResponse),
+
     /// A conversation asked for by `query` with `new` exists.
     ///
     /// Sent as soon as it has been created and locked, before its first turn
@@ -148,6 +153,9 @@ pub enum PluginToHost {
     /// Ask the host to change what a running turn is doing.
     Interrupt(InterruptRequest),
 
+    /// Ask the host to compact a conversation.
+    Compact(CompactRequest),
+
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
 
@@ -188,6 +196,7 @@ impl PluginToHost {
             Self::SetTitle(m) => m.id.as_deref(),
             Self::WriteDraft(m) => m.id.as_deref(),
             Self::Interrupt(m) => m.id.as_deref(),
+            Self::Compact(m) => m.id.as_deref(),
 
             // Not requests: nothing is waiting on an answer to any of these.
             Self::Ready(_)
@@ -624,6 +633,172 @@ pub struct QueryRequest {
     /// Requires `new`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>,
+}
+
+/// Ask the host to add compactions to a conversation.
+///
+/// Answered with [`HostToPlugin::Compacted`] once every compaction is stored,
+/// or with [`HostToPlugin::Error`], in which case none is stored.
+/// A compaction that generates a summary calls a model, so this can take as
+/// long as a turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CompactRequest {
+    /// Optional request correlation ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation to compact.
+    pub conversation: String,
+
+    /// Compactions to apply in order; each is stored as one compaction event.
+    pub compactions: Vec<Compaction>,
+}
+
+/// One compaction of a range of turns.
+///
+/// Turn indices are 1-based from the start of the conversation or negative from
+/// the end (`-1` is the last turn).
+/// Both bounds are inclusive, and `0` is rejected.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Compaction {
+    /// First turn in the range (inclusive).
+    pub from: NonZeroI64,
+
+    /// Last turn in the range (inclusive).
+    pub to: NonZeroI64,
+
+    /// Strip reasoning from the turns in range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningCompaction>,
+
+    /// Strip or omit tool calls in the range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<ToolCallsCompaction>,
+
+    /// Replace the turns in range with a summary.
+    ///
+    /// Takes precedence over `reasoning` and `tool_calls` for the turns it
+    /// covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<SummaryCompaction>,
+}
+
+/// Strip reasoning blocks.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReasoningCompaction {
+    /// Strip only blocks larger than this many bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over_bytes: Option<u64>,
+}
+
+/// Strip or omit tool calls.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCallsCompaction {
+    pub mode: ToolCallsMode,
+
+    /// Compact only items larger than this byte threshold.
+    /// For `strip` modes, the request and response are measured separately; for
+    /// `omit`, their combined size is measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over_bytes: Option<u64>,
+}
+
+/// How to compact tool calls in the selected range.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallsMode {
+    /// Clear request arguments and replace the response with a status line.
+    Strip,
+
+    /// Clear request arguments only.
+    StripRequests,
+
+    /// Replace the response with a status line only.
+    StripResponses,
+
+    /// Remove the tool call request and response.
+    Omit,
+}
+
+/// Summary policy for a compacted turn range.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum SummaryCompaction {
+    /// Verbatim summary text.
+    Text(String),
+
+    /// Generate a summary of the turns in range using an LLM.
+    Generate(GenerateSummary),
+}
+
+/// Options for LLM-generated compaction summaries.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateSummary {
+    /// Model to summarize with (an alias or `provider/name` ID).
+    ///
+    /// Defaults to the conversation's assistant model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    /// Custom instructions that replace the default summarizer prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+
+    /// Supplementary guidance appended to the summarizer prompt (e.g. "focus on
+    /// the decisions").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+}
+
+/// Response to `compact`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompactedResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation that was compacted.
+    pub conversation: String,
+
+    /// Stored compactions, in request order.
+    pub compactions: Vec<StoredCompaction>,
+}
+
+/// A stored compaction with resolved 1-based turn bounds.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredCompaction {
+    /// 1-based start turn (inclusive).
+    pub from: u64,
+
+    /// 1-based end turn (inclusive).
+    pub to: u64,
+
+    /// Whether reasoning is stripped.
+    pub reasoning: bool,
+
+    /// Tool call compaction mode, if any.
+    #[serde(default)]
+    pub tool_calls: Option<ToolCallsMode>,
+
+    /// Source of the summary replacing the range, if any.
+    #[serde(default)]
+    pub summary: Option<SummarySource>,
+}
+
+/// Source of a stored compaction summary.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SummarySource {
+    /// Provided verbatim in the request.
+    Text,
+
+    /// Generated by a model.
+    Generated,
 }
 
 /// Ask the host to change what a running turn is doing.

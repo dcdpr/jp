@@ -1207,6 +1207,44 @@ fn an_id_object_replaces_the_id_in_every_json_form() {
     );
 }
 
+/// Assigning a nested plugin option via a dotted key preserves the plugin's
+/// other fields and sibling plugins configured in earlier layers.
+#[test]
+fn a_dotted_plugin_option_keeps_the_run_policy() {
+    let configured = || {
+        let mut p = PartialAppConfig::empty();
+        for key in ["plugins.command.ticket.run", "plugins.command.wiki.run"] {
+            p.assign(KvAssignment::try_from_cli(key, "allow").unwrap())
+                .unwrap();
+        }
+        p
+    };
+    let run = |p: &PartialAppConfig, plugin: &str| {
+        p.plugins
+            .command
+            .clone()
+            .into_map()
+            .get(plugin)
+            .and_then(|plugin| plugin.run)
+    };
+
+    let mut dotted = configured();
+    dotted
+        .assign(
+            KvAssignment::try_from_cli("plugins.command.ticket.options.assistant", "Ada via jp")
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        run(&dotted, "ticket"),
+        Some(plugins::command::RunPolicy::Allow)
+    );
+    assert_eq!(
+        run(&dotted, "wiki"),
+        Some(plugins::command::RunPolicy::Allow)
+    );
+}
+
 #[test]
 fn config_load_paths_append_across_layers() {
     // Each layer adds its search directories to the accumulated list instead of

@@ -2184,6 +2184,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-serve-chat"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "humantime",
+ "jp_config",
+ "jp_plugin",
+ "pretty_assertions",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "jp-serve-web"
 version = "0.1.0"
 dependencies = [

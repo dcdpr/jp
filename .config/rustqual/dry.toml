@@ -34,9 +34,15 @@ exclude_files = [
 # via `clippy::pedantic`). The workspace explicitly allows
 # `clippy::enum_glob_use`, and all 10 `DRY-004` findings on 2026-11-11 were enum
 # glob imports (T-0yh5m6r).
+#
+# `DRY-005` (repeated match) groups matches by their normalized shape, which
+# drops variant names, so unrelated enums whose arms all return a string literal
+# land in one group. Re-enable once the vendored rustqual groups by the matched
+# type (T-1dhk659).
 [duplicates]
 enabled                 = true
 detect_wildcard_imports = false
+detect_repeated_matches = false
 
 [boilerplate]
 enabled = false

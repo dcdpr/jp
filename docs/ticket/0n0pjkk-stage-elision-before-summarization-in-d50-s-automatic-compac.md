@@ -71,3 +71,17 @@ small: 35.7 percentage points of success rate at 32k, still 2.7 at 128k, against
 single-digit differences between tiers.
 
 Findings and the rest of the proposals: T-0n0nwz3.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T19:08:00Z
+
+A use case for the elision stage: the chat bridge (`jp serve chat`) keeps one
+conversation per chat for a week (`rollover = "sunday"`), and most of what fills
+it is tool output such as `ticket_list` listings that are out of date a turn
+later, plus reasoning.
+When D50 lands, its first rule for such conversations should strip old tool
+results and reasoning aggressively, well before any summary is needed.
