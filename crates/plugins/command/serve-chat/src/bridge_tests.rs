@@ -336,7 +336,6 @@ fn fixture() -> Fixture {
     let checkout = FakeCheckout::default();
     let today = Arc::new(Mutex::new(november(7)));
 
-    let clock = Arc::clone(&today);
     let mut bridge = Bridge::new(
         host.clone(),
         Arc::clone(&outbox) as Arc<dyn Outbox>,
@@ -344,7 +343,7 @@ fn fixture() -> Fixture {
         options(),
         State::in_memory(),
     );
-    bridge.today = Box::new(move || *clock.lock().unwrap());
+    bridge.conversations = clocked(&today, bridge.options.rollover);
 
     Fixture {
         bridge,
@@ -353,6 +352,12 @@ fn fixture() -> Fixture {
         checkout,
         today,
     }
+}
+
+/// Conversations kept in memory, on the date `today` holds.
+fn clocked(today: &Arc<Mutex<NaiveDate>>, rollover: Rollover) -> Conversations {
+    let clock = Arc::clone(today);
+    Conversations::with_clock(State::in_memory(), rollover, move || *clock.lock().unwrap())
 }
 
 fn from(sender: &str, text: &str) -> Inbound {
@@ -783,7 +788,7 @@ fn only_the_bare_silent_word_is_silent() {
 #[tokio::test]
 async fn a_weekly_rollover_keeps_the_conversation_for_the_week() {
     let mut f = fixture();
-    f.bridge.options.rollover = Rollover::Weekly(Weekday::Sun);
+    f.bridge.conversations = clocked(&f.today, Rollover::Weekly(Weekday::Sun));
 
     // 2026-11-07 is a Saturday: its week started on Sunday 2026-11-01.
     f.receive(from(CLIENT, "Saturday"));

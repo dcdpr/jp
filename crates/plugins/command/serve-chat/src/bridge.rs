@@ -26,7 +26,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use chrono::{Local, NaiveDate};
+use chrono::NaiveDate;
 use jp_plugin::message::{Compaction, StoredCompaction, SummarySource, ToolCallsMode};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, watch};
@@ -39,7 +39,7 @@ use crate::{
     inbox::{Inbox, Incoming, Next},
     options::{Options, Rollover},
     queue::{Queue, Waiting},
-    state::State,
+    state::{Conversations, State},
     transport::{Attachment, Chat, Inbound, Outbox},
 };
 
@@ -116,11 +116,7 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     outbox: Arc<dyn Outbox>,
     checkout: C,
     options: Options,
-    state: State,
-
-    /// The clock that decides which rollover period a turn falls in.
-    today: Box<dyn Fn() -> NaiveDate + Send + Sync>,
-
+    conversations: Conversations,
     queue: Queue,
     running: Option<Running>,
 
@@ -143,14 +139,14 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         state: State,
     ) -> Self {
         let (events_tx, events_rx) = mpsc::unbounded_channel();
+        let conversations = Conversations::new(state, options.rollover);
 
         Self {
             host,
             outbox,
             checkout,
             options,
-            state,
-            today: Box::new(|| Local::now().date_naive()),
+            conversations,
             queue: Queue::default(),
             running: None,
             paused: None,
@@ -314,7 +310,6 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             .as_ref()
             .map_or(0.0, |decide| decide.threshold);
 
-        let period = self.period();
         if let Some(incoming) = self.inbox.decided() {
             match action(result.ok(), threshold) {
                 Action::Answer => self.route(incoming),
@@ -323,7 +318,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     &format!("A message in {} isn't for the assistant.", incoming.chat),
                 ),
                 Action::NewConversation => {
-                    if let Err(error) = self.state.forget(&incoming.chat) {
+                    if let Err(error) = self.conversations.forget(&incoming.chat) {
                         self.host.log(Level::ERROR, &error);
                     }
                     self.outbox.send(&incoming.chat, NEW_CONVERSATION);
@@ -335,7 +330,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                         .running
                         .as_ref()
                         .is_some_and(|running| running.chat == incoming.chat);
-                    match self.state.conversation(&incoming.chat, period) {
+                    match self.conversations.current(&incoming.chat) {
                         None => self.outbox.send(&incoming.chat, NOTHING_TO_COMPACT),
                         Some(_) if busy => self.outbox.send(&incoming.chat, BUSY_COMPACTING),
                         Some(conversation) => {
@@ -425,16 +420,13 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     pub(crate) async fn handle(&mut self, event: Event) {
         match event {
             Event::Started { conversation } => {
-                let period = self.period();
                 let Some(running) = &mut self.running else {
                     return;
                 };
                 running.conversation = Some(conversation.clone());
                 let chat = running.chat.clone();
 
-                if self.state.conversation(&chat, period) != Some(conversation.as_str())
-                    && let Err(error) = self.state.set(&chat, period, &conversation)
-                {
+                if let Err(error) = self.conversations.record(&chat, &conversation) {
                     self.host.log(Level::ERROR, &error);
                 }
                 self.hand_over();
@@ -602,14 +594,18 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     /// Spawn a turn on the current conversation for `waiting.chat`, creating
     /// the conversation if needed.
     fn start(&mut self, waiting: Waiting) {
-        let period = self.period();
         let conversation = self
-            .state
-            .conversation(&waiting.chat, period)
+            .conversations
+            .current(&waiting.chat)
             .map(ToOwned::to_owned);
         let request = TurnRequest {
             content: waiting.texts.join("\n\n"),
-            title: title(&self.options, &waiting, period),
+            title: title(
+                &self.options,
+                self.conversations.rollover(),
+                &waiting,
+                self.conversations.period(),
+            ),
             cfg: cfg(&self.options, &waiting.person),
             expires_in: self.options.conversation_ttl.clone(),
         };
@@ -627,11 +623,6 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             let result = run_turn(&host, conversation, request, &events).await;
             drop(events.send(Event::Ended { result }));
         });
-    }
-
-    /// Start date of the current rollover period.
-    fn period(&self) -> NaiveDate {
-        self.options.rollover.start((self.today)())
     }
 
     fn idle(&mut self) {
@@ -797,10 +788,10 @@ pub(crate) fn cfg(options: &Options, person: &str) -> Vec<String> {
     cfg
 }
 
-/// Title for the conversation a turn for `waiting` creates in the period
-/// starting on `period`.
-fn title(options: &Options, waiting: &Waiting, period: NaiveDate) -> String {
-    let when = match options.rollover {
+/// Title for the conversation a turn for `waiting` creates in the `rollover`
+/// period starting on `period`.
+fn title(options: &Options, rollover: Rollover, waiting: &Waiting, period: NaiveDate) -> String {
+    let when = match rollover {
         Rollover::Daily => period.to_string(),
         Rollover::Weekly(_) => format!("week of {period}"),
     };

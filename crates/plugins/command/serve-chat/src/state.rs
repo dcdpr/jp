@@ -10,10 +10,10 @@
 use std::{collections::BTreeMap, fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::transport::Chat;
+use crate::{options::Rollover, transport::Chat};
 
 const STATE_FILE: &str = "state.json";
 
@@ -114,6 +114,73 @@ impl State {
         fs::write(&temporary, format!("{json}\n"))
             .and_then(|()| fs::rename(&temporary, path))
             .map_err(|error| format!("failed to write {path}: {error}"))
+    }
+}
+
+/// The clock that decides which rollover period today falls in.
+type Clock = Box<dyn Fn() -> NaiveDate + Send + Sync>;
+
+/// Which conversation each chat is on in the current rollover period.
+pub(crate) struct Conversations {
+    state: State,
+    rollover: Rollover,
+    today: Clock,
+}
+
+impl Conversations {
+    /// Track conversations in `state`, with periods counted from the local
+    /// date.
+    pub(crate) fn new(state: State, rollover: Rollover) -> Self {
+        Self {
+            state,
+            rollover,
+            today: Box::new(|| Local::now().date_naive()),
+        }
+    }
+
+    /// Track conversations in `state`, with today's date read from `today`.
+    #[cfg(test)]
+    pub(crate) fn with_clock(
+        state: State,
+        rollover: Rollover,
+        today: impl Fn() -> NaiveDate + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            state,
+            rollover,
+            today: Box::new(today),
+        }
+    }
+
+    pub(crate) fn rollover(&self) -> Rollover {
+        self.rollover
+    }
+
+    /// Start date of the current rollover period.
+    pub(crate) fn period(&self) -> NaiveDate {
+        self.rollover.start((self.today)())
+    }
+
+    /// The conversation `chat` is on in the current period, if it has one.
+    pub(crate) fn current(&self, chat: &Chat) -> Option<&str> {
+        self.state.conversation(chat, self.period())
+    }
+
+    /// Record `conversation` as `chat`'s conversation for the current period.
+    ///
+    /// Writes nothing when it already is.
+    pub(crate) fn record(&mut self, chat: &Chat, conversation: &str) -> Result<(), String> {
+        let period = self.period();
+        if self.state.conversation(chat, period) == Some(conversation) {
+            return Ok(());
+        }
+
+        self.state.set(chat, period, conversation)
+    }
+
+    /// Forget `chat`'s conversation, so its next turn starts a new one.
+    pub(crate) fn forget(&mut self, chat: &Chat) -> Result<(), String> {
+        self.state.forget(chat)
     }
 }
 
