@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-20
-- **Required by**: [RFD 058], [RFD 066], [RFD 067]
+- **Required by**: [RFD 058], [RFD 066], [RFD 067], [RFD 135]
 - **Summary**: Replaces opaque attachments with typed MCP-aligned `Resource`
   snapshots stored on the `ChatRequest` of the turn that attached them.
 
@@ -311,6 +311,12 @@ invocation:
   Any declared attachment whose URI does not appear in the forked stream is
   resolved fresh for the fork's first turn.
 
+> [!TIP]
+> [RFD 135] also stores `Resource` snapshots on `Decision` events when `jp
+> decide -a` resolves an attachment in a conversation.
+> A resource URI on a `Decision` event counts as already present in the stream,
+> so the next `jp query` reuses it without resolving the attachment again.
+
 ### Config and `--attach`
 
 `conversation.attachments` remains the declaration mechanism, and `--attach` on
@@ -449,6 +455,12 @@ event stream:
 The `text_attachments_to_xml` helper may remain for providers that render text
 resources as XML, operating on `&[Resource]` from `ChatRequest` rather than a
 separate `Vec<Attachment>`.
+
+> [!TIP]
+> [RFD 135] synthesizes transient resources at request-build time:
+> `Thread::into_parts` converts each recorded `Decision` event into a `Resource`
+> on its turn's first `ChatRequest`, so providers that read resources from
+> `ChatRequest` events render decisions without decision-specific code.
 
 ## Drawbacks
 
@@ -683,3 +695,4 @@ Depends on all previous phases.
 [RFD 058]: 058-typed-content-blocks-for-tool-responses.md
 [RFD 066]: 066-content-addressable-blob-store.md
 [RFD 067]: 067-resource-deduplication-for-token-efficiency.md
+[RFD 135]: 135-jp-decide.md
