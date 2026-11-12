@@ -2,15 +2,15 @@
 #
 # Print the next finding of the run's rule, followed by the rule's guidance.
 #
-# Findings come from `qual report` in its order, by file and then by line, so a
-# run finishes one file before it starts the next. A target is every finding
-# that shares a `(rule, file, symbol)` key, the identity `qual diff` compares
-# by: two magic numbers in one function are one target. Keys recorded in
+# `qual report` orders findings by file and line, so a run finishes one file
+# before moving to the next. A target groups all findings that share a
+# `(rule, file, symbol)` key (the identity `qual diff` compares by), so two
+# magic numbers in the same function form a single target. Keys recorded in
 # `state/attempted.jsonl` or `state/rejected.jsonl` are skipped.
 #
-# Prints nothing when no finding is left, which ends the run. Exits 1 instead
-# once `MAX_FAILED_GATES` gates in a row have failed, so a mistake the model
-# keeps making doesn't use up the one attempt of every finding of the rule.
+# Prints nothing when no findings remain, which ends the run. Exits 1 if
+# `MAX_FAILED_GATES` consecutive gates fail, preventing a recurring model
+# mistake from exhausting the single attempt on every remaining finding.
 #
 # Also writes the target to `state/current.json`, where the gate reads it.
 
@@ -25,8 +25,8 @@ source "$LOOP_MISSION_DIR/lib.sh"
 rule=${QUAL_RULE:?the mission exports the rule of the run}
 current=$LOOP_STATE/current.json
 
-# A rejection belongs to the turn that wrote it; one left behind would reject
-# the next finding.
+# Remove any stale target or rejection file before starting the turn so a
+# leftover `state/rejection` cannot reject the next finding.
 rm -f "$current" "$LOOP_STATE/rejection"
 
 failures=$(cat "$LOOP_STATE/failures")
@@ -55,7 +55,7 @@ if [[ -z $target ]]; then
 fi
 printf '%s\n' "$target" > "$current"
 
-# One line per finding, as `qual report --format ai` writes them.
+# Format each finding on one line, matching `qual report --format ai`.
 jq -r '
     .findings[]
     | (if .file == "" then "<workspace>"

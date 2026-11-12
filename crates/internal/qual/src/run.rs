@@ -150,13 +150,14 @@ impl Workspace {
         Ok(report)
     }
 
-    /// Collect the findings of `rule` in the working tree.
+    /// Collect all findings for `rule` in the working tree.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Exempt`] if the policy exempts `rule`, without running
-    /// `rustqual`.
-    /// Otherwise fails as [`Self::report`] does.
+    /// Returns [`Error::Exempt`] without running `rustqual` if the policy
+    /// exempts `rule`.
+    /// Returns an error if the policy cannot be read, a `rustqual` pass fails
+    /// or skips a file, or a source file with a finding fails to parse.
     pub fn report_rule(&self, runner: &dyn ProcessRunner, rule: &str) -> Result<Report, Error> {
         if !self.policy()?.gates(rule) {
             return Err(Error::Exempt {

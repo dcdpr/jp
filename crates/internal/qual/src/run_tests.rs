@@ -176,8 +176,8 @@ fn report_for_a_rule_lists_only_its_findings() {
 #[test]
 fn report_for_an_exempt_rule_is_an_error() {
     let (_dir, workspace) = workspace();
-    // Answers with a finding of the exempt rule, so a report that filtered
-    // instead of failing would come back empty rather than as an error.
+    // Return a finding for the exempt rule so filtering instead of rejecting
+    // would produce an empty `Ok` report rather than `Err`.
     let runner = MockProcessRunner::responding(|_| {
         ok(sarif(&[(
             "iosp/violation",
@@ -195,7 +195,7 @@ fn report_for_an_exempt_rule_is_an_error() {
         matches!(&error, Error::Exempt { rule, .. } if rule == "iosp/violation"),
         "{error:?}"
     );
-    // The policy alone decides, before any analysis runs.
+    // Exempt rules are rejected from the policy without running `rustqual`.
     assert_eq!(runner.calls(), vec![]);
 }
 

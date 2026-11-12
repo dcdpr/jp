@@ -159,8 +159,8 @@ while [[ $# -gt 0 ]]; do
         --no-gate)         GATE=0; shift ;;
         --help|-h)         usage; exit 0 ;;
         *)
-            # An option of the mission's own. `parse_option` sets `OPTION_COUNT`
-            # to the number of arguments it consumed.
+            # Delegate unrecognized options to the mission's `parse_option`,
+            # which sets `OPTION_COUNT` to the number of arguments consumed.
             OPTION_COUNT=0
             if declare -F parse_option >/dev/null && parse_option "$@" && [[ $OPTION_COUNT -gt 0 ]]; then
                 shift "$OPTION_COUNT"
@@ -231,8 +231,8 @@ if [[ $DISCARD_ON_GATE_FAILURE -eq 1 ]] && ! git diff --quiet -- "${NOT_STATE[@]
     die "this mission discards failed iterations; commit or revert unstaged changes first"
 fi
 
-# The mission's own preconditions, checked once its options are parsed and
-# before anything is committed or written to a run directory.
+# Run mission-specific preflight checks before the commit probe or run
+# directory creation.
 if declare -F preflight >/dev/null; then
     preflight
 fi

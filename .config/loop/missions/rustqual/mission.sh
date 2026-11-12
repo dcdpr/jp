@@ -3,19 +3,20 @@
 # Sourced by `.config/loop/run.sh`. A run works on one rule, named with
 # `--rule`, on the branch `qual/<rule>`. `next-target` picks the rule's next
 # finding from `qual report`, and `gate` keeps the turn's commit only when the
-# finding is gone and nothing else got worse; any other work is discarded.
+# target finding is resolved, no new findings are introduced, and `cargo check`
+# and package tests pass; any other work is discarded.
 #
 #   .config/loop/run.sh rustqual --rule CX-004 --iterations 1    # one finding
 #   .config/loop/run.sh rustqual --rule CX-004 --hours 10        # full run
 #
-# Before a rule's first run, read a sample of its findings as the model gets
-# them, and fix the rule's guidance file wherever a finding plus its guidance
-# isn't enough to make the fix:
+# Before a rule's first run, inspect a sample of its findings in the AI prompt
+# format and update the rule's guidance file if the diagnostic and guidance lack
+# the context needed to fix the finding:
 #
 #   cargo run --package qual -- report --rule CX-004 --format ai
 #
-# Two files in `state/` outlive a run, one `{key, reason}` object per line, with
-# a finding's `(rule, file, symbol)` as its key:
+# Two files in `state/` persist across runs, one `{key, reason}` object per
+# line, keyed by `(rule, file, symbol)`:
 #
 # - `attempted.jsonl`: findings whose fix failed the gate. Delete a line to have
 #   a later run try that finding again.
@@ -24,8 +25,8 @@
 #
 # `next-target` skips both, so every finding gets one attempt.
 #
-# `--no-gate` would retry a finding the model can't fix forever: only the gate
-# records a finding as attempted or rejected.
+# Do not pass `--no-gate`: only the gate records findings as attempted or
+# rejected, so an unfixable finding would be retried indefinitely.
 
 # shellcheck source=lib.sh
 source "$MISSION_DIR/lib.sh"
@@ -90,9 +91,9 @@ preflight() {
         die "a run for $RULE works on the branch '$branch', but HEAD is on '$BRANCH'; switch to it first (\`git switch -c $branch\` creates it)"
     fi
 
-    # `qual report --rule` fails on a rule the policy exempts. Unchecked, an
-    # exempt rule has no findings in any report, and the run would end as if
-    # the rule were burned down.
+    # `qual report --rule` fails if the policy exempts the rule. Without this
+    # check, an exempt rule would produce an empty report and exit as if all
+    # findings were resolved.
     echo "$MISSION: reading the findings of $RULE..." >&2
     if ! report=$(qual report --rule "$RULE" --format json 2>&1); then
         die "\`qual report --rule $RULE\` failed: $report"
@@ -103,12 +104,12 @@ preflight() {
 
 init_state() {
     touch "$STATE/attempted.jsonl" "$STATE/rejected.jsonl"
-    # A new run starts with no failed gate behind it.
+    # Reset per-run state while preserving `attempted.jsonl` and `rejected.jsonl`.
     echo 0 > "$STATE/failures"
     rm -f "$STATE/gate-reason" "$STATE/rejection"
 }
 
-# `fill`, which also replaces `@RULE@`.
+# Like `fill`, but also substitutes `@RULE@`.
 fill_rule() {
     local t
     t=$(fill)
@@ -129,8 +130,8 @@ Fix that finding, and only that one:
 
 1. Read the code the finding points at, and enough around it to understand
    what it does and who calls it.
-2. Fix it the way the guidance says, trying its fixes in the order it lists
-   them.
+2. Apply the fix recommended by the guidance, trying the listed approaches in
+   order.
 3. Run `cargo_check`, then `cargo_test` on the package you changed, then
    `cargo_format`.
 4. Stage only this fix with the git staging tools, and commit it with
@@ -149,7 +150,7 @@ A harness checks every turn. It measures the result from git, cargo, and
 rustqual, and doesn't read your summary:
 
 - rustqual no longer reports the finding;
-- no rustqual finding of any rule is new, anywhere in the workspace;
+- no new rustqual findings of any rule are introduced anywhere in the workspace;
 - `cargo check --workspace --all-targets` passes, and so do the tests of every
   package the commit touches;
 - the turn made exactly one commit and left nothing uncommitted.
@@ -161,8 +162,8 @@ Hard rules:
 
 - Never add a `qual:allow`, `qual:api`, or `qual:test_helper` marker, and never
   change anything under `.config/rustqual/` or `.config/loop/`. The guidance
-  names a marker for when a user asks for one, and nobody does here: reject the
-  finding instead.
+  mentions suppression markers only for interactive sessions where a user
+  requests one; in this unattended loop, reject the finding instead.
 - Change only what the fix needs. Don't tidy nearby code, and don't fix other
   findings you notice along the way.
 - Never stage or commit anything under `@STATE@/`. The harness owns that

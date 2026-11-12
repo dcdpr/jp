@@ -2,9 +2,8 @@
 
 # Run `qual` (`crates/internal/qual`) from the worktree root.
 #
-# This is the only place the mission names the command. `qual report` and
-# `qual diff` become rustqual commands when T-1dhk659 folds `qual` into
-# rustqual, and this function is then the one line to change.
+# Centralizing the invocation here keeps the switch to `rustqual` (T-1dhk659) to
+# a single line.
 qual() {
     cargo run --quiet --locked --package qual -- "$@"
 }

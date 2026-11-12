@@ -89,18 +89,19 @@ The harness provides `fill`, which reads a template from stdin and replaces
 
 ### Options and preconditions
 
-A mission can take command-line options of its own, and refuse to start.
+A mission can define its own command-line options and preflight checks.
 All three functions are optional:
 
-- `parse_option` receives the remaining arguments when the harness meets an
-  option it doesn't define.
-  It sets `OPTION_COUNT` to the number of arguments it consumed, or returns
-  non-zero for an option the mission doesn't define either.
-- `option_usage` prints the mission's options, which `run.sh <mission> --help`
-  lists below the harness's own.
-- `preflight` runs once from the worktree root, after the options are parsed and
+- `parse_option` receives the remaining arguments when the harness encounters an
+  option it does not recognize.
+  It sets `OPTION_COUNT` to the number of arguments consumed (including the
+  option itself), or returns non-zero if the option is unrecognized.
+- `option_usage` prints the mission's options for `run.sh <mission> --help`,
+  which lists them below the harness options.
+- `preflight` runs once from the worktree root, after options are parsed and
   before the harness's commit probe.
-  It calls `die` to refuse the run, as `rustqual` does without a `--rule`.
+  It calls `die` to abort startup when a precondition is not met (for example,
+  when `rustqual` is invoked without `--rule`).
 
 ### Environment
 
@@ -110,8 +111,8 @@ the per-iteration variables `LOOP_ITERATION` and `LOOP_ITERATION_BASE` (the
 `HEAD` commit at the start of the iteration; a repair turn keeps the base of the
 iteration it repairs).
 `gate` also receives `LOOP_TURN_STATUS`, the exit status of the turn it checks.
-Both inherit every variable `mission.sh` exports, which is how a mission passes
-an option on to them.
+Both scripts inherit any variables exported by `mission.sh` (such as parsed
+mission options).
 
 ## Discarding an iteration
 

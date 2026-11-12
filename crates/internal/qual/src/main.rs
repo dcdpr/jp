@@ -50,9 +50,9 @@ enum Command {
 
     /// List all non-exempt findings in the working tree.
     Report {
-        /// List the findings of this rule only.
+        /// List findings for this rule only.
         ///
-        /// Fails when the policy exempts the rule.
+        /// Fails if the policy exempts the rule.
         #[arg(long)]
         rule: Option<String>,
 

@@ -17,12 +17,12 @@
 # appends `{key, reason}` to `state/rejected.jsonl`, and passes when the turn
 # changed nothing else.
 #
-# Every failure exits 1, so the harness discards the iteration. The gate then
-# appends `{key, reason}` to `state/attempted.jsonl`, unless the turn was cut
-# short by a usage limit or a network stall and so never attempted the finding;
-# a turn that ran into the per-turn timeout (124) did. The reason also goes to
-# `state/gate-reason` for the next turn's prompt, and `state/failures` counts
-# the failed gates in a row for `next-target`.
+# Every failure exits 1, causing the harness to discard the iteration. If the
+# turn completed (exit 0) or hit the per-turn timeout (exit 124), the gate
+# appends `{key, reason}` to `state/attempted.jsonl`, writes the failure reason
+# to `state/gate-reason` for the next turn's prompt, and increments
+# `state/failures` for `next-target`. Turns interrupted by a usage limit or
+# network stall are not recorded as attempted and will be retried.
 
 set -euo pipefail
 
@@ -45,13 +45,14 @@ rejection=$LOOP_STATE/rejection
 reason_file=$LOOP_STATE/gate-reason
 failures=$LOOP_STATE/failures
 
-# Whether the turn got to attempt the finding.
+# Return 0 if the turn completed or timed out (rather than aborting on a rate
+# limit or network stall).
 attempted_turn() {
     [[ $LOOP_TURN_STATUS -eq 0 || $LOOP_TURN_STATUS -eq 124 ]]
 }
 
-# Leave with 0 or 1 only. The harness reads exit status 2 as "keep the work and
-# repair it in place", which this mission never asks for, and `qual` and `jq`
+# Normalize non-zero exit codes to 1. The harness treats exit status 2 as
+# an in-place repair request, which this mission never uses, and `qual` and `jq`
 # exit 2 on errors of their own.
 finish() {
     local status=$?
@@ -100,8 +101,8 @@ if [[ -f $rejection ]]; then
             echo "PASS: rejected $name"
             exit 0
         fi
-        # The rejection stands, and already keeps `next-target` off the finding,
-        # so it is not recorded as attempted as well.
+        # Keep the entry in `rejected.jsonl`; `next-target` already skips
+        # rejected findings, so do not also record it in `attempted.jsonl`.
         message="the turn rejected the finding and changed files as well; a rejection leaves the code untouched"
         echo "$message" > "$reason_file"
         echo "FAIL: $message"
@@ -122,16 +123,14 @@ if [[ ! $subject =~ $subject_re || ${#subject} -gt $MAX_SUBJECT_CHARS ]]; then
     fail "the commit subject doesn't follow the repository's convention, \`type(scope): Capitalized summary\` without a closing period, in at most $MAX_SUBJECT_CHARS characters: $subject"
 fi
 
-# The policy that decides what counts as a finding, and the scripts that check
-# this commit.
 config=$(git diff --name-only "$base" HEAD -- .config/rustqual .config/loop)
 if [[ -n $config ]]; then
     fail "the commit changes rustqual's configuration or the loop harness:
 $config"
 fi
 
-# Markers added minus markers removed, so a marker that moves with its item
-# doesn't count.
+# Count net new markers (added minus removed) so moving an existing marker with
+# its item does not fail the check.
 markers=$(git diff --unified=0 "$base" HEAD -- '*.rs' | awk '
     /^\+\+\+ / || /^--- / { next }
     /^\+.*qual:(allow|api|test_helper)/ { n++ }
@@ -161,8 +160,7 @@ if [[ -n $left ]]; then
 $left"
 fi
 
-# `qual diff` exits 1 on a finding the base lacks, and higher when it could
-# not compare the two.
+# `qual diff` exits 1 when new findings are present, and 2 on execution errors.
 status=0
 new=$(qual diff --base "$base" --format ai 2>&1) || status=$?
 if [[ $status -eq 1 ]]; then
@@ -174,8 +172,8 @@ elif [[ $status -ne 0 ]]; then
     exit 1
 fi
 
-# The package that owns each changed file: the one whose directory is the
-# longest prefix of the file's path.
+# Resolve each changed file to its owning Cargo package (the package whose
+# directory is the longest prefix of the file path).
 packages=$(
     git diff --name-only "$base" HEAD | jq -Rrn \
         --slurpfile meta <(cargo metadata --locked --no-deps --format-version 1) '
@@ -195,8 +193,8 @@ if [[ -n $packages ]]; then
     for package in $packages; do
         selection+=(-p "$package")
     done
-    # `INSTA_WORKSPACE_ROOT` as in `just test`: a test binary built by another
-    # worktree would otherwise look for its snapshots there.
+    # Set `INSTA_WORKSPACE_ROOT` (as in `just test`) so test binaries reused
+    # from another worktree resolve snapshot paths against this worktree.
     if ! output=$(INSTA_WORKSPACE_ROOT=$LOOP_ROOT cargo nextest run --locked --no-fail-fast \
         --no-tests=warn --hide-progress-bar --status-level=fail --final-status-level=fail \
         "${selection[@]}" 2>&1); then

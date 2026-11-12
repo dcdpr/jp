@@ -123,11 +123,12 @@ The mission is in `.config/loop/missions/rustqual/` (`mission.sh`,
 Its first run, one iteration on `CX-004` with `astra`, passed the gate with one
 commit.
 The commit shortens `response_error` in
-`crates/contrib/async-anthropic/src/client.rs`, 62 lines against a limit of 60,
+`crates/contrib/async-anthropic/src/client.rs` (62 lines against a limit of 60)
 by extracting a helper.
 That run executed `preflight`, `next-target`, and the gate's passing path.
-A failed gate (the discard, `attempted.jsonl`, the reason in the next turn's
-prompt), a rejection, and the stop after 8 failed gates have not run yet.
+The failed-gate path (discarding the work, recording `attempted.jsonl`, and
+passing the failure reason to the next turn's prompt), the rejection path, and
+the early stop after 8 consecutive failed gates have not been exercised yet.
 
 What the ticket left open, and how it was settled:
 
@@ -155,8 +156,8 @@ Where the mission departs from the description:
 - **Rejections.** The model doesn't append to `rejected.jsonl`.
   It writes its reason as plain text to `state/rejection`, and the gate appends
   `{key, reason}`.
-  The model can't then get the key wrong, break the JSON, or overwrite earlier
-  lines.
+  This prevents the model from writing the wrong key, producing invalid JSON, or
+  overwriting earlier entries.
   A rejection that also changed files is recorded, and the changes are
   discarded.
 - **Markers.** The gate refuses `qual:api` and `qual:test_helper` as well as
@@ -170,9 +171,9 @@ Where the mission departs from the description:
   mark the whole rule as attempted.
 - **Feedback.** The gate's reason for a discard goes into the next turn's
   prompt.
-- **Commit subject.** Checked for `type(scope): Capitalized summary` without a
-  closing period, in at most 72 characters.
-  The convention says 50, which recent history on `main` doesn't hold to.
+- **Commit subject.** The gate checks for `type(scope): Capitalized summary`
+  without a closing period, up to 72 characters (rather than 50, which recent
+  commits on `main` regularly exceed).
 
 Still open on this ticket: the per-rule runs in tier order, the manual guidance
 check before each (`cargo run --package qual -- report --rule <ID> --format
