@@ -174,6 +174,11 @@ the request fails:
 - Adding `decide` and `decided` increments `PROTOCOL_VERSION` (from 13).
   A plugin that sends `decide` must declare the new protocol version in `ready`.
 
+> [!TIP]
+> [RFD 135] lets a `decide` request name a conversation to record into.
+> Such a request writes state, so the host awaits it after the plugin exits, as
+> it awaits a delegated `query`, instead of cancelling it.
+
 ### Crates
 
 ```text
@@ -235,7 +240,9 @@ field would bypass the configuration pipeline that every other request uses, and
   deferred to a separate RFD.
 - **A `decide` tool for the assistant.**
 - **`box` questions and image states.** TypeSafe gates both behind opt-in
-  headers, and JP has no rendering surface for `box` answers.
+  headers and sends images as `assets`, Ollama sends them in a separate `images`
+  field, and JP has no rendering surface for `box` answers.
+  The `systemone` source therefore sends text and JSON only.
 - **Other decision sources**, such as OpenAI's Decisions API (which has no
   published schema) or an LLM-backed fallback source.
 - **Using decision models inside JP's own internal flows**, such as answering
@@ -256,6 +263,10 @@ in request validation, option limits, and confidence calculation.
 For example, Ollama requires `instructions` and a non-blank string `state`, caps
 cloud requests at 64 questions, and echoes the requested model name where
 TypeSafe returns the resolved model version.
+Context limits differ too: Jev allows 64k tokens per request and 32k per
+question, Ollama's cloud 65,536 tokens, and a local Ollama model 64 KiB of text.
+JP does not track these limits: a state that is too long is the server's to
+reject.
 JP's types enforce the requirements shared by all servers, and any
 server-specific rejection is returned as a provider error.
 JP forwards the server's answers as returned and makes no guarantee that
