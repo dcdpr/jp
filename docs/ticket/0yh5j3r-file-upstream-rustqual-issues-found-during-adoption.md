@@ -30,14 +30,13 @@ newer release has fixed.
 4. **`DRY` is all-or-nothing.** Turning off `[duplicates]` also turns off
    dead-code (`DRY-002`) and dead-type detection.
    A per-rule switch would remove the need for a second pass.
-   With two passes, a `qual:allow(dry, duplicate)` marker suppresses its finding
-   in the DRY pass, and the main pass, where `[duplicates]` is off, reports the
-   marker as `ORPHAN-001` (item 3).
-   `qual:allow(dry, fragment)` behaves the same, so a `DRY-001` or `DRY-003`
-   finding can't be suppressed with a reason (checked with probe markers on
-   2026-11-12).
-   The guidance files say so until the second pass goes; `qual:inverse` pairs
-   are not affected.
+   Running two passes means `qual:allow(dry, duplicate)` (`DRY-001`) and
+   `qual:allow(dry, fragment)` (`DRY-003`) cannot be used: each marker
+   suppresses its finding in the DRY pass, but the main pass (which disables
+   `[duplicates]`) reports the marker as `ORPHAN-001` (item 3; verified with
+   probe markers on 2026-11-12).
+   The guidance files note this limitation until the second pass is removed;
+   `qual:inverse` pairs are unaffected.
 5. **`ai-json` lacks the stable rule ID and the threshold/actual values** (for
    example `length=72 > 60`).
    Agents need both to fix a finding without a second lookup.
@@ -110,18 +109,22 @@ newer release has fixed.
     attachment crates), which is read by the linker, is also flagged.
     Neither rule accepts `qual:allow`, and `qual:api` is rejected on private
     items.
-14. **`DRY-005` groups `match` expressions by shape, whatever type they match.**
-    `group_repeated_patterns` (`src/adapters/analyzers/dry/match_patterns.rs`)
-    groups by a hash of the normalized `match` alone.
-    Normalization drops path patterns and erases literal values, so every
-    `match` that maps the same number of unit variants to string literals lands
-    in one group, whatever enum it matches.
-    "repeated match on Self (6 occurrences)" holds `PathRoot::as_str` in
-    `bookworm`, whose arms are `PathRoot::…`, and `<Status as Display>::fmt` in
-    `ticket`: the name is the second-to-last path segment of an arm of one
-    `match` in the group (`extract_enum_name`), not a key.
-    Propose keying the group on the matched type, with `Self` resolved to the
-    `impl` type, and skipping a `match` whose type can't be read from its arms.
+14. **`DRY-005` groups `match` expressions by shape, ignoring the matched
+    type.** `group_repeated_patterns`
+    (`src/adapters/analyzers/dry/match_patterns.rs`) groups by a hash of the
+    normalized `match` alone.
+    Normalization strips path prefixes from patterns and erases literal values,
+    so every `match` that maps the same number of unit variants to string
+    literals lands in the same group regardless of the enum.
+    For example, "repeated match on Self (6 occurrences)" groups
+    `PathRoot::as_str` in `bookworm` (whose arm patterns start with
+    `PathRoot::`) together with `<Status as Display>::fmt` in `ticket`: the type
+    name in the message is extracted from the second-to-last path segment of an
+    arm in one `match` of the group (`extract_enum_name`), not used in the
+    grouping key.
+    Propose including the matched type in the grouping key (resolving `Self` to
+    the enclosing `impl` type) and skipping `match` expressions whose matched
+    type cannot be inferred from the arm patterns.
     The detector also ignores `[duplicates] enabled = false`: `run_dry_pass`
     (`src/app/secondary.rs`) gates it on `detect_repeated_matches` alone, so
     JP's main pass runs it too.
