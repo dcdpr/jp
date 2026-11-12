@@ -6,8 +6,8 @@ use camino_tempfile::Utf8TempDir;
 
 use super::*;
 
-/// Run git in `dir` without the user's or the system's git configuration, which
-/// can ask for a signature on every commit.
+/// Run `git` in `dir` isolated from global and system git config, so host
+/// settings such as commit signing and hooks do not affect the test.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)

@@ -7,18 +7,17 @@
 - **Label**: domain=tooling
 - **Label**: type=task
 
-The command plugins and some internal crates spawn `git`, and a few other
-programs, straight through `std::process::Command`.
-Their tests therefore need a real `git`, build real repositories in temp
-directories, and pick up the developer's global and system git configuration.
-Commit signing through 1Password made the `jp-serve-chat` tests hang and fail;
-hooks or diff settings in a user's config can change what a test sees.
+Command plugins and several internal crates spawn `git` and other external
+programs directly via `std::process::Command`.
+Their tests require a `git` binary, initialize real repositories in temporary
+directories, and inherit the host's global and system git config.
+Commit signing (for example through 1Password) caused the `jp-serve-chat` tests
+to hang and fail, and global hooks or diff settings can alter test output.
 
-The interim fix sets `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` to empty in the
-test helpers that build repositories.
-That covers the helpers only: production code under test, such as ticket
-`refresh`, `jp vite sync`, and wiki pinning, still runs the real `git` with the
-user's configuration.
+Setting `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` to `""` in test helpers
+isolates repository setup, but production code under test (such as `jp ticket
+refresh`, `jp vite sync`, and wiki link pinning) still spawns `git` with the
+host's configuration.
 
 ## Where processes are spawned directly
 
@@ -28,14 +27,15 @@ Production code:
   `rev-parse`) and `git config` for the author
 - `plugins/command/rfd/src/author.rs`, `plugins/command/wiki/src/author.rs`:
   `git config` for the author
-- `plugins/command/vite/src/git.rs`: remote, repository prefix, unrecorded files
-- `plugins/command/vite/src/serve.rs`: the dev server, and `jp`
-- `plugins/command/wiki/src/git.rs`: two `git` calls
+- `plugins/command/vite/src/git.rs`: `origin` remote URL and default branch
+- `plugins/command/vite/src/serve.rs`: the dev server and `jp`
+- `plugins/command/wiki/src/git.rs`: `remote`, `rev-parse`, `cat-file`,
+  `merge-base`, `hash-object`, `log`, `diff`, and `status`
 - `plugins/command/gui/src/launch.rs`: `open`
-- `internal/overwrite/src/lib.rs`: `git`
+- `internal/overwrite/src/lib.rs`: `rev-parse`, `status`, and `ls-files`
 - `plugins/command/serve-chat/src/checkout.rs` (chat bridge): `rev-parse`,
-  `status`, `pull`; and `take.sh`, a shell script whose tests stub `flock` and
-  `git` on `PATH`
+  `status`, and `pull`; and `take.sh`, a shell script whose tests stub `flock`
+  and `git` on `PATH`
 
 Test helpers that build real repositories: `overwrite`, `tool-definitions`,
 `rfd` (`cmd/init_tests.rs`), `ticket`, `vite` (`git_tests.rs`, `lib_tests.rs`),
@@ -44,43 +44,40 @@ Test helpers that build real repositories: `overwrite`, `tool-definitions`,
 
 ## Direction
 
-Simulate up to the edge, with one trait in between, the way JP's core already
-does:
+Route external process calls through a trait boundary, matching JP's core
+crates:
 
-- Every run-once external command in these crates goes through
-  `jp_process::ProcessRunner`, passed in rather than created where it is used.
-  `SystemProcessRunner` is the only implementation that spawns anything, and is
-  chosen in each binary's `main`.
-- A small shared git layer on top of it, shared across crates, exposes typed
-  operations (status, log, show, diff, rev-parse, config, pull) and parses git's
-  output in one place, tested once against fixed output.
-- Tests use a fake: `MockProcessRunner` with scripted output for narrow cases,
-  or a fake git implementation that models a repository's state (commits,
-  working tree, remote) for the plugins' behaviour tests.
-  No test of plugin logic spawns `git`.
-- A few integration tests exercise the real git layer, with the user's and the
-  system's configuration isolated.
+- Route every one-shot external command in these crates through an injected
+  `jp_process::ProcessRunner`.
+  Only `SystemProcessRunner`, constructed in each binary's `main`, spawns OS
+  processes.
+- Build a shared git layer on top of `ProcessRunner` that exposes typed
+  operations (`status`, `log`, `show`, `diff`, `rev-parse`, `config`, `pull`)
+  and parses git output in one place, unit-tested against fixed fixtures.
+- Use fakes in tests: `MockProcessRunner` with scripted output for narrow cases,
+  or an in-memory fake git implementation that models repository state (commits,
+  working tree, remote) for plugin behavior tests.
+  Unit tests of plugin logic do not spawn `git`.
+- Cover the real git layer with a small set of integration tests isolated from
+  global and system git config.
 
 ## Open questions
 
-- Where the shared git layer lives: in `jp_process`, the `doc` crate, or a new
+- Where to place the shared git layer: in `jp_process`, `doc`, or a dedicated
   crate.
+- Whether to use scripted output, a modeled fake repository, or both depending
+  on the test.
+- What seam to use for long-lived processes such as `jp vite serve`'s dev
+  server, which fall outside `ProcessRunner`.
+- Whether to move `take.sh` into Rust behind the same seam or keep it as a shell
+  script with stub-based tests.
 
-- Scripted output or a modelled fake repository, or both for different tests.
-
-- Long-lived processes, such as `jp vite serve`'s dev server, are outside
-  `ProcessRunner`'s scope and need their own seam.
-
-- `take.sh` is shell: move its logic into Rust behind the same seam, or keep it
-  as a script with stub-based tests.
+## Done when
 
 - [ ] Production git and process calls in the listed crates go through an
-      injected runner
-
-- [ ] A shared, typed git layer, with its output parsing tested against fixed
-      output
-
-- [ ] Plugin tests use a fake, and no longer create real repositories
-
-- [ ] A small set of real-git integration tests, isolated from user and system
-      configuration
+      injected `ProcessRunner`
+- [ ] A shared, typed git layer parses git output and is unit-tested against
+      fixed fixtures
+- [ ] Plugin unit tests use a fake and do not initialize real git repositories
+- [ ] A small set of integration tests exercises the real git layer, isolated
+      from global and system git config

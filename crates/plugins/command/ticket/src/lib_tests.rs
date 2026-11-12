@@ -139,9 +139,9 @@ fn git(dir: &Utf8Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-/// A git command in `dir` that reads neither the user's nor the system's git
-/// configuration, so the machine's identity, default branch name, and signing
-/// setup can't reach in and change what the test does.
+/// Build a `git` command in `dir` isolated from global and system git config,
+/// so host settings such as user identity, default branch, and commit signing
+/// do not affect the test.
 fn isolated_git(dir: &Utf8Path) -> std::process::Command {
     let mut command = std::process::Command::new("git");
     command
