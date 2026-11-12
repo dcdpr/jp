@@ -82,6 +82,10 @@ Options:
   --no-gate           Skip the mission's gate between turns
   --help
 EOF
+    if declare -F option_usage >/dev/null; then
+        printf '\n%s options:\n' "$MISSION"
+        option_usage
+    fi
 }
 
 HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -154,7 +158,16 @@ while [[ $# -gt 0 ]]; do
         --rotate-events)   ROTATE_EVENTS=$2; shift 2 ;;
         --no-gate)         GATE=0; shift ;;
         --help|-h)         usage; exit 0 ;;
-        *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+        *)
+            # An option of the mission's own. `parse_option` sets `OPTION_COUNT`
+            # to the number of arguments it consumed.
+            OPTION_COUNT=0
+            if declare -F parse_option >/dev/null && parse_option "$@" && [[ $OPTION_COUNT -gt 0 ]]; then
+                shift "$OPTION_COUNT"
+            else
+                echo "unknown option: $1" >&2; usage >&2; exit 2
+            fi
+            ;;
     esac
 done
 
@@ -216,6 +229,12 @@ fi
 # resetting a failed iteration would overwrite them.
 if [[ $DISCARD_ON_GATE_FAILURE -eq 1 ]] && ! git diff --quiet -- "${NOT_STATE[@]}"; then
     die "this mission discards failed iterations; commit or revert unstaged changes first"
+fi
+
+# The mission's own preconditions, checked once its options are parsed and
+# before anything is committed or written to a run directory.
+if declare -F preflight >/dev/null; then
+    preflight
 fi
 
 # Verify that `git commit` succeeds non-interactively before starting the loop.

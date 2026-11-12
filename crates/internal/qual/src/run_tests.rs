@@ -150,6 +150,56 @@ fn report_reads_each_rule_from_its_pass_and_names_its_symbol() {
 }
 
 #[test]
+fn report_for_a_rule_lists_only_its_findings() {
+    let (_dir, workspace) = workspace();
+    let runner = MockProcessRunner::responding(|spec| {
+        if is_pass(spec, "dry.toml") {
+            return ok(sarif(&[("DRY-002", "src/lib.rs", 5, "dead code: unused")]));
+        }
+        ok(sarif(&[
+            ("CX-003", "src/lib.rs", 2, "Magic number 42 in run"),
+            ("SRP-002", "src/lib.rs", 1, "lib: 900 production lines"),
+        ]))
+    });
+
+    let report = workspace.report_rule(&runner, "CX-003").unwrap();
+
+    assert_eq!(report.findings, vec![finding(
+        "src/lib.rs",
+        2,
+        "CX-003",
+        "run",
+        "Magic number 42 in run"
+    )]);
+}
+
+#[test]
+fn report_for_an_exempt_rule_is_an_error() {
+    let (_dir, workspace) = workspace();
+    // Answers with a finding of the exempt rule, so a report that filtered
+    // instead of failing would come back empty rather than as an error.
+    let runner = MockProcessRunner::responding(|_| {
+        ok(sarif(&[(
+            "iosp/violation",
+            "src/lib.rs",
+            1,
+            "IOSP violation in run",
+        )]))
+    });
+
+    let error = workspace
+        .report_rule(&runner, "iosp/violation")
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, Error::Exempt { rule, .. } if rule == "iosp/violation"),
+        "{error:?}"
+    );
+    // The policy alone decides, before any analysis runs.
+    assert_eq!(runner.calls(), vec![]);
+}
+
+#[test]
 fn a_failing_rustqual_run_is_an_error() {
     let (_dir, workspace) = workspace();
     let runner = MockProcessRunner::responding(|_| {

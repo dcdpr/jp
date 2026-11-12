@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+#
+# Check the iteration's work on the target finding.
+#
+# The work passes when, compared with the iteration's base:
+#
+# - it is one commit, with a subject in the repository's convention, and
+#   nothing is left uncommitted;
+# - it changes nothing under `.config/rustqual/` or `.config/loop/`, and adds no
+#   `qual:` marker;
+# - `cargo check --workspace --all-targets` passes;
+# - `qual report` no longer lists the target;
+# - `qual diff` against the base reports no new finding;
+# - the tests of every package the commit touches pass.
+#
+# A turn that wrote `state/rejection` rejects the finding instead: the gate
+# appends `{key, reason}` to `state/rejected.jsonl`, and passes when the turn
+# changed nothing else.
+#
+# Every failure exits 1, so the harness discards the iteration. The gate then
+# appends `{key, reason}` to `state/attempted.jsonl`, unless the turn was cut
+# short by a usage limit or a network stall and so never attempted the finding;
+# a turn that ran into the per-turn timeout (124) did. The reason also goes to
+# `state/gate-reason` for the next turn's prompt, and `state/failures` counts
+# the failed gates in a row for `next-target`.
+
+set -euo pipefail
+
+MAX_SUBJECT_CHARS=72
+
+# `type(scope, scope)!: Summary`, with the summary capitalized (or opening with
+# a code reference) and no closing period.
+subject_re='^(build|chore|ci|docs|feat|enhance|fix|perf|refactor|test)(\([a-z0-9_-]+(, [a-z0-9_-]+)*\))?!?: [A-Z`].*[^.]$'
+
+cd "$LOOP_ROOT"
+# shellcheck source=lib.sh
+source "$LOOP_MISSION_DIR/lib.sh"
+
+rule=${QUAL_RULE:?the mission exports the rule of the run}
+state_rel=${LOOP_STATE#"$LOOP_ROOT"/}
+base=$LOOP_ITERATION_BASE
+attempted=$LOOP_STATE/attempted.jsonl
+rejected=$LOOP_STATE/rejected.jsonl
+rejection=$LOOP_STATE/rejection
+reason_file=$LOOP_STATE/gate-reason
+failures=$LOOP_STATE/failures
+
+# Whether the turn got to attempt the finding.
+attempted_turn() {
+    [[ $LOOP_TURN_STATUS -eq 0 || $LOOP_TURN_STATUS -eq 124 ]]
+}
+
+# Leave with 0 or 1 only. The harness reads exit status 2 as "keep the work and
+# repair it in place", which this mission never asks for, and `qual` and `jq`
+# exit 2 on errors of their own.
+finish() {
+    local status=$?
+    trap - EXIT
+    if [[ $status -eq 0 ]]; then
+        echo 0 > "$failures"
+        exit 0
+    fi
+    if attempted_turn; then
+        echo $(($(cat "$failures") + 1)) > "$failures"
+    fi
+    exit 1
+}
+trap finish EXIT
+
+key=$(jq -c .key "$LOOP_STATE/current.json")
+name=$(jq -r '.key | if .symbol == "" then .file else "`\(.symbol)` in \(.file)" end' "$LOOP_STATE/current.json")
+
+# Append the target and `$2` to the JSON Lines file `$1`.
+record() {
+    jq -cn --argjson key "$key" --arg reason "$2" '{key: $key, reason: $reason}' >> "$1"
+}
+
+fail() {
+    echo "FAIL: $1"
+    if attempted_turn; then
+        head -n 40 <<<"$1" > "$reason_file"
+        record "$attempted" "$(head -n 1 <<<"$1")"
+    else
+        rm -f "$reason_file"
+        echo "the turn exited $LOOP_TURN_STATUS before it finished, so the finding is retried"
+    fi
+    exit 1
+}
+
+commits=$(git rev-list --count "$base..HEAD")
+dirty=$(git status --porcelain -- . ":(exclude)$state_rel")
+
+if [[ -f $rejection ]]; then
+    reason=$(cat "$rejection")
+    rm -f "$rejection"
+    if [[ -n ${reason//[[:space:]]/} ]]; then
+        record "$rejected" "$reason"
+        if [[ $commits -eq 0 && -z $dirty ]]; then
+            rm -f "$reason_file"
+            echo "PASS: rejected $name"
+            exit 0
+        fi
+        # The rejection stands, and already keeps `next-target` off the finding,
+        # so it is not recorded as attempted as well.
+        message="the turn rejected the finding and changed files as well; a rejection leaves the code untouched"
+        echo "$message" > "$reason_file"
+        echo "FAIL: $message"
+        exit 1
+    fi
+fi
+
+if [[ $commits -ne 1 ]]; then
+    fail "the turn made $commits commits; a fix is exactly one commit"
+fi
+if [[ -n $dirty ]]; then
+    fail "the turn left changes uncommitted:
+$dirty"
+fi
+
+subject=$(git log -1 --format=%s)
+if [[ ! $subject =~ $subject_re || ${#subject} -gt $MAX_SUBJECT_CHARS ]]; then
+    fail "the commit subject doesn't follow the repository's convention, \`type(scope): Capitalized summary\` without a closing period, in at most $MAX_SUBJECT_CHARS characters: $subject"
+fi
+
+# The policy that decides what counts as a finding, and the scripts that check
+# this commit.
+config=$(git diff --name-only "$base" HEAD -- .config/rustqual .config/loop)
+if [[ -n $config ]]; then
+    fail "the commit changes rustqual's configuration or the loop harness:
+$config"
+fi
+
+# Markers added minus markers removed, so a marker that moves with its item
+# doesn't count.
+markers=$(git diff --unified=0 "$base" HEAD -- '*.rs' | awk '
+    /^\+\+\+ / || /^--- / { next }
+    /^\+.*qual:(allow|api|test_helper)/ { n++ }
+    /^-.*qual:(allow|api|test_helper)/ { n-- }
+    END { print n + 0 }
+')
+if [[ $markers -gt 0 ]]; then
+    fail "the commit adds a \`qual:\` marker; a finding that shouldn't be fixed is rejected, not suppressed"
+fi
+
+if ! output=$(cargo check --locked --workspace --all-targets --message-format short 2>&1); then
+    printf '%s\n' "$output"
+    errors=$(grep -E 'error(\[E[0-9]+\])?:' <<<"$output" | head -n 20 || true)
+    if [[ -z $errors ]]; then
+        errors=$(tail -n 20 <<<"$output")
+    fi
+    fail "\`cargo check --workspace --all-targets\` fails on the commit:
+$errors"
+fi
+
+report=$(qual report --rule "$rule" --format json)
+left=$(jq -r --argjson key "$key" '
+    .[] | select({rule, file, symbol} == $key) | "\(.file):\(.line): \(.message)"
+' <<<"$report")
+if [[ -n $left ]]; then
+    fail "rustqual still reports the finding:
+$left"
+fi
+
+# `qual diff` exits 1 on a finding the base lacks, and higher when it could
+# not compare the two.
+status=0
+new=$(qual diff --base "$base" --format ai 2>&1) || status=$?
+if [[ $status -eq 1 ]]; then
+    fail "the commit adds rustqual findings:
+$new"
+elif [[ $status -ne 0 ]]; then
+    printf '%s\n' "$new"
+    echo "ERROR: \`qual diff\` could not compare the commit with its base"
+    exit 1
+fi
+
+# The package that owns each changed file: the one whose directory is the
+# longest prefix of the file's path.
+packages=$(
+    git diff --name-only "$base" HEAD | jq -Rrn \
+        --slurpfile meta <(cargo metadata --locked --no-deps --format-version 1) '
+        $meta[0] as $m
+        | ($m.workspace_root + "/") as $root
+        | [$m.packages[] | {name, dir: (.manifest_path | ltrimstr($root) | rtrimstr("/Cargo.toml"))}] as $packages
+        | [inputs as $file
+           | [$packages[] | select(.dir as $dir | $file | startswith($dir + "/"))]
+           | max_by(.dir | length)
+           | .name // empty]
+        | unique[]
+    '
+)
+if [[ -n $packages ]]; then
+    names=${packages//$'\n'/, }
+    selection=()
+    for package in $packages; do
+        selection+=(-p "$package")
+    done
+    # `INSTA_WORKSPACE_ROOT` as in `just test`: a test binary built by another
+    # worktree would otherwise look for its snapshots there.
+    if ! output=$(INSTA_WORKSPACE_ROOT=$LOOP_ROOT cargo nextest run --locked --no-fail-fast \
+        --no-tests=warn --hide-progress-bar --status-level=fail --final-status-level=fail \
+        "${selection[@]}" 2>&1); then
+        printf '%s\n' "$output"
+        fail "the tests of $names fail on the commit:
+$(tail -n 30 <<<"$output")"
+    fi
+fi
+
+rm -f "$reason_file"
+echo "PASS: fixed $name"
