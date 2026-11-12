@@ -23,22 +23,40 @@ max = 1
 type = "date"
 ```
 
-- **Validation.** A write is refused when a value isn't a `YYYY-MM-DD` date, and
-  `jp ticket check` reports existing ones that aren't.
-- **Relative input.** A write may give a relative value such as `1w` or `3d`.
-  It is stored as the date it resolves to, counted from the ticket's own `Date`,
-  so a stored value never goes stale.
-- **Filters.** `ticket_list` and `jp ticket list` can filter a date-typed key by
-  range, for example `due<2026-12-01` or `before` / `after` arguments.
+- **Declaration.** `type` is allowed only on a key that takes any value (`values
+  = []`); on a key with listed values, or a bare key, it is a declaration error.
+- **Validation.** A write is refused when a value isn't a `YYYY-MM-DD` calendar
+  date, and `jp ticket check` and `jp wiki check` report existing ones that
+  aren't.
+  Checked in `Vocabulary::resolve_against`, so every consumer gets it.
+- **Filters.** `Selector` gains `<`, `<=`, `>`, and `>=`, as in
+  `due<2026-12-01`.
+  The operand must be a date, or the filter is refused; a stored value that
+  isn't a date doesn't match.
+  Filters stay vocabulary-free, so a ticket with a malformed value can still be
+  found.
+  `YYYY-MM-DD` sorts bytewise, so comparison needs no clock.
+- **Absolute only.** Values are stored and compared as dates.
+  Relative input (`1w`, `+3d`) is out of scope; it can be added later as write-
+  and filter-time syntax resolved against today, without changing what is
+  stored.
 
 Labels stay optional: a board that declares no `due` key is unaffected.
+
+`jp_label`'s vocabulary entry rejects unknown fields, so every plugin binary
+that reads a vocabulary (ticket, wiki, vite, rfd tooling) is rebuilt together
+with this change.
 
 This changes the vocabulary format from RFD 100, so note it there.
 The conversation query DSL in D37 may later offer a general way to filter by
 typed values; this doesn't wait for it.
 
-- [ ] `type = "date"` on a vocabulary key, with validation on write and in
-      `check`
-- [ ] Relative values resolved against the ticket's date on write
-- [ ] Range filters for date-typed keys in `ticket_list` and `jp ticket list`
-- [ ] Planner persona uses the filter for "what's due"
+- [x] `type = "date"` on an open vocabulary key, refused on any other key
+- [x] Writes refuse a value that isn't a date; `check` reports existing ones
+- [x] Comparison operators on `Selector`, used by `jp ticket list` and
+      `ticket_list`
+- [x] Tool definitions describe the comparison operators for date-typed keys
+- [x] `due` declared with `type = "date"`; its description and the planner
+      prompt drop relative values
+- [x] Planner persona uses the filter for "what's due"
+- [x] RFD 100 documents `type` and the comparison operators

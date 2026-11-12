@@ -2996,6 +2996,118 @@ fn labelling_two_tickets_with_one_unique_label_is_refused() {
     assert!(labels_of(&dir, first).is_empty());
 }
 
+/// A board whose `due` key takes a date.
+fn dated_board() -> Options {
+    let Value::Object(options) = json!({ "labels": {
+        "due": { "description": "When the work is wanted.", "values": [], "max": 1, "type": "date" }
+    } }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// File a ticket on [`dated_board`] and hand back its id.
+fn add_dated(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<TicketId, String> {
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            parent: None,
+            title: Some(title.to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+        },
+        &dated_board(),
+    )?;
+
+    Ok(store::list(dir.path())
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.ticket.as_ref().is_ok_and(|t| t.title == title))
+        .expect("the ticket that was just filed")
+        .id)
+}
+
+#[test]
+fn a_label_that_is_not_of_its_key_s_type_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = add_dated(&dir, "Ship it", &["due=1w"]).unwrap_err();
+
+    assert_eq!(error, "`due=1w` is not a date, written YYYY-MM-DD.");
+    assert!(store::list(dir.path()).unwrap().is_empty());
+}
+
+/// A comparison narrows to the dates on its side, which is how "what is due
+/// before Friday" is asked.
+#[test]
+fn listing_narrows_on_a_date_comparison() {
+    let dir = Utf8TempDir::new().unwrap();
+    let early = add_dated(&dir, "Early", &["due=2026-11-20"]).unwrap();
+    let late = add_dated(&dir, "Late", &["due=2026-12-20"]).unwrap();
+    add_dated(&dir, "Undated", &[]).unwrap();
+    let listing = |label: &str| {
+        run_with_options(
+            dir.path(),
+            Command::List {
+                under: None,
+                status: None,
+                labels: vec![label.to_owned()],
+                query: None,
+            },
+            &dated_board(),
+        )
+        .unwrap()
+        .text
+    };
+
+    assert_eq!(
+        listing("due<2026-12-01"),
+        format!("{early} Todo         Early [due=2026-11-20]\n")
+    );
+    assert_eq!(
+        listing("due>=2026-11-21"),
+        format!("{late} Todo         Late [due=2026-12-20]\n")
+    );
+}
+
+#[test]
+fn listing_refuses_a_comparison_with_something_other_than_a_date() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = run_with_options(
+        dir.path(),
+        Command::List {
+            under: None,
+            status: None,
+            labels: vec!["due<friday".to_owned()],
+            query: None,
+        },
+        &dated_board(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "label value 'friday' is not a date written YYYY-MM-DD, the only kind of value `<`, `<=`, \
+         `>`, and `>=` compare"
+    );
+}
+
+#[test]
+fn the_label_listing_names_a_key_s_type() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = run_with_options(dir.path(), Command::Labels, &dated_board()).unwrap();
+
+    assert_eq!(
+        out.text,
+        "due  When the work is wanted. (at most one label per ticket)\n  due=<a date, written \
+         YYYY-MM-DD>\n\n"
+    );
+}
+
 /// `jp ticket labels` shows a key taking any value, and which keys one ticket
 /// holds on its own.
 #[test]

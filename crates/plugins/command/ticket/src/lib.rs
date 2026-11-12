@@ -39,7 +39,8 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
+    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, ValueType,
+    Vocabulary,
     board::{self, Place, Placement},
     check::Problem,
     checklist::{self, Progress},
@@ -348,7 +349,8 @@ enum Command {
         #[arg(long)]
         status: Option<Status>,
 
-        /// Only tickets carrying this label, as `key` or `key=value`.
+        /// Only tickets carrying this label, as `key` or `key=value`, or a date
+        /// compared with `<`, `<=`, `>`, or `>=`, as `due<2026-12-01`.
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
@@ -2295,7 +2297,8 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
 
         out.push_str(&format!("{key}  {}{notes}\n", facet.description()));
         if facet.is_open() {
-            out.push_str(&format!("  {key}=<any value>\n"));
+            let value = facet.value_type().map_or("any value", ValueType::describe);
+            out.push_str(&format!("  {key}=<{value}>\n"));
         }
         for value in facet.values() {
             out.push_str(&format!("  {key}={value}\n"));

@@ -68,6 +68,9 @@ summary = "Only pages carrying every one of these labels."
 description = """
 Each entry is a `key=value` pair, or a bare `key` to match any value under it.
 Every entry has to match, so each one narrows the listing further.
+
+A key holding dates is also compared with `<`, `<=`, `>`, or `>=` and a date
+written YYYY-MM-DD, as `due<2026-12-01`.
 """
 
 # The accepted values are mirrored from the vocabulary by `jp wiki tools sync`.

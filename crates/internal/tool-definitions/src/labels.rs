@@ -9,9 +9,10 @@
 //!
 //! A vocabulary with a key that takes any value gets no list at all: a list
 //! holds only the values it names, so it would refuse that key's.
-//! Its labels are described in words instead.
+//! Its labels are described in words instead, along with the `type` a key holds
+//! its values to, and for a filter, how a date-typed key is compared.
 
-use jp_label::{Unique, Vocabulary};
+use jp_label::{Unique, ValueType, Vocabulary};
 
 use crate::toml_string;
 
@@ -54,6 +55,11 @@ pub(crate) fn render(
     } else {
         rules(vocabulary, item)
     };
+    let notes = [rules, types(vocabulary, filter)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let notes = (!notes.is_empty()).then(|| notes.join(" "));
 
     let mut out = String::new();
     if role == Role::Create && vocabulary.facets().any(|(_, facet)| facet.min() > 0) {
@@ -64,7 +70,7 @@ pub(crate) fn render(
     out.push_str(&format!(
         "\n[conversation.tools.{key}.parameters.{parameter}.items]\n"
     ));
-    if let Some(summary) = summary(&tokens, &open, rules.as_deref(), filter) {
+    if let Some(summary) = summary(&tokens, &open, notes.as_deref(), filter) {
         out.push_str(&format!("summary = {}\n", toml_string(&summary)));
     }
     if open.is_empty() {
@@ -127,6 +133,27 @@ fn summary(tokens: &[String], open: &[&str], rules: Option<&str>, filter: bool) 
     }
 
     Some(summary)
+}
+
+/// What the vocabulary's typed keys hold their values to, as sentences, or
+/// `None` when no key has a `type`.
+///
+/// A `filter` is also told how to compare them.
+fn types(vocabulary: &Vocabulary, filter: bool) -> Option<String> {
+    let sentences: Vec<String> = vocabulary
+        .facets()
+        .filter_map(|(key, facet)| facet.value_type().map(|kind| (key, kind)))
+        .map(|(key, kind)| match kind {
+            ValueType::Date if filter => format!(
+                "`{key}` holds {}; compare it with `<`, `<=`, `>`, or `>=`, as in \
+                 `{key}<2026-12-01`.",
+                kind.describe()
+            ),
+            ValueType::Date => format!("`{key}` takes {}.", kind.describe()),
+        })
+        .collect();
+
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 /// What the vocabulary's bounded and unique keys ask of an `item`, as

@@ -40,7 +40,7 @@
         ]
       },
       "due": {
-        "description": "When the work is wanted: a date, YYYY-MM-DD, or a duration after the ticket's date, such as 1w.",
+        "description": "When the work is wanted, as a date: YYYY-MM-DD.",
         "values": [],
         "open": true,
         "max": 1
