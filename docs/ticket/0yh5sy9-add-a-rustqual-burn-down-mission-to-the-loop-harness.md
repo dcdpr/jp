@@ -1,6 +1,6 @@
 # Add a rustqual burn-down mission to the loop harness
 
-- **Status**: Todo
+- **Status**: In Progress
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -109,3 +109,76 @@ shows what remains.
   crate.
 - Once a rule reaches zero on `main`, add it to the `enforced` list
   (`.config/rustqual/qual.toml` today) in a small follow-up PR.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-12T07:58:47Z
+
+The mission is in `.config/loop/missions/rustqual/` (`mission.sh`,
+`next-target`, `gate`, `lib.sh`).
+
+Its first run, one iteration on `CX-004` with `astra`, passed the gate with one
+commit.
+The commit shortens `response_error` in
+`crates/contrib/async-anthropic/src/client.rs` (62 lines against a limit of 60)
+by extracting a helper.
+That run executed `preflight`, `next-target`, and the gate's passing path.
+The failed-gate path (discarding the work, recording `attempted.jsonl`, and
+passing the failure reason to the next turn's prompt), the rejection path, and
+the early stop after 8 consecutive failed gates have not been exercised yet.
+
+What the ticket left open, and how it was settled:
+
+- **`--rule`.** The harness had no way for a mission to take an option, so
+  `run.sh` gained three optional mission functions: `parse_option`,
+  `option_usage`, and `preflight` (documented in the loop README).
+- **Exempt rules.** The hooks don't read `qual.toml`.
+  `qual report` gained `--rule <ID>`, which fails on a rule the policy exempts,
+  and `preflight` calls it.
+  The policy's pattern matching and the `enforced`-over-`exempt` precedence stay
+  in `qual`, and the mission keeps working when the policy moves into rustqual's
+  config.
+- **Branch.** `preflight` refuses to run unless `HEAD` is on `qual/<rule,
+  lowercased>`.
+  It doesn't create or switch branches.
+- **A target** is every finding sharing one `(rule, file, symbol)` key, the
+  identity `qual diff` compares by.
+  "Gone" means `qual report` lists no finding with that key.
+- **Tests for the affected crate** means the packages that own the changed
+  files, not their dependents.
+  `cargo check --workspace --all-targets` covers the dependents.
+
+Where the mission departs from the description:
+
+- **Rejections.** The model doesn't append to `rejected.jsonl`.
+  It writes its reason as plain text to `state/rejection`, and the gate appends
+  `{key, reason}`.
+  This prevents the model from writing the wrong key, producing invalid JSON, or
+  overwriting earlier entries.
+  A rejection that also changed files is recorded, and the changes are
+  discarded.
+- **Markers.** The gate refuses any `qual:` annotation the commit adds or
+  changes, not only `qual:allow`: `qual:api`, `qual:test_helper`,
+  `qual:inverse`, and an edit to an existing marker, such as a raised
+  `file_length=N`.
+  Marker lines are compared as a multiset, so a marker that moves with its item
+  passes.
+  `lib-test.sh` holds the cases, and every run starts by running them.
+- **`.config/loop/`** is off limits along with `.config/rustqual/`, since the
+  gate runs from the working tree.
+- **Stopping early.** `next-target` ends the run with status 1 after 8 failed
+  gates in a row.
+  Every finding gets one attempt, so a mistake the model repeats would otherwise
+  mark the whole rule as attempted.
+- **Feedback.** The gate's reason for a discard goes into the next turn's
+  prompt.
+- **Commit subject.** The gate checks for `type(scope): Capitalized summary`
+  without a closing period, up to 72 characters (rather than 50, which recent
+  commits on `main` regularly exceed).
+
+Still open on this ticket: the per-rule runs in tier order, the manual guidance
+check before each (`cargo run --package qual -- report --rule <ID> --format
+ai`), the PRs per crate, and the `enforced` ratchet.

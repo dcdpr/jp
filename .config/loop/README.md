@@ -87,6 +87,22 @@ conversation, such as `--attach=<path>`.
 The harness provides `fill`, which reads a template from stdin and replaces
 `@RUN_ID@`, `@BASELINE@`, and `@STATE@` with the current run's values.
 
+### Options and preconditions
+
+A mission can define its own command-line options and preflight checks.
+All three functions are optional:
+
+- `parse_option` receives the remaining arguments when the harness encounters an
+  option it does not recognize.
+  It sets `OPTION_COUNT` to the number of arguments consumed (including the
+  option itself), or returns non-zero if the option is unrecognized.
+- `option_usage` prints the mission's options for `run.sh <mission> --help`,
+  which lists them below the harness options.
+- `preflight` runs once from the worktree root, after options are parsed and
+  before the harness's commit probe.
+  It calls `die` to abort startup when a precondition is not met (for example,
+  when `rustqual` is invoked without `--rule`).
+
 ### Environment
 
 `gate` and `next-target` receive `LOOP_MISSION`, `LOOP_MISSION_DIR`,
@@ -95,6 +111,8 @@ the per-iteration variables `LOOP_ITERATION` and `LOOP_ITERATION_BASE` (the
 `HEAD` commit at the start of the iteration; a repair turn keeps the base of the
 iteration it repairs).
 `gate` also receives `LOOP_TURN_STATUS`, the exit status of the turn it checks.
+Both scripts inherit any variables exported by `mission.sh` (such as parsed
+mission options).
 
 ## Discarding an iteration
 

@@ -151,3 +151,18 @@ rustqual's config, and delete `qual`.
 
 With `qual` gone, rustqual needs no library API: callers run the binary and read
 its JSON output.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-12T07:58:47Z
+
+T-0yh5sy9 added `qual report --rule <ID>`: it lists one rule's findings and
+fails on a rule the policy exempts.
+The burn-down mission's preflight and both of its hooks call it through `qual()`
+in `.config/loop/missions/rustqual/lib.sh`, so the rustqual replacement for
+`qual report` needs the same `--rule` flag and exempt-rule check.
+`report_for_a_rule_lists_only_its_findings` and
+`report_for_an_exempt_rule_is_an_error` in `run_tests.rs` are its spec.
