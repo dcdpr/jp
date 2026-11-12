@@ -382,9 +382,12 @@ Setting `style.parameters = "tool"` delegates parameter rendering to the plugin,
 which previews the fragment before writing it.
 Because the tool's `type` parameter uses the fixed list of seven identifiers,
 its schema does not depend on workspace configuration: `jp release tools init`
-writes the tool definition once, no `tools sync` command is needed, and (as in
-[RFD 116]) `tools init` will be removed once plugins can declare their own tool
+writes the tool definition, no `tools sync` command is needed, and (as in [RFD
+116]) `tools init` will be removed once plugins can declare their own tool
 schemas directly.
+Like the other plugins' `tools init`, it leaves a file that matches the shipped
+definition alone, and overwrites one with different contents only when git can
+restore it or `--force` is passed.
 JP enables `changelog_add` in every conversation, the changelog skill tells the
 personas that write changes (`dev`, `prose`, and `rfd-implementor`) when to use
 it, and the `pr-reviewer` persona checks that each fragment describes the change
