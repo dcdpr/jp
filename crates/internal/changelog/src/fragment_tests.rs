@@ -568,13 +568,18 @@ fn an_upgrade_body_of_definitions_alone_is_empty() {
 
 #[test]
 fn a_misplaced_token_says_how_to_show_it_instead() {
+    let error = parse(Type::Changed, indoc! {"
+        Entry, with an example:
+
+        ```text
+        BREAKING CHANGE: in an example
+        ```
+    "})
+    .unwrap_err();
+
     assert_eq!(
-        FragmentError::MarkerInCodeBlock {
-            line: 7,
-            marker: "BREAKING CHANGE:",
-        }
-        .to_string(),
-        "line 7 starts with `BREAKING CHANGE:` inside a code block; to show the token, indent the \
+        error.to_string(),
+        "line 4 starts with `BREAKING CHANGE:` inside a code block; to show the token, indent the \
          line or put the token in inline code"
     );
 }

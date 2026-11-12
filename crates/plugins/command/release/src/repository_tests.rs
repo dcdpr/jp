@@ -1,9 +1,13 @@
 use std::collections::BTreeSet;
 
 use camino_tempfile::Utf8TempDir;
+use semver::Version;
 
 use super::*;
-use crate::{releases::Started, repository_testing::Fixture};
+use crate::{
+    releases::{Standing, Started},
+    repository_testing::Fixture,
+};
 
 /// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
 const OCTOBER_1: i64 = 1_790_856_000;
@@ -59,17 +63,32 @@ fn a_workspace_outside_a_repository_is_refused() {
     );
 }
 
+/// A workspace below the top of the work tree has its root at the same place in
+/// each worktree, and names paths from there.
 #[test]
-fn the_workspace_root_is_read_below_the_top_of_the_work_tree() {
+fn paths_are_relative_to_a_workspace_below_the_top_of_the_work_tree() {
     let fixture = Fixture::new();
-    fixture.write("sub/project/README.md", "A workspace below the top.\n");
+    fixture.write("sub/project/changelog.d/fix.fixed.md", "Fixed.\n");
+    let notes = fixture.commit("Fix a bug");
+    fixture.write("sub/project/src/fix.rs", "// A fix.\n");
+    let code = fixture.commit("Fix it in the code");
     let shell = fixture.shell();
 
     let top = Repository::open(&shell, fixture.root()).unwrap();
     let below = Repository::open(&shell, &fixture.root().join("sub/project")).unwrap();
+    let worktree = below.worktrees.add("test", &code).unwrap();
 
-    assert_eq!(top.prefix(), "");
-    assert_eq!(below.prefix(), "sub/project/");
+    assert_eq!(worktree.workspace(), worktree.top().join("sub/project/"));
+    assert_eq!(
+        below.history.changes_outside(&notes, "changelog.d"),
+        Ok(false)
+    );
+    assert_eq!(
+        below.history.changes_outside(&code, "changelog.d"),
+        Ok(true)
+    );
+    // From the top, the fragments directory is elsewhere.
+    assert_eq!(top.history.changes_outside(&notes, "changelog.d"), Ok(true));
 }
 
 /// A tag only this repository has finalizes its release too, but isn't
@@ -85,7 +104,7 @@ fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
     let releases = repository.releases().unwrap();
 
     // The commit that starts 0.3.0 is the one below the tip.
@@ -110,7 +129,7 @@ fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
         }],
         picked: BTreeSet::from([main.clone()]),
     });
-    assert_eq!(repository.main(), Ok(main));
+    assert_eq!(repository.origin.main(), Ok(main));
 }
 
 /// A release branch only this repository has, such as one a cut made and nobody
@@ -122,14 +141,14 @@ fn a_release_branch_origin_lacks_is_read_from_here() {
     release_branch(&fixture, &main);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
 
     fixture.origin_git(&["branch", "--delete", "--force", "release/0.3"]);
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
 
-    let branch = repository.branch("release/0.3").unwrap();
+    let branch = repository.refs.branch("release/0.3").unwrap();
     assert_eq!(branch.origin, None);
-    assert_eq!(repository.standing(&branch), Ok(Some(Standing::Local)));
+    assert_eq!(repository.refs.standing(&branch), Ok(Some(Standing::Local)));
     assert_eq!(repository.releases().unwrap().lines.len(), 1);
 }
 
@@ -140,12 +159,12 @@ fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
     release_branch(&fixture, &main);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
     let standing = || {
-        let branch = repository.branch("release/0.3").unwrap();
+        let branch = repository.refs.branch("release/0.3").unwrap();
         (
-            repository.standing(&branch).unwrap(),
-            repository.tip(&branch),
+            repository.refs.standing(&branch).unwrap(),
+            repository.refs.tip(&branch),
         )
     };
     let published = fixture.hash("release/0.3");
@@ -164,7 +183,7 @@ fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
     let newer = commit_on(&fixture, "release/0.3", "Pick a fix elsewhere");
     fixture.publish(&["release/0.3"]);
     fixture.git(&["update-ref", "refs/heads/release/0.3", &behind]);
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
     assert_eq!(standing(), (Some(Standing::Behind), Ok(Some(newer))));
 
     commit_on(&fixture, "release/0.3", "Pick a fix here");
@@ -180,8 +199,8 @@ fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
         )
     );
 
-    let missing = repository.branch("release/0.9").unwrap();
-    assert_eq!(repository.standing(&missing), Ok(None));
+    let missing = repository.refs.branch("release/0.9").unwrap();
+    assert_eq!(repository.refs.standing(&missing), Ok(None));
 }
 
 #[test]
@@ -194,18 +213,18 @@ fn the_release_branches_holding_a_commit_are_listed() {
     fixture.push();
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
 
     assert_eq!(
-        repository.containing(&main),
+        repository.history.containing(&main),
         Ok(vec!["release/0.3".to_owned()])
     );
-    assert_eq!(repository.containing(&later), Ok(vec![]));
+    assert_eq!(repository.history.containing(&later), Ok(vec![]));
 
     // A release branch only this repository has holds its commits too.
     fixture.git(&["branch", "release/0.4", &later]);
     assert_eq!(
-        repository.containing(&later),
+        repository.history.containing(&later),
         Ok(vec!["release/0.4".to_owned()])
     );
 }
@@ -216,16 +235,16 @@ fn the_checkout_stands_for_main_when_it_has_mains_commits() {
     let main = fixture.hash("HEAD");
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
 
-    let at_main = repository.checkout().unwrap();
+    let at_main = repository.origin.checkout().unwrap();
     assert!(at_main.at_main());
     assert_eq!(at_main.describe(), format!("main at {}", &main[..7]));
     assert_eq!(at_main.ahead(), None);
 
     fixture.write("src/rehearsal.rs", "// A rehearsal.\n");
     let ahead = fixture.commit("A rehearsal");
-    let checkout = repository.checkout().unwrap();
+    let checkout = repository.origin.checkout().unwrap();
     assert_eq!(
         checkout.ahead(),
         Some(format!(
@@ -237,7 +256,7 @@ fn the_checkout_stands_for_main_when_it_has_mains_commits() {
 
     fixture.git(&["checkout", "--quiet", "--detach", &ahead]);
     assert_eq!(
-        repository.checkout().unwrap().describe(),
+        repository.origin.checkout().unwrap().describe(),
         format!("the checkout at {}", &ahead[..7])
     );
 }
@@ -252,10 +271,10 @@ fn a_checkout_without_mains_commits_is_refused() {
     fixture.git(&["reset", "--quiet", "--hard", &behind]);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
 
     assert_eq!(
-        repository.checkout(),
+        repository.origin.checkout(),
         Err(format!(
             "main at {} lacks commits origin's main has, at {}; bring them in first, such as with \
              `git pull`.",
@@ -277,10 +296,10 @@ fn a_branch_behind_main_is_told_to_merge_it() {
     fixture.git(&["switch", "--quiet", "--create", "rehearsal", &behind]);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
-    repository.fetch().unwrap();
+    repository.origin.fetch().unwrap();
 
     assert_eq!(
-        repository.checkout(),
+        repository.origin.checkout(),
         Err(format!(
             "rehearsal at {} lacks commits origin's main has, at {}; bring them in first, such as \
              with `git merge origin/main`.",
@@ -299,11 +318,15 @@ fn a_branch_is_set_only_from_where_it_was_read() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    repository.set_branch("release/0.3", &first, None).unwrap();
+    repository
+        .refs
+        .set_branch("release/0.3", &first, None)
+        .unwrap();
     assert_eq!(fixture.hash("release/0.3"), first);
 
     // Created already, so it isn't created again.
     let error = repository
+        .refs
         .set_branch("release/0.3", &second, None)
         .unwrap_err();
     assert!(
@@ -312,6 +335,7 @@ fn a_branch_is_set_only_from_where_it_was_read() {
     );
 
     repository
+        .refs
         .set_branch("release/0.3", &second, Some(&first))
         .unwrap();
     assert_eq!(fixture.hash("release/0.3"), second);
@@ -325,6 +349,7 @@ fn a_branch_checked_out_is_not_set() {
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
     let error = repository
+        .refs
         .set_branch("main", &head, Some(&head))
         .unwrap_err();
 
@@ -342,9 +367,9 @@ fn a_commit_is_named_by_any_revision() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    assert_eq!(repository.commit(&head[..7]), Ok(head));
+    assert_eq!(repository.history.commit(&head[..7]), Ok(head));
     assert_eq!(
-        repository.commit("no-such-branch"),
+        repository.history.commit("no-such-branch"),
         Err("`no-such-branch` names no commit.".to_owned())
     );
 }
@@ -356,7 +381,7 @@ fn a_worktree_is_removed_when_dropped_unless_kept() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    let worktree = repository.worktree("test", &head).unwrap();
+    let worktree = repository.worktrees.add("test", &head).unwrap();
     let top = worktree.top().to_owned();
     assert_eq!(worktree.head(), Ok(head.clone()));
     assert!(top.join("changelog.d/README.md").exists());
@@ -365,9 +390,9 @@ fn a_worktree_is_removed_when_dropped_unless_kept() {
     assert!(!top.exists());
     assert!(!fixture.git(&["worktree", "list"]).contains(top.as_str()));
 
-    let kept = repository.worktree("test", &head).unwrap().keep();
+    let kept = repository.worktrees.add("test", &head).unwrap().keep();
     assert!(kept.exists());
-    drop(repository.reopen(&kept).unwrap());
+    drop(repository.worktrees.reopen(&kept).unwrap());
     assert!(!kept.exists());
 }
 
@@ -396,8 +421,8 @@ fn a_tag_is_dated_by_its_tagger_or_else_by_its_commit() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    assert_eq!(repository.tag_date("v0.1.0"), Ok(OCTOBER_1 + 3600));
-    assert_eq!(repository.tag_date("v0.2.0"), Ok(OCTOBER_1));
+    assert_eq!(repository.refs.tag_date("v0.1.0"), Ok(OCTOBER_1 + 3600));
+    assert_eq!(repository.refs.tag_date("v0.2.0"), Ok(OCTOBER_1));
     assert_eq!(fixture.git(&["tag", "--list"]), "");
 }
 
@@ -415,7 +440,7 @@ fn a_tag_only_this_repository_has_is_dated_from_here() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    assert_eq!(repository.tag_date("v0.1.0"), Ok(OCTOBER_1));
+    assert_eq!(repository.refs.tag_date("v0.1.0"), Ok(OCTOBER_1));
 }
 
 /// An annotated tag names a tag object; both sides read the commit under it, as
@@ -430,7 +455,7 @@ fn tags_name_their_commits_here_and_on_origin() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    let tags = repository.tags().unwrap();
+    let tags = repository.refs.tags().unwrap();
 
     assert_eq!(
         tags.local,
@@ -448,7 +473,7 @@ fn a_tag_neither_has_cannot_be_dated() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
-    let error = repository.tag_date("v0.9.0").unwrap_err();
+    let error = repository.refs.tag_date("v0.9.0").unwrap_err();
 
     assert!(error.starts_with("`git fetch` failed: "), "{error}");
 }
@@ -471,5 +496,5 @@ fn a_shallow_clone_is_refused() {
     let shell = fixture.shell();
     let repository = Repository::open(&shell, clone.path()).unwrap();
 
-    assert!(repository.refuse_shallow().is_err());
+    assert!(repository.origin.refuse_shallow().is_err());
 }

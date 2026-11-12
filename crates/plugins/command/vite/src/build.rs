@@ -20,7 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use jp_plugin::message::HostToPlugin;
 use serde_json::Value;
 
@@ -56,6 +56,22 @@ where
     R: BufRead + Send + 'static,
     W: Write,
 {
+    let site_dir = ready(stdout, root, options, config)?;
+
+    run(stdin, stdout, &site_dir, vitepress)
+}
+
+/// Bring the settings snapshot of the project at `root` up to date, and return
+/// the site's source directory.
+///
+/// Refuses a site that isn't set up, or whose files `jp vite sync` writes
+/// aren't the ones this binary writes.
+fn ready(
+    stdout: &mut impl Write,
+    root: &Utf8Path,
+    options: &Options,
+    config: &Value,
+) -> Result<Utf8PathBuf, String> {
     let site_dir = source_dir(root, options)?;
     if let Some(reason) = serve::unready(root, &site_dir) {
         return Err(reason);
@@ -78,13 +94,28 @@ where
         return Err(problem);
     }
 
+    Ok(site_dir)
+}
+
+/// Run `vitepress build` in `site_dir` with the arguments `vitepress`,
+/// forwarding its output to the host until it exits or the host shuts down.
+fn run<R, W>(
+    stdin: R,
+    stdout: &mut W,
+    site_dir: &Utf8Path,
+    vitepress: &[String],
+) -> Result<(), String>
+where
+    R: BufRead + Send + 'static,
+    W: Write,
+{
     let renderer = env::current_exe().ok();
-    let mut child = serve::vitepress_command(&site_dir, "build", vitepress, renderer.as_deref())
+    let mut child = serve::vitepress_command(site_dir, "build", vitepress, renderer.as_deref())
         .spawn()
         .map_err(|error| {
             format!(
                 "`{} build` couldn't be started: {error}",
-                serve::runner(&site_dir).join(" ")
+                serve::runner(site_dir).join(" ")
             )
         })?;
 

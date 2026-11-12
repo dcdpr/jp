@@ -15,6 +15,12 @@ pub(crate) struct Pipeline<'a> {
     pub repo: Repository<'a>,
     pub options: &'a Options,
 
+    /// What runs the project's commands.
+    pub shell: &'a Shell,
+
+    /// The workspace root, in the checkout the command runs from.
+    pub root: Utf8PathBuf,
+
     /// The fragments directory, below the workspace root, with `/` between its
     /// parts.
     pub fragments: String,
@@ -30,11 +36,13 @@ impl<'a> Pipeline<'a> {
         options: &'a Options,
     ) -> Result<Self, String> {
         let repo = Repository::open(shell, root)?;
-        let fragments = below(root, &options.fragments_dir)?;
+        let fragments = below(root, &options.notes.fragments_dir)?;
 
         Ok(Self {
             repo,
             options,
+            shell,
+            root: root.to_owned(),
             fragments,
         })
     }
@@ -50,6 +58,7 @@ impl<'a> Pipeline<'a> {
     /// [`address`]: Self::address
     pub(crate) fn forge(&self) -> Forge {
         self.options
+            .notes
             .forge
             .unwrap_or_else(|| Forge::infer(self.address().as_deref()))
     }
@@ -58,9 +67,10 @@ impl<'a> Pipeline<'a> {
     /// `repository`, or `origin`'s.
     pub(crate) fn address(&self) -> Option<String> {
         self.options
+            .notes
             .repository
             .clone()
-            .or_else(|| self.repo.origin_address())
+            .or_else(|| self.repo.origin.address())
     }
 }
 

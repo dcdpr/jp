@@ -10,17 +10,13 @@
 //!
 //! A Release's description renders a release's notes the way `jp release
 //! render` does, so it reads the fragments directory, the forge, the web
-//! address, and the headings from `jp release`'s settings, held to what that
-//! plugin accepts.
+//! address, and the headings from `jp release`'s settings, through
+//! `release_options`.
 
 use camino::Utf8PathBuf;
-use changelog::{Forge, Headings, Type, UnknownType};
 use doc::repository::is_web_address;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-
-/// The fragments directory `jp release` reads when none is configured.
-const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
 
 /// The placeholder `upgrade_guide` names a release's version with.
 pub(crate) const VERSION: &str = "{version}";
@@ -104,93 +100,6 @@ impl Options {
             assets: section.assets,
             upgrade_guide,
             footer,
-        })
-    }
-}
-
-/// What the plugin reads of `jp release`'s settings.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Notes {
-    /// The fragments directory, relative to the workspace root unless absolute.
-    pub(crate) dir: Utf8PathBuf,
-
-    /// The forge credits link to; unset, the one the web address is on.
-    pub(crate) forge: Option<Forge>,
-
-    /// The repository's web address, such as `https://github.com/dcdpr/jp`;
-    /// unset, `origin`'s.
-    pub(crate) repository: Option<String>,
-
-    /// The heading each type's section has in the notes.
-    pub(crate) headings: Headings,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct ReleaseSection {
-    fragments_dir: Option<Utf8PathBuf>,
-    forge: Option<String>,
-    repository: Option<String>,
-    headings: Map<String, Value>,
-}
-
-impl Notes {
-    /// Read `jp release`'s settings from the whole configuration the host
-    /// passed.
-    pub(crate) fn read(config: &Value) -> Result<Self, String> {
-        let section: ReleaseSection = match config.pointer("/plugins/command/release/options") {
-            None | Some(Value::Null) => ReleaseSection::default(),
-            Some(options) => serde_json::from_value(options.clone()).map_err(|error| {
-                format!("`plugins.command.release.options` is invalid: {error}.")
-            })?,
-        };
-
-        let dir = match section.fragments_dir {
-            None => Utf8PathBuf::from(DEFAULT_FRAGMENTS_DIR),
-            Some(dir) if dir.as_str().trim().is_empty() => {
-                return Err("`plugins.command.release.options.fragments_dir` is empty.".to_owned());
-            }
-            Some(dir) => dir,
-        };
-
-        let forge = section
-            .forge
-            .map(|forge| forge.parse::<Forge>())
-            .transpose()
-            .map_err(|error| format!("`plugins.command.release.options.forge`: {error}."))?;
-
-        let repository = match section.repository {
-            None => None,
-            Some(repository) if is_web_address(&repository) => {
-                Some(repository.trim_end_matches('/').to_owned())
-            }
-            Some(_) => {
-                return Err(
-                    "`plugins.command.release.options.repository` must be an `https://` address."
-                        .to_owned(),
-                );
-            }
-        };
-
-        let mut headings = Headings::default();
-        for (type_, heading) in &section.headings {
-            let type_ = type_.parse::<Type>().map_err(|error: UnknownType| {
-                format!("`plugins.command.release.options.headings`: {error}.")
-            })?;
-            let heading = heading.as_str().map(str::trim).unwrap_or_default();
-            if heading.is_empty() {
-                return Err(format!(
-                    "`plugins.command.release.options.headings.{type_}` has to be a heading."
-                ));
-            }
-            headings.set(type_, heading);
-        }
-
-        Ok(Self {
-            dir,
-            forge,
-            repository,
-            headings,
         })
     }
 }

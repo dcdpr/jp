@@ -26,18 +26,12 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{NoAddress, ReleaseError, cli::version as parse_version, directory::Part, release};
 use clap::{CommandFactory, Parser, Subcommand};
-use jp_plugin::message::{
-    DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost, PrintMessage,
-};
+use jp_plugin::{client, message::InitMessage};
 use release_build::BUILDS;
+use release_options::{Notes, no_address};
 use semver::Version;
 
-use crate::{
-    description::description,
-    github::Repository,
-    options::{Notes, Options},
-    publish::Plan,
-};
+use crate::{description::description, github::Repository, options::Options, publish::Plan};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -84,22 +78,29 @@ enum Command {
 /// A `describe` is answered and ends the session; an `init` runs the command
 /// its arguments name.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
-    match read_message(&mut stdin)? {
-        HostToPlugin::Describe => send_describe(&mut stdout),
-        HostToPlugin::Init(init) => {
-            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
-                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
-                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
-            }
-
-            if init.tool.is_some() {
-                return send_exit(&mut stdout, 1, Some("`jp release github` serves no tools."));
-            }
-
-            handle_command(&init, token().as_deref(), &mut stdout)
-        }
-        other => Err(format!("expected init or describe, got: {other:?}")),
+    let describe = || {
+        client::describe(
+            MANIFEST,
+            "release-github",
+            help_text(),
+            jp_plugin::package!(),
+        )
+    };
+    let Some(init) = client::start(
+        &mut stdin,
+        &mut stdout,
+        "jp-release-github",
+        REQUIRED_PROTOCOL,
+        describe,
+    )?
+    else {
+        return Ok(());
+    };
+    if init.tool.is_some() {
+        return client::exit(&mut stdout, 1, Some("`jp release github` serves no tools."));
     }
+
+    handle_command(&init, token().as_deref(), &mut stdout)
 }
 
 /// The protocol version this plugin needs from the host, the one `jp release`
@@ -129,10 +130,10 @@ fn handle_command(
         Ok(args) => args,
         // `--help` and `--version` surface as errors that aren't failures.
         Err(error) if !error.use_stderr() => {
-            print(stdout, &error.to_string())?;
-            return send_exit(stdout, 0, None);
+            client::print(stdout, &error.to_string(), "content", "plain")?;
+            return client::exit(stdout, 0, None);
         }
-        Err(error) => return send_exit(stdout, 1, Some(&error.to_string())),
+        Err(error) => return client::exit(stdout, 1, Some(&error.to_string())),
     };
 
     let outcome = match args.command {
@@ -142,10 +143,10 @@ fn handle_command(
 
     match outcome {
         Ok(text) => {
-            print(stdout, &text)?;
-            send_exit(stdout, 0, None)
+            client::print(stdout, &text, "content", "plain")?;
+            client::exit(stdout, 0, None)
         }
-        Err(message) => send_exit(stdout, 1, Some(&message)),
+        Err(message) => client::exit(stdout, 1, Some(&message)),
     }
 }
 
@@ -160,7 +161,7 @@ fn publish_release(
 ) -> Result<String, String> {
     let token = token.ok_or_else(no_token)?;
     let options = Options::read(&init.options)?;
-    let notes = Notes::read(&init.config)?;
+    let notes = Notes::from_config(&init.config)?;
     let root = init.workspace.root.as_path();
     let repository = Repository::find(root, notes.repository.as_deref())?;
 
@@ -183,7 +184,7 @@ fn publish_release(
         format!(
             "{} has no notes for {version}; merge its notes branch, `release-notes/v{version}`, \
              into this checkout first.",
-            show(root, &resolve(root, &notes.dir))
+            show(root, &resolve(root, &notes.fragments_dir))
         )
     })?;
 
@@ -198,7 +199,7 @@ fn publish_release(
     let published = block_on(publish::publish(&client, &repository, plan, &mut |name| {
         // A host that stopped reading fails the final print too, which reports
         // it.
-        drop(send_print(
+        drop(client::print(
             stdout,
             &format!("Attaching {name}.\n"),
             "chrome",
@@ -213,7 +214,7 @@ fn publish_release(
 fn sync_releases(init: &InitMessage, token: Option<&str>) -> Result<String, String> {
     let token = token.ok_or_else(no_token)?;
     let options = Options::read(&init.options)?;
-    let notes = Notes::read(&init.config)?;
+    let notes = Notes::from_config(&init.config)?;
     let root = init.workspace.root.as_path();
     let repository = Repository::find(root, notes.repository.as_deref())?;
     let footer = footer(root, &options)?;
@@ -244,7 +245,7 @@ fn describe(
     version: &Version,
     download: &str,
 ) -> Result<Option<String>, String> {
-    let dir = resolve(root, &notes.dir);
+    let dir = resolve(root, &notes.fragments_dir);
     if !dir.join(version.to_string()).is_dir() {
         return Ok(None);
     }
@@ -257,11 +258,7 @@ fn describe(
         &notes.headings,
     )
     .map_err(|error| match error {
-        ReleaseError::NoAddress(NoAddress(forge)) => format!(
-            "The forge is `{forge}`, but git's `origin` remote has no web address for credits to \
-             link to; set `plugins.command.release.options.repository` to the project's, such as \
-             `https://github.com/dcdpr/jp`."
-        ),
+        ReleaseError::NoAddress(NoAddress(forge)) => no_address(forge),
         error => format!("The notes of {version} can't be read: {error}."),
     })?;
 
@@ -349,82 +346,6 @@ fn show(root: &Utf8Path, path: &Utf8Path) -> String {
 #[must_use]
 pub fn help_text() -> String {
     Args::command().render_help().to_string()
-}
-
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe = DescribeResponse::from_manifest(
-        MANIFEST,
-        "release-github",
-        env!("CARGO_PKG_VERSION"),
-        help_text(),
-    )
-    .map_err(|e| format!("invalid embedded manifest: {e}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
-}
-
-/// Print `text` on the host's content channel.
-fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
-    send_print(stdout, text, "content", "plain")
-}
-
-/// Print `text`, written in `format`, on the host's `channel`.
-fn send_print(
-    stdout: &mut impl Write,
-    text: &str,
-    channel: &str,
-    format: &str,
-) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Print(PrintMessage {
-            text: text.to_owned(),
-            channel: channel.to_owned(),
-            format: format.to_owned(),
-            language: None,
-        }),
-    )
-}
-
-/// End the session with a failure, or with success when `code` is 0.
-fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: reason.map(String::from),
-            expected: false,
-        }),
-    )
-}
-
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    let read = stdin
-        .read_line(&mut line)
-        .map_err(|error| format!("failed to read from host: {error}"))?;
-
-    // EOF: the host closed the pipe without answering, which is what an older
-    // `jp` does when it gives up on a message it couldn't read.
-    if read == 0 {
-        return Err(
-            "The host stopped responding. Are `jp` and `jp-release-github` the same build?"
-                .to_owned(),
-        );
-    }
-
-    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
-}
-
-fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|error| format!("serialize error: {error}"))?;
-    writeln!(stdout, "{json}").map_err(|error| format!("write error: {error}"))?;
-    stdout
-        .flush()
-        .map_err(|error| format!("flush error: {error}"))
 }
 
 #[cfg(test)]

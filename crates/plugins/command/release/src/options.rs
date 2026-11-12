@@ -50,26 +50,19 @@
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-release` still loads.
 
-use std::{collections::BTreeMap, fmt, time::Duration};
+use std::{fmt, time::Duration};
 
-use camino::{Utf8Path, Utf8PathBuf};
-use changelog::{Forge, Headings, Type, UnknownType};
-use doc::repository::is_web_address;
+use camino::Utf8Path;
+use release_options::Notes;
 use semver::Version;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-
-/// The fragments directory, when `fragments_dir` isn't set.
-const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
 
 /// What `bump` writes where the new version goes.
 const VERSION: &str = "{version}";
 
 /// The setting `bump` is read from, as errors name it.
 pub(crate) const BUMP_KEY: &str = "plugins.command.release.options.bump";
-
-/// The setting `repository` is read from, as errors name it.
-pub(crate) const REPOSITORY_KEY: &str = "plugins.command.release.options.repository";
 
 /// The setting `build` is read from, as errors name it.
 pub(crate) const BUILD_KEY: &str = "plugins.command.release.options.build";
@@ -88,22 +81,11 @@ const PROFILE: &str = "{profile}";
 const DEFAULT_CADENCE: (&str, u64) = ("2w", 14 * 24 * 60 * 60);
 
 /// The settings every command and tool runs with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Options {
-    /// The directory holding the fragments and highlights, relative to the
-    /// workspace root.
-    pub fragments_dir: Utf8PathBuf,
-
-    /// The forge release notes credit change requests on; `None` reads it from
-    /// the project's web address.
-    pub forge: Option<Forge>,
-
-    /// The project's web address, which credits link from, without a `/` at its
-    /// end; `None` takes git's `origin` remote's.
-    pub repository: Option<String>,
-
-    /// The heading of each type's section of the release notes.
-    pub headings: Headings,
+    /// Where the fragments are, and how release notes credit and head their
+    /// entries: the settings other plugins read too.
+    pub notes: Notes,
 
     /// The command that writes a new version where the project keeps it.
     pub bump: Option<Bump>,
@@ -113,20 +95,6 @@ pub(crate) struct Options {
 
     /// How long after a minor or major release is cut the next one is due.
     pub cadence: Cadence,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            fragments_dir: Utf8PathBuf::from(DEFAULT_FRAGMENTS_DIR),
-            forge: None,
-            repository: None,
-            headings: Headings::default(),
-            bump: None,
-            build: None,
-            cadence: Cadence::default(),
-        }
-    }
 }
 
 /// The `cadence` option: a duration, kept as configuration writes it to show it
@@ -299,40 +267,13 @@ fn fill(word: &str, values: &[(&str, &str)]) -> String {
     filled
 }
 
-/// Why release notes can't credit change requests on `forge`: there is no web
-/// address for the credits to link to, and how to give one.
-pub(crate) fn no_address(forge: Forge) -> String {
-    format!(
-        "The forge is `{forge}`, but git's `origin` remote has no web address for credits to link \
-         to; set `{REPOSITORY_KEY}` to the project's, such as `https://github.com/dcdpr/jp`."
-    )
-}
-
-/// The options as the configuration writes them.
-#[derive(Deserialize)]
+/// The options only this plugin reads, as the configuration writes them.
+#[derive(Default, Deserialize)]
 #[serde(default)]
 struct Settings {
-    fragments_dir: Utf8PathBuf,
-    forge: Option<String>,
-    repository: Option<String>,
-    headings: BTreeMap<String, String>,
     bump: Option<String>,
     build: Option<String>,
     cadence: Option<String>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            fragments_dir: Utf8PathBuf::from(DEFAULT_FRAGMENTS_DIR),
-            forge: None,
-            repository: None,
-            headings: BTreeMap::new(),
-            bump: None,
-            build: None,
-            cadence: None,
-        }
-    }
 }
 
 impl Options {
@@ -341,40 +282,9 @@ impl Options {
     /// The error names the setting and says what is wrong with it, for the user
     /// to fix in their configuration.
     pub(crate) fn read(options: &Map<String, Value>) -> Result<Self, String> {
+        let notes = Notes::read(options)?;
         let settings: Settings = serde_json::from_value(Value::Object(options.clone()))
             .map_err(|error| format!("`plugins.command.release.options` is invalid: {error}."))?;
-
-        if settings.fragments_dir.as_str().trim().is_empty() {
-            return Err("`plugins.command.release.options.fragments_dir` is empty.".to_owned());
-        }
-
-        let forge = settings
-            .forge
-            .map(|forge| forge.parse::<Forge>())
-            .transpose()
-            .map_err(|error| format!("`plugins.command.release.options.forge`: {error}."))?;
-
-        let repository = match settings.repository {
-            None => None,
-            Some(repository) if is_web_address(&repository) => {
-                Some(repository.trim_end_matches('/').to_owned())
-            }
-            Some(_) => return Err(format!("`{REPOSITORY_KEY}` must be an `https://` address.")),
-        };
-
-        let mut headings = Headings::default();
-        for (type_, heading) in &settings.headings {
-            let type_ = type_.parse::<Type>().map_err(|error: UnknownType| {
-                format!("`plugins.command.release.options.headings`: {error}.")
-            })?;
-            let heading = heading.trim();
-            if heading.is_empty() {
-                return Err(format!(
-                    "`plugins.command.release.options.headings.{type_}` is empty."
-                ));
-            }
-            headings.set(type_, heading);
-        }
 
         let bump = settings.bump.as_deref().map(Bump::parse).transpose()?;
         let build = settings.build.as_deref().map(Build::parse).transpose()?;
@@ -387,10 +297,7 @@ impl Options {
             .unwrap_or_default();
 
         Ok(Self {
-            fragments_dir: settings.fragments_dir,
-            forge,
-            repository,
-            headings,
+            notes,
             bump,
             build,
             cadence,

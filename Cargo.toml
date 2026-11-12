@@ -47,6 +47,7 @@ async-anthropic = { path = "crates/contrib/async-anthropic" }
 changelog = { path = "crates/internal/changelog" }
 doc = { path = "crates/internal/doc" }
 release-build = { path = "crates/internal/release-build" }
+release-options = { path = "crates/internal/release-options" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 overwrite = { path = "crates/internal/overwrite" }
 schematic = { path = "crates/contrib/schematic", default-features = false }

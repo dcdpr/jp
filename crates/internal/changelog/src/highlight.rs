@@ -28,7 +28,7 @@
 use std::fmt;
 
 use crate::{
-    document::{self, CREDITS, ListedCredit},
+    document::{self, CREDITS, Field, ListedCredit},
     links::{Links, line_starts},
 };
 
@@ -144,31 +144,7 @@ pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
         .find(has_text)
         .unwrap_or(lines.len());
     let (fields, end) = document::fields(&lines, start);
-
-    let mut authors = vec![];
-    let mut credits = vec![];
-    for field in fields {
-        if field.key.eq_ignore_ascii_case(AUTHORS) {
-            if field.value.is_empty() {
-                return Err(HighlightError::EmptyAuthor { line: field.line });
-            }
-            authors.push(field.value);
-        } else if field.key.eq_ignore_ascii_case(CREDITS) {
-            let credit = document::credit(&field).ok_or_else(|| HighlightError::InvalidCredit {
-                line: field.line,
-                value: field.value.clone(),
-            })?;
-            credits.push(credit);
-        } else {
-            return Err(HighlightError::UnknownField {
-                line: field.line,
-                key: field.key,
-            });
-        }
-    }
-    if authors.is_empty() {
-        return Err(HighlightError::NoAuthors);
-    }
+    let (authors, credits) = authors_and_credits(fields)?;
 
     let offset = line_starts(&source)
         .get(end)
@@ -198,6 +174,44 @@ pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
         credits: (!credits.is_empty()).then_some(credits),
         body: prose.to_owned(),
     })
+}
+
+/// The authors and the credits a highlight's metadata block lists.
+///
+/// # Errors
+///
+/// Returns the first field that is neither an author nor a credit, an empty
+/// author, a credit that names neither a change request nor a commit, or that
+/// no author is listed.
+fn authors_and_credits(
+    fields: Vec<Field>,
+) -> Result<(Vec<String>, Vec<ListedCredit>), HighlightError> {
+    let mut authors = vec![];
+    let mut credits = vec![];
+    for field in fields {
+        if field.key.eq_ignore_ascii_case(AUTHORS) {
+            if field.value.is_empty() {
+                return Err(HighlightError::EmptyAuthor { line: field.line });
+            }
+            authors.push(field.value);
+        } else if field.key.eq_ignore_ascii_case(CREDITS) {
+            let credit = document::credit(&field).ok_or_else(|| HighlightError::InvalidCredit {
+                line: field.line,
+                value: field.value.clone(),
+            })?;
+            credits.push(credit);
+        } else {
+            return Err(HighlightError::UnknownField {
+                line: field.line,
+                key: field.key,
+            });
+        }
+    }
+    if authors.is_empty() {
+        return Err(HighlightError::NoAuthors);
+    }
+
+    Ok((authors, credits))
 }
 
 /// The title of the `# Title` heading `line` holds, without the space around

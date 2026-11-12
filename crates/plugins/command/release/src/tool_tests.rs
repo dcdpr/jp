@@ -294,10 +294,8 @@ fn a_write_the_access_policy_denies_is_refused() {
 fn a_fragments_directory_outside_the_workspace_is_refused() {
     let root = workspace();
     let elsewhere = Utf8TempDir::new().unwrap();
-    let options = Options {
-        fragments_dir: elsewhere.path().to_path_buf(),
-        ..Options::default()
-    };
+    let mut options = Options::default();
+    options.notes.fragments_dir = elsewhere.path().to_path_buf();
 
     let message = error_message(run(
         &init(&root),

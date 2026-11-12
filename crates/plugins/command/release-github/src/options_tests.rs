@@ -1,4 +1,3 @@
-use changelog::{Forge, Type};
 use serde_json::json;
 
 use super::*;
@@ -87,68 +86,5 @@ fn an_empty_asset_is_refused() {
     assert_eq!(
         read,
         Err("`plugins.command.release-github.options.assets` lists an empty path.".to_owned())
-    );
-}
-
-#[test]
-fn notes_read_jp_releases_settings() {
-    let config = json!({ "plugins": { "command": { "release": { "options": {
-        "fragments_dir": "notes",
-        "forge": "github",
-        "repository": "https://github.com/dcdpr/jp/",
-        "headings": { "added": "New features" },
-        "bump": "cargo set-version {version}",
-    }}}}});
-    let mut headings = Headings::default();
-    headings.set(Type::Added, "New features");
-
-    assert_eq!(
-        Notes::read(&config),
-        Ok(Notes {
-            dir: Utf8PathBuf::from("notes"),
-            forge: Some(Forge::GitHub),
-            repository: Some("https://github.com/dcdpr/jp".to_owned()),
-            headings,
-        })
-    );
-}
-
-#[test]
-fn notes_without_jp_releases_settings_read_changelog_d() {
-    assert_eq!(
-        Notes::read(&json!({})),
-        Ok(Notes {
-            dir: Utf8PathBuf::from("changelog.d"),
-            ..Notes::default()
-        })
-    );
-}
-
-#[test]
-fn notes_refuse_a_repository_that_is_no_web_address() {
-    let config = json!({ "plugins": { "command": { "release": { "options": {
-        "repository": "git@github.com:dcdpr/jp.git",
-    }}}}});
-
-    assert_eq!(
-        Notes::read(&config),
-        Err(
-            "`plugins.command.release.options.repository` must be an `https://` address."
-                .to_owned()
-        )
-    );
-}
-
-#[test]
-fn notes_refuse_a_heading_for_a_type_there_is_none_of() {
-    let config = json!({ "plugins": { "command": { "release": { "options": {
-        "headings": { "bugs": "Bug fixes" },
-    }}}}});
-
-    let error = Notes::read(&config).unwrap_err();
-
-    assert!(
-        error.starts_with("`plugins.command.release.options.headings`: "),
-        "{error}"
     );
 }

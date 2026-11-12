@@ -22,16 +22,14 @@
 use std::collections::BTreeMap;
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
-use jp_label::Unique;
+use jp_label::{Unique, Vocabulary};
+use release_options::Notes;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
     git::Remote,
-    options::{
-        Options, ReleaseOptions, release_options, rfd_options, ticket_options, web_address,
-        wiki_options,
-    },
+    options::{Options, rfd_options, ticket_options, web_address, wiki_options},
     site,
 };
 
@@ -244,21 +242,7 @@ pub(crate) fn snapshot(
             dir,
             route,
             done_limit: ticket_options.done_limit,
-            labels: ticket_options
-                .labels
-                .facets()
-                .map(|(key, facet)| {
-                    (key.to_owned(), Label {
-                        description: facet.description().to_owned(),
-                        values: facet.values().map(ToOwned::to_owned).collect(),
-                        retired: facet.retired().map(ToOwned::to_owned).collect(),
-                        open: facet.is_open(),
-                        min: facet.min(),
-                        max: facet.max(),
-                        unique: facet.unique().map(Unique::as_str),
-                    })
-                })
-                .collect(),
+            labels: labels(&ticket_options.labels),
         }
     });
 
@@ -270,7 +254,7 @@ pub(crate) fn snapshot(
             relevant_key: wiki_options.relevant_key,
         });
 
-    let release = releases(root, release_options(config)?)?;
+    let release = releases(root, Notes::from_config(config)?)?;
 
     Ok(Settings {
         revision: site::REVISION.to_owned(),
@@ -288,13 +272,31 @@ pub(crate) fn snapshot(
     })
 }
 
-/// The releases, when the fragments directory `options` names exists.
+/// The labels `vocabulary` defines, by key, as the ticket pages read them.
+fn labels(vocabulary: &Vocabulary) -> BTreeMap<String, Label> {
+    vocabulary
+        .facets()
+        .map(|(key, facet)| {
+            (key.to_owned(), Label {
+                description: facet.description().to_owned(),
+                values: facet.values().map(ToOwned::to_owned).collect(),
+                retired: facet.retired().map(ToOwned::to_owned).collect(),
+                open: facet.is_open(),
+                min: facet.min(),
+                max: facet.max(),
+                unique: facet.unique().map(Unique::as_str),
+            })
+        })
+        .collect()
+}
+
+/// The releases, when the fragments directory `notes` names exists.
 ///
 /// The fragments directory has to be inside the workspace, since the site is
 /// built from it, but not inside the source directory: the site renders the
 /// release pages rather than serving the fragments.
-fn releases(root: &Utf8Path, options: ReleaseOptions) -> Result<Option<ReleaseSettings>, String> {
-    let absolute = resolve(root, &options.dir);
+fn releases(root: &Utf8Path, notes: Notes) -> Result<Option<ReleaseSettings>, String> {
+    let absolute = resolve(root, &notes.fragments_dir);
     if !absolute.is_dir() {
         return Ok(None);
     }
@@ -303,16 +305,21 @@ fn releases(root: &Utf8Path, options: ReleaseOptions) -> Result<Option<ReleaseSe
         format!(
             "`plugins.command.release.options.fragments_dir` ({}) is outside the workspace, so \
              the site can't render the releases from it.",
-            options.dir
+            notes.fragments_dir
         )
     })?;
 
     Ok(Some(ReleaseSettings {
         dir,
         route: RELEASE_ROUTE.to_owned(),
-        forge: options.forge.map(|forge| forge.id().to_owned()),
-        repository: options.repository,
-        headings: options.headings,
+        forge: notes.forge.map(|forge| forge.id().to_owned()),
+        repository: notes.repository,
+        // Keyed by the type's id; a type left out keeps its default heading.
+        headings: notes
+            .headings
+            .configured()
+            .map(|(type_, heading)| (type_.id().to_owned(), heading.to_owned()))
+            .collect(),
     }))
 }
 

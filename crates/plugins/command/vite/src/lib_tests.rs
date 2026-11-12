@@ -6,7 +6,6 @@ use jp_plugin::message::{ComposeResponse, OutputFormat, PathsInfo, WorkspaceInfo
 use serde_json::{Map, json};
 
 use super::*;
-use crate::options::release_options;
 
 fn parse(args: &[&str]) -> Result<Args, ClapError> {
     Args::try_parse_from(iter::once("jp vite").chain(args.iter().copied()))
@@ -664,7 +663,14 @@ fn jp_root() -> Utf8PathBuf {
 fn jp_site_is_synced() {
     let root = jp_root();
     let config = jp_config(&root);
-    if !root.join(release_options(&config).unwrap().dir).is_dir() {
+    if !root
+        .join(
+            release_options::Notes::from_config(&config)
+                .unwrap()
+                .fragments_dir,
+        )
+        .is_dir()
+    {
         return;
     }
 

@@ -190,14 +190,7 @@ pub fn with_credits(
         .map(|line| line.trim_end_matches(['\r', '\n']))
         .collect();
 
-    let has_text = |index: &usize| !plain[*index].trim().is_empty();
-    let start = match (0..plain.len()).find(has_text) {
-        Some(title) if highlight && is_title(plain[title]) => (title + 1..plain.len())
-            .find(has_text)
-            .unwrap_or(plain.len()),
-        Some(first) => first,
-        None => plain.len(),
-    };
+    let start = block_start(&plain, highlight);
 
     let mut block = String::new();
     for credit in credits {
@@ -228,6 +221,23 @@ pub fn with_credits(
     }
 
     written
+}
+
+/// The index in `plain`, a file's lines without their line endings, where its
+/// metadata block starts or would start: the first line with text, or with
+/// `highlight`, the first after the title.
+///
+/// The number of lines when there is no such line.
+fn block_start(plain: &[&str], highlight: bool) -> usize {
+    let has_text = |index: &usize| !plain[*index].trim().is_empty();
+
+    match (0..plain.len()).find(has_text) {
+        Some(title) if highlight && is_title(plain[title]) => (title + 1..plain.len())
+            .find(has_text)
+            .unwrap_or(plain.len()),
+        Some(first) => first,
+        None => plain.len(),
+    }
 }
 
 /// The token that opens an upgrade section `line` starts with, if it starts

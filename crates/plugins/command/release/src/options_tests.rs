@@ -1,3 +1,4 @@
+use changelog::{Forge, Type};
 use serde_json::json;
 
 use super::*;
@@ -12,14 +13,14 @@ fn read(options: Value) -> Result<Options, String> {
 
 #[test]
 fn the_fragments_directory_defaults_to_changelog_d() {
-    assert_eq!(read(json!({})).unwrap().fragments_dir, "changelog.d");
+    assert_eq!(read(json!({})).unwrap().notes.fragments_dir, "changelog.d");
 }
 
 #[test]
 fn the_fragments_directory_can_be_named() {
     let options = read(json!({ "fragments_dir": "docs/changes" })).unwrap();
 
-    assert_eq!(options.fragments_dir, "docs/changes");
+    assert_eq!(options.notes.fragments_dir, "docs/changes");
 }
 
 /// A configuration written for a newer plugin, with settings this one doesn't
@@ -34,17 +35,17 @@ fn settings_this_plugin_does_not_read_are_ignored() {
 /// Unset, the forge is read from git's `origin` remote when a release is read.
 #[test]
 fn the_forge_is_unset_by_default() {
-    assert_eq!(read(json!({})).unwrap().forge, None);
+    assert_eq!(read(json!({})).unwrap().notes.forge, None);
 }
 
 #[test]
 fn the_forge_is_named_as_github_gitlab_or_none() {
     assert_eq!(
-        read(json!({ "forge": "gitlab" })).unwrap().forge,
+        read(json!({ "forge": "gitlab" })).unwrap().notes.forge,
         Some(Forge::GitLab)
     );
     assert_eq!(
-        read(json!({ "forge": "none" })).unwrap().forge,
+        read(json!({ "forge": "none" })).unwrap().notes.forge,
         Some(Forge::None)
     );
 
@@ -60,10 +61,11 @@ fn the_forge_is_named_as_github_gitlab_or_none() {
 
 #[test]
 fn the_repository_is_a_web_address_without_a_slash_at_its_end() {
-    assert_eq!(read(json!({})).unwrap().repository, None);
+    assert_eq!(read(json!({})).unwrap().notes.repository, None);
     assert_eq!(
         read(json!({ "repository": "https://github.com/dcdpr/jp/" }))
             .unwrap()
+            .notes
             .repository
             .as_deref(),
         Some("https://github.com/dcdpr/jp")
@@ -93,9 +95,9 @@ fn headings_rename_the_types_they_name() {
     }))
     .unwrap();
 
-    assert_eq!(options.headings.of(Type::Added), "New features");
-    assert_eq!(options.headings.of(Type::Fixed), "Bug fixes");
-    assert_eq!(options.headings.of(Type::Changed), "Changed");
+    assert_eq!(options.notes.headings.of(Type::Added), "New features");
+    assert_eq!(options.notes.headings.of(Type::Fixed), "Bug fixes");
+    assert_eq!(options.notes.headings.of(Type::Changed), "Changed");
 }
 
 #[test]

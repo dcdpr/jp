@@ -75,100 +75,196 @@ pub(crate) fn cut(
     at: Option<&str>,
 ) -> Result<String, String> {
     let repo = &pipeline.repo;
-    repo.refuse_shallow()?;
-    repo.fetch()?;
-    let checkout = repo.checkout()?;
+    repo.origin.refuse_shallow()?;
+    repo.origin.fetch()?;
+    let checkout = repo.origin.checkout()?;
     refuse_unpublished(repo)?;
     let releases = repo.releases()?;
     let at = cut_point(repo, &checkout, at)?;
-    let from = if at == checkout.head {
-        checkout.describe()
-    } else {
-        format!(
-            "{}, an earlier commit of {}",
-            short(&at),
-            checkout.describe()
-        )
-    };
 
-    let notes = repo.worktree("cut", &checkout.head)?;
-    let unreleased = unreleased(pipeline, &releases, &notes)?;
+    let notes = repo.worktrees.add("cut", &checkout.head)?;
+    let filed = shipped_at(pipeline, &releases, &notes, &checkout, &at)?;
+    let version = next_version(pipeline, &releases, &filed, requested)?;
+    let cut = Cut::new(pipeline, &checkout, &at, version, &filed);
+    refuse_existing(repo, &cut.notes_branch)?;
+
+    let noted = file_notes(
+        pipeline,
+        &notes,
+        &filed,
+        &cut.version,
+        &cut.message(pipeline),
+    )?;
+    let started = start_branch(pipeline, &at, &cut.version)?;
+    repo.refs.set_branch(&cut.branch, &started, None)?;
+    if let Err(error) = repo.refs.set_branch(&cut.notes_branch, &noted, None) {
+        // Without its notes branch, the release branch would block the next cut.
+        drop(repo.refs.delete_branch(&cut.branch, &started));
+        return Err(error);
+    }
+
+    cut.report(repo, &checkout, &at)
+}
+
+/// A release being cut, as its commit message and report name it.
+struct Cut {
+    version: Version,
+
+    /// The release branch, such as `release/0.3`.
+    branch: String,
+
+    notes_branch: String,
+
+    /// Where the release is cut from, such as `main` or `4e1f0a2, an earlier
+    /// commit of main`.
+    from: String,
+
+    /// The files it files, counted, such as "3 fragments and a highlight".
+    files: String,
+
+    /// The release's directory, below the workspace root, with a trailing `/`.
+    destination: String,
+}
+
+impl Cut {
+    /// Release `version`, cut at the commit `at` of `checkout` and filing
+    /// `filed`.
+    fn new(
+        pipeline: &Pipeline<'_>,
+        checkout: &Checkout,
+        at: &str,
+        version: Version,
+        filed: &[TopLevel],
+    ) -> Self {
+        let from = if at == checkout.head {
+            checkout.describe()
+        } else {
+            format!(
+                "{}, an earlier commit of {}",
+                short(at),
+                checkout.describe()
+            )
+        };
+        let fragments = filed.iter().filter(|file| !file.highlight).count();
+
+        Self {
+            branch: releases::branch(&version),
+            notes_branch: releases::notes_branch(&version),
+            from,
+            files: files(fragments, filed.len() - fragments),
+            destination: format!("{}/{version}/", pipeline.fragments),
+            version,
+        }
+    }
+
+    /// The message of the notes branch's commit.
+    fn message(&self, pipeline: &Pipeline<'_>) -> String {
+        let bump = if pipeline.options.bump.is_some() {
+            format!(", and writes the version {}", self.version)
+        } else {
+            String::new()
+        };
+
+        format!(
+            "chore(release): Cut release {version}\n\n`jp release cut` started release {version} \
+             on `{}`, from {}.\n\nThis moves the {} it ships into `{}`, where its notes are \
+             prepared{bump}.\n",
+            self.branch,
+            self.from,
+            self.files,
+            self.destination,
+            version = self.version,
+        )
+    }
+
+    /// What was made, cut at the commit `at` of `checkout`, and how to publish
+    /// it.
+    fn report(
+        &self,
+        repo: &Repository<'_>,
+        checkout: &Checkout,
+        at: &str,
+    ) -> Result<String, String> {
+        let (branch, notes_branch) = (&self.branch, &self.notes_branch);
+
+        let mut said = format!(
+            "Started release {} on {branch}, cut from {}.\n",
+            self.version, self.from
+        );
+        if let Some(ahead) = checkout.ahead() {
+            let mut holding = vec![];
+            if !repo.history.is_ancestor(at, &checkout.main)? {
+                holding.push(branch.clone());
+            }
+            holding.push(notes_branch.clone());
+            said.push_str(&format!(
+                "{ahead}: {} {} commits {MAIN} doesn't have yet.\n",
+                listed(&holding),
+                if holding.len() == 1 { "holds" } else { "hold" }
+            ));
+        }
+        said.push_str(&format!(
+            "Filed {} into {} on {notes_branch}.\n\nNothing is published yet. Publish both \
+             branches with:\n\n{}\nthen prepare the release's notes on {notes_branch}, and merge \
+             it into {MAIN} once they are final.\n",
+            self.files,
+            self.destination,
+            push(&[branch.clone(), notes_branch.clone()])
+        ));
+
+        Ok(said)
+    }
+}
+
+/// The unreleased files at the top level of the fragments directory in `notes`,
+/// a worktree at the commit checked out, whose changes the commit `at` has.
+///
+/// Refuses a checkout with no unreleased fragments, and a cut point that ships
+/// the change of none of them.
+fn shipped_at(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+    notes: &Worktree<'_>,
+    checkout: &Checkout,
+    at: &str,
+) -> Result<Vec<TopLevel>, String> {
+    let unreleased = unreleased(pipeline, releases, notes)?;
     if !unreleased.iter().any(|file| !file.highlight) {
         return Err(format!(
             "{} has no unreleased fragments, so there is nothing to release.",
             checkout.describe()
         ));
     }
-    let shipped = repo.ancestors(&at)?;
+
+    let shipped = pipeline.repo.history.ancestors(at)?;
     let filed: Vec<TopLevel> = unreleased
         .into_iter()
         .filter(|file| file.changes.iter().all(|change| shipped.contains(change)))
         .collect();
-    let fragments = filed.iter().filter(|file| !file.highlight).count();
-    if fragments == 0 {
+    if !filed.iter().any(|file| !file.highlight) {
         return Err(format!(
             "None of the unreleased fragments on {} describes a change {} has, so a release cut \
              there would list nothing; write fragments whose `Credits` name its changes first.",
             checkout.describe(),
-            short(&at)
-        ));
-    }
-    let version = next_version(pipeline, &releases, &filed, requested)?;
-
-    let branch = releases::branch(&version);
-    let notes_branch = releases::notes_branch(&version);
-    let existing = repo.branch(&notes_branch)?;
-    if existing.local.is_some() || existing.origin.is_some() {
-        return Err(format!(
-            "{notes_branch} exists already; delete it if an earlier cut left it behind, here with \
-             `git branch -D {notes_branch}` or on {ORIGIN} with `git push {ORIGIN} --delete \
-             {notes_branch}`."
+            short(at)
         ));
     }
 
-    let files = files(fragments, filed.len() - fragments);
-    let destination = format!("{}/{version}/", pipeline.fragments);
-    let message = format!(
-        "chore(release): Cut release {version}\n\n`jp release cut` started release {version} on \
-         `{branch}`, from {from}.\n\nThis moves the {files} it ships into `{destination}`, where \
-         its notes are prepared{}.\n",
-        if pipeline.options.bump.is_some() {
-            format!(", and writes the version {version}")
-        } else {
-            String::new()
-        },
-    );
+    Ok(filed)
+}
 
-    let noted = file_notes(pipeline, &notes, &filed, &version, &message)?;
-    let started = start_branch(pipeline, &at, &version)?;
-    repo.set_branch(&branch, &started, None)?;
-    if let Err(error) = repo.set_branch(&notes_branch, &noted, None) {
-        // Without its notes branch, the release branch would block the next cut.
-        drop(repo.git(&["branch", "--delete", "--force", &branch]));
-        return Err(error);
+/// Refuse while the notes branch `notes_branch` exists, here or on `origin`.
+fn refuse_existing(repo: &Repository<'_>, notes_branch: &str) -> Result<(), String> {
+    let existing = repo.refs.branch(notes_branch)?;
+    if existing.local.is_none() && existing.origin.is_none() {
+        return Ok(());
     }
 
-    let mut said = format!("Started release {version} on {branch}, cut from {from}.\n");
-    if let Some(ahead) = checkout.ahead() {
-        let mut holding = vec![];
-        if !repo.is_ancestor(&at, &checkout.main)? {
-            holding.push(branch.clone());
-        }
-        holding.push(notes_branch.clone());
-        said.push_str(&format!(
-            "{ahead}: {} {} commits {MAIN} doesn't have yet.\n",
-            listed(&holding),
-            if holding.len() == 1 { "holds" } else { "hold" }
-        ));
-    }
-    said.push_str(&format!(
-        "Filed {files} into {destination} on {notes_branch}.\n\nNothing is published yet. Publish \
-         both branches with:\n\n{}\nthen prepare the release's notes on {notes_branch}, and merge \
-         it into {MAIN} once they are final.\n",
-        push(&[branch, notes_branch.clone()])
-    ));
-
-    Ok(said)
+    Err(format!(
+        "{notes_branch} exists already; delete it if an earlier cut left it behind, here with \
+         `git branch -D {notes_branch}` or on {ORIGIN} with `git push {ORIGIN} --delete \
+         {notes_branch}`."
+    ))
 }
 
 /// The version a cut filing `filed` starts: `requested`, or the next minor
@@ -222,12 +318,12 @@ fn cut_point(
     let Some(at) = at else {
         return Ok(checkout.head.clone());
     };
-    let hash = repo.commit(at)?;
+    let hash = repo.history.commit(at)?;
     if hash == checkout.head {
         return Ok(hash);
     }
 
-    if !repo.first_parents(&checkout.head)?.contains(&hash) {
+    if !repo.history.first_parents(&checkout.head)?.contains(&hash) {
         return Err(format!(
             "{} isn't on the first-parent line of {}, so it isn't a commit of {MAIN}'s own \
              history; a release is cut at one of those.",
@@ -235,7 +331,7 @@ fn cut_point(
             checkout.describe()
         ));
     }
-    let shipping = repo.containing(&hash)?;
+    let shipping = repo.history.containing(&hash)?;
     if !shipping.is_empty() {
         return Err(format!(
             "{} {} {} already, so a release cut there would ship nothing new; name a later commit.",
@@ -252,12 +348,13 @@ fn cut_point(
 /// since a cut would count it as a release made.
 fn refuse_unpublished(repo: &Repository<'_>) -> Result<(), String> {
     let branches: Vec<String> = repo
+        .refs
         .branches(RELEASE_BRANCH)?
         .into_iter()
         .filter(|branch| branch.origin.is_none() && releases::line_of(&branch.name).is_some())
         .map(|branch| branch.name)
         .collect();
-    let tags = repo.tags()?;
+    let tags = repo.refs.tags()?;
     let tags: Vec<String> = tags
         .local
         .keys()
@@ -434,7 +531,7 @@ impl<'p> Changes<'p> {
         let pipeline = self.pipeline;
         let number = match credit {
             ListedCredit::Commit(hash) => {
-                return pipeline.repo.commit(hash).map(Some).map_err(|_| {
+                return pipeline.repo.history.commit(hash).map(Some).map_err(|_| {
                     format!(
                         "{}/{path} credits {hash}, which names no commit this repository has; \
                          correct its `Credits`.",
@@ -447,7 +544,7 @@ impl<'p> Changes<'p> {
         };
 
         if self.merged.is_none() {
-            let log = pipeline.repo.first_parent_log(&self.tree)?;
+            let log = pipeline.repo.history.first_parent_log(&self.tree)?;
             self.merged = Some(merges(&log, self.forge));
         }
         let merged = self.merged.as_ref().and_then(|merged| merged.get(number));
@@ -469,7 +566,7 @@ impl<'p> Changes<'p> {
             let branches = match self.shipped_by.entry(change.clone()) {
                 Entry::Occupied(known) => known.into_mut(),
                 Entry::Vacant(unknown) => {
-                    let containing = self.pipeline.repo.containing(unknown.key())?;
+                    let containing = self.pipeline.repo.history.containing(unknown.key())?;
                     let branches = self
                         .releases
                         .shipping(unknown.key(), &containing)
@@ -521,7 +618,7 @@ pub(crate) fn unreleased_count(
     releases: &Releases,
     main: &str,
 ) -> Result<usize, String> {
-    let notes = pipeline.repo.worktree("due", main)?;
+    let notes = pipeline.repo.worktrees.add("due", main)?;
     if !pipeline.fragments_in(&notes).is_dir() {
         return Ok(0);
     }
@@ -571,7 +668,7 @@ fn file_notes(
 ///
 /// Returns the commit's hash.
 fn start_branch(pipeline: &Pipeline<'_>, at: &str, version: &Version) -> Result<String, String> {
-    let code = pipeline.repo.worktree("cut", at)?;
+    let code = pipeline.repo.worktrees.add("cut", at)?;
     // History from before the project kept fragments has no directory to remove.
     code.git(&[
         "rm",

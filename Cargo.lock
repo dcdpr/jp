@@ -2191,6 +2191,7 @@ dependencies = [
  "jp_plugin",
  "jp_tool",
  "release-build",
+ "release-options",
  "semver",
  "serde",
  "serde_json",
@@ -2214,6 +2215,7 @@ dependencies = [
  "jp_plugin",
  "jp_test",
  "release-build",
+ "release-options",
  "semver",
  "serde",
  "serde_json",
@@ -2318,6 +2320,7 @@ dependencies = [
  "jp_label",
  "jp_plugin",
  "overwrite",
+ "release-options",
  "serde",
  "serde_json",
  "site-revision",
@@ -4073,6 +4076,17 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "release-options"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "changelog",
+ "doc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

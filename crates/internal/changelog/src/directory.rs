@@ -394,16 +394,35 @@ fn read_top_level(
     for entry in entries(dir)? {
         let path = dir.join(&entry.name);
         if entry.is_dir {
-            if entry.name == HIGHLIGHTS {
-                read_highlights(&path, &format!("{HIGHLIGHTS}/"), report, contents)?;
-            } else if !is_version(&entry.name) {
-                report.problem(&path, ProblemKind::NotARelease);
-            } else if releases {
-                read_release(&path, &format!("{}/", entry.name), report, contents)?;
-            }
+            read_top_level_dir(&path, &entry.name, releases, report, contents)?;
         } else if entry.name != README {
             read_file(&path, &entry.name, "", Format::Fragment, report, contents)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Read the directory `name`, at `path` in the top level of the fragments
+/// directory: `highlights/`, or a release's directory when `releases` is set.
+///
+/// Any other directory is a problem.
+fn read_top_level_dir(
+    path: &Utf8Path,
+    name: &str,
+    releases: bool,
+    report: &mut Report,
+    contents: &mut Contents,
+) -> Result<(), CheckError> {
+    if name == HIGHLIGHTS {
+        return read_highlights(path, &format!("{HIGHLIGHTS}/"), report, contents);
+    }
+    if !is_version(name) {
+        report.problem(path, ProblemKind::NotARelease);
+        return Ok(());
+    }
+    if releases {
+        read_release(path, &format!("{name}/"), report, contents)?;
     }
 
     Ok(())

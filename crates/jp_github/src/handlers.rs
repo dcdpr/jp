@@ -1058,6 +1058,9 @@ impl ReposHandler {
     }
 }
 
+/// The largest page GitHub's REST API returns.
+const MAX_PER_PAGE: u8 = 100;
+
 /// A repository's releases, and the files attached to them.
 pub struct ReleasesHandler {
     pub(crate) client: Octocrab,
@@ -1073,7 +1076,7 @@ impl ReleasesHandler {
             .get_paginated(
                 &format!("/repos/{}/{}/releases", self.owner, self.repo),
                 vec![],
-                100,
+                MAX_PER_PAGE,
             )
             .await
     }

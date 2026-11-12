@@ -15,11 +15,11 @@ use changelog::{
     directory::{Part, ReadError},
     markdown, release,
 };
+use release_options::no_address;
 use semver::Version;
 
 use crate::{
     cut,
-    options::no_address,
     pipeline::{Pipeline, counted, listed, problems, push, short},
     releases::{self, Line, Releases},
     repository::{MAIN, ORIGIN, Worktree},
@@ -64,80 +64,21 @@ pub(crate) enum Notes {
 /// The error says why `version` can't be finalized.
 pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<String, String> {
     let repo = &pipeline.repo;
-    repo.refuse_shallow()?;
-    repo.fetch()?;
+    repo.origin.refuse_shallow()?;
+    repo.origin.fetch()?;
     let releases = repo.releases()?;
     let tag = releases::tag(version);
-
-    // A tag made here and not yet pushed is the release, unless it is
-    // somewhere else.
-    if !releases.published.contains(version)
-        && let Some(tagged) = repo.local_tag(&tag)?
-    {
-        let Some(line) = releases.line(version) else {
-            return Err(format!(
-                "This repository has a tag {tag}, but no {} to check it against; delete it with \
-                 `git tag -d {tag}` if a rehearsal left it.",
-                releases::branch(version)
-            ));
-        };
-        if tagged != line.tip {
-            return Err(format!(
-                "This repository has a tag {tag} at {}, not at the tip of {}, {}; delete it with \
-                 `git tag -d {tag}`.",
-                short(&tagged),
-                line.branch,
-                short(&line.tip)
-            ));
-        }
-
-        return publish(pipeline, &line.branch, &tag, false);
+    if let Some(said) = tagged_here(pipeline, &releases, version, &tag)? {
+        return Ok(said);
     }
 
     let line = releases.finalize_target(version)?;
-    let checkout = repo.checkout()?;
-    let main = repo.worktree("finalize", &checkout.head)?;
-    let at = checkout.describe();
-    let merge = format!(
-        "Merge {} into {MAIN} first, then finalize from there.",
-        releases::notes_branch(version)
-    );
-    match notes(pipeline, &releases, line, version, &main)? {
-        Notes::Filed => {}
-        Notes::Unmerged {
-            branch,
-            delete,
-            missing,
-        } => {
-            return Err(format!(
-                "{at} lacks {} of the notes of {version} that {branch} has: {}. {merge} If {MAIN} \
-                 dropped {} on purpose, delete the branch with {delete}.",
-                counted(missing.len(), "file", "files"),
-                listed(&missing),
-                if missing.len() == 1 { "it" } else { "them" },
-            ));
-        }
-        Notes::Unfiled(pending) => {
-            return Err(format!(
-                "{at} still has {} at the top of {} whose changes {} ships: {}. Their notes \
-                 aren't filed yet. {merge}",
-                counted(pending.len(), "file", "files"),
-                pipeline.fragments,
-                line.branch,
-                listed(&pending),
-            ));
-        }
-        Notes::Missing => {
-            let directory = format!("{}/{version}/", pipeline.fragments);
-            return Err(format!(
-                "{at} has no notes of {version} in {directory}. Write at least one fragment \
-                 there, such as {directory}<slug>.fixed.md, and finalize from a commit that has \
-                 it."
-            ));
-        }
-    }
+    let checkout = repo.origin.checkout()?;
+    let main = repo.worktrees.add("finalize", &checkout.head)?;
+    let notes = notes(pipeline, &releases, line, version, &main)?;
+    refuse_unready(pipeline, notes, &checkout.describe(), version, line)?;
     let message = message(pipeline, version, &main)?;
-    repo.tag(&tag, &line.tip, &message)?;
+    repo.refs.tag(&tag, &line.tip, &message)?;
 
     let mut said = format!(
         "Tagged the tip of {}, {}, as {tag}, with the notes of {version} on {}.\n",
@@ -153,6 +94,90 @@ pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<Str
     said.push_str(&publish(pipeline, &line.branch, &tag, true)?);
 
     Ok(said)
+}
+
+/// How to publish the tag of `version` this repository has and `origin`
+/// doesn't, which is the release; `None` without such a tag.
+///
+/// Refuses a tag there is no release branch to check against, or one not at the
+/// tip of its release branch.
+fn tagged_here(
+    pipeline: &Pipeline<'_>,
+    releases: &Releases,
+    version: &Version,
+    tag: &str,
+) -> Result<Option<String>, String> {
+    if releases.published.contains(version) {
+        return Ok(None);
+    }
+    let Some(tagged) = pipeline.repo.refs.local_tag(tag)? else {
+        return Ok(None);
+    };
+
+    let Some(line) = releases.line(version) else {
+        return Err(format!(
+            "This repository has a tag {tag}, but no {} to check it against; delete it with `git \
+             tag -d {tag}` if a rehearsal left it.",
+            releases::branch(version)
+        ));
+    };
+    if tagged != line.tip {
+        return Err(format!(
+            "This repository has a tag {tag} at {}, not at the tip of {}, {}; delete it with `git \
+             tag -d {tag}`.",
+            short(&tagged),
+            line.branch,
+            short(&line.tip)
+        ));
+    }
+
+    publish(pipeline, &line.branch, tag, false).map(Some)
+}
+
+/// Refuse to finalize `version`, in preparation on `line`, unless `notes` says
+/// the commit described by `at` has its notes filed.
+fn refuse_unready(
+    pipeline: &Pipeline<'_>,
+    notes: Notes,
+    at: &str,
+    version: &Version,
+    line: &Line,
+) -> Result<(), String> {
+    let merge = format!(
+        "Merge {} into {MAIN} first, then finalize from there.",
+        releases::notes_branch(version)
+    );
+
+    match notes {
+        Notes::Filed => Ok(()),
+        Notes::Unmerged {
+            branch,
+            delete,
+            missing,
+        } => Err(format!(
+            "{at} lacks {} of the notes of {version} that {branch} has: {}. {merge} If {MAIN} \
+             dropped {} on purpose, delete the branch with {delete}.",
+            counted(missing.len(), "file", "files"),
+            listed(&missing),
+            if missing.len() == 1 { "it" } else { "them" },
+        )),
+        Notes::Unfiled(pending) => Err(format!(
+            "{at} still has {} at the top of {} whose changes {} ships: {}. Their notes aren't \
+             filed yet. {merge}",
+            counted(pending.len(), "file", "files"),
+            pipeline.fragments,
+            line.branch,
+            listed(&pending),
+        )),
+        Notes::Missing => {
+            let directory = format!("{}/{version}/", pipeline.fragments);
+            Err(format!(
+                "{at} has no notes of {version} in {directory}. Write at least one fragment \
+                 there, such as {directory}<slug>.fixed.md, and finalize from a commit that has \
+                 it."
+            ))
+        }
+    }
 }
 
 /// Where the notes of `version`, in preparation on `line`, stand in the commit
@@ -172,9 +197,9 @@ pub(crate) fn notes(
     let repo = &pipeline.repo;
     let notes_branch = releases::notes_branch(version);
     let directory = format!("{}/{version}/", pipeline.fragments);
-    let filed = repo.files_at(&main.head()?, &directory)?;
+    let filed = repo.history.files_at(&main.head()?, &directory)?;
 
-    let branch = repo.branch(&notes_branch)?;
+    let branch = repo.refs.branch(&notes_branch)?;
     for (hash, name, delete) in [
         (
             branch.local,
@@ -191,6 +216,7 @@ pub(crate) fn notes(
             continue;
         };
         let missing: Vec<String> = repo
+            .history
             .files_at(&hash, &directory)?
             .difference(&filed)
             .cloned()
@@ -234,9 +260,9 @@ fn message(
     let release = release::read(
         &pipeline.fragments_in(main),
         &Part::Release(version.clone()),
-        options.forge,
-        options.repository.as_deref(),
-        &options.headings,
+        options.notes.forge,
+        options.notes.repository.as_deref(),
+        &options.notes.headings,
     )
     .map_err(|error| match error {
         ReleaseError::Read(ReadError::Problems(found)) => format!(
@@ -249,7 +275,7 @@ fn message(
 
     // The upgrade guide follows in the same message, so a breaking entry links
     // to its section by anchor alone.
-    let notes = markdown::notes(&release, &options.headings, "");
+    let notes = markdown::notes(&release, &options.notes.headings, "");
     let guide = markdown::upgrade_guide(&release);
 
     let body = if guide.is_empty() {
@@ -266,7 +292,7 @@ fn message(
 /// made when `made`; with `branch` too when `origin` lacks commits of it.
 fn publish(pipeline: &Pipeline<'_>, branch: &str, tag: &str, made: bool) -> Result<String, String> {
     let repo = &pipeline.repo;
-    let standing = repo.standing(&repo.branch(branch)?)?;
+    let standing = repo.refs.standing(&repo.refs.branch(branch)?)?;
     let unpushed = standing.is_some_and(releases::Standing::unpushed);
 
     let mut refs = vec![];

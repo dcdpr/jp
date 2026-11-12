@@ -123,6 +123,14 @@ impl Headings {
             None => capitalized(type_.id()),
         }
     }
+
+    /// The headings given, each with the type it heads, in the order of the
+    /// types.
+    pub fn configured(&self) -> impl Iterator<Item = (Type, &str)> {
+        self.0
+            .iter()
+            .map(|(type_, heading)| (*type_, heading.as_str()))
+    }
 }
 
 impl FromIterator<(Type, String)> for Headings {

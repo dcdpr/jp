@@ -255,12 +255,18 @@ fn check_checksums(out: &Utf8Path, files: &BTreeSet<&str>) -> Vec<String> {
     problems
 }
 
+/// The length of a SHA-256 in hex: 32 bytes, two digits each.
+const SHA256_HEX_DIGITS: usize = 64;
+
+/// How much of a file [`sha256`] reads at a time.
+const READ_BUFFER_BYTES: usize = 64 * 1024;
+
 /// The SHA-256 and file name of a line of `checksums.txt`, as `sha256sum`
 /// writes them: the hash, a space, then a space or `*`, then the name.
 ///
 /// The hash is returned in lowercase.
 fn parse_checksum(line: &str) -> Option<(String, &str)> {
-    let (hash, rest) = line.split_at_checked(64)?;
+    let (hash, rest) = line.split_at_checked(SHA256_HEX_DIGITS)?;
     if !hash.chars().all(|char| char.is_ascii_hexdigit()) {
         return None;
     }
@@ -297,7 +303,7 @@ fn sha256(path: &Utf8Path) -> Result<String, String> {
     let unreadable = |error| format!("{path} can't be read: {error}.");
     let mut file = File::open(path).map_err(unreadable)?;
     let mut hasher = Sha256::new();
-    let mut buffer = vec![0; 64 * 1024];
+    let mut buffer = vec![0; READ_BUFFER_BYTES];
     loop {
         let read = file.read(&mut buffer).map_err(unreadable)?;
         if read == 0 {
@@ -309,7 +315,7 @@ fn sha256(path: &Utf8Path) -> Result<String, String> {
     Ok(hasher
         .finalize()
         .iter()
-        .fold(String::with_capacity(64), |mut hex, byte| {
+        .fold(String::with_capacity(SHA256_HEX_DIGITS), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
             hex
         }))

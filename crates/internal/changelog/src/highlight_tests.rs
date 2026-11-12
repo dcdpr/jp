@@ -294,12 +294,19 @@ fn a_highlight_of_definitions_alone_has_no_prose() {
 
 #[test]
 fn a_misplaced_token_says_where_the_section_goes_instead() {
+    let error = parse(indoc! {"
+        # Fan out
+
+        - **Authors**: @JeanMertz
+
+        The assistant calls one tool on many inputs at once.
+
+        BREAKING CHANGE: Title
+    "})
+    .unwrap_err();
+
     assert_eq!(
-        HighlightError::Marker {
-            line: 7,
-            marker: "BREAKING CHANGE:",
-        }
-        .to_string(),
+        error.to_string(),
         "line 7 starts with `BREAKING CHANGE:`, and a highlight has no upgrade section; write the \
          section in the fragment for the change, or, to show the token, indent the line or put \
          the token in inline code"

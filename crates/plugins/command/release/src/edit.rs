@@ -21,16 +21,17 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{Type, fragment, highlight};
-use jp_plugin::message::{
-    ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
+use jp_plugin::{
+    client,
+    message::{
+        ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
+    },
 };
 
 use crate::{
-    Output, compose,
+    BINARY, Output,
     entry::{self, Fragments, HIGHLIGHTS, Planned},
-    read_message,
     repository::temporary,
-    send,
 };
 
 /// The protocol that added `edit_files`, through which the host opens the
@@ -58,7 +59,7 @@ pub(crate) struct Host<'a, R, W> {
 
 impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
     fn open(&mut self, path: &Utf8Path) -> Result<bool, String> {
-        send(
+        client::send(
             self.stdout,
             &PluginToHost::EditFiles(EditFilesRequest {
                 id: None,
@@ -66,7 +67,7 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
             }),
         )?;
 
-        match read_message(self.stdin)? {
+        match client::read(self.stdin, BINARY)? {
             HostToPlugin::Edited(response) => Ok(response.saved),
             HostToPlugin::Error(error) => {
                 Err(format!("couldn't open an editor: {}", error.message))
@@ -77,7 +78,7 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
     }
 
     fn again(&mut self, problem: &str) -> bool {
-        let choice = compose(self.stdin, self.stdout, ComposeRequest {
+        let choice = client::compose(self.stdin, self.stdout, BINARY, ComposeRequest {
             id: None,
             message: problem.to_owned(),
             mode: ComposeMode::Select {

@@ -22,6 +22,7 @@ doc = { workspace = true }
 jp_github = { workspace = true }
 jp_plugin = { workspace = true }
 release-build = { workspace = true }
+release-options = { workspace = true }
 
 camino = { workspace = true, features = ["serde1"] }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }

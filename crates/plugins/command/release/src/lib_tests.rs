@@ -2,7 +2,10 @@ use std::env;
 
 use camino_tempfile::Utf8TempDir;
 use indoc::indoc;
-use jp_plugin::message::{EditedResponse, ErrorResponse, PathsInfo, WorkspaceInfo};
+use jp_plugin::message::{
+    EditedResponse, ErrorResponse, ExitMessage, HostToPlugin, PathsInfo, PluginToHost,
+    WorkspaceInfo,
+};
 use serde_json::{Map, json};
 
 use super::*;

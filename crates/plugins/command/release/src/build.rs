@@ -147,16 +147,16 @@ pub(crate) fn build(
         format!("`{BUILD_KEY}` isn't set, so there is no command to build {version} with.")
     })?;
     let repo = &pipeline.repo;
-    repo.refuse_shallow()?;
-    repo.fetch()?;
+    repo.origin.refuse_shallow()?;
+    repo.origin.fetch()?;
     let (releases, tags) = repo.releases_and_tags()?;
     let target = target(&releases, &tags, version)?;
     // A tag only `origin` has can name a commit no branch here holds.
-    if !repo.has_commit(&target.commit)? {
-        repo.fetch_tag(&releases::tag(version))?;
+    if !repo.history.has_commit(&target.commit)? {
+        repo.refs.fetch_tag(&releases::tag(version))?;
     }
 
-    let worktree = repo.worktree("build", &target.commit)?;
+    let worktree = repo.worktrees.add("build", &target.commit)?;
     let out = Scratch::new(builds, version)?;
     let (program, args) =
         command.command(version, &worktree.workspace(), &out.path, profile.name());
@@ -166,9 +166,9 @@ pub(crate) fn build(
         target.name,
         short(&target.commit)
     ))?;
-    let status = repo
-        .shell()
-        .stream(repo.root(), &program, &args, each)
+    let status = pipeline
+        .shell
+        .stream(&pipeline.root, &program, &args, each)
         .map_err(|error| format!("`{BUILD_KEY}` couldn't build {version}: {error}"))?;
     if !status.success() {
         return Err(format!(

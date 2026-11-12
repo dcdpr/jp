@@ -65,18 +65,19 @@ use changelog::{
     release,
 };
 use clap::{CommandFactory, Parser, Subcommand};
-use jp_plugin::message::{
-    ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin, InitMessage, OutputFormat,
-    PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+use jp_plugin::{
+    client,
+    message::{InitMessage, OutputFormat, ToolCall},
 };
 use release_build::{BUILDS, Profile};
+use release_options::no_address;
 use semver::Version;
 use serde_json::Value;
 
 use crate::{
     edit::Host,
     entry::{Fragments, HIGHLIGHTS},
-    options::{Options, no_address},
+    options::Options,
     pipeline::Pipeline,
     repository::MAIN,
     shell::Shell,
@@ -399,22 +400,20 @@ struct Context<'a> {
 /// An `init` carrying a tool call is answered with the call's outcome; any
 /// other `init` runs the command its arguments name.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
-    match read_message(&mut stdin)? {
-        HostToPlugin::Describe => send_describe(&mut stdout),
-        HostToPlugin::Init(init) => {
-            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
-                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
-                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
-            }
+    let describe = || client::describe(MANIFEST, "release", help_text(), jp_plugin::package!());
+    let Some(init) = client::start(&mut stdin, &mut stdout, BINARY, REQUIRED_PROTOCOL, describe)?
+    else {
+        return Ok(());
+    };
 
-            match &init.tool {
-                Some(call) => answer_tool_call(&init, call, &mut stdout),
-                None => handle_command(&init, &mut stdin, &mut stdout),
-            }
-        }
-        other => Err(format!("expected init or describe, got: {other:?}")),
+    match &init.tool {
+        Some(call) => answer_tool_call(&init, call, &mut stdout),
+        None => handle_command(&init, &mut stdin, &mut stdout),
     }
 }
+
+/// The plugin's executable, as messages for the user name it.
+pub(crate) const BINARY: &str = "jp-release";
 
 /// The protocol version this plugin needs from the host.
 ///
@@ -444,17 +443,10 @@ fn answer_tool_call(
 ) -> Result<(), String> {
     let options = match Options::read(&init.options) {
         Ok(options) => options,
-        Err(message) => return send_exit(stdout, 1, Some(&message)),
+        Err(message) => return client::exit(stdout, 1, Some(&message)),
     };
 
-    let outcome = serde_json::to_value(tool::run(init, call, &options))
-        .map_err(|error| format!("failed to serialize the tool outcome: {error}"))?;
-    send(
-        stdout,
-        &PluginToHost::ToolOutcome(ToolOutcomeMessage { outcome }),
-    )?;
-
-    send_exit(stdout, 0, None)
+    client::answer_tool(stdout, &tool::run(init, call, &options))
 }
 
 fn handle_command(
@@ -467,99 +459,137 @@ fn handle_command(
         Ok(args) => args,
         // `--help` and `--version` surface as errors that aren't failures.
         Err(error) if !error.use_stderr() => {
-            print(stdout, &error.to_string())?;
-            return send_exit(stdout, 0, None);
+            client::print(stdout, &error.to_string(), "content", "plain")?;
+            return client::exit(stdout, 0, None);
         }
-        Err(error) => return send_exit(stdout, 1, Some(&error.to_string())),
+        Err(error) => return client::exit(stdout, 1, Some(&error.to_string())),
     };
 
     let options = match Options::read(&init.options) {
         Ok(options) => options,
-        Err(message) => return send_exit(stdout, 1, Some(&message)),
+        Err(message) => return client::exit(stdout, 1, Some(&message)),
     };
-    let root = init.workspace.root.as_path();
-    let dir = resolve_dir(root, &options.fragments_dir);
-    let fragments = match Fragments::new(root, dir, &init.config) {
-        Ok(fragments) => fragments,
-        Err(message) => return send_exit(stdout, 1, Some(&message)),
-    };
-    let ctx = Context {
-        fragments,
-        config: &init.config,
-        options: &options,
-        format: init.output_format,
+    let ctx = match Context::new(init, &options) {
+        Ok(ctx) => ctx,
+        Err(message) => return client::exit(stdout, 1, Some(&message)),
     };
 
-    let result = match args.command {
-        Command::Init => init_dir(&ctx),
+    let result = dispatch(&ctx, init, args.command, stdin, stdout);
+    finish(stdout, result)
+}
+
+impl<'a> Context<'a> {
+    /// What the commands `init` asks for run against, read with `options`.
+    ///
+    /// The error says why the fragments directory can't be used.
+    fn new(init: &'a InitMessage, options: &'a Options) -> Result<Self, String> {
+        let root = init.workspace.root.as_path();
+        let dir = resolve_dir(root, &options.notes.fragments_dir);
+
+        Ok(Self {
+            fragments: Fragments::new(root, dir, &init.config)?,
+            config: &init.config,
+            options,
+            format: init.output_format,
+        })
+    }
+}
+
+/// Run `command`, which `init` asked for.
+fn dispatch(
+    ctx: &Context<'_>,
+    init: &InitMessage,
+    command: Command,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<Output, String> {
+    let root = ctx.fragments.root;
+    let options = ctx.options;
+
+    match command {
+        Command::Init => init_dir(ctx),
         Command::Record(record) => {
             let (type_, slug) = record.split();
-            edit_fragment(&ctx, type_, slug, init.version, stdin, stdout)
+            edit_fragment(ctx, type_, slug, init.version, stdin, stdout)
         }
         Command::Highlight { slug } => {
-            edit_highlight(&ctx, slug.as_deref(), init.version, stdin, stdout)
+            edit_highlight(ctx, slug.as_deref(), init.version, stdin, stdout)
         }
-        Command::Check => check(&ctx),
-        Command::Render { render } => render_release(&ctx, &render),
-        Command::Cut { version, at } => make_release(root, &options, |pipeline| {
+        Command::Check => check(ctx),
+        Command::Render { render } => render_release(ctx, &render),
+        Command::Cut { version, at } => make_release(root, options, |pipeline| {
             cut::cut(pipeline, version.as_ref(), at.as_deref())
         }),
         Command::Pick {
             version: Some(version),
             commits,
             resume: false,
-        } => make_release(root, &options, |pipeline| {
+        } => make_release(root, options, |pipeline| {
             pick::pick(pipeline, &version, &commits)
         }),
-        Command::Pick { .. } => make_release(root, &options, pick::resume),
-        Command::Finalize { version } => make_release(root, &options, |pipeline| {
+        Command::Pick { .. } => make_release(root, options, pick::resume),
+        Command::Finalize { version } => make_release(root, options, |pipeline| {
             finalize::finalize(pipeline, &version)
         }),
-        Command::Build { version, quick } => {
-            let profile = if quick {
-                Profile::Quick
-            } else {
-                Profile::Release
-            };
-            builds(init)
-                .ok_or_else(|| {
-                    "This workspace has no user-local storage, where `jp release build` keeps \
-                     builds."
-                        .to_owned()
-                })
-                .and_then(|builds| {
-                    make_release(root, &options, |pipeline| {
-                        build::build(pipeline, &builds, &version, profile, &mut |line| {
-                            send_print(stdout, &format!("{line}\n"), "chrome", "plain")
-                        })
-                    })
-                })
-        }
-        Command::Abandon { version } => make_release(root, &options, |pipeline| {
+        Command::Build { version, quick } => build_release(ctx, init, &version, quick, stdout),
+        Command::Abandon { version } => make_release(root, options, |pipeline| {
             abandon::abandon(pipeline, &version)
         }),
-        Command::Due => due_release(root, &options, ctx.format),
-        Command::Status => make_release(root, &options, |pipeline| {
+        Command::Due => due_release(root, options, ctx.format),
+        Command::Status => make_release(root, options, |pipeline| {
             status::status(pipeline, now()?, builds(init).as_deref())
         }),
         Command::Tools {
             command: ToolsCommand::Init { path, force },
         } => definitions::init(&resolve_dir(root, &path), force),
+    }
+}
+
+/// Print what a command produced and end the session with its code, or end it
+/// with the failure the command reported.
+fn finish(stdout: &mut impl Write, result: Result<Output, String>) -> Result<(), String> {
+    let output = match result {
+        Ok(output) => output,
+        Err(message) => return client::exit(stdout, 1, Some(&message)),
     };
 
-    match result {
-        Ok(output) => {
-            if let Some(note) = &output.note {
-                send_print(stdout, note, "chrome", "plain")?;
-            }
-            if !output.text.is_empty() {
-                let format = if output.json { "json" } else { "plain" };
-                send_print(stdout, &output.text, "content", format)?;
-            }
-            send_result(stdout, output.code)
-        }
-        Err(message) => send_exit(stdout, 1, Some(&message)),
+    if let Some(note) = &output.note {
+        client::print(stdout, note, "chrome", "plain")?;
     }
+    if !output.text.is_empty() {
+        let format = if output.json { "json" } else { "plain" };
+        client::print(stdout, &output.text, "content", format)?;
+    }
+
+    client::result(stdout, output.code)
+}
+
+/// Build release `version`, with the quick profile when `quick` is set,
+/// printing the build's output on the host's chrome channel as it comes.
+///
+/// Refuses a workspace without user-local storage, where builds are kept.
+fn build_release(
+    ctx: &Context<'_>,
+    init: &InitMessage,
+    version: &Version,
+    quick: bool,
+    stdout: &mut impl Write,
+) -> Result<Output, String> {
+    let profile = if quick {
+        Profile::Quick
+    } else {
+        Profile::Release
+    };
+    let builds = builds(init).ok_or_else(|| {
+        "This workspace has no user-local storage, where `jp release build` keeps builds."
+            .to_owned()
+    })?;
+
+    make_release(ctx.fragments.root, ctx.options, |pipeline| {
+        build::build(pipeline, &builds, version, profile, &mut |line| {
+            client::print(stdout, &format!("{line}\n"), "chrome", "plain")
+        })
+    })
 }
 
 /// Create the fragments directory and its `highlights/`, and write the README,
@@ -670,27 +700,6 @@ fn branch_slug(root: &Utf8Path, type_: Type) -> Result<String, String> {
     })
 }
 
-/// Ask the host to collect text, and wait for it.
-///
-/// The host owns the terminal, since the plugin's stdin carries this protocol,
-/// so composition runs there.
-fn compose(
-    stdin: &mut impl BufRead,
-    stdout: &mut impl Write,
-    request: ComposeRequest,
-) -> Result<String, String> {
-    send(stdout, &PluginToHost::Compose(request))?;
-
-    match read_message(stdin)? {
-        HostToPlugin::Composed(response) => response.text.ok_or_else(|| {
-            "Nothing composed; run it again with what it asked for given as flags.".to_owned()
-        }),
-        HostToPlugin::Error(error) => Err(error.message),
-        HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
-        other => Err(format!("expected a composed response, got: {other:?}")),
-    }
-}
-
 /// The name to credit a highlight to when none is given: JP's `user.name`, then
 /// git's, read in the workspace at `root`.
 fn identity(root: &Utf8Path, config: &Value) -> Option<String> {
@@ -753,12 +762,12 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
     let release = release::read(
         &fragments.dir,
         &render.part(),
-        ctx.options.forge,
-        ctx.options.repository.as_deref(),
-        &ctx.options.headings,
+        ctx.options.notes.forge,
+        ctx.options.notes.repository.as_deref(),
+        &ctx.options.notes.headings,
     )
     .map_err(|error| unreadable(fragments, error))?;
-    let text = view.render(&release, &ctx.options.headings)?;
+    let text = view.render(&release, &ctx.options.notes.headings)?;
 
     let no_guide = text.is_empty() && view == View::UpgradeGuide;
     let note = no_guide.then(|| match &render.version {
@@ -882,94 +891,6 @@ fn resolve_dir(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
 #[must_use]
 pub fn help_text() -> String {
     Args::command().render_help().to_string()
-}
-
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe = DescribeResponse::from_manifest(
-        MANIFEST,
-        "release",
-        env!("CARGO_PKG_VERSION"),
-        help_text(),
-    )
-    .map_err(|e| format!("invalid embedded manifest: {e}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
-}
-
-/// Print `text` on the host's content channel.
-fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
-    send_print(stdout, text, "content", "plain")
-}
-
-/// Print `text`, written in `format`, on the host's `channel`.
-fn send_print(
-    stdout: &mut impl Write,
-    text: &str,
-    channel: &str,
-    format: &str,
-) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Print(PrintMessage {
-            text: text.to_owned(),
-            channel: channel.to_owned(),
-            format: format.to_owned(),
-            language: None,
-        }),
-    )
-}
-
-/// End the session with a failure, or with success when `code` is 0.
-fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: reason.map(String::from),
-            expected: false,
-        }),
-    )
-}
-
-/// End the session with the code a command chose to report its result by, which
-/// `jp` doesn't treat as a failure.
-fn send_result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: None,
-            expected: code != 0,
-        }),
-    )
-}
-
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    let read = stdin
-        .read_line(&mut line)
-        .map_err(|error| format!("failed to read from host: {error}"))?;
-
-    // EOF: the host closed the pipe without answering, which is what an older
-    // `jp` does when it gives up on a message it couldn't read.
-    if read == 0 {
-        return Err(
-            "The host stopped responding. Are `jp` and `jp-release` the same build?".to_owned(),
-        );
-    }
-
-    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
-}
-
-fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|error| format!("serialize error: {error}"))?;
-    writeln!(stdout, "{json}").map_err(|error| format!("write error: {error}"))?;
-    stdout
-        .flush()
-        .map_err(|error| format!("flush error: {error}"))
 }
 
 #[cfg(test)]

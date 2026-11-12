@@ -1,0 +1,27 @@
+[package]
+description = "`jp release`'s settings that other plugins read too: where the fragments are, and how release notes credit and head their entries."
+name = "release-options"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+changelog = { workspace = true }
+doc = { workspace = true }
+
+camino = { workspace = true, features = ["serde1"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

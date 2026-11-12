@@ -1,5 +1,7 @@
 use camino_tempfile::Utf8TempDir;
-use jp_plugin::message::{OutputFormat, PathsInfo, WorkspaceInfo};
+use jp_plugin::message::{
+    ExitMessage, HostToPlugin, OutputFormat, PathsInfo, PluginToHost, WorkspaceInfo,
+};
 use serde_json::{Map, json};
 
 use super::*;

@@ -31,11 +31,11 @@ pub(crate) struct Due {
 /// The error says why they can't be read.
 pub(crate) fn due(pipeline: &Pipeline<'_>, now: i64) -> Result<Due, String> {
     let repo = &pipeline.repo;
-    repo.refuse_shallow()?;
-    repo.fetch()?;
+    repo.origin.refuse_shallow()?;
+    repo.origin.fetch()?;
     let releases = repo.releases()?;
 
-    next(pipeline, &releases, now, &repo.main()?)
+    next(pipeline, &releases, now, &repo.origin.main()?)
 }
 
 /// Whether the next release is due at `now`, in seconds since the Unix epoch,
@@ -63,7 +63,7 @@ pub(crate) fn next(
         Some(newest) => {
             let cut_at = match releases.started_at(newest) {
                 Some(at) => at,
-                None => repo.tag_date(&format!("v{newest}"))?,
+                None => repo.refs.tag_date(&format!("v{newest}"))?,
             };
             assess(newest, cut_at, now, &pipeline.options.cadence)
         }

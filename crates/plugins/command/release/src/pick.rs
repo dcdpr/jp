@@ -126,7 +126,7 @@ pub(crate) fn pick(
     commits: &[String],
 ) -> Result<String, String> {
     let repo = &pipeline.repo;
-    let state = repo.common_dir()?.join(STOPPED);
+    let state = repo.worktrees.common_dir()?.join(STOPPED);
     if let Some(stopped) = load(&state)? {
         if stopped.worktree.join(".git").exists() {
             return Err(format!(
@@ -139,15 +139,15 @@ pub(crate) fn pick(
         remove(&state)?;
     }
 
-    repo.refuse_shallow()?;
-    repo.fetch()?;
-    let checkout = repo.checkout()?;
+    repo.origin.refuse_shallow()?;
+    repo.origin.fetch()?;
+    let checkout = repo.origin.checkout()?;
     let releases = repo.releases()?;
     let target = releases.pick_target(version)?;
     let commits = order(pipeline, &checkout, target.line, commits)?;
     let prepared = prepare(pipeline, &checkout, &releases, version, &commits)?;
 
-    let code = repo.worktree("pick", &prepared.line.tip)?;
+    let code = repo.worktrees.add("pick", &prepared.line.tip)?;
     if prepared.start {
         if let Some(bump) = &pipeline.options.bump {
             code.bump(bump, version)?;
@@ -177,11 +177,11 @@ pub(crate) fn pick(
 /// try again.
 pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
     let repo = &pipeline.repo;
-    let state = repo.common_dir()?.join(STOPPED);
+    let state = repo.worktrees.common_dir()?.join(STOPPED);
     let Some(stopped) = load(&state)? else {
         return Err("No pick is stopped, so there is nothing to continue.".to_owned());
     };
-    let Ok(code) = repo.reopen(&stopped.worktree) else {
+    let Ok(code) = repo.worktrees.reopen(&stopped.worktree) else {
         remove(&state)?;
         return Err(format!(
             "The worktree the pick into {} stopped in, {}, is gone; pick the commits again.",
@@ -190,32 +190,52 @@ pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
     };
     let version = Version::parse(&stopped.version)
         .map_err(|error| format!("{state} names no version: {error}"))?;
-    let mut commits = vec![];
-    for hash in &stopped.commits {
-        let subject = repo.git(&["log", "-1", "--format=%s", hash])?;
-        commits.push(Commit {
-            hash: hash.clone(),
-            subject: subject.trim().to_owned(),
-        });
-    }
+    let commits = stopped
+        .commits
+        .iter()
+        .map(|hash| {
+            Ok(Commit {
+                hash: hash.clone(),
+                subject: repo.history.subject(hash)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
 
+    let code = pick_rest(pipeline, &state, code, &version, &commits, &stopped)?;
+    finish_resumed(pipeline, &state, code, &version, &commits, &stopped)
+}
+
+/// Make the picks of `commits` into `version` the stopped pick `stopped` has
+/// left to do in `code`, once the one that stopped is resolved.
+///
+/// Returns `code` with every pick made; the error says what stopped it, with
+/// the pick kept in `code` and recorded in `state`.
+fn pick_rest<'r>(
+    pipeline: &Pipeline<'_>,
+    state: &Utf8Path,
+    code: Worktree<'r>,
+    version: &Version,
+    commits: &[Commit],
+    stopped: &Stopped,
+) -> Result<Worktree<'r>, String> {
     if let Some(commit) = commits.get(stopped.stopped)
         && let Err(error) = resolve(pipeline, &code, &commit.hash)
     {
         code.keep();
         return Err(error);
     }
+
     for (index, commit) in commits.iter().enumerate().skip(stopped.stopped + 1) {
         match pick_one(pipeline, &code, &commit.hash) {
             Ok(Picked::Done) => {}
             Ok(Picked::Conflicts(paths)) => {
-                return Err(stop(&state, code, &version, &commits, index, &paths)?);
+                return Err(stop(state, code, version, commits, index, &paths)?);
             }
             Err(error) => {
                 let top = code.keep();
-                save(&state, &Stopped {
+                save(state, &Stopped {
                     stopped: index,
-                    ..stopped
+                    ..stopped.clone()
                 })?;
                 return Err(format!(
                     "{error}\nThe pick is kept in {top}; finish it there and run `jp release pick \
@@ -225,35 +245,50 @@ pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
         }
     }
 
-    // Every pick is made, and the worktree is kept until the branches are
-    // updated.
+    Ok(code)
+}
+
+/// Update the branches for the stopped pick `stopped`, every pick of which is
+/// made in `code`, and say what was done and how to publish it.
+///
+/// The worktree is kept until the branches are updated; when they can't be, the
+/// error says how to try again.
+fn finish_resumed(
+    pipeline: &Pipeline<'_>,
+    state: &Utf8Path,
+    code: Worktree<'_>,
+    version: &Version,
+    commits: &[Commit],
+    stopped: &Stopped,
+) -> Result<String, String> {
+    let repo = &pipeline.repo;
     let finished = (|| {
-        repo.refuse_shallow()?;
-        repo.fetch()?;
-        let checkout = repo.checkout()?;
+        repo.origin.refuse_shallow()?;
+        repo.origin.fetch()?;
+        let checkout = repo.origin.checkout()?;
         let releases = repo.releases()?;
-        let prepared = prepare(pipeline, &checkout, &releases, &version, &commits)?;
+        let prepared = prepare(pipeline, &checkout, &releases, version, commits)?;
 
         finish(
             pipeline,
             &checkout,
             &prepared,
             &code.head()?,
-            &version,
-            &commits,
+            version,
+            commits,
         )
     })();
     match finished {
         Ok(said) => {
-            remove(&state)?;
+            remove(state)?;
             drop(code);
             Ok(said)
         }
         Err(error) => {
             let top = code.keep();
-            save(&state, &Stopped {
+            save(state, &Stopped {
                 stopped: commits.len(),
-                ..stopped
+                ..stopped.clone()
             })?;
             Err(format!(
                 "{error}\nThe picks are kept in {top}; run `jp release pick --continue` to try \
@@ -274,17 +309,16 @@ fn order(
     commits: &[String],
 ) -> Result<Vec<Commit>, String> {
     let repo = &pipeline.repo;
-    let main_line = repo.first_parents(&checkout.head)?;
+    let main_line = repo.history.first_parents(&checkout.head)?;
     let positions: HashMap<&str, usize> = main_line
         .iter()
         .enumerate()
         .map(|(position, hash)| (hash.as_str(), position))
         .collect();
-    let notes = format!("{}{}/", repo.prefix(), pipeline.fragments);
 
     let mut ordered: Vec<(usize, Commit)> = vec![];
     for commit in commits {
-        let hash = repo.commit(commit)?;
+        let hash = repo.history.commit(commit)?;
         if ordered.iter().any(|(_, known)| known.hash == hash) {
             continue;
         }
@@ -295,43 +329,37 @@ fn order(
                 checkout.describe()
             ));
         };
-        if line.picked.contains(&hash) || repo.containing(&hash)?.contains(&line.branch) {
+        if line.picked.contains(&hash) || repo.history.containing(&hash)?.contains(&line.branch) {
             return Err(format!("{} has {} already.", line.branch, short(&hash)));
         }
+        refuse_notes_only(pipeline, &hash)?;
 
-        let changed = repo.git(&[
-            "log",
-            "-1",
-            "-z",
-            "--format=",
-            "--name-only",
-            "--diff-merges=first-parent",
-            &hash,
-        ])?;
-        let code = changed
-            .split('\0')
-            .map(|path| path.trim_start_matches('\n'))
-            .any(|path| !path.is_empty() && !path.starts_with(&notes));
-        if !code {
-            return Err(format!(
-                "{} changes nothing outside {}, and release notes are corrected on `{MAIN}`, not \
-                 picked.",
-                short(&hash),
-                pipeline.fragments
-            ));
-        }
-
-        let subject = repo.git(&["log", "-1", "--format=%s", &hash])?;
-        ordered.push((position, Commit {
-            hash,
-            subject: subject.trim().to_owned(),
-        }));
+        let subject = repo.history.subject(&hash)?;
+        ordered.push((position, Commit { hash, subject }));
     }
 
     // `main_line` lists the newest commit first.
     ordered.sort_by(|(a, _), (b, _)| b.cmp(a));
 
     Ok(ordered.into_iter().map(|(_, commit)| commit).collect())
+}
+
+/// Refuse the commit `hash` when it changes nothing outside the fragments
+/// directory.
+fn refuse_notes_only(pipeline: &Pipeline<'_>, hash: &str) -> Result<(), String> {
+    if pipeline
+        .repo
+        .history
+        .changes_outside(hash, &pipeline.fragments)?
+    {
+        return Ok(());
+    }
+
+    Err(format!(
+        "{} changes nothing outside {}, and release notes are corrected on `{MAIN}`, not picked.",
+        short(hash),
+        pipeline.fragments
+    ))
 }
 
 /// Settle where the pick of `commits` into `version` goes, and what it files on
@@ -348,9 +376,10 @@ fn prepare<'r>(
 ) -> Result<Prepared<'r>, String> {
     let repo = &pipeline.repo;
     let target = releases.pick_target(version)?;
-    repo.refuse_checked_out(&target.line.branch)?;
-    repo.refuse_checked_out(&releases::notes_branch(version))?;
-    let local = repo.branch(&target.line.branch)?.local;
+    repo.refs.refuse_checked_out(&target.line.branch)?;
+    repo.refs
+        .refuse_checked_out(&releases::notes_branch(version))?;
+    let local = repo.refs.branch(&target.line.branch)?.local;
     let filing = plan(pipeline, checkout, releases, target.line, version, commits)?;
 
     Ok(Prepared {
@@ -377,9 +406,9 @@ fn plan<'r>(
     commits: &[Commit],
 ) -> Result<Filing<'r>, String> {
     let repo = &pipeline.repo;
-    let branch = repo.branch(&releases::notes_branch(version))?;
-    let notes = repo.worktree("pick", &checkout.head)?;
-    if let Some(tip) = repo.tip(&branch)? {
+    let branch = repo.refs.branch(&releases::notes_branch(version))?;
+    let notes = repo.worktrees.add("pick", &checkout.head)?;
+    if let Some(tip) = repo.refs.tip(&branch)? {
         merge_notes(&notes, &branch.name, &tip)?;
     }
 
@@ -395,7 +424,14 @@ fn plan<'r>(
     }
 
     let history = History::read(&dir).map_err(|error| error.to_string())?;
-    let forge = pipeline.forge();
+    let planner = Planner {
+        pipeline,
+        releases,
+        line,
+        version,
+        history: &history,
+        dir: &dir,
+    };
     for commit in commits {
         // Whether another release ships the commit, asked once.
         let mut elsewhere = None;
@@ -410,69 +446,112 @@ fn plan<'r>(
                 ));
                 continue;
             };
-            let Some(place) = Place::parse(&now) else {
-                continue;
-            };
-            let to = Place {
-                part: Part::Release(version.clone()),
-                highlight: place.highlight,
-                name: place.name.clone(),
-            };
-            if place.part == to.part {
-                continue;
+            if let Some(file) = planner.file(&commit.hash, now, &mut elsewhere)? {
+                filing.files.push(file);
             }
-            if dir.join(to.path()).exists() {
-                return Err(format!(
-                    "{}/{} exists already, so {}/{now} can't be filed there.",
-                    pipeline.fragments,
-                    to.path(),
-                    pipeline.fragments
-                ));
-            }
-
-            let text = fs::read_to_string(dir.join(&now))
-                .map_err(|error| format!("failed to read {}/{now}: {error}", pipeline.fragments))?;
-            let listed = lists_credits(
-                pipeline,
-                version,
-                &commit.hash,
-                &now,
-                &text,
-                place.highlight,
-            )?;
-
-            let copy = match (&place.part, elsewhere) {
-                (Part::Release(_), _) => true,
-                (Part::Unreleased, Some(shipped)) => shipped,
-                (Part::Unreleased, None) => {
-                    let containing = repo.containing(&commit.hash)?;
-                    let shipped = releases
-                        .shipping(&commit.hash, &containing)
-                        .iter()
-                        .any(|other| other.branch != line.branch);
-                    elsewhere = Some(shipped);
-                    shipped
-                }
-            };
-            let copy = if !copy {
-                None
-            } else if listed {
-                Some(text)
-            } else {
-                let credits = history.credits(&now, forge);
-                Some(with_credits(&text, place.highlight, &credits, forge))
-            };
-
-            filing.files.push(Filed {
-                from: now,
-                to: to.path(),
-                highlight: place.highlight,
-                copy,
-            });
         }
     }
 
     Ok(filing)
+}
+
+/// What [`plan`] files the notes of a pick into `version`, onto `line`, by.
+struct Planner<'a, 'p> {
+    pipeline: &'a Pipeline<'p>,
+    releases: &'a Releases,
+    line: &'a Line,
+    version: &'a Version,
+
+    /// The history of the fragments directory along `main`'s line.
+    history: &'a History,
+
+    /// The fragments directory, in a worktree at `main` with the notes branch
+    /// merged in.
+    dir: &'a Utf8Path,
+}
+
+impl Planner<'_, '_> {
+    /// How the fragment or highlight at `now` below the fragments directory,
+    /// which the commit `hash` added, is filed into the release's directory:
+    /// moved, or copied with its credits when another release ships `hash` too;
+    /// `None` for a file filed there already, or that is neither.
+    ///
+    /// `elsewhere` keeps whether another release ships `hash`, once asked.
+    /// The error says why the file can't be filed.
+    fn file(
+        &self,
+        hash: &str,
+        now: String,
+        elsewhere: &mut Option<bool>,
+    ) -> Result<Option<Filed>, String> {
+        let fragments = &self.pipeline.fragments;
+        let Some(place) = Place::parse(&now) else {
+            return Ok(None);
+        };
+        let to = Place {
+            part: Part::Release(self.version.clone()),
+            highlight: place.highlight,
+            name: place.name.clone(),
+        };
+        if place.part == to.part {
+            return Ok(None);
+        }
+        if self.dir.join(to.path()).exists() {
+            return Err(format!(
+                "{fragments}/{} exists already, so {fragments}/{now} can't be filed there.",
+                to.path(),
+            ));
+        }
+
+        let text = fs::read_to_string(self.dir.join(&now))
+            .map_err(|error| format!("failed to read {fragments}/{now}: {error}"))?;
+        let listed = lists_credits(
+            self.pipeline,
+            self.version,
+            hash,
+            &now,
+            &text,
+            place.highlight,
+        )?;
+        let copy = match place.part {
+            Part::Release(_) => true,
+            Part::Unreleased => self.shipped_elsewhere(hash, elsewhere)?,
+        };
+        let copy = if !copy {
+            None
+        } else if listed {
+            Some(text)
+        } else {
+            let forge = self.pipeline.forge();
+            let credits = self.history.credits(&now, forge);
+            Some(with_credits(&text, place.highlight, &credits, forge))
+        };
+
+        Ok(Some(Filed {
+            from: now,
+            to: to.path(),
+            highlight: place.highlight,
+            copy,
+        }))
+    }
+
+    /// Whether a release besides the one on `line` ships the commit `hash`,
+    /// asked of the repository once and kept in `elsewhere`.
+    fn shipped_elsewhere(&self, hash: &str, elsewhere: &mut Option<bool>) -> Result<bool, String> {
+        if let Some(shipped) = *elsewhere {
+            return Ok(shipped);
+        }
+
+        let containing = self.pipeline.repo.history.containing(hash)?;
+        let shipped = self
+            .releases
+            .shipping(hash, &containing)
+            .iter()
+            .any(|other| other.branch != self.line.branch);
+        *elsewhere = Some(shipped);
+
+        Ok(shipped)
+    }
 }
 
 /// Merge the notes branch `name`, at `tip`, into `notes`, a worktree at `main`,
@@ -743,29 +822,60 @@ fn finish(
     version: &Version,
     commits: &[Commit],
 ) -> Result<String, String> {
+    update_branches(pipeline, prepared, picked, version, commits)?;
+
+    picked_report(pipeline, checkout, prepared, version, commits)
+}
+
+/// Point the release branch at `picked`, and file the notes `prepared` planned
+/// on the notes branch, when it planned any.
+///
+/// Refuses a release branch that moved since the pick started.
+fn update_branches(
+    pipeline: &Pipeline<'_>,
+    prepared: &Prepared<'_>,
+    picked: &str,
+    version: &Version,
+    commits: &[Commit],
+) -> Result<(), String> {
     let repo = &pipeline.repo;
     let branch = &prepared.line.branch;
-    if !repo.is_ancestor(&prepared.line.tip, picked)? {
+    if !repo.history.is_ancestor(&prepared.line.tip, picked)? {
         return Err(format!(
             "{branch} moved since the pick started, to {}; pick the commits again.",
             short(&prepared.line.tip)
         ));
     }
     if prepared.local.as_deref() != Some(picked) {
-        repo.set_branch(branch, picked, prepared.local.as_deref())?;
+        repo.refs
+            .set_branch(branch, picked, prepared.local.as_deref())?;
     }
 
+    if prepared.filing.files.is_empty() {
+        return Ok(());
+    }
+    let message = notes_message(pipeline, version, branch, commits, &prepared.filing);
+    let hash = apply(pipeline, &prepared.filing, &message)?;
+
+    repo.refs.set_branch(
+        &releases::notes_branch(version),
+        &hash,
+        prepared.filing.branch.local.as_deref(),
+    )
+}
+
+/// What the pick of `commits` into `version` did, as `prepared` planned it, and
+/// how to publish it.
+fn picked_report(
+    pipeline: &Pipeline<'_>,
+    checkout: &Checkout,
+    prepared: &Prepared<'_>,
+    version: &Version,
+    commits: &[Commit],
+) -> Result<String, String> {
+    let branch = &prepared.line.branch;
     let notes_branch = releases::notes_branch(version);
     let filed_notes = !prepared.filing.files.is_empty();
-    if filed_notes {
-        let message = notes_message(pipeline, version, branch, commits, &prepared.filing);
-        let hash = apply(pipeline, &prepared.filing, &message)?;
-        repo.set_branch(
-            &notes_branch,
-            &hash,
-            prepared.filing.branch.local.as_deref(),
-        )?;
-    }
 
     let picked_count = counted(commits.len(), "commit", "commits");
     let mut said = if prepared.start {
@@ -797,16 +907,8 @@ fn finish(
         ));
     }
     if let Some(ahead) = checkout.ahead() {
-        let mut holding = vec![];
-        for commit in commits {
-            if !repo.is_ancestor(&commit.hash, &checkout.main)? {
-                holding.push(branch.clone());
-                break;
-            }
-        }
-        if filed_notes {
-            holding.push(notes_branch.clone());
-        }
+        let notes = filed_notes.then_some(notes_branch.as_str());
+        let holding = holding(pipeline, checkout, commits, branch, notes)?;
         if !holding.is_empty() {
             said.push_str(&format!(
                 "{ahead}: {} {} commits {MAIN} doesn't have yet.\n",
@@ -828,6 +930,33 @@ fn finish(
     }
 
     Ok(said)
+}
+
+/// The branches a pick of `commits` made, from a checkout ahead of `origin`'s
+/// `main`, that hold commits `origin`'s `main` lacks: the release branch
+/// `branch` when one of `commits` is such a commit, and the notes branch
+/// `notes`, when the pick filed notes on it.
+fn holding(
+    pipeline: &Pipeline<'_>,
+    checkout: &Checkout,
+    commits: &[Commit],
+    branch: &str,
+    notes: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let mut holding = vec![];
+    for commit in commits {
+        if !pipeline
+            .repo
+            .history
+            .is_ancestor(&commit.hash, &checkout.main)?
+        {
+            holding.push(branch.to_owned());
+            break;
+        }
+    }
+    holding.extend(notes.map(ToOwned::to_owned));
+
+    Ok(holding)
 }
 
 /// Move or copy each file of `filing` into the release's directory, and commit
@@ -862,7 +991,7 @@ fn apply(pipeline: &Pipeline<'_>, filing: &Filing<'_>, message: &str) -> Result<
 /// The pick a conflict stopped, as the release it goes into and the worktree
 /// holding it, when there is one to continue.
 pub(crate) fn stopped(pipeline: &Pipeline<'_>) -> Result<Option<(String, Utf8PathBuf)>, String> {
-    let state = pipeline.repo.common_dir()?.join(STOPPED);
+    let state = pipeline.repo.worktrees.common_dir()?.join(STOPPED);
 
     Ok(load(&state)?
         .filter(|stopped| stopped.worktree.join(".git").exists())

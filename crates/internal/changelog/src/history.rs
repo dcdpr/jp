@@ -182,6 +182,21 @@ pub(crate) enum Change {
     Renamed { from: String, to: String },
 }
 
+impl Change {
+    /// The path the change leaves a file at, and the path it was at before:
+    /// `None` before an added file, and the same path before a modified one.
+    ///
+    /// `None` for a deleted file, which the change leaves nowhere.
+    fn paths(&self) -> Option<(Option<&String>, &String)> {
+        match self {
+            Self::Added(path) => Some((None, path)),
+            Self::Modified(path) => Some((Some(path), path)),
+            Self::Renamed { from, to } => Some((Some(from), to)),
+            Self::Deleted(_) => None,
+        }
+    }
+}
+
 /// Read the log `git::log` writes: each commit's header, `commit <hash>`, a
 /// line break and its message, then each path it changed as `--name-status -z`
 /// writes them, every field ended by a NUL.
@@ -269,47 +284,7 @@ pub(crate) fn credited(commits: &[Commit], paths: &[&str]) -> Vec<Vec<usize>> {
     let mut credited = vec![vec![]; paths.len()];
 
     for (index, commit) in commits.iter().enumerate() {
-        // Every change in a commit is read against where the files were after
-        // it, so a path one change frees and another takes, in the same commit,
-        // is followed to the right file.
-        let mut ended = vec![];
-        let mut moved = vec![];
-
-        for change in &commit.changes {
-            match change {
-                Change::Added(path) | Change::Modified(path) => {
-                    let Some(&file) = followed.get(path) else {
-                        continue;
-                    };
-                    if is_unreleased(path) {
-                        credited[file].push(index);
-                    }
-                    if matches!(change, Change::Added(_)) {
-                        ended.push(path);
-                    }
-                }
-                Change::Renamed { from, to } => {
-                    let Some(&file) = followed.get(to) else {
-                        continue;
-                    };
-                    if is_unreleased(from) && is_unreleased(to) {
-                        credited[file].push(index);
-                    }
-                    ended.push(to);
-                    moved.push((from, file));
-                }
-                // Nothing followed can have been deleted after the commit: the
-                // commit that wrote it again ended its history.
-                Change::Deleted(_) => {}
-            }
-        }
-
-        for path in ended {
-            followed.remove(path);
-        }
-        for (path, file) in moved {
-            followed.insert(path.clone(), file);
-        }
+        follow(commit, index, &mut followed, &mut credited);
     }
 
     for commits in &mut credited {
@@ -317,6 +292,51 @@ pub(crate) fn credited(commits: &[Commit], paths: &[&str]) -> Vec<Vec<usize>> {
     }
 
     credited
+}
+
+/// Credit `commit`, at `index` in the log, to each file in `followed` it wrote
+/// or changed at the top level, and follow each file it moved back to where it
+/// was before.
+///
+/// `followed` maps a path to the index of the file found there, and `credited`
+/// holds each file's credited commits.
+/// A file the commit added ends its history: nothing before it is that file.
+fn follow(
+    commit: &Commit,
+    index: usize,
+    followed: &mut HashMap<String, usize>,
+    credited: &mut [Vec<usize>],
+) {
+    // Every change in a commit is read against where the files were after it,
+    // so a path one change frees and another takes, in the same commit, is
+    // followed to the right file.
+    let mut ended = vec![];
+    let mut moved = vec![];
+
+    for change in &commit.changes {
+        // Nothing followed can have been deleted after the commit: the commit
+        // that wrote it again ended its history.
+        let Some((before, after)) = change.paths() else {
+            continue;
+        };
+        let Some(&file) = followed.get(after) else {
+            continue;
+        };
+        if is_unreleased(after) && before.is_none_or(|before| is_unreleased(before)) {
+            credited[file].push(index);
+        }
+        if before != Some(after) {
+            ended.push(after);
+            moved.extend(before.map(|before| (before, file)));
+        }
+    }
+
+    for path in ended {
+        followed.remove(path);
+    }
+    for (path, file) in moved {
+        followed.insert(path.clone(), file);
+    }
 }
 
 #[cfg(test)]

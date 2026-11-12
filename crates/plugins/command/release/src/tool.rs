@@ -56,7 +56,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     }
 
     let root = init.workspace.root.as_path();
-    let relative = match workspace_relative(root, &options.fragments_dir) {
+    let relative = match workspace_relative(root, &options.notes.fragments_dir) {
         Ok(relative) => relative,
         Err(refusal) => return refuse(refusal),
     };

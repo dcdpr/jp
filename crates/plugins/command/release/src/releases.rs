@@ -204,6 +204,8 @@ pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTree
 ///
 /// The error names a commit the log gives no date.
 pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), String> {
+    const FIELDS: usize = 3;
+
     let mut started = vec![];
     let mut picked = BTreeSet::new();
 
@@ -212,7 +214,8 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
         if record.is_empty() {
             continue;
         }
-        let mut fields = record.splitn(3, '\n');
+        // The hash, the date, and the message, which can hold more newlines.
+        let mut fields = record.splitn(FIELDS, '\n');
         let commit = fields.next().unwrap_or_default();
         let at = fields
             .next()

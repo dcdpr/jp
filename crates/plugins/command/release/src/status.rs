@@ -21,7 +21,7 @@ use crate::{
     pick,
     pipeline::{Pipeline, counted, listed, push},
     releases::{self, Line, NOTES_BRANCH, RELEASE_BRANCH, Releases, Standing},
-    repository::{Checkout, MAIN, ORIGIN, Tags, Worktree},
+    repository::{Branch, Checkout, MAIN, ORIGIN, Tags, Worktree},
 };
 
 /// Where the releases of the workspace stand at `now`, in seconds since the
@@ -35,13 +35,13 @@ pub(crate) fn status(
     builds: Option<&Utf8Path>,
 ) -> Result<String, String> {
     let repo = &pipeline.repo;
-    repo.refuse_shallow()?;
-    repo.fetch()?;
+    repo.origin.refuse_shallow()?;
+    repo.origin.fetch()?;
     let (releases, tags) = repo.releases_and_tags()?;
-    let checkout = repo.checked_out()?;
+    let checkout = repo.origin.checked_out()?;
 
     let mut paragraphs = vec![];
-    if repo.lacks_main(&checkout)? {
+    if repo.origin.lacks_main(&checkout)? {
         paragraphs.push(checkout.behind());
     }
     if let Some((version, worktree)) = pick::stopped(pipeline)? {
@@ -61,7 +61,7 @@ pub(crate) fn status(
     // read the notes of a release in preparation, and is removed before `due`
     // checks out its own.
     if !in_preparation.is_empty() {
-        let main = repo.worktree("status", &checkout.head)?;
+        let main = repo.worktrees.add("status", &checkout.head)?;
         for (line, version) in in_preparation {
             paragraphs.push(preparing(
                 pipeline, &releases, line, version, &checkout, &main,
@@ -100,40 +100,15 @@ fn unpublished(
 ) -> Result<Vec<String>, String> {
     let repo = &pipeline.repo;
     let mut branches = vec![];
-    let mut diverged = vec![];
-
-    for branch in repo.branches(RELEASE_BRANCH)? {
-        if releases::line_of(&branch.name).is_none() {
-            continue;
-        }
-        if repo.standing(&branch)?.is_some_and(Standing::unpushed) {
+    for branch in repo.refs.branches(RELEASE_BRANCH)? {
+        if releases::line_of(&branch.name).is_some()
+            && repo.refs.standing(&branch)?.is_some_and(Standing::unpushed)
+        {
             branches.push(branch.name);
         }
     }
-    for branch in repo.branches(NOTES_BRANCH)? {
-        let Some(version) = notes_version(&branch.name) else {
-            continue;
-        };
-        match repo.standing(&branch)? {
-            Some(Standing::Local | Standing::Ahead) => {
-                // A notes branch whose files the checkout has is merged, so
-                // pushing it again would only bring it back.
-                let Some(local) = &branch.local else {
-                    continue;
-                };
-                let directory = format!("{}/{version}/", pipeline.fragments);
-                let merged = repo
-                    .files_at(local, &directory)?
-                    .is_subset(&repo.files_at(&checkout.head, &directory)?);
-                if !merged {
-                    branches.push(branch.name);
-                }
-            }
-            Some(Standing::Diverged) => diverged.push(branch.name),
-            _ => {}
-        }
-    }
-
+    let (notes, diverged) = notes_branches(pipeline, checkout)?;
+    branches.extend(notes);
     let tags: Vec<String> = tags
         .local
         .keys()
@@ -142,26 +117,7 @@ fn unpublished(
         .cloned()
         .collect();
 
-    let mut paragraphs = vec![];
-    if !branches.is_empty() || !tags.is_empty() {
-        let mut delete = vec![];
-        if !branches.is_empty() {
-            delete.push(format!("`git branch -D {}`", branches.join(" ")));
-        }
-        if !tags.is_empty() {
-            delete.push(format!("`git tag -d {}`", tags.join(" ")));
-        }
-        let names: Vec<String> = branches.into_iter().chain(tags).collect();
-        let them = if names.len() == 1 { "it" } else { "them" };
-
-        paragraphs.push(format!(
-            "Only this repository has {}. Publish {them} with:\n\n{}\nor, if a rehearsal left \
-             {them}, delete {them} with {}.",
-            listed(&names),
-            push(&names),
-            delete.join(" and "),
-        ));
-    }
+    let mut paragraphs: Vec<String> = publish_them(branches, tags).into_iter().collect();
     if !diverged.is_empty() {
         let them = if diverged.len() == 1 { "it" } else { "them" };
         paragraphs.push(format!(
@@ -172,6 +128,85 @@ fn unpublished(
     }
 
     Ok(paragraphs)
+}
+
+/// The notes branches with commits `origin` lacks, leaving out the ones the
+/// commit checked out has merged, and the notes branches here and on `origin`
+/// that diverged.
+fn notes_branches(
+    pipeline: &Pipeline<'_>,
+    checkout: &Checkout,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let repo = &pipeline.repo;
+    let mut unpushed = vec![];
+    let mut diverged = vec![];
+
+    for branch in repo.refs.branches(NOTES_BRANCH)? {
+        let Some(version) = notes_version(&branch.name) else {
+            continue;
+        };
+        match repo.refs.standing(&branch)? {
+            Some(Standing::Local | Standing::Ahead)
+                if !merged(pipeline, checkout, &branch, &version)? =>
+            {
+                unpushed.push(branch.name);
+            }
+            Some(Standing::Diverged) => diverged.push(branch.name),
+            _ => {}
+        }
+    }
+
+    Ok((unpushed, diverged))
+}
+
+/// Whether the commit checked out has the files the notes branch `branch` of
+/// `version` filed, which makes it merged: pushing it again would only bring it
+/// back.
+///
+/// A branch only `origin` has counts as merged.
+fn merged(
+    pipeline: &Pipeline<'_>,
+    checkout: &Checkout,
+    branch: &Branch,
+    version: &Version,
+) -> Result<bool, String> {
+    let Some(local) = &branch.local else {
+        return Ok(true);
+    };
+    let repo = &pipeline.repo;
+    let directory = format!("{}/{version}/", pipeline.fragments);
+
+    Ok(repo
+        .history
+        .files_at(local, &directory)?
+        .is_subset(&repo.history.files_at(&checkout.head, &directory)?))
+}
+
+/// The paragraph saying only this repository has the branches `branches` and
+/// the tags `tags`, how to publish them, and how to delete what a rehearsal
+/// left; `None` when there are none.
+fn publish_them(branches: Vec<String>, tags: Vec<String>) -> Option<String> {
+    if branches.is_empty() && tags.is_empty() {
+        return None;
+    }
+
+    let mut delete = vec![];
+    if !branches.is_empty() {
+        delete.push(format!("`git branch -D {}`", branches.join(" ")));
+    }
+    if !tags.is_empty() {
+        delete.push(format!("`git tag -d {}`", tags.join(" ")));
+    }
+    let names: Vec<String> = branches.into_iter().chain(tags).collect();
+    let them = if names.len() == 1 { "it" } else { "them" };
+
+    Some(format!(
+        "Only this repository has {}. Publish {them} with:\n\n{}\nor, if a rehearsal left {them}, \
+         delete {them} with {}.",
+        listed(&names),
+        push(&names),
+        delete.join(" and "),
+    ))
 }
 
 /// The finalized releases with no publishable build kept in `builds`, and the
