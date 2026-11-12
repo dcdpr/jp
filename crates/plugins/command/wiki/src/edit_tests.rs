@@ -230,12 +230,16 @@ fn archiving_by_status_refuses_a_page_with_active_children() {
 }
 
 /// Run git in `dir`, failing the test when it does.
+///
+/// The user's and the system's git configuration are not read, so signing or
+/// hooks set up there can't change what the test does.
 fn git(dir: &Utf8Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(["-c", "user.name=Tester", "-c", "user.email=t@example.com"])
-        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap();
     assert!(

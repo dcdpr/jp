@@ -42,10 +42,14 @@ fn sync_with(dir: &Utf8Path, config: &Value, force: bool) -> Result<String, Stri
     )
 }
 
+/// Run git in `dir` without the user's or the system's git configuration, which
+/// can ask for a signature on every commit.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
         .args(args)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
 
@@ -61,7 +65,6 @@ fn repository() -> Utf8TempDir {
     git(dir.path(), &["init", "--quiet", "--initial-branch=main"]);
     git(dir.path(), &["config", "user.name", "Tester"]);
     git(dir.path(), &["config", "user.email", "tester@example.com"]);
-    git(dir.path(), &["config", "commit.gpgsign", "false"]);
 
     dir
 }

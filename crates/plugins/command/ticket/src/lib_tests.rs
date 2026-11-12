@@ -125,8 +125,7 @@ fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
 /// Run git in `dir`, failing the test with its stderr rather than a bare status
 /// code.
 fn git(dir: &Utf8Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .current_dir(dir)
+    let output = isolated_git(dir)
         .args(args)
         .output()
         .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
@@ -140,10 +139,20 @@ fn git(dir: &Utf8Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+/// A git command in `dir` that reads neither the user's nor the system's git
+/// configuration, so the machine's identity, default branch name, and signing
+/// setup can't reach in and change what the test does.
+fn isolated_git(dir: &Utf8Path) -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    command
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "");
+
+    command
+}
+
 /// A repository with `docs/ticket/`, one commit on `main`, and nothing else.
-///
-/// The config is set locally so the machine's identity, default branch name,
-/// and signing setup can't reach in and change what the test does.
 fn git_repo() -> Utf8TempDir {
     let dir = Utf8TempDir::new().unwrap();
     let root = dir.path();
@@ -151,7 +160,6 @@ fn git_repo() -> Utf8TempDir {
     git(root, &["init", "--initial-branch=main"]);
     git(root, &["config", "user.name", "tester"]);
     git(root, &["config", "user.email", "tester@example.com"]);
-    git(root, &["config", "commit.gpgsign", "false"]);
 
     std::fs::create_dir_all(root.join("docs/ticket")).unwrap();
     std::fs::write(root.join("docs/ticket").join(EPOCH_FILE), "2026-08-10\n").unwrap();
@@ -168,8 +176,8 @@ fn git_repo() -> Utf8TempDir {
 fn commit(root: &Utf8Path, message: &str, at: Option<&str>) {
     git(root, &["add", "-A"]);
 
-    let mut command = std::process::Command::new("git");
-    command.current_dir(root).args(["commit", "-m", message]);
+    let mut command = isolated_git(root);
+    command.args(["commit", "-m", message]);
     if let Some(at) = at {
         command
             .env("GIT_AUTHOR_DATE", at)
