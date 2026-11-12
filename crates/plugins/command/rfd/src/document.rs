@@ -84,6 +84,27 @@ pub(crate) fn body(content: &str) -> String {
     lines[start..].join("\n").trim().to_owned()
 }
 
+/// Extract the reference link label from a relationship field entry:
+/// `"tickets"` for `[RFD 001][tickets]`, and `"RFD 001"` for `[RFD 001]` or
+/// `[RFD 001][]`.
+///
+/// Returns `None` for inline links (`[RFD 001](001-x.md)`) or plain text.
+#[must_use]
+pub(crate) fn reference_label(entry: &str) -> Option<String> {
+    let (text, rest) = entry.trim().strip_prefix('[')?.split_once(']')?;
+
+    if rest.starts_with('(') {
+        return None;
+    }
+
+    let label = rest
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once(']'))
+        .map_or("", |(label, _)| label);
+
+    Some(if label.is_empty() { text } else { label }.to_owned())
+}
+
 /// The RFD an entry of a relationship field cites: `[RFD 001][tickets]` cites
 /// `001`.
 #[must_use]
@@ -170,13 +191,6 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
         });
 
         Some(defined.unwrap_or(value))
-    }
-
-    /// Whether the line at `index` belongs to the field `key`, continuation
-    /// lines included.
-    #[must_use]
-    pub(crate) fn is_field_line(&self, key: &str, index: usize) -> bool {
-        self.0.is_field_line(key, index)
     }
 }
 
@@ -271,6 +285,30 @@ impl Document {
             // block to add it to.
             self.0.set(key, &kept.join(", ")).is_ok()
         }
+    }
+
+    /// Remove the reference link definition `[label]: …` if no other line
+    /// references `[label]`.
+    ///
+    /// Label matching is case-insensitive, following CommonMark.
+    /// Returns `false` if the definition is still referenced or does not exist.
+    pub(crate) fn remove_unused_definition(&mut self, label: &str) -> bool {
+        let reference = format!("[{}]", label.to_lowercase());
+        let definition = format!("{reference}:");
+        let is_definition = |line: &str| line.trim_start().to_lowercase().starts_with(&definition);
+
+        let used = self
+            .0
+            .lines()
+            .iter()
+            .any(|line| !is_definition(line) && line.to_lowercase().contains(&reference));
+        if used {
+            return false;
+        }
+
+        let before = self.0.lines().len();
+        self.0.retain_lines(|line| !is_definition(line));
+        self.0.lines().len() != before
     }
 
     /// The index of the document's heading line, `# RFD 042: Title`.

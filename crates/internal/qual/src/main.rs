@@ -50,6 +50,12 @@ enum Command {
 
     /// List all non-exempt findings in the working tree.
     Report {
+        /// List findings for this rule only.
+        ///
+        /// Fails if the policy exempts the rule.
+        #[arg(long)]
+        rule: Option<String>,
+
         #[arg(long, value_enum, default_value_t)]
         format: Format,
     },
@@ -84,8 +90,11 @@ fn run(cli: Cli) -> Result<bool, Box<dyn Error>> {
                 verdict.passed(),
             )
         }
-        Command::Report { format } => {
-            let report = workspace.report(&runner)?;
+        Command::Report { rule, format } => {
+            let report = match &rule {
+                Some(rule) => workspace.report_rule(&runner, rule)?,
+                None => workspace.report(&runner)?,
+            };
             let rules = report.findings.iter().map(|finding| finding.rule.as_str());
             let guidance = workspace.guidance(rules)?;
             (render::report(&report, &guidance, format), true)

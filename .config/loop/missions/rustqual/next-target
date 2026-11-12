@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#
+# Print the next finding of the run's rule, followed by the rule's guidance.
+#
+# `qual report` orders findings by file and line, so a run finishes one file
+# before moving to the next. A target groups all findings that share a
+# `(rule, file, symbol)` key (the identity `qual diff` compares by), so two
+# magic numbers in the same function form a single target. Keys recorded in
+# `state/attempted.jsonl` or `state/rejected.jsonl` are skipped.
+#
+# Prints nothing when no findings remain, which ends the run. Exits 1 if
+# `MAX_FAILED_GATES` consecutive gates fail, preventing a recurring model
+# mistake from exhausting the single attempt on every remaining finding.
+#
+# Also writes the target to `state/current.json`, where the gate reads it.
+
+set -euo pipefail
+
+MAX_FAILED_GATES=8
+
+cd "$LOOP_ROOT"
+# shellcheck source=lib.sh
+source "$LOOP_MISSION_DIR/lib.sh"
+
+rule=${QUAL_RULE:?the mission exports the rule of the run}
+current=$LOOP_STATE/current.json
+
+# Remove any stale target or rejection file before starting the turn so a
+# leftover `state/rejection` cannot reject the next finding.
+rm -f "$current" "$LOOP_STATE/rejection"
+
+failures=$(cat "$LOOP_STATE/failures")
+if [[ $failures -ge $MAX_FAILED_GATES ]]; then
+    echo "$LOOP_MISSION: the gate failed $failures times in a row; stopping before the rest of $rule's findings are used up. The reasons are in $LOOP_STATE/attempted.jsonl" >&2
+    exit 1
+fi
+
+report=$(qual report --rule "$rule" --format json)
+skip=$(jq -cs 'map(.key)' "$LOOP_STATE/attempted.jsonl" "$LOOP_STATE/rejected.jsonl")
+
+target=$(jq -c --argjson skip "$skip" '
+    def key: {rule, file, symbol};
+    map(select(key as $key | any($skip[]; . == $key) | not))
+    | if length == 0 then empty
+      else (.[0] | key) as $key | {key: $key, findings: map(select(key == $key))}
+      end
+' <<<"$report")
+
+if [[ -z $target ]]; then
+    left=$(jq length <<<"$report")
+    if [[ $left -gt 0 ]]; then
+        echo "$LOOP_MISSION: $left finding(s) of $rule are left, each attempted or rejected; see attempted.jsonl and rejected.jsonl in $LOOP_STATE" >&2
+    fi
+    exit 0
+fi
+printf '%s\n' "$target" > "$current"
+
+# Format each finding on one line, matching `qual report --format ai`.
+jq -r '
+    .findings[]
+    | (if .file == "" then "<workspace>"
+       elif .line > 0 then "\(.file):\(.line)"
+       else .file end) as $location
+    | if .symbol == "" then "- `\($location)`: \(.message)"
+      else "- `\($location)` in `\(.symbol)`: \(.message)" end
+' <<<"$target"
+echo
+cat "$(guidance_path "$rule")"

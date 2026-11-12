@@ -13,6 +13,7 @@
 mod admission;
 mod approvals;
 mod approve;
+mod compaction;
 pub(crate) mod discovery;
 pub(crate) mod dispatch;
 pub(crate) mod help;

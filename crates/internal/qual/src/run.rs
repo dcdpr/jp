@@ -74,6 +74,9 @@ pub enum Error {
         source: PolicyError,
     },
 
+    #[error("{path} exempts rule `{rule}`, so a report has no findings for it")]
+    Exempt { rule: String, path: Utf8PathBuf },
+
     #[error(transparent)]
     Renames(#[from] RenamesError),
 
@@ -144,6 +147,27 @@ impl Workspace {
         report
             .findings
             .retain(|finding| policy.gates(&finding.rule));
+        Ok(report)
+    }
+
+    /// Collect all findings for `rule` in the working tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Exempt`] without running `rustqual` if the policy
+    /// exempts `rule`.
+    /// Returns an error if the policy cannot be read, a `rustqual` pass fails
+    /// or skips a file, or a source file with a finding fails to parse.
+    pub fn report_rule(&self, runner: &dyn ProcessRunner, rule: &str) -> Result<Report, Error> {
+        if !self.policy()?.gates(rule) {
+            return Err(Error::Exempt {
+                rule: rule.to_owned(),
+                path: self.config_dir.join(policy::FILE),
+            });
+        }
+
+        let mut report = self.report(runner)?;
+        report.findings.retain(|finding| finding.rule == rule);
         Ok(report)
     }
 

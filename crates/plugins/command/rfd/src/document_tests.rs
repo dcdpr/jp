@@ -326,6 +326,35 @@ fn uncite_drops_entries_wherever_they_wrap_to() {
 }
 
 #[test]
+fn reference_label_reads_every_link_form() {
+    assert_eq!(reference_label("[RFD 001]").as_deref(), Some("RFD 001"));
+    assert_eq!(reference_label("[RFD 001][]").as_deref(), Some("RFD 001"));
+    assert_eq!(
+        reference_label("[RFD 001][tickets]").as_deref(),
+        Some("tickets")
+    );
+    assert_eq!(reference_label("[RFD 001](001-x.md)"), None);
+    assert_eq!(reference_label("RFD 001"), None);
+}
+
+#[test]
+fn remove_unused_definition_drops_a_definition_nothing_cites() {
+    let mut document = Document::parse("Body.\n\n[RFD 001]: 001-x.md\n[rfd 002]: 002-y.md\n");
+
+    assert!(document.remove_unused_definition("RFD 002"));
+    assert_eq!(document.render(), "Body.\n\n[RFD 001]: 001-x.md\n");
+}
+
+#[test]
+fn remove_unused_definition_keeps_a_definition_in_use() {
+    let text = "See [RFD 001].\n\n[RFD 001]: 001-x.md\n";
+    let mut document = Document::parse(text);
+
+    assert!(!document.remove_unused_definition("rfd 001"));
+    assert_eq!(document.render(), text);
+}
+
+#[test]
 fn uncite_removes_a_field_left_empty() {
     let out = edit(|document| assert!(document.uncite("Extended by", |_| true)));
 

@@ -111,6 +111,13 @@ JP also removes all active subscriptions when the plugin exits.
 
 ### Interactive Events
 
+> [!NOTE]
+> Interactive prompts for plugin-delegated `query` turns (without event
+> subscriptions) are being split into a separate RFD (T-1hva7by), reusing the
+> `tool_approval` and `inquiry` payloads below and adding a `decline` action
+> that falls back to JP's detached prompt behavior.
+> T-1hetcnt builds on that RFD to support tool approvals over the chat bridge.
+
 Pushed events without a `respond` field are informational: the plugin observes
 them and does not reply.
 Events that require user input carry a `respond` field naming the expected

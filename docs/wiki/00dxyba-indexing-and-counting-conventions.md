@@ -89,6 +89,15 @@ Two consequences worth calling out:
   Note this diverges from Rust's `..` (which is exclusive); there is no `..=`
   form.
 
+- `--turn` accepts a comma-separated list of positions and ranges (or repeated
+  `--turn` flags): `--turn=1,3..10,15` selects turn 1, turns 3 through 10, and
+  turn 15.
+  Each item follows the rules above, and any out-of-range item returns an error.
+  Overlapping items are merged into a single window, whereas adjacent items
+  (`1..3,4..6`) remain separate windows so `jp conversation compact` compacts
+  each window independently.
+  Lists starting with a from-end position require `=` (`--turn=-3,-1`).
+
 ## Which bounds go where
 
 A bound is legal in a config rule only if it is **conversation-independent** —
@@ -156,6 +165,8 @@ so it is half-open and uses distinct flag names (`--created-since` /
   freely (`--turn 2..-1`).
   `--first` and `--last` given together produce two windows and skip the turns
   between them.
+  A `--turn` list produces one window per item after `TurnSelection::windows`
+  merges overlapping items.
 
 - **Keep flags** (`jp_cli::cmd::turn_selection`): `keep_first_bound` /
   `keep_last_bound` map `RuleBound::Absolute(N)` (the 1-based value parsed from

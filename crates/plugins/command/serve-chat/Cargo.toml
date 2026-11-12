@@ -1,0 +1,53 @@
+[package]
+name = "jp-serve-chat"
+description = "Chat bridge that relays messages between a chat app and JP turns."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# No `[package.metadata.jp-registry]`: the bridge runs on one machine, installed
+# from a checkout with `cargo install`, so it is deliberately absent from the
+# published registry. `jp` finds it on `$PATH`.
+
+[dependencies]
+jp_plugin = { workspace = true }
+
+camino = { workspace = true, features = ["serde1"] }
+chrono = { workspace = true }
+humantime = { workspace = true }
+# Calls the decide API, which says whether a group message is for the assistant.
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+# Resolves the workspace's own planner persona under the bridge's per-turn
+# settings, the way the host layers them.
+jp_config = { workspace = true }
+
+camino-tempfile = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+# Hashes a snapshot the way `just chat-take` does, in the `take.sh` tests.
+sha2 = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+name = "jp_serve_chat"
+path = "src/lib.rs"
+doctest = false
+
+# The binary is a shell around the library, and carries no tests of its own.
+[[bin]]
+name = "jp-serve-chat"
+path = "src/main.rs"
+test = false

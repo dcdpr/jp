@@ -80,6 +80,13 @@ values = []
 max = 1
 unique = "key-value"
 
+# When the work is wanted. Takes any value: a date, `2026-11-25`, or a duration
+# after the ticket's `Date`, `1w`. A date is what a label filter can find.
+[plugins.command.ticket.options.labels.due]
+description = "When the work is wanted: a date, YYYY-MM-DD, or a duration after the ticket's date, such as 1w."
+values = []
+max = 1
+
 # Any other RFD a ticket's work belongs to, such as one phase of its
 # Implementation Plan.
 [plugins.command.ticket.options.labels.relevant-rfd]

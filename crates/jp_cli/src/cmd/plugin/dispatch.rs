@@ -11,7 +11,7 @@ use std::{
     pin::Pin,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -37,13 +37,13 @@ use jp_llm::event::NoticeSink;
 use jp_plugin::{
     Manifest, PROTOCOL_VERSION,
     message::{
-        ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
-        ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
-        DescribeResponse, DoneResponse, DraftResponse, EditFilesRequest, EditedResponse,
-        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, InterruptAction as WireAction,
-        InterruptRequest, LockState, LogMessage, OutputFormat as PluginOutputFormat, PathsInfo,
-        PluginToHost, QueryCompleteResponse, QueryRequest, SetTitleRequest, WorkspaceInfo,
-        WriteDraftRequest,
+        CompactRequest, CompactedResponse, ComposeMode, ComposeOption, ComposeRequest,
+        ComposeResponse, ConfigEntry, ConfigResponse, ConfigsResponse, ConversationSummary,
+        ConversationsResponse, CreatedResponse, DescribeResponse, DoneResponse, DraftResponse,
+        EditFilesRequest, EditedResponse, ErrorResponse, EventsResponse, HostToPlugin, InitMessage,
+        InterruptAction as WireAction, InterruptRequest, LockState, LogMessage,
+        OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
+        QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
     registry::{Registry, RegistryPlugin},
 };
@@ -62,6 +62,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::{
     admission::{Official, admit},
     approvals::ApprovalStore,
+    compaction,
     discovery::{self, LocalPlugin},
     help, install, output,
     process_tree::ProcessTree,
@@ -833,6 +834,13 @@ async fn message_loop(
                 output::print(&ctx.printer, &print, &ctx.config().style.markdown);
             }
 
+            // `None` means the compaction is running and will answer for itself.
+            PluginToHost::Compact(request) => {
+                if let Some(response) = run_compact(ctx, request, stdin, turns) {
+                    answer(stdin, &response, "a compact request")?;
+                }
+            }
+
             // Answered once the turn has acted on it, which can be well after
             // this loop has moved on, so the wait gets a task of its own.
             PluginToHost::Interrupt(request) => {
@@ -1151,12 +1159,18 @@ fn lock_for_query(
             .map_err(|error| format!("failed to create the conversation: {error}"));
     }
 
-    let id = parse_conversation_id(&request.conversation)?;
+    lock_existing(ctx, &request.conversation)
+}
+
+/// Take exclusive hold of an existing conversation, failing rather than waiting
+/// when something else holds it.
+fn lock_existing(ctx: &Ctx, conversation: &str) -> Result<ConversationLock, String> {
+    let id = parse_conversation_id(conversation)?;
 
     let handle = ctx
         .workspace
         .acquire_conversation(&id)
-        .map_err(|error| format!("conversation {}: {error}", request.conversation))?;
+        .map_err(|error| format!("conversation {conversation}: {error}"))?;
 
     match ctx
         .workspace
@@ -1396,6 +1410,57 @@ async fn prepare_turn(
     .await?;
 
     Ok((inputs, stream))
+}
+
+/// Spawn a task to apply a plugin's `compact` request to a conversation.
+///
+/// Returns `None` once the background task is spawned; the task sends the
+/// correlated reply when compaction finishes.
+/// Returns `Some` if locking or config resolution fails before the task can
+/// start.
+fn run_compact(
+    ctx: &Ctx,
+    request: CompactRequest,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    turns: &mut JoinSet<()>,
+) -> Option<HostToPlugin> {
+    let CompactRequest {
+        id,
+        conversation,
+        compactions,
+    } = request;
+    let failed = |message: String| Some(action_failed(id.clone(), "compact", message));
+
+    let lock = match lock_existing(ctx, &conversation) {
+        Ok(lock) => lock,
+        Err(error) => return failed(error),
+    };
+    let config = match conversation_config(ctx, &lock, &[]) {
+        Ok(config) => config,
+        Err(error) => return failed(error),
+    };
+
+    let stdin = Arc::clone(stdin);
+    turns.spawn(async move {
+        let reply = match compaction::compact(&compactions, &config, lock).await {
+            Ok(compactions) => HostToPlugin::Compacted(CompactedResponse {
+                id,
+                conversation,
+                compactions,
+            }),
+            Err(error) => {
+                warn!(%conversation, %error, "A compaction failed.");
+                action_failed(id, "compact", error)
+            }
+        };
+
+        // A writer that panicked mid-message leaves the lock poisoned. The pipe
+        // itself is still usable, and the plugin is waiting on this reply.
+        let mut writer = stdin.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(write_message(&mut *writer, &reply));
+    });
+
+    None
 }
 
 /// Decide how a conversation nobody has named gets a title from its first
@@ -1984,6 +2049,7 @@ fn handle_request(
         PluginToHost::Compose(_)
         | PluginToHost::EditFiles(_)
         | PluginToHost::Query(_)
+        | PluginToHost::Compact(_)
         | PluginToHost::Interrupt(_)
         | PluginToHost::Print(_) => {
             unreachable!("answered before the lock")

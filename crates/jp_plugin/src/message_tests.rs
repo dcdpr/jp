@@ -523,6 +523,130 @@ fn a_structured_temporary_query_reads_from_json() {
     );
 }
 
+fn turn(n: i64) -> NonZeroI64 {
+    NonZeroI64::new(n).unwrap()
+}
+
+#[test]
+fn a_compact_request_carries_its_compactions() {
+    let json = r#"{"type":"compact","id":"c1","conversation":"123","compactions":[{"from":2,"to":-2,"reasoning":{"over_bytes":16384},"tool_calls":{"mode":"strip_responses","over_bytes":1048576}},{"from":1,"to":12,"summary":{"generate":{"model":"haiku","context":"the decisions"}}},{"from":-3,"to":-1,"reasoning":{},"summary":{"text":"We agreed on the design."}}]}"#;
+
+    let msg = from_str::<PluginToHost>(json).unwrap();
+
+    assert_eq!(
+        msg,
+        PluginToHost::Compact(CompactRequest {
+            id: Some("c1".to_owned()),
+            conversation: "123".to_owned(),
+            compactions: vec![
+                Compaction {
+                    from: turn(2),
+                    to: turn(-2),
+                    reasoning: Some(ReasoningCompaction {
+                        over_bytes: Some(16_384),
+                    }),
+                    tool_calls: Some(ToolCallsCompaction {
+                        mode: ToolCallsMode::StripResponses,
+                        over_bytes: Some(1_048_576),
+                    }),
+                    summary: None,
+                },
+                Compaction {
+                    from: turn(1),
+                    to: turn(12),
+                    reasoning: None,
+                    tool_calls: None,
+                    summary: Some(SummaryCompaction::Generate(GenerateSummary {
+                        model: Some("haiku".to_owned()),
+                        instructions: None,
+                        context: Some("the decisions".to_owned()),
+                    })),
+                },
+                Compaction {
+                    from: turn(-3),
+                    to: turn(-1),
+                    reasoning: Some(ReasoningCompaction::default()),
+                    tool_calls: None,
+                    summary: Some(SummaryCompaction::Text(
+                        "We agreed on the design.".to_owned()
+                    )),
+                },
+            ],
+        })
+    );
+    assert_eq!(msg.id(), Some("c1"));
+    assert_eq!(serde_json::to_string(&msg).unwrap(), json);
+}
+
+// Unknown fields are rejected so typos do not silently alter the compaction.
+#[test]
+fn a_compact_request_with_an_unknown_field_is_refused() {
+    for json in [
+        r#"{"type":"compact","conversation":"123","compactions":[],"dry_run":true}"#,
+        r#"{"type":"compact","conversation":"123","compactions":[{"from":1,"to":2,"keep_last":1}]}"#,
+        r#"{"type":"compact","conversation":"123","compactions":[{"from":1,"to":2,"reasoning":{"over":"1KB"}}]}"#,
+        r#"{"type":"compact","conversation":"123","compactions":[{"from":1,"to":2,"summary":{"generate":{"temperature":0}}}]}"#,
+    ] {
+        let error = from_str::<PluginToHost>(json).unwrap_err().to_string();
+
+        assert!(error.starts_with("unknown field"), "{json}: {error}");
+    }
+}
+
+/// Turns are counted from 1, or from -1 at the end, so there is no turn 0.
+#[test]
+fn a_compaction_of_turn_zero_is_refused() {
+    let json = r#"{"type":"compact","conversation":"123","compactions":[{"from":0,"to":2,"reasoning":{}}]}"#;
+
+    let error = from_str::<PluginToHost>(json).unwrap_err().to_string();
+
+    assert!(
+        error.starts_with("invalid value: integer `0`, expected a nonzero i64"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_compaction_with_an_unknown_tool_calls_mode_is_refused() {
+    let json = r#"{"type":"compact","conversation":"123","compactions":[{"from":1,"to":2,"tool_calls":{"mode":"sres"}}]}"#;
+
+    let error = from_str::<PluginToHost>(json).unwrap_err().to_string();
+
+    assert!(error.starts_with("unknown variant `sres`"), "{error}");
+}
+
+#[test]
+fn a_compacted_reply_carries_the_stored_compactions() {
+    let msg = HostToPlugin::Compacted(CompactedResponse {
+        id: Some("c1".to_owned()),
+        conversation: "123".to_owned(),
+        compactions: vec![
+            StoredCompaction {
+                from: 2,
+                to: 9,
+                reasoning: true,
+                tool_calls: Some(ToolCallsMode::Strip),
+                summary: None,
+            },
+            StoredCompaction {
+                from: 1,
+                to: 12,
+                reasoning: false,
+                tool_calls: None,
+                summary: Some(SummarySource::Generated),
+            },
+        ],
+    });
+
+    let json = serde_json::to_string(&msg).unwrap();
+
+    assert_eq!(
+        json,
+        r#"{"type":"compacted","id":"c1","conversation":"123","compactions":[{"from":2,"to":9,"reasoning":true,"tool_calls":"strip","summary":null},{"from":1,"to":12,"reasoning":false,"tool_calls":null,"summary":"generated"}]}"#
+    );
+    assert_eq!(from_str::<HostToPlugin>(&json).unwrap(), msg);
+}
+
 /// A plugin that asks for neither sends the same bytes it sent before the
 /// fields existed, so an older host still reads it.
 #[test]
