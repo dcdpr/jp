@@ -8,6 +8,8 @@
 //! [`EventsSummary`] computed from the same parse.
 //! A later scan, in this process or a later one, skips the parse for a
 //! directory whose files still carry the recorded [`FileStamp`]s.
+//! A directory with a file modified within [`MTIME_GRANULARITY`] of the scan is
+//! never recorded, because its stamps could still match after a rewrite.
 //!
 //! Between processes the cache lives in [`SCAN_CACHE_FILE`] inside the
 //! user-local `conversations/` directory, which is never part of a git
@@ -45,8 +47,8 @@ pub(crate) const SCAN_CACHE_FILE: &str = ".scan_cache.json";
 /// computation change, so entries recorded under the old rules are discarded.
 const SCAN_CACHE_VERSION: u32 = 1;
 
-/// How long a file's modification time must lie before the scan started for an
-/// entry covering it to be persisted.
+/// How long a file's modification time must lie before the scan started for the
+/// scan of it to be recorded.
 ///
 /// Filesystems with coarse timestamps (FAT records 2 s, HFS+ 1 s) can give a
 /// file rewritten within one tick the modification time it had when it was
@@ -218,7 +220,13 @@ impl ScannedDir {
             && stamps.events == Some(self.events)
     }
 
-    fn modified_before(&self, cutoff: SystemTime) -> bool {
+    /// Whether a scan started at `scan_started` may be recorded: every file was
+    /// last modified more than [`MTIME_GRANULARITY`] before it.
+    fn reusable(&self, scan_started: SystemTime) -> bool {
+        let cutoff = scan_started
+            .checked_sub(MTIME_GRANULARITY)
+            .unwrap_or(UNIX_EPOCH);
+
         [Some(self.metadata), self.base_config, Some(self.events)]
             .into_iter()
             .flatten()
@@ -243,8 +251,8 @@ pub(crate) struct ScanCache {
 
 #[derive(Default)]
 struct State {
-    /// Every directory known to have passed validation, including entries too
-    /// recent to persist.
+    /// Every recorded directory: those scanned by this process and those read
+    /// from disk.
     dirs: HashMap<Utf8PathBuf, ScannedDir>,
 
     /// The entries last read from or written to disk, used to skip rewriting an
@@ -284,10 +292,21 @@ impl ScanCache {
             .map(|scanned| scanned.summary)
     }
 
-    /// Record directories that passed validation.
-    pub(crate) fn extend(&self, scanned: impl IntoIterator<Item = (Utf8PathBuf, ScannedDir)>) {
+    /// Record directories that passed a scan started at `scan_started`.
+    ///
+    /// A directory with a file modified within [`MTIME_GRANULARITY`] of
+    /// `scan_started` is not recorded.
+    pub(crate) fn extend(
+        &self,
+        scanned: impl IntoIterator<Item = (Utf8PathBuf, ScannedDir)>,
+        scan_started: SystemTime,
+    ) {
         let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
-        state.dirs.extend(scanned);
+        state.dirs.extend(
+            scanned
+                .into_iter()
+                .filter(|(_, scanned)| scanned.reusable(scan_started)),
+        );
     }
 
     /// Merge in the entries persisted at `path`.
@@ -335,12 +354,9 @@ impl ScanCache {
         scanned: impl IntoIterator<Item = (Utf8PathBuf, ScannedDir)>,
         scan_started: SystemTime,
     ) {
-        let cutoff = scan_started
-            .checked_sub(MTIME_GRANULARITY)
-            .unwrap_or(UNIX_EPOCH);
         let dirs: BTreeMap<_, _> = scanned
             .into_iter()
-            .filter(|(dir, scanned)| dir.is_absolute() && scanned.modified_before(cutoff))
+            .filter(|(dir, scanned)| dir.is_absolute() && scanned.reusable(scan_started))
             .collect();
 
         let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);

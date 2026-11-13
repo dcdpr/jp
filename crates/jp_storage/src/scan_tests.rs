@@ -89,7 +89,10 @@ fn get_requires_every_stamp_to_match() {
     let cache = ScanCache::default();
     let dir = Utf8PathBuf::from("/ws/conversations/a");
     let entry = scanned(100);
-    cache.extend([(dir.clone(), entry)]);
+    cache.extend(
+        [(dir.clone(), entry)],
+        UNIX_EPOCH + Duration::from_secs(200),
+    );
 
     assert_eq!(cache.get(&dir, &stamps_of(&entry)), Some(entry));
 
@@ -111,11 +114,36 @@ fn summary_only_requires_the_events_stamp_to_match() {
     let cache = ScanCache::default();
     let dir = Utf8PathBuf::from("/ws/conversations/a");
     let entry = scanned(100);
-    cache.extend([(dir.clone(), entry)]);
+    cache.extend(
+        [(dir.clone(), entry)],
+        UNIX_EPOCH + Duration::from_secs(200),
+    );
 
     assert_eq!(cache.summary(&dir, stamp(30, 100)), Some(entry.summary));
     assert_eq!(cache.summary(&dir, stamp(30, 101)), None);
     assert_eq!(cache.summary(&dir, stamp(29, 100)), None);
+}
+
+#[test]
+fn extend_leaves_out_entries_modified_inside_the_granularity_window() {
+    // A file modified one second before the scan started could be rewritten
+    // within the same timestamp tick on a coarse filesystem, leaving its stamp
+    // unchanged, so neither lookup may answer from that scan.
+    let cache = ScanCache::default();
+    let old = Utf8PathBuf::from("/ws/conversations/old");
+    let recent = Utf8PathBuf::from("/ws/conversations/recent");
+
+    cache.extend(
+        [(old.clone(), scanned(100)), (recent.clone(), scanned(199))],
+        UNIX_EPOCH + Duration::from_secs(200),
+    );
+
+    assert_eq!(
+        cache.get(&old, &stamps_of(&scanned(100))),
+        Some(scanned(100))
+    );
+    assert_eq!(cache.get(&recent, &stamps_of(&scanned(199))), None);
+    assert_eq!(cache.summary(&recent, stamp(30, 199)), None);
 }
 
 #[test]

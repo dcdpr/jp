@@ -113,6 +113,8 @@ impl Storage {
     /// A directory whose files still carry the size and modification time
     /// recorded when it last passed is not read again.
     /// Those records persist in user-local storage across processes.
+    /// No record is kept of a directory with a file modified in the two seconds
+    /// before the scan, so such a directory is read again by the next scan.
     ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
@@ -121,9 +123,14 @@ impl Storage {
     /// [`IgnoredAny`]: serde::de::IgnoredAny
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
+        self.validate_conversations_at(SystemTime::now())
+    }
+
+    /// Run [`Self::validate_conversations`] as a scan started at
+    /// `scan_started`.
+    fn validate_conversations_at(&self, scan_started: SystemTime) -> ValidationResult {
         trace!("Validating conversations.");
 
-        let scan_started = SystemTime::now();
         let cache_path = self
             .user
             .as_ref()
@@ -152,7 +159,7 @@ impl Storage {
             validate_root(&conversations_dir, &self.scan, &mut result, &mut scanned);
         }
 
-        self.scan.extend(scanned.iter().cloned());
+        self.scan.extend(scanned.iter().cloned(), scan_started);
         if let Some(path) = &cache_path {
             self.scan.save(path, scanned, scan_started);
         }
