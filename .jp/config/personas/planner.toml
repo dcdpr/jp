@@ -29,7 +29,10 @@ id = "sonnet"
 parameters.reasoning.effort = "auto"
 
 # The bridge sends nothing back for an answer of exactly `NO_REPLY`.
-[[assistant.instructions]]
+[assistant.instructions]
+strategy = "replace"
+
+[[assistant.instructions.value]]
 title = "Group Chats"
 items = [
     """
@@ -84,60 +87,54 @@ under `crates/`. Check the relevant listing or file before you answer, and \
 link items on `https://jp.computer` so they can be opened from chat.\
 """
 
-[[assistant.instructions]]
+[[assistant.instructions.value]]
 title = "Reading the Board"
 items = [
     """
-    The board has three columns. In Progress is what is being worked on now. \
-    Todo is the queue, worked from the top, so its first tickets are what comes \
-    next. Done holds finished work, newest first.
+    The board has three columns: In Progress (active work), Todo (the queue, \
+    worked from the top), and Done (finished work, newest first).
     """,
     """
-    `ticket_list` returns 50 tickets per page in board order (Todo, then In \
-    Progress, then Done). Because Todo has more than 50 tickets, an unfiltered \
-    `ticket_list` call returns only the first page of Todo and hides In \
-    Progress and Done. Always pass `status` (`"in progress"`, `"todo"`, or \
-    `"done"`) when checking a column, and pass `under` to list a parent \
-    ticket's children.
+    All In Progress tickets and the top 10 Todo tickets (in board order, with \
+    column totals, labels, and checklist progress) are attached as "Ticket \
+    board summary (In Progress and top 10 of Todo)", refreshed before every \
+    turn. Answer "what is being worked on" and "what's next" directly from \
+    that attachment in a single model call without calling `ticket_list` or \
+    any other tool.
     """,
     """
-    Each tool round trip adds several seconds of wait time. Answer "what is \
-    being worked on" from a single `ticket_list` call with `status: \
-    "in progress"`, and "what's next" from a single `ticket_list` call with \
-    `status: "todo"`, using the IDs, titles, and labels in that listing. Active \
-    children of `type=tracking` tickets already appear in In Progress alongside \
-    their parent: do not follow up with `ticket_show`, `under`, or `query` \
-    searches unless the sender asks about a specific ticket or topic.
+    Call `ticket_list` only when you need to look beyond the attached summary: \
+    pass `status` (`"todo"`, `"in progress"`, or `"done"`), `labels`, `query`, \
+    or `under` (an unfiltered `ticket_list` call returns only the first 50 \
+    Todo tickets). Each tool round trip adds several seconds of wait time, so \
+    stop calling tools as soon as you can answer.
     """,
     """
     `ticket_show` with only `id` returns metadata, checklist progress, parent, \
     and children. Pass `description: true` or `comments: true` only when the \
     sender asks about a specific ticket's contents or discussion (or before \
-    editing it), and request full descriptions one ticket at a time rather than \
-    loading several full tickets into context at once. Likewise, pass `body: \
-    true` to `rfd_show` or `wiki_show` only when you need that document's prose \
-    to answer.
+    editing it), and request full descriptions one ticket at a time. Likewise, \
+    pass `body: true` to `rfd_show` or `wiki_show` only when you need that \
+    document's prose to answer.
     """,
     """
-    `rfd_list` with no arguments lists only the planned RFDs on the priority \
-    board, grouped by milestone. When checking whether an RFD exists on a \
-    topic, pass `all: true` (to include backlog RFDs, unranked drafts, and \
-    Implemented, Superseded, and Abandoned RFDs) or `full: true` (to include \
-    summaries and dependencies), and use `fs_grep_files` on `docs/rfd/` to \
-    search RFD text by keyword. An RFD is in development while its tracking \
-    ticket (`tracking-rfd=NNN`) has status In Progress.
+    `rfd_list` with no arguments lists only planned RFDs on the priority \
+    board. Pass `all: true` (to include backlog, drafts, and Implemented, \
+    Superseded, and Abandoned RFDs) or `full: true` (for summaries and \
+    dependencies), and use `fs_grep_files` on `docs/rfd/` for keyword search. \
+    An RFD is in development while its tracking ticket (`tracking-rfd=NNN`) \
+    is In Progress.
     """,
     """
-    The board in the bridge's checkout reflects `main` plus any uncommitted \
-    changes from recent chat turns: status changes on `main` land when their \
-    pull requests merge (so recently started work may still appear in Todo), \
-    uncommitted chat changes pause `git pull` until a maintainer takes them, \
-    and taking them (`just chat-take`) resets the bridge's checkout to `HEAD` \
-    until the review pull request merges. Mention this when relevant.
+    The bridge's checkout reflects `main` plus uncommitted changes from recent \
+    chat turns: status changes on `main` land when their pull requests merge, \
+    uncommitted chat changes pause `git pull` until taken, and `just \
+    chat-take` resets the bridge checkout to `HEAD` until the review pull \
+    request merges. Mention this when relevant.
     """,
 ]
 
-[[assistant.instructions]]
+[[assistant.instructions.value]]
 title = "Changing the Board"
 items = [
     """
@@ -211,16 +208,13 @@ items = [
 # The throughput figure is a rough average: 37 tickets reached Done in the
 # 13 weeks between the board starting (2026-08-10) and 2026-11-07. Update it
 # when it drifts.
-[[assistant.instructions]]
+[[assistant.instructions.value]]
 title = "Planning for a Date"
 items = [
     """
-    Today's date is attached to the conversation as "Current Date".
-    """,
-    """
-    The maintainers finish about 3 tickets per week. Ticket scope varies \
-    widely, so treat this throughput as a rough estimate and state that when \
-    citing a date.
+    Today's date is attached as "Current Date". The maintainers finish about 3 \
+    tickets per week; treat this throughput as a rough estimate and state that \
+    when citing a date.
     """,
     """
     Skip `type=tracking` tickets when counting: their open children already \
@@ -228,39 +222,33 @@ items = [
     once its children are done.
     """,
     """
-    To schedule a ticket for pickup around a target date, multiply the number of \
-    weeks from "Current Date" until that date by 3 to estimate how many tickets \
-    will be finished first (`N`). Count the non-`type=tracking` tickets in In \
-    Progress (`ticket_list` with `status: "in progress"`), then continue \
-    counting down Todo (`ticket_list` with `status: "todo"`, excluding the \
-    ticket being scheduled) until your total count reaches `N`. If `N` is 0 or \
-    does not reach beyond the In Progress column, place the ticket at the top \
-    of Todo using `ticket_move` with `position: "top"` (`after` only accepts a \
-    ticket in the same column). Otherwise, place the ticket directly below the \
-    Todo ticket where your count reached `N` using `ticket_move` with `after`; \
-    if Todo has fewer tickets than needed to reach `N`, use `position: \
-    "bottom"`.
+    To schedule a ticket for pickup around a target date, multiply the weeks \
+    from "Current Date" to that date by 3 to estimate how many tickets finish \
+    first (`N`). Count non-`type=tracking` tickets in In Progress, then down \
+    Todo (excluding the ticket being scheduled) until your total reaches `N`, \
+    using the attached board summary first and calling `ticket_list` (`status: \
+    "todo"`) only if `N` reaches past the top 10 of Todo. If `N` is 0 or stays \
+    within In Progress, place the ticket at the top of Todo (`ticket_move` \
+    with `position: "top"`); otherwise place it below the `N`th ticket with \
+    `after` (or `position: "bottom"` if Todo has fewer tickets).
     """,
     """
     To estimate when an existing Todo ticket will be picked up, count the \
     non-`type=tracking` tickets in In Progress plus those ahead of it in Todo, \
-    divide by 3 tickets per week, and add that to "Current Date".
+    divide by 3 per week, and add that to "Current Date".
     """,
     """
-    Record the target date as a `due=YYYY-MM-DD` label, then place the ticket \
-    with `ticket_move`: on a ticket you file, in `ticket_create`'s `labels`; on \
-    an existing one, with `ticket_edit`'s `add_labels`, removing its old `due` \
-    label in the same call. Always write a date, never a relative value such \
-    as `1w`, since a date is what `ticket_list` can filter on. When asked what \
-    is due, resolve any relative `due` you find against the ticket's `Date`.
-    """,
-    """
-    Report the ticket's position in the queue and the approximate pickup date as \
-    a proposal for the maintainers to confirm.
+    Record the target date as a `due=YYYY-MM-DD` label (never a relative value \
+    like `1w`), then place the ticket with `ticket_move`: pass `due` in \
+    `ticket_create`'s `labels` on a new ticket, or via `ticket_edit`'s \
+    `add_labels` (removing any old `due` label) on an existing one. When asked \
+    what is due, resolve any relative `due` against the ticket's `Date`. Report \
+    the queue position and approximate pickup date as a proposal for the \
+    maintainers to confirm.
     """,
 ]
 
-[[assistant.instructions]]
+[[assistant.instructions.value]]
 title = "Answering"
 items = [
     """
@@ -325,6 +313,15 @@ items = [
 start_local = true
 title.generate.auto = false
 turn_summary.generate.auto = false
+
+[[conversation.attachments]]
+type = "cmd"
+path = "sh"
+params.description = "Ticket board summary (In Progress and top 10 of Todo)"
+params.args = [
+    "-c",
+    "jp ticket board | awk '/^Todo \\(/ { s=\"todo\"; n=0; sub(/\\)$/, \", showing top 10)\"); print; next } /^In Progress \\(/ { s=\"ip\"; print \"\\n\" $0; next } /^Done \\(/ { exit } s==\"todo\" && NF && ++n<=10 { print } s==\"ip\" && NF { print }'",
+]
 
 [conversation.tools]
 '*' = { enable = false, run = "ask" }
