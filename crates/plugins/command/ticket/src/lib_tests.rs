@@ -1237,7 +1237,11 @@ fn status_places_the_ticket_next_to_its_neighbour() {
         )
     );
 
-    let board = run_in(root, Command::Board).unwrap();
+    let board = run_in(root, Command::Board {
+        statuses: vec![],
+        limit: None,
+    })
+    .unwrap();
     assert!(
         board.text.contains(
             "In Progress (3)\nT-02wt0k2 Started\nT-02wt0k1 Moving\nT-02wt0k3 Also started\n"
@@ -1329,13 +1333,104 @@ fn board_prints_each_column_in_board_order() {
         ..Options::default()
     };
 
-    let output = run_with_options(root, Command::Board, &options).unwrap();
+    let output = run_with_options(
+        root,
+        Command::Board {
+            statuses: vec![],
+            limit: None,
+        },
+        &options,
+    )
+    .unwrap();
 
     assert_eq!(
         output.text,
         "Todo (3)\nT-02wt0k3 Third filed\nT-02wt0k1 First filed\nT-02wt0k2 Second filed\n\nIn \
-         Progress (0)\n\nDone (2, showing 1)\nT-02wt0k5 Newer done\n"
+         Progress (0)\n\nDone (1/2)\nT-02wt0k5 Newer done\n"
     );
+}
+
+/// Columns print in board order regardless of the order in `statuses`.
+#[test]
+fn board_prints_only_the_statuses_named() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    write_ticket(root, "02wt0k1", "Queued", Status::Todo);
+    write_ticket(root, "02wt0k2", "Started", Status::InProgress);
+    write_ticket(root, "02wt0k3", "Finished", Status::Done);
+
+    let output = run_in(root, Command::Board {
+        statuses: vec![Status::InProgress, Status::Todo],
+        limit: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        output.text,
+        "Todo (1)\nT-02wt0k1 Queued\n\nIn Progress (1)\nT-02wt0k2 Started\n"
+    );
+}
+
+/// `limit` truncates every column and overrides `board.done_limit` for Done.
+#[test]
+fn board_limit_cuts_every_column() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    write_ticket(root, "02wt0k1", "First queued", Status::Todo);
+    write_ticket(root, "02wt0k2", "Second queued", Status::Todo);
+    write_ticket(root, "02wt0k3", "Third queued", Status::Todo);
+    write_ticket(root, "02wt0k4", "Started", Status::InProgress);
+    write_ticket(root, "02wt0k5", "Oldest done", Status::Done);
+    write_ticket(root, "02wt0k6", "Older done", Status::Done);
+    write_ticket(root, "02wt0k7", "Newest done", Status::Done);
+    let options = Options {
+        board: options::BoardOptions { done_limit: 1 },
+        ..Options::default()
+    };
+
+    let output = run_with_options(
+        root,
+        Command::Board {
+            statuses: vec![],
+            limit: Some(2),
+        },
+        &options,
+    )
+    .unwrap();
+
+    assert_eq!(
+        output.text,
+        "Todo (2/3)\nT-02wt0k1 First queued\nT-02wt0k2 Second queued\n\nIn Progress \
+         (1)\nT-02wt0k4 Started\n\nDone (2/3)\nT-02wt0k7 Newest done\nT-02wt0k6 Older done\n"
+    );
+}
+
+#[test]
+fn board_takes_statuses_and_a_limit() {
+    let named = parse(&[
+        "board",
+        "--status",
+        "in-progress",
+        "--status",
+        "todo",
+        "--limit",
+        "10",
+    ]);
+    match named.unwrap().command {
+        Command::Board { statuses, limit } => {
+            assert_eq!(statuses, vec![Status::InProgress, Status::Todo]);
+            assert_eq!(limit, Some(10));
+        }
+        other => panic!("expected board, got {other:?}"),
+    }
+
+    match parse(&["board"]).unwrap().command {
+        Command::Board { statuses, limit } => assert_eq!((statuses, limit), (vec![], None)),
+        other => panic!("expected board, got {other:?}"),
+    }
+
+    assert!(parse(&["board", "--status", "open"]).is_err());
+    assert!(parse(&["board", "--limit", "ten"]).is_err());
 }
 
 #[test]
@@ -1353,7 +1448,11 @@ fn rank_places_a_ticket_and_the_board_follows() {
     .unwrap();
     assert_eq!(ranked.text, "T-02wt0k2 now sits above T-02wt0k1 in Todo\n");
 
-    let board = run_in(root, Command::Board).unwrap();
+    let board = run_in(root, Command::Board {
+        statuses: vec![],
+        limit: None,
+    })
+    .unwrap();
     assert!(
         board
             .text
@@ -3411,7 +3510,11 @@ fn show_list_and_board_count_the_checklist() {
         "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\n"
     );
 
-    let board = run_command(&dir, Command::Board).unwrap();
+    let board = run_command(&dir, Command::Board {
+        statuses: vec![],
+        limit: None,
+    })
+    .unwrap();
     assert_eq!(
         board.text,
         "Todo (1)\nT-02wt0kx Exercise recorded tool rounds (1 of 3 checked)\n\nIn Progress \
