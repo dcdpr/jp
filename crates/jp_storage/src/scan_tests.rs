@@ -128,7 +128,7 @@ fn summary_only_requires_the_events_stamp_to_match() {
 fn extend_leaves_out_entries_modified_inside_the_granularity_window() {
     // A file modified one second before the scan started could be rewritten
     // within the same timestamp tick on a coarse filesystem, leaving its stamp
-    // unchanged, so neither lookup may answer from that scan.
+    // unchanged, so the scan must not be cached.
     let cache = ScanCache::default();
     let old = Utf8PathBuf::from("/ws/conversations/old");
     let recent = Utf8PathBuf::from("/ws/conversations/recent");

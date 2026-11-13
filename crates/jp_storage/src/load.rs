@@ -311,7 +311,7 @@ impl Storage {
             .map(|id| {
                 // Fast path: resolve from the listings above. On any miss or
                 // failure (stale path, corrupt active metadata), fall back to
-                // the rescanning loader, including the archive — this mirrors
+                // the rescanning loader, including the archive, to match
                 // `FsStorageBackend::load_conversation_metadata`.
                 let result = self
                     .load_conversation_metadata_from(
@@ -327,11 +327,12 @@ impl Storage {
             .collect()
     }
 
-    /// Event count and last event time of the `events.json` in `dir`.
+    /// Return the event count and last-event timestamp for `events.json` in
+    /// `dir`.
     ///
-    /// Taken from the last validation scan while the file still carries the
-    /// size and modification time recorded then; otherwise the file is parsed.
-    /// A missing or unparseable file summarizes as empty.
+    /// Uses the cached summary from the last validation scan if the file's size
+    /// and modification time still match; otherwise parses `events.json`.
+    /// Returns an empty [`EventsSummary`] if the file is missing or invalid.
     pub(crate) fn events_summary(&self, dir: &Utf8Path) -> EventsSummary {
         let path = dir.join(EVENTS_FILE);
         if let Some(stamp) = FileStamp::of(&path)
@@ -355,11 +356,11 @@ impl Storage {
     }
 }
 
-/// Map each conversation under `root`'s conversations directory to its
-/// directory, from a single listing.
+/// Map each [`ConversationId`] under `root`'s conversations directory to its
+/// directory path.
 ///
-/// When a conversation has more than one directory, the first one listed is
-/// kept, as [`find_conversation_dir_path`] does.
+/// If multiple directories share an ID, keeps the first entry returned by
+/// [`dir_entries`], matching [`find_conversation_dir_path`].
 fn conversation_dirs_by_id(root: &Utf8Path) -> HashMap<ConversationId, Utf8PathBuf> {
     let mut dirs = HashMap::new();
     for entry in dir_entries(root.join(CONVERSATIONS_DIR)) {

@@ -100,21 +100,21 @@ impl Storage {
     /// For each directory entry it verifies:
     ///
     /// 1. The directory name parses as a [`ConversationId`].
-    /// 2. A `metadata.json` file exists and is a valid JSON object.
+    /// 2. A `metadata.json` file exists and is valid JSON.
     /// 3. An `events.json` file exists and is a JSON array where each element
-    ///    contains `timestamp` and `kind` fields.
+    ///    contains `timestamp` and `type` fields.
     ///
-    /// No field values are materialized — the check uses [`IgnoredAny`] to
-    /// skip values without allocating.
+    /// Field values are skipped via [`IgnoredAny`] without allocating.
     /// Content-level issues (bad field values, missing optional fields, schema
     /// mismatches) are handled at load time by
     /// [`ConversationStream::sanitize`].
     ///
-    /// A directory whose files still carry the size and modification time
-    /// recorded when it last passed is not read again.
-    /// Those records persist in user-local storage across processes.
-    /// No record is kept of a directory with a file modified in the two seconds
-    /// before the scan, so such a directory is read again by the next scan.
+    /// Directories whose files match the size and modification time from the
+    /// last passing scan are skipped without re-reading the files.
+    /// Scan records are cached in memory and persisted to user-local storage
+    /// across processes.
+    /// Directories with a file modified within two seconds before the scan are
+    /// not cached, so the next scan re-reads them.
     ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
@@ -259,7 +259,8 @@ pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::
 
 /// Validate every conversation directory under `conversations_dir`.
 ///
-/// Directories that pass and could be stamped are appended to `scanned`.
+/// Directories that pass validation and have complete file stamps are appended
+/// to `scanned`.
 fn validate_root(
     conversations_dir: &Utf8Path,
     cache: &ScanCache,
@@ -295,8 +296,8 @@ fn validate_root(
 
 /// Validate a single conversation directory entry.
 ///
-/// Returns the directory's scan alongside the result, unless one of its files
-/// could not be stamped.
+/// Returns [`ScannedDir`] alongside the result when `metadata.json` and
+/// `events.json` both have valid file stamps.
 fn validate_entry(
     conversations_dir: &Utf8Path,
     dirname: &str,
@@ -313,8 +314,8 @@ fn validate_entry(
         dirname: dirname.to_owned(),
     };
 
-    // Stamped before anything is read: should a file change mid-check, the
-    // recorded stamp is the older one and the next scan reads it again.
+    // Capture file stamps before reading any files so a mid-check write keeps
+    // the older stamp and is re-read on the next scan.
     let stamps = DirStamps::of(entry_path);
     if let Some(scan) = cache.get(entry_path, &stamps) {
         return Ok((valid, Some(scan)));
@@ -386,7 +387,7 @@ fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error +
 /// Confirm `events.json` is a JSON array of objects with `timestamp` and `type`
 /// fields, and summarize it from the same parse.
 ///
-/// All elements in the array — both `ConfigDelta` and `ConversationEvent` —
+/// All elements in the array (both `ConfigDelta` and `ConversationEvent`)
 /// serialize with `timestamp` and `type` as top-level fields.
 /// `type` is the tag for the flattened `EventKind` enum on events, and an
 /// explicit `"config_delta"` tag on config deltas.

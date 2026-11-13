@@ -6,16 +6,16 @@
 //! [`ScanCache`] records each directory that passed validation, together with
 //! the size and modification time of every file the check read and the
 //! [`EventsSummary`] computed from the same parse.
-//! A later scan, in this process or a later one, skips the parse for a
-//! directory whose files still carry the recorded [`FileStamp`]s.
-//! A directory with a file modified within [`MTIME_GRANULARITY`] of the scan is
-//! never recorded, because its stamps could still match after a rewrite.
+//! Later scans, in the current process or a subsequent process, skip parsing
+//! any directory whose files still match the recorded [`FileStamp`]s.
+//! Directories with a file modified within [`MTIME_GRANULARITY`] of the scan
+//! are not cached, because a rewrite in the same timestamp tick could leave the
+//! stamps unchanged.
 //!
-//! Between processes the cache lives in [`SCAN_CACHE_FILE`] inside the
-//! user-local `conversations/` directory, which is never part of a git
-//! checkout.
-//! An entry is only trusted after its stamps match the files on disk, so a
-//! missing, stale, or unreadable cache file costs a re-parse and nothing else.
+//! Across processes, the cache is stored at [`SCAN_CACHE_FILE`] in the
+//! user-local `conversations/` directory, which is outside any git checkout.
+//! Cached entries are used only when their stamps match the files on disk, so a
+//! missing, stale, or unreadable cache file only triggers a re-parse.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -38,23 +38,24 @@ use crate::{BASE_CONFIG_FILE, EVENTS_FILE, METADATA_FILE, parse_datetime};
 /// File name of the persisted cache inside the user-local `conversations/`
 /// directory.
 ///
-/// Dot-prefixed so conversation lookups and validation skip it.
+/// Uses a leading dot so conversation lookups and validation skip it.
 pub(crate) const SCAN_CACHE_FILE: &str = ".scan_cache.json";
 
-/// Version of the persisted format, and of the checks an entry vouches for.
+/// Schema version for the persisted scan cache and its validation rules.
 ///
-/// Bump it when the structural checks in `validate` or the [`EventsSummary`]
-/// computation change, so entries recorded under the old rules are discarded.
+/// Increment this when the structural checks in `validate` or the
+/// [`EventsSummary`] computation change, so entries written by older versions
+/// are discarded.
 const SCAN_CACHE_VERSION: u32 = 1;
 
-/// How long a file's modification time must lie before the scan started for the
-/// scan of it to be recorded.
+/// Minimum age of a file's modification time relative to the start of a scan
+/// for the scan result to be cached.
 ///
-/// Filesystems with coarse timestamps (FAT records 2 s, HFS+ 1 s) can give a
-/// file rewritten within one tick the modification time it had when it was
-/// scanned.
-/// Once a file's modification time is older than this window, any later rewrite
-/// carries a newer one, so the stamp cannot match stale content.
+/// Filesystems with coarse timestamp resolution (2 s on FAT, 1 s on HFS+) can
+/// assign the same modification time when a file is rewritten within the same
+/// clock tick as the scan.
+/// Once a file's modification time is older than this window, any later write
+/// produces a newer timestamp.
 const MTIME_GRANULARITY: Duration = Duration::from_secs(2);
 
 /// Size and modification time of a file.
@@ -65,10 +66,10 @@ pub(crate) struct FileStamp {
 }
 
 impl FileStamp {
-    /// Stamp the regular file at `path`.
+    /// Read the size and modification time of the regular file at `path`.
     ///
-    /// Returns `None` when the path is missing, is not a regular file, or the
-    /// platform reports no modification time for it.
+    /// Returns `None` if the path does not exist, is not a regular file, or has
+    /// no modification time.
     pub(crate) fn of(path: &Utf8Path) -> Option<Self> {
         let meta = fs::metadata(path).ok()?;
         if !meta.is_file() {
@@ -87,8 +88,7 @@ impl FileStamp {
     }
 }
 
-/// Number of events in a conversation's `events.json`, and the timestamp of the
-/// last one.
+/// Event count and last-event timestamp for a conversation's `events.json`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct EventsSummary {
     pub(crate) count: usize,
@@ -99,7 +99,7 @@ impl EventsSummary {
     /// Parse an `events.json` body.
     ///
     /// Fails unless the body is a JSON array whose elements are all objects
-    /// carrying `timestamp` and `type` fields.
+    /// with `timestamp` and `type` fields.
     /// Field values are skipped without being materialized; only the last
     /// element's timestamp is parsed, and an unparseable last timestamp yields
     /// `last_event_at: None` rather than an error.
@@ -171,8 +171,8 @@ impl<'de> Deserialize<'de> for RawSummary<'de> {
     }
 }
 
-/// Stamps of the files validation reads in one conversation directory, taken
-/// before any of them is read.
+/// File stamps for the files in a conversation directory, captured before the
+/// files are read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DirStamps {
     pub(crate) metadata: Option<FileStamp>,
@@ -189,10 +189,10 @@ impl DirStamps {
         }
     }
 
-    /// Record a directory that passed validation with these stamps.
+    /// Build a [`ScannedDir`] for a directory that passed validation with these
+    /// stamps.
     ///
-    /// Returns `None` when `metadata.json` or `events.json` could not be
-    /// stamped, since such a directory cannot be recognized again later.
+    /// Returns `None` if `metadata.json` or `events.json` is missing a stamp.
     pub(crate) fn scanned(self, summary: EventsSummary) -> Option<ScannedDir> {
         Some(ScannedDir {
             metadata: self.metadata?,
@@ -220,8 +220,9 @@ impl ScannedDir {
             && stamps.events == Some(self.events)
     }
 
-    /// Whether a scan started at `scan_started` may be recorded: every file was
-    /// last modified more than [`MTIME_GRANULARITY`] before it.
+    /// Returns `true` if every file was modified more than
+    /// [`MTIME_GRANULARITY`] before `scan_started`, making the scan safe to
+    /// cache.
     fn reusable(&self, scan_started: SystemTime) -> bool {
         let cutoff = scan_started
             .checked_sub(MTIME_GRANULARITY)
@@ -251,8 +252,7 @@ pub(crate) struct ScanCache {
 
 #[derive(Default)]
 struct State {
-    /// Every recorded directory: those scanned by this process and those read
-    /// from disk.
+    /// Cached directories from both the current process and the on-disk cache.
     dirs: HashMap<Utf8PathBuf, ScannedDir>,
 
     /// The entries last read from or written to disk, used to skip rewriting an
@@ -270,8 +270,8 @@ impl fmt::Debug for ScanCache {
 }
 
 impl ScanCache {
-    /// The recorded scan of `dir`, if every file still carries its recorded
-    /// stamp.
+    /// Return the cached scan for `dir` if all of its file stamps match
+    /// `stamps`.
     pub(crate) fn get(&self, dir: &Utf8Path, stamps: &DirStamps) -> Option<ScannedDir> {
         let state = self.state.read().unwrap_or_else(PoisonError::into_inner);
         state
@@ -281,8 +281,8 @@ impl ScanCache {
             .copied()
     }
 
-    /// The events summary recorded for `dir`, if its `events.json` still
-    /// carries the recorded stamp.
+    /// Return the cached [`EventsSummary`] for `dir` if its `events.json` stamp
+    /// matches `events`.
     pub(crate) fn summary(&self, dir: &Utf8Path, events: FileStamp) -> Option<EventsSummary> {
         let state = self.state.read().unwrap_or_else(PoisonError::into_inner);
         state
@@ -309,10 +309,9 @@ impl ScanCache {
         );
     }
 
-    /// Merge in the entries persisted at `path`.
+    /// Load persisted cache entries from `path` into memory.
     ///
-    /// A missing file, unreadable file, or file written under another
-    /// [`SCAN_CACHE_VERSION`] adds nothing.
+    /// Missing, unreadable, or version-mismatched cache files are ignored.
     pub(crate) fn load(&self, path: &Utf8Path) {
         let Ok(bytes) = fs::read(path) else {
             return;
@@ -340,14 +339,13 @@ impl ScanCache {
         state.on_disk = persisted.dirs;
     }
 
-    /// Persist `scanned` to `path`, replacing what the file held.
+    /// Persist `scanned` to `path`, replacing the existing cache file.
     ///
     /// Only entries with an absolute directory path whose files were all
-    /// modified at least [`MTIME_GRANULARITY`] before `scan_started` are
+    /// modified more than [`MTIME_GRANULARITY`] before `scan_started` are
     /// written.
-    /// The file is left untouched when that set equals what was last read from
-    /// or written to it.
-    /// Failures are logged and otherwise ignored: the cache only saves work.
+    /// Skips the write if the filtered entry set matches the on-disk state, and
+    /// logs and ignores I/O errors.
     pub(crate) fn save(
         &self,
         path: &Utf8Path,

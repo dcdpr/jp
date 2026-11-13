@@ -87,7 +87,7 @@ struct Storage {
     /// If unset, user storage is disabled.
     user: Option<Utf8PathBuf>,
 
-    /// Conversation directories already validated, shared by clones.
+    /// Cached validation and event-summary scans, shared across clones.
     scan: ScanCache,
 }
 

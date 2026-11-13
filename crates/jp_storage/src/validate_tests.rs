@@ -41,15 +41,14 @@ fn set_mtime(path: &camino::Utf8Path, when: SystemTime) {
         .unwrap();
 }
 
-/// Pin every file in a conversation directory to `when`.
 fn set_dir_mtimes(dir: &camino::Utf8Path, when: SystemTime) {
     for name in [METADATA_FILE, EVENTS_FILE] {
         set_mtime(&dir.join(name), when);
     }
 }
 
-/// Replace a file's content with spaces, keeping its size and modification
-/// time, so only a cached scan can still call it valid.
+/// Overwrite `path` with spaces of the same byte length while preserving its
+/// modification time.
 fn blank_keeping_stamp(path: &camino::Utf8Path) {
     let meta = fs::metadata(path).unwrap();
     let modified = meta.modified().unwrap();
@@ -57,8 +56,8 @@ fn blank_keeping_stamp(path: &camino::Utf8Path) {
     set_mtime(path, modified);
 }
 
-/// Replace a file's content with `content` of the same size, keeping its
-/// modification time: a rewrite that size and modification time cannot reveal.
+/// Overwrite `path` with same-sized `content` while preserving its modification
+/// time.
 fn rewrite_keeping_stamp(path: &camino::Utf8Path, content: &str) {
     let meta = fs::metadata(path).unwrap();
     assert_eq!(u64::try_from(content.len()).unwrap(), meta.len());
@@ -409,8 +408,8 @@ fn an_unchanged_conversation_is_not_parsed_again() {
 
     assert_eq!(storage.validate_conversations().valid.len(), 1);
 
-    // Same size and modification time: the scan recorded above vouches for
-    // the file, so the blanked content is never read.
+    // Same size and modification time, so validation uses the cached scan
+    // without re-reading the blanked file.
     blank_keeping_stamp(&dir.join(EVENTS_FILE));
 
     let result = storage.validate_conversations();
@@ -488,9 +487,10 @@ fn the_scan_is_reused_by_the_next_process() {
 
 #[test]
 fn a_scan_of_a_just_modified_file_is_not_reused_by_the_next_process() {
-    // A modification time inside the coarse-timestamp window cannot tell a
-    // later rewrite apart, so the entry stays out of the persisted cache. A
-    // future modification time lands in that window deterministically.
+    // Files modified within `MTIME_GRANULARITY` of the scan cannot be
+    // distinguished from a same-tick rewrite, so they are not persisted to the
+    // scan cache. Setting mtime in the future guarantees it falls within the
+    // window.
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
     let user_root = tmp.path().join("user");
@@ -519,9 +519,9 @@ fn a_scan_of_a_just_modified_file_is_not_reused_by_the_next_process() {
 
 #[test]
 fn a_same_stamp_rewrite_just_after_a_scan_is_read_again() {
-    // A filesystem with coarse timestamps gives a file rewritten in the tick it
-    // was scanned in the same modification time, and a same-size edit keeps the
-    // size too. A scan taken one second after the write must not be reused.
+    // On a filesystem with coarse timestamps, a same-size rewrite in the same
+    // clock tick preserves both size and modification time. A scan that ran
+    // one second after the write must not be cached.
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
@@ -555,9 +555,9 @@ fn a_same_stamp_rewrite_just_after_a_scan_is_read_again() {
 
 #[test]
 fn a_scan_taken_just_after_a_write_is_not_persisted_by_a_later_validation() {
-    // The same instance validates again long after the write. It must parse
-    // the rewritten file then, not persist the scan it took one second after
-    // the write for the next process to trust.
+    // When the same `Storage` instance validates again after the granularity
+    // window has passed, it must re-parse the rewritten file rather than
+    // persisting the earlier uncached scan.
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
     let user_root = tmp.path().join("user");
