@@ -105,6 +105,29 @@ fn selectors_compose_with_and() {
 }
 
 #[test]
+fn a_comparison_matches_dates_on_its_side_of_the_operand() {
+    let labels = Labels::from_iter([("due", ["2026-12-01"])]);
+    let matches = |token: &str| labels.matches(&Selector::parse_all([token]).unwrap());
+
+    assert!(matches("due<2026-12-02"));
+    assert!(!matches("due<2026-12-01"));
+    assert!(matches("due<=2026-12-01"));
+    assert!(matches("due>2026-11-30"));
+    assert!(!matches("due>2026-12-01"));
+    assert!(matches("due>=2026-12-01"));
+    assert!(!matches("other<2027-01-01"));
+}
+
+#[test]
+fn a_comparison_never_matches_a_value_that_is_not_a_date() {
+    let labels = Labels::from_iter([("due", ["1w"])]);
+
+    assert!(!labels.matches(&Selector::parse_all(["due<9999-12-31"]).unwrap()));
+    assert!(!labels.matches(&Selector::parse_all(["due>0001-01-01"]).unwrap()));
+    assert!(labels.matches(&Selector::parse_all(["due"]).unwrap()));
+}
+
+#[test]
 fn no_selectors_matches_everything() {
     assert!(Labels::default().matches(&[]));
     assert!(Labels::from_iter([("crate", ["jp_cli"])]).matches(&[]));

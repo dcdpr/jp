@@ -242,9 +242,10 @@ items = [
     like `1w`), then place the ticket with `ticket_move`: pass `due` in \
     `ticket_create`'s `labels` on a new ticket, or via `ticket_edit`'s \
     `add_labels` (removing any old `due` label) on an existing one. When asked \
-    what is due, resolve any relative `due` against the ticket's `Date`. Report \
-    the queue position and approximate pickup date as a proposal for the \
-    maintainers to confirm.
+    what is due, filter with `ticket_list` by comparing `due`: `due<=YYYY-MM-DD` \
+    for everything due by that date, or `due<YYYY-MM-DD` with "Current Date" \
+    for overdue tickets. Report the queue position and approximate pickup date \
+    as a proposal for the maintainers to confirm.
     """,
 ]
 

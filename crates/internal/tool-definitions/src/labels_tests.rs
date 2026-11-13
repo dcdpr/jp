@@ -90,6 +90,28 @@ fn open_and_unique_keys_are_described_in_words() {
     );
 }
 
+/// Write tools describe the expected value format; filter tools also list
+/// comparison operators.
+#[test]
+fn a_typed_key_is_described_with_its_type() {
+    let vocabulary =
+        Vocabulary::parse(r#"{"due": {"values": [], "max": 1, "type": "date"}}"#).unwrap();
+
+    assert_eq!(
+        render("t", "labels", &vocabulary, "ticket", Role::Add),
+        "\n[conversation.tools.t.parameters.labels.items]\nsummary = \"One `key=value` label: \
+         due=<value>, with any value. A ticket carries at most one label under `due`. `due` takes \
+         a date, written YYYY-MM-DD.\"\n"
+    );
+    assert_eq!(
+        render("t", "labels", &vocabulary, "ticket", Role::Filter),
+        "\n[conversation.tools.t.parameters.labels.items]\nsummary = \"One `key=value` label, or \
+         a bare `key` for any value under it: due, or due=<value> with any value. `due` holds a \
+         date, written YYYY-MM-DD; compare it with `<`, `<=`, `>`, or `>=`, as in \
+         `due<2026-12-01`.\"\n"
+    );
+}
+
 /// An empty `enum` accepts nothing, which some providers refuse outright, so a
 /// vocabulary without labels writes nothing at all.
 #[test]

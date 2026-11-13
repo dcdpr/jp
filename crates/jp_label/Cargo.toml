@@ -13,6 +13,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde", "std"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }

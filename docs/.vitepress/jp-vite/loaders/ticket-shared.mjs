@@ -69,7 +69,7 @@ function readLabels(meta) {
 }
 
 // The labels the board defines, as a map of key to `{ values, open, retired,
-// min, max, unique }`.
+// min, max, unique, type }`.
 //
 // A board that configures none defines none, and takes any label.
 export function loadVocabulary(settings = readSettings()) {
@@ -164,6 +164,57 @@ export function findMiscountedLabels(tickets, vocabulary) {
     return `Tickets carry too few or too many labels of one key:\n${offenders.join('\n')}\n\n` +
         `Set what each ticket carries (\`jp ticket label set --id <id> key=value\`), or ` +
         `change the key's \`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
+}
+
+// Validators and format descriptions for `type` constraints, mirroring
+// `jp_label::ValueType`.
+const VALUE_TYPES = {
+    date: { accepts: isDate, describe: 'a date, written YYYY-MM-DD' },
+}
+
+// Whether `value` is a valid calendar date in zero-padded `YYYY-MM-DD` format.
+//
+// Checks the digit pattern first to reject unpadded or signed years, which
+// break lexicographic date comparisons.
+function isDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    if (!match) return false
+
+    const [year, month, day] = match.slice(1).map(Number)
+    // Use `setUTCFullYear` because `Date.UTC` maps years 0..99 to 1900..1999.
+    const date = new Date(0)
+    date.setUTCFullYear(year, month - 1, day)
+    return date.getUTCFullYear() === year
+        && date.getUTCMonth() === month - 1
+        && date.getUTCDate() === day
+}
+
+// Report labels whose values do not match their key's `type` constraint.
+//
+// `jp ticket` validates label types on write; this check catches hand-edited
+// tickets or tickets filed before `type` was added to the key.
+export function findMistypedLabels(tickets, vocabulary) {
+    const typed = Object.entries(vocabulary)
+        .filter(([, entry]) => Object.hasOwn(VALUE_TYPES, entry?.type))
+        .map(([key, entry]) => [key, VALUE_TYPES[entry.type]])
+    if (typed.length === 0) return null
+
+    const offenders = []
+    for (const ticket of tickets) {
+        for (const [key, kind] of typed) {
+            for (const label of ticket.labels) {
+                if (!label.startsWith(`${key}=`)) continue
+                if (kind.accepts(label.slice(key.length + 1))) continue
+                offenders.push(`  ${ticket.id}: ${label} (${kind.describe})`)
+            }
+        }
+    }
+
+    if (offenders.length === 0) return null
+
+    return `Tickets carry labels that are not of their key's type:\n${offenders.join('\n')}\n\n` +
+        `Set each to a value of its type (\`jp ticket label set --id <id> key=value\`). ` +
+        `\`jp ticket check\` says the same.`
 }
 
 // Labels the vocabulary lets one ticket carry, found on several.
@@ -449,6 +500,8 @@ export function loadTickets(settings = readSettings()) {
     if (unknown) throw new Error(unknown)
     const miscounted = findMiscountedLabels(tickets, vocabulary)
     if (miscounted) throw new Error(miscounted)
+    const mistyped = findMistypedLabels(tickets, vocabulary)
+    if (mistyped) throw new Error(mistyped)
     const shared = findSharedLabels(tickets, vocabulary)
     if (shared) throw new Error(shared)
     const broken = findBrokenParents(tickets)

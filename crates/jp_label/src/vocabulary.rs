@@ -49,6 +49,16 @@
 //!
 //! Leaving `values` out makes a bare key instead, which takes none.
 //!
+//! An open key can restrict its values to a [`ValueType`] with `type`,
+//! rejecting values of any other format on write:
+//!
+//! ```json
+//! { "due": { "description": "When the work is wanted.", "values": [], "type": "date" } }
+//! ```
+//!
+//! `date` is the only supported type: a calendar date in `YYYY-MM-DD` format,
+//! which a [`Selector`] can compare with `<`, `<=`, `>`, and `>=`.
+//!
 //! A key can also be held to one item across a collection, with `unique`:
 //! `"key"` lets one item carry the key at all, and `"key-value"` lets one item
 //! carry each of its values.
@@ -65,6 +75,8 @@
 //! Reading is liberal and writing is strict: an item parsed off disk reports
 //! whatever labels it carries, but only [`Vocabulary::resolve`] and
 //! [`Vocabulary::resolve_against`] produce a set a write will accept.
+//!
+//! [`Selector`]: crate::Selector
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -74,7 +86,7 @@ use std::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{KeyError, Labels, parse_token, validate_key, validate_value};
+use crate::{KeyError, Labels, ValueType, parse_token, validate_key, validate_value};
 
 /// The on-disk shape of one key's entry.
 ///
@@ -96,6 +108,8 @@ struct Entry {
     max: Option<usize>,
     #[serde(default)]
     unique: Option<Unique>,
+    #[serde(default, rename = "type")]
+    value_type: Option<ValueType>,
 }
 
 /// How much of a key one item of a collection holds on its own.
@@ -136,6 +150,7 @@ pub struct Facet {
     min: usize,
     max: Option<usize>,
     unique: Option<Unique>,
+    value_type: Option<ValueType>,
 }
 
 impl Facet {
@@ -166,6 +181,14 @@ impl Facet {
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// Value type constraint for this key, or `None` for unrestricted text.
+    ///
+    /// Only open keys (`values = []`) can have a value type.
+    #[must_use]
+    pub fn value_type(&self) -> Option<ValueType> {
+        self.value_type
     }
 
     /// How much of this key one item of a collection holds on its own, or
@@ -225,6 +248,9 @@ fn bound(min: usize, max: Option<usize>) -> Option<String> {
 /// meet.
 fn check(key: &str, facet: &Facet) -> Result<(), Error> {
     let key = key.to_owned();
+    if facet.value_type.is_some() && !facet.open {
+        return Err(Error::TypeOnClosedKey { key });
+    }
     if facet.open && !facet.retired.is_empty() {
         return Err(Error::RetiredOnOpenKey { key });
     }
@@ -347,6 +373,7 @@ impl Vocabulary {
                 min: entry.min.unwrap_or(0),
                 max: entry.max,
                 unique: entry.unique,
+                value_type: entry.value_type,
             };
             check(&key, &facet)?;
 
@@ -457,7 +484,8 @@ impl Vocabulary {
     /// The tokens are the item's whole set, so each key's `min` and `max` are
     /// checked against them.
     ///
-    /// A key that takes any value keeps the value as given.
+    /// An open key preserves the value's original spelling after validating any
+    /// configured `type`.
     /// An empty vocabulary accepts every well-formed token, spelled as given.
     /// Neither checks `unique`, which needs the rest of the collection; see
     /// [`Vocabulary::clashes`].
@@ -483,6 +511,7 @@ impl Vocabulary {
         let mut unknown_keys = vec![];
         let mut unknown_values = vec![];
         let mut retired = vec![];
+        let mut mistyped = vec![];
 
         for token in requested {
             let Ok((key, value)) = parse_token(token) else {
@@ -506,6 +535,17 @@ impl Vocabulary {
                 continue;
             };
 
+            // `check` only allows `type` on open keys (`values = []`), so this
+            // never rejects an explicitly listed value.
+            if let Some(expected) = facet.value_type.filter(|kind| !kind.accepts(&value)) {
+                mistyped.push(Mistyped {
+                    key: key.to_owned(),
+                    value,
+                    expected,
+                });
+                continue;
+            }
+
             if let Some(known) = matching(facet.active.iter(), &value) {
                 accepted.entry(key).or_default().insert(known.to_owned());
             } else if let Some(known) = matching(facet.retired.iter(), &value) {
@@ -527,6 +567,7 @@ impl Vocabulary {
             || !unknown_keys.is_empty()
             || !unknown_values.is_empty()
             || !retired.is_empty()
+            || !mistyped.is_empty()
             || !miscounted.is_empty()
         {
             return Err(Rejected {
@@ -534,6 +575,7 @@ impl Vocabulary {
                 unknown_keys,
                 unknown_values,
                 retired,
+                mistyped,
                 miscounted,
                 addable: self.tokens(),
                 open_keys: self.open_keys().map(ToOwned::to_owned).collect(),
@@ -684,6 +726,7 @@ fn free_form(requested: &[String]) -> Result<Labels, Rejected> {
             unknown_keys: vec![],
             unknown_values: vec![],
             retired: vec![],
+            mistyped: vec![],
             miscounted: vec![],
             addable: vec![],
             open_keys: vec![],
@@ -741,6 +784,8 @@ pub enum Error {
     RetiredOnOpenKey { key: String },
     /// `unique = "key"` on a key every item has to carry.
     UniqueRequired { key: String, min: usize },
+    /// `type` on a key that lists its values or takes none.
+    TypeOnClosedKey { key: String },
 }
 
 impl fmt::Display for Error {
@@ -749,7 +794,7 @@ impl fmt::Display for Error {
             Self::Malformed(reason) => write!(
                 f,
                 "The label vocabulary is not a map of each key to a `description`, `values`, and \
-                 the optional `retired`, `min`, and `max`: {reason}"
+                 the optional `retired`, `min`, `max`, `unique`, and `type`: {reason}"
             ),
             Self::Name(error) => write!(f, "The label vocabulary is unusable: {error}."),
             Self::EmptyValue { key } => {
@@ -793,6 +838,11 @@ impl fmt::Display for Error {
                 "`{key}` in the label vocabulary is required on every item (`min = {min}`) but \
                  allowed on one (`unique = \"key\"`), which no two items can meet."
             ),
+            Self::TypeOnClosedKey { key } => write!(
+                f,
+                "`{key}` in the label vocabulary has a `type`, but only a key taking any value \
+                 (`values = []`) can have one."
+            ),
         }
     }
 }
@@ -821,12 +871,34 @@ pub struct Rejected {
     pub unknown_values: Vec<String>,
     /// Retired, and not already on the item.
     pub retired: Vec<String>,
+    /// Values that do not match their key's `type`.
+    pub mistyped: Vec<Mistyped>,
     /// Keys the item would carry too few or too many values of.
     pub miscounted: Vec<Miscount>,
     /// The tokens a write may add.
     pub addable: Vec<String>,
     /// The keys a write may add with any value.
     pub open_keys: Vec<String>,
+}
+
+/// A label value that does not match its key's [`ValueType`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mistyped {
+    pub key: String,
+    pub value: String,
+    pub expected: ValueType,
+}
+
+impl fmt::Display for Mistyped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`{}={}` is not {}.",
+            self.key,
+            self.value,
+            self.expected.describe()
+        )
+    }
 }
 
 /// A bounded key an item would carry too few or too many values of.
@@ -922,8 +994,13 @@ impl fmt::Display for Rejected {
             )?;
         }
 
-        // The whole set is offered only for a label the vocabulary refused; a
-        // miscount offers the values of its own key.
+        for mistyped in &self.mistyped {
+            sentence(f, mistyped.to_string())?;
+        }
+
+        // Only list the full vocabulary when a key or value is unknown or
+        // retired; miscounts list their own key's values, and mistyped values
+        // state the expected format.
         let refused = !self.malformed.is_empty()
             || !self.unknown_keys.is_empty()
             || !self.unknown_values.is_empty()
