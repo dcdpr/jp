@@ -29,6 +29,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Attachment](#attachment)
     - [Background Task](#background-task)
     - [Checklist Item](#checklist-item)
+    - [Closed Prompt](#closed-prompt)
     - [CommandConfig](#commandconfig)
     - [Compacted View](#compacted-view)
     - [Compaction](#compaction)
@@ -37,6 +38,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [Display Sanitization](#display-sanitization)
+    - [Drain Timeout](#drain-timeout)
     - [EditorBackend](#editorbackend)
     - [Envelope](#envelope)
     - [Event Overlay](#event-overlay)
@@ -55,6 +57,7 @@ In disagreements between code and docs, the code is authoritative.
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
     - [Service Tier](#service-tier)
+    - [Shutdown Budget](#shutdown-budget)
     - [Signal Router](#signal-router)
     - [Subscription Flow](#subscription-flow)
     - [Summary](#summary)
@@ -102,6 +105,18 @@ The `checklist` module of the `ticket` crate reads and checks them.
 that can be picked up, merged, or discussed separately; nor a step of the `plan`
 tool, which tracks the assistant's progress through one conversation and is kept
 with it.
+
+### Closed Prompt
+
+A prompt whose wait for input is ended programmatically without user input,
+either by its caller when the answer is no longer needed (`PromptCloser` in
+`jp_inquire`) or by graceful shutdown (`jp_inquire::close_all`).
+
+**Not the same as** a cancelled or interrupted prompt, which the user ends at
+the keyboard with `Esc` or `Ctrl+C`.
+
+**Scope**: Only `InlineReply` supports programmatic closing; prompts rendered by
+the `inquire` crate (including `InlineSelect`) block until a key is pressed.
 
 ### CommandConfig
 
@@ -233,6 +248,15 @@ Storage sanitization (`Workspace::sanitize`, [RFD-052]) checks the conversations
 on disk at startup and moves broken ones to the trash.
 Stream repair (`ConversationStream::sanitize`) fixes structural problems in an
 event stream, such as a tool call with no response.
+
+### Drain Timeout
+
+The maximum time background tasks are given to finish their `run` phase after a
+command returns before they are cancelled.
+Passed as the `timeout` parameter to `TaskHandler::sync` in `jp_task::handler`.
+
+**Not the same as** a [Shutdown Budget](#shutdown-budget), which bounds how long
+a running command may continue after a graceful shutdown request.
 
 ### EditorBackend
 
@@ -462,6 +486,19 @@ tier under load, and bill at whatever actually served it.
 
 **Not the same as** the model: a tier changes what the request costs and how
 fast it is served, not which weights answer it.
+
+### Shutdown Budget
+
+The grace period a running command claims to finish asynchronous teardown after
+a graceful shutdown is requested, before `until_shutdown` drops the command
+future.
+Tracked by `ShutdownBudgets` in `jp_cli::shutdown`; when multiple claims are
+held, the maximum claimed duration applies.
+
+**Not the same as** a plugin's shutdown timeout (`shutdown_timeout_secs`), which
+is one component of a plugin run's shutdown budget, or the [Drain
+Timeout](#drain-timeout), which applies to background tasks after a command
+returns.
 
 ### Signal Router
 

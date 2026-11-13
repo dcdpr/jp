@@ -846,7 +846,7 @@ fn a_root_object_naming_one_map_entry_keeps_the_others() {
         .unwrap();
 
     assert_eq!(
-        config.plugins.command,
+        config.plugins.command.plugins,
         MergeableMap::Map(IndexMap::from([
             ("ticket".to_owned(), allowed_with_assistant()),
             ("wiki".to_owned(), allowed()),
@@ -869,7 +869,7 @@ fn an_object_assigned_to_a_block_keeps_the_entries_of_maps_inside_it() {
         .unwrap();
 
     assert_eq!(
-        config.plugins.command,
+        config.plugins.command.plugins,
         MergeableMap::Map(IndexMap::from([
             ("ticket".to_owned(), allowed_with_assistant()),
             ("wiki".to_owned(), allowed()),
@@ -884,6 +884,38 @@ fn an_object_assigned_to_a_map_replaces_it() {
     config
         .assign(
             KvAssignment::try_from_cli(
+                "plugins.command.ticket.options:",
+                r#"{"dir": "docs/ticket"}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    config
+        .assign(
+            KvAssignment::try_from_cli(
+                "plugins.command.ticket.options:",
+                r#"{"assistant": "Ada via jp"}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        config.plugins.command.plugins,
+        MergeableMap::Map(IndexMap::from([
+            ("ticket".to_owned(), allowed_with_assistant()),
+            ("wiki".to_owned(), allowed()),
+        ]))
+    );
+}
+
+#[test]
+fn an_object_assigned_to_the_command_plugins_block_keeps_the_plugins_it_does_not_name() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(
+            KvAssignment::try_from_cli(
                 "plugins.command:",
                 r#"{"ticket": {"options": {"assistant": "Ada via jp"}}}"#,
             )
@@ -892,17 +924,35 @@ fn an_object_assigned_to_a_map_replaces_it() {
         .unwrap();
 
     assert_eq!(
-        config.plugins.command,
-        MergeableMap::Map(IndexMap::from([(
-            "ticket".to_owned(),
-            PartialCommandPluginConfig {
-                options: MergeableMap::Map(IndexMap::from([(
-                    "assistant".to_owned(),
-                    JsonValue(json!("Ada via jp")),
-                )])),
-                ..Default::default()
-            },
-        )]))
+        config.plugins.command.plugins,
+        MergeableMap::Map(IndexMap::from([
+            ("ticket".to_owned(), allowed_with_assistant()),
+            ("wiki".to_owned(), allowed()),
+        ]))
+    );
+}
+
+#[test]
+fn a_replace_strategy_assigned_to_the_command_plugins_block_drops_the_other_plugins() {
+    let mut config = plugins_allowed_by_files();
+
+    config
+        .assign(
+            KvAssignment::try_from_cli(
+                "plugins.command:",
+                r#"{"value": {"ticket": {"run": "allow"}}, "strategy": "replace"}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        config.plugins.command.plugins,
+        MergeableMap::Merged(MergedMap {
+            value: IndexMap::from([("ticket".to_owned(), allowed())]),
+            strategy: Some(MergedMapStrategy::Replace),
+            discard_when_merged: false,
+        })
     );
 }
 
@@ -920,7 +970,7 @@ fn a_map_strategy_in_a_root_object_combines_with_the_entries_already_there() {
         .unwrap();
 
     assert_eq!(
-        config.plugins.command,
+        config.plugins.command.plugins,
         MergeableMap::Merged(MergedMap {
             value: IndexMap::from([
                 ("ticket".to_owned(), allowed_with_assistant()),
@@ -981,5 +1031,5 @@ fn null_in_a_root_object_clears_the_map() {
         ))
         .unwrap();
 
-    assert_eq!(config.plugins.command, MergeableMap::default());
+    assert_eq!(config.plugins.command.plugins, MergeableMap::default());
 }

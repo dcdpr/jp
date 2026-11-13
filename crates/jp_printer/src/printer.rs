@@ -1993,7 +1993,8 @@ fn release_pending(delay_control: &DelayControl, count: usize) {
 /// Returns `None` if no controlling terminal is available (e.g., CI, Docker
 /// without `-t`, or detached processes).
 #[cfg(unix)]
-fn open_tty() -> Option<std::fs::File> {
+#[must_use]
+pub fn open_tty() -> Option<std::fs::File> {
     std::fs::OpenOptions::new()
         .write(true)
         .open("/dev/tty")
@@ -2002,13 +2003,15 @@ fn open_tty() -> Option<std::fs::File> {
 
 /// Opens the console output device for writing.
 #[cfg(windows)]
-fn open_tty() -> Option<std::fs::File> {
+#[must_use]
+pub fn open_tty() -> Option<std::fs::File> {
     std::fs::OpenOptions::new().write(true).open("CONOUT$").ok()
 }
 
 /// No TTY support on this platform.
 #[cfg(not(any(unix, windows)))]
-fn open_tty() -> Option<std::fs::File> {
+#[must_use]
+pub fn open_tty() -> Option<std::fs::File> {
     None
 }
 

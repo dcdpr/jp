@@ -45,6 +45,7 @@ fn config(run: Option<RunPolicy>, pinned: Option<&str>) -> CommandPluginConfig {
             algorithm: AlgorithmConfig::Sha256,
             value: value.to_owned(),
         }),
+        shutdown_timeout_secs: None,
         options: MergeableMap::default(),
     }
 }
@@ -58,7 +59,11 @@ fn deny_refuses_whatever_else_would_admit_it() {
     };
 
     assert_eq!(
-        decide(&approved, Some(&config(Some(RunPolicy::Deny), None))),
+        decide(
+            &approved,
+            Some(&config(Some(RunPolicy::Deny), None)),
+            RunPolicy::Ask
+        ),
         Verdict::Refuse(
             "plugin `webui` is denied by configuration (plugins.command.webui.run = \"deny\")"
                 .to_owned()
@@ -73,6 +78,7 @@ fn a_pinned_checksum_refuses_a_binary_that_does_not_match_it_even_under_allow() 
     let verdict = decide(
         &candidate(&plugin),
         Some(&config(Some(RunPolicy::Allow), Some("bbb"))),
+        RunPolicy::Ask,
     );
 
     assert!(matches!(verdict, Verdict::Refuse(reason) if reason.contains("checksum mismatch")));
@@ -90,6 +96,7 @@ fn a_pin_without_a_digest_refuses() {
     let verdict = decide(
         &unhashed,
         Some(&config(Some(RunPolicy::Allow), Some("aaa"))),
+        RunPolicy::Ask,
     );
 
     assert!(matches!(verdict, Verdict::Refuse(reason) if reason.contains("checksum mismatch")));
@@ -117,6 +124,7 @@ fn a_sha1_pin_is_compared_with_the_binarys_sha1() {
                     algorithm: AlgorithmConfig::Sha1,
                     value: value.to_owned(),
                 }),
+                shutdown_timeout_secs: None,
                 options: MergeableMap::default(),
             });
         plugins
@@ -169,18 +177,154 @@ fn allow_runs_without_asking() {
     assert_eq!(
         decide(
             &candidate(&plugin),
-            Some(&config(Some(RunPolicy::Allow), Some("aaa")))
+            Some(&config(Some(RunPolicy::Allow), Some("aaa"))),
+            RunPolicy::Ask
         ),
         Verdict::Run
     );
 }
 
-/// Every plugin is at `ask` unless config says otherwise.
 #[test]
-fn ask_is_the_default() {
+fn a_plugin_without_its_own_policy_gets_the_default() {
     let plugin = plugin("webui");
 
-    assert_eq!(decide(&candidate(&plugin), None), Verdict::Ask(Reason::New));
+    assert_eq!(
+        decide(&candidate(&plugin), None, RunPolicy::Allow),
+        Verdict::Run
+    );
+    assert_eq!(
+        decide(
+            &candidate(&plugin),
+            Some(&config(None, None)),
+            RunPolicy::Allow
+        ),
+        Verdict::Run
+    );
+}
+
+#[test]
+fn a_default_of_deny_refuses_and_names_the_default() {
+    let plugin = plugin("webui");
+    let approved = Candidate {
+        approval: ApprovalMatch::Matches,
+        ..candidate(&plugin)
+    };
+
+    assert_eq!(
+        decide(&approved, None, RunPolicy::Deny),
+        Verdict::Refuse(
+            "plugin `webui` is denied by configuration (plugins.command.'*'.run = \"deny\")"
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_plugins_own_policy_overrides_the_default() {
+    let plugin = plugin("webui");
+
+    // Allowed by name where everything else is denied.
+    assert_eq!(
+        decide(
+            &candidate(&plugin),
+            Some(&config(Some(RunPolicy::Allow), None)),
+            RunPolicy::Deny
+        ),
+        Verdict::Run
+    );
+
+    // Asked about where everything else runs.
+    assert_eq!(
+        decide(
+            &candidate(&plugin),
+            Some(&config(Some(RunPolicy::Ask), None)),
+            RunPolicy::Allow
+        ),
+        Verdict::Ask(Reason::New)
+    );
+
+    // Denied by name where everything else runs, and the refusal names the
+    // plugin's own key.
+    assert_eq!(
+        decide(
+            &candidate(&plugin),
+            Some(&config(Some(RunPolicy::Deny), None)),
+            RunPolicy::Allow
+        ),
+        Verdict::Refuse(
+            "plugin `webui` is denied by configuration (plugins.command.webui.run = \"deny\")"
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_pinned_checksum_refuses_a_mismatch_under_a_default_of_allow() {
+    let plugin = plugin("webui");
+
+    assert_eq!(
+        decide(
+            &candidate(&plugin),
+            Some(&config(None, Some("bbb"))),
+            RunPolicy::Allow
+        ),
+        Verdict::Refuse(
+            "plugin `webui` binary checksum mismatch.\nexpected: bbb\nactual:   aaa\nThe binary \
+             at /bin/jp-webui has changed since it was pinned. Update \
+             plugins.command.webui.checksum.value in your config to accept the new binary."
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn admit_applies_the_default_policy_of_the_configuration() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-webui");
+    std::fs::write(&path, "v1").unwrap();
+    let plugin = LocalPlugin {
+        path,
+        ..plugin("webui")
+    };
+
+    let mut approvals = ApprovalStore::load_from(Some(tmp.path().join("approvals.json")));
+    let (printer, _out, _err) = Printer::memory(jp_printer::OutputFormat::Text);
+    let mut admit_under = |default: RunPolicy| {
+        let mut config = AppConfig::new_test().plugins;
+        config.command.defaults.run = default;
+
+        admit(
+            &plugin,
+            Official::default(),
+            &config,
+            &mut approvals,
+            false,
+            &printer,
+        )
+        .map(drop)
+        .map_err(|error| error.message.unwrap_or_default())
+    };
+
+    assert_eq!(
+        admit_under(RunPolicy::Deny),
+        Err(
+            "plugin `webui` is denied by configuration (plugins.command.'*'.run = \"deny\")"
+                .to_owned()
+        )
+    );
+    // Nobody approved the binary, so it runs only because the default allows.
+    assert_eq!(admit_under(RunPolicy::Allow), Ok(()));
+}
+
+/// Under `ask`, a binary nothing vouches for is asked about.
+#[test]
+fn a_new_binary_is_asked_about_under_ask() {
+    let plugin = plugin("webui");
+
+    assert_eq!(
+        decide(&candidate(&plugin), None, RunPolicy::Ask),
+        Verdict::Ask(Reason::New)
+    );
 }
 
 #[test]
@@ -192,7 +336,7 @@ fn the_official_release_runs_without_asking() {
         ..candidate(&plugin)
     };
 
-    assert_eq!(decide(&official, None), Verdict::Run);
+    assert_eq!(decide(&official, None, RunPolicy::Ask), Verdict::Run);
 }
 
 /// A package manager's own build of an official plugin has other bytes than the
@@ -206,7 +350,10 @@ fn an_official_binary_that_is_not_the_release_is_asked_about() {
         ..candidate(&plugin)
     };
 
-    assert_eq!(decide(&official, None), Verdict::Ask(Reason::NotTheRelease));
+    assert_eq!(
+        decide(&official, None, RunPolicy::Ask),
+        Verdict::Ask(Reason::NotTheRelease)
+    );
 }
 
 #[test]
@@ -217,7 +364,7 @@ fn an_approved_binary_runs_without_asking() {
         ..candidate(&plugin)
     };
 
-    assert_eq!(decide(&approved, None), Verdict::Run);
+    assert_eq!(decide(&approved, None, RunPolicy::Ask), Verdict::Run);
 }
 
 #[test]
@@ -228,14 +375,17 @@ fn a_changed_or_moved_binary_is_asked_about_again() {
         approval: ApprovalMatch::Changed,
         ..candidate(&plugin)
     };
-    assert_eq!(decide(&changed, None), Verdict::Ask(Reason::Changed));
+    assert_eq!(
+        decide(&changed, None, RunPolicy::Ask),
+        Verdict::Ask(Reason::Changed)
+    );
 
     let elsewhere = Candidate {
         approval: ApprovalMatch::Elsewhere("/other/jp-webui".into()),
         ..candidate(&plugin)
     };
     assert_eq!(
-        decide(&elsewhere, None),
+        decide(&elsewhere, None, RunPolicy::Ask),
         Verdict::Ask(Reason::Elsewhere("/other/jp-webui".into()))
     );
 }

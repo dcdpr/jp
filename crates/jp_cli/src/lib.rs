@@ -15,6 +15,7 @@ mod render;
 mod schema;
 mod session;
 mod shared;
+mod shutdown;
 mod signals;
 
 use std::{
@@ -66,6 +67,7 @@ use crate::{
     cli::flag::{ArgPrompts, Parsed},
     cmd::{plugin::help::print_root_section, target::resolve_request},
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
+    shutdown::{on_shutdown, until_shutdown},
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -567,26 +569,26 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     ctx.config_reset = config_reset;
     let rt = ctx.handle().clone();
 
-    // Run the requested command, racing it against the shutdown token.
+    // Run the requested command until it returns or a shutdown request ends
+    // it; the teardown below then drains background tasks and cleans up stale
+    // files either way.
     // `start_new` carries the interactive picker's "start a new conversation"
     // choice through to the query command, which honors it at lock time.
-    //
-    // When a graceful shutdown is requested (an unhandled or escalated
-    // Ctrl-C, or SIGTERM), the command future is dropped and the run falls
-    // through to the normal teardown below. Dropping the future releases
-    // conversation locks and persists dirty conversations (guard-scoped
-    // persistence); the teardown then drains background tasks and cleans up
-    // stale files.
     let shutdown = ctx.signals.shutdown_token();
-    let output = rt.block_on(async {
-        tokio::select! {
-            biased;
-            output = command.run(&mut ctx, handles, start_new) => output,
-            () = shutdown.cancelled() => Err(cmd::Error::interrupted()),
-        }
-    });
+    let budgets = ctx.shutdown_budgets.clone();
 
-    // The shutdown arm above drops the command future, so a conversation scope
+    // Close any active closable prompt (such as `InlineReply`) on shutdown so
+    // synchronous prompt waits unblock and `until_shutdown` can drop the
+    // command.
+    on_shutdown(&rt, shutdown.clone(), jp_inquire::close_all);
+
+    let output = rt.block_on(until_shutdown(
+        command.run(&mut ctx, handles, start_new),
+        &shutdown,
+        &budgets,
+    ));
+
+    // A shutdown request drops the command future, so a conversation scope
     // that was dirty persists from its `Drop` and records any failure on the
     // workspace — with the command's own drain gone along with the future.
     // Draining here, before the `disable_persistence` check below, is what lets

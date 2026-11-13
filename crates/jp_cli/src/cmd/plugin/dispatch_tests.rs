@@ -1,8 +1,16 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
 #[cfg(unix)]
 use chrono::Utc;
+use inquire::InquireError;
+use jp_config::{
+    PartialAppConfig,
+    assignment::{AssignKeyValue as _, KvAssignment},
+    plugins::command::{CommandPluginConfig, RunPolicy},
+    types::map::MergeableMap,
+};
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
 use jp_editor::MockEditorBackend;
+use jp_inquire::InlineOption;
 use jp_llm::turn_summary::{GeneratedTurnSummary, transcripts};
 #[cfg(unix)]
 use jp_plugin::registry::ApprovedPlugin;
@@ -14,11 +22,10 @@ use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
 use serde_json::json;
 use serial_test::serial;
+use tokio::sync::{Notify, oneshot};
 
 use super::*;
-#[cfg(unix)]
-use crate::Globals;
-use crate::{editor::CUT_MARKER, env_testing::EnvVarGuard};
+use crate::{Globals, editor::CUT_MARKER, env_testing::EnvVarGuard, shutdown::until_shutdown};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
@@ -70,6 +77,141 @@ fn edit_refused(message: &str) -> HostToPlugin {
         request: Some("edit_files".to_owned()),
         message: message.to_owned(),
     })
+}
+
+/// Mock prompt backend whose `inline_reply` blocks until the test sends a
+/// [`ReplyOutcome`].
+struct HeldReply {
+    outcomes: Mutex<std::sync::mpsc::Receiver<ReplyOutcome>>,
+    opened: Arc<Notify>,
+}
+
+impl HeldReply {
+    fn new(outcomes: std::sync::mpsc::Receiver<ReplyOutcome>) -> Self {
+        Self {
+            outcomes: Mutex::new(outcomes),
+            opened: Arc::new(Notify::new()),
+        }
+    }
+}
+
+impl PromptBackend for HeldReply {
+    fn inline_select(
+        &self,
+        message: &str,
+        _options: Vec<InlineOption>,
+        _default: Option<char>,
+        _writer: &mut dyn Write,
+    ) -> Result<char, InquireError> {
+        panic!("unexpected prompt: {message}")
+    }
+
+    fn inline_reply(
+        &self,
+        _message: &str,
+        _initial_text: &str,
+        _edit_mode: ReplyEditMode,
+        _editor_escape: bool,
+        _help: Option<&str>,
+        _output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        self.opened.notify_one();
+        self.outcomes
+            .lock()
+            .unwrap()
+            .recv()
+            .map_err(|_| InquireError::OperationCanceled)
+    }
+
+    fn select(
+        &self,
+        message: &str,
+        _options: Vec<String>,
+        _default: Option<usize>,
+        _writer: &mut dyn Write,
+    ) -> Result<usize, InquireError> {
+        panic!("unexpected prompt: {message}")
+    }
+
+    fn password(&self, message: &str, _writer: &mut dyn Write) -> Result<String, InquireError> {
+        panic!("unexpected prompt: {message}")
+    }
+}
+
+fn composer_asking(prompts: Arc<HeldReply>) -> Composer {
+    Composer {
+        printer: Arc::new(Printer::sink()),
+        prompts,
+        editor: None,
+        edit_mode: ReplyEditMode::default(),
+        interactive: true,
+    }
+}
+
+fn reply_request() -> ComposeRequest {
+    ComposeRequest {
+        id: Some("1".to_owned()),
+        message: "Reply".to_owned(),
+        mode: ComposeMode::Buffer { initial_text: None },
+        help: None,
+    }
+}
+
+#[tokio::test]
+async fn a_compose_request_is_answered_with_what_the_user_submits() {
+    let (submit, outcomes) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldReply::new(outcomes));
+    let composer = composer_asking(Arc::clone(&prompts));
+
+    tokio::spawn(async move {
+        prompts.opened.notified().await;
+        submit
+            .send(ReplyOutcome::Submit("hello".to_owned()))
+            .unwrap();
+    });
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        compose(&composer, reply_request(), &CancellationToken::new()),
+    )
+    .await
+    .expect("the prompt was answered");
+
+    assert_eq!(
+        response,
+        Some(ComposeResponse {
+            id: Some("1".to_owned()),
+            text: Some("hello".to_owned()),
+            values: vec![],
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_shutdown_request_ends_the_wait_for_a_compose_prompt_left_open() {
+    let (submit, outcomes) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldReply::new(outcomes));
+    let composer = composer_asking(Arc::clone(&prompts));
+
+    let shutdown = CancellationToken::new();
+    {
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            prompts.opened.notified().await;
+            shutdown.cancel();
+        });
+    }
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        compose(&composer, reply_request(), &shutdown),
+    )
+    .await
+    .expect("the wait ended at the shutdown request");
+
+    assert_eq!(response, None);
+
+    submit.send(ReplyOutcome::Cancelled).unwrap();
 }
 
 #[test]
@@ -2281,36 +2423,72 @@ fn a_worker_dies_with_a_plugin_that_never_reads_init() {
     }
 }
 
-/// A plugin that ignores `Shutdown` is killed once
-/// `plugins.shutdown_timeout_secs` has passed, not after a fixed grace period.
-///
-/// With the timeout at zero the kill follows the request at once; at the
-/// default of five seconds the run would take at least that long to end.
-///
-/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
-/// a script.
+/// Write a test plugin script `jp-{name}` into `dir` and return its executable
+/// path.
 #[cfg(unix)]
-#[test]
-fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
+fn script_plugin(dir: &Utf8Path, name: &str, sh: &str, _powershell: &str) -> Utf8PathBuf {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let tmp = tempdir().unwrap();
-    let script = tmp.path().join("jp-stubborn");
-    let started = tmp.path().join("started");
+    let path = dir.join(format!("jp-{name}"));
+    fs::write(&path, format!("#!/bin/sh\n{sh}")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
 
-    // Never reads stdin again, so the `Shutdown` it is sent goes unanswered.
+    path
+}
+
+/// Write a test plugin script `jp-{name}` into `dir` and return its executable
+/// path.
+///
+/// Writes a `.bat` wrapper that invokes PowerShell on a companion `.ps1`
+/// script, since `cmd.exe`'s `set /p` truncates long protocol lines.
+#[cfg(windows)]
+fn script_plugin(dir: &Utf8Path, name: &str, _sh: &str, powershell: &str) -> Utf8PathBuf {
+    let path = dir.join(format!("jp-{name}.bat"));
+    fs::write(dir.join(format!("jp-{name}.ps1")), powershell).unwrap();
     fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nread -r msg\necho '{{\"type\":\"ready\",\"protocol\":1}}'\n: > \
-             {started}\nsleep 600\n"
-        ),
+        &path,
+        "@echo off\r\npowershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \
+         \"%~dpn0.ps1\"\r\n",
     )
     .unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let mut config = AppConfig::new_test();
-    config.plugins.shutdown_timeout_secs = 0;
+    path
+}
+
+/// Timing and shutdown budget observations from
+/// [`shut_down_a_plugin_ignoring_shutdown`].
+struct IgnoredShutdown {
+    took: Duration,
+    claimed_while_running: Option<Duration>,
+    claimed_afterwards: Option<Duration>,
+}
+
+/// Run the plugin `stubborn`, which ignores `Shutdown`, under `config`, and
+/// request a shutdown once it is running.
+fn shut_down_a_plugin_ignoring_shutdown(config: AppConfig) -> IgnoredShutdown {
+    let tmp = tempdir().unwrap();
+    let started = tmp.path().join("started");
+
+    // Reads `init` and never reads stdin again, so the `Shutdown` it is sent
+    // goes unanswered.
+    let script = script_plugin(
+        tmp.path(),
+        "stubborn",
+        &format!(
+            r#"read -r msg
+echo '{{"type":"ready","protocol":1}}'
+: > {started}
+sleep 600
+"#
+        ),
+        &format!(
+            r#"$null = [Console]::In.ReadLine()
+[Console]::Out.WriteLine('{{"type":"ready","protocol":1}}')
+[IO.File]::WriteAllText('{started}', '')
+Start-Sleep -Seconds 600
+"#
+        ),
+    );
 
     let root = tmp.path().join("workspace");
     let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
@@ -2330,6 +2508,7 @@ fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
 
     // Requested once the plugin is running, the way a SIGTERM would be.
     let shutdown = ctx.signals.shutdown_token();
+    let budgets = ctx.shutdown_budgets.clone();
     let requested = Arc::new(Mutex::new(None));
     {
         let requested = Arc::clone(&requested);
@@ -2338,7 +2517,7 @@ fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
             while !started.exists() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(20));
             }
-            *requested.lock().unwrap() = Some(Instant::now());
+            *requested.lock().unwrap() = Some((Instant::now(), budgets.longest()));
             shutdown.cancel();
         });
     }
@@ -2347,12 +2526,270 @@ fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
         .block_on(run_plugin("stubborn", &script, &[], &mut ctx))
         .unwrap();
 
-    let requested = requested.lock().unwrap().expect("shutdown was requested");
-    let took = requested.elapsed();
+    let (requested, claimed_while_running) =
+        requested.lock().unwrap().expect("shutdown was requested");
+
+    IgnoredShutdown {
+        took: requested.elapsed(),
+        claimed_while_running,
+        claimed_afterwards: ctx.shutdown_budgets.longest(),
+    }
+}
+
+#[test]
+fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
+    let mut config = AppConfig::new_test();
+    config.plugins.command.defaults.shutdown_timeout_secs = 0;
+
+    let shown = shut_down_a_plugin_ignoring_shutdown(config);
+
     assert!(
-        took < Duration::from_secs(3),
-        "killed {took:?} after shutdown was requested"
+        shown.took < Duration::from_secs(3),
+        "killed {:?} after shutdown was requested",
+        shown.took
     );
+    // 0s plugin grace + 5s turn grace + 2s margin.
+    assert_eq!(shown.claimed_while_running, Some(Duration::from_secs(7)));
+    assert_eq!(shown.claimed_afterwards, None);
+}
+
+#[test]
+fn a_plugin_ignoring_shutdown_is_killed_after_its_own_grace() {
+    let mut partial = PartialAppConfig::new_test();
+    for assignment in [
+        "plugins.command.*.shutdown_timeout_secs=5",
+        "plugins.command.stubborn.shutdown_timeout_secs=0",
+        "plugins.command.patient.shutdown_timeout_secs=3600",
+    ] {
+        partial
+            .assign(assignment.parse::<KvAssignment>().unwrap())
+            .unwrap();
+    }
+    let config = build(partial).unwrap();
+
+    let shown = shut_down_a_plugin_ignoring_shutdown(config);
+
+    assert!(
+        shown.took < Duration::from_secs(3),
+        "killed {:?} after shutdown was requested",
+        shown.took
+    );
+    assert_eq!(shown.claimed_while_running, Some(Duration::from_secs(7)));
+}
+
+#[test]
+fn a_shutdown_request_waits_for_the_plugin_to_stop() {
+    let tmp = tempdir().unwrap();
+    let started = tmp.path().join("started");
+    let stopped = tmp.path().join("stopped");
+
+    let script = script_plugin(
+        tmp.path(),
+        "careful",
+        &format!(
+            r#"read -r msg
+echo '{{"type":"ready","protocol":1}}'
+: > {started}
+read -r msg
+sleep 0.2
+echo "$msg" > {stopped}
+echo '{{"type":"exit","code":0}}'
+"#
+        ),
+        &format!(
+            r#"$null = [Console]::In.ReadLine()
+[Console]::Out.WriteLine('{{"type":"ready","protocol":1}}')
+[IO.File]::WriteAllText('{started}', '')
+$msg = [Console]::In.ReadLine()
+Start-Sleep -Milliseconds 200
+[IO.File]::WriteAllText('{stopped}', $msg + "`n")
+[Console]::Out.WriteLine('{{"type":"exit","code":0}}')
+"#
+        ),
+    );
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let budgets = ctx.shutdown_budgets.clone();
+
+    // Requested once the plugin is running, the way a SIGTERM would be.
+    let shutdown = ctx.signals.shutdown_token();
+    let claimed_while_running = Arc::new(Mutex::new(None));
+    {
+        let shutdown = shutdown.clone();
+        let budgets = budgets.clone();
+        let claimed = Arc::clone(&claimed_while_running);
+        thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !started.exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            *claimed.lock().unwrap() = budgets.longest();
+            shutdown.cancel();
+        });
+    }
+
+    runtime
+        .block_on(until_shutdown(
+            run_plugin("careful", &script, &[], &mut ctx),
+            &shutdown,
+            &budgets,
+        ))
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&stopped).unwrap(),
+        "{\"type\":\"shutdown\"}\n"
+    );
+    // 5s default plugin grace + 5s turn grace + 2s margin.
+    assert_eq!(
+        *claimed_while_running.lock().unwrap(),
+        Some(Duration::from_secs(12))
+    );
+    assert_eq!(budgets.longest(), None);
+}
+
+#[test]
+fn a_plugin_the_default_policy_denies_is_refused_before_it_is_installed() {
+    let mut plugins = AppConfig::new_test().plugins;
+    plugins.command.defaults.run = RunPolicy::Deny;
+
+    assert_eq!(
+        check_not_denied("serve-web", &plugins).map_err(|e| e.message.unwrap_or_default()),
+        Err(
+            "plugin `serve-web` is denied by configuration (plugins.command.'*'.run = \"deny\")"
+                .to_owned()
+        )
+    );
+
+    plugins
+        .command
+        .insert("serve-web".to_owned(), CommandPluginConfig {
+            run: Some(RunPolicy::Allow),
+            checksum: None,
+            shutdown_timeout_secs: None,
+            options: MergeableMap::default(),
+        });
+
+    assert_eq!(
+        check_not_denied("serve-web", &plugins).map_err(|e| e.message.unwrap_or_default()),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_plugin_run_gets_its_grace_and_its_turns_grace_to_shut_down() {
+    // 30s plugin grace + 5s turn grace + 2s margin.
+    assert_eq!(
+        shutdown_budget(Duration::from_secs(30)),
+        Duration::from_secs(37)
+    );
+}
+
+struct DropFlag(Arc<AtomicBool>);
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_shutdown_request_stops_the_turns_still_running() {
+    let running = RunningTurns::default();
+    let mut interrupts = running.register(conversation_id(1));
+    let (acted, action) = oneshot::channel();
+
+    let mut turns = JoinSet::new();
+    turns.spawn(async move {
+        drop(acted.send(interrupts.next().await));
+    });
+
+    let shutdown = CancellationToken::new();
+    {
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            shutdown.cancel();
+        });
+    }
+
+    let started = tokio::time::Instant::now();
+    tokio::time::timeout(
+        Duration::from_mins(10),
+        finish_turns(&mut turns, &running, &shutdown, Duration::from_secs(5)),
+    )
+    .await
+    .expect("the turn ended once it was asked to stop");
+
+    assert_eq!(action.await.unwrap(), Some(InterruptAction::Stop));
+    assert_eq!(started.elapsed(), Duration::from_secs(10));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_turn_that_does_not_stop_is_aborted_after_its_grace() {
+    let running = RunningTurns::default();
+    let interrupts = running.register(conversation_id(1));
+    let dropped = Arc::new(AtomicBool::new(false));
+
+    let mut turns = JoinSet::new();
+    {
+        let held = (DropFlag(Arc::clone(&dropped)), interrupts);
+        turns.spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await;
+        });
+    }
+
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+
+    let started = tokio::time::Instant::now();
+    tokio::time::timeout(
+        Duration::from_mins(10),
+        finish_turns(&mut turns, &running, &shutdown, Duration::from_secs(5)),
+    )
+    .await
+    .expect("the turn was aborted");
+
+    assert_eq!(started.elapsed(), Duration::from_secs(5));
+    assert!(turns.is_empty());
+    assert!(dropped.load(Ordering::Acquire));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_turn_is_waited_for_while_no_shutdown_is_requested() {
+    let running = RunningTurns::default();
+    let mut interrupts = running.register(conversation_id(1));
+    let (ended, interrupted) = oneshot::channel();
+
+    // Takes an hour, far past the grace a stopped turn gets.
+    let mut turns = JoinSet::new();
+    turns.spawn(async move {
+        tokio::time::sleep(Duration::from_hours(1)).await;
+        drop(ended.send(interrupts.try_next()));
+    });
+
+    let shutdown = CancellationToken::new();
+    let started = tokio::time::Instant::now();
+    finish_turns(&mut turns, &running, &shutdown, Duration::from_secs(5)).await;
+
+    assert_eq!(started.elapsed(), Duration::from_hours(1));
+    assert_eq!(interrupted.await.unwrap(), None);
 }
 
 #[test]

@@ -42,6 +42,18 @@ and the bridge sends the turn's final response back to the chat.
   finish (when `signal-cli` exits), verifies the working tree, and only then
   releases the checkout lock and exits.
 
+When a shutdown signal arrives, JP terminates a plugin if it has not exited
+within `shutdown_timeout_secs` (5 seconds by default, configured under
+`plugins.command.'*'.shutdown_timeout_secs` or per plugin).
+Set `plugins.command.serve-chat.shutdown_timeout_secs` high enough for the
+bridge to stop an active turn and verify the working tree, while keeping it
+below the process supervisor's stop timeout:
+
+```toml
+[plugins.command.serve-chat]
+shutdown_timeout_secs = 60
+```
+
 ## Group chats
 
 A message that mentions the bridge's account, or replies to one of its messages,

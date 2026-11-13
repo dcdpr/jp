@@ -42,6 +42,32 @@ fn a_cfg_argument_can_deny_approving() {
 
 #[test]
 #[serial(env_vars)]
+fn the_default_policy_denies_approving_unless_the_plugin_has_its_own() {
+    let tmp = tempdir().unwrap();
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", tmp.path().as_str());
+
+    let deny_all = || {
+        "plugins.command.*.run=deny"
+            .parse::<KeyValueOrPath>()
+            .unwrap()
+    };
+    assert_eq!(
+        check(&[deny_all()]),
+        Err(
+            "plugin `titles` is denied by configuration (plugins.command.'*'.run = \"deny\"), so \
+             it is not run to approve it"
+                .to_owned()
+        )
+    );
+
+    let allow = "plugins.command.titles.run=allow"
+        .parse::<KeyValueOrPath>()
+        .unwrap();
+    assert_eq!(check(&[deny_all(), allow]), Ok(()));
+}
+
+#[test]
+#[serial(env_vars)]
 fn the_user_global_config_denies_and_no_cfg_resets_it() {
     let tmp = tempdir().unwrap();
     fs::write(
@@ -64,6 +90,7 @@ fn pinned(value: &str) -> PartialAppConfig {
     config
         .plugins
         .command
+        .plugins
         .insert("titles".to_owned(), PartialCommandPluginConfig {
             checksum: Some(PartialChecksumConfig {
                 value: Some(value.to_owned()),
@@ -111,6 +138,7 @@ fn a_sha1_pin_is_compared_with_the_binarys_sha1() {
     config
         .plugins
         .command
+        .plugins
         .get_mut("titles")
         .and_then(|c| c.checksum.as_mut())
         .unwrap()

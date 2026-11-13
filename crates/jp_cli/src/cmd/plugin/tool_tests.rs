@@ -273,6 +273,41 @@ fn a_denied_plugin_is_refused_even_when_approved() {
 }
 
 #[test]
+fn a_plugin_denied_by_the_default_policy_is_refused_even_when_approved() {
+    let machine = Machine::new().with_plugin("ticket", "v1");
+    let mut approvals = machine.approvals();
+    machine.approve(&mut approvals, "ticket");
+
+    let plugins = machine.admit_with(
+        &["ticket"],
+        &turn_config(&["plugins.command.*.run=deny"]),
+        &mut approvals,
+    );
+
+    assert!(plugins.admitted.is_empty());
+    assert_eq!(
+        plugins.refused()["ticket"],
+        "plugin `ticket` is denied by configuration (plugins.command.'*'.run = \"deny\")"
+    );
+}
+
+#[test]
+fn a_plugin_allowed_by_name_is_admitted_under_a_default_of_deny() {
+    let machine = Machine::new().with_plugin("ticket", "v1");
+
+    let plugins = machine.admit(
+        &["ticket"],
+        &turn_config(&[
+            "plugins.command.*.run=deny",
+            "plugins.command.ticket.run=allow",
+        ]),
+    );
+
+    assert!(plugins.refused().is_empty(), "{:?}", plugins.refused());
+    assert_eq!(plugins.admitted["ticket"].binary, machine.path("ticket"));
+}
+
+#[test]
 fn a_missing_plugin_is_refused() {
     let machine = Machine::new();
 
