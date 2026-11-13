@@ -320,6 +320,32 @@ pub mod commits {
     }
 }
 
+pub mod releases {
+    use super::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Release {
+        pub id: u64,
+        pub tag_name: String,
+        pub name: Option<String>,
+        pub body: Option<String>,
+        pub draft: bool,
+        pub prerelease: bool,
+        pub html_url: String,
+        /// Asset upload URI template ending in `{?name,label}`.
+        pub upload_url: String,
+        #[serde(default)]
+        pub assets: Vec<Asset>,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Asset {
+        pub id: u64,
+        pub name: String,
+        pub browser_download_url: String,
+    }
+}
+
 pub mod search {
     use super::{Deserialize, Serialize};
 

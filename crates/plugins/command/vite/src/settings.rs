@@ -6,7 +6,8 @@
 //! It holds where the RFDs, tickets, and wiki pages live and where the site
 //! serves them, the RFD categories, the label keys a ticket or a wiki page
 //! names an RFD under, the ticket vocabulary, how much of the Done column the
-//! board shows, where links to repository files point and the branch they are
+//! board shows, where the release notes' fragments live and what they are
+//! rendered with, where links to repository files point and the branch they are
 //! edited on, the pages that moved, and the revision of the site files it was
 //! written with.
 //!
@@ -14,11 +15,15 @@
 //! it, and the site neither loads it nor links to it.
 //! One that exists has to sit inside the VitePress source directory, which is
 //! the only place VitePress serves pages from.
+//! The releases are the exception: the site renders their pages under
+//! [`RELEASE_ROUTE`] from the fragments directory, which can be anywhere in the
+//! workspace.
 
 use std::collections::BTreeMap;
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
-use jp_label::{Unique, ValueType};
+use jp_label::{Unique, ValueType, Vocabulary};
+use release_options::Notes;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -27,6 +32,9 @@ use crate::{
     options::{Options, rfd_options, ticket_options, web_address, wiki_options},
     site,
 };
+
+/// Where the site serves the releases, relative to the source directory.
+pub(crate) const RELEASE_ROUTE: &str = "releases";
 
 /// What the site reads of the project's configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -54,6 +62,9 @@ pub(crate) struct Settings {
     /// The wiki, when the project has one.
     pub wiki: Option<WikiSettings>,
 
+    /// The releases, when the project keeps release notes.
+    pub release: Option<ReleaseSettings>,
+
     /// Pages that moved: each old route, and the route or wiki page id it went
     /// to; left out when none did.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -73,6 +84,29 @@ pub(crate) struct WikiSettings {
 
     /// The label key a page names an RFD it relates to under.
     pub relevant_key: String,
+}
+
+/// Release-note settings written to `.vitepress/jp-vite/settings.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReleaseSettings {
+    /// Fragments directory relative to the workspace root.
+    pub dir: String,
+
+    /// Site route prefix relative to the VitePress source directory
+    /// ([`RELEASE_ROUTE`]).
+    pub route: String,
+
+    /// Configured forge identifier (`github`, `gitlab`, or `none`), or `None`
+    /// to infer it from the repository URL.
+    pub forge: Option<String>,
+
+    /// Configured repository web URL, or `None` to derive it from git's
+    /// `origin` remote at build time.
+    pub repository: Option<String>,
+
+    /// Custom changelog section headings keyed by fragment type ID.
+    pub headings: BTreeMap<String, String>,
 }
 
 /// Where the RFDs live, and what the site shows of them.
@@ -210,22 +244,7 @@ pub(crate) fn snapshot(
             dir,
             route,
             done_limit: ticket_options.done_limit,
-            labels: ticket_options
-                .labels
-                .facets()
-                .map(|(key, facet)| {
-                    (key.to_owned(), Label {
-                        description: facet.description().to_owned(),
-                        values: facet.values().map(ToOwned::to_owned).collect(),
-                        retired: facet.retired().map(ToOwned::to_owned).collect(),
-                        open: facet.is_open(),
-                        min: facet.min(),
-                        max: facet.max(),
-                        unique: facet.unique().map(Unique::as_str),
-                        value_type: facet.value_type().map(ValueType::as_str),
-                    })
-                })
-                .collect(),
+            labels: labels(&ticket_options.labels),
         }
     });
 
@@ -236,6 +255,8 @@ pub(crate) fn snapshot(
             route,
             relevant_key: wiki_options.relevant_key,
         });
+
+    let release = releases(root, Notes::from_config(config)?)?;
 
     Ok(Settings {
         revision: site::REVISION.to_owned(),
@@ -248,8 +269,58 @@ pub(crate) fn snapshot(
         rfd,
         ticket,
         wiki,
+        release,
         redirects: options.redirects.clone(),
     })
+}
+
+/// The labels `vocabulary` defines, by key, as the ticket pages read them.
+fn labels(vocabulary: &Vocabulary) -> BTreeMap<String, Label> {
+    vocabulary
+        .facets()
+        .map(|(key, facet)| {
+            (key.to_owned(), Label {
+                description: facet.description().to_owned(),
+                values: facet.values().map(ToOwned::to_owned).collect(),
+                retired: facet.retired().map(ToOwned::to_owned).collect(),
+                open: facet.is_open(),
+                min: facet.min(),
+                max: facet.max(),
+                unique: facet.unique().map(Unique::as_str),
+                value_type: facet.value_type().map(ValueType::as_str),
+            })
+        })
+        .collect()
+}
+
+/// Resolve [`ReleaseSettings`] when the configured `fragments_dir` exists
+/// inside the workspace.
+fn releases(root: &Utf8Path, notes: Notes) -> Result<Option<ReleaseSettings>, String> {
+    let absolute = resolve(root, &notes.fragments_dir);
+    if !absolute.is_dir() {
+        return Ok(None);
+    }
+
+    let dir = below(root, &absolute).ok_or_else(|| {
+        format!(
+            "`plugins.command.release.options.fragments_dir` ({}) is outside the workspace, so \
+             the site can't render the releases from it.",
+            notes.fragments_dir
+        )
+    })?;
+
+    Ok(Some(ReleaseSettings {
+        dir,
+        route: RELEASE_ROUTE.to_owned(),
+        forge: notes.forge.map(|forge| forge.id().to_owned()),
+        repository: notes.repository,
+        // Keyed by the type's id; a type left out keeps its default heading.
+        headings: notes
+            .headings
+            .configured()
+            .map(|(type_, heading)| (type_.id().to_owned(), heading.to_owned()))
+            .collect(),
+    }))
 }
 
 /// The VitePress source directory, which has to be inside the workspace: the

@@ -1,0 +1,39 @@
+[[assistant.system_prompt_sections]]
+tag = "changelog_skill"
+title = "Skill: Changelog"
+content = """\
+You have been given the changelog skill. Every pull request that changes \
+something users notice records it in a changelog fragment under \
+`changelog.d/`, and the release notes are built from those fragments rather \
+than from commit messages. The following tool helps you with this:
+
+- changelog_add: Write a fragment: its type, and the entry that tells users \
+what changed, ending with a section of the upgrade guide when the change \
+requires them to act.
+
+Write the entry for someone using JP, not for someone reading its code: what \
+they can do now, what behaves differently, what was fixed. Keep it to one or \
+two short sentences, since release notes list dozens of entries; a feature that \
+needs more gets a highlight. Format as code only what users type or read \
+literally, such as a command, a flag, or a config key, not every name in the \
+sentence. Add one fragment per user-visible change. A follow-up to an earlier \
+change adds a fragment of its own rather than extending the earlier one, and an \
+existing fragment is edited only to correct its wording.
+
+The type says what the change means for users, not what kind of code change \
+it is: an internal `feat` gets no fragment, and a `refactor` that changes what \
+users see does. A change users won't notice, such as a refactor, a test, or a \
+CI change, gets no fragment; say so when you finish, since its pull request \
+then needs the `no-changelog` label. So does a pull request whose title marks a \
+breaking change with `!` but adds no upgrade section, for a break users never \
+see.
+
+A feature worth a story also gets a highlight in `changelog.d/highlights/`, \
+which you write as a file like any other document. `changelog.d/README.md` \
+describes both formats.\
+"""
+
+# Inherit the workspace's `run = "ask"` policy so the user reviews the fragment
+# preview before writing.
+[conversation.tools]
+changelog_add = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }

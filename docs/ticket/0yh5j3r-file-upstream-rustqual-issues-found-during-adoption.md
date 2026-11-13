@@ -151,3 +151,44 @@ per-finding diff and per-rule switches into rustqual.
 Item 5 (`ai-json` lacks rule ID and metric values) is a small change once it's
 in-tree.
 Items 1 and 6 still need reproducing.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-12T21:59:24Z
+
+Items 6 and 7 have one root cause, and it makes findings appear and disappear in
+code a change never touches.
+Reproduced on 2026-11-12 with v1.8.2.
+
+- A method call counts as a call into the project when *any* workspace function
+  has that name: the call is matched by name, with no type information
+  (`is_type_resolved_own_method`, `ProjectScope::is_own_function`).
+  Item 6 is probably this.
+- A body with no logic outside closures and no own calls is `Trivial`, and
+  `attach_metrics` drops its complexity metrics (item 7), so its magic numbers,
+  `unwrap`/`expect` counts and complexity scores go unreported.
+
+Together: adding a method with a common name anywhere in the workspace
+reclassifies every function that calls a std method of that name, and its old
+findings surface as new.
+`version` in `crates/jp_llm/src/provider/anthropic/acp.rs` has `part.len() < 6`
+inside a `map_while` closure and calls only std methods.
+The release branch adds `Record::split` in `jp-release`; from then on
+`str::split` in `version` counts as an own call, the function stops being
+trivial, and `qual` reports `CX-003 magic number 6 in version` as new.
+Renaming `Record::split` makes the finding disappear; a fresh base analysis
+(cache key changed) has no finding for `version` either, so `qual`'s diff is
+right and the two rustqual reports disagree.
+
+The reverse also holds: renaming or removing such a method makes functions
+trivial again and hides their findings, including `A20` for an `unwrap()` inside
+a closure.
+
+Proposed fixes, for the vendored copy (T-1dhk659) and upstream:
+
+1. Compute and report complexity metrics independently of the IOSP
+   classification; `Trivial` should exempt a function from IOSP only.
+2. Don't count a method call as an own call when the receiver's type is unknown
+   and the name is also a std method, or resolve receivers with type information
+   where available.

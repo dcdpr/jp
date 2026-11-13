@@ -2,15 +2,19 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use reqwest::{
     Client,
-    header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT},
+    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::{
     Error, GitHubError, Page, Result, StatusCode,
-    handlers::{CurrentHandler, IssuesHandler, PullsHandler, ReposHandler, SearchHandler},
+    handlers::{
+        CurrentHandler, IssuesHandler, PullsHandler, ReleasesHandler, ReposHandler, SearchHandler,
+    },
 };
+
+const API: &str = "https://api.github.com";
 
 #[derive(Clone)]
 pub struct Octocrab {
@@ -25,12 +29,16 @@ pub(crate) struct Inner {
 
 pub struct OctocrabBuilder {
     token: Option<String>,
+    base_url: Option<String>,
 }
 
 impl Octocrab {
     #[must_use]
     pub fn builder() -> OctocrabBuilder {
-        OctocrabBuilder { token: None }
+        OctocrabBuilder {
+            token: None,
+            base_url: None,
+        }
     }
 
     #[must_use]
@@ -61,6 +69,15 @@ impl Octocrab {
     #[must_use]
     pub fn repos(&self, owner: impl Into<String>, repo: impl Into<String>) -> ReposHandler {
         ReposHandler {
+            client: self.clone(),
+            owner: owner.into(),
+            repo: repo.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn releases(&self, owner: impl Into<String>, repo: impl Into<String>) -> ReleasesHandler {
+        ReleasesHandler {
             client: self.clone(),
             owner: owner.into(),
             repo: repo.into(),
@@ -139,6 +156,39 @@ impl Octocrab {
             .client
             .post(format!("{}{}", self.inner.api_base, path))
             .json(body);
+
+        self.send_json(request).await
+    }
+
+    pub(crate) async fn patch_json<T: DeserializeOwned, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let request = self
+            .inner
+            .client
+            .patch(format!("{}{}", self.inner.api_base, path))
+            .json(body);
+
+        self.send_json(request).await
+    }
+
+    /// Upload `contents` as a release asset named `name` to the full `url`
+    /// (`uploads.github.com` rather than `api_base`).
+    pub(crate) async fn upload<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        name: &str,
+        contents: Vec<u8>,
+    ) -> Result<T> {
+        let request = self
+            .inner
+            .client
+            .post(url)
+            .query(&[("name", name)])
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(contents);
 
         self.send_json(request).await
     }
@@ -324,14 +374,24 @@ impl OctocrabBuilder {
         self
     }
 
+    /// Override the base REST API URL (default `https://api.github.com`);
+    /// GraphQL requests use `<url>/graphql`.
+    #[must_use]
+    pub fn base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into().trim_end_matches('/').to_owned());
+        self
+    }
+
     pub fn build(self) -> Result<Octocrab> {
         let client = build_http_client(self.token.as_deref())?;
+        let api_base = self.base_url.unwrap_or_else(|| API.to_owned());
+        let graphql_url = format!("{api_base}/graphql");
 
         Ok(Octocrab {
             inner: Arc::new(Inner {
                 client,
-                api_base: "https://api.github.com".to_owned(),
-                graphql_url: "https://api.github.com/graphql".to_owned(),
+                api_base,
+                graphql_url,
             }),
         })
     }

@@ -188,6 +188,56 @@ run = "allow"
 repository = "https://github.com/dcdpr/jp"
 branch = "main"
 
+# Pages that moved. The release pages took over from the change log jilu wrote.
+[plugins.command.vite.options.redirects]
+"change-log" = "releases/"
+
+# `jp release` writes and checks the changelog fragments the release notes are
+# built from. It is served the same way, installed with `just _install-release`.
+[plugins.command.release]
+run = "allow"
+
+# Fragments and highlights are laid out in the style of `.comfort.toml` as they
+# are written, so they pass `fmt-markdown-ci` as they land. Release notes credit
+# GitHub pull requests, linked at JP's repository rather than at `origin`, which
+# a rehearsal's clone points elsewhere.
+[plugins.command.release.options]
+fragments_dir = "changelog.d"
+format_on_write = true
+forge = "github"
+repository = "https://github.com/dcdpr/jp"
+# The version lives in `[workspace.package]`, which `cargo set-version` (from
+# cargo-edit) writes through `jp_cli`, one of the crates inheriting it, along
+# with `Cargo.lock`. `--workspace` would also overwrite the crates under
+# `crates/contrib/`, which keep versions of their own.
+bump = "cargo set-version --package jp_cli {version}"
+# Every target JP ships, built on a Mac by JP's own script; its header says what
+# it needs installed.
+build = "bash .config/release/build.sh {version} {source} {out} {profile}"
+# A release every two weeks while JP moves fast: `jp release due` says the next
+# one should be cut two weeks after the last.
+cadence = "2w"
+
+# The headings of the release notes' sections that read better than the type's
+# id; the other types keep theirs, capitalized.
+[plugins.command.release.options.headings]
+added = "New features"
+fixed = "Bug fixes"
+
+# `jp release github` publishes a release's build and notes as its GitHub
+# Release, installed with `just _install-release-github`.
+[plugins.command.release-github]
+run = "allow"
+
+# Every Release carries the install scripts, filled in with its download
+# address, and ends with the commands that run them. Breaking entries link to
+# the release's upgrade guide on the site, since GitHub gives a description's
+# headings no anchors to link to.
+[plugins.command.release-github.options]
+assets = [".config/release/install.sh", ".config/release/install.ps1"]
+upgrade_guide = "https://jp.computer/releases/{version}/upgrade"
+footer = ".config/release/github.md"
+
 [providers.llm.aliases]
 # Anthropic aliases
 fable = "anthropic/claude-fable-5-2"

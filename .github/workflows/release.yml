@@ -1,0 +1,161 @@
+name: release
+on:
+  # Daily, so a release that falls due is reminded of within a day.
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  # The push of a release's tag, which `jp release finalize` makes: it puts the
+  # release's pages on the site, and a minor or major release's closes the
+  # reminder.
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+env:
+  CARGO_TERM_COLOR: always
+  JUST_TIMESTAMP: true
+  JUST_COLOR: always
+  JUST_EXPLAIN: true
+  JUST_VERBOSE: 4
+  # The build only has to answer a question: debug info and incremental
+  # compilation would only slow it down, and grow the cache.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_INCREMENTAL: "0"
+permissions:
+  contents: read
+# One run at a time per ref, so two runs never each open a reminder.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  due:
+    name: Ask whether a release is due
+    # A fork has no releases of its own to be reminded of.
+    if: github.event_name != 'push' && github.repository == 'dcdpr/jp'
+    runs-on: ubuntu-latest
+    # A run without a target cache builds `jp` from scratch.
+    timeout-minutes: 60
+    outputs:
+      due: ${{ steps.due.outputs.due }}
+      reason: ${{ steps.due.outputs.reason }}
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          # `jp release due` reads the release branches against the history of
+          # `main`, and refuses a shallow clone.
+          fetch-depth: 0
+          # The build runs code from crates.io, and this job pushes nothing.
+          persist-credentials: false
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      # rust-cache keeps every stale build of a crate still in the graph, so the
+      # week in the key starts the cache over before it outgrows the runner.
+      - name: Compute cache week
+        id: week
+        shell: bash
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
+        with:
+          key: release-due-${{ steps.week.outputs.week }}
+          cache-bin: false
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Ask whether a release is due
+        id: due
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # Read from the JSON rather than from the exit status: `jp` exits 1
+          # when no release is due, and also when it fails.
+          status=0
+          just release-due --format json > "$RUNNER_TEMP/due.json" || status=$?
+
+          if ! due=$(jq -er '.due | if type == "boolean" then tostring else error("no answer") end' "$RUNNER_TEMP/due.json"); then
+            echo "::error title=No answer::\`just release-due\` exited with $status without saying whether a release is due."
+            exit 1
+          fi
+          reason=$(jq -r '.reason' "$RUNNER_TEMP/due.json")
+          echo "$reason"
+
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+          {
+            echo "reason<<END_OF_REASON"
+            echo "$reason"
+            echo "END_OF_REASON"
+          } >> "$GITHUB_OUTPUT"
+  remind:
+    name: Open the release reminder
+    needs: due
+    if: needs.due.outputs.due == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open the reminder, unless one is open
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REASON: ${{ needs.due.outputs.reason }}
+        run: |
+          set -euo pipefail
+
+          open=$(gh issue list --label release --state open --json number --jq length)
+          if [ "$open" -gt 0 ]; then
+            echo "A release reminder is open already."
+            exit 0
+          fi
+
+          # `gh issue create` refuses a label the repository doesn't have.
+          labels=$(gh label list --search release --json name --jq '.[].name')
+          if ! grep -qxF release <<< "$labels"; then
+            gh label create release --color 0E8A16 --description "A release is due"
+          fi
+
+          body=$(printf '%s\n\n%s\n' "$REASON" 'Cut it with `jp release cut`, prepare its notes on `main`, and finalize it with `jp release finalize <version>`. The push of its tag closes this issue; a patch release does not.')
+          gh issue create --title "Cut the next release" --label release --body "$body"
+  close:
+    name: Close the release reminder
+    # A patch release is no answer to the reminder: `due` counts from the last
+    # minor or major release, so it would open again the next day.
+    if: github.event_name == 'push' && github.repository == 'dcdpr/jp' && endsWith(github.ref_name, '.0')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Close every open reminder
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Through a file, so a failing `gh issue list` stops the job instead
+          # of reading as no reminder to close.
+          gh issue list --label release --state open --json number --jq '.[].number' \
+            > "$RUNNER_TEMP/open"
+
+          while read -r number; do
+            gh issue close "$number" --comment "Released as $TAG."
+          done < "$RUNNER_TEMP/open"
+  site:
+    name: Publish the release on the site
+    # The site gives a release its pages once its tag exists, and is built only
+    # from `main`, since a tag's tree has no `changelog.d/`. So this job starts
+    # the site workflow on `main` through `workflow_dispatch`: unlike a push, a
+    # dispatch made with the workflow's own token starts a run.
+    if: github.event_name == 'push' && github.repository == 'dcdpr/jp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Rebuild the site from main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run docs.yml --ref main

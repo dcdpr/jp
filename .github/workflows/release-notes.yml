@@ -1,0 +1,68 @@
+name: release-notes
+on:
+  # A change to a released version's notes on `main`: the description of its
+  # GitHub Release follows them.
+  push:
+    branches: [main]
+    paths: ["changelog.d/[0-9]*/**"]
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+  JUST_TIMESTAMP: true
+  JUST_COLOR: always
+  JUST_EXPLAIN: true
+  JUST_VERBOSE: 4
+  # The build only runs one command: debug info and incremental compilation
+  # would only slow it down, and grow the cache.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_INCREMENTAL: "0"
+permissions:
+  contents: read
+# One run at a time, so two runs never rewrite one description in turn.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  sync:
+    name: Rewrite the Releases' descriptions
+    # A fork has no Releases of JP's to rewrite, and the notes are `main`'s.
+    if: github.repository == 'dcdpr/jp' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # A run without a target cache builds `jp` from scratch.
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          # Release notes credit the commits that wrote them, read from the
+          # history, which a shallow clone lacks.
+          fetch-depth: 0
+          # The build runs code from crates.io, which must not find a token
+          # that can write the repository; only the last step gets one.
+          persist-credentials: false
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      # rust-cache keeps every stale build of a crate still in the graph, so the
+      # week in the key starts the cache over before it outgrows the runner.
+      - name: Compute cache week
+        id: week
+        shell: bash
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
+        with:
+          key: release-sync-${{ steps.week.outputs.week }}
+          cache-bin: false
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Everything `just release-sync` builds, built here without the token, so
+      # the step that has it runs no build scripts.
+      - name: Build `jp` and `jp release github`
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --package jp_cli
+          cargo install --locked --path crates/plugins/command/release-github --debug
+      - name: Rewrite the descriptions whose notes changed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: just release-sync

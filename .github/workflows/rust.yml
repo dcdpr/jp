@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+      # Each release is tagged on its branch, so its tip shows the checks of the
+      # code a release ships.
+      - release/*
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -50,6 +53,7 @@ jobs:
       shear: ${{ steps.filter.outputs.shear }}
       vet: ${{ steps.filter.outputs.vet }}
       qual: ${{ steps.filter.outputs.qual }}
+      changelog: ${{ steps.filter.outputs.changelog }}
     steps:
       - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
         with:
@@ -104,6 +108,13 @@ jobs:
           set_task shear "$source"
           set_task vet "$cargo|^\.config/supply-chain/|$workflow|$justfile"
           set_task qual "$source|^\.config/rustqual/"
+          case "$GITHUB_REF" in
+            # A release branch has no fragments: its notes live on `main`.
+            refs/heads/release/*) echo "changelog=false" >> "$GITHUB_OUTPUT" ;;
+            # The parser's crate as well as the fragments, so a change to the
+            # rules is checked against every fragment already written.
+            *) set_task changelog "^changelog\.d/|^crates/internal/changelog/|$cargo|$workflow|$justfile" ;;
+          esac
   rust:
     needs: changes
     runs-on: ${{ matrix.os }}
@@ -114,7 +125,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        task: [lint, fmt, fmt-comments, fmt-markdown, typecheck-js, test, docs, coverage, deny, insta, shear, vet, qual]
+        task: [lint, fmt, fmt-comments, fmt-markdown, typecheck-js, test, docs, coverage, deny, insta, shear, vet, qual, changelog]
         include:
           - task: test
             os: windows-latest
@@ -184,6 +195,7 @@ jobs:
           SHEAR: ${{ needs.changes.outputs.shear }}
           VET: ${{ needs.changes.outputs.vet }}
           QUAL: ${{ needs.changes.outputs.qual }}
+          CHANGELOG: ${{ needs.changes.outputs.changelog }}
         run: |
           set -euo pipefail
 
@@ -201,6 +213,7 @@ jobs:
             shear) run="$SHEAR" ;;
             vet) run="$VET" ;;
             qual) run="$QUAL" ;;
+            changelog) run="$CHANGELOG" ;;
             *) echo "unknown task: $TASK" >&2; exit 1 ;;
           esac
 

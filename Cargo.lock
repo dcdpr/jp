@@ -587,6 +587,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "changelog"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "comrak",
+ "doc",
+ "indoc",
+ "semver",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2160,6 +2175,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-release"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "changelog",
+ "chrono",
+ "clap",
+ "comrak",
+ "doc",
+ "humantime",
+ "indoc",
+ "jp_md",
+ "jp_plugin",
+ "jp_tool",
+ "release-build",
+ "release-options",
+ "semver",
+ "serde",
+ "serde_json",
+ "shlex",
+ "strip-ansi-escapes",
+ "toml",
+ "tool-definitions",
+]
+
+[[package]]
+name = "jp-release-github"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "changelog",
+ "clap",
+ "doc",
+ "indoc",
+ "jp_github",
+ "jp_plugin",
+ "jp_test",
+ "release-build",
+ "release-options",
+ "semver",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "jp-rfd"
 version = "0.1.0"
 dependencies = [
@@ -2250,12 +2313,14 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "camino-tempfile",
+ "changelog",
  "clap",
  "doc",
  "jp_config",
  "jp_label",
  "jp_plugin",
  "overwrite",
+ "release-options",
  "serde",
  "serde_json",
  "site-revision",
@@ -4000,6 +4065,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "release-build"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "release-options"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "changelog",
+ "doc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

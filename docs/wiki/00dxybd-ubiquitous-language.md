@@ -28,6 +28,8 @@ In disagreements between code and docs, the code is authoritative.
   - [Terms](#terms)
     - [Attachment](#attachment)
     - [Background Task](#background-task)
+    - [Change Request](#change-request)
+    - [Changelog Fragment](#changelog-fragment)
     - [Checklist Item](#checklist-item)
     - [CommandConfig](#commandconfig)
     - [Compacted View](#compacted-view)
@@ -42,16 +44,20 @@ In disagreements between code and docs, the code is authoritative.
     - [Event Overlay](#event-overlay)
     - [External Login](#external-login)
     - [Fan-Out](#fan-out)
+    - [Highlight](#highlight)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
     - [Invocation](#invocation)
     - [JP MCP Server](#jp-mcp-server)
     - [Match](#match)
     - [MCP Host](#mcp-host)
+    - [Notes Branch](#notes-branch)
     - [Operation](#operation)
     - [Parent Ticket](#parent-ticket)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
+    - [Release Branch](#release-branch)
+    - [Release Notes](#release-notes)
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
     - [Service Tier](#service-tier)
@@ -87,6 +93,30 @@ A task is two-phase: `run` (off the main critical path, cancellable, accumulates
 state) and `sync` (with `&mut Workspace`, commits the accumulated state).
 The handler lives at `Ctx::task_handler` and is drained exactly once per `jp`
 invocation, at the end of `jp_cli::lib::run`.
+
+### Change Request
+
+A forge's unit of code review: a pull request on GitHub or a merge request on
+GitLab.
+[Release Notes](#release-notes) credit each [Changelog
+Fragment](#changelog-fragment) and [Highlight](#highlight) to the change
+requests that modified it on the default branch (or to the commit itself when
+the commit message references no change request).
+Extracted and formatted by `Forge` in `changelog::forge`.
+See [RFD-122].
+
+### Changelog Fragment
+
+A single release-note entry recording one user-visible change: a Markdown file
+in `changelog.d/` named `<slug>.<type>.md` for one of the seven change types
+(`added`, `changed`, `deprecated`, `removed`, `fixed`, `security`,
+`performance`), with an optional `BREAKING CHANGE:` **upgrade section** for
+changes that require user action.
+Implemented as `Fragment` in `changelog::fragment`.
+See [RFD-121].
+
+**Not the same as** a conventional-commit type, which classifies a code change
+for developers rather than its effect on users.
 
 ### Checklist Item
 
@@ -296,6 +326,18 @@ receives one operation per execution; configured by `FanOutConfig` in
 **Not the same as** a tool that takes several targets as one action, such as
 `fs_modify_file`, which applies them together and is approved as one.
 
+### Highlight
+
+An editorial section in [Release Notes](#release-notes) for a major feature: a
+Markdown file in `changelog.d/highlights/` containing a `# Title` heading,
+`Authors` metadata, and prose.
+Implemented as `Highlight` in `changelog::highlight`.
+See [RFD-121].
+
+**Not the same as** a [Changelog Fragment](#changelog-fragment), which records
+the change in the categorized changelog list; a highlighted feature still has a
+fragment.
+
 ### InlineReply
 
 The `jp_inquire` widget for short replies: the interrupt-menu reply (`r` in both
@@ -373,6 +415,17 @@ the protocol.
 The Host is one such caller, and a third-party client is another; only the Host
 answers the server's decisions.
 
+### Notes Branch
+
+The short-lived branch `release-notes/v<version>` that moves a release's
+[Changelog Fragments](#changelog-fragment) and [Highlights](#highlight) into
+`changelog.d/<version>/` for review and merge into `main`.
+Named by `notes_branch` in `jp_release::releases`.
+See [RFD-122].
+
+**Not the same as** a [Release Branch](#release-branch), which holds the
+release's code and omits `changelog.d/`.
+
 ### Operation
 
 One element of a [Fan-Out](#fan-out) call's `ops` array: one complete set of the
@@ -420,6 +473,28 @@ concept, not conversation pinning.
 An LLM vendor integration — one of `anthropic`, `google`, `openai`,
 `openrouter`, `llamacpp`, `ollama`, `cerebras`, `deepseek`.
 Each implements the `Provider` trait in `jp_llm`.
+
+### Release Branch
+
+The long-lived branch `release/<major>.<minor>` holding the code for all
+`<major>.<minor>.x` releases.
+Each release on the branch begins with a `Starts-Release: <version>` commit
+(placing the release **in preparation**) followed by any commits cherry-picked
+from `main`, and is **finalized** by an annotated `v<version>` tag.
+Modeled as `Line` in `jp_release::releases`.
+See [RFD-122].
+
+**Not the same as** a [Notes Branch](#notes-branch), which files the release's
+notes into `changelog.d/<version>/` on `main`.
+
+### Release Notes
+
+The rendered summary of a release: its overview, its [Highlights](#highlight),
+and its [Changelog Fragments](#changelog-fragment) grouped by type, with
+breaking entries linking to their sections in the release's **upgrade guide**.
+Assembled as `Release` in `changelog::release` and rendered to Markdown by
+`changelog::markdown`.
+See [RFD-122].
 
 ### RFD
 
@@ -591,5 +666,7 @@ See [RFD-031].
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
 [RFD-096]: ../rfd/096-terminal-output-sanitization-for-untrusted-content.md
+[RFD-121]: ../rfd/121-changelog-fragments-and-validation.md
+[RFD-122]: ../rfd/122-release-pipeline.md
 [Turn Summary]: 00dxybc-conversation.md#turn-summary
 [`shlex::split`]: https://docs.rs/shlex

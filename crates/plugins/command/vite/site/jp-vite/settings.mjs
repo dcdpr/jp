@@ -18,8 +18,16 @@ export const SRC_DIR = resolve(import.meta.dirname, '../..')
 // Where the snapshot is, for loaders to watch.
 export const SETTINGS_FILE = resolve(import.meta.dirname, 'settings.json')
 
-export function readSettings() {
-    return JSON.parse(readFileSync(SETTINGS_FILE, 'utf-8'))
+// The settings snapshot at `file`, `SETTINGS_FILE` by default.
+//
+// Throws, naming the file, when it can't be read or doesn't hold JSON.
+export function readSettings(file = SETTINGS_FILE) {
+    const source = readFileSync(file, 'utf-8')
+    try {
+        return JSON.parse(source)
+    } catch (error) {
+        throw new Error(`${file} is not valid JSON: ${error.message}.`)
+    }
 }
 
 // The directory one workflow's documents live in, or `null` when the project

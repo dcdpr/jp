@@ -38,6 +38,7 @@ import './style.css'
 // - `<WikiIndex />`: every wiki page.
 // - `<WikiChildren />`: the wiki pages under the page it is on, or with no page
 //   around it, the top pages.
+// - `<ReleaseIndex />`: the releases, and the changes no release ships yet.
 // - `<DocLabels />`: a document's labels, which every RFD, ticket, and wiki
 //   page's header shows.
 //
@@ -54,6 +55,7 @@ export function enhanceApp({ app }) {
     app.component('TicketChildren', defineAsyncComponent(() => import('./TicketChildren.vue')))
     app.component('WikiIndex', defineAsyncComponent(() => import('./WikiIndex.vue')))
     app.component('WikiChildren', defineAsyncComponent(() => import('./WikiChildren.vue')))
+    app.component('ReleaseIndex', defineAsyncComponent(() => import('./ReleaseIndex.vue')))
 }
 
 // What the RFD, ticket, and wiki pages add above a document, for the default

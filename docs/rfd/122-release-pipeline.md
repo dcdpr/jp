@@ -1,25 +1,29 @@
 # RFD 122: Release Pipeline
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
 - **Extends**: [RFD 116]
-- **Requires**: [RFD 121]
-- **Required by**: [RFD 123]
-- **Summary**: The `jp release` plugin cuts releases onto branches, files their
-  notes on `main` through pull requests, and tags them.
+- **Summary**: Extends `jp release` to cut, cherry-pick, finalize, and build
+  releases locally while keeping release notes on `main`.
 
 ## Summary
 
 This RFD extends the `jp release` plugin ([RFD 121]) with commands that cut,
-patch, and tag releases while keeping all release notes and upgrade guides on
-`main`.
-`jp release cut` branches `release/<series>` for code and opens a pull request
-moving unreleased fragments into the release's directory on `main`.
-`jp release pick` cherry-picks fixes onto the release branch, and `jp release
-finalize` tags the release.
-The pipeline replaces `jilu`; [RFD 123] covers binary builds and distribution.
+patch, tag, and build releases while keeping all release notes and upgrade
+guides on `main`.
+`jp release cut` branches `release/<series>` for code and
+`release-notes/v<version>` for notes, which moves the unreleased fragments into
+the release's directory once it is merged into `main`; `jp release pick`
+cherry-picks fixes onto the release branch, `jp release finalize` tags the
+release with its notes as the tag's message, and `jp release build` runs the
+project's build command for it.
+Each command works on the releasing machine, talks to no forge, and prints the
+`git push` that publishes what it made, so a release can be rehearsed, or undone
+with `jp release abandon`, without publishing anything.
+It replaces `jilu`; what JP builds and where it publishes binaries are covered
+in [RFD 123].
 
 ## Motivation
 
@@ -56,51 +60,71 @@ alone.
 JP's CI workflows wrap these commands as a convenience rather than a
 requirement.
 
+The commands publish nothing themselves.
+What they make stays in the local repository until the person releasing pushes
+it, so a mistake is undone by deleting a branch, and a release can be rehearsed
+on a branch of its own before the real one.
+
+Binaries follow the same rule.
+A release ends on the releasing machine, with its tag pushed and its binaries
+built; putting the binaries on a forge, a website, or object storage is a step
+of its own, which another plugin takes ([RFD 123]).
+Building runs a command the project configures, so it can move to dedicated
+build hardware without changing what reads its results.
+
+Releases can also be cut at an earlier commit of `main`, so a project can
+release the history it had before it had releases.
+
 ## Design
 
 ### Repository layout
 
-| Location           | Contents                                                                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `main`             | Active development and all release notes: unreleased fragments at the root of `changelog.d/`, released ones in `changelog.d/<version>/` |
-| `release/0.3`      | The code shipped in `0.3.x` releases: `main` at the cut point, without `changelog.d/`, plus cherry-picked commits                       |
-| `v0.3.0`, `v0.3.1` | Annotated tags on `release/0.3` marking finalized releases                                                                              |
+| Where                                                  | Holds                                                                                                                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `main`                                                 | Development, and every release's notes: unreleased fragments at the top level of `changelog.d/`, each release's in its version's directory |
+| `release/0.3`                                          | The code 0.3.x releases ship: `main` at the cut, without `changelog.d/`, plus the commits picked onto it                                   |
+| `release-notes/v0.3.0`                                 | A release's notes on their way to `main`: its fragments moved into its directory, to be merged into `main`                                 |
+| `v0.3.0`, `v0.3.1`                                     | Tags on `release/0.3`: the releases                                                                                                        |
+| `release/0.3.0/` in the workspace's user-local storage | A release's build: its archives, their checksums, and a manifest ([Building a release](#building-a-release))                               |
 
 No separate state file is used:
 
-- A release **ships** a change when its branch contains the commit that
-  introduced it, either from `main` at the cut point or via `jp release pick`.
-- A fragment in `changelog.d/<version>/` belongs to that release.
-  A fragment at the root of `changelog.d/` is **unreleased** until a release
-  branch contains its commit.
-  `cut` or `pick` opens a change request moving the fragment into
-  `changelog.d/<version>/`; until that change request merges, the fragment still
-  renders as unreleased.
-- A release is **in preparation** from the initial commit on its release branch
-  until it is tagged.
-  Tagging produces a **finalized** release.
+- A release **ships** a change when its branch contains the commit that made it,
+  from `main`'s history at the cut or through a pick.
+- A fragment in a version's directory belongs to that release.
+  One at the top level is **unreleased** until a release ships its change: the
+  commit that added it, or every change its `Credits` name ([RFD 121]).
+  The release's notes branch then moves it, and until that merges it is still at
+  the top level.
+- A release is **in preparation** from the commit that starts it on its branch
+  until its tag, and a tag is a **finalized** release.
+- A finalized release is **built** when its build directory holds a build of the
+  commit its tag names.
 
 ### Commands
 
-[RFD 121] introduces the plugin with `init`, `add`, and `check`.
+[RFD 121] introduces the plugin with `init`, `check`, `highlight`, and a command
+for each type of change, such as `fixed`.
 This RFD adds:
 
-| Command                              | Description                                                                                      |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `jp release cut [--version VERSION]` | Starts the next minor or major release from `main`                                               |
-| `jp release pick VERSION COMMIT...`  | Cherry-picks commits from `main` onto a release in preparation, or starts the next patch release |
-| `jp release finalize VERSION`        | Tags a finalized release                                                                         |
-| `jp release render [VERSION]`        | Renders a release's notes or upgrade guide, or the unreleased fragments                          |
-| `jp release due`                     | Exits zero when the next release is due                                                          |
-| `jp release review [VERSION]`        | Asks the assistant to review a release's notes and upgrade guide                                 |
+| Command                                            | Does                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `jp release cut [--version VERSION] [--at COMMIT]` | Starts the next minor or major release from `main`                                               |
+| `jp release pick VERSION COMMIT...`                | Adds commits from `main` to a release in preparation, or starts the next patch release with them |
+| `jp release finalize VERSION`                      | Tags a release, with its notes as the tag's message                                              |
+| `jp release build VERSION`                         | Builds a release's binaries with the project's build command                                     |
+| `jp release abandon VERSION`                       | Undoes a release nobody has published, so it can be cut again                                    |
+| `jp release render [VERSION]`                      | Prints a release's notes or upgrade guide, or the unreleased fragments                           |
+| `jp release due`                                   | Succeeds when the next release should be cut                                                     |
+| `jp release status`                                | Says where the releases stand, and what to run next                                              |
 
-`cut`, `pick`, and `finalize` operate in a temporary worktree based on
-`origin`'s branches, leaving the caller's working tree untouched.
-They push using the caller's credentials: release branches and tags are pushed
-directly, while updates to `main` are pushed to a branch and submitted through a
-change request ([Changes to `main`](#changes-to-main)).
-Following [RFD 116], none of these commands are exposed as LLM tools because
-they access the network or make project-level release decisions.
+`cut`, `pick`, `finalize`, `build`, and `abandon` read `main`, the release
+branches, and the notes branches from `origin` and from the local repository,
+and work in temporary worktrees, so the checkout they run from is left alone.
+They make their branches and tags in the local repository and print the `git
+push` that publishes them ([Publishing](#publishing)).
+None is served as a tool: under [RFD 116]'s rule, commands that reach the
+network or decide something for the project are the user's to run.
 
 ### Configuration
 
@@ -108,8 +132,9 @@ they access the network or make project-level release decisions.
 [plugins.command.release.options]
 cadence = "2w"
 forge = "github"
+repository = "https://github.com/dcdpr/jp"
 bump = "cargo set-version --package jp_cli {version}"
-change_request_labels = ["no-changelog"]
+build = "bash .config/release/build.sh {version} {source} {out} {profile}"
 
 [plugins.command.release.options.headings]
 added = "New features"
@@ -119,25 +144,24 @@ fixed = "Bug fixes"
 The example above shows JP's configuration.
 Every option is optional:
 
-- `cadence` defaults to two weeks (`2w`) and accepts the same duration format as
-  `jp query --tmp`.
-- `forge` is `github`, `gitlab`, or `none`.
-  It controls how release notes credit and link change requests ([Credits and
-  links](#credits-and-links)) and how `cut` and `pick` open change requests
-  ([Changes to `main`](#changes-to-main)).
-  When unset, it is inferred from the `origin` remote URL: `github` for
-  `github.com`, `gitlab` for `gitlab.com`, and `none` for any other host.
-  Self-hosted GitHub or GitLab instances set `forge` explicitly and use the
-  remote's hostname for links.
+- `cadence` defaults to two weeks, and takes a duration as `jp query --tmp`
+  does.
+- `forge` is `github`, `gitlab`, or `none`, and decides how releases credit and
+  link change requests ([Credits and links](#credits-and-links)).
+  Unset, it follows `repository`: `github` for github.com, `gitlab` for
+  gitlab.com, and `none` for any other host.
+  A self-hosted GitHub or GitLab sets it.
+- `repository` is the web address links start from.
+  Unset, it is the address of git's `origin` remote, so a clone whose `origin`
+  is not the project's forge, such as a rehearsal's, sets it.
 - `bump` has no default.
-  When unset, the version is recorded only in the Git tag.
-- `change_request_labels` lists the forge labels applied to change requests
-  opened by `cut` and `pick` (empty by default).
-  JP sets `["no-changelog"]` to satisfy [RFD 121]'s CI check, since release
-  change requests move existing fragments rather than adding new ones.
-- `headings` maps fragment type IDs to section headings in the release notes.
-  Unlisted types default to their capitalized ID (`Added`, `Performance`).
-  Across config layers, `headings` merges key by key.
+  Without it, a version lives only in its tag.
+- `build` has no default, and has to name `{source}` and `{out}`; `builders`
+  names commands that build elsewhere ([Building a
+  release](#building-a-release)).
+- `headings` renames a type's section in the release notes.
+  A type it does not name keeps its default heading, its id capitalized
+  (`Added`, `Performance`), and layered `headings` merge key by key.
 
 `fragments_dir` is defined in [RFD 121].
 
@@ -149,22 +173,18 @@ exists.
 Tags are annotated, and a release's date comes from its tag timestamp.
 
 Cutting from `main` starts a minor release, or a major release (from `1.0`
-onward) when an unreleased fragment has an upgrade section; `--version`
-overrides the computed version.
+onward) when an unreleased fragment has an upgrade section.
+`--version` overrides the computed version, except that from `1.0` onward it
+cannot name a minor release while an unreleased fragment has an upgrade section;
+`cut` refuses that, as `pick` does.
 The next version is computed from the highest tag or release in preparation, so
 running `cut` while a release is in preparation cuts the subsequent version.
 Patch releases are created only on release branches via `pick` ([Patch
 releases](#patch-releases)).
 
-Because JP tagged `v0.1.0` without publishing a release before this pipeline
-existed, its first published release is `v0.2.0`, covering changes merged after
-[RFD 121]'s check landed.
-A release meant to introduce JP to new users states that in its overview and
-highlights; the pipeline treats every release identically.
-
 When `bump` is set, the plugin runs it with `{version}` replaced by the new
-version in the initial commit on the release branch, and again in the `cut`
-change request so `main` records the latest cut version.
+version in the initial commit on the release branch, and for a cut also on the
+notes branch, so `main` records the latest cut version once the notes merge.
 This lets projects update version files wherever they keep them using their
 existing tools.
 JP's `bump` command runs `cargo set-version` (from `cargo-edit`) on `jp_cli`,
@@ -172,104 +192,140 @@ which updates `[workspace.package] version`, every crate that inherits it, and
 `Cargo.lock` (checked in CI with `--locked`), while leaving the independently
 versioned crates under `crates/contrib/` untouched.
 Passing `--workspace` would overwrite those `crates/contrib/` versions as well.
+JP's maintainers run these commands through `just release`, which installs a
+pinned `cargo-edit`, builds `jp` and `jp-release` from the checkout, and runs
+`jp release` with the given arguments.
 
 ### Cutting a release
 
 `jp release cut`:
 
-1. Rejects shallow clones (which lack the commit history needed for credits) and
-   refuses to run when `main` has no unreleased fragments.
-2. Computes the next version at the tip of `origin/main` (the cut point).
-3. Creates `release/<major>.<minor>` at that commit, adds a commit that deletes
-   `changelog.d/` and runs `bump`, and pushes the branch.
-4. Creates `release-cut/v<version>` from the same commit, moves (`git mv`) every
-   unreleased fragment and highlight into `changelog.d/<version>/`, runs `bump`,
-   commits, pushes the branch, and opens a change request against `main`.
+1. Rejects shallow clones (which lack the commit history needed for credits).
+2. Reads `main` as the checked-out commit, which must contain every commit of
+   `origin/main`: a checkout behind it would cut a release missing work already
+   on `main`.
+   A checkout ahead of it, such as a branch used for a rehearsal, is cut from,
+   and `cut` reports that it is ahead.
+3. Refuses to run while a release branch or `v` tag exists only in the local
+   repository, since `cut` would count it as an existing release; a rehearsal
+   leaves such branches and tags behind.
+4. Refuses to run when `main` has no unreleased fragments, and computes the next
+   version at that commit (the cut point).
+5. Creates `release/<major>.<minor>` at the cut point, with one commit that
+   deletes `changelog.d/` and runs `bump`.
+6. Creates `release-notes/v<version>` from the same commit, with one commit that
+   moves (`git mv`) every unreleased fragment and highlight into
+   `changelog.d/<version>/` and runs `bump`.
+7. Prints the `git push` that publishes both branches.
 
 <!-- end list -->
 
 ```
 changelog.d/
   README.md
-  enable-explicit.md          # merged after the cut: unreleased
+  enable-explicit.removed.md    # merged after the cut: unreleased
   0.3.0/
-    retry-idle-turns.md
+    retry-idle-turns.fixed.md
     highlights/plugin-tools.md
 ```
 
 Because both branches start from the same commit, the code on the release branch
 and the fragments moved into `changelog.d/<version>/` match regardless of how
-long the change request takes to merge.
+long the notes branch takes to merge.
 Any fragment merged to `main` after the cut point remains at the root of
 `changelog.d/`, and its code is not on the release branch, so both belong to the
 next release.
-If a correction to a moved fragment merges on `main` before the cut's change
-request merges, Git's rename tracking carries that edit into
-`changelog.d/<version>/`.
+If a correction to a moved fragment merges on `main` before the notes branch
+merges, Git's rename tracking carries that edit into `changelog.d/<version>/`.
 Because [RFD 121] requires every new change to add a new fragment file, any edit
 to an existing fragment is a correction and belongs in the release that ships
 that fragment.
 
 Whether a fragment is unreleased depends on what release branches contain its
 commit, not on its current directory path.
-If a fragment is still at the root of `changelog.d/` only because an earlier
-`cut` or `pick` change request has not merged yet, its commit is already on a
-release branch, so a subsequent `cut` leaves it for that pending change request.
-`cut` and `pick` never block on earlier change requests.
+If a fragment is still at the root of `changelog.d/` only because another
+release's notes branch has not merged yet, its commit is already on a release
+branch, so a subsequent `cut` leaves it for that notes branch.
+`cut` and `pick` never block on another release's notes.
 
 Because the release branch deletes `changelog.d/`, release notes cannot be
 edited on the release branch.
 The version-bump commits that start releases are the only commits on a release
 branch that do not originate on `main`.
 
-### Changes to `main`
+### Cutting at an earlier commit
 
-`cut` and `pick` push to the release branch directly, but update `main` through
-a branch and a change request like any other change:
+`jp release cut --at <commit>` cuts a release at an earlier commit on `main`'s
+first-parent history that no existing release branch contains, rather than at
+the currently checked-out commit.
+The release branch starts at `<commit>`, while the notes branch starts at the
+current checkout and moves only the fragments whose changes `<commit>` contains.
+This lets a project backfill historical releases one period at a time by writing
+fragments with explicit `Credits` naming the historical commits or pull requests
+([RFD 121]); [RFD 123] uses this workflow to release JP's history.
+The initial commit on the release branch removes `changelog.d/` with
+`--ignore-unmatch` so commits that predate `changelog.d/` still succeed, and git
+respects `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` when dating the release
+commits and tag.
 
-- `github` opens a pull request via the `jp_github` client crate (extended to
-  create and label pull requests) using JP's standard GitHub authentication,
-  without shelling out to `gh`.
-- `gitlab` opens a merge request using Git push options (`merge_request.create`,
-  `merge_request.target`, `merge_request.title`, and `merge_request.label`),
-  requiring only `git` and push credentials.
-- `none` pushes the branch and stops, leaving the merge to the project's
-  workflow.
+### Publishing
 
-Each change request applies `change_request_labels`.
-Because the caller opens the change request under their own account, CI checks,
-review, and merging work the same way as on any contributor change request.
+`cut`, `pick`, `finalize`, and `abandon` publish nothing, and `build` writes
+only to its build directory.
+Each prints the `git push` that publishes what it made, such as:
+
+```sh
+git push origin release/0.3 release-notes/v0.3.0
+```
+
+The person releasing then runs it.
+Until then, everything the command created is local: a mistake is undone by
+deleting a branch or tag, and a whole release can be rehearsed on a separate
+branch and deleted afterwards.
+
+A release branch and a tag are pushed directly, and the notes branch is merged
+into `main` like any other change.
+`jp release` never talks to the forge, so it needs no token.
+
+When both the local repository and `origin` have a branch, the commands use
+whichever contains the other's commits; if the two have diverged, the commands
+stop until they are reconciled.
 
 ### Preparing a release
 
 Preparing release notes takes as long as needed without blocking `main`:
 
-- **Editing notes**: Fragment files, highlights, and the overview in
-  `changelog.d/<version>/` are edited on `main` through normal change requests.
-  To combine two fragments for a single logical change (such as a feature and a
-  follow-up fix), edit one fragment, delete the other, and list both change
-  requests in the surviving fragment's `change_requests` frontmatter.
-- **Overview**: The overview introduces the release notes.
-  When `changelog.d/<version>/overview.md` is absent, rendering generates a
-  default summary stating the version, the count of entries per type, and the
-  highlight titles.
-  Adding `overview.md` replaces the generated summary; `jp release render
-  <version>` prints the generated text as a starting point.
-- **Cherry-picking commits**: `jp release pick 0.3.0 <commit>...` cherry-picks
-  the specified commits onto `release/0.3` (`git cherry-pick -x`), strips any
-  changes under `changelog.d/`, and pushes the release branch.
-  On a new branch `release-pick/v0.3.0-<short-sha>` based on `main`, it places
-  the fragments and highlights introduced by those commits into
-  `changelog.d/0.3.0/` and opens a change request.
-  If no later release ships the fragment, `pick` moves it so the next release
-  does not list it again.
-  If a later release was already cut after the commit merged to `main`, `pick`
-  copies the fragment and writes its resolved credits into the copy's
-  `change_requests` field ([RFD 121]), so both releases include the change and
-  list the entry.
-  If cherry-picking hits a merge conflict, `pick` stops and prints the temporary
-  worktree path; after resolving the conflict there, run `jp release pick
-  --continue`.
+- **Notes** are edited on the notes branch until it merges, and on `main`, like
+  any change, after: the wording of fragments and highlights in the release's
+  directory, and its overview.
+  Two entries for one change, such as a change and its follow-up, become one by
+  editing one, deleting the other, and listing both change requests in the kept
+  fragment's `Credits` fields.
+- **The overview** opens the release notes.
+  Without an `overview.md` in the release's directory, it is a summary generated
+  at render: the version, how many entries of each type the release has, and its
+  highlights' titles.
+  Writing `overview.md` replaces it, and `jp release render <version>` prints
+  the summary to start from.
+- **More code** comes from `jp release pick 0.3.0 <commit>...`, with commits
+  from the first-parent line of the commit checked out, which stands for `main`.
+  It cherry-picks them onto `release/0.3` (`git cherry-pick -x`), leaving out
+  what they change under `changelog.d/`.
+  On the release's notes branch, with `main` merged in so that it holds the
+  commits' fragments, or on a new notes branch from `main` when there is none,
+  it puts each fragment and highlight the commits added into
+  `changelog.d/0.3.0/`.
+  A fragment no other release ships moves, so the next release does not list the
+  change a second time.
+  One that a later release already ships, because that release was cut after the
+  commit merged, is copied, with its credits written into the copy's `Credits`
+  fields ([RFD 121]): both releases ship the change, and both list it.
+  When the notes branch has merged, a pick puts its notes on a new one.
+  A notes branch that conflicts with `main` stops the pick before anything
+  changes, until `main` is merged into it by hand, or, when it has merged, it is
+  deleted.
+  A conflict in the code stops `pick` in its worktree, which it names; resolve
+  the conflict there and run `jp release pick --continue`.
 
 Because code reaches a release branch only via `cut` or `pick`, every change
 lands on `main` first.
@@ -277,23 +333,96 @@ lands on `main` first.
 ### Finalizing a release
 
 `jp release finalize 0.3.0` creates an annotated `v0.3.0` tag at the tip of
-`origin/release/0.3` and pushes the tag.
-Maintainers run `finalize` once checks pass on the release branch (via GitHub CI
-on `release/*` pushes, or `just ci` locally).
+`release/0.3` in the local repository and prints the push that publishes it,
+including the release branch when `origin` is missing some of its commits.
+The tag message starts with the subject `Release 0.3.0` (shown by `git tag -n`),
+followed by the release notes and, when the release has one, the upgrade guide
+under an `Upgrade guide` heading, so `git show v0.3.0` shows the whole release
+without the documentation site.
+Breaking entries link to their upgrade sections by anchor only, since those
+sections are in the same message; git keeps the message verbatim, including `#`
+headings.
 
-Because a maintainer pushes the tag directly, the push triggers JP's binary
-distribution workflow ([RFD 123]).
-Release notes remain editable on `main` after tagging: updating files in
-`changelog.d/<version>/` re-renders the notes wherever they are published,
-including when a `cut` or `pick` change request merges after the tag is pushed.
+`finalize` reads the notes from `changelog.d/0.3.0/` in the checked-out commit,
+which stands in for `main` as it does for `cut`, so the notes branch must merge
+first.
+It refuses to run while the notes branch (local or on `origin`) has a file in
+the release's directory that the checked-out commit lacks, while a fragment for
+a change the release ships is still at the root of `changelog.d/`, or while the
+release has no notes at all.
+A notes file deliberately deleted on `main` after the merge (such as one of two
+entries for the same change) does not block it: deleting the merged notes branch
+lets `finalize` proceed.
+
+Pushing the tag publishes the release's code and notes, and building its
+binaries comes next ([Building a release](#building-a-release)).
+The person releasing decides when: on GitHub, CI runs on every push to a release
+branch and shows on its tip; elsewhere, `just ci` runs the same checks locally.
+
+The release's notes stay on `main`: correcting them, at any time, is a change to
+its directory there, and every place the notes appear renders them again, except
+the tag, which keeps the notes the release was tagged with.
+
+### Building a release
+
+`jp release build 0.3.0` builds a release's artifacts on the local machine:
+
+1. Checks out the commit named by `v0.3.0` (or the tip of `release/0.3` while
+   the release is in preparation) in a temporary worktree.
+2. Runs the configured `build` command from the current workspace root (so
+   historical releases build with the current build script), substituting
+   `{version}`, `{source}` (the worktree path), `{out}` (an empty staging
+   directory), and `{profile}` (`release`, or `quick` with `--quick`).
+   Build output streams to the terminal unless `--quiet` is passed.
+3. Validates the contents of `{out}`: the artifact files, `checksums.txt`
+   (containing a SHA-256 entry for each artifact in `sha256sum` format), and
+   `manifest.json` (recording the version, commit, profile, and target triple
+   for each artifact), with no extra files allowed.
+   If the command fails or validation finds any problems, the staging directory
+   is discarded and all problems are reported together.
+4. Moves the validated directory to `release/0.3.0/` under workspace user-local
+   storage (`jp path user-workspace`), replacing any previous build for that
+   version.
+
+<!-- end list -->
+
+```json
+{
+  "format": 1,
+  "version": "0.3.0",
+  "commit": "8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b",
+  "profile": "release",
+  "artifacts": [
+    { "file": "jp-aarch64-apple-darwin.tar.xz", "target": "aarch64-apple-darwin" },
+    { "file": "jp-x86_64-pc-windows-msvc.zip", "target": "x86_64-pc-windows-msvc" }
+  ]
+}
+```
+
+A build made with the `release` profile from the commit its version's tag names
+is **publishable**, so a build of a release in preparation becomes publishable
+when `finalize` tags the commit it was made from.
+A `--quick` build, and a build of a commit the tag doesn't name, such as one
+left from before an abandon, are for testing, and publishers refuse them ([RFD
+123]).
+`jp release status` names each finalized release without a publishable build.
+
+A **remote builder** builds elsewhere, such as on dedicated hardware a CI job
+drives.
+`builders.<name>` is a command that starts a build there and fetches its result
+into `{out}`, and `jp release build 0.3.0 --remote <name>` runs it, after
+checking that `origin` has the tag the builder builds, then checks the result
+the same way.
+A builder that signs or attests what it builds does so over its own
+`checksums.txt`, which reaches the build directory unchanged.
 
 ### Patch releases
 
 Patch releases branch from their release series branch rather than `main`.
 After `v0.3.0` is tagged, `jp release pick 0.3.1 <commit>...` starts `0.3.1` by
 adding a version-bump commit (`bump`) on `release/0.3`, cherry-picking the
-requested commits, and opening a change request on `main` that moves or copies
-their fragments into `changelog.d/0.3.1/`.
+requested commits, and moving or copying their fragments into
+`changelog.d/0.3.1/` on a new notes branch, `release-notes/v0.3.1`.
 `pick` rejects fragments that contain an upgrade section when targeting a patch
 release.
 `jp release finalize 0.3.1` then tags `v0.3.1`.
@@ -302,12 +431,31 @@ next patch version for a tagged release series.
 
 ### Releases in parallel
 
-Each `release/<major>.<minor>` branch has at most one release in preparation at
-a time; a patch release cannot start until the preceding release on that branch
-is tagged.
-Different release branches are independent: `release/0.3` can prepare `0.3.1`
-while `main` cuts `0.4.0`, since each uses its own release branch and its own
-`changelog.d/<version>/` directory on `main`.
+Each release branch holds one release in preparation at a time: a patch release
+starts after the previous release on its line is tagged.
+Releases on different branches do not touch each other.
+`release/0.3` can prepare 0.3.1 while `main` cuts 0.4.0, since each writes its
+own branches and its own version's directory.
+
+### Abandoning a release
+
+`jp release abandon 0.3.0` retracts an unpublished release (one whose tag has
+not been pushed to `origin`) so it can be cut again:
+
+- Refuses if a newer release exists (releases must be abandoned from newest to
+  oldest) or if `origin` already has tag `v0.3.0`.
+- Deletes the local tag `v0.3.0` and local notes branch `release-notes/v0.3.0`,
+  and either deletes `release/0.3` (for a `.0` release) or resets it to the
+  commit before `Starts-Release: 0.3.x` (for a patch release).
+- Creates `release-notes/abandon-v0.3.0` (from the notes branch if unmerged, or
+  from the current checkout if already merged) moving the release's fragments
+  and highlights back to the top level of `changelog.d/` with any wording edits
+  preserved.
+  Files copied by `pick` from another release are deleted instead, and
+  `overview.md` remains in `changelog.d/0.3.0/` for the next cut of that
+  version.
+- Prints the `git push` commands to delete the corresponding branches on
+  `origin`.
 
 ### Release notes and the upgrade guide
 
@@ -387,8 +535,11 @@ adds both when publishing the document.
 ### The release model
 
 The `changelog` crate builds and serializes a release model from a
-`changelog.d/<version>/` directory or from the unreleased fragments at the root
-of `changelog.d/`.
+`changelog.d/<version>/` directory or from everything no finalized release
+ships.
+That unreleased model holds the fragments at the root of `changelog.d/` and the
+directory of every release without a tag, so a release's entries count as
+unreleased until it is tagged, however early its notes branch merged.
 Markdown is one rendering of that model; consumers that need custom formatting
 read the JSON output:
 
@@ -445,34 +596,33 @@ Both `changelog render` (the standalone crate binary) and `jp release render`
 accept `--format json` or `--format markdown`, plus `--page notes` or `--page
 upgrade` for Markdown output.
 The `changelog` binary does not read JP configuration; it receives the fragments
-directory, forge, and section headings via CLI flags, which `jp release render`
-populates from the plugin configuration.
+directory, forge, project web address (`repository`), and section headings via
+CLI flags, which `jp release render` populates from the plugin configuration.
 In Markdown mode, breaking entries link to their upgrade guide section using a
 base path passed by the caller.
 
 Every consumer renders from `main`, where the release notes live:
 
-- `jp release render` prints notes or upgrade guides for local review or
-  external tooling.
-- `jp vite` renders them as documentation site pages ([On the
-  site](#on-the-site)).
-- The binary distribution workflow ([RFD 123]) publishes the release notes to
-  the GitHub Release with links to the upgrade guide on the documentation site,
-  and updates the GitHub Release whenever `changelog.d/<version>/` changes on
-  `main`.
+- `jp release render` prints them, to read while a release is prepared or to
+  hand to another tool.
+- `jp vite` turns them into pages on the site ([On the site](#on-the-site)).
+- A publisher, such as [RFD 123]'s `jp release github`, puts them where it
+  publishes the release, and renders them again when the release's directory
+  changes on `main`.
 
 ### Credits and links
 
-Credits are derived from `main`'s Git history.
-For each fragment and highlight, the `changelog` crate inspects the commits that
-added or modified the file at the root of `changelog.d/` (following renames) up
-to the commit that moved it into `changelog.d/<version>/`.
-Edits made after the file is moved into a version directory do not add credits.
-Each commit's change request is extracted from its commit message, or from its
-merge commit message when merged via a merge commit.
-If a fragment defines an explicit `change_requests` list in its frontmatter,
-that list overrides history lookup; `pick` uses this mechanism when copying a
-fragment into a patch release so the copy retains the original credits.
+Credits come from `main`'s history.
+For each fragment and highlight, the crate reads the commits that wrote or
+changed it while it sat at the top level of `changelog.d/`, following renames,
+up to the commit that moved it into a release's directory.
+Corrections after that credit nobody.
+A commit's change request is read from its message or, when the commit reached
+`main` through a merge, from the merge commit's message.
+A fragment that lists `Credits` takes those instead, which is how a copy made
+for a patch release keeps the original's credits, commits included.
+Links start from `repository`, or from the web address of git's `origin` when it
+is unset.
 
 | `forge`  | Change request pattern                                                       | Label  | Target URL                                      |
 | -------- | ---------------------------------------------------------------------------- | ------ | ----------------------------------------------- |
@@ -486,8 +636,9 @@ hash and linked to the forge's commit page (`/commit/<sha>` on GitHub,
 Because JP squash-merges pull requests using GitHub's default commit subject,
 its entries credit pull requests automatically.
 GitLab's default squash commit message contains only the merge request title, so
-GitLab projects that squash-merge receive commit credits unless they include
-`%{reference}` in their squash commit template.
+GitLab projects that squash-merge receive commit credits unless their squash
+commit template ends with `See merge request %{reference}`, as GitLab's default
+merge commit message does.
 
 Because credit resolution requires Git history, `render` rejects shallow clones
 rather than emitting incomplete credits.
@@ -495,59 +646,102 @@ rather than emitting incomplete credits.
 ### Release workflow
 
 `jp release due` exits zero when `cadence` has elapsed since the latest minor or
-major release was cut and that release has been finalized.
+major release was cut, that release has been finalized, and `main` has at least
+one unreleased fragment (without one, `cut` would have nothing to release).
 
-1. **Cut**: A maintainer runs `jp release cut` when `due` succeeds (or on
-   demand).
-2. **Prepare**: Contributors edit the release notes in `changelog.d/<version>/`
-   on `main` and cherry-pick any additional fixes onto `release/<major>.<minor>`
-   with `jp release pick`.
-3. **Finalize**: Once CI passes on the release branch, a maintainer runs `jp
-   release finalize` to tag and publish the release.
+1. **Cut.** A maintainer runs `jp release cut`, when `due` says so or on any
+   other day, and pushes the two branches it made.
+2. **Prepare.** They and others edit the release's notes on its notes branch,
+   and pick later work onto its release branch, for as long as it takes, then
+   merge the notes branch into `main`.
+3. **Finalize.** They run `jp release finalize` from `main` once the notes
+   branch has merged and the release branch's checks pass, and push the tag.
+4. **Build.** They run `jp release build`, and publish what it built wherever
+   the project publishes releases ([RFD 123]).
 
-For a patch release, a maintainer runs `jp release pick` targeting the next
-patch version, followed by `jp release finalize`.
+A patch release is a `pick` into the next patch version, then `finalize` and
+`build`.
+
+`jp release status` reports the next step, so maintainers do not have to
+remember the order.
+It reads the same state as the other commands without changing anything, and
+reports, in this order:
+
+- whether the checkout is missing commits from `origin/main`, which `cut` and
+  `finalize` refuse;
+- a pick a conflict stopped, and the `--continue` that finishes it;
+- the release branches, notes branches, and `v` tags only the local repository
+  has, with the push that publishes them, or the commands that delete what a
+  rehearsal left; a notes branch the checkout has merged is left out;
+- each release in preparation, with where its notes are: on its notes branch,
+  with the merge still to come; or on `main`, with the `finalize` that tags it;
+- each finalized release without a publishable build, with the `build` that
+  makes one;
+- while no minor or major release is in preparation, `due`'s answer, with the
+  `cut` that starts the next one when it is due.
 
 ### JP's CI
 
-Every GitHub Actions workflow invokes a `just` recipe so the same steps can run
-locally without GitHub, and no workflow pushes commits to any branch:
+Format validation, the checks on pushes, `due`, and the site build invoke `just`
+recipes, so the same steps can run locally without GitHub.
+The changelog gate, the release reminder, and the site build on a tag depend on
+GitHub labels, issues, and workflow runs, which they access with `gh`.
+No workflow pushes commits to any branch:
 
-| Trigger                       | Runs                                                                                                 | Side effects                                                               |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Pull request                  | Changelog fragment check and format validation ([RFD 121])                                       | None                                                                       |
-| Push to `main` or `release/*` | Test and lint suite (`just changelog-ci` runs only on `main`, since release branches lack fragments) | None                                                                       |
-| Daily schedule                | `just release-due`                                                                                   | Opens an issue labelled `release` if a release is due and none exists      |
-| Push to `main`                | Documentation site build ([On the site](#on-the-site))                                               | Deploys the site                                                           |
-| Push of a `v*` tag            | Binary distribution ([RFD 123])                                                                  | Publishes `jp` binaries and the GitHub Release; closes the `release` issue |
+| When                            | Runs                                                                                            | Writes                                                             |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| A pull request                  | The changelog gate and format validation ([RFD 121])                                        | Nothing                                                            |
+| A push to `main` or `release/*` | The checks; on `main`, `just changelog-ci` among them, since release branches have no fragments | Nothing                                                            |
+| Daily                           | `just release-due`                                                                              | An issue labelled `release` when a release is due and none is open |
+| A push to `main`                | The site build ([On the site](#on-the-site))                                                    | The site                                                           |
+| A push of a `v*` tag            | The site build on `main`, which the release workflow starts ([On the site](#on-the-site))       | The site                                                           |
+| A push of a `vX.Y.0` tag        | Closing the reminder, since a minor or major release answers it                                 | Closes the reminder issue                                          |
 
-Because maintainers push branches and tags from their own machines, downstream
-workflows trigger normally.
+Because maintainers push branches and tags themselves, downstream workflows
+trigger normally.
 In GitHub Actions, pushes and pull requests created with `GITHUB_TOKEN` do not
 trigger other workflows and require manual approval to run checks ([Triggering a
 workflow from a workflow]); because CI never pushes branches or opens pull
 requests, the pipeline needs no bot account or token workarounds.
+The only run a workflow starts is the site build for a release's tag, through
+`workflow_dispatch`, which a workflow's own token is allowed to trigger.
 
 ### On the site
 
-Releases are a third content workflow in `jp vite` ([RFD 116]) alongside tickets
-and RFDs, allowing the documentation site to build without compiling `jp`.
-`jp vite sync` writes `fragments_dir`, `forge`, and `headings` into the site's
-settings snapshot alongside the other plugins' settings.
-During the site build, the releases loader runs `changelog render --format json`
-for each `changelog.d/<version>/` directory and for the root of `changelog.d/`,
-passing the snapshotted settings as CLI flags.
-From that JSON model, `jp vite` generates release notes and upgrade guide pages
-for each release plus an "Unreleased" page.
-A release in preparation appears on the site (marked as in preparation) as soon
-as its `cut` change request merges to `main`, serving as a live preview while
-notes are edited.
-The generated pages are not committed to Git.
-`jp vite` serves them under `/releases/` with a release index showing dates, and
-replaces the "Change Log" navigation link with "Releases".
+Releases are a third workflow for `jp vite` ([RFD 116]), next to tickets and
+RFDs.
+`jp vite sync` writes `fragments_dir`, `forge`, `repository`, and `headings`
+into its settings snapshot with the other plugins' settings.
+The releases loader runs `changelog render --format json` for each version's
+directory and for the unreleased model, with arguments from the snapshot, and
+builds the pages from the model: release notes and an upgrade guide for each
+finalized release, and an "Unreleased" page.
+A release gets its pages when it is tagged: until then, its entries are on the
+Unreleased page, grouped by type with the fragments no release ships yet.
+Under `jp vite serve`, a release in preparation also gets its pages, marked as a
+draft, so its notes can be read as they will appear; the built site, which `just
+preview-docs` serves, shows them as they deploy.
+`jp release render 0.3.0` prints them without the site.
+The pages are never committed.
+Where they go is `jp vite`'s choice: JP serves them under `/releases/`, with an
+index of releases and their dates, and replaces the navigation's "Change Log"
+entry with "Releases".
 
-The docs build compiles and installs the `changelog` crate binary in place of
-`jilu`, without compiling the rest of the workspace.
+Under `jp vite serve`, and under `jp vite build`, which builds the site as
+`vitepress build` does, the loader renders with the `jp-vite` binary itself, run
+as `jp-vite changelog render`, which `jp vite` names to it in `JP_VITE_BIN`.
+A workspace then needs nothing but `jp` and its plugins to build its site, and
+the release pages are rendered by the release of `jp vite` that wrote the site's
+files.
+`jp vite build` brings the settings snapshot up to date first, as `serve` does,
+and refuses while a file `jp vite sync` writes is out of date.
+The `package.json` `jp vite init` writes runs both, as its `dev` and `build`
+scripts.
+A `vitepress build` started by hand runs the `changelog` binary on `PATH`.
+
+JP's docs build runs `vitepress build` directly, so it needs no `jp`; it
+compiles and installs the `changelog` crate binary in place of `jilu`, without
+compiling the rest of the workspace.
 The docs workflow already fetches full Git history, which credit resolution
 requires.
 
@@ -556,19 +750,11 @@ Because release tags do not contain `changelog.d/` and `jp vite` only enables a
 workflow when its directory exists ([RFD 116]), building the site from a release
 tag would omit all release pages and must not overwrite the deployment from
 `main`.
-JP's docs workflow therefore stops deploying on tag pushes.
+JP's site workflow therefore builds only from `main`; pushing a release's tag
+starts it there through the release workflow, which is when the release's pages
+appear.
 If JP later adds versioned documentation per release, each tag can build into a
 versioned subpath and link to the `/releases/` pages deployed from `main`.
-
-### `review`
-
-`jp release review` sends a structured `query` request (protocol 11) to the host
-`jp` process, using the same mechanism as `jp rfd track` ([RFD 116]).
-It asks the assistant to flag entries that read like raw commit messages,
-entries that fail to explain the user-facing impact, upgrade sections that omit
-migration steps, and typos.
-`review` prints findings to the terminal without modifying files; it is an
-advisory check, not a CI gate.
 
 ### Other artifacts
 
@@ -592,128 +778,140 @@ docs-build step that ran `jilu` are removed.
 
 ## Drawbacks
 
-- **Maintaining custom release-notes tooling**: JP replaces `jilu` with the
-  in-tree `changelog` crate and `jp-release` plugin.
-  Although the implementation is small (parsing, credit lookup, JSON model, and
-  Markdown rendering), the project owns its maintenance.
-- **Two-step `cut` and `pick` updates**: Pushing the release branch is
-  immediate, whereas moving fragments on `main` waits for the change request to
-  merge.
-  Until that change request merges, those fragments continue rendering as
-  unreleased.
-- **Multi-branch state during `pick` conflicts**: `pick` updates both the
-  release branch and a change-request branch for `main`; a cherry-pick conflict
-  pauses the command midway until the user resolves the conflict and runs
-  `--continue`.
-- **Branch and directory accumulation**: A two-week cadence creates 26
-  `release/<major>.<minor>` branches and 26 `changelog.d/<version>/` directories
-  per year.
-- **Release tags are not ancestors of `main`**: Because tags sit on
-  `release/<major>.<minor>` after the commit that deletes `changelog.d/`, `git
-  describe` on `main` does not find release tags.
-  The cut point on `main` is the parent of the first commit on the release
-  branch.
-- **CI compiles `jp` and `jp-release` from source**: Until binary distribution
-  is implemented, workflows that invoke `jp release` (primarily the daily `due`
-  check) must compile `jp` and `jp-release`.
-- **Credit extraction depends on commit message conventions**: Projects or
-  forges that do not include change request references in merge or squash
-  commits fall back to per-commit credits.
+- **The project owns the assembly logic.** `jilu` is replaced by code JP
+  maintains.
+  The logic is small (parse, credit, model, render), but it is now ours to test
+  and fix.
+- **A cut or pick lands in two steps.** The release branch is pushed at once;
+  `main` follows when the notes branch merges, and until then the release's
+  fragments are still at the top level.
+- **Publishing is a step to forget.** The commands push nothing, so a cut nobody
+  pushed blocks the next cut until it is pushed or deleted.
+- **A local build is as trustworthy as the machine it ran on.** It carries
+  checksums, which show a file is the one published but not how it was built,
+  until a remote builder that attests its builds replaces it.
+- **`pick` merges `main` into the notes branch.** A notes branch edited where
+  `main` changed too stops the pick until someone merges `main` into it by hand.
+- **Branches and directories accumulate**: a release branch per minor release
+  and a directory per release, 26 of each a year at JP's cadence.
+- **Tags off `main`.** Every release is tagged on its branch, past the commit
+  that deletes `changelog.d/`, so `git describe` on `main` finds no release.
+  A release's starting point on `main` is the parent of its branch's first
+  commit.
+- **Workflows that run `jp release` compile `jp` and `jp-release`** until
+  releases publish both; the daily `due` is the main one.
+- **Credits depend on merge messages.** A forge or project that writes no change
+  request into its merge or squash commits gets commit credits instead.
 
 ## Alternatives
 
-- **A standalone binary invoked via `just` instead of a command plugin**: Avoids
-  the plugin protocol, but cannot request host LLM queries for `jp release
-  review` and separates release commands from the [RFD 116] plugin suite used by
-  other workspaces.
-- **Opening release pull requests against the release branch and syncing notes
-  back to `main`**: Causes release notes to exist on two branches at once,
-  creating ambiguity about where to edit historical notes.
-- **Pushing the `cut` commit directly to `main`**: Eliminates the change
-  request, but requires granting maintainers a branch-protection bypass on
-  `main` and lands unreviewed commits directly on the default branch.
-  Branching the release branch and the `cut` change request from the same commit
-  achieves the same atomicity without bypassing branch protection.
-- **Orphan release branches**: Prevents accidentally merging a release branch
-  back into `main` (which would delete `changelog.d/`), but breaks `git bisect`
-  across releases, `git log v0.3.0..v0.4.0`, and Git ancestry links between tags
-  and `main`.
-- **Tagging `main` directly without release branches**: Avoids release branches,
-  but makes cherry-picking fixes into a release or shipping a patch release
-  without everything currently on `main` impossible.
-- **Preparing releases on a short-lived branch that merges back into `main`**:
-  Any commit merged to `main` while notes are being prepared is automatically
-  included in the release unless merges to `main` are held back.
-- **Freezing `main` during release preparation** (as in Vector's release
-  checklist): Blocks all other development while release notes are edited.
-- **Automating `cut` or pull request creation in GitHub Actions**: Requires a
-  GitHub App token (or manual workflow approvals) for CI-created pushes and pull
-  requests to trigger checks, and couples the release workflow to GitHub.
-- **Failing CI on `main` when a release is overdue**: Turns unrelated pull
-  requests red for a condition their authors cannot fix in their branch.
-- **Generating and committing `overview.md` at `cut` time**: Subsequent `pick`s
-  invalidate the summary counts, and auto-regenerating the file only when
-  unedited introduces hidden state.
-- **Committing rendered Markdown release pages**: Removes the `changelog` binary
-  from the site build, but freezes rendered output at release time so formatting
-  improvements or typo fixes require editing generated files.
-- **Deleting fragments after a release**: Keeps `changelog.d/` small, but has
-  the same drawback of freezing rendered pages once released.
-- **Built-in Cargo version bumping**: Couples `cut` to Rust workspaces, whereas
-  a configurable `bump` shell command supports any ecosystem using existing
-  tools.
-- **Reading the current version from `Cargo.toml`**: Git tags are the single
-  source of truth for released versions; writing `Cargo.toml` via `bump` without
-  reading it back prevents drift between tags and manifests.
+- **A `just`-invoked binary instead of a command plugin.** Free of the plugin
+  system, but it splits release tooling from the plugin family other workspaces
+  install.
+- **Release pull requests into the release branch, with the notes synced back to
+  `main` afterwards.** The notes would live on both branches, and correcting an
+  old release would have two possible places, one of them wrong.
+- **Committing the cut to `main` directly.** One step instead of two, but on
+  GitHub it needs a bypass of `main`'s pull-request rule for whoever cuts
+  releases, which lets them push anything else too, and it puts unreviewed
+  commits on `main`.
+  Starting the release branch and the notes branch from the same commit makes
+  the cut just as atomic.
+- **Orphan release branches**, with no history shared with `main`, so a release
+  branch could not be merged back.
+  Nothing would come back anyway: every commit on a release branch comes from
+  `main` except the ones that start releases, and a merge would delete every
+  release note, which nobody merges unnoticed.
+  The cost would land on everyday debugging: no `git bisect` between two release
+  tags, no `git log v0.3.0..v0.4.0` of what changed between releases, and no
+  link in git from a tag to the commit of `main` it was cut from.
+- **No release branches: tagging `main` where a release is cut.** One branch
+  fewer, but no picks, and no patch release without everything else merged
+  since.
+- **Preparing on a short-lived branch merged into `main`.** Whatever merges to
+  `main` meanwhile ships unless someone holds it back.
+- **Freezing `main` during a release**, as Vector's release checklist does.
+  Everyone else waits while the notes are prepared.
+- **Commands that push, and open the pull request through the forge.** One step
+  fewer, but `jp release` would need a token and code for each forge, and a cut
+  whose second push failed would be left half done, with nothing to finish it.
+  A rehearsal would need a stand-in remote.
+  The forge answers a push with the address that opens the pull request anyway.
+- **Building on the forge when a tag is pushed**, as release tools that generate
+  CI workflows do.
+  Builds would come from the forge's runners alone, a release could not be built
+  before its tag reached the forge, and a project leaving the forge would
+  rebuild its release process.
+  A remote builder runs on such hardware through the same command as a local
+  build.
+- **A pull request per pick**, from a branch of its own off `main`.
+  No merge into an open notes branch, but one more pull request per pick, and a
+  release's notes spread over several.
+- **Workflows that prepare releases or open pull requests.** A workflow's pushes
+  and pull requests wait for approval unless it holds a GitHub App token, and
+  either way the flow needs GitHub.
+- **A check on `main` that fails when a release is overdue.** Every pull request
+  would show it red, and no change in it can fix it, which teaches people to
+  ignore red.
+- **An overview written at the cut.** Picks change what it summarizes, and
+  regenerating it until someone edits it is state nobody can see.
+- **Committing rendered pages.** The site would need no `changelog` binary, but
+  each page would be frozen at release time: a typo fix or a format change would
+  mean editing generated Markdown.
+- **Deleting fragments once released.** A smaller tree, with the same frozen
+  pages.
+- **Version handling built in for Rust workspaces.** It would tie `cut` to one
+  kind of project, where a command reaches the same result with tools projects
+  already have.
+- **Reading the version from a manifest.** Tags record what was released, and a
+  file that is only written cannot drift from them.
 
 ## Non-Goals
 
-- **Building, signing, and distributing binaries**: Covered by separate RFDs
-  triggered on tag push ([RFD 123] for the `jp` binary, followed by a separate
-  RFD for command plugins including `jp-release`).
-  Until those land, JP's CI workflows compile `jp` and `jp-release` from source.
-- **Pre-release versions**: Release candidates (`-rc.1`) must not consume
-  unreleased fragments needed by the final release and require a separate
-  design.
-- **Independent per-crate versioning**: All released workspace crates share a
-  single version number.
-- **Reusable CI workflows for external workspaces**: JP's GitHub Actions
-  workflows are specific to JP; `jp release` itself requires no CI integration.
-- **Publishing to crates.io**: JP is distributed as prebuilt binaries.
+- **Publishing.** `jp release` ends with a pushed tag and a local build; putting
+  a release's binaries and notes on a forge, a website, or object storage is a
+  publisher's job, and [RFD 123] adds GitHub's.
+  Until releases publish `jp` and `jp-release`, JP's release workflows compile
+  them from the checkout.
+- **What a project builds.** Its `build` command decides targets, toolchains,
+  and archives; [RFD 123] defines JP's.
+- **Signing.** A remote builder can sign or attest what it builds; a local build
+  carries checksums alone.
+- **Pre-releases.** A release candidate must not consume the fragments its final
+  release needs, which needs its own design.
+- **Independent package versions.** One release, one version.
+- **CI for other workspaces.** JP's workflows are JP's, and `jp release` needs
+  none.
+- **Publishing to crates.io.** JP ships as binaries.
 
 ## Risks and Open Questions
 
-- **Resolving plugin configuration without `jp`**: JP's CI workflows must build
-  `jp` because only the host binary resolves configuration, whereas the docs
-  site build avoids `jp` by reading `.jp/vite.json`.
-  A future RFD can add standalone configuration resolution to plugins; because
-  the `changelog` crate takes all settings as CLI arguments, only the plugin
-  wrapper would change.
-  Once [RFD 123] ships prebuilt `jp` binaries, CI can download `jp` instead of
-  compiling it.
-- **Cherry-picking a breaking change into a non-breaking release**: `pick`
-  rejects fragments with an upgrade section when targeting a patch release (or a
-  minor release from `1.0` onward).
-  If a breaking fix must ship, maintainers must abandon the in-preparation
-  release and cut a major release instead.
-- **Abandoning a release in preparation**: There is no dedicated `abandon`
-  subcommand.
-  Abandoning an unfinalized release requires moving its fragments back to the
-  root of `changelog.d/` on `main` and deleting the `release/<major>.<minor>`
-  branch.
-  A dedicated command can be added if this becomes common.
-- **`Cargo.lock` merge conflicts**: Because the `cut` change request updates
-  `Cargo.lock` via `bump`, concurrent pull requests that touch `Cargo.lock` may
-  conflict with it.
-  Rebasing the `cut` branch and re-running `bump` resolves the conflict.
-- **Highlights modified across a release cut**: Under [RFD 121], multiple pull
-  requests contributing to a feature edit the same highlight file.
-  If a pull request merges after the cut point and extends a highlight that the
-  `cut` change request is moving into `changelog.d/<version>/`, Git's rename
-  merge carries those additions into the released highlight even though that
-  pull request's code is not on the release branch.
-  Reviewers should check highlights during release preparation and move any
-  post-cut additions back to `main`.
+- **Configuration without `jp`.** JP's release workflows run `jp` because only
+  `jp` resolves configuration; the site does not.
+  A follow-up RFD can give plugins a standalone mode that resolves configuration
+  with the same code `jp` uses; the `changelog` crate reads none, so only the
+  plugins would change.
+  Release binaries make `jp` a download rather than a compile in the meantime.
+- **A breaking change that has to ship in a release that cannot break.** `pick`
+  refuses a fragment with an upgrade section into a patch release, and from
+  `1.0` on into a minor one, and `cut --version` refuses such a minor release.
+  Shipping it means `jp release abandon` on the release in preparation and
+  cutting a major one.
+- **Abandoning a pushed patch release** removes commits from its release branch,
+  a force push that the protection on `release/*` refuses.
+  A pushed patch release is finished rather than abandoned.
+- **Lockfile conflicts.** The notes branch changes `Cargo.lock` through `bump`,
+  and stays open while the notes are prepared, so a change to `Cargo.lock`
+  merged meanwhile may conflict with it; running `bump` again after merging
+  `main` into it resolves it.
+- **Highlights extended across a cut.** Highlights are edited by every pull
+  request that builds their feature ([RFD 121]), so a pull request merged after
+  the cut that extends a highlight the cut moves has its extension carried into
+  the released copy, describing work the release does not ship.
+  Fragments avoid this by being added rather than extended; highlights cannot,
+  since a highlight is one story per feature.
+  The release's highlights are read while its notes are prepared, and a
+  correction is an edit to the released copy on `main`.
 
 ## Implementation Plan
 
@@ -728,31 +926,33 @@ Depends on [RFD 121] Phases 2 and 3.
 ### Phase 2: `cut`, `pick`, and `finalize`
 
 Implement version computation from tags and release branches, the `bump` hook,
-release branch creation, change request creation on `main` across all three
-forge modes (extending `jp_github` with pull-request creation and labelling, and
-using GitLab push options), `pick` (including fragment moves and copies), patch
-releases, and `finalize`.
-Configure `bump` and `change_request_labels` for JP, and enable CI checks on
-pushes to `release/*`.
+release branch and notes branch creation in the local repository from the
+checked-out commit (printing the `git push` that publishes them), `pick`
+(including fragment moves and copies onto the notes branch), patch releases, and
+`finalize` (with the release notes as the tag message).
+Configure `bump` for JP, and enable CI checks on pushes to `release/*`.
 Depends on Phase 1.
 
 ### Phase 3: `due` and the reminder workflow
 
-Implement `jp release due`, add the `just release-due` recipe, and add the daily
-GitHub Actions workflow that opens a `release`-labelled reminder issue (closed
-automatically when the next `v*` tag is pushed).
+Implement `jp release due` and `jp release status`, add the `just release-due`
+recipe, and add the daily GitHub Actions workflow that opens a
+`release`-labelled reminder issue (closed automatically when the tag of the next
+minor or major release is pushed).
 Depends on Phase 2.
 
 ### Repository settings
 
 No repository settings block Phase 2: `main`'s branch protection already accepts
-the change requests opened by `cut` and `pick`, and no rules currently restrict
-`release/*`.
+the notes branches' pull requests, and no rules currently restrict `release/*`,
+so release branches can be pushed.
 Once Phase 2 merges, a repository administrator should configure branch and tag
 protection to prevent history rewrites:
 
 - On `release/*`: block force pushes and branch deletion.
 - On `v*` tags: block tag updates and deletion.
+
+T-1f2jmb7 tracks applying them.
 
 ### Phase 4: Documentation site and retiring `jilu`
 
@@ -760,38 +960,65 @@ Add the releases workflow to `jp vite`: snapshot `fragments_dir`, `forge`, and
 `headings` in `jp vite sync`, add the releases loader, generate the release
 notes, upgrade guide, index, and "Unreleased" pages, and replace "Change Log"
 with "Releases" in the site navigation.
-Update the docs workflow to build `changelog` instead of `jilu`, stop deploying
-the site on tag pushes, and remove `jilu` and `docs/change-log.md`.
+Update the docs workflow to build `changelog` instead of `jilu`, build the site
+only from `main` (and again when a release's tag is pushed), and remove `jilu`
+and `docs/change-log.md`.
 Depends on Phase 1 and the site phase of [RFD 116].
 
-### Phase 5: `review`
+### Phase 5: Cutting the past, and abandoning
 
-Implement `jp release review` using host LLM queries.
-Depends on Phase 1.
+Implement `cut --at` (filing fragments by the commits referenced in their
+`Credits` fields and supporting trees without `changelog.d/`) and `abandon`.
+Have `cut` instruct the user to merge the notes branch into `main`.
+Depends on Phase 2.
+
+### Phase 6: Building
+
+Implement `jp release build` with the `build` option and `--quick`, output
+directory validation (`manifest.json` and `checksums.txt`), and `status`
+reporting finalized releases without a publishable build.
+`--remote` and `builders` are deferred until a remote builder is added.
+Depends on Phase 2.
+
+### Phase 7: Links and drafts
+
+Add the `repository` option across release-note rendering and `jp vite`'s
+settings snapshot, and render draft pages for untagged releases in preparation
+under `jp vite serve`.
+Depends on Phase 4.
+
+### Phase 8: Sites built with `jp vite`
+
+Add `jp vite build` and have the `jp-vite` binary render release pages directly
+(via `jp-vite changelog`) under both `serve` and `build`, so only standalone
+`vitepress build` invocations require `changelog` on `PATH`.
+Update the `package.json` template written by `jp vite init` to run `jp vite
+serve` and `jp vite build` in its `dev` and `build` scripts.
+Depends on Phase 4.
 
 ## References
 
-- [RFD 116: Shareable RFD, Ticket, and Site Tooling][RFD 116]: the command
-  plugin architecture and `jp vite` workflow model extended by this RFD.
-- [RFD 121: Changelog Fragments and Validation][RFD 121]: the fragment format
-  and `jp release` plugin that this pipeline builds on.
-- [RFD 001: The JP RFD Process][RFD 001]: the RFD lifecycle followed by this
-  document.
-- [Bevy release news example], [Bevy migration guide example], and [bevy-website
-  `generate-release`]: prior art for separating release notes from upgrade
-  guides and assembling both from fragments.
-- [Vector releases index] and [Vector's release checklist]: prior art for
-  per-release pages and the `main`-branch freeze avoided by this design.
-- [Triggering a workflow from a workflow]: GitHub Actions rules on events
-  created by `GITHUB_TOKEN`.
-- [GitLab commit message templates] and [GitLab push options]: GitLab's merge
-  commit format and push options for opening merge requests.
-- [cargo-edit]: provides `cargo set-version`, used as JP's `bump` command.
+- [RFD 116: Shareable RFD, Ticket, and Site Tooling][RFD 116], the plugin family
+  and the `jp vite` workflows this RFD adds to.
+- [RFD 121: Changelog Fragments and Validation][RFD 121], the inputs this
+  pipeline consumes and the plugin it extends.
+- [RFD 123: Distributing the jp Binary][RFD 123], what JP builds and where it
+  publishes it.
+- [RFD 001: The JP RFD Process][RFD 001], the lifecycle this RFD follows.
+- [Bevy release news example] and [Bevy migration guide example], the split
+  between release notes and upgrade guide, and [bevy-website
+  `generate-release`], prior art for assembling them from fragments.
+- [Vector releases index], prior art for the per-release page and index, and
+  [Vector's release checklist], the freeze this RFD avoids.
+- [Triggering a workflow from a workflow], GitHub's rules for what the workflow
+  token can and cannot start.
+- [GitLab commit message templates], what GitLab writes into merge and squash
+  commits.
+- [cargo-edit], whose `cargo set-version` is JP's `bump`.
 
 [Bevy migration guide example]: https://bevy.org/learn/migration-guides/0-18-to-0-19/
 [Bevy release news example]: https://bevy.org/news/bevy-0-19/
 [GitLab commit message templates]: https://docs.gitlab.com/user/project/merge_requests/commit_templates/
-[GitLab push options]: https://docs.gitlab.com/topics/git/commit/#push-options-for-merge-requests
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 099]: 099-native-macos-app-for-browsing-conversations.md
 [RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
