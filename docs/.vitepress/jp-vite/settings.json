@@ -1,5 +1,5 @@
 {
-  "revision": "05202abcea0b8354",
+  "revision": "d42598ac37981bc6",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
   "branch": "main",
@@ -40,10 +40,11 @@
         ]
       },
       "due": {
-        "description": "When the work is wanted: a date, YYYY-MM-DD, or a duration after the ticket's date, such as 1w.",
+        "description": "When the work is wanted, as a date: YYYY-MM-DD.",
         "values": [],
         "open": true,
-        "max": 1
+        "max": 1,
+        "type": "date"
       },
       "llm-provider": {
         "description": "The provider related to the ticket, if any",

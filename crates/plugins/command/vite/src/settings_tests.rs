@@ -35,7 +35,8 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                     "min": 1,
                     "max": 1
                 },
-                "triaged": { "description": "Looked at" }
+                "triaged": { "description": "Looked at" },
+                "due": { "description": "When", "values": [], "type": "date" }
             }
         } } } }
     });
@@ -64,6 +65,16 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
             route: "ticket".to_owned(),
             done_limit: 3,
             labels: BTreeMap::from([
+                ("due".to_owned(), Label {
+                    description: "When".to_owned(),
+                    values: vec![],
+                    retired: vec![],
+                    open: true,
+                    min: 0,
+                    max: None,
+                    unique: None,
+                    value_type: Some("date"),
+                }),
                 ("triaged".to_owned(), Label {
                     description: "Looked at".to_owned(),
                     values: vec![],
@@ -72,6 +83,7 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                     min: 0,
                     max: None,
                     unique: None,
+                    value_type: None,
                 }),
                 ("type".to_owned(), Label {
                     description: "The type".to_owned(),
@@ -81,6 +93,7 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                     min: 1,
                     max: Some(1),
                     unique: None,
+                    value_type: None,
                 }),
             ]),
         }),
@@ -326,6 +339,10 @@ fn a_configured_branch_wins_over_origins() {
 
 /// The snapshot is committed, so the same settings always write the same text.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one fixture and the whole text it renders to"
+)]
 fn the_snapshot_renders_in_a_fixed_shape() {
     let settings = Settings {
         revision: "0123456789abcdef".to_owned(),
@@ -352,6 +369,7 @@ fn the_snapshot_renders_in_a_fixed_shape() {
                     min: 1,
                     max: Some(1),
                     unique: None,
+                    value_type: None,
                 }),
                 ("area".to_owned(), Label {
                     description: "The area".to_owned(),
@@ -361,6 +379,7 @@ fn the_snapshot_renders_in_a_fixed_shape() {
                     min: 0,
                     max: None,
                     unique: None,
+                    value_type: None,
                 }),
                 ("rfd".to_owned(), Label {
                     description: "The RFD".to_owned(),
@@ -370,6 +389,7 @@ fn the_snapshot_renders_in_a_fixed_shape() {
                     min: 0,
                     max: None,
                     unique: Some("key-value"),
+                    value_type: None,
                 }),
             ]),
         }),
@@ -425,6 +445,31 @@ fn the_snapshot_renders_in_a_fixed_shape() {
   "release": null
 }
 "#
+    );
+}
+
+#[test]
+fn a_typed_key_renders_its_type() {
+    let label = Label {
+        description: "When".to_owned(),
+        values: vec![],
+        retired: vec![],
+        open: true,
+        min: 0,
+        max: Some(1),
+        unique: None,
+        value_type: Some("date"),
+    };
+
+    assert_eq!(
+        serde_json::to_string_pretty(&label).unwrap(),
+        r#"{
+  "description": "When",
+  "values": [],
+  "open": true,
+  "max": 1,
+  "type": "date"
+}"#
     );
 }
 

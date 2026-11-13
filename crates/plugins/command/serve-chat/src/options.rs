@@ -14,10 +14,9 @@
 //! signal = "+31611111111"
 //! ```
 //!
-//! `compact` lists the compactions "@JP compact" asks `jp` for, in the shape of
-//! the plugin protocol's `compact` request.
-//! It defaults to stripping reasoning and tool calls from every turn but the
-//! first and the last:
+//! `compact` configures the compaction rules sent to the host when a user
+//! requests compaction (for example, "@JP compact").
+//! By default, it strips reasoning and tool calls from turns `2` through `-2`:
 //!
 //! ```toml
 //! [[plugins.command.serve-chat.options.compact]]
@@ -349,8 +348,7 @@ fn decide(raw: RawDecide) -> Result<DecideOptions, String> {
             "`{KEY}.decide.threshold` is `{threshold}`; it is a probability, from 0 to 1."
         ));
     }
-    // Empty names no variable: the server, such as a local model, asks for no
-    // token.
+    // An empty string disables token lookup for unauthenticated endpoints.
     let api_key_env = raw.api_key_env.map_or_else(
         || DEFAULT_DECIDE_KEY_ENV.to_owned(),
         |name| name.trim().to_owned(),

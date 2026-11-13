@@ -39,7 +39,8 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
+    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, ValueType,
+    Vocabulary,
     board::{self, Place, Placement},
     check::Problem,
     checklist::{self, Progress},
@@ -47,7 +48,7 @@ use ticket::{
     store,
 };
 
-use crate::options::{LABELS_KEY, Options, leftover_labels_file};
+use crate::options::{BoardOptions, LABELS_KEY, Options, leftover_labels_file};
 
 /// The name the plugin is configured under, `plugins.command.ticket`.
 pub(crate) const PLUGIN: &str = "ticket";
@@ -275,8 +276,21 @@ enum Command {
 
     /// Print the board: Todo, In Progress, and Done, each in board order.
     ///
-    /// Done shows its top `board.done_limit` tickets; `list` shows them all.
-    Board,
+    /// Done is truncated to `board.done_limit` tickets unless `--limit` is
+    /// passed; `list` shows every Done ticket.
+    /// Truncated columns show `(<shown>/<total>)` in their heading, such as
+    /// `Todo (10/190)`.
+    Board {
+        /// Print only this column: `todo`, `in progress`, or `done`.
+        /// Repeat to include multiple columns; they print in board order.
+        #[arg(long = "status")]
+        statuses: Vec<Status>,
+
+        /// Maximum number of tickets to show per column, from the top.
+        /// Overrides `board.done_limit` for Done.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 
     /// Move a ticket next to another in the same column of the board.
     #[command(group(ArgGroup::new("place").required(true)))]
@@ -348,7 +362,8 @@ enum Command {
         #[arg(long)]
         status: Option<Status>,
 
-        /// Only tickets carrying this label, as `key` or `key=value`.
+        /// Only tickets carrying this label, as `key`, `key=value`, or a date
+        /// comparison with `<`, `<=`, `>`, or `>=` (e.g. `due<2026-12-01`).
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
@@ -1558,7 +1573,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             uncheck,
         }),
 
-        Command::Board => show_board(dir, ctx.options.board.done_limit),
+        Command::Board { statuses, limit } => show_board(dir, &ctx.options.board, &statuses, limit),
 
         Command::Rank { id, before, after } => rank(dir, id, before, after),
 
@@ -1718,12 +1733,20 @@ fn rename(
     .into())
 }
 
-/// Print the board, one column after another.
+/// Print the board's columns vertically in board order (`Todo`, `In Progress`,
+/// `Done`).
 ///
-/// Stacked rather than side by side, which would wrap on a narrow terminal.
-/// Done is cut to its top `done_limit` tickets, and its heading says how many
-/// there are.
-fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
+/// If `statuses` is non-empty, only the listed columns are printed.
+/// Each column is truncated to `limit` tickets, or to `layout.done_limit` for
+/// `Done` when `limit` is `None`.
+/// Column headings show `(<total>)` when complete and `(<shown>/<total>)` when
+/// truncated.
+fn show_board(
+    dir: &Utf8Path,
+    layout: &BoardOptions,
+    statuses: &[Status],
+    limit: Option<usize>,
+) -> Result<Output, String> {
     let entries = store::list(dir).map_err(|error| error.to_string())?;
     let order = board::read(dir).map_err(|error| error.to_string())?;
 
@@ -1738,6 +1761,10 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
 
     let mut columns = vec![];
     for status in [Status::Todo, Status::InProgress, Status::Done] {
+        if !statuses.is_empty() && !statuses.contains(&status) {
+            continue;
+        }
+
         let column: Vec<TicketId> = tickets
             .iter()
             .filter(|(_, ticket)| ticket.metadata.status == status)
@@ -1746,14 +1773,11 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
         let laid_out = order.arrange(status, &column);
 
         let total = laid_out.len();
-        let shown = if status == Status::Done {
-            total.min(done_limit)
-        } else {
-            total
-        };
+        let limit = limit.or((status == Status::Done).then_some(layout.done_limit));
+        let shown = limit.map_or(total, |limit| total.min(limit));
 
         let mut text = if shown < total {
-            format!("{status} ({total}, showing {shown})\n")
+            format!("{status} ({shown}/{total})\n")
         } else {
             format!("{status} ({total})\n")
         };
@@ -2295,7 +2319,8 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
 
         out.push_str(&format!("{key}  {}{notes}\n", facet.description()));
         if facet.is_open() {
-            out.push_str(&format!("  {key}=<any value>\n"));
+            let value = facet.value_type().map_or("any value", ValueType::describe);
+            out.push_str(&format!("  {key}=<{value}>\n"));
         }
         for value in facet.values() {
             out.push_str(&format!("  {key}={value}\n"));

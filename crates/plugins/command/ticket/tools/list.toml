@@ -91,6 +91,9 @@ description = """
 Each entry is a `key=value` pair, or a bare `key` to match any value under it.
 Every entry has to match, so each one narrows the listing further.
 
+Date-typed keys also support `<`, `<=`, `>`, and `>=` comparisons with a
+`YYYY-MM-DD` date, such as `due<2026-12-01`.
+
 Retired values are accepted here, which is how you find the tickets still
 carrying one.
 """

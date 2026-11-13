@@ -545,6 +545,88 @@ fn a_required_key_taking_any_value_says_how_to_add_one() {
     );
 }
 
+fn typed() -> Vocabulary {
+    Vocabulary::parse(
+        r#"{
+            "due": {"values": [], "max": 1, "type": "date"},
+            "rfd": {"values": []}
+        }"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_typed_key_takes_values_of_its_type() {
+    let vocabulary = typed();
+
+    assert_eq!(
+        vocabulary.facet("due").unwrap().value_type(),
+        Some(ValueType::Date)
+    );
+    assert_eq!(vocabulary.facet("rfd").unwrap().value_type(), None);
+
+    let labels = vocabulary
+        .resolve(&owned(&["due=2026-12-01", "rfd=friday"]))
+        .unwrap();
+    assert_eq!(labels.to_tokens(), ["due=2026-12-01", "rfd=friday"]);
+}
+
+/// Rejecting a mistyped value reports the expected format without listing every
+/// valid label in the vocabulary.
+#[test]
+fn a_value_of_another_type_is_refused() {
+    let error = typed()
+        .resolve(&owned(&["due=1w", "due=2026-1-5"]))
+        .unwrap_err();
+
+    assert_eq!(error.mistyped, [
+        Mistyped {
+            key: "due".to_owned(),
+            value: "1w".to_owned(),
+            expected: ValueType::Date,
+        },
+        Mistyped {
+            key: "due".to_owned(),
+            value: "2026-1-5".to_owned(),
+            expected: ValueType::Date,
+        },
+    ]);
+    assert_eq!(
+        error.to_string(),
+        "`due=1w` is not a date, written YYYY-MM-DD. `due=2026-1-5` is not a date, written \
+         YYYY-MM-DD."
+    );
+}
+
+#[test]
+fn a_type_on_a_key_not_taking_any_value_is_an_error() {
+    let error = Vocabulary::parse(r#"{"due": {"values": ["soon"], "type": "date"}}"#).unwrap_err();
+
+    assert_eq!(error, Error::TypeOnClosedKey {
+        key: "due".to_owned()
+    });
+    assert_eq!(
+        error.to_string(),
+        "`due` in the label vocabulary has a `type`, but only a key taking any value (`values = \
+         []`) can have one."
+    );
+
+    assert_eq!(
+        Vocabulary::parse(r#"{"due": {"type": "date"}}"#).unwrap_err(),
+        Error::TypeOnClosedKey {
+            key: "due".to_owned()
+        }
+    );
+}
+
+#[test]
+fn an_unknown_type_is_an_error() {
+    assert!(matches!(
+        Vocabulary::parse(r#"{"due": {"values": [], "type": "duration"}}"#),
+        Err(Error::Malformed(_))
+    ));
+}
+
 /// Moving every value of a key to `retired` and leaving `values = []` behind
 /// would open the key to any value; it is refused, naming the shape that
 /// retires them.
