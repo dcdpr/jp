@@ -148,7 +148,8 @@ pub(crate) struct Label {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unique: Option<&'static str>,
 
-    /// The kind of value an open key holds, `date`; left out for free text.
+    /// Value type constraint for an open key (e.g. `"date"`); omitted for
+    /// unrestricted text.
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub value_type: Option<&'static str>,
 }

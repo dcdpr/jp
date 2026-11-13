@@ -14,8 +14,8 @@ fn a_date_is_a_zero_padded_calendar_date() {
     assert!(!ValueType::Date.accepts(""));
 }
 
-/// `chrono`'s `%Y` round-trips signed and expanded years, which would order
-/// before every four-digit year when compared as text.
+/// `chrono`'s `%Y` specifier accepts signed and five-digit years, which sort
+/// before four-digit years lexicographically (`'+' < '0'`).
 #[test]
 fn a_date_has_a_four_digit_unsigned_year() {
     assert!(!ValueType::Date.accepts("+10000-01-01"));

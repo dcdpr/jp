@@ -441,8 +441,6 @@ fn the_snapshot_renders_in_a_fixed_shape() {
     );
 }
 
-/// A typed key carries its `type`, which the site's loader holds every ticket's
-/// value to.
 #[test]
 fn a_typed_key_renders_its_type() {
     let label = Label {

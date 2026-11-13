@@ -166,24 +166,22 @@ export function findMiscountedLabels(tickets, vocabulary) {
         `change the key's \`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
 }
 
-// The kinds of value a key's `type` holds it to, as `jp_label::ValueType`
-// defines them: whether a value is one, and how one is written.
+// Validators and format descriptions for `type` constraints, mirroring
+// `jp_label::ValueType`.
 const VALUE_TYPES = {
     date: { accepts: isDate, describe: 'a date, written YYYY-MM-DD' },
 }
 
-// Whether `value` is a calendar date written as zero-padded `YYYY-MM-DD`.
+// Whether `value` is a valid calendar date in zero-padded `YYYY-MM-DD` format.
 //
-// The shape is checked first, so an unpadded or signed year never passes: only
-// that shape orders chronologically as text, which is how `jp ticket` compares
-// dates.
+// Checks the digit pattern first to reject unpadded or signed years, which
+// break lexicographic date comparisons.
 function isDate(value) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
     if (!match) return false
 
     const [year, month, day] = match.slice(1).map(Number)
-    // `setUTCFullYear` rather than `Date.UTC`, which reads years below 100 as
-    // 1900 onward.
+    // Use `setUTCFullYear` because `Date.UTC` maps years 0..99 to 1900..1999.
     const date = new Date(0)
     date.setUTCFullYear(year, month - 1, day)
     return date.getUTCFullYear() === year
@@ -191,10 +189,10 @@ function isDate(value) {
         && date.getUTCDate() === day
 }
 
-// Labels whose value isn't of the kind its key's `type` holds it to.
+// Report labels whose values do not match their key's `type` constraint.
 //
-// Every label write `jp ticket` makes is held to the type; this catches a
-// ticket edited by hand, or one filed before the key was typed.
+// `jp ticket` validates label types on write; this check catches hand-edited
+// tickets or tickets filed before `type` was added to the key.
 export function findMistypedLabels(tickets, vocabulary) {
     const typed = Object.entries(vocabulary)
         .filter(([, entry]) => Object.hasOwn(VALUE_TYPES, entry?.type))

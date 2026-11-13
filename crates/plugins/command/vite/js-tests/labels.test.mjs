@@ -106,8 +106,6 @@ test('a label on several tickets names them all', () => {
     )
 })
 
-// A key holding dates takes a zero-padded `YYYY-MM-DD` calendar date, as
-// `jp ticket` checks it.
 const DATED = {
     due: { description: 'When', values: [], open: true, max: 1, type: 'date' },
     dueness: { description: 'Free text', values: [], open: true },
