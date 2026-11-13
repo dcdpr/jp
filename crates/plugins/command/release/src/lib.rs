@@ -3,21 +3,20 @@
 //!
 //! This crate provides the `jp release` subcommands and the `changelog_add`
 //! tool (`source = "plugin.command.release.add"`).
-//! When `init` carries a tool call, [`tool`] handles it; otherwise the CLI
-//! subcommand in `init.args` runs.
+//! When `init` carries a tool call, the `tool` module handles it; otherwise the
+//! CLI subcommand in `init.args` runs.
 //!
 //! Parsing, directory validation, and release-note rendering live in the
 //! [`changelog`] crate.
 //! Within this crate:
 //!
-//! - [`edit`] opens fragments and highlights in the user's editor via the host.
-//! - [`entry`] derives file names and writes validated fragments (formatting
-//!   them with `.comfort.toml` when `format_on_write` is enabled).
-//! - [`options`] parses `plugins.command.release.options`.
-//! - [`definitions`] scaffolds the `changelog_add` tool definition.
-//! - [`cut`], [`pick`], [`finalize`], [`build`], [`abandon`], [`due`], and
-//!   [`status`] implement the release pipeline over [`releases`] and
-//!   [`repository`].
+//! - `edit` opens fragments and highlights in the user's editor via the host.
+//! - `entry` derives file names and writes validated fragments (formatting them
+//!   with `.comfort.toml` when `format_on_write` is enabled).
+//! - `options` parses `plugins.command.release.options`.
+//! - `definitions` scaffolds the `changelog_add` tool definition.
+//! - `cut`, `pick`, `finalize`, `build`, `abandon`, `due`, and `status`
+//!   implement the release pipeline over `releases` and `repository`.
 //!
 //! See `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`.
@@ -367,8 +366,8 @@ struct Context<'a> {
 
 /// Serve a single plugin session from `stdin` to `stdout`.
 ///
-/// Answers a `describe` request immediately, dispatches tool calls to [`tool`],
-/// or runs the CLI subcommand from `init.args`.
+/// Answers a `describe` request immediately, dispatches tool calls to the
+/// `tool` module, or runs the CLI subcommand from `init.args`.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     let describe = || client::describe(MANIFEST, "release", help_text(), jp_plugin::package!());
     let Some(init) = client::start(&mut stdin, &mut stdout, BINARY, REQUIRED_PROTOCOL, describe)?
