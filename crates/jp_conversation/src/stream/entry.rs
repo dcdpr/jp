@@ -155,12 +155,19 @@ impl Serialize for EventPayload {
     }
 }
 
-// Dispatching on `type` avoids the allocations from trying each untagged
-// variant. Base64 content is decoded only for known conversation events.
 impl<'de> Deserialize<'de> for EventPayload {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = Value::deserialize(deserializer)?;
+        let value = Value::deserialize(deserializer)?;
+        Self::from_value(value).map_err(D::Error::custom)
+    }
+}
 
+// Dispatching on `type` avoids the allocations from trying each untagged
+// variant. Base64 content is decoded only for known conversation events.
+impl EventPayload {
+    /// Deserialize a stored payload from a JSON object whose `event_id` has
+    /// been stripped.
+    pub(super) fn from_value(mut value: Value) -> Result<Self, serde_json::Error> {
         let tag = value
             .get("type")
             .and_then(Value::as_str)
@@ -169,75 +176,104 @@ impl<'de> Deserialize<'de> for EventPayload {
         if tag == "config_delta" {
             return config_delta::deserialize(&value)
                 .map(Self::ConfigDelta)
-                .map_err(D::Error::custom);
+                .map_err(serde_json::Error::custom);
         }
 
         if tag == "compaction" {
-            return serde_json::from_value(value)
-                .map(Self::Compaction)
-                .map_err(D::Error::custom);
+            return serde_json::from_value(value).map(Self::Compaction);
         }
 
         if tag == "event_overlay" {
-            return serde_json::from_value(value)
-                .map(Self::Overlay)
-                .map_err(D::Error::custom);
+            return serde_json::from_value(value).map(Self::Overlay);
         }
 
-        // Conversations are an append-only log a newer `jp` may have written.
-        // An unrecognized event kind is preserved verbatim instead of failing
-        // the whole stream load, so it round-trips on the next save. Corrupt
-        // *known* events still fail loudly below.
-        if !EventKind::TYPE_TAGS.contains(&tag) {
-            #[cfg(debug_assertions)]
-            {
-                let mut probe = value.clone();
-                decode_event_value(&mut probe);
-                debug_assert!(
-                    serde_json::from_value::<ConversationEvent>(probe).is_err(),
-                    "event tag `{tag}` is missing from EventKind::TYPE_TAGS",
-                );
-            }
-            warn!(%tag, "Unknown conversation event kind; preserving raw event.");
-            return Ok(Self::Unknown {
-                value,
-                scope: EventScope::Global,
-            });
+        if let Some(scope) = unreadable_scope(tag, &value) {
+            return Ok(Self::Unknown { value, scope });
         }
 
-        // `ChatResponse` is untagged: its content key selects the variant, so a
-        // variant added by a newer jp arrives under a known `type` tag. One
-        // with no known content key is preserved the same way, but stays
-        // turn-scoped: it answers the request before it, and pruning that turn
-        // must take it along.
-        if tag == "chat_response"
-            && !ChatResponse::CONTENT_KEYS
-                .iter()
-                .any(|key| value.get(key).is_some())
-        {
-            #[cfg(debug_assertions)]
-            {
-                let mut probe = value.clone();
-                decode_event_value(&mut probe);
-                debug_assert!(
-                    serde_json::from_value::<ConversationEvent>(probe).is_err(),
-                    "a ChatResponse content key is missing from ChatResponse::CONTENT_KEYS",
-                );
-            }
-            warn!("Unknown chat response variant; preserving raw event.");
-            return Ok(Self::Unknown {
-                value,
-                scope: EventScope::Turn,
-            });
-        }
-
-        // Decode base64-encoded storage fields before deserializing.
+        // Known event kinds must deserialize strictly after base64 decoding.
         decode_event_value(&mut value);
 
-        serde_json::from_value(value)
-            .map(|e| Self::Event(Box::new(e)))
-            .map_err(D::Error::custom)
+        serde_json::from_value(value).map(|e| Self::Event(Box::new(e)))
     }
+
+    /// Deserialize a [`ConversationEvent`] from a stored payload JSON object,
+    /// returning `None` for non-event entries.
+    ///
+    /// Skips `config_delta`, `compaction`, and `event_overlay` entries by their
+    /// `type` tag without parsing them, and returns `None` for unrecognized
+    /// entries ([`Self::Unknown`]).
+    pub(super) fn event_from_value(
+        value: Value,
+    ) -> Result<Option<ConversationEvent>, serde_json::Error> {
+        let tag = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        if matches!(tag, "config_delta" | "compaction" | "event_overlay") {
+            return Ok(None);
+        }
+
+        Ok(match Self::from_value(value)? {
+            Self::Event(event) => Some(*event),
+            Self::ConfigDelta(_)
+            | Self::Compaction(_)
+            | Self::Overlay(_)
+            | Self::Unknown { .. } => None,
+        })
+    }
+}
+
+/// Return the [`EventScope`] for an unrecognized event payload, or `None` if
+/// `value` is a known [`ConversationEvent`] variant.
+///
+/// Logs a warning and returns:
+///
+/// - `Some(EventScope::Global)` when `tag` (the payload's `type` field) is not
+///   in [`EventKind::TYPE_TAGS`].
+/// - `Some(EventScope::Turn)` when `tag` is `"chat_response"` but `value` has
+///   no key in [`ChatResponse::CONTENT_KEYS`].
+fn unreadable_scope(tag: &str, value: &Value) -> Option<EventScope> {
+    // Conversations are an append-only log a newer `jp` may have written.
+    // An unrecognized event kind is preserved verbatim instead of failing
+    // the whole stream load, so it round-trips on the next save.
+    if !EventKind::TYPE_TAGS.contains(&tag) {
+        #[cfg(debug_assertions)]
+        {
+            let mut probe = value.clone();
+            decode_event_value(&mut probe);
+            debug_assert!(
+                serde_json::from_value::<ConversationEvent>(probe).is_err(),
+                "event tag `{tag}` is missing from EventKind::TYPE_TAGS",
+            );
+        }
+        warn!(%tag, "Unknown conversation event kind; preserving raw event.");
+        return Some(EventScope::Global);
+    }
+
+    // `ChatResponse` is untagged (its content key selects the variant), so a
+    // variant added by a newer `jp` still carries `type = "chat_response"`. It
+    // is turn-scoped so pruning the enclosing turn removes it too.
+    if tag == "chat_response"
+        && !ChatResponse::CONTENT_KEYS
+            .iter()
+            .any(|key| value.get(key).is_some())
+    {
+        #[cfg(debug_assertions)]
+        {
+            let mut probe = value.clone();
+            decode_event_value(&mut probe);
+            debug_assert!(
+                serde_json::from_value::<ConversationEvent>(probe).is_err(),
+                "a ChatResponse content key is missing from ChatResponse::CONTENT_KEYS",
+            );
+        }
+        warn!("Unknown chat response variant; preserving raw event.");
+        return Some(EventScope::Turn);
+    }
+
+    None
 }
 
 /// Whether an [`InternalEvent`] belongs to a single turn or applies to the
