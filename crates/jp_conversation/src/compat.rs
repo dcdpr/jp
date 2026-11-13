@@ -30,8 +30,8 @@ use serde_json::{Value, json};
 use serde_path_to_error::{Path as ErrorPath, Segment};
 use tracing::warn;
 
-/// The current [`AppConfig`] schema, built on first use, cached for performance
-/// optimization purposes.
+/// Cached [`AppConfig`] schema reused across [`deserialize_partial_config`]
+/// calls.
 static SCHEMA: LazyLock<Schema> = LazyLock::new(AppConfig::schema);
 
 /// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating schema

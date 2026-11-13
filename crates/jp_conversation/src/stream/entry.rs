@@ -187,12 +187,11 @@ impl EventPayload {
             return serde_json::from_value(value).map(Self::Overlay);
         }
 
-        // Corrupt *known* events still fail loudly below.
         if let Some(scope) = unreadable_scope(tag, &value) {
             return Ok(Self::Unknown { value, scope });
         }
 
-        // Decode base64-encoded storage fields before deserializing.
+        // Known event kinds must deserialize strictly after base64 decoding.
         decode_event_value(&mut value);
 
         serde_json::from_value(value).map(|e| Self::Event(Box::new(e)))
@@ -226,15 +225,15 @@ impl EventPayload {
     }
 }
 
-/// Classify a stored payload that this build cannot read as a conversation
-/// event.
+/// Return the [`EventScope`] for an unrecognized event payload, or `None` if
+/// `value` is a known [`ConversationEvent`] variant.
 ///
-/// `tag` is the payload's `type` field.
-/// Returns the [`EventScope`] to preserve the raw payload under, and logs a
-/// warning, when `tag` is not a known event kind or when a `chat_response`
-/// carries no known content key.
-/// Returns `None` when the payload should deserialize as a
-/// [`ConversationEvent`].
+/// Logs a warning and returns:
+///
+/// - `Some(EventScope::Global)` when `tag` (the payload's `type` field) is not
+///   in [`EventKind::TYPE_TAGS`].
+/// - `Some(EventScope::Turn)` when `tag` is `"chat_response"` but `value` has
+///   no key in [`ChatResponse::CONTENT_KEYS`].
 fn unreadable_scope(tag: &str, value: &Value) -> Option<EventScope> {
     // Conversations are an append-only log a newer `jp` may have written.
     // An unrecognized event kind is preserved verbatim instead of failing
@@ -253,11 +252,9 @@ fn unreadable_scope(tag: &str, value: &Value) -> Option<EventScope> {
         return Some(EventScope::Global);
     }
 
-    // `ChatResponse` is untagged: its content key selects the variant, so a
-    // variant added by a newer jp arrives under a known `type` tag. One
-    // with no known content key is preserved the same way, but stays
-    // turn-scoped: it answers the request before it, and pruning that turn
-    // must take it along.
+    // `ChatResponse` is untagged (its content key selects the variant), so a
+    // variant added by a newer `jp` still carries `type = "chat_response"`. It
+    // is turn-scoped so pruning the enclosing turn removes it too.
     if tag == "chat_response"
         && !ChatResponse::CONTENT_KEYS
             .iter()

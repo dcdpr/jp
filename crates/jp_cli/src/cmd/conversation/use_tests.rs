@@ -324,8 +324,8 @@ fn filter_grep_drops_a_match_whose_stream_does_not_load() {
         }
     }
 
-    // A config delta whose `op` this build does not know. The event search
-    // skips config deltas, and the stream load fails on this one.
+    // Append a `config_delta` with an unknown `op`: event search skips
+    // `config_delta` entries, whereas full stream loading rejects it.
     let events_path = backend.conversation_events_path(&id_broken).unwrap();
     let mut events: Vec<Value> = serde_json::from_slice(&fs::read(&events_path).unwrap()).unwrap();
     events.push(json!({
