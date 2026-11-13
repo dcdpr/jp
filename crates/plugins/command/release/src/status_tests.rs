@@ -9,10 +9,8 @@ use crate::{
     shell::Shell,
 };
 
-/// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
+/// 2026-10-01 12:00:00 UTC in seconds since the Unix epoch.
 const OCTOBER_1: i64 = 1_790_856_000;
-
-/// A day, in seconds.
 const DAY: i64 = 86_400;
 
 fn options() -> Options {
@@ -23,7 +21,6 @@ fn options() -> Options {
     Options::read(&options).unwrap()
 }
 
-/// What `status` says at `now` in the workspace of `fixture`.
 fn status_at(fixture: &Fixture, now: i64) -> String {
     let shell = fixture.shell();
     let options = options();
@@ -32,7 +29,6 @@ fn status_at(fixture: &Fixture, now: i64) -> String {
     status(&pipeline, now, None).unwrap()
 }
 
-/// Run `command` in the workspace of `fixture` with `shell`.
 fn run(
     fixture: &Fixture,
     shell: &Shell,
@@ -44,8 +40,6 @@ fn run(
     command(&pipeline)
 }
 
-/// A workspace with a fix merged into `main`, and release 0.1.0 cut from it
-/// here on 2026-10-01, its branches not yet published.
 fn cut_on_october_1() -> Fixture {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -155,8 +149,6 @@ fn a_release_tagged_here_says_how_to_publish_it_and_when_the_next_is_due() {
     );
 }
 
-/// What `status` says at `now` in the workspace of `fixture`, which keeps
-/// builds in `builds`.
 fn status_with_builds(fixture: &Fixture, now: i64, builds: &Utf8Path) -> String {
     let shell = fixture.shell();
     let options = options();
@@ -165,8 +157,6 @@ fn status_with_builds(fixture: &Fixture, now: i64, builds: &Utf8Path) -> String 
     status(&pipeline, now, Some(builds)).unwrap()
 }
 
-/// [`cut_on_october_1`], with its notes merged, finalized, and everything
-/// published.
 fn finalized_on_october_1() -> Fixture {
     let fixture = cut_on_october_1();
     fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
@@ -180,7 +170,6 @@ fn finalized_on_october_1() -> Fixture {
     fixture
 }
 
-/// Keep a build of 0.1.0 in `builds`, made from `commit` with `profile`.
 fn keep_build(builds: &Utf8Path, commit: &str, profile: &str) {
     let dir = builds.join("0.1.0");
     fs::create_dir_all(&dir).unwrap();

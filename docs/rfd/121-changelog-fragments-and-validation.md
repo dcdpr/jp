@@ -208,22 +208,22 @@ Each names a change request on the workspace's forge, written `#1207` (or
 A turn that stalls while idle is retried instead of failing.
 ```
 
-`Credits` also say which changes a fragment describes, and so which release it
-belongs to: the first release that ships every change they name files it ([RFD
-122]).
-A fragment without them describes the commit that added it.
-That lets a fragment written after the fact, for a release cut at an earlier
-commit, find its release.
+`Credits` also determine which release includes the fragment: the first release
+that contains every referenced commit files it ([RFD 122]).
+Without explicit `Credits`, the fragment is tied to the commit that added it.
+This allows fragments written retroactively for an earlier commit to be filed
+into the corresponding historical release.
 
 Each user-visible change adds its own fragment, follow-ups included: a pull
 request that extends an earlier change describes what it adds in a new fragment,
 whether or not the earlier one has been released.
 An existing fragment is edited only to correct its wording.
-The rule makes a fragment's text describe the code that added it, which matters
-because a fragment can move into a release while a pull request that edits it is
-open ([Released fragments](#released-fragments)): git carries the edit to the
-moved file when the pull request merges, which is right for a correction and
-would be wrong for a description of new work.
+This keeps each fragment tied to the commit that added it.
+If a release is cut while a pull request editing an existing fragment is open
+([Released fragments](#released-fragments)), git's rename tracking carries that
+edit into `changelog.d/<version>/` when the pull request merges, which is
+desirable for a wording fix but would misattribute new work to the earlier
+release.
 A feature built across several pull requests adds a fragment for each
 user-visible change they make, and each of them edits the shared highlight,
 which credits all of them.

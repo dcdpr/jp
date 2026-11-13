@@ -1,7 +1,7 @@
 # Installation
 
-JP runs on macOS and Linux, on Apple silicon or ARM64 and on x86_64, and on
-Windows on x86_64.
+JP runs on macOS (Apple silicon and Intel), Linux (x86_64 and ARM64), and
+Windows (x86_64).
 
 ## Install Script
 
@@ -17,15 +17,16 @@ On Windows, in PowerShell:
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/dcdpr/jp/releases/latest/download/install.ps1 | iex"
 ```
 
-The script downloads the latest release for your platform, checks it against the
-release's checksums, and installs `jp` into `~/.cargo/bin`, where `cargo
-install` puts it.
-It tells you when that directory isn't on your `PATH`.
+The installer downloads the latest release archive for your platform, verifies
+its SHA-256 checksum against `checksums.txt`, and installs `jp` into
+`~/.cargo/bin`.
+If `~/.cargo/bin` is not in your `PATH`, the installer prints instructions to
+add it.
 
 ## Manual Download
 
-Each [release][releases] has an archive for each platform, and a `checksums.txt`
-with the SHA-256 of each archive:
+Each [release][releases] provides prebuilt archives and a `checksums.txt` file
+containing their SHA-256 digests:
 
 | Platform               | Archive                               |
 | ---------------------- | ------------------------------------- |
@@ -35,8 +36,8 @@ with the SHA-256 of each archive:
 | Linux on x86_64        | `jp-x86_64-unknown-linux-gnu.tar.xz`  |
 | Windows on x86_64      | `jp-x86_64-pc-windows-msvc.zip`       |
 
-Download your platform's archive and `checksums.txt` into one directory, and
-check the archive there.
+Download your platform's archive and `checksums.txt` into the same directory and
+verify the checksum.
 On Linux:
 
 ```sh
@@ -49,40 +50,40 @@ On macOS:
 shasum -a 256 -c --ignore-missing checksums.txt
 ```
 
-On Windows, compare the hash `Get-FileHash jp-x86_64-pc-windows-msvc.zip` prints
-with the one `checksums.txt` gives the archive.
+On Windows, compare the output of `Get-FileHash jp-x86_64-pc-windows-msvc.zip`
+against the hash in `checksums.txt`.
 
-Each archive holds a directory of the same name, with `jp`, or `jp.exe` on
-Windows; put it in a directory on your `PATH`.
+Extract the archive and place `jp` (or `jp.exe` on Windows) in a directory on
+your `PATH`.
 
-The Linux builds need glibc 2.28 or newer, which Debian 10, Ubuntu 20.04, RHEL
-8, and their successors have; systems built on musl, such as Alpine, can't run
-them.
+Linux binaries require glibc 2.28 or newer (Debian 10+, Ubuntu 20.04+, RHEL 8+).
+Systems using musl (such as Alpine Linux) must [install from
+source](#install-from-source).
 
 ### Downloads From a Browser
 
-JP's binaries aren't signed.
-A browser marks the files it downloads, and macOS refuses to run a marked
-program that Apple hasn't notarized, which JP's aren't.
-`curl` and the install script leave no such mark, and this removes it from a
-`jp` unpacked from an archive a browser downloaded:
+Release binaries are not code-signed or notarized.
+When you download an archive in a web browser, macOS attaches a quarantine
+attribute and blocks execution (`curl` and the install script do not set this
+attribute).
+Clear the quarantine attribute with `xattr`:
 
 ```sh
 xattr -d com.apple.quarantine jp
 ```
 
-Windows may warn about a `jp.exe` downloaded through a browser in the same way.
+Windows SmartScreen may show a similar warning for `jp.exe` when downloaded via
+a browser.
 
 ## Install From Source
 
-With [Cargo] and a recent stable Rust:
+With [Cargo] and a recent stable Rust toolchain:
 
 ```sh
 cargo install --locked --git https://github.com/dcdpr/jp.git --tag v0.3.0 jp_cli
 ```
 
-`--tag` names the release to build; without it, Cargo builds the newest code on
-`main`.
+Omit `--tag v0.3.0` to build the latest commit on `main`.
 
 [Cargo]: https://doc.rust-lang.org/cargo/
 [releases]: https://github.com/dcdpr/jp/releases

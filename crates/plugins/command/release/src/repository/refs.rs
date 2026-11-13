@@ -1,11 +1,10 @@
-//! The branches and tags of the repository and of `origin`.
+//! Reading and updating local and `origin` branches and tags.
 
 use std::{collections::BTreeMap, fs};
 
 use super::{Branch, LOCAL_REFS, ORIGIN, ORIGIN_REFS, Tags, git::Git, temporary};
 use crate::releases::{self, Standing};
 
-/// The branches and tags of the repository and of `origin`, as last fetched.
 pub(crate) struct Refs<'a> {
     git: Git<'a>,
 }
@@ -15,8 +14,8 @@ impl<'a> Refs<'a> {
         Self { git }
     }
 
-    /// Every branch whose name starts with `prefix`, such as `release/`, as
-    /// this repository and `origin` each hold it, by name.
+    /// List all branches matching `prefix` (e.g. `"release/"`) across
+    /// `refs/heads/` and `refs/remotes/origin/`.
     pub(crate) fn branches(&self, prefix: &str) -> Result<Vec<Branch>, String> {
         let mut branches: BTreeMap<String, Branch> = BTreeMap::new();
         for (namespace, local) in [(LOCAL_REFS, true), (ORIGIN_REFS, false)] {
@@ -48,7 +47,6 @@ impl<'a> Refs<'a> {
         Ok(branches.into_values().collect())
     }
 
-    /// The branch `name`, as this repository and `origin` each hold it.
     pub(crate) fn branch(&self, name: &str) -> Result<Branch, String> {
         Ok(Branch {
             name: name.to_owned(),
@@ -57,8 +55,6 @@ impl<'a> Refs<'a> {
         })
     }
 
-    /// Where `branch` in this repository stands against `origin`'s; `None` when
-    /// neither has it.
     pub(crate) fn standing(&self, branch: &Branch) -> Result<Option<Standing>, String> {
         let standing = match (&branch.local, &branch.origin) {
             (None, None) => return Ok(None),
@@ -73,12 +69,8 @@ impl<'a> Refs<'a> {
         Ok(Some(standing))
     }
 
-    /// The commit `branch` is at for the release commands: this repository's
-    /// when it has every commit of `origin`'s, else `origin`'s; `None` when
-    /// neither has it.
-    ///
-    /// Refuses a branch this repository and `origin` each have commits of the
-    /// other lacks.
+    /// Return the further-ahead tip commit between local and `origin` for
+    /// `branch`, or an error if the two have diverged.
     pub(crate) fn tip(&self, branch: &Branch) -> Result<Option<String>, String> {
         Ok(match self.standing(branch)? {
             None => None,
@@ -94,17 +86,14 @@ impl<'a> Refs<'a> {
         })
     }
 
-    /// The `v` tags in this repository, and those on `origin`.
+    /// List all `v*` tags locally and on `origin`.
     pub(crate) fn tags(&self) -> Result<Tags, String> {
-        // An annotated tag names a tag object, which `*objectname` peels to the
-        // commit; a lightweight tag names the commit itself.
         let format = concat!(
             "--format=",
             "%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)",
             "%09%(refname)",
         );
         let local = self.git.git(&["for-each-ref", format, "refs/tags/v*"])?;
-        // Without `--refs`, each annotated tag is listed peeled too.
         let origin = self
             .git
             .git(&["ls-remote", "--tags", ORIGIN, "refs/tags/v*"])?;
@@ -115,12 +104,9 @@ impl<'a> Refs<'a> {
         })
     }
 
-    /// When the tag `tag` was made, in seconds since the Unix epoch: an
-    /// annotated tag's own time, or a lightweight tag's commit's.
-    ///
-    /// Reads this repository's tag, or else `origin`'s, which is fetched into
-    /// `FETCH_HEAD` alone, so no tag is written here.
-    /// The error says the tag can't be read, or has no time.
+    /// Return the Unix timestamp of `tag` (the tagger date for annotated tags
+    /// or the commit date for lightweight tags), fetching into `FETCH_HEAD` if
+    /// the tag only exists on `origin`.
     pub(crate) fn tag_date(&self, tag: &str) -> Result<i64, String> {
         let reference = format!("refs/tags/{tag}");
         let object = if self.git.hash(&reference)?.is_some() {
@@ -144,8 +130,8 @@ impl<'a> Refs<'a> {
         date.ok_or_else(|| format!("The tag {tag} has no time git can read."))
     }
 
-    /// Fetch `origin`'s tag `tag` into `FETCH_HEAD`, with the objects it needs,
-    /// writing no tag here.
+    /// Fetch `refs/tags/<tag>` from `origin` into `FETCH_HEAD` without creating
+    /// a local tag ref.
     pub(crate) fn fetch_tag(&self, tag: &str) -> Result<(), String> {
         let reference = format!("refs/tags/{tag}");
 
@@ -154,7 +140,6 @@ impl<'a> Refs<'a> {
             .map(drop)
     }
 
-    /// The commit the tag `tag` in this repository points at, when it has one.
     pub(crate) fn local_tag(&self, tag: &str) -> Result<Option<String>, String> {
         let reference = format!("refs/tags/{tag}");
         if self.git.hash(&reference)?.is_none() {
@@ -164,12 +149,9 @@ impl<'a> Refs<'a> {
         self.git.commit(&reference).map(Some)
     }
 
-    /// Point this repository's branch `name` at the commit `new`.
-    ///
-    /// `local` is the commit the branch was at when it was read, or `None` for
-    /// a branch to create; a branch that moved since is left alone.
-    /// Refuses a branch checked out in a worktree, whose files would no longer
-    /// match it.
+    /// Atomically update `refs/heads/<name>` from `local` (`None` if creating a
+    /// new branch) to `new`, rejecting the update if the branch is checked out
+    /// in any worktree.
     pub(crate) fn set_branch(
         &self,
         name: &str,
@@ -193,10 +175,8 @@ impl<'a> Refs<'a> {
         Ok(())
     }
 
-    /// Delete this repository's branch `name`, which has to be at the commit
-    /// `local` still.
-    ///
-    /// Refuses a branch checked out in a worktree.
+    /// Atomically delete `refs/heads/<name>` (expecting it at commit `local`),
+    /// rejecting the deletion if the branch is checked out in any worktree.
     pub(crate) fn delete_branch(&self, name: &str, local: &str) -> Result<(), String> {
         self.refuse_checked_out(name)?;
 
@@ -214,13 +194,12 @@ impl<'a> Refs<'a> {
         Ok(())
     }
 
-    /// Delete this repository's tag `tag`.
     pub(crate) fn delete_tag(&self, tag: &str) -> Result<(), String> {
         self.git.git(&["tag", "--delete", tag]).map(drop)
     }
 
-    /// Refuse when the branch `name` is checked out in one of the repository's
-    /// worktrees, naming where.
+    /// Return an error if branch `name` is currently checked out in any
+    /// worktree.
     pub(crate) fn refuse_checked_out(&self, name: &str) -> Result<(), String> {
         let listing = self.git.git(&["worktree", "list", "--porcelain"])?;
         let reference = format!("branch {LOCAL_REFS}{name}");
@@ -240,12 +219,9 @@ impl<'a> Refs<'a> {
         Ok(())
     }
 
-    /// Make the annotated tag `tag` at the commit `hash`, with `message` kept
-    /// as it is: lines starting with `#` stay, where git would otherwise drop
-    /// them as comments.
+    /// Create an annotated tag `tag` at `hash` with verbatim `message`
+    /// (`--cleanup=verbatim` preserves Markdown `#` headings).
     pub(crate) fn tag(&self, tag: &str, hash: &str, message: &str) -> Result<(), String> {
-        // A file rather than an argument, since a release's notes can outgrow
-        // what a command line holds on Windows.
         let file = temporary("tag-message")?;
         fs::write(&file, message)
             .map_err(|error| format!("failed to write the message of {tag} to {file}: {error}"))?;

@@ -1,15 +1,18 @@
-//! `jp release github`: publish releases to GitHub, as GitHub Releases.
+//! `jp release github`: publish and sync GitHub Releases.
 //!
-//! [`run`] serves one session with the host.
-//! `publish` attaches a release's publishable build, which `jp release build`
-//! keeps, and the files the `assets` setting names to the GitHub Release of the
-//! release's tag, with the release's notes as its description.
-//! `sync` rewrites the descriptions whose notes changed since.
+//! [`run`] serves one plugin session with the host:
 //!
-//! Notes are rendered from the checkout the command runs in, with `jp
-//! release`'s settings, as `jp release render` renders them.
+//! - `publish` uploads a release's artifacts (validated from the build
+//!   directory produced by `jp release build`) and configured `assets` to the
+//!   GitHub Release for `v<version>`, setting its description to the rendered
+//!   release notes.
+//! - `sync` updates the descriptions of existing GitHub Releases whose release
+//!   notes have changed in the current checkout.
 //!
-//! See: `docs/rfd/123-distributing-the-jp-binary.md`, "Publishing to GitHub"
+//! Release notes are rendered from the current checkout using the shared
+//! `plugins.command.release.options` settings ([`release_options::Notes`]).
+//!
+//! See `docs/rfd/123-distributing-the-jp-binary.md` ("Publishing to GitHub").
 
 mod description;
 mod github;
@@ -46,37 +49,42 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Publish a release's build and notes as the GitHub Release of its tag.
+    /// Publish a release's build artifacts and notes as the GitHub Release for
+    /// its tag.
     ///
-    /// Attaches the archives, `checksums.txt`, and `manifest.json` of the
-    /// publishable build of the release that `jp release build` keeps, and the
-    /// files the `assets` setting names.
-    /// The description is the release's notes, rendered from this checkout.
-    /// The tag has to be on GitHub, at the commit the build is of.
-    /// Publishing a release again updates its Release.
-    /// The Release of the highest version is marked the latest.
+    /// Uploads the archives, `checksums.txt`, and `manifest.json` from the
+    /// release build stored by `jp release build`, along with any files listed
+    /// in `assets`.
+    /// Sets the release description to the release notes rendered from the
+    /// current checkout.
     ///
-    /// Reads a token from `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`.
+    /// Requires tag `v<version>` to exist on GitHub at the commit recorded in
+    /// the build manifest.
+    /// Re-publishing an existing release updates it in place, and marks the
+    /// highest published version as the latest release.
+    ///
+    /// Reads the GitHub API token from `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`.
     Publish {
-        /// The release, such as `0.3.0`.
+        /// Release version, such as `0.3.0`.
         #[arg(value_parser = parse_version)]
         version: Version,
     },
 
-    /// Rewrite the description of each Release whose notes changed.
+    /// Update the description of each GitHub Release whose release notes
+    /// changed.
     ///
-    /// Renders the notes of each release that has a Release from this checkout,
-    /// which should be `main`, and updates each description that reads
-    /// differently.
+    /// Renders the notes for every published release from the current checkout
+    /// (typically `main`) and updates any GitHub Release whose description
+    /// differs.
     ///
-    /// Reads a token from `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`.
+    /// Reads the GitHub API token from `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`.
     Sync,
 }
 
-/// Serve one plugin session: read the host's first message and answer it.
+/// Serve a single plugin session from `stdin` to `stdout`.
 ///
-/// A `describe` is answered and ends the session; an `init` runs the command
-/// its arguments name.
+/// Answers a `describe` request immediately, or runs the subcommand specified
+/// by an `init` message.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     let describe = || {
         client::describe(
@@ -103,22 +111,17 @@ pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String
     handle_command(&init, token().as_deref(), &mut stdout)
 }
 
-/// The protocol version this plugin needs from the host, the one `jp release`
-/// needs too.
 const REQUIRED_PROTOCOL: u32 = 12;
 
-/// Where this plugin attaches to `jp`, readable from the binary without running
-/// it.
+/// Embedded plugin manifest read by `jp` without spawning the binary.
 ///
-/// `protocol` has to match `REQUIRED_PROTOCOL`.
+/// `protocol` must match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 12,
     description: "Publish releases to GitHub, as GitHub Releases",
     command: ["release", "github"],
 );
 
-/// Run the command `init`'s arguments name, with the GitHub `token` the
-/// environment holds.
 fn handle_command(
     init: &InitMessage,
     token: Option<&str>,
@@ -128,7 +131,7 @@ fn handle_command(
         Args::try_parse_from(iter::once("jp release github".to_owned()).chain(init.args.clone()));
     let args = match parsed {
         Ok(args) => args,
-        // `--help` and `--version` surface as errors that aren't failures.
+        // `--help` and `--version` exit 0 via clap's non-stderr display path.
         Err(error) if !error.use_stderr() => {
             client::print(stdout, &error.to_string(), "content", "plain")?;
             return client::exit(stdout, 0, None);
@@ -150,9 +153,6 @@ fn handle_command(
     }
 }
 
-/// Publish `version` as the GitHub Release of its tag, and say what was done.
-///
-/// Each file is named on the host's chrome channel as it is attached.
 fn publish_release(
     init: &InitMessage,
     token: Option<&str>,
@@ -197,8 +197,6 @@ fn publish_release(
     };
 
     let published = block_on(publish::publish(&client, &repository, plan, &mut |name| {
-        // A host that stopped reading fails the final print too, which reports
-        // it.
         drop(client::print(
             stdout,
             &format!("Attaching {name}.\n"),
@@ -210,7 +208,6 @@ fn publish_release(
     Ok(publish::summary(&published, version))
 }
 
-/// Rewrite the descriptions of the Releases whose notes changed, and say which.
 fn sync_releases(init: &InitMessage, token: Option<&str>) -> Result<String, String> {
     let token = token.ok_or_else(no_token)?;
     let options = Options::read(&init.options)?;
@@ -235,8 +232,8 @@ fn sync_releases(init: &InitMessage, token: Option<&str>) -> Result<String, Stri
     Ok(sync::summary(&updated))
 }
 
-/// The description of the Release of `version`, whose files GitHub serves from
-/// `download`; `None` when the fragments directory has no notes for it.
+/// Render the GitHub Release description for `version`, or return `None` if the
+/// fragments directory has no `<version>/` subdirectory.
 fn describe(
     root: &Utf8Path,
     notes: &Notes,
@@ -272,7 +269,6 @@ fn describe(
     )))
 }
 
-/// The footer `options` names, read from the workspace at `root`.
 fn footer(root: &Utf8Path, options: &Options) -> Result<Option<String>, String> {
     options
         .footer
@@ -288,8 +284,6 @@ fn footer(root: &Utf8Path, options: &Options) -> Result<Option<String>, String> 
         .transpose()
 }
 
-/// Where builds of the workspace's releases are kept: `release/` in its
-/// user-local storage.
 fn builds(init: &InitMessage) -> Result<Utf8PathBuf, String> {
     init.paths
         .user_workspace
@@ -301,7 +295,6 @@ fn builds(init: &InitMessage) -> Result<Utf8PathBuf, String> {
         })
 }
 
-/// Run `future` to its end on a runtime of its own.
 fn block_on<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -310,23 +303,18 @@ fn block_on<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, Str
         .block_on(future)
 }
 
-/// The token for GitHub's API in the environment, if one is set.
 fn token() -> Option<String> {
     let non_empty = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
 
     non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
 }
 
-/// Why a command that talks to GitHub can't, without a token.
 fn no_token() -> String {
     "Publishing to GitHub needs a token that can write the repository's contents, in \
      `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`; `gh auth token` prints one."
         .to_owned()
 }
 
-/// Resolve a directory against the workspace root.
-///
-/// An absolute path is taken as given; a relative one hangs off the root.
 fn resolve(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
     if dir.is_absolute() {
         dir.to_path_buf()
@@ -335,14 +323,12 @@ fn resolve(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
     }
 }
 
-/// `path` as shown to the user: relative to the workspace root when it is
-/// inside it.
 fn show(root: &Utf8Path, path: &Utf8Path) -> String {
     path.strip_prefix(root)
         .map_or_else(|_| path.to_string(), ToString::to_string)
 }
 
-/// The usage text, rendered from the same clap definition the commands parse.
+/// Render the top-level CLI `--help` text.
 #[must_use]
 pub fn help_text() -> String {
     Args::command().render_help().to_string()

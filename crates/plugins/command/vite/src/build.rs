@@ -1,16 +1,10 @@
-//! `jp vite build`: build the site for publishing, as `vitepress build` does,
-//! with this binary rendering its release pages.
+//! `jp vite build`: running `vitepress build` with up-to-date site settings and
+//! `JP_VITE_BIN` set to this binary for release-page rendering.
 //!
-//! Before starting `vitepress build`, build brings the settings snapshot up to
-//! date, as `serve` does, and refuses while a file `jp vite sync` writes isn't
-//! the one this binary writes, since the site would be built with loaders from
-//! another release.
-//! It names this binary to the site's loaders in [`BIN`], so the release pages
-//! need no `changelog` on `PATH`.
-//! Nothing else differs from a `vitepress build`: the pages show no drafts, and
-//! accept no edits.
-//!
-//! [`BIN`]: crate::serve::BIN
+//! Before spawning `vitepress build`, [`build`] refreshes the
+//! `.vitepress/jp-vite/settings.json` snapshot and verifies that all `jp
+//! vite`-owned files match the current binary (rejecting stale loaders from an
+//! older release).
 
 use std::{
     env,
@@ -33,17 +27,12 @@ use crate::{
     site, sync,
 };
 
-/// How long the output of a finished build is waited for, once `vitepress` has
-/// exited.
+/// Maximum wait time to drain remaining stdout/stderr after `vitepress build`
+/// exits.
 const LINGER: Duration = Duration::from_secs(2);
 
-/// Build the site of the project at `root`, with `vitepress` the arguments
-/// `vitepress build` gets.
-///
-/// `stdin` goes to a thread of its own, so the host's shutdown stops the build;
-/// everything sent to the host goes through `stdout` from here.
-/// The error says why the site can't be built, or that `vitepress build` failed
-/// or was stopped.
+/// Build the VitePress site for the workspace at `root`, passing `vitepress`
+/// arguments to `vitepress build`.
 pub(crate) fn build<R, W>(
     stdin: R,
     stdout: &mut W,
@@ -61,11 +50,8 @@ where
     run(stdin, stdout, &site_dir, vitepress)
 }
 
-/// Bring the settings snapshot of the project at `root` up to date, and return
-/// the site's source directory.
-///
-/// Refuses a site that isn't set up, or whose files `jp vite sync` writes
-/// aren't the ones this binary writes.
+/// Refresh the settings snapshot, verify that all `jp vite`-owned files are up
+/// to date, and return the site's source directory.
 fn ready(
     stdout: &mut impl Write,
     root: &Utf8Path,
@@ -82,8 +68,6 @@ fn ready(
         print_to(stdout, &note, "chrome")?;
     }
 
-    // The plugins' site revisions matter to edits, which a build makes none of:
-    // only the files the loaders run from are checked.
     let changes = sync::plan(root, site::owned(&settings), &site::owned_dir(&settings))?;
     let unchecked = Revisions {
         rfd: None,
@@ -97,8 +81,6 @@ fn ready(
     Ok(site_dir)
 }
 
-/// Run `vitepress build` in `site_dir` with the arguments `vitepress`,
-/// forwarding its output to the host until it exits or the host shuts down.
 fn run<R, W>(
     stdin: R,
     stdout: &mut W,
@@ -134,7 +116,6 @@ where
             .try_wait()
             .map_err(|error| format!("`vitepress build`: {error}"))?
         {
-            // A failed build says why last, so its output is read to the end.
             print_rest(stdout, &received, &forwarders)?;
 
             return if status.success() {
@@ -156,8 +137,6 @@ where
     }
 }
 
-/// Print what `vitepress` printed that hasn't reached the host yet, waiting up
-/// to [`LINGER`] for `forwarders` to reach the end of its output.
 fn print_rest(
     stdout: &mut impl Write,
     received: &Receiver<Event>,

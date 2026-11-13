@@ -96,29 +96,27 @@ invocation, at the end of `jp_cli::lib::run`.
 
 ### Change Request
 
-A forge's unit of review: a pull request on GitHub, a merge request on GitLab.
-A release's notes credit each [Changelog Fragment](#changelog-fragment) and
-[Highlight](#highlight) to the change requests that wrote or changed it before a
-release took it, read from the messages of the commits that brought them to the
-default branch, and credit the commit itself when its message names none.
-Read and linked by `changelog::forge`.
+A forge's unit of code review: a pull request on GitHub or a merge request on
+GitLab.
+[Release Notes](#release-notes) credit each [Changelog
+Fragment](#changelog-fragment) and [Highlight](#highlight) to the change
+requests that modified it on the default branch (or to the commit itself when
+the commit message references no change request).
+Extracted and formatted by `Forge` in `changelog::forge`.
 See [RFD-122].
 
 ### Changelog Fragment
 
-One entry in a release's notes, recording one change users notice: a Markdown
-file in the fragments directory, `changelog.d/` by default, named
-`<slug>.<type>.md` after one of seven fixed types (`added`, `changed`,
-`deprecated`, `removed`, `fixed`, `security`, `performance`).
-A fragment for a change that requires users to act also carries its **upgrade
-section**: a paragraph starting with `BREAKING CHANGE:`, and the paragraphs
-after it.
-Parsed by `changelog::fragment`, and written by `jp release <type>`, such as `jp
-release fixed`.
+A single release-note entry recording one user-visible change: a Markdown file
+in `changelog.d/` named `<slug>.<type>.md` for one of the seven change types
+(`added`, `changed`, `deprecated`, `removed`, `fixed`, `security`,
+`performance`), with an optional `BREAKING CHANGE:` **upgrade section** for
+changes that require user action.
+Implemented as `Fragment` in `changelog::fragment`.
 See [RFD-121].
 
 **Not the same as** a conventional-commit type, which classifies a code change
-for developers rather than what it means for users.
+for developers rather than its effect on users.
 
 ### Checklist Item
 
@@ -330,13 +328,15 @@ receives one operation per execution; configured by `FanOutConfig` in
 
 ### Highlight
 
-An editorial section of a release's notes, for a feature worth more than its
-[Changelog Fragment](#changelog-fragment): a Markdown file in the fragments
-directory's `highlights/`, with a `title`, the `authors` to credit, and prose.
-A change with a highlight still has a fragment, since a highlight adds no entry
-to the list of changes.
-Parsed by `changelog::highlight`.
+An editorial section in [Release Notes](#release-notes) for a major feature: a
+Markdown file in `changelog.d/highlights/` containing a `# Title` heading,
+`Authors` metadata, and prose.
+Implemented as `Highlight` in `changelog::highlight`.
 See [RFD-121].
+
+**Not the same as** a [Changelog Fragment](#changelog-fragment), which records
+the change in the categorized changelog list; a highlighted feature still has a
+fragment.
 
 ### InlineReply
 
@@ -417,14 +417,14 @@ answers the server's decisions.
 
 ### Notes Branch
 
-The branch `release-notes/v<version>` that files a release's notes on `main`:
-`jp release cut` starts it with every unreleased [Changelog
-Fragment](#changelog-fragment) and [Highlight](#highlight) moved into the
-release's directory, `jp release pick` adds the ones its picks added, and a pull
-request from it merges them into `main`.
-It starts from the same commit as its [Release Branch](#release-branch), so the
-code a release ships and the fragments it lists are chosen together.
+The short-lived branch `release-notes/v<version>` that moves a release's
+[Changelog Fragments](#changelog-fragment) and [Highlights](#highlight) into
+`changelog.d/<version>/` for review and merge into `main`.
+Named by `notes_branch` in `jp_release::releases`.
 See [RFD-122].
+
+**Not the same as** a [Release Branch](#release-branch), which holds the
+release's code and omits `changelog.d/`.
 
 ### Operation
 
@@ -476,27 +476,24 @@ Each implements the `Provider` trait in `jp_llm`.
 
 ### Release Branch
 
-The branch `release/<major>.<minor>` holding the code of every release that
-shares the major and minor version: `main` at the cut, then a commit that starts
-each release, with a `Starts-Release` trailer, and the commits picked from
-`main` with `git cherry-pick -x`.
-It has no fragments directory, since a release's notes live on `main`, filed
-through its [Notes Branch](#notes-branch).
-A release is **in preparation** from the commit that starts it until its
-`v<version>` tag, which **finalizes** it.
-Written by `jp release cut`, `pick`, and `finalize`, in the local repository,
-for the person releasing to push.
+The long-lived branch `release/<major>.<minor>` holding the code for all
+`<major>.<minor>.x` releases.
+Each release on the branch begins with a `Starts-Release: <version>` commit
+(placing the release **in preparation**) followed by any commits cherry-picked
+from `main`, and is **finalized** by an annotated `v<version>` tag.
+Modeled as `Line` in `jp_release::releases`.
 See [RFD-122].
+
+**Not the same as** a [Notes Branch](#notes-branch), which files the release's
+notes into `changelog.d/<version>/` on `main`.
 
 ### Release Notes
 
-The document a release is read in: its overview, its [Highlights](#highlight),
-and every [Changelog Fragment](#changelog-fragment) grouped under its type's
-heading.
-A fragment with an upgrade section is marked as breaking and links to that
-section of the release's other document, its **upgrade guide**.
-Both are rendered from the release's directory by `changelog::markdown`, and
-printed by `jp release render`.
+The rendered summary of a release: its overview, its [Highlights](#highlight),
+and its [Changelog Fragments](#changelog-fragment) grouped by type, with
+breaking entries linking to their sections in the release's **upgrade guide**.
+Assembled as `Release` in `changelog::release` and rendered to Markdown by
+`changelog::markdown`.
 See [RFD-122].
 
 ### RFD

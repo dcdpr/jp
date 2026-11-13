@@ -1,44 +1,43 @@
-//! Where a project's changes are reviewed, which decides how a release credits
-//! them and where the credits link.
+//! Forge detection, change-request extraction from commit messages, and credit
+//! link formatting.
 //!
-//! A release credits each fragment and highlight to the change requests that
-//! wrote it, read from the messages of the commits that brought them to the
-//! default branch, and to a commit when its message names none:
+//! Each fragment and highlight is credited to the change requests that modified
+//! it on the default branch, or to the commit itself when the commit message
+//! does not reference a change request:
 //!
-//! | Forge    | A change request is read from                                           | Label  | Links to                                        |
-//! | -------- | ----------------------------------------------------------------------- | ------ | ----------------------------------------------- |
-//! | `github` | `(#123)` ending a squash commit's subject, or `Merge pull request #123` | `#123` | `https://<host>/<owner>/<repo>/pull/123`        |
-//! | `gitlab` | a line `See merge request <project>!123`                                | `!123` | `https://<host>/<project>/-/merge_requests/123` |
-//! | `none`   | nothing                                                                 |        |                                                 |
+//! | Forge    | Commit message pattern                                            | Label  | Target URL                                      |
+//! | -------- | ----------------------------------------------------------------- | ------ | ----------------------------------------------- |
+//! | `github` | Trailing `(#123)` on squash subject, or `Merge pull request #123` | `#123` | `https://<host>/<owner>/<repo>/pull/123`        |
+//! | `gitlab` | Trailing `See merge request <project>!123` line                   | `!123` | `https://<host>/<project>/-/merge_requests/123` |
+//! | `none`   | None                                                              |        |                                                 |
 //!
-//! A commit is labelled with its short hash and links to `/commit/<hash>` on
-//! GitHub, `/-/commit/<hash>` on GitLab, and nowhere without a forge.
+//! Commits are labeled with their 7-character short hash and link to
+//! `/commit/<hash>` on GitHub, `/-/commit/<hash>` on GitLab, or no URL when the
+//! forge is `none`.
 
 use std::{fmt, num::NonZeroU64, str::FromStr};
 
 use serde::Serialize;
 
-/// How many characters of a commit's hash its label shows.
 const SHORT_HASH: usize = 7;
 
-/// The forge a project's change requests are reviewed on.
+/// Source code hosting forge where change requests are reviewed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Forge {
-    /// GitHub, github.com or a host of its own: pull requests.
+    /// GitHub (`github.com` or self-hosted GitHub Enterprise): pull requests.
     GitHub,
 
-    /// GitLab, gitlab.com or a host of its own: merge requests.
+    /// GitLab (`gitlab.com` or self-hosted GitLab): merge requests.
     GitLab,
 
-    /// No forge: every credit is a commit, and none links anywhere.
+    /// No forge: all credits are plain commit hashes without links.
     None,
 }
 
 impl Forge {
-    /// Every forge, as configuration names them.
     pub const ALL: [Self; 3] = [Self::GitHub, Self::GitLab, Self::None];
 
-    /// The name configuration gives the forge, such as `github`.
+    /// Configuration identifier for the forge (`github`, `gitlab`, or `none`).
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -48,11 +47,12 @@ impl Forge {
         }
     }
 
-    /// The forge a project's web address is on: GitHub for github.com, GitLab
-    /// for gitlab.com, and none for any other host, or no address at all.
+    /// Infer the forge from a repository URL's hostname (`github.com` ->
+    /// [`Forge::GitHub`], `gitlab.com` -> [`Forge::GitLab`], anything else ->
+    /// [`Forge::None`]).
     ///
-    /// A host of GitHub's or GitLab's own can't be told from its address, so a
-    /// project on one names its forge.
+    /// Self-hosted GitHub or GitLab instances cannot be inferred from the
+    /// hostname and must configure the forge explicitly.
     #[must_use]
     pub fn infer(address: Option<&str>) -> Self {
         let host = address.and_then(host).map(str::to_ascii_lowercase);
@@ -64,8 +64,8 @@ impl Forge {
         }
     }
 
-    /// The change request a commit's `message` names, as the forge writes it
-    /// into the commits it merges.
+    /// Extract a change request number from `message` using this forge's merge
+    /// or squash commit convention.
     #[must_use]
     pub fn change_request(self, message: &str) -> Option<NonZeroU64> {
         match self {
@@ -85,7 +85,6 @@ impl fmt::Display for Forge {
 impl FromStr for Forge {
     type Err = UnknownForge;
 
-    /// Read a forge from its name, written as configuration writes it.
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         Self::ALL
             .into_iter()
@@ -94,7 +93,7 @@ impl FromStr for Forge {
     }
 }
 
-/// A string that names none of the forges.
+/// Error returned when parsing an unrecognized [`Forge`] identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownForge(pub String);
 
@@ -110,25 +109,26 @@ impl fmt::Display for UnknownForge {
 
 impl std::error::Error for UnknownForge {}
 
-/// A project on its forge: what its credits read like, and where they link.
+/// Forge and base repository URL used to format [`Credit`] labels and links.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     forge: Forge,
 
-    /// The project's web address, such as `https://github.com/dcdpr/jp`, which
-    /// links start from; `None` without a forge.
+    /// Base repository web URL (without trailing `/`), or `None` when `forge`
+    /// is [`Forge::None`].
     address: Option<String>,
 }
 
 impl Project {
-    /// The project at the web `address` on `forge`, with no `/` at its end.
+    /// Create a [`Project`] for `forge` with the given web `address` (stripping
+    /// any trailing `/`).
     ///
-    /// Without a forge the address is unused, since nothing links.
+    /// When `forge` is [`Forge::None`], `address` is ignored.
     ///
     /// # Errors
     ///
-    /// Returns [`NoAddress`] when `forge` is GitHub or GitLab and there is no
-    /// address for links to start from.
+    /// Returns [`NoAddress`] if `forge` is [`Forge::GitHub`] or
+    /// [`Forge::GitLab`] and `address` is `None`.
     pub fn new(forge: Forge, address: Option<&str>) -> Result<Self, NoAddress> {
         let address = match forge {
             Forge::None => None,
@@ -147,8 +147,9 @@ impl Project {
         self.forge
     }
 
-    /// The credit for the commit `hash`, whose message is `message`: the change
-    /// request the message names, or else the commit itself.
+    /// Build the [`Credit`] for a commit with `hash` and `message`, preferring
+    /// a change request extracted from `message` and falling back to the commit
+    /// hash.
     #[must_use]
     pub fn credit(&self, hash: &str, message: &str) -> Credit {
         match self.forge.change_request(message) {
@@ -157,7 +158,7 @@ impl Project {
         }
     }
 
-    /// The credit for change request `number`.
+    /// Build the [`Credit`] for change request `number`.
     #[must_use]
     pub fn change_request(&self, number: NonZeroU64) -> Credit {
         let (label, url) = match (self.forge, &self.address) {
@@ -179,7 +180,8 @@ impl Project {
         }
     }
 
-    /// The credit for the commit `hash`, labelled with its short hash.
+    /// Build the [`Credit`] for commit `hash`, labeled with its 7-character
+    /// short hash.
     #[must_use]
     pub fn commit(&self, hash: &str) -> Credit {
         let url = match (self.forge, &self.address) {
@@ -196,7 +198,8 @@ impl Project {
     }
 }
 
-/// A forge that links to its change requests, with no web address to link at.
+/// Error returned when a forge requires a repository web URL for credit links
+/// and none is available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoAddress(pub Forge);
 
@@ -213,21 +216,21 @@ impl fmt::Display for NoAddress {
 
 impl std::error::Error for NoAddress {}
 
-/// Who a release credits for a fragment or highlight: a change request, or a
-/// commit that reached the default branch without one.
+/// Attribution entry for a fragment or highlight in a release.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Credit {
     pub kind: CreditKind,
 
-    /// The credit as the forge writes it: `#1182` on GitHub, `!1182` on GitLab,
-    /// or a commit's short hash, such as `4e1f0a2`.
+    /// Display label (`#1182` on GitHub, `!1182` on GitLab, or a 7-character
+    /// commit hash such as `4e1f0a2`).
     pub label: String,
 
-    /// The credit's page on the forge; `None` without a forge.
+    /// Web URL for the change request or commit, or `None` when the forge is
+    /// [`Forge::None`].
     pub url: Option<String>,
 }
 
-/// What a [`Credit`] names.
+/// Whether a [`Credit`] refers to a change request or a commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CreditKind {
@@ -235,7 +238,7 @@ pub enum CreditKind {
     Commit,
 }
 
-/// The host of a web address, such as `github.com`, without a port.
+/// Extract the hostname (without port) from an `http://` or `https://` URL.
 fn host(address: &str) -> Option<&str> {
     let rest = address
         .strip_prefix("https://")
@@ -249,8 +252,9 @@ fn host(address: &str) -> Option<&str> {
     (!host.is_empty()).then_some(host)
 }
 
-/// The pull request a GitHub commit names: `(#123)` ending a squash commit's
-/// subject, or `Merge pull request #123` opening a merge commit's.
+/// Extract a GitHub pull request number from `(#123)` at the end of a squash
+/// commit subject or `Merge pull request #123` at the start of a merge commit
+/// subject.
 fn github_change_request(message: &str) -> Option<NonZeroU64> {
     let subject = message.lines().next().unwrap_or_default().trim();
 
@@ -268,8 +272,8 @@ fn github_change_request(message: &str) -> Option<NonZeroU64> {
         .and_then(positive)
 }
 
-/// The merge request a GitLab commit names: the last line reading `See merge
-/// request <project>!123`, as GitLab ends the message of a merge commit.
+/// Extract a GitLab merge request number from the last `See merge request
+/// <project>!123` trailer line.
 fn gitlab_change_request(message: &str) -> Option<NonZeroU64> {
     message.lines().rev().find_map(|line| {
         let reference = line.trim().strip_prefix("See merge request ")?;
@@ -279,7 +283,6 @@ fn gitlab_change_request(message: &str) -> Option<NonZeroU64> {
     })
 }
 
-/// `text` as a positive number, when it is nothing but ASCII digits.
 fn positive(text: &str) -> Option<NonZeroU64> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;

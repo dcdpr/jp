@@ -4,20 +4,10 @@ use serde_json::{Value, json};
 use super::*;
 use crate::{cut::cut, options::Options, repository_testing::Fixture};
 
-/// A `bump` that writes the version into `VERSION`, wherever git runs.
 const BUMP: &str = "git config --file VERSION version.current {version}";
-
-/// The command the tests build with: `build.sh`, which a test writes into the
-/// workspace root.
 const BUILD: &str = "sh build.sh {version} {source} {out} {profile}";
-
-/// A commit, for checks that build nothing.
 const COMMIT: &str = "8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b";
-
-/// The archive the tests' builds write.
 const ARCHIVE: &str = "jp-x86_64-unknown-linux-gnu.tar.xz";
-
-/// The platform [`ARCHIVE`] is for.
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 
 fn options_with(options: Value) -> Options {
@@ -36,7 +26,6 @@ fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// Run `command` in the workspace of `fixture`.
 fn run(
     fixture: &Fixture,
     command: impl FnOnce(&Pipeline<'_>) -> Result<String, String>,
@@ -48,8 +37,6 @@ fn run(
     command(&pipeline)
 }
 
-/// Build `version` with `profile` in the workspace of `fixture`, keeping it in
-/// `builds`: what `build` returned, and every line it handed on.
 fn build_in(
     fixture: &Fixture,
     builds: &Utf8Path,
@@ -68,7 +55,6 @@ fn build_in(
     (built, lines)
 }
 
-/// A workspace whose release 0.1.0, listing one fix, was cut here.
 fn cut_0_1_0() -> Fixture {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -79,7 +65,6 @@ fn cut_0_1_0() -> Fixture {
     fixture
 }
 
-/// A `manifest.json` naming [`ARCHIVE`] for [`TARGET`].
 fn manifest(version: &str, commit: &str, profile: &str) -> String {
     json!({
         "format": 1,
@@ -91,7 +76,6 @@ fn manifest(version: &str, commit: &str, profile: &str) -> String {
     .to_string()
 }
 
-/// The names in `dir`, sorted.
 fn names(dir: &Utf8Path) -> Vec<String> {
     let mut names: Vec<String> = dir
         .read_dir_utf8()

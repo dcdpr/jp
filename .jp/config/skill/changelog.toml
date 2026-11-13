@@ -33,7 +33,7 @@ which you write as a file like any other document. `changelog.d/README.md` \
 describes both formats.\
 """
 
-# Writing a fragment leaves a diff someone has to review, so it inherits the
-# workspace's `run = "ask"`, and the preview shows the file it writes.
+# Inherit the workspace's `run = "ask"` policy so the user reviews the fragment
+# preview before writing.
 [conversation.tools]
 changelog_add = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }

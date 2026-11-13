@@ -1,21 +1,16 @@
-//! `jp release build`: a release's binaries, made by the project's `build`
-//! command and kept in the workspace's user-local storage.
+//! `jp release build`: building release artifacts via
+//! `plugins.command.release.options.build` and storing them in workspace
+//! user-local storage.
 //!
-//! [`build`] checks out the commit the release's tag names, or the tip of its
-//! release branch while it is in preparation, in a worktree of its own, and
-//! runs `build` from the workspace root to write the archives, `checksums.txt`,
-//! and `manifest.json` into an empty directory.
-//! [`check`] holds what the command left there to what was asked for, and only
-//! then is it moved to `release/<version>/`, replacing an earlier build of that
-//! version.
-//! The format a build is held to is the `release-build` crate's, which
-//! publishers read kept builds with.
+//! [`build`] checks out the release's tagged commit (or the tip of its release
+//! branch while the release is in preparation) in a temporary worktree, runs
+//! the configured `build` command from the workspace root into a scratch
+//! directory, validates the output with [`release_build::check`], and moves the
+//! verified directory to `<user_workspace>/release/<version>/`.
 //!
-//! A kept build is publishable when it was made with the `release` profile from
-//! the commit the release's tag names, which [`assess`] reads from its manifest
-//! for `status`.
-//!
-//! [`check`]: release_build::check
+//! [`assess`] inspects a stored build's `manifest.json` for `jp release status`
+//! to determine whether it was built with the `release` profile from the commit
+//! named by `v<version>`.
 
 use std::{fmt::Write as _, fs, process};
 
@@ -30,11 +25,9 @@ use crate::{
     repository::{ORIGIN, Tags},
 };
 
-/// What a `build` command is given and has to leave behind, shown after the
-/// options of `jp release build --help`.
-// A string rather than part of the command's doc comment: clap joins each
-// paragraph of a doc comment into one line, which a list or an example can't
-// survive.
+/// Build command contract appended to `jp release build --help`.
+// Stored as a static string rather than a doc comment because clap reflows doc
+// comment paragraphs onto single lines.
 pub(crate) const CONTRACT: &str = r#"The build command:
   `plugins.command.release.options.build` runs from the workspace root, not
   from {source}, so an old release builds with today's scripts. It is split
@@ -72,32 +65,28 @@ What it leaves in {out}:
   Nothing else may be left there. A build that fails, or whose {out} breaks
   any of this, isn't kept, and every problem with it is named."#;
 
-/// What a build is of.
 struct Target {
-    /// The commit built.
     commit: String,
 
-    /// What names the commit: the release's tag, or while the release is in
-    /// preparation, its release branch.
+    /// Ref name (`v<version>` or `release/<major>.<minor>`) displayed in status
+    /// output.
     name: String,
 
-    /// Whether the release's tag names the commit.
     tagged: bool,
 }
 
-/// The empty directory a build writes into, removed when dropped unless kept.
+/// Temporary build output directory removed on drop unless persisted via
+/// [`keep`].
 struct Scratch {
     path: Utf8PathBuf,
     kept: bool,
 }
 
 impl Scratch {
-    /// A new, empty directory in `builds` for a build of `version`.
     fn new(builds: &Utf8Path, version: &Version) -> Result<Self, String> {
         fs::create_dir_all(builds)
             .map_err(|error| format!("{builds} can't be created to keep builds in: {error}."))?;
         let path = builds.join(format!(".building-{version}-{}", process::id()));
-        // Left by an earlier run that had this process's id and was stopped.
         if path.exists() {
             fs::remove_dir_all(&path)
                 .map_err(|error| format!("{path} can't be emptied for the build: {error}."))?;
@@ -117,25 +106,21 @@ impl Drop for Scratch {
     }
 }
 
-/// How a build of a release kept in user-local storage stands.
+/// Status of a stored release build in `<user_workspace>/release/<version>/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Kept {
-    /// No build of it is kept.
+    /// No build directory exists for the version.
     Nothing,
 
-    /// A build publishers take.
+    /// Build uses the `release` profile and matches the tagged commit.
     Publishable,
 
-    /// A build publishers refuse, with what it is, such as `a quick build`.
+    /// Build cannot be published (e.g. `"a quick build"` or a commit mismatch).
     ForTesting(String),
 }
 
-/// Build `version` with `profile`, handing each line the build prints to
-/// `each`, and keep what it made in `builds`.
-///
-/// Returns what was built and where it is kept.
-/// The error says why `version` can't be built, why the build failed, or what
-/// it left that can't be kept; nothing is kept then.
+/// Build `version` with `profile`, streaming output lines to `each`, and store
+/// the validated build under `builds/<version>/`.
 pub(crate) fn build(
     pipeline: &Pipeline<'_>,
     builds: &Utf8Path,
@@ -151,7 +136,6 @@ pub(crate) fn build(
     repo.origin.fetch()?;
     let (releases, tags) = repo.releases_and_tags()?;
     let target = target(&releases, &tags, version)?;
-    // A tag only `origin` has can name a commit no branch here holds.
     if !repo.history.has_commit(&target.commit)? {
         repo.refs.fetch_tag(&releases::tag(version))?;
     }
@@ -192,11 +176,8 @@ pub(crate) fn build(
     Ok(built(version, &target, profile, &manifest, &dir, replaced))
 }
 
-/// What `version` is built from: the commit its tag names, or while it is in
-/// preparation, the tip of its release branch.
-///
-/// The error says there is nothing of `version` to build, or that its tag names
-/// one commit here and another on `origin`.
+/// Resolve the commit to build for `version`: its tag `v<version>` if tagged,
+/// or the tip of its release branch if in preparation.
 fn target(releases: &Releases, tags: &Tags, version: &Version) -> Result<Target, String> {
     let tag = releases::tag(version);
     if releases.tagged.contains(version) {
@@ -241,11 +222,8 @@ fn target(releases: &Releases, tags: &Tags, version: &Version) -> Result<Target,
     })
 }
 
-/// How the build of `version` kept in `builds` stands, when the release's tag
-/// names `tagged`.
-///
-/// Reads only the build's manifest: the archives are hashed when a build is
-/// made, and again by whatever publishes them.
+/// Check whether `builds/<version>/` holds a publishable `release`-profile
+/// build of commit `tagged`.
 pub(crate) fn assess(builds: &Utf8Path, version: &Version, tagged: &str) -> Kept {
     let dir = builds.join(version.to_string());
     if !dir.is_dir() {
@@ -272,10 +250,8 @@ pub(crate) fn assess(builds: &Utf8Path, version: &Version, tagged: &str) -> Kept
     Kept::Publishable
 }
 
-/// Move the build in `out` to `dir`, replacing what is there, and return
-/// whether it replaced an earlier build.
-///
-/// The error says the build can't be moved; an earlier build is put back then.
+/// Move `out` to `dir`, atomically replacing any existing directory at `dir`
+/// and returning whether an existing build was replaced.
 fn keep(mut out: Scratch, dir: &Utf8Path) -> Result<bool, String> {
     let replaced = dir.exists();
     let earlier = dir.with_file_name(format!(
@@ -302,8 +278,6 @@ fn keep(mut out: Scratch, dir: &Utf8Path) -> Result<bool, String> {
     Ok(replaced)
 }
 
-/// What to tell the user about the build of `version` from `target` with
-/// `profile` that `manifest` lists, now kept in `dir`.
 fn built(
     version: &Version,
     target: &Target,

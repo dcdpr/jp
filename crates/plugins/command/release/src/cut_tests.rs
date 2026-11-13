@@ -3,14 +3,11 @@ use serde_json::{Value, json};
 use super::*;
 use crate::{options::Options, repository_testing::Fixture};
 
-/// A highlight that follows the format.
 const HIGHLIGHT: &str =
     "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant asks once.\n";
 
-/// A `bump` that writes the version into `VERSION`, wherever git runs.
 const BUMP: &str = "git config --file VERSION version.current {version}";
 
-/// The options a test runs with: no forge, and [`BUMP`].
 fn options() -> Options {
     options_with(&json!({ "forge": "none", "bump": BUMP }))
 }

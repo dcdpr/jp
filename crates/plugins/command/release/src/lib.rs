@@ -1,33 +1,26 @@
-//! `jp-release`: record what changes for users as changelog fragments and
-//! highlights, and make releases from them.
+//! `jp release` command plugin: recording changelog fragments and highlights,
+//! and managing the release lifecycle.
 //!
-//! A command plugin providing `jp release` and its subcommands, and the tool
-//! the assistant reaches through `source = "plugin.command.release.add"`.
-//! An `init` carrying a tool call is answered by the `tool` module; any other
-//! runs the command its arguments name.
+//! This crate provides the `jp release` subcommands and the `changelog_add`
+//! tool (`source = "plugin.command.release.add"`).
+//! When `init` carries a tool call, [`tool`] handles it; otherwise the CLI
+//! subcommand in `init.args` runs.
 //!
-//! The formats, the check that holds a fragments directory to them, and the
-//! release notes and upgrade guide rendered from them live in the `changelog`
-//! crate; this crate is the commands, their configuration, and the tool over
-//! it.
-//! `edit` opens a fragment or highlight in the user's editor, `entry` names the
-//! files and writes the fragment the tool gives, `options` reads the settings
-//! from `plugins.command.release.options`, and `definitions` writes the tool's
-//! definition.
-//! With `format_on_write` on, every file written in the fragments directory is
-//! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
+//! Parsing, directory validation, and release-note rendering live in the
+//! [`changelog`] crate.
+//! Within this crate:
 //!
-//! `cut`, `pick`, and `finalize` make releases on release branches and their
-//! notes on notes branches, in this repository, and print the push that
-//! publishes them; `build` builds a release's binaries with the project's
-//! command and keeps them in the workspace's user-local storage; `abandon`
-//! takes back a release nobody has published, and `due` says when the next
-//! release should be cut.
-//! `releases` decides what they may do, and `repository` runs the git they need
-//! in worktrees of their own, reading what this repository and `origin` hold.
+//! - [`edit`] opens fragments and highlights in the user's editor via the host.
+//! - [`entry`] derives file names and writes validated fragments (formatting
+//!   them with `.comfort.toml` when `format_on_write` is enabled).
+//! - [`options`] parses `plugins.command.release.options`.
+//! - [`definitions`] scaffolds the `changelog_add` tool definition.
+//! - [`cut`], [`pick`], [`finalize`], [`build`], [`abandon`], [`due`], and
+//!   [`status`] implement the release pipeline over [`releases`] and
+//!   [`repository`].
 //!
-//! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
-//! `docs/rfd/122-release-pipeline.md`
+//! See `docs/rfd/121-changelog-fragments-and-validation.md` and
+//! `docs/rfd/122-release-pipeline.md`.
 
 mod abandon;
 mod build;
@@ -83,14 +76,9 @@ use crate::{
     shell::Shell,
 };
 
-/// The name the plugin is configured under, `plugins.command.release`.
 pub(crate) const PLUGIN: &str = "release";
 
-/// The README `init` writes into the fragments directory, describing both
-/// formats.
 const README: &str = include_str!("../templates/README.md");
-
-/// The name of the file [`README`] is written to.
 const README_FILE: &str = "README.md";
 
 #[derive(Debug, Parser)]
@@ -274,40 +262,39 @@ enum Command {
     },
 }
 
-/// A fragment of each type, written or edited in the user's editor.
+/// Fragment-recording subcommands, one per [`Type`].
 #[derive(Debug, Subcommand)]
 enum Record {
-    /// Write or edit an `added` fragment, a new capability users can now reach,
-    /// in your editor.
+    /// Write or edit an `added` fragment (a new user-facing capability) in your
+    /// editor.
     Added(Name),
 
-    /// Write or edit a `changed` fragment, a change to existing behavior, in
+    /// Write or edit a `changed` fragment (a change to existing behavior) in
     /// your editor.
     Changed(Name),
 
-    /// Write or edit a `deprecated` fragment, something still working but
-    /// slated for removal, in your editor.
+    /// Write or edit a `deprecated` fragment (a feature slated for removal) in
+    /// your editor.
     Deprecated(Name),
 
-    /// Write or edit a `removed` fragment, something taken away, in your
+    /// Write or edit a `removed` fragment (a removed feature or option) in your
     /// editor.
     Removed(Name),
 
-    /// Write or edit a `fixed` fragment, a bug fix users would notice, in your
+    /// Write or edit a `fixed` fragment (a user-visible bug fix) in your
     /// editor.
     Fixed(Name),
 
-    /// Write or edit a `security` fragment, a fix with security relevance, in
-    /// your editor.
+    /// Write or edit a `security` fragment (a security-relevant fix) in your
+    /// editor.
     Security(Name),
 
-    /// Write or edit a `performance` fragment, a performance improvement users
-    /// would notice, in your editor.
+    /// Write or edit a `performance` fragment (a user-visible performance
+    /// improvement) in your editor.
     Performance(Name),
 }
 
 impl Record {
-    /// The type of the fragment, and the slug given for it.
     fn split(self) -> (Type, Option<String>) {
         match self {
             Self::Added(name) => (Type::Added, name.slug),
@@ -321,51 +308,44 @@ impl Record {
     }
 }
 
-/// The name of a fragment to write or edit.
 #[derive(Debug, clap::Args)]
 struct Name {
-    /// The fragment's name: `<slug>.<type>.md` in the fragments directory,
-    /// which opens for another edit when it is there.
+    /// Fragment slug (`<slug>.<type>.md` in the fragments directory).
     ///
-    /// Defaults to the current git branch's name, the part after its last `/`.
-    /// Saving a fragment empty removes it.
+    /// Defaults to the last `/`-separated segment of the current git branch.
+    /// Saving an empty file removes the fragment.
     slug: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
 enum ToolsCommand {
-    /// Write the tool's starting definition.
+    /// Write the default `changelog_add` tool definition.
     ///
-    /// An existing file that matches the shipped definition is left untouched.
-    /// One with different contents is overwritten if it is tracked by git with
-    /// no uncommitted changes; otherwise `--force` is required.
-    /// The workspace configuration has to load the directory for the tool to
-    /// appear.
+    /// Files that already match the shipped definition are left untouched.
+    /// Modified files are overwritten if git can restore them; otherwise
+    /// `--force` is required.
     Init {
-        /// Directory to write it into, relative to the workspace root.
+        /// Output directory, relative to the workspace root.
         path: Utf8PathBuf,
 
-        /// Overwrite a file that git cannot restore.
+        /// Overwrite existing files that git cannot restore.
         #[arg(long)]
         force: bool,
     },
 }
 
-/// What a subcommand produced.
 #[derive(Debug, Default)]
 pub(crate) struct Output {
     text: String,
 
-    /// The exit code, for a command that reports a result by it: `check` exits
-    /// 1 when it finds a problem, after printing what it found, and `due` when
-    /// no release is due, after printing why.
+    /// Exit code (`0` by default; `1` when `check` finds problems or `due`
+    /// reports that no release is due).
     code: u8,
 
-    /// Whether `text` is JSON, which the host prints as such.
+    /// Whether `text` is JSON.
     json: bool,
 
-    /// What to tell the user beside the output, on stderr, such as why there is
-    /// none.
+    /// Optional status note printed on the `chrome` channel (stderr).
     note: Option<String>,
 }
 
@@ -378,27 +358,17 @@ impl From<String> for Output {
     }
 }
 
-/// What a command runs against.
 struct Context<'a> {
-    /// The fragments directory.
     fragments: Fragments<'a>,
-
-    /// The configuration the host resolved, which names who a highlight is
-    /// credited to by default.
     config: &'a Value,
-
     options: &'a Options,
-
-    /// How the host prints, which decides the format `render` prints in by
-    /// default.
     format: OutputFormat,
 }
 
-/// Serve one plugin session: read the host's first message and answer it.
+/// Serve a single plugin session from `stdin` to `stdout`.
 ///
-/// A `describe` is answered and ends the session.
-/// An `init` carrying a tool call is answered with the call's outcome; any
-/// other `init` runs the command its arguments name.
+/// Answers a `describe` request immediately, dispatches tool calls to [`tool`],
+/// or runs the CLI subcommand from `init.args`.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     let describe = || client::describe(MANIFEST, "release", help_text(), jp_plugin::package!());
     let Some(init) = client::start(&mut stdin, &mut stdout, BINARY, REQUIRED_PROTOCOL, describe)?
@@ -412,30 +382,26 @@ pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String
     }
 }
 
-/// The plugin's executable, as messages for the user name it.
 pub(crate) const BINARY: &str = "jp-release";
 
-/// The protocol version this plugin needs from the host.
-///
-/// 12 is the first to carry tool calls (`tool` on `init`, answered with
-/// `tool_outcome`), which is how `changelog_add` reaches this plugin.
+/// Minimum host protocol version required by this plugin (v12 introduced `tool`
+/// on `init` and `tool_outcome`).
 const REQUIRED_PROTOCOL: u32 = 12;
 
-/// Where this plugin attaches to `jp`, readable from the binary without running
-/// it.
+/// Embedded plugin manifest read by `jp` without spawning the binary.
 ///
-/// `protocol` has to match `REQUIRED_PROTOCOL`.
+/// `protocol` must match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 12,
     description: "Record what changes for users as changelog fragments, and make releases",
     command: ["release"],
 );
 
-/// Answer the tool call `init` carried, then exit.
+/// Execute the tool call in `init` and write its `tool_outcome` message.
 ///
-/// The host closed stdin after `init`, so nothing here may ask it anything.
-/// Options the plugin can't read end the call as a failed plugin run rather
-/// than as an outcome: the assistant can't fix the configuration.
+/// Invalid plugin options fail the plugin process directly (`exit(1)`) rather
+/// than returning a tool error outcome, because the assistant cannot fix
+/// workspace configuration.
 fn answer_tool_call(
     init: &InitMessage,
     call: &ToolCall,
@@ -457,7 +423,7 @@ fn handle_command(
     let parsed = Args::try_parse_from(iter::once("jp release".to_owned()).chain(init.args.clone()));
     let args = match parsed {
         Ok(args) => args,
-        // `--help` and `--version` surface as errors that aren't failures.
+        // `--help` and `--version` exit 0 via clap's non-stderr display path.
         Err(error) if !error.use_stderr() => {
             client::print(stdout, &error.to_string(), "content", "plain")?;
             return client::exit(stdout, 0, None);
@@ -479,9 +445,6 @@ fn handle_command(
 }
 
 impl<'a> Context<'a> {
-    /// What the commands `init` asks for run against, read with `options`.
-    ///
-    /// The error says why the fragments directory can't be used.
     fn new(init: &'a InitMessage, options: &'a Options) -> Result<Self, String> {
         let root = init.workspace.root.as_path();
         let dir = resolve_dir(root, &options.notes.fragments_dir);
@@ -495,7 +458,6 @@ impl<'a> Context<'a> {
     }
 }
 
-/// Run `command`, which `init` asked for.
 fn dispatch(
     ctx: &Context<'_>,
     init: &InitMessage,
@@ -545,8 +507,6 @@ fn dispatch(
     }
 }
 
-/// Print what a command produced and end the session with its code, or end it
-/// with the failure the command reported.
 fn finish(stdout: &mut impl Write, result: Result<Output, String>) -> Result<(), String> {
     let output = match result {
         Ok(output) => output,
@@ -564,10 +524,6 @@ fn finish(stdout: &mut impl Write, result: Result<Output, String>) -> Result<(),
     client::result(stdout, output.code)
 }
 
-/// Build release `version`, with the quick profile when `quick` is set,
-/// printing the build's output on the host's chrome channel as it comes.
-///
-/// Refuses a workspace without user-local storage, where builds are kept.
 fn build_release(
     ctx: &Context<'_>,
     init: &InitMessage,
@@ -592,13 +548,8 @@ fn build_release(
     })
 }
 
-/// Create the fragments directory and its `highlights/`, and write the README,
-/// each only when it isn't there.
-///
-/// The README is laid out as the workspace formats the fragments directory.
-///
-/// `highlights/` starts empty, which git doesn't keep, so a checkout has none
-/// until a highlight is written; `jp release highlight` creates it then.
+/// Create `<fragments_dir>/`, `<fragments_dir>/highlights/`, and
+/// `<fragments_dir>/README.md` if they do not already exist.
 fn init_dir(ctx: &Context<'_>) -> Result<Output, String> {
     let fragments = &ctx.fragments;
     let mut text = String::new();
@@ -633,8 +584,6 @@ fn init_dir(ctx: &Context<'_>) -> Result<Output, String> {
     Ok(text.into())
 }
 
-/// Write or edit the fragment of type `type_` named `slug`, or after the git
-/// branch, in the editor of the host speaking protocol `version`.
 fn edit_fragment(
     ctx: &Context<'_>,
     type_: Type,
@@ -652,8 +601,6 @@ fn edit_fragment(
     edit::fragment(&ctx.fragments, type_, &slug, &mut Host { stdin, stdout })
 }
 
-/// Write or edit the highlight named `slug`, or a new one, in the editor of the
-/// host speaking protocol `version`.
 fn edit_highlight(
     ctx: &Context<'_>,
     slug: Option<&str>,
@@ -670,11 +617,7 @@ fn edit_highlight(
     })
 }
 
-/// The slug a fragment of `type_` is named by when none is given: the one the
-/// current git branch's name gives, read in the workspace at `root`.
-///
-/// The error says to name the fragment, when there's no branch to name it
-/// after.
+/// Derive a default fragment slug from the current git branch in `root`.
 fn branch_slug(root: &Utf8Path, type_: Type) -> Result<String, String> {
     let name_it = format!("name it: `jp release {type_} <slug>`");
     let branch = Process::new("git")
@@ -700,8 +643,8 @@ fn branch_slug(root: &Utf8Path, type_: Type) -> Result<String, String> {
     })
 }
 
-/// The name to credit a highlight to when none is given: JP's `user.name`, then
-/// git's, read in the workspace at `root`.
+/// Resolve the default author for a new highlight from JP's `user.name` or `git
+/// config user.name`.
 fn identity(root: &Utf8Path, config: &Value) -> Option<String> {
     let configured = config
         .pointer("/user/name")
@@ -723,9 +666,6 @@ fn identity(root: &Utf8Path, config: &Value) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-/// Check every file in the fragments directory.
-///
-/// Paths are shown relative to the workspace root.
 fn check(ctx: &Context<'_>) -> Result<Output, String> {
     let fragments = &ctx.fragments;
     existing(fragments)?;
@@ -742,13 +682,6 @@ fn check(ctx: &Context<'_>) -> Result<Output, String> {
     })
 }
 
-/// Print a release's notes or upgrade guide, or the fragments no release has
-/// taken yet, as `render` asks.
-///
-/// Credits link from the configured `repository`, or else from git's `origin`
-/// remote's web address, to the configured forge, or to the one that address is
-/// on, and the configured headings name each type's section.
-/// An upgrade guide with no sections prints nothing, and says why on stderr.
 fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> {
     let default = if ctx.format.is_json() {
         Format::Json
@@ -786,8 +719,6 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
     })
 }
 
-/// Say whether the next release of the workspace at `root` is due, as text or,
-/// when the host prints JSON, as JSON, and exit 1 when it isn't.
 fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Result<Output, String> {
     let shell = Shell::new();
     let pipeline = Pipeline::new(&shell, root, options)?;
@@ -808,8 +739,6 @@ fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Resu
     })
 }
 
-/// Where builds of the workspace's releases are kept: `release/` in its
-/// user-local storage, when it has some.
 fn builds(init: &InitMessage) -> Option<Utf8PathBuf> {
     init.paths
         .user_workspace
@@ -817,7 +746,6 @@ fn builds(init: &InitMessage) -> Option<Utf8PathBuf> {
         .map(|storage| storage.join(BUILDS))
 }
 
-/// The time now, in seconds since the Unix epoch.
 fn now() -> Result<i64, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -826,7 +754,6 @@ fn now() -> Result<i64, String> {
     Ok(i64::try_from(now.as_secs()).unwrap_or(i64::MAX))
 }
 
-/// Run `command`, which makes a release in the workspace at `root`.
 fn make_release(
     root: &Utf8Path,
     options: &Options,
@@ -838,7 +765,6 @@ fn make_release(
     command(&pipeline).map(Output::from)
 }
 
-/// Refuse a fragments directory that isn't there, saying how to make one.
 fn existing(fragments: &Fragments<'_>) -> Result<(), String> {
     if fragments.dir.is_dir() {
         return Ok(());
@@ -850,8 +776,6 @@ fn existing(fragments: &Fragments<'_>) -> Result<(), String> {
     ))
 }
 
-/// Why a release couldn't be read, with the paths it names shown from the
-/// workspace root.
 fn unreadable(fragments: &Fragments<'_>, error: ReleaseError) -> String {
     let shown = |path: &Utf8Path| Utf8PathBuf::from(fragments.show(path));
 
@@ -875,10 +799,6 @@ fn unreadable(fragments: &Fragments<'_>, error: ReleaseError) -> String {
     }
 }
 
-/// Resolve a directory against the workspace root.
-///
-/// An absolute path is taken as given; a relative one hangs off the root, so
-/// the commands behave the same from any subdirectory.
 fn resolve_dir(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
     if dir.is_absolute() {
         dir.to_path_buf()
@@ -887,7 +807,7 @@ fn resolve_dir(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
     }
 }
 
-/// The usage text, rendered from the same clap definition the commands parse.
+/// Render the top-level CLI `--help` text.
 #[must_use]
 pub fn help_text() -> String {
     Args::command().render_help().to_string()

@@ -3,17 +3,14 @@ use serde_json::{Value, json};
 use super::*;
 use crate::{cut::cut, finalize::finalize, options::Options, repository_testing::Fixture};
 
-/// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
+/// 2026-10-01 12:00:00 UTC in seconds since the Unix epoch.
 const OCTOBER_1: i64 = 1_790_856_000;
-
-/// Two weeks, the cadence when none is set, in seconds.
 const TWO_WEEKS: i64 = 14 * 86_400;
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// The options of a project without a forge, and `settings` besides.
 fn options(settings: &Value) -> Options {
     let mut options = json!({ "forge": "none" });
     if let (Value::Object(options), Value::Object(settings)) = (&mut options, settings) {
@@ -26,8 +23,6 @@ fn options(settings: &Value) -> Options {
     Options::read(&options).unwrap()
 }
 
-/// Whether the next release is due at `now` in the workspace of `fixture`, with
-/// `settings`.
 fn due_at(fixture: &Fixture, now: i64, settings: &Value) -> Due {
     let shell = fixture.shell();
     let options = options(settings);
@@ -36,7 +31,6 @@ fn due_at(fixture: &Fixture, now: i64, settings: &Value) -> Due {
     due(&pipeline, now).unwrap()
 }
 
-/// A workspace whose release 0.1.0 was cut on 2026-10-01 at noon UTC.
 fn cut_on_october_1() -> Fixture {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -50,8 +44,6 @@ fn cut_on_october_1() -> Fixture {
     fixture
 }
 
-/// Merge the notes of release 0.1.0 of the workspace of `fixture` into `main`,
-/// and finalize it, now.
 fn finalize_0_1_0(fixture: &Fixture) {
     fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#3)");
     let shell = fixture.shell();
@@ -61,7 +53,6 @@ fn finalize_0_1_0(fixture: &Fixture) {
     finalize(&pipeline, &version("0.1.0")).unwrap();
 }
 
-/// Merge a fix with its fragment into `main`: a change no release ships yet.
 fn merge_a_fix(fixture: &Fixture) {
     fixture.fragment("crash", "fixed", "No more crash.");
     fixture.commit("fix: Stop a crash (#2)");

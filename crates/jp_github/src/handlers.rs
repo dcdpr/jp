@@ -1029,12 +1029,10 @@ impl ReposHandler {
         }
     }
 
-    /// The SHA of the commit `reference` names: a commit's SHA,
-    /// `heads/<branch>`, or `tags/<tag>`, an annotated tag's peeled to the
-    /// commit it tags.
+    /// Resolve `reference` (a commit SHA, `heads/<branch>`, or `tags/<tag>`) to
+    /// its commit SHA, peeling annotated tags to their target commit.
     ///
-    /// A reference that names no commit is a GitHub error with status 404 or
-    /// 422.
+    /// Returns a 404 or 422 [`Error::GitHub`] if `reference` does not exist.
     pub async fn commit_sha(&self, reference: &str) -> Result<String> {
         let sha = self
             .client
@@ -1058,10 +1056,9 @@ impl ReposHandler {
     }
 }
 
-/// The largest page GitHub's REST API returns.
 const MAX_PER_PAGE: u8 = 100;
 
-/// A repository's releases, and the files attached to them.
+/// Handler for GitHub Releases and release assets.
 pub struct ReleasesHandler {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,
@@ -1069,8 +1066,8 @@ pub struct ReleasesHandler {
 }
 
 impl ReleasesHandler {
-    /// Every release of the repository, newest first; drafts are listed for a
-    /// token that can push to it.
+    /// List all releases in the repository, newest first (including draft
+    /// releases when authenticated with push access).
     pub async fn list(&self) -> Result<Vec<models::releases::Release>> {
         self.client
             .get_paginated(
@@ -1090,7 +1087,6 @@ impl ReleasesHandler {
             .await
     }
 
-    /// Change the release with `id` as `update` says.
     pub async fn update(
         &self,
         id: u64,
@@ -1104,10 +1100,10 @@ impl ReleasesHandler {
             .await
     }
 
-    /// Attach `contents` to `release` as the file `name`.
+    /// Upload `contents` as an asset named `name` on `release`.
     ///
-    /// GitHub refuses a second file of one name, so delete an earlier one
-    /// first.
+    /// GitHub rejects duplicate asset names; delete any existing asset with the
+    /// same name via [`Self::delete_asset`] first.
     pub async fn upload_asset(
         &self,
         release: &models::releases::Release,
@@ -1123,7 +1119,6 @@ impl ReleasesHandler {
         self.client.upload(url, name, contents).await
     }
 
-    /// Delete the file attached to a release with `id`.
     pub async fn delete_asset(&self, id: u64) -> Result<()> {
         self.client
             .delete_no_content(&format!(

@@ -6,8 +6,6 @@ use serde_json::{Map, json};
 
 use super::*;
 
-/// The `init` running `jp release github` with `args` in the workspace at
-/// `root`.
 fn init_message(root: &Utf8Path, args: &[&str]) -> InitMessage {
     InitMessage {
         version: jp_plugin::PROTOCOL_VERSION,
@@ -26,7 +24,6 @@ fn init_message(root: &Utf8Path, args: &[&str]) -> InitMessage {
     }
 }
 
-/// The messages a reply in `output` holds, one per line.
 fn messages(output: &[u8]) -> Vec<PluginToHost> {
     String::from_utf8(output.to_vec())
         .unwrap()
@@ -35,7 +32,6 @@ fn messages(output: &[u8]) -> Vec<PluginToHost> {
         .collect()
 }
 
-/// Run a session the way the host does, starting with `message`.
 fn session(message: &HostToPlugin) -> Vec<PluginToHost> {
     let input = serde_json::to_string(message).unwrap() + "\n";
     let mut output = vec![];
@@ -44,7 +40,6 @@ fn session(message: &HostToPlugin) -> Vec<PluginToHost> {
     messages(&output)
 }
 
-/// Run the command `init` names, with `token` as the environment's.
 fn command(init: &InitMessage, token: Option<&str>) -> Vec<PluginToHost> {
     let mut output = vec![];
     handle_command(init, token, &mut output).unwrap();
@@ -52,7 +47,6 @@ fn command(init: &InitMessage, token: Option<&str>) -> Vec<PluginToHost> {
     messages(&output)
 }
 
-/// Everything the session printed.
 fn printed(messages: &[PluginToHost]) -> String {
     messages
         .iter()
@@ -63,7 +57,6 @@ fn printed(messages: &[PluginToHost]) -> String {
         .collect()
 }
 
-/// How the session ended.
 fn exit(messages: &[PluginToHost]) -> &ExitMessage {
     match messages.last() {
         Some(PluginToHost::Exit(exit)) => exit,

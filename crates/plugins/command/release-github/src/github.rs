@@ -1,5 +1,4 @@
-//! The repository on GitHub a workspace publishes its releases to, and a client
-//! for GitHub's API there.
+//! GitHub repository coordinates and API client construction.
 
 use std::process::Command;
 
@@ -7,26 +6,22 @@ use camino::Utf8Path;
 use doc::repository::web_address;
 use jp_github::Octocrab;
 
-/// The host of GitHub itself, whose API is at `api.github.com`; any other host
-/// is a GitHub Enterprise server, with its API below `/api/v3`.
+/// Public GitHub hostname (`api.github.com`); any other host is treated as a
+/// GitHub Enterprise instance serving its API at `https://<host>/api/v3`.
 const GITHUB: &str = "github.com";
 
-/// A repository on GitHub, read from its web address.
+/// Parsed GitHub repository coordinates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Repository {
-    /// The repository's web address, such as `https://github.com/dcdpr/jp`.
+    /// Base web URL (`https://<host>/<owner>/<name>`).
     pub(crate) web: String,
-
-    /// The host, such as `github.com`.
     pub(crate) host: String,
-
     pub(crate) owner: String,
     pub(crate) name: String,
 }
 
 impl Repository {
-    /// The repository at `address`, an `https://<host>/<owner>/<name>` address;
-    /// `None` for one with a path of any other length.
+    /// Parse `https://<host>/<owner>/<name>` into a [`Repository`].
     pub(crate) fn parse(address: &str) -> Option<Self> {
         let rest = address.strip_prefix("https://")?;
         let mut parts = rest.trim_end_matches('/').split('/');
@@ -47,9 +42,9 @@ impl Repository {
         })
     }
 
-    /// The repository the workspace at `root` publishes to: at `configured`,
-    /// `jp release`'s `repository`, or else at git's `origin` remote's web
-    /// address.
+    /// Resolve the target GitHub repository from `configured`
+    /// (`plugins.command.release.options.repository`) or git's `origin` remote
+    /// in `root`.
     pub(crate) fn find(root: &Utf8Path, configured: Option<&str>) -> Result<Self, String> {
         let address = match configured {
             Some(address) => address.to_owned(),
@@ -69,19 +64,19 @@ impl Repository {
         })
     }
 
-    /// Where GitHub's API serves this repository's host from: `None` for GitHub
-    /// itself, and `https://<host>/api/v3` for GitHub Enterprise.
+    /// Return the custom API base URL (`https://<host>/api/v3`) for GitHub
+    /// Enterprise hosts, or `None` for `github.com`.
     pub(crate) fn api(&self) -> Option<String> {
         (self.host != GITHUB).then(|| format!("https://{}/api/v3", self.host))
     }
 
-    /// The address GitHub serves the files attached to the Release of `tag`
-    /// from.
+    /// Return the asset download base URL for `tag`
+    /// (`https://<host>/<owner>/<name>/releases/download/<tag>`).
     pub(crate) fn download(&self, tag: &str) -> String {
         format!("{}/releases/download/{tag}", self.web)
     }
 
-    /// A client for GitHub's API on this repository's host, sending `token`.
+    /// Build an authenticated [`Octocrab`] client for this repository's host.
     pub(crate) fn client(&self, token: &str) -> Result<Octocrab, String> {
         let mut builder = Octocrab::builder().personal_token(token.to_owned());
         if let Some(api) = self.api() {
@@ -94,8 +89,6 @@ impl Repository {
     }
 }
 
-/// The web address of the `origin` remote of the repository at `root`, if it
-/// has one an address can be read from.
 fn origin(root: &Utf8Path) -> Option<String> {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])

@@ -1,13 +1,12 @@
-//! `jp release`'s settings that other plugins read too: where the fragments
-//! are, and how release notes credit and head their entries.
+//! Shared `plugins.command.release.options` settings consumed across release
+//! and site plugins.
 //!
-//! They live in `plugins.command.release.options`, beside settings only `jp
-//! release` reads, which this crate ignores.
-//! [`Notes::read`] reads them from the options the host passes `jp release`,
-//! and [`Notes::from_config`] from the whole configuration another plugin is
-//! passed.
-//! Both hold them to the same rules, so every plugin refuses the same values in
-//! the same words.
+//! [`Notes::read`] parses these settings from the plugin options map passed to
+//! `jp release`, and [`Notes::from_config`] extracts them from the full
+//! workspace configuration passed to other plugins (such as `jp vite` and `jp
+//! release github`).
+//! Unknown keys in `plugins.command.release.options` are ignored so settings
+//! specific to `jp release` do not fail other plugins.
 
 use std::collections::BTreeMap;
 
@@ -17,31 +16,31 @@ use doc::repository::is_web_address;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-/// The fragments directory, when `fragments_dir` isn't set.
+/// Default fragments directory path when `fragments_dir` is unset.
 pub const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
 
-/// Where the settings are, as errors name them.
 const KEY: &str = "plugins.command.release.options";
 
-/// The setting `repository` is read from, as errors name it.
+/// Configuration key path for the `repository` option, used in error messages.
 pub const REPOSITORY_KEY: &str = "plugins.command.release.options.repository";
 
-/// The settings release notes are found and rendered with.
+/// Release-note configuration shared by `jp release`, `jp release github`, and
+/// `jp vite`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notes {
-    /// The directory holding the fragments and highlights, relative to the
-    /// workspace root unless absolute.
+    /// Path to the fragments directory, relative to the workspace root unless
+    /// absolute.
     pub fragments_dir: Utf8PathBuf,
 
-    /// The forge release notes credit change requests on; `None` reads it from
-    /// the project's web address.
+    /// Forge where change requests are reviewed; `None` infers the forge from
+    /// the repository URL.
     pub forge: Option<Forge>,
 
-    /// The project's web address, which credits link from, without a `/` at its
-    /// end; `None` takes git's `origin` remote's.
+    /// Base web URL of the repository (without trailing `/`), or `None` to
+    /// derive it from git's `origin` remote.
     pub repository: Option<String>,
 
-    /// The heading of each type's section of the release notes.
+    /// Custom section headings for changelog fragment types.
     pub headings: Headings,
 }
 
@@ -56,7 +55,6 @@ impl Default for Notes {
     }
 }
 
-/// The settings as the configuration writes them.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct Section {
@@ -67,23 +65,20 @@ struct Section {
 }
 
 impl Notes {
-    /// Read the settings from `options`, the options the host passes `jp
-    /// release`.
+    /// Parse [`Notes`] from the `plugins.command.release.options` map.
     ///
     /// # Errors
     ///
-    /// Names the setting and says what is wrong with it, for the user to fix in
-    /// their configuration.
+    /// Returns an error naming the invalid configuration key.
     pub fn read(options: &Map<String, Value>) -> Result<Self, String> {
         Self::parse(Value::Object(options.clone()))
     }
 
-    /// Read the settings from `config`, the whole configuration the host passes
-    /// a plugin.
+    /// Extract and parse [`Notes`] from a full workspace configuration object.
     ///
     /// # Errors
     ///
-    /// As [`Notes::read`].
+    /// Returns an error naming the invalid configuration key.
     pub fn from_config(config: &Value) -> Result<Self, String> {
         match config.pointer("/plugins/command/release/options") {
             None | Some(Value::Null) => Ok(Self::default()),
@@ -104,8 +99,9 @@ impl Notes {
     }
 }
 
-/// Why release notes can't credit change requests on `forge`: there is no web
-/// address for the credits to link to, and how to give one.
+/// Format the error returned when `forge` requires a repository web URL for
+/// credit links and none is available from git's `origin` remote or
+/// [`REPOSITORY_KEY`].
 #[must_use]
 pub fn no_address(forge: Forge) -> String {
     format!(

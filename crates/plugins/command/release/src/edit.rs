@@ -1,18 +1,20 @@
-//! `jp release <type>` and `jp release highlight`: a fragment or highlight,
-//! opened in the user's editor and checked when the editor closes.
+//! Interactive editor workflow for `jp release <type>` and `jp release
+//! highlight`.
 //!
-//! The editor runs on the host, which owns the terminal ([`Host`]).
-//! [`fragment()`] and [`highlight()`] reach it through [`Editing`], so what
-//! happens after an edit can be tested without one.
+//! [`fragment()`] and [`highlight()`] open files in the user's editor via
+//! [`Editing`] (implemented by [`Host`] over the plugin protocol) and validate
+//! the result when the editor exits:
 //!
-//! A file that doesn't follow its format is offered back to the editor, and one
-//! given up on is undone: a new file is removed, and an existing one restored.
-//! A file saved empty is removed.
-//! An accepted file is laid out the way the workspace formats the fragments
-//! directory.
+//! - If validation fails, the user is prompted to either reopen the editor or
+//!   discard the changes (deleting a newly created file or restoring the
+//!   original contents).
+//! - Saving an empty file deletes the fragment or cancels creating a new file.
+//! - Accepted files are formatted according to the workspace's
+//!   `format_on_write` setting.
 //!
-//! A new highlight is written in a draft outside the fragments directory, and
-//! filed under the slug its title gives once it follows the format.
+//! Unnamed highlights are drafted in a temporary file outside the fragments
+//! directory and moved to `highlights/<slug>.md` once validated, using a slug
+//! derived from the `# Title` heading.
 
 use std::{
     fs,
@@ -34,24 +36,22 @@ use crate::{
     repository::temporary,
 };
 
-/// The protocol that added `edit_files`, through which the host opens the
-/// editor.
+/// Minimum host protocol version that supports `edit_files`.
 pub(crate) const EDIT_FILES_PROTOCOL: u32 = 13;
 
-/// How an edit reaches the user.
+/// Editor interaction interface abstracted for testing.
 pub(crate) trait Editing {
-    /// Open `path` in the user's editor and wait for it to close.
-    ///
-    /// `true` when the editor exited cleanly.
+    /// Open `path` in the user's editor and return `Ok(true)` if the editor
+    /// exited cleanly.
     fn open(&mut self, path: &Utf8Path) -> Result<bool, String>;
 
-    /// Ask whether to open the editor again, after `problem` was found in what
-    /// it left behind.
+    /// Prompt the user after validation fails with `problem`, returning `true`
+    /// to reopen the editor or `false` to discard the edit.
     fn again(&mut self, problem: &str) -> bool;
 }
 
-/// [`Editing`] through the host: `edit_files` opens the editor, and `compose`
-/// asks the question.
+/// [`Editing`] implementation backed by the host plugin protocol (`edit_files`
+/// and `compose`).
 pub(crate) struct Host<'a, R, W> {
     pub(crate) stdin: &'a mut R,
     pub(crate) stdout: &'a mut W,
@@ -97,12 +97,12 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
             help: None,
         });
 
-        // No answer, from a cancelled prompt or a missing terminal, discards.
         choice.is_ok_and(|choice| choice == "edit")
     }
 }
 
-/// Refuse a host, speaking protocol `version`, that can't open an editor.
+/// Return an error if the host protocol `version` does not support
+/// `edit_files`.
 pub(crate) fn check_host(version: u32) -> Result<(), String> {
     if version >= EDIT_FILES_PROTOCOL {
         return Ok(());
@@ -114,9 +114,8 @@ pub(crate) fn check_host(version: u32) -> Result<(), String> {
     ))
 }
 
-/// Open the fragment of type `type_` named `slug` in the editor, a new and
-/// empty one when there is none, and keep what the editor leaves once it
-/// follows the format.
+/// Open `<slug>.<type>.md` in the editor (creating an empty file if needed) and
+/// validate the resulting fragment.
 pub(crate) fn fragment(
     fragments: &Fragments<'_>,
     type_: Type,
@@ -141,11 +140,8 @@ pub(crate) fn fragment(
     )
 }
 
-/// Open the highlight named `slug` in the editor, or a new one named after its
-/// title when there is no `slug`, and keep what the editor leaves once it
-/// follows the format.
-///
-/// A new highlight opens with a title to write, and `author` credited.
+/// Open `highlights/<slug>.md` in the editor, or draft a new highlight (seeded
+/// with `author`) and file it under the slug derived from its `# Title`.
 pub(crate) fn highlight(
     fragments: &Fragments<'_>,
     slug: Option<&str>,
@@ -175,21 +171,12 @@ pub(crate) fn highlight(
     drafted(fragments, &template, parse, editing)
 }
 
-/// How an edit ended.
 enum Ended {
-    /// The editor left text that follows the format.
     Accepted(String),
-
-    /// The editor left the file as it was opened.
     Unchanged,
-
-    /// The editor left nothing but whitespace.
     Emptied,
 }
 
-/// Open `path`, created holding `initial` when it isn't there, until what the
-/// editor leaves follows the format `parse` holds it to, or the edit is given
-/// up on.
 fn in_place(
     fragments: &Fragments<'_>,
     path: &Utf8Path,
@@ -212,8 +199,6 @@ fn in_place(
     let ended = settle(editing, path, &shown, opened, &check);
 
     let Some(original) = original else {
-        // A new file stays only once the editor leaves one that follows the
-        // format.
         return match ended {
             Ok(Ended::Accepted(text)) => {
                 lay_out(fragments, path, &shown, &text)?;
@@ -253,9 +238,8 @@ fn in_place(
     }
 }
 
-/// Write a new highlight in a draft outside the fragments directory, opened
-/// holding `template`, and file it under the slug its title gives once it
-/// follows the format `parse` holds it to.
+/// Edit a new highlight in a temporary file outside the fragments directory,
+/// then file it under the slug derived from its `# Title` once validated.
 fn drafted(
     fragments: &Fragments<'_>,
     template: &str,
@@ -267,7 +251,6 @@ fn drafted(
     let draft = Utf8PathBuf::from(format!("{}.md", temporary("highlight")?));
     create(&draft, SHOWN, template)?;
 
-    // Laid out as any highlight is, whatever it ends up named.
     let filed_as = fragments.dir.join(HIGHLIGHTS).join("new.md");
     let check = |text: &str| checked(fragments, &filed_as, text, &parse);
     let outcome = match settle(editing, &draft, SHOWN, template, &check) {
@@ -276,16 +259,11 @@ fn drafted(
         Err(problem) => Err(format!("Nothing written: {problem}")),
     };
 
-    // Filed or given up on, the draft has served its purpose.
     drop(fs::remove_file(&draft));
 
     outcome
 }
 
-/// File the highlight `text` in `fragments` under the slug its title gives,
-/// laid out as the workspace formats highlights.
-///
-/// A slug another highlight has gets `-2`, `-3`, and so on.
 fn file_highlight(fragments: &Fragments<'_>, text: &str) -> Result<Output, String> {
     let title = highlight::parse(text)
         .map_err(|error| error.to_string())?
@@ -306,12 +284,8 @@ fn file_highlight(fragments: &Fragments<'_>, text: &str) -> Result<Output, Strin
     Ok(format!("Wrote {}\n", planned.shown).into())
 }
 
-/// Open the editor on `path`, which messages call `shown`, until what it leaves
-/// follows the format `check` holds it to; `opened` is what the file held when
-/// it was first opened.
-///
-/// The error is why the edit was given up on: the editor failed, or what it
-/// left doesn't follow the format and the user chose not to edit it again.
+/// Repeatedly open `path` in `editing` until `check` succeeds or the user
+/// discards the edit.
 fn settle(
     editing: &mut impl Editing,
     path: &Utf8Path,
@@ -341,9 +315,8 @@ fn settle(
     }
 }
 
-/// Hold `text` to the format `parse` holds it to, as written and as a write to
-/// `path` lays it out: laying a paragraph out a sentence per line can start a
-/// line with an upgrade section's token.
+/// Validate `text` with `parse` both as written and after applying workspace
+/// formatting.
 fn checked(
     fragments: &Fragments<'_>,
     path: &Utf8Path,
@@ -361,8 +334,6 @@ fn checked(
     Ok(())
 }
 
-/// Write `text`, which the editor left at `path`, laid out as the workspace
-/// formats it, when that changes it.
 fn lay_out(
     fragments: &Fragments<'_>,
     path: &Utf8Path,
@@ -377,10 +348,6 @@ fn lay_out(
     fs::write(path, laid_out.as_ref()).map_err(|error| format!("failed to write {shown}: {error}"))
 }
 
-/// Create the file `path`, which messages call `shown`, holding `text`, and the
-/// directory it goes in.
-///
-/// Refuses to overwrite a file.
 fn create(path: &Utf8Path, shown: &str, text: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
@@ -398,7 +365,6 @@ fn remove(path: &Utf8Path, shown: &str) -> Result<(), String> {
     fs::remove_file(path).map_err(|error| format!("failed to remove {shown}: {error}"))
 }
 
-/// `message`, saying also why undoing an edit failed when `undo` did.
 fn undone(undo: Result<(), String>, message: String) -> String {
     match undo {
         Ok(()) => message,

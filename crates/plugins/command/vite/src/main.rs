@@ -1,11 +1,9 @@
-//! The `jp-vite` executable: a thin shell around [`jp_vite`].
+//! Entry point for the `jp-vite` command plugin binary.
 //!
-//! Everything the plugin does lives in the library, so it can be tested without
-//! spawning a process.
-//!
-//! `jp-vite changelog …` is the `changelog` binary instead: under `jp vite
-//! serve` and `jp vite build`, the site's loaders render release pages with it,
-//! so a site needs nothing but `jp` and its plugins to be built.
+//! When invoked as `jp-vite changelog ...`, dispatches directly to
+//! [`changelog::cli::run`] so VitePress release data loaders can render release
+//! pages under `jp vite serve` and `jp vite build` without a separate
+//! `changelog` binary on `PATH`.
 
 use std::{
     env,

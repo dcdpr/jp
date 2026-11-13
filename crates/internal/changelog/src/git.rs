@@ -1,8 +1,7 @@
-//! The git commands a release is read with, each run in the fragments
-//! directory.
+//! Git subprocess helpers run inside the fragments directory.
 //!
-//! Every setting that changes what git writes is pinned on the command line, so
-//! a user's git configuration can't change what is read.
+//! Formatting and diff options are passed explicitly on the command line so
+//! user git configuration cannot alter the output.
 
 use std::{
     fmt,
@@ -13,13 +12,10 @@ use camino::Utf8Path;
 
 use crate::history::HEADER;
 
-/// A git command that couldn't be run, or failed.
+/// Error returned when a `git` subprocess cannot be spawned or exits non-zero.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitError {
-    /// The command, as `git log`.
     pub command: String,
-
-    /// Why: what git wrote to stderr, or why it couldn't be run.
     pub message: String,
 }
 
@@ -31,18 +27,19 @@ impl fmt::Display for GitError {
 
 impl std::error::Error for GitError {}
 
-/// Every commit on the first-parent line of `HEAD` that changed the fragments
-/// directory `dir`, newest first, as `history::parse` reads it.
+/// Return the first-parent `git log` of `HEAD` touching `dir`, newest commit
+/// first, formatted for [`crate::history::parse`].
 ///
-/// A merge commit lists what it changed against its first parent: everything
-/// its branch brought.
-/// Paths are relative to `dir`, and renames within it are detected.
+/// Merge commits diff against their first parent (`--diff-merges=first-parent`)
+/// so every file change introduced by the merged branch is listed on the merge
+/// commit.
+/// Paths are relative to `dir`, with rename detection enabled.
 pub(crate) fn log(dir: &Utf8Path) -> Result<String, GitError> {
     let format = format!("--format={HEADER}%H%n%B");
 
     run(dir, &[
-        // `log.follow` turns `--follow` on for a single path, which follows
-        // one file, not a directory.
+        // Disable `log.follow`, which enables single-file `--follow` when one
+        // pathspec is given.
         "-c",
         "log.follow=false",
         "log",
@@ -61,14 +58,13 @@ pub(crate) fn log(dir: &Utf8Path) -> Result<String, GitError> {
     ])
 }
 
-/// Whether the repository holding `dir` is a shallow clone, which lacks the
-/// history credits are read from.
+/// Return whether `dir` is inside a shallow git clone.
 pub(crate) fn is_shallow(dir: &Utf8Path) -> Result<bool, GitError> {
     run(dir, &["rev-parse", "--is-shallow-repository"]).map(|output| output.trim() == "true")
 }
 
-/// The address of the `origin` remote of the repository holding `dir`, or
-/// `None` when it has none.
+/// Return the URL of the `origin` remote for `dir`, or `None` if `origin` is
+/// not configured.
 pub(crate) fn origin(dir: &Utf8Path) -> Option<String> {
     run(dir, &["remote", "get-url", "origin"])
         .ok()
@@ -76,11 +72,11 @@ pub(crate) fn origin(dir: &Utf8Path) -> Option<String> {
         .filter(|origin| !origin.is_empty())
 }
 
-/// The day the tag `tag` was made, as `YYYY-MM-DD` in the tagger's time zone,
-/// or `None` when there is no such tag.
+/// Return the creation date (`YYYY-MM-DD`) of `refs/tags/<tag>`, or `None` if
+/// the tag does not exist.
 ///
-/// An annotated tag's date is when it was tagged; a lightweight tag's is its
-/// commit's.
+/// Uses the tagger date for annotated tags and the committer date for
+/// lightweight tags.
 pub(crate) fn tag_date(dir: &Utf8Path, tag: &str) -> Result<Option<String>, GitError> {
     let reference = format!("refs/tags/{tag}");
     let output = run(dir, &[
@@ -89,15 +85,14 @@ pub(crate) fn tag_date(dir: &Utf8Path, tag: &str) -> Result<Option<String>, GitE
         &reference,
     ])?;
 
-    // The pattern also matches the tags below `<tag>/`, which can't hold a
-    // release.
+    // `for-each-ref` treats `refs/tags/<tag>` as a prefix match, so verify an
+    // exact refname match to exclude nested tags under `refs/tags/<tag>/...`.
     Ok(output.lines().find_map(|line| {
         let (name, date) = line.split_once('\0')?;
         (name == reference && !date.is_empty()).then(|| date.to_owned())
     }))
 }
 
-/// What `git` with `args`, run in `dir`, wrote to stdout.
 fn run(dir: &Utf8Path, args: &[&str]) -> Result<String, GitError> {
     let failed = |message| GitError {
         command: format!("git {}", subcommand(args)),
@@ -120,8 +115,8 @@ fn run(dir: &Utf8Path, args: &[&str]) -> Result<String, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// The subcommand `args` run, such as `log`: the first argument that is neither
-/// an option nor a `-c` setting.
+/// Return the git subcommand name in `args` (the first argument that is neither
+/// a flag nor a `-c key=value` pair).
 fn subcommand<'a>(args: &[&'a str]) -> &'a str {
     args.iter()
         .copied()

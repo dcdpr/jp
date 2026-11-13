@@ -42,7 +42,6 @@ fn breaking(
     breaking
 }
 
-/// A release with nothing in it but `entries`.
 fn release(entries: Vec<Credited<Fragment>>) -> Release {
     Release {
         version: Some(Version::new(0, 3, 0)),
@@ -53,7 +52,6 @@ fn release(entries: Vec<Credited<Fragment>>) -> Release {
     }
 }
 
-/// The release the RFD shows, minus the line wrapping a formatter adds.
 fn jp_0_3_0() -> Release {
     Release {
         version: Some(Version::new(0, 3, 0)),

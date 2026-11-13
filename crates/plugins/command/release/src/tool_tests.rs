@@ -7,7 +7,6 @@ use serde_json::json;
 
 use super::*;
 
-/// A workspace whose fragments directory, `changelog.d`, exists.
 fn workspace() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir(root.path().join("changelog.d")).unwrap();
@@ -15,7 +14,6 @@ fn workspace() -> Utf8TempDir {
     root
 }
 
-/// The workspace a call runs in, as the host describes it in `init`.
 fn init(root: &Utf8TempDir) -> InitMessage {
     InitMessage {
         version: jp_plugin::PROTOCOL_VERSION,
@@ -34,7 +32,6 @@ fn init(root: &Utf8TempDir) -> InitMessage {
     }
 }
 
-/// A call to `name` asking for `action`, with `arguments`.
 fn call(action: ToolAction, name: &str, arguments: Value) -> ToolCall {
     let Value::Object(arguments) = arguments else {
         panic!("arguments are an object");
@@ -81,7 +78,6 @@ fn error_message(outcome: Outcome) -> String {
     }
 }
 
-/// A preview as a terminal shows it, with the ANSI styling removed.
 fn strip_ansi(rendered: &str) -> String {
     String::from_utf8(strip_ansi_escapes::strip(rendered)).unwrap()
 }

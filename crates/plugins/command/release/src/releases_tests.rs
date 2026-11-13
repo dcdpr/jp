@@ -1,17 +1,13 @@
 use super::*;
 
-/// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
+/// 2026-10-01 12:00:00 UTC in seconds since the Unix epoch.
 const OCTOBER_1: i64 = 1_790_856_000;
-
-/// A day, in seconds.
 const DAY: i64 = 86_400;
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// A release branch holding the releases `started`, oldest first, each started
-/// a day after the last from 2026-10-01, with nothing picked onto it.
 fn line(branch: &str, started: &[&str]) -> Line {
     Line {
         branch: branch.to_owned(),
@@ -29,7 +25,6 @@ fn line(branch: &str, started: &[&str]) -> Line {
     }
 }
 
-/// The releases `tagged` finalized, their tags on `origin`, and `lines` holds.
 fn releases(tagged: &[&str], lines: Vec<Line>) -> Releases {
     let tagged: BTreeSet<Version> = tagged.iter().map(|text| version(text)).collect();
 

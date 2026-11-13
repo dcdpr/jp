@@ -3,27 +3,16 @@ use serde_json::json;
 
 use super::*;
 
-/// The commit the tests' builds are of.
 const COMMIT: &str = "8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b";
-
-/// The archive the tests' builds write.
 const ARCHIVE: &str = "jp-x86_64-unknown-linux-gnu.tar.xz";
-
-/// What [`ARCHIVE`] holds.
 const CONTENTS: &str = "an archive\n";
-
-/// The SHA-256 of [`CONTENTS`], as `shasum -a 256` gives it.
 const HASH: &str = "4cd36b3ca046f7c17e81e1aa31bf2dc6a91b98c94238810db57456b4904d3a22";
-
-/// The platform [`ARCHIVE`] is for.
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// A directory holding what a build of 0.3.0 from [`COMMIT`] with the release
-/// profile writes.
 fn written() -> Utf8TempDir {
     let out = Utf8TempDir::new().unwrap();
     fs::write(out.path().join(ARCHIVE), CONTENTS).unwrap();

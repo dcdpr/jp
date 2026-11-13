@@ -1,4 +1,4 @@
-//! The plugin's settings, read from `plugins.command.release.options`.
+//! Configuration under `plugins.command.release.options`.
 //!
 //! ```toml
 //! [plugins.command.release.options]
@@ -8,47 +8,28 @@
 //! bump = "cargo set-version --package jp_cli {version}"
 //! build = "bash .config/release/build.sh {version} {source} {out} {profile}"
 //! cadence = "2w"
+//! format_on_write = true
 //!
 //! [plugins.command.release.options.headings]
 //! added = "New features"
 //! fixed = "Bug fixes"
 //! ```
 //!
-//! `format_on_write = true` lays every fragment, highlight, and README the
-//! plugin writes out in the style of the workspace's `.comfort.toml`; it is off
-//! by default.
+//! - `fragments_dir`, `forge`, `repository`, and `headings` are shared with
+//!   other plugins via [`release_options::Notes`].
+//! - `format_on_write` (default `false`) formats written fragments, highlights,
+//!   and `README.md` using the workspace's `.comfort.toml`.
+//! - `bump` is the command run in the workspace root (with `{version}`
+//!   substituted) to update version numbers in project manifests.
+//!   It is split into words with shell quoting rules and executed directly
+//!   without a shell.
+//! - `build` is the command run by `jp release build` in the workspace root,
+//!   with `{version}`, `{source}`, `{out}`, and `{profile}` substituted.
+//!   Both `{source}` and `{out}` are required.
+//! - `cadence` (default `"2w"`) is the duration after a minor or major release
+//!   cut before `jp release due` reports the next release as due.
 //!
-//! `forge` is where change requests are reviewed, `github`, `gitlab`, or
-//! `none`, which decides how release notes credit them and where the credits
-//! link; `jp release` itself never talks to it.
-//! Unset, it is read from the project's web address: `github` for github.com,
-//! `gitlab` for gitlab.com, and `none` for any other host.
-//! `repository` is that address, an `https://` one, which credits link from.
-//! Unset, it is the address of git's `origin` remote, so a clone whose `origin`
-//! isn't the project's forge, such as a path on disk, sets it.
-//! `headings` renames a type's section of the release notes; a type it doesn't
-//! name is headed by its id capitalized, such as `Added`.
-//!
-//! `bump` is the command that writes a new version wherever the project keeps
-//! it, run in the workspace root with `{version}` replaced by the new version.
-//! It is split into words as a shell splits them, but runs without a shell.
-//! Unset, a version lives only in its tag.
-//!
-//! `build` is the command `jp release build` runs in the workspace root to
-//! build a release's binaries, split into words as `bump` is, with `{version}`,
-//! the release's version, `{source}`, a checkout of its code, `{out}`, the
-//! empty directory its archives, `checksums.txt`, and `manifest.json` go, and
-//! `{profile}`, `release` or `quick`.
-//! It has to name `{source}` and `{out}`.
-//! Unset, `jp release build` refuses to run.
-//!
-//! `cadence` is how long after a minor or major release is cut the next one is
-//! due, which `jp release due` reports: a duration such as `2w`, `10d`, or
-//! `1week 3days`, two weeks by default.
-//!
-//! Every option is optional.
-//! Keys this plugin doesn't read are ignored, so a configuration written for a
-//! newer `jp-release` still loads.
+//! Unknown option keys are ignored for forward compatibility.
 
 use std::{fmt, time::Duration};
 
@@ -58,47 +39,23 @@ use semver::Version;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-/// What `bump` writes where the new version goes.
 const VERSION: &str = "{version}";
-
-/// The setting `bump` is read from, as errors name it.
 pub(crate) const BUMP_KEY: &str = "plugins.command.release.options.bump";
-
-/// The setting `build` is read from, as errors name it.
 pub(crate) const BUILD_KEY: &str = "plugins.command.release.options.build";
-
-/// What `build` writes where the checkout of the release's code is.
 const SOURCE: &str = "{source}";
-
-/// What `build` writes where the directory the build goes is.
 const OUT: &str = "{out}";
-
-/// What `build` writes where the profile to build with goes.
 const PROFILE: &str = "{profile}";
-
-/// The cadence, when `cadence` isn't set, as configuration writes it and in
-/// seconds.
 const DEFAULT_CADENCE: (&str, u64) = ("2w", 14 * 24 * 60 * 60);
 
-/// The settings every command and tool runs with.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Options {
-    /// Where the fragments are, and how release notes credit and head their
-    /// entries: the settings other plugins read too.
     pub notes: Notes,
-
-    /// The command that writes a new version where the project keeps it.
     pub bump: Option<Bump>,
-
-    /// The command that builds a release's binaries.
     pub build: Option<Build>,
-
-    /// How long after a minor or major release is cut the next one is due.
     pub cadence: Cadence,
 }
 
-/// The `cadence` option: a duration, kept as configuration writes it to show it
-/// the same way.
+/// Release cadence duration paired with its original configuration string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Cadence {
     text: String,
@@ -106,9 +63,6 @@ pub(crate) struct Cadence {
 }
 
 impl Cadence {
-    /// Read `text`, a duration as `jp query --tmp` takes one, such as `2w`.
-    ///
-    /// The error says what is wrong with it.
     fn parse(text: &str) -> Result<Self, String> {
         let text = text.trim();
         let duration = humantime::parse_duration(text).map_err(|error| {
@@ -124,7 +78,6 @@ impl Cadence {
         })
     }
 
-    /// The cadence in whole seconds.
     pub(crate) fn seconds(&self) -> i64 {
         i64::try_from(self.duration.as_secs()).unwrap_or(i64::MAX)
     }
@@ -147,17 +100,14 @@ impl fmt::Display for Cadence {
     }
 }
 
-/// The command `bump` configures: words as a shell splits them, `{version}` in
-/// at least one.
+/// Parsed `bump` command template containing at least one `{version}`
+/// placeholder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Bump {
     words: Vec<String>,
 }
 
 impl Bump {
-    /// Split `command` into the program and its arguments.
-    ///
-    /// The error says what is wrong with it.
     fn parse(command: &str) -> Result<Self, String> {
         let words = split(BUMP_KEY, command)?;
         if !words.iter().any(|word| word.contains(VERSION)) {
@@ -169,8 +119,7 @@ impl Bump {
         Ok(Self { words })
     }
 
-    /// The program to run, and its arguments, with every `{version}` replaced
-    /// by `version`.
+    /// Return `(program, args)` with `{version}` replaced by `version`.
     pub(crate) fn command(&self, version: &Version) -> (String, Vec<String>) {
         let version = version.to_string();
         let mut words = self
@@ -183,17 +132,14 @@ impl Bump {
     }
 }
 
-/// The command `build` configures: words as a shell splits them, `{source}` and
-/// `{out}` each in at least one.
+/// Parsed `build` command template containing `{source}` and `{out}`
+/// placeholders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Build {
     words: Vec<String>,
 }
 
 impl Build {
-    /// Split `command` into the program and its arguments.
-    ///
-    /// The error says what is wrong with it.
     fn parse(command: &str) -> Result<Self, String> {
         let words = split(BUILD_KEY, command)?;
         for (placeholder, why) in [
@@ -208,8 +154,8 @@ impl Build {
         Ok(Self { words })
     }
 
-    /// The program to run, and its arguments, with `{version}`, `{source}`,
-    /// `{out}`, and `{profile}` replaced.
+    /// Return `(program, args)` with `{version}`, `{source}`, `{out}`, and
+    /// `{profile}` substituted.
     pub(crate) fn command(
         &self,
         version: &Version,
@@ -231,9 +177,6 @@ impl Build {
     }
 }
 
-/// `command` split into words as a shell splits them, for the setting `key`.
-///
-/// The error says it can't be split, or holds no words.
 fn split(key: &str, command: &str) -> Result<Vec<String>, String> {
     let words = shlex::split(command)
         .ok_or_else(|| format!("`{key}` can't be split into words; check its quotes."))?;
@@ -244,9 +187,9 @@ fn split(key: &str, command: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
-/// `word` with each placeholder of `values` replaced by its value, in one pass,
-/// so a value holding a placeholder, such as a path with `{out}` in it, is left
-/// as it is.
+/// Substitute all placeholders in `word` in a single left-to-right pass so a
+/// replacement value that contains a placeholder literal is not substituted a
+/// second time.
 fn fill(word: &str, values: &[(&str, &str)]) -> String {
     let mut filled = String::with_capacity(word.len());
     let mut rest = word;
@@ -267,7 +210,6 @@ fn fill(word: &str, values: &[(&str, &str)]) -> String {
     filled
 }
 
-/// The options only this plugin reads, as the configuration writes them.
 #[derive(Default, Deserialize)]
 #[serde(default)]
 struct Settings {
@@ -277,10 +219,6 @@ struct Settings {
 }
 
 impl Options {
-    /// Read the options the host passed in `init`.
-    ///
-    /// The error names the setting and says what is wrong with it, for the user
-    /// to fix in their configuration.
     pub(crate) fn read(options: &Map<String, Value>) -> Result<Self, String> {
         let notes = Notes::read(options)?;
         let settings: Settings = serde_json::from_value(Value::Object(options.clone()))

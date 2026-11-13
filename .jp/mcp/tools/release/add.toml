@@ -29,8 +29,8 @@ Record a breaking change, with its section of the upgrade guide, under a name of
 ```
 '''
 
-# The tool previews the fragment it is about to write, and the preview has no
-# side effects, so it is drawn before the call is put to the user.
+# Allow `FormatArguments` without prompting so the user sees a preview of the
+# planned fragment before approving the tool call.
 format = "allow"
 
 [conversation.tools.changelog_add.style]

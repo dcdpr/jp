@@ -503,8 +503,8 @@ fn family_of(name: &str) -> Option<&'static str> {
 /// suffixes (`opus[1m]`).
 /// Returns an empty vector for bare aliases (`opus`).
 fn version(text: &str, family: &str) -> Vec<u32> {
-    /// The length from which a part is a date suffix, such as `20251001`,
-    /// rather than a version number.
+    /// Minimum digit length treated as a date suffix (e.g. `20251001`) rather
+    /// than a version component.
     const DATE_SUFFIX_LEN: usize = 6;
 
     let text = text.to_ascii_lowercase();

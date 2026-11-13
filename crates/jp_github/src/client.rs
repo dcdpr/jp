@@ -14,7 +14,6 @@ use crate::{
     },
 };
 
-/// Where GitHub's REST API is reached when nothing says otherwise.
 const API: &str = "https://api.github.com";
 
 #[derive(Clone)]
@@ -175,9 +174,8 @@ impl Octocrab {
         self.send_json(request).await
     }
 
-    /// POST `contents` as the file `name` to `url`, a whole address rather than
-    /// a path below the API's, as GitHub's uploads are made to a host of their
-    /// own.
+    /// Upload `contents` as a release asset named `name` to the full `url`
+    /// (`uploads.github.com` rather than `api_base`).
     pub(crate) async fn upload<T: DeserializeOwned>(
         &self,
         url: &str,
@@ -376,8 +374,8 @@ impl OctocrabBuilder {
         self
     }
 
-    /// Send requests to `url` rather than to `https://api.github.com`, such as
-    /// a server standing in for GitHub; GraphQL requests go to `<url>/graphql`.
+    /// Override the base REST API URL (default `https://api.github.com`);
+    /// GraphQL requests use `<url>/graphql`.
     #[must_use]
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into().trim_end_matches('/').to_owned());

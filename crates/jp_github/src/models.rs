@@ -323,7 +323,6 @@ pub mod commits {
 pub mod releases {
     use super::{Deserialize, Serialize};
 
-    /// A release, published or a draft.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Release {
         pub id: u64,
@@ -333,14 +332,12 @@ pub mod releases {
         pub draft: bool,
         pub prerelease: bool,
         pub html_url: String,
-        /// Where assets are uploaded to, as a URI template ending in
-        /// `{?name,label}`.
+        /// Asset upload URI template ending in `{?name,label}`.
         pub upload_url: String,
         #[serde(default)]
         pub assets: Vec<Asset>,
     }
 
-    /// A file attached to a release.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Asset {
         pub id: u64,

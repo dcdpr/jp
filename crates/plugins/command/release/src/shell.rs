@@ -1,12 +1,10 @@
-//! The programs the release commands run: git, and the project's `bump` and
-//! `build`.
+//! Subprocess execution for `git` and configured `bump` / `build` commands.
 //!
-//! Each runs in a directory it is given, reads nothing from stdin, and has its
-//! output captured, since the plugin's own stdin and stdout carry the host's
-//! protocol; a program that runs long, such as `build`, has its output handed
-//! on line by line as it comes instead.
-//! [`Shell`] holds the environment they run with on top of the plugin's, which
-//! a test pins so that the machine's git configuration can't reach in.
+//! Because plugin `stdin` and `stdout` carry the NDJSON plugin protocol, child
+//! processes run with `stdin` closed and their output captured (or streamed
+//! line by line via [`Shell::stream`] for long-running commands like `build`).
+//! [`Shell`] also carries environment overrides so tests can isolate `git` from
+//! host configuration.
 
 use std::{
     ffi::OsStr,
@@ -18,14 +16,13 @@ use std::{
 
 use camino::Utf8Path;
 
-/// Runs programs for the release pipeline.
+/// Subprocess runner with optional environment variable overrides.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Shell {
-    /// Set on every program, on top of the plugin's own environment.
     env: Vec<(String, String)>,
 }
 
-/// What a program printed, and whether it succeeded.
+/// Captured output and exit status of a completed subprocess.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Ran {
     pub success: bool,
@@ -34,8 +31,7 @@ pub(crate) struct Ran {
 }
 
 impl Ran {
-    /// What the program printed to explain itself: stderr, or stdout when
-    /// stderr is empty.
+    /// Return trimmed `stderr` if non-empty, or trimmed `stdout` otherwise.
     pub(crate) fn said(&self) -> &str {
         let stderr = self.stderr.trim();
         if stderr.is_empty() {
@@ -47,20 +43,16 @@ impl Ran {
 }
 
 impl Shell {
-    /// A shell that runs programs with the plugin's environment.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// A shell that sets `env` on every program it runs.
     #[cfg(test)]
     pub(crate) fn with_env(env: Vec<(String, String)>) -> Self {
         Self { env }
     }
 
-    /// Run `program` with `args` in `dir`, whatever it exits with.
-    ///
-    /// The error says why it couldn't be run at all.
+    /// Run `program` with `args` in `dir` and capture its output.
     pub(crate) fn run<S: AsRef<OsStr>>(
         &self,
         dir: &Utf8Path,
@@ -82,13 +74,11 @@ impl Shell {
         })
     }
 
-    /// Run `program` with `args` in `dir`, handing each line it prints, on
-    /// stdout or stderr, to `each` as it comes, and return how it exited.
+    /// Run `program` with `args` in `dir`, forwarding each stdout and stderr
+    /// line (stripped of its trailing newline) to `each`.
     ///
-    /// Lines lose their line ending, and bytes that aren't UTF-8 are replaced.
-    /// After `each` fails, the program still runs to its end, its output read
-    /// and dropped so it can't stall on a full pipe, and the error is `each`'s;
-    /// otherwise the error says the program couldn't be run at all.
+    /// If `each` returns an error, remaining child output is still drained
+    /// before waiting for the process so the child cannot block on a full pipe.
     pub(crate) fn stream<S: AsRef<OsStr>>(
         &self,
         dir: &Utf8Path,
@@ -117,7 +107,6 @@ impl Shell {
                 .take()
                 .map(|pipe| read_lines(pipe, sender.clone())),
         ];
-        // The lines end once both readers drop their senders.
         drop(sender);
 
         let mut failed = None;
@@ -142,14 +131,12 @@ impl Shell {
         }
     }
 
-    /// Run git with `args` in `dir`, whatever it exits with.
     pub(crate) fn try_git(&self, dir: &Utf8Path, args: &[&str]) -> Result<Ran, String> {
         self.run(dir, "git", args)
     }
 
-    /// Run git with `args` in `dir`, and return what it printed on stdout.
-    ///
-    /// The error names the command and quotes what git said.
+    /// Run `git` with `args` in `dir`, returning `stdout` on success or an
+    /// error quoting git's output on failure.
     pub(crate) fn git(&self, dir: &Utf8Path, args: &[&str]) -> Result<String, String> {
         let ran = self.try_git(dir, args)?;
         if !ran.success {
@@ -160,8 +147,6 @@ impl Shell {
     }
 }
 
-/// Read `pipe` on a thread of its own, sending each line to `sender` without
-/// its line ending.
 fn read_lines(pipe: impl Read + Send + 'static, sender: Sender<String>) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut reader = BufReader::new(pipe);
@@ -184,8 +169,6 @@ fn read_lines(pipe: impl Read + Send + 'static, sender: Sender<String>) -> JoinH
     })
 }
 
-/// The subcommand `args` run, such as `push`: the first argument that is
-/// neither an option nor a `-c` setting.
 fn subcommand<'a>(args: &[&'a str]) -> &'a str {
     args.iter()
         .copied()

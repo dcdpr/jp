@@ -1,15 +1,14 @@
-//! Where fragments and highlights are filed, and writing a fragment the
-//! assistant gives.
+//! Fragment and highlight file paths, slug derivation, and fragment writing.
 //!
-//! A fragment is `<slug>.<type>.md` in the fragments directory, and a highlight
-//! is `<slug>.md` in its `highlights/`.
-//! [`plan`] settles the file a fragment is written to, lays it out as the
-//! workspace formats the fragments directory, and holds it to the format `jp
-//! release check` holds it to, as it is laid out; [`Planned::write`] writes it.
+//! Fragments live at `<fragments_dir>/<slug>.<type>.md` and highlights live at
+//! `<fragments_dir>/highlights/<slug>.md`.
+//! [`plan`] resolves the target path, applies `.comfort.toml` formatting when
+//! `format_on_write` is enabled, and validates the fragment both before and
+//! after formatting.
+//! [`Planned::write`] writes the validated file to disk.
 //!
-//! A slug the caller doesn't give is derived from the first words of the entry,
-//! of a highlight's title, or of the git branch's name, as they read without
-//! their markup and link URLs.
+//! When no explicit slug is provided, one is derived from the plain text of the
+//! entry, the highlight's `# Title`, or the current git branch name.
 
 use std::{
     fs::{self, OpenOptions},
@@ -25,33 +24,20 @@ use serde_json::Value;
 
 use crate::{PLUGIN, repository::MAIN};
 
-/// The directory, inside the fragments directory, that holds highlights.
 pub(crate) const HIGHLIGHTS: &str = "highlights";
 
-/// The longest slug derived from an entry, in bytes: room for the first few
-/// words, which is what tells one file from another in a listing.
+/// Maximum length in bytes of a slug derived from an entry or title.
 const MAX_DERIVED_SLUG: usize = 50;
 
-/// The fragments directory of a workspace.
+/// Workspace fragments directory and its Markdown formatting policy.
 #[derive(Debug, Clone)]
 pub(crate) struct Fragments<'a> {
-    /// The workspace root, which paths in messages are relative to.
     pub root: &'a Utf8Path,
-
-    /// The fragments directory.
     pub dir: Utf8PathBuf,
-
-    /// How a file written in the fragments directory is laid out.
     pub formatting: Formatting,
 }
 
 impl<'a> Fragments<'a> {
-    /// The fragments directory `dir` of the workspace at `root`, laying files
-    /// out as `config`, the whole configuration the host passed in `init`,
-    /// says: in the style of the workspace's `.comfort.toml` when
-    /// `format_on_write` is on, as they are given otherwise.
-    ///
-    /// The error names the setting or the file that is wrong.
     pub(crate) fn new(
         root: &'a Utf8Path,
         dir: Utf8PathBuf,
@@ -68,8 +54,7 @@ impl<'a> Fragments<'a> {
 }
 
 impl Fragments<'_> {
-    /// `path` as a message names it: relative to the workspace root, with `/`
-    /// between its parts on every platform.
+    /// Format `path` relative to the workspace root using `/` separators.
     pub(crate) fn show(&self, path: &Utf8Path) -> String {
         path.strip_prefix(self.root)
             .unwrap_or(path)
@@ -77,29 +62,23 @@ impl Fragments<'_> {
             .replace(MAIN_SEPARATOR, "/")
     }
 
-    /// The fragment of type `type_` named `slug`: `<slug>.<type>.md`.
     pub(crate) fn fragment(&self, slug: &str, type_: Type) -> Utf8PathBuf {
         self.dir.join(fragment::file_name(slug, type_))
     }
 
-    /// The highlight named `slug`: `highlights/<slug>.md`.
     pub(crate) fn highlight(&self, slug: &str) -> Utf8PathBuf {
         self.dir.join(HIGHLIGHTS).join(format!("{slug}.md"))
     }
 }
 
-/// A file about to be written: where it goes, and what it holds.
+/// Validated fragment or highlight ready to be written to disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Planned {
     pub path: Utf8PathBuf,
-
-    /// [`Planned::path`] as messages name it.
     pub shown: String,
-
     pub text: String,
 }
 
-/// Check that `fragments` is there to take a new file.
 pub(crate) fn ready(fragments: &Fragments<'_>) -> Result<(), String> {
     if fragments.dir.is_dir() {
         return Ok(());
@@ -111,16 +90,14 @@ pub(crate) fn ready(fragments: &Fragments<'_>) -> Result<(), String> {
     ))
 }
 
-/// Settle the file in `fragments` that the fragment of type `type_` holding
-/// `body` is written to, named by `slug` or by one derived from the entry, and
-/// lay it out as the workspace formats the fragments directory.
+/// Validate and format a fragment of `type_` with `body`, resolving its target
+/// path from `slug` (or deriving a slug from the entry's first words).
 ///
-/// The fragment is held to its format as given and again as laid out, since
-/// laying a paragraph out a sentence per line can start a line with an upgrade
-/// section's token.
-/// A derived slug a file of the type already has gets `-2`, `-3`, and so on,
-/// while a `slug` the caller named is refused instead.
-/// The error says what to change.
+/// Validates `body` both before and after applying `.comfort.toml` formatting,
+/// because sentence-per-line reflow can move a mid-paragraph `BREAKING CHANGE:`
+/// token to the start of a line.
+/// When `slug` is derived, existing collisions receive a `-2`, `-3`, ...
+/// suffix; when `slug` is explicit, an existing file is rejected.
 pub(crate) fn plan(
     fragments: &Fragments<'_>,
     type_: Type,
@@ -166,10 +143,8 @@ pub(crate) fn plan(
 }
 
 impl Planned {
-    /// Write the file, creating its directory when it isn't there yet.
-    ///
-    /// Refuses to overwrite a file, including one that appeared since the file
-    /// was planned.
+    /// Atomically create and write the planned file, failing if the file was
+    /// created since [`plan`] ran.
     pub(crate) fn write(&self) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
@@ -189,10 +164,8 @@ impl Planned {
     }
 }
 
-/// Refuse a slug that can't name a fragment or highlight: one holding more than
-/// ASCII letters, digits, `-`, and `_`, which keeps it a plain file name in the
-/// directory it names, and keeps a fragment's type the only `.` part of its
-/// name.
+/// Validate that `slug` is non-empty and contains only ASCII alphanumerics,
+/// `-`, and `_`.
 pub(crate) fn check_slug(slug: &str) -> Result<(), String> {
     let plain = !slug.is_empty()
         && slug
@@ -207,12 +180,9 @@ pub(crate) fn check_slug(slug: &str) -> Result<(), String> {
     ))
 }
 
-/// The slug a file is named by after the git branch `branch`: its last
-/// `/`-separated part, as [`derive_slug`] reads it, so `jean/fix-idle-turns`
-/// gives `fix-idle-turns`.
-///
-/// `None` on the default branch, which has no change of its own to name a file
-/// after, and for a branch whose name holds no word.
+/// Derive a slug from the last `/`-separated segment of `branch` (e.g.
+/// `fix-idle-turns` from `jean/fix-idle-turns`), returning `None` for `main` or
+/// branches with no ASCII word characters.
 pub(crate) fn branch_slug(branch: &str) -> Option<String> {
     if branch == MAIN {
         return None;
@@ -221,8 +191,8 @@ pub(crate) fn branch_slug(branch: &str) -> Option<String> {
     derive_slug(branch.rsplit('/').next().unwrap_or(branch))
 }
 
-/// What `markdown` says, without its markup: its text and inline code, with a
-/// space where a line or a block breaks, and no link's URL.
+/// Extract plain text and inline code from `markdown`, replacing line and block
+/// breaks with spaces and stripping link URLs.
 pub(crate) fn plain_text(markdown: &str) -> String {
     let arena = Arena::new();
     let root = parse_document(&arena, markdown, &Options::default());
@@ -242,12 +212,8 @@ pub(crate) fn plain_text(markdown: &str) -> String {
     text
 }
 
-/// A slug for `text`: its first words, lowercased and joined by `-`, at most
-/// [`MAX_DERIVED_SLUG`] bytes.
-///
-/// A word is a run of ASCII letters, digits, and `_`, so Markdown between words
-/// separates them like a space does.
-/// `None` when `text` holds no word.
+/// Derive a lowercase `-`-joined slug of at most [`MAX_DERIVED_SLUG`] bytes
+/// from the leading ASCII alphanumeric words of `text`.
 pub(crate) fn derive_slug(text: &str) -> Option<String> {
     let mut slug = String::new();
     let words = text
@@ -257,7 +223,6 @@ pub(crate) fn derive_slug(text: &str) -> Option<String> {
     for word in words {
         let word = word.to_ascii_lowercase();
         if slug.is_empty() {
-            // ASCII, so any byte index is a character boundary.
             slug = word[..word.len().min(MAX_DERIVED_SLUG)].to_owned();
             continue;
         }
@@ -271,8 +236,8 @@ pub(crate) fn derive_slug(text: &str) -> Option<String> {
     (!slug.is_empty()).then_some(slug)
 }
 
-/// The first of the files `name` gives `slug`, `slug-2`, `slug-3`, and so on,
-/// that `dir` doesn't hold.
+/// Return the first unoccupied path in `dir` among `name(slug)`,
+/// `name("<slug>-2")`, `name("<slug>-3")`, and so on.
 pub(crate) fn unused(dir: &Utf8Path, slug: &str, name: impl Fn(&str) -> String) -> Utf8PathBuf {
     let mut path = dir.join(name(slug));
     let mut number = 2;

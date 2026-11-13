@@ -5,8 +5,6 @@ use serde_json::json;
 
 use super::*;
 
-/// Build the site at `root` with the default options and no configuration,
-/// returning what the build said and how it ended.
 fn build_at(root: &Utf8Path) -> (String, Result<(), String>) {
     let mut stdout = vec![];
     let result = build(

@@ -8,24 +8,24 @@ Each fragment becomes one entry of the release notes, read by someone using JP.
 
 Write each entry the way JP's `changelog.d/README.md` asks:
 
-- One or two short sentences saying what users can do now, what behaves
-  differently, or what was fixed.
-  Leave out how it was built.
+- One or two short sentences saying what users can do, what behaves differently,
+  or what was fixed.
+  Omit implementation details.
 - Code formatting only for what users type or read literally: commands, flags,
   config keys, and file names.
 - Plain words: no "now", no "previously", and no marketing.
 
 Choose what to write about:
 
-- Leave out changes users don't notice: refactoring, tests, CI, builds,
-  dependency updates with no visible effect, internal documentation, RFDs,
-  tickets, and JP's own development tooling, such as personas,
-  `.config/jp/tools`, and the justfile.
+- Omit changes users don't notice: refactoring, tests, CI, builds, dependency
+  updates with no visible effect, internal documentation, RFDs, tickets, and
+  JP's own development tooling, such as personas, `.config/jp/tools`, and the
+  justfile.
 - Write one fragment per user-visible change, crediting every listed change that
   makes it, and a fragment for each unrelated user-visible change a single pull
   request makes.
 - Describe only what a change shows.
-  When its effect on users is unclear, say only what is clear, or leave it out.
+  When its effect on users is unclear, state only what is clear, or omit it.
 
 Fill in each fragment:
 

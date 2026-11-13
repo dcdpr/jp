@@ -1,6 +1,5 @@
 use super::*;
 
-/// The full hash of a commit, as git writes it.
 const HASH: &str = "4e1f0a2c9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a49";
 
 fn number(n: u64) -> NonZeroU64 {

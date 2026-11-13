@@ -1,14 +1,14 @@
-//! `jp release finalize`: tag a release in preparation.
+//! `jp release finalize`: creating the annotated `v<version>` tag for a release
+//! in preparation.
 //!
-//! The tag, `v<version>`, is annotated and points at the tip of the release
-//! branch: this repository's, or `origin`'s when this repository's is behind.
-//! Its message is the release notes, followed by the upgrade guide when the
-//! release has one, as the commit checked out has them in the release's
-//! directory; that commit stands for `main`, so the notes branch has to be
-//! merged into it first.
-//! The tag is made in this repository, and pushing it makes the release.
-//! The person running it decides when: on GitHub, CI shows its checks on the
-//! branch's tip once the branch is pushed.
+//! Creates an annotated tag `v<version>` at the tip of the release branch
+//! (`release/<major>.<minor>`), using the rendered release notes and upgrade
+//! guide from `<fragments_dir>/<version>/` in the current checkout as the tag
+//! message.
+//! Requires `release-notes/v<version>` to be merged into the current checkout
+//! first.
+//!
+//! Does not push the tag; prints the `git push` command to publish it.
 
 use changelog::{
     NoAddress, ReleaseError,
@@ -25,43 +25,34 @@ use crate::{
     repository::{MAIN, ORIGIN, Worktree},
 };
 
-/// The heading the upgrade guide follows the release notes under, in a tag's
-/// message.
 const UPGRADE_GUIDE: &str = "Upgrade guide";
 
-/// Where the notes of a release in preparation stand, in a commit that stands
-/// for `main`.
+/// Status of a release's notes in a checkout representing `main`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Notes {
-    /// Its notes branch has files of the release's directory the commit lacks,
-    /// each relative to the workspace root.
+    /// `release-notes/v<version>` contains files in
+    /// `<fragments_dir>/<version>/` that are not yet present in the checkout.
     Unmerged {
-        /// The notes branch as a sentence names it: `release-notes/v0.3.0`, or
-        /// `origin's release-notes/v0.3.0`.
         branch: String,
-
-        /// The command that deletes that branch.
         delete: String,
-
         missing: Vec<String>,
     },
 
-    /// Fragments or highlights at the top level of the fragments directory
-    /// whose change the release's branch ships, each relative to the workspace
-    /// root.
+    /// Top-level fragments or highlights whose changes are shipped by the
+    /// release branch have not yet been moved into
+    /// `<fragments_dir>/<version>/`.
     Unfiled(Vec<String>),
 
-    /// The commit has no notes of the release.
+    /// `<fragments_dir>/<version>/` has no fragments or highlights in the
+    /// checkout.
     Missing,
 
-    /// The commit has the release's notes.
+    /// All notes for the release are filed in `<fragments_dir>/<version>/`.
     Filed,
 }
 
-/// Tag release `version` at the tip of its release branch, with its notes as
-/// the commit checked out has them, and say how to publish the tag.
-///
-/// The error says why `version` can't be finalized.
+/// Create the annotated tag `v<version>` at the tip of its release branch and
+/// return a summary with the `git push` command to publish it.
 pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<String, String> {
     let repo = &pipeline.repo;
     repo.origin.refuse_shallow()?;
@@ -96,11 +87,8 @@ pub(crate) fn finalize(pipeline: &Pipeline<'_>, version: &Version) -> Result<Str
     Ok(said)
 }
 
-/// How to publish the tag of `version` this repository has and `origin`
-/// doesn't, which is the release; `None` without such a tag.
-///
-/// Refuses a tag there is no release branch to check against, or one not at the
-/// tip of its release branch.
+/// If `tag` already exists locally (and not yet on `origin`) at the tip of its
+/// release branch, return the push instructions for it.
 fn tagged_here(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -134,8 +122,6 @@ fn tagged_here(
     publish(pipeline, &line.branch, tag, false).map(Some)
 }
 
-/// Refuse to finalize `version`, in preparation on `line`, unless `notes` says
-/// the commit described by `at` has its notes filed.
 fn refuse_unready(
     pipeline: &Pipeline<'_>,
     notes: Notes,
@@ -180,13 +166,7 @@ fn refuse_unready(
     }
 }
 
-/// Where the notes of `version`, in preparation on `line`, stand in the commit
-/// `main` is a worktree of.
-///
-/// They are unmerged while its notes branch, here or on `origin`, has files of
-/// the release's directory the commit lacks, and unfiled while fragments or
-/// highlights whose change `line` ships sit at the top level of the fragments
-/// directory.
+/// Check the status of `version`'s release notes in `main`.
 pub(crate) fn notes(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -248,9 +228,8 @@ pub(crate) fn notes(
     })
 }
 
-/// The message of the tag of `version`: the subject `Release <version>`, then
-/// its release notes as `main` has them, then its upgrade guide under a heading
-/// of its own when it has one.
+/// Render the annotated tag message for `version` (`Release <version>` subject
+/// followed by the release notes and optional upgrade guide).
 fn message(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -273,8 +252,8 @@ fn message(
         error => error.to_string(),
     })?;
 
-    // The upgrade guide follows in the same message, so a breaking entry links
-    // to its section by anchor alone.
+    // Pass an empty upgrade_guide base path so breaking entries link to
+    // `#<anchor>` within the same tag message.
     let notes = markdown::notes(&release, &options.notes.headings, "");
     let guide = markdown::upgrade_guide(&release);
 
@@ -284,12 +263,9 @@ fn message(
         format!("{notes}\n# {UPGRADE_GUIDE}\n\n{guide}")
     };
 
-    // The first paragraph is the tag's subject, which `git tag -n` lists.
     Ok(format!("Release {version}\n\n{body}"))
 }
 
-/// How to publish the tag `tag`, at the tip of `branch`, which this command
-/// made when `made`; with `branch` too when `origin` lacks commits of it.
 fn publish(pipeline: &Pipeline<'_>, branch: &str, tag: &str, made: bool) -> Result<String, String> {
     let repo = &pipeline.repo;
     let standing = repo.refs.standing(&repo.refs.branch(branch)?)?;

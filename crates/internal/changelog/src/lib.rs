@@ -1,35 +1,34 @@
-//! Changelog fragments and highlights: what a project records about its changes
-//! for its users, to build its release notes from.
+//! Parsing, validation, and release-note rendering for changelog fragments and
+//! highlights.
 //!
-//! A project keeps them in one directory, `changelog.d/` by default.
-//! A fragment is one entry per change users notice: a Markdown file named
-//! `<slug>.<type>.md` after the change's [`Type`], holding the entry the
-//! release notes list and, for a change that requires users to act, its section
-//! of the release's upgrade guide.
-//! A highlight, in the directory's `highlights/`, is an editorial section of
-//! the release notes, for a feature worth more than its entry: a `# Title`, the
-//! people it credits, and its prose.
+//! A project stores fragments and highlights in a single directory
+//! (`changelog.d/` by default):
 //!
-//! [`fragment::parse`] and [`highlight::parse`] read one file and hold it to
-//! its format.
-//! [`check()`] holds a whole fragments directory to its layout, released files
-//! included, and every file in it to its format.
+//! - A **fragment** (`<slug>.<type>.md`) records a single user-visible change
+//!   under its [`Type`], along with an optional [`Upgrade`] section for
+//!   breaking changes.
+//! - A **highlight** (`highlights/<slug>.md`) is an editorial section of the
+//!   release notes for a major feature, containing a `# Title`, `Authors`
+//!   metadata, and prose.
 //!
-//! [`release::read`] builds a [`Release`] from a release's directory, or from
-//! the files no tag ships yet, crediting each file to the change requests that
-//! wrote it, which it reads from git's history.
-//! A release serializes to JSON, and [`markdown`] renders its release notes and
-//! upgrade guide.
+//! [`fragment::parse`] and [`highlight::parse`] parse and validate individual
+//! files.
+//! [`check()`] validates the directory layout and every fragment and highlight
+//! in it, including released subdirectories.
 //!
-//! The `changelog` binary runs [`check()`] for CI, and renders releases,
-//! through [`cli`].
+//! [`release::read`] assembles a [`Release`] from a release subdirectory (or
+//! from all unreleased files), attributing each file to the change requests or
+//! commits that modified it in git history.
+//! A [`Release`] serializes to JSON and renders to Markdown release notes and
+//! upgrade guides via [`markdown`].
 //!
-//! The crate reads no configuration: whatever differs between projects, such as
-//! where the fragments directory is, arrives as an argument.
+//! [`cli`] implements the standalone `changelog` binary used in CI.
+//! This crate does not read workspace configuration; callers pass
+//! project-specific settings as arguments.
 //!
-//! The formats are specified in
-//! `docs/rfd/121-changelog-fragments-and-validation.md`, and releases in
-//! `docs/rfd/122-release-pipeline.md`.
+//! See `docs/rfd/121-changelog-fragments-and-validation.md` and
+//! `docs/rfd/122-release-pipeline.md` for the format and pipeline
+//! specifications.
 
 pub mod cli;
 pub mod directory;

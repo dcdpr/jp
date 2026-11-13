@@ -1,17 +1,14 @@
-//! The `changelog` binary, and the flags of its `render` that `jp release
-//! render` shares.
+//! CLI for the standalone `changelog` binary and the [`Render`] flags shared
+//! with `jp release render`.
 //!
-//! `changelog check [DIR]` holds a fragments directory, `changelog.d` unless
-//! `DIR` names another, to its layout and every fragment and highlight in it to
-//! its format, and exits 1 when anything breaks a rule.
+//! - `changelog check [DIR]` validates the layout and file formats of a
+//!   fragments directory (`changelog.d` by default) and exits 1 if any problems
+//!   are found.
+//! - `changelog render [VERSION]` renders a release's notes or upgrade guide
+//!   (or all unreleased changes when `VERSION` is omitted) as Markdown or JSON.
 //!
-//! `changelog render [VERSION]` prints a release's notes or upgrade guide, or
-//! what no tag ships yet, as Markdown or as the JSON other tools render from
-//! ([`Render`]).
-//! The forge, the web address credits link from, and the headings arrive as
-//! flags rather than from configuration.
-//!
-//! Neither reads configuration, so CI can run them without `jp`.
+//! Neither subcommand reads JP configuration, so CI can run `changelog` without
+//! `jp`.
 
 use std::{env, ffi::OsString, process::ExitCode};
 
@@ -94,75 +91,76 @@ enum Command {
     },
 }
 
-/// What `render` prints, as `changelog render` and `jp release render` take it.
-// No group of its own: a subcommand flattening it under the same name would
-// define the group twice.
+/// Output selection flags shared by `changelog render` and `jp release render`.
+// Skip generating an ArgGroup so subcommands that flatten Render do not collide
+// with a group of the same name.
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 #[group(skip)]
 pub struct Render {
-    /// The release, such as `0.3.0`; without one, what no tag ships yet: the
-    /// fragments at the top level, and those of every release not yet tagged.
+    /// Release version (e.g. `0.3.0`); if omitted, renders top-level fragments
+    /// and any untagged release directories.
     #[arg(value_parser = version)]
     pub version: Option<Version>,
 
-    /// `markdown` for a document to read, or `json` for the release as other
-    /// tools render it.
+    /// `markdown` for rendered prose, or `json` for structured release data.
     #[arg(long, value_enum)]
     pub format: Option<Format>,
 
-    /// The Markdown document: `notes` for the release notes, the default, or
+    /// Markdown document to render: `notes` (default) for the release notes, or
     /// `upgrade` for the upgrade guide.
     #[arg(long, value_enum)]
     pub page: Option<Page>,
 
-    /// Where the release notes link to the upgrade guide, such as
+    /// Base URL or path for upgrade guide links in the release notes, such as
     /// `https://jp.computer/releases/0.3.0/upgrade`.
     ///
-    /// A breaking entry links to its section there, after a `#`.
-    /// Defaults to `upgrade`, a page beside the release notes.
+    /// Breaking entries link to `<upgrade-url>#<anchor>`.
+    /// Defaults to `upgrade`.
     #[arg(long, value_name = "URL")]
     pub upgrade_url: Option<String>,
 }
 
-/// The format `render` prints in.
+/// Output format for `render`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
     Markdown,
     Json,
 }
 
-/// The Markdown document `render` prints.
+/// Markdown document selected by `--page`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Page {
     Notes,
     Upgrade,
 }
 
-/// What to print of a release, its flags checked.
+/// Validated output target for a [`Render`] invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum View {
-    /// The release, as the JSON other tools render from.
+    /// Structured JSON representation of the [`Release`].
     Json,
 
-    /// The release notes, linking to the upgrade guide at this address.
+    /// Markdown release notes linking to the upgrade guide at `upgrade_guide`.
     Notes { upgrade_guide: String },
 
-    /// The upgrade guide.
+    /// Markdown upgrade guide.
     UpgradeGuide,
 }
 
 impl Render {
-    /// The part of the fragments directory to render.
+    /// Return the fragments directory [`Part`] selected by `self.version`.
     #[must_use]
     pub fn part(&self) -> Part {
         self.version.clone().map_or(Part::Unreleased, Part::Release)
     }
 
-    /// What to print, in `default` unless `--format` names a format.
+    /// Resolve the [`View`] to render, using `default` when `--format` is
+    /// omitted.
     ///
     /// # Errors
     ///
-    /// Refuses a flag that doesn't apply to what it would print.
+    /// Returns an error if `--page` or `--upgrade-url` is combined with an
+    /// incompatible format or page.
     pub fn view(&self, default: Format) -> Result<View, String> {
         match (self.format.unwrap_or(default), self.page) {
             (Format::Json, Some(_)) => Err("`--page` names a Markdown document; JSON holds the \
@@ -191,13 +189,16 @@ impl Render {
 }
 
 impl View {
-    /// `release` as this view prints it, each type's entries headed by
-    /// `headings`, and ending in a line break unless there is nothing to print:
-    /// a release without upgrade sections has no upgrade guide.
+    /// Render `release` according to this view, using `headings` for changelog
+    /// section titles.
+    ///
+    /// Returns an empty string when rendering [`View::UpgradeGuide`] for a
+    /// release with no breaking entries; otherwise ends with a trailing
+    /// newline.
     ///
     /// # Errors
     ///
-    /// Returns why the JSON couldn't be written.
+    /// Returns an error if JSON serialization fails.
     pub fn render(&self, release: &Release, headings: &Headings) -> Result<String, String> {
         Ok(match self {
             Self::Json => {
@@ -211,12 +212,12 @@ impl View {
     }
 }
 
-/// Read a release's version, such as `0.3.0`, with or without the `v` its tag
-/// has.
+/// Parse a semantic version string (e.g. `0.3.0`), stripping an optional
+/// leading `v`.
 ///
 /// # Errors
 ///
-/// Says why `text` isn't a semantic version.
+/// Returns an error if `text` is not a valid semantic version.
 pub fn version(text: &str) -> Result<Version, String> {
     let bare = text.strip_prefix('v').unwrap_or(text);
 
@@ -224,7 +225,7 @@ pub fn version(text: &str) -> Result<Version, String> {
         .map_err(|error| format!("`{text}` is not a release's version, such as `0.3.0`: {error}"))
 }
 
-/// Read `--repository`'s web address, without a `/` at its end.
+/// Parse `--repository` as an HTTP(S) URL and strip any trailing `/`.
 fn repository(text: &str) -> Result<String, String> {
     if !is_web_address(text) {
         return Err(format!(
@@ -235,7 +236,7 @@ fn repository(text: &str) -> Result<String, String> {
     Ok(text.trim_end_matches('/').to_owned())
 }
 
-/// Read `--heading`'s `TYPE=HEADING`.
+/// Parse a `--heading` `TYPE=HEADING` argument.
 fn heading(text: &str) -> Result<(Type, String), String> {
     let (type_, heading) = text
         .split_once('=')
@@ -252,20 +253,16 @@ fn heading(text: &str) -> Result<(Type, String), String> {
     Ok((type_, heading.to_owned()))
 }
 
-/// Run the binary with the process's arguments.
+/// Run the CLI with [`env::args_os`].
 #[must_use]
 pub fn main() -> ExitCode {
     run(env::args_os())
 }
 
-/// Run the binary with `args`, the first of which names it, as the process's
-/// arguments do.
+/// Run the CLI with `args` (including the binary name at index 0).
 ///
-/// Help, a version, or arguments it can't parse end the process, as they do the
-/// binary.
+/// `--help`, `--version`, and parse errors exit the process directly via clap.
 #[must_use]
-// The binary's output: the report or the release on stdout, a failure on
-// stderr.
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 pub fn run<I, T>(args: I) -> ExitCode
 where

@@ -86,29 +86,26 @@ pub(crate) struct WikiSettings {
     pub relevant_key: String,
 }
 
-/// Where the release notes' fragments live, where the site serves the releases,
-/// and what the notes are rendered with.
+/// Release-note settings written to `.vitepress/jp-vite/settings.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReleaseSettings {
-    /// The fragments directory, relative to the workspace root, as `jp release`
-    /// reads it.
+    /// Fragments directory relative to the workspace root.
     pub dir: String,
 
-    /// Where the site serves the releases: a directory relative to the source
-    /// directory, [`RELEASE_ROUTE`].
+    /// Site route prefix relative to the VitePress source directory
+    /// ([`RELEASE_ROUTE`]).
     pub route: String,
 
-    /// The forge the notes credit change requests on, when one is configured;
-    /// otherwise the one the project's web address is on.
+    /// Configured forge identifier (`github`, `gitlab`, or `none`), or `None`
+    /// to infer it from the repository URL.
     pub forge: Option<String>,
 
-    /// The project's web address, which the credits link from, when one is
-    /// configured; otherwise git's `origin` remote's, where the site is built.
+    /// Configured repository web URL, or `None` to derive it from git's
+    /// `origin` remote at build time.
     pub repository: Option<String>,
 
-    /// The heading of each type's section of the release notes, by the type's
-    /// id; a type left out keeps its default heading.
+    /// Custom changelog section headings keyed by fragment type ID.
     pub headings: BTreeMap<String, String>,
 }
 
@@ -290,11 +287,8 @@ fn labels(vocabulary: &Vocabulary) -> BTreeMap<String, Label> {
         .collect()
 }
 
-/// The releases, when the fragments directory `notes` names exists.
-///
-/// The fragments directory has to be inside the workspace, since the site is
-/// built from it, but not inside the source directory: the site renders the
-/// release pages rather than serving the fragments.
+/// Resolve [`ReleaseSettings`] when the configured `fragments_dir` exists
+/// inside the workspace.
 fn releases(root: &Utf8Path, notes: Notes) -> Result<Option<ReleaseSettings>, String> {
     let absolute = resolve(root, &notes.fragments_dir);
     if !absolute.is_dir() {

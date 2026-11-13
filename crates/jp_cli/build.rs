@@ -11,11 +11,11 @@ fn main() {
         .map(|s| s.trim().to_owned())
         .unwrap_or_default();
 
-    // A release build sets `SOURCE_DATE_EPOCH` to the time of the commit it
-    // builds, so the version names the day the release was cut, and two builds
-    // of one commit agree. No `rerun-if-env-changed`: any `rerun-if` directive
-    // stops Cargo from running this script again when the package's files
-    // change, which keeps the hash above current.
+    // Use `SOURCE_DATE_EPOCH` when set (e.g. during release builds) so builds
+    // from the same commit produce an identical version string. Do not emit
+    // `cargo:rerun-if-env-changed`: any `rerun-if` directive disables Cargo's
+    // default package-wide rebuild trigger, which would leave `git_hash` stale
+    // when source files change.
     let built = env::var("SOURCE_DATE_EPOCH")
         .ok()
         .and_then(|seconds| seconds.trim().parse().ok())

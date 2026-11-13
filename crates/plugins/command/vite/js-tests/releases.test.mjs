@@ -16,13 +16,11 @@ import {
     workspaceRoot,
 } from '../site/jp-vite/releases.mjs'
 
-// The warning a draft page opens with, below its title, for release 0.4.0.
 const DRAFT_NOTICE = '> [!WARNING]\n'
     + '> Draft: 0.4.0 isn\'t tagged yet, so this page can still change.\n'
     + '> Only `jp vite serve` shows it; until the tag, the built site lists these changes on the '
     + 'Unreleased page.\n'
 
-// The settings' `release`, as `jp vite sync` writes it for JP.
 const RELEASE = {
     dir: 'changelog.d',
     route: 'releases',

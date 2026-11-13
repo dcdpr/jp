@@ -1,17 +1,16 @@
-//! A release's two documents, as Markdown.
+//! Markdown rendering for release notes ([`notes`]) and upgrade guides
+//! ([`upgrade_guide`]).
 //!
-//! [`notes`] renders the release notes: the overview, each highlight under its
-//! title and credited to its authors and change requests, and every entry in a
-//! list under its type's heading, with its credits.
-//! A breaking entry is marked, and links to its section of the upgrade guide.
+//! - [`notes`] renders the release overview, each highlight (`## <title>`,
+//!   body, and `By <authors> in <credits>.`), and the `## Changelog` sections
+//!   grouped by [`Type`].
+//!   Breaking entries include a link to their upgrade guide section.
+//! - [`upgrade_guide`] renders `## <title>` sections for each breaking entry,
+//!   with its credits and upgrade instructions, or an empty string if the
+//!   release has no breaking entries.
 //!
-//! [`upgrade_guide`] renders the upgrade guide: one section per entry with an
-//! upgrade section, headed by its title, followed by the entry's credits and
-//! the section's body.
-//! A release without upgrade sections has no upgrade guide, which renders as
-//! nothing.
-//!
-//! Neither document has a title or a date; whoever places them adds both.
+//! Neither function emits a top-level `#` document title or release date;
+//! callers prepend those for their target surface.
 
 use std::collections::HashMap;
 
@@ -25,16 +24,12 @@ use crate::{
     release::{Credited, Headings, Release, series},
 };
 
-/// Where the release notes link to the upgrade guide when nothing says
-/// otherwise: a page beside them.
+/// Default relative path from the release notes to the upgrade guide.
 pub const UPGRADE_GUIDE: &str = "upgrade";
 
-/// The release notes of `release`, each type's entries headed by `headings`.
-///
-/// A breaking entry links to its section of the upgrade guide at
-/// `upgrade_guide`, such as `upgrade` or
-/// `https://jp.computer/releases/0.3.0/upgrade`, with the anchor of the
-/// section's heading after a `#`.
+/// Render the Markdown release notes for `release`, using `headings` for
+/// changelog section titles and `upgrade_guide` as the base URL/path for
+/// breaking-change upgrade links.
 #[must_use]
 pub fn notes(release: &Release, headings: &Headings, upgrade_guide: &str) -> String {
     let (_, anchors) = guide(release);
@@ -76,19 +71,15 @@ pub fn notes(release: &Release, headings: &Headings, upgrade_guide: &str) -> Str
     blocks.join("\n\n") + "\n"
 }
 
-/// The upgrade guide of `release`, or nothing when no entry has an upgrade
-/// section.
+/// Render the Markdown upgrade guide for `release`, or an empty string if no
+/// entry has an upgrade section.
 #[must_use]
 pub fn upgrade_guide(release: &Release) -> String {
     guide(release).0
 }
 
-/// The upgrade guide of `release`, and the anchor of each section's heading, by
-/// the slug of its entry.
-///
-/// Anchors are read from the rendered guide as the site gives them, so a
-/// heading in a section's body that takes a section's slug first moves the
-/// section's anchor along with it.
+/// Render the upgrade guide for `release` and map each breaking entry's slug to
+/// its generated heading anchor.
 fn guide(release: &Release) -> (String, HashMap<&str, String>) {
     let mut guide = String::new();
     let mut sections = vec![];
@@ -122,9 +113,8 @@ fn guide(release: &Release) -> (String, HashMap<&str, String>) {
     (guide, anchors)
 }
 
-/// `entry` as an item of its type's list: the entry, then for a breaking one a
-/// link to its section of the upgrade guide at `upgrade_guide`, whose heading
-/// has `anchor`, then its credits.
+/// Render `entry` as a bullet list item with an optional upgrade-guide link and
+/// credit list.
 fn item(entry: &Credited<Fragment>, anchor: Option<&str>, upgrade_guide: &str) -> String {
     let mut tail = vec![];
     if entry.file.upgrade.is_some() {
@@ -140,8 +130,8 @@ fn item(entry: &Credited<Fragment>, anchor: Option<&str>, upgrade_guide: &str) -
 
     let mut text = entry.file.entry.clone();
     if !tail.is_empty() {
-        // The last paragraph goes on; after a code block, a list, or any other
-        // block, a line would be read as part of it.
+        // Append on the next line when `text` ends with a paragraph, or start a
+        // new paragraph after a code block, list, or blockquote.
         text.push_str(if ends_in_paragraph(&text) {
             "\n"
         } else {
@@ -153,8 +143,8 @@ fn item(entry: &Credited<Fragment>, anchor: Option<&str>, upgrade_guide: &str) -
     list_item(&text)
 }
 
-/// `markdown` as one item of a bullet list: every line after the first indented
-/// to the item's content, so each block stays inside it.
+/// Format `markdown` as a `- ` bullet item, indenting continuation lines by two
+/// spaces.
 fn list_item(markdown: &str) -> String {
     let mut item = String::from("- ");
     for (index, line) in markdown.lines().enumerate() {
@@ -170,7 +160,6 @@ fn list_item(markdown: &str) -> String {
     item
 }
 
-/// Whether the last block of `markdown` is a paragraph.
 fn ends_in_paragraph(markdown: &str) -> bool {
     let arena = Arena::new();
     let root = parse_document(&arena, markdown, &document::markdown_options());
@@ -179,9 +168,6 @@ fn ends_in_paragraph(markdown: &str) -> bool {
         .is_some_and(|node| matches!(node.data().value, NodeValue::Paragraph))
 }
 
-/// Each of `credits` as a link to its page, or as its label when it has none.
-///
-/// A commit's label is a hash, so it is shown as code.
 fn links(credits: &[Credit]) -> Vec<String> {
     credits
         .iter()

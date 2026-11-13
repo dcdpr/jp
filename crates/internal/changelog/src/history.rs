@@ -1,18 +1,15 @@
-//! What the history of the default branch says about who wrote each fragment
-//! and highlight.
+//! First-parent git history tracking for fragments and highlights.
 //!
-//! A release credits a file to every commit that wrote or changed it while it
-//! sat at the top level of the fragments directory, up to the commit that filed
-//! it into a release's directory.
-//! History is read along the first-parent line, so a change that reached the
-//! branch through a merge is the merge commit's, whose message names the change
-//! request.
+//! Each file is credited to the commits that added, modified, or renamed it at
+//! the top level of the fragments directory before it was moved into a
+//! `<version>/` release subdirectory.
+//! Because history is walked along the first-parent line of `HEAD`, changes
+//! merged from a branch are attributed to the merge or squash commit on the
+//! default branch.
 //!
-//! [`History::read`] reads it once, to ask about any file: the commit that
-//! brought it to the top level, who to credit for it, and for a commit, the
-//! files it added and where they are now.
-//! [`parse`] reads the log `git::log` writes, and [`credited`] follows each
-//! file back through it, renames included.
+//! [`History::read`] loads the commit log once and answers queries about file
+//! origins ([`History::origins`]), files added by a commit
+//! ([`History::added_by`]), and credits ([`History::credits`]).
 
 use std::collections::HashMap;
 
@@ -22,40 +19,38 @@ use crate::{
     directory::is_unreleased, document::ListedCredit, forge::Forge, git, release::ReleaseError,
 };
 
-/// What each commit's header in the log starts with, followed by its hash, a
-/// line break, and its message.
+/// Commit header prefix in `git::log` output, followed by `<hash>\n<message>`.
 pub(crate) const HEADER: &str = "commit ";
 
-/// The first-parent history of `HEAD` in the repository holding a fragments
-/// directory, limited to the commits that changed the directory.
+/// First-parent commit history of `HEAD` touching a fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct History {
-    /// Newest first, as git writes them.
+    /// Commits ordered from newest to oldest.
     commits: Vec<Commit>,
 }
 
-/// A fragment or highlight a commit added at the top level of the fragments
-/// directory.
+/// A fragment or highlight added at the top level of the fragments directory by
+/// a commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Added {
-    /// Its path below the fragments directory when the commit added it, such as
-    /// `retry-idle-turns.fixed.md` or `highlights/fan-out.md`.
+    /// Path relative to the fragments directory when the commit added it (e.g.
+    /// `retry-idle-turns.fixed.md` or `highlights/fan-out.md`).
     pub path: String,
 
-    /// Its path at `HEAD`, followed through every rename since, such as
-    /// `0.3.0/retry-idle-turns.fixed.md`; `None` once a later commit deleted
-    /// it.
+    /// Current path at `HEAD` after following subsequent renames (e.g.
+    /// `0.3.0/retry-idle-turns.fixed.md`), or `None` if a later commit deleted
+    /// the file.
     pub now: Option<String>,
 }
 
 impl History {
-    /// Read the history of the repository holding the fragments directory
-    /// `dir`.
+    /// Load the first-parent commit history touching `dir`.
     ///
     /// # Errors
     ///
-    /// Refuses a shallow clone, which lacks the history, and returns a git
-    /// command that failed or a log that doesn't read as one.
+    /// Returns [`ReleaseError::Shallow`] if the repository is a shallow clone,
+    /// [`ReleaseError::Git`] if `git` fails, or [`ReleaseError::Log`] if the
+    /// `git log` output cannot be parsed.
     pub fn read(dir: &Utf8Path) -> Result<Self, ReleaseError> {
         if git::is_shallow(dir)? {
             return Err(ReleaseError::Shallow);
@@ -69,12 +64,11 @@ impl History {
         &self.commits
     }
 
-    /// For each of `paths`, below the fragments directory at `HEAD`, the hash
-    /// of the commit that brought it to the top level: the oldest commit that
-    /// wrote or changed it there.
+    /// Return the hash of the commit that first added each path in `paths` at
+    /// the top level of the fragments directory.
     ///
-    /// `None` for a file no commit wrote at the top level, such as one added
-    /// straight into a release's directory.
+    /// Returns `None` for any file that was never committed at the top level
+    /// (for example, a file added directly inside a `<version>/` subdirectory).
     #[must_use]
     pub fn origins(&self, paths: &[&str]) -> Vec<Option<String>> {
         credited(&self.commits, paths)
@@ -86,11 +80,11 @@ impl History {
             .collect()
     }
 
-    /// The fragments and highlights the commit `hash` added at the top level,
-    /// each with where it is now.
+    /// Return the top-level fragments and highlights added by commit `hash`,
+    /// along with their current paths at `HEAD`.
     ///
-    /// Empty when the commit added none, which includes a commit off the
-    /// first-parent line of `HEAD`: its changes are the merge commit's.
+    /// Returns an empty vector if `hash` is not on the first-parent history or
+    /// added no top-level files.
     #[must_use]
     pub fn added_by(&self, hash: &str) -> Vec<Added> {
         let Some(index) = self.commits.iter().position(|commit| commit.hash == hash) else {
@@ -110,10 +104,12 @@ impl History {
             .collect()
     }
 
-    /// Who to credit for `path`, below the fragments directory at `HEAD`: each
-    /// commit that wrote or changed it while it sat at the top level, oldest
-    /// first, as the change request `forge` reads from its message, or as the
-    /// commit itself when the message names none; each credit once.
+    /// Return the deduplicated credits for `path` (relative to the fragments
+    /// directory at `HEAD`), ordered from oldest to newest commit that touched
+    /// the file at the top level.
+    ///
+    /// Each commit is credited as its change request on `forge`, or as its
+    /// commit hash when the commit message references no change request.
     #[must_use]
     pub fn credits(&self, path: &str, forge: Forge) -> Vec<ListedCredit> {
         let indices = credited(&self.commits, &[path]).pop().unwrap_or_default();
@@ -135,13 +131,11 @@ impl History {
         credits
     }
 
-    /// Where the file at `path` after the commit at `index` is at `HEAD`:
-    /// followed through every later rename, and `None` once a later commit
-    /// deleted it.
+    /// Track `path` forward from `commits[index]` to `HEAD` across renames,
+    /// returning `None` if a newer commit deleted the file.
     fn follow(&self, index: usize, path: &str) -> Option<String> {
         let mut path = path.to_owned();
 
-        // The commits newer than the one at `index`, oldest of them first.
         for commit in self.commits[..index].iter().rev() {
             for change in &commit.changes {
                 match change {
@@ -159,21 +153,16 @@ impl History {
     }
 }
 
-/// A commit on the first-parent line that changed the fragments directory.
+/// A first-parent commit that modified the fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Commit {
     pub hash: String,
-
-    /// The full message, subject and body.
     pub message: String,
-
-    /// What the commit changed below the fragments directory, against its first
-    /// parent.
     pub changes: Vec<Change>,
 }
 
-/// How a commit changed one path, below the fragments directory with `/`
-/// between its parts.
+/// A file change within the fragments directory relative to a commit's first
+/// parent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Change {
     Added(String),
@@ -183,10 +172,8 @@ pub(crate) enum Change {
 }
 
 impl Change {
-    /// The path the change leaves a file at, and the path it was at before:
-    /// `None` before an added file, and the same path before a modified one.
-    ///
-    /// `None` for a deleted file, which the change leaves nowhere.
+    /// Return `(previous_path, current_path)` for this change, or `None` if the
+    /// file was deleted.
     fn paths(&self) -> Option<(Option<&String>, &String)> {
         match self {
             Self::Added(path) => Some((None, path)),
@@ -197,17 +184,12 @@ impl Change {
     }
 }
 
-/// Read the log `git::log` writes: each commit's header, `commit <hash>`, a
-/// line break and its message, then each path it changed as `--name-status -z`
-/// writes them, every field ended by a NUL.
-///
-/// The error names what in the log doesn't read as such.
+/// Parse the NUL-delimited `--name-status -z` output of [`git::log`].
 pub(crate) fn parse(log: &str) -> Result<Vec<Commit>, String> {
     let mut commits: Vec<Commit> = vec![];
     let mut fields = log.split('\0');
 
     while let Some(field) = fields.next() {
-        // A line break separates a commit's header from what it changed.
         let field = field.trim_start_matches('\n');
         if field.is_empty() {
             continue;
@@ -242,8 +224,8 @@ pub(crate) fn parse(log: &str) -> Result<Vec<Commit>, String> {
                 from: path()?,
                 to: path()?,
             },
-            // A copy leaves its source where it was: for the copy, history
-            // starts here.
+            // Treat a copied file as newly added at its destination so its
+            // history starts at the copy commit.
             Some('C') => {
                 path()?;
                 Change::Added(path()?)
@@ -256,8 +238,8 @@ pub(crate) fn parse(log: &str) -> Result<Vec<Commit>, String> {
     Ok(commits)
 }
 
-/// The letter of a `--name-status` status, such as `R` for `R100`: one
-/// uppercase letter, and a similarity score for a rename or a copy.
+/// Parse the status letter from a `--name-status` token (e.g. `'R'` from
+/// `"R100"`).
 fn status(field: &str) -> Option<char> {
     let mut chars = field.chars();
     let letter = chars.next().filter(char::is_ascii_uppercase)?;
@@ -265,16 +247,13 @@ fn status(field: &str) -> Option<char> {
     chars.all(|c| c.is_ascii_digit()).then_some(letter)
 }
 
-/// For each of `paths`, the indices into `commits` of the commits that wrote or
-/// changed it while it sat at the top level of the fragments directory, oldest
-/// first.
+/// For each path in `paths` (relative to the fragments directory at `HEAD`),
+/// return the indices in `commits` that added, modified, or renamed the file at
+/// the top level, ordered from oldest to newest.
 ///
-/// `commits` is the log newest first, as git writes it, and each of `paths` is
-/// a file's path below the fragments directory now.
-/// A file is followed back through every rename.
-/// A rename counts only when it moves a file within the top level, so the
-/// commit that files it into a release's directory counts for nothing, and
-/// neither does any change to it there.
+/// Follows renames backward through `commits` (which are ordered newest-first).
+/// The commit that moves a file into `<version>/` and any subsequent edits
+/// inside `<version>/` are excluded.
 pub(crate) fn credited(commits: &[Commit], paths: &[&str]) -> Vec<Vec<usize>> {
     let mut followed: HashMap<String, usize> = paths
         .iter()
@@ -294,28 +273,20 @@ pub(crate) fn credited(commits: &[Commit], paths: &[&str]) -> Vec<Vec<usize>> {
     credited
 }
 
-/// Credit `commit`, at `index` in the log, to each file in `followed` it wrote
-/// or changed at the top level, and follow each file it moved back to where it
-/// was before.
-///
-/// `followed` maps a path to the index of the file found there, and `credited`
-/// holds each file's credited commits.
-/// A file the commit added ends its history: nothing before it is that file.
+/// Process a single `commit` (at `index`), recording top-level changes in
+/// `credited` and updating `followed` with pre-commit paths.
 fn follow(
     commit: &Commit,
     index: usize,
     followed: &mut HashMap<String, usize>,
     credited: &mut [Vec<usize>],
 ) {
-    // Every change in a commit is read against where the files were after it,
-    // so a path one change frees and another takes, in the same commit, is
-    // followed to the right file.
+    // Stage path updates so a commit that renames `a -> b` and adds a new `a`
+    // resolves each change against the post-commit paths in `followed`.
     let mut ended = vec![];
     let mut moved = vec![];
 
     for change in &commit.changes {
-        // Nothing followed can have been deleted after the commit: the commit
-        // that wrote it again ended its history.
         let Some((before, after)) = change.paths() else {
             continue;
         };

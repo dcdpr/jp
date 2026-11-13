@@ -1,23 +1,20 @@
-//! The repository holding the workspace, as `cut`, `pick`, `finalize`, and
-//! `due` reach it.
+//! Git repository operations for the release pipeline.
 //!
-//! They read what `origin` holds after fetching its `main`, release branches,
-//! and notes branches into remote-tracking branches, together with the release
-//! branches, notes branches, and tags this repository has: where both have a
-//! branch, the one with the other's commits counts (see [`Standing`]).
-//! They write in worktrees of their own, so the checkout they run from is left
-//! alone, and keep what they make in this repository's branches and tags.
-//! Nothing is pushed.
-//! The default branch is `main`.
+//! Pipeline subcommands fetch `main`, `release/*`, and `release-notes/*` from
+//! `origin` into remote-tracking branches, perform file and commit operations
+//! in temporary worktrees (leaving the user's checkout untouched), and update
+//! local branches and tags without pushing.
 //!
-//! [`Repository`] reaches the repository through four views, which run git the
-//! same way: [`Refs`] for branches and tags, [`History`] for commits and what
-//! they hold, [`Origin`] for `origin` and the checkout measured against it, and
-//! [`Worktrees`].
-//! Every path a view takes or gives is relative to the workspace root, which
-//! may sit below the top of the work tree.
+//! [`Repository`] exposes four sub-views over a shared [`Git`] handle:
 //!
-//! [`Standing`]: crate::releases::Standing
+//! - [`Refs`] for reading and updating branches and tags.
+//! - [`History`] for inspecting commits, ancestry, and trees.
+//! - [`Origin`] for fetching from `origin` and comparing the current checkout
+//!   against `origin/main`.
+//! - [`Worktrees`] for creating and managing temporary worktrees.
+//!
+//! All paths accepted or returned by these views are relative to the workspace
+//! root (which may be a subdirectory of the git work tree).
 
 mod git;
 mod history;
@@ -47,22 +44,13 @@ use crate::{
     shell::Shell,
 };
 
-/// The remote releases are read from, and published to.
 pub(crate) const ORIGIN: &str = "origin";
-
-/// The default branch, which every change reaches first.
 pub(crate) const MAIN: &str = "main";
-
-/// Where `main` is fetched to.
 const MAIN_REF: &str = "refs/remotes/origin/main";
-
-/// Where `origin`'s branches are fetched to, each below its own name.
 const ORIGIN_REFS: &str = "refs/remotes/origin/";
-
-/// Where this repository's branches are.
 const LOCAL_REFS: &str = "refs/heads/";
 
-/// The repository holding a workspace.
+/// Git repository handle for a workspace.
 pub(crate) struct Repository<'a> {
     pub refs: Refs<'a>,
     pub history: History<'a>,
@@ -71,9 +59,6 @@ pub(crate) struct Repository<'a> {
 }
 
 impl<'a> Repository<'a> {
-    /// The repository holding the workspace at `root`.
-    ///
-    /// The error says the workspace isn't in a git repository.
     pub(crate) fn open(shell: &'a Shell, root: &Utf8Path) -> Result<Self, String> {
         let git = Git::open(shell, root)?;
 
@@ -85,16 +70,13 @@ impl<'a> Repository<'a> {
         })
     }
 
-    /// What the tags and release branches here and on `origin` say, each
-    /// release branch at its tip (see [`Refs::tip`]).
+    /// Load [`Releases`] from local and `origin` tags and release branches.
     pub(crate) fn releases(&self) -> Result<Releases, String> {
         self.releases_and_tags().map(|(releases, _)| releases)
     }
 
-    /// [`releases`], and the tags they were read from, for a command that needs
-    /// both without asking `origin` for the tags twice.
-    ///
-    /// [`releases`]: Self::releases
+    /// Load [`Releases`] alongside the raw [`Tags`] map without querying
+    /// `origin` for tags twice.
     pub(crate) fn releases_and_tags(&self) -> Result<(Releases, Tags), String> {
         let tags = self.refs.tags()?;
         let published = releases::versions(tags.origin.keys());
@@ -133,27 +115,23 @@ impl<'a> Repository<'a> {
     }
 }
 
-/// The commit the workspace's checkout is at, which `cut`, `pick`, and
-/// `finalize` read as `main`.
+/// Current workspace checkout compared against `origin/main`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Checkout {
-    /// The commit's hash.
     pub head: String,
 
-    /// The branch checked out; `None` on a detached `HEAD`.
+    /// Checked-out branch name, or `None` when `HEAD` is detached.
     pub branch: Option<String>,
 
-    /// The hash of `origin`'s `main`, as last fetched.
+    /// Commit hash of `refs/remotes/origin/main`.
     pub main: String,
 }
 
 impl Checkout {
-    /// Whether the checkout is at `origin`'s `main`.
     pub(crate) fn at_main(&self) -> bool {
         self.head == self.main
     }
 
-    /// Where the checkout is, as a sentence names it: `main at 4c5d6e7`.
     pub(crate) fn describe(&self) -> String {
         match &self.branch {
             Some(branch) => format!("{branch} at {}", short(&self.head)),
@@ -161,9 +139,7 @@ impl Checkout {
         }
     }
 
-    /// That the checkout lacks commits of `origin`'s `main`, and how to bring
-    /// them in: `git pull` on `main`, and `git merge origin/main` on any other
-    /// branch, where `git pull` brings in the branch's own upstream.
+    /// Format the error message for a checkout that is behind `origin/main`.
     pub(crate) fn behind(&self) -> String {
         let how = if self.branch.as_deref() == Some(MAIN) {
             "`git pull`".to_owned()
@@ -179,10 +155,8 @@ impl Checkout {
         )
     }
 
-    /// That the checkout is ahead of `origin`'s `main`, as the start of a
-    /// sentence, when it is.
-    ///
-    /// Holds only for a checkout with every commit of `origin`'s `main`.
+    /// Format a prefix clause noting that `self.head` is ahead of
+    /// `origin/main`, or return `None` when `self.head == self.main`.
     pub(crate) fn ahead(&self) -> Option<String> {
         (!self.at_main()).then(|| {
             format!(
@@ -194,28 +168,22 @@ impl Checkout {
     }
 }
 
-/// The tags this repository and `origin` each have: each tag's name, such as
-/// `v0.3.0`, and the hash of the commit it names.
+/// Local and `origin` `v*` tag maps (`tag_name -> commit_hash`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Tags {
     pub local: BTreeMap<String, String>,
     pub origin: BTreeMap<String, String>,
 }
 
-/// A branch as this repository and `origin` each hold it.
+/// Local and `origin` commit hashes for a branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Branch {
-    /// Its name, such as `release/0.3`.
     pub name: String,
-
-    /// The hash of this repository's branch, when it has one.
     pub local: Option<String>,
-
-    /// The hash of `origin`'s branch, as last fetched, when it has one.
     pub origin: Option<String>,
 }
 
-/// A path in the temporary directory nothing else takes, named after `purpose`.
+/// Generate a unique path in the system temporary directory for `purpose`.
 pub(crate) fn temporary(purpose: &str) -> Result<Utf8PathBuf, String> {
     static TAKEN: AtomicU64 = AtomicU64::new(0);
 

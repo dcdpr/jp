@@ -1,5 +1,4 @@
-//! The plugin's settings, read from `plugins.command.release-github.options`,
-//! and what it reads of `jp release`'s, from `plugins.command.release.options`.
+//! Configuration under `plugins.command.release-github.options`.
 //!
 //! ```toml
 //! [plugins.command.release-github.options]
@@ -8,37 +7,33 @@
 //! footer = ".config/release/github.md"
 //! ```
 //!
-//! A Release's description renders a release's notes the way `jp release
-//! render` does, so it reads the fragments directory, the forge, the web
-//! address, and the headings from `jp release`'s settings, through
-//! `release_options`.
+//! Shared release-note settings (`fragments_dir`, `forge`, `repository`,
+//! `headings`) are loaded from `plugins.command.release.options` via
+//! [`release_options::Notes`].
 
 use camino::Utf8PathBuf;
 use doc::repository::is_web_address;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-/// The placeholder `upgrade_guide` names a release's version with.
+/// Version placeholder in `upgrade_guide` and `footer` templates.
 pub(crate) const VERSION: &str = "{version}";
 
-/// The placeholder the files the plugin attaches name the address a release's
-/// files are served from with.
+/// Download base-URL placeholder in attached `assets` and `footer` templates.
 pub(crate) const DOWNLOAD: &str = "{download}";
 
-/// This plugin's settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Options {
-    /// Files to attach to every Release besides its build's, relative to the
-    /// workspace root, with each `{download}` in them replaced.
+    /// Extra workspace-relative files to attach to every GitHub Release (with
+    /// `{download}` substituted in UTF-8 files).
     pub(crate) assets: Vec<Utf8PathBuf>,
 
-    /// The address of a release's upgrade guide, with `{version}` in it, that
-    /// breaking entries link to; unset, the description includes the guide.
+    /// External upgrade guide URL template containing `{version}`; if `None`,
+    /// the upgrade guide is appended inline to the release description.
     pub(crate) upgrade_guide: Option<String>,
 
-    /// A Markdown file added after the notes in every Release's description,
-    /// relative to the workspace root, with `{version}` and `{download}` in it
-    /// replaced.
+    /// Workspace-relative Markdown file appended to every GitHub Release
+    /// description (with `{version}` and `{download}` substituted).
     pub(crate) footer: Option<Utf8PathBuf>,
 }
 
@@ -51,9 +46,8 @@ struct Section {
 }
 
 impl Options {
-    /// Read the plugin's options, as the host passed them.
-    ///
-    /// Settings this plugin doesn't read are ignored.
+    /// Parse [`Options`] from `plugins.command.release-github.options`,
+    /// ignoring unknown keys.
     pub(crate) fn read(options: &Map<String, Value>) -> Result<Self, String> {
         let section: Section =
             serde_json::from_value(Value::Object(options.clone())).map_err(|error| {

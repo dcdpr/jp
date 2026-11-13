@@ -1,17 +1,10 @@
-//! The tool this plugin serves, answered when the host's `init` carries a tool
-//! call.
+//! Execution of the `add` tool (`source = "plugin.command.release.add"`).
 //!
-//! The host names it the way its `source` does, without the `changelog_` the
-//! assistant knows it by: `add`, which writes a fragment.
-//! A call runs once and ends with its outcome.
-//! The host closed stdin after `init`, so nothing here asks it anything, and a
-//! missing argument is an error naming the argument.
-//! `add` also answers `format_arguments`, previewing the file it is about to
-//! write.
-//!
-//! The call's access policy is enforced on the fragments directory before the
-//! tool runs: the directory has to be inside the workspace, and the policy has
-//! to let the tool read it and create a file in it.
+//! Handles both `run` (writing a new fragment file) and `format_arguments`
+//! (rendering a terminal preview of the planned file before approval).
+//! Before planning or writing, the tool verifies that the configured fragments
+//! directory is inside the workspace and permitted by the call's
+//! [`AccessPolicy`].
 
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::Type;
@@ -27,18 +20,11 @@ use crate::{
 };
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
-
-/// What a tool answers: its outcome, or a failure that becomes an error outcome
-/// on the way out.
 type Answer = Result<Outcome, Error>;
 
-/// The tools this plugin serves, by the name a `source` gives them.
 pub(crate) const TOOLS: &[&str] = &["add"];
 
-/// Answer one tool call.
-///
-/// Every failure becomes an error outcome, so the assistant reads what went
-/// wrong and can correct the call.
+/// Execute `call` and return its [`Outcome`].
 pub(crate) fn run(init: &InitMessage, call: &ToolCall, options: &Options) -> Outcome {
     match answer(init, call, options) {
         Ok(outcome) => outcome,
@@ -76,10 +62,8 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
         Ok(fragments) => fragments,
         Err(refusal) => return refuse(refusal),
     };
-    // Planned before the action split, so a preview fails too: an unattended
-    // preview that errors fails the call ahead of the approval prompt, which
-    // tells the assistant to fix the arguments rather than asking the user
-    // about a call that cannot land.
+    // Plan and validate before branching on `call.action` so invalid arguments
+    // fail during `FormatArguments` before prompting the user for approval.
     let planned = match entry::plan(&fragments, type_, &body, slug.as_deref()) {
         Ok(planned) => planned,
         Err(refusal) => return refuse(refusal),
@@ -95,12 +79,8 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     }
 }
 
-/// The fragments directory as the access policy reads paths: relative to the
-/// workspace root.
-///
-/// A directory configured as an absolute path inside the workspace is taken
-/// relative to it; one outside it is refused, since a tool reaches only the
-/// workspace.
+/// Resolve `dir` as a path relative to the workspace `root`, rejecting paths
+/// outside the workspace.
 fn workspace_relative(root: &Utf8Path, dir: &Utf8Path) -> Result<Utf8PathBuf, String> {
     if !dir.is_absolute() {
         return Ok(dir.to_path_buf());
@@ -116,12 +96,8 @@ fn workspace_relative(root: &Utf8Path, dir: &Utf8Path) -> Result<Utf8PathBuf, St
         })
 }
 
-/// Check the call's access policy lets it read the fragments directory, `dir`,
-/// and create a file in it.
-///
-/// A policy the plugin can't read refuses the call rather than reading as
-/// unrestricted.
-/// The error is the refusal, for the assistant.
+/// Verify that `call`'s [`AccessPolicy`] grants read and create access to
+/// `dir`.
 fn check_access(init: &InitMessage, call: &ToolCall, dir: &Utf8Path) -> Result<(), String> {
     let access = call
         .access
@@ -153,13 +129,9 @@ fn check_access(init: &InitMessage, call: &ToolCall, dir: &Utf8Path) -> Result<(
     Ok(())
 }
 
-/// A call's arguments, read with errors that name the argument.
 struct Arguments<'a>(&'a Map<String, Value>);
 
 impl Arguments<'_> {
-    /// An argument the call can't do without.
-    ///
-    /// Absent and `null` are both missing.
     fn required<T: DeserializeOwned>(&self, key: &str) -> Result<T, Error> {
         match self.0.get(key) {
             None | Some(Value::Null) => Err(format!("Missing argument `{key}`.").into()),
@@ -168,7 +140,6 @@ impl Arguments<'_> {
         }
     }
 
-    /// An argument the call can do without; absent and `null` are both `None`.
     fn optional<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, Error> {
         match self.0.get(key) {
             None | Some(Value::Null) => Ok(None),
@@ -177,7 +148,6 @@ impl Arguments<'_> {
     }
 }
 
-/// End the call with a message the assistant can act on.
 #[expect(clippy::unnecessary_wraps, reason = "every tool returns an `Answer`")]
 fn refuse(message: impl Into<String>) -> Answer {
     Ok(Outcome::Error {
@@ -187,12 +157,8 @@ fn refuse(message: impl Into<String>) -> Answer {
     })
 }
 
-/// The file at `path` a call is about to write, holding `text`, styled for the
-/// terminal as the user sees it before approving the call.
-///
-/// The file is shown whole in a code block, so a `Credits` field and an upgrade
-/// section read as they are written rather than rendered.
-/// Falls back to the unstyled source if the Markdown can't be formatted.
+/// Render a terminal-styled Markdown preview of the fragment `text` to be
+/// written at `path`.
 fn preview(path: &str, text: &str) -> String {
     let fence = "`".repeat(longest_backtick_run(text).max(2) + 1);
     let markdown = format!("Writes `{path}`:\n\n{fence}markdown\n{text}{fence}\n");
@@ -202,8 +168,6 @@ fn preview(path: &str, text: &str) -> String {
         .unwrap_or(markdown)
 }
 
-/// The longest run of backticks in `text`, which a fence around it has to
-/// outrun.
 fn longest_backtick_run(text: &str) -> usize {
     text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
 }

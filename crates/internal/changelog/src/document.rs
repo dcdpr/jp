@@ -1,15 +1,6 @@
-//! What fragments and highlights share: the fields a file lists in a metadata
-//! block, the credits those fields name, and the token that opens an upgrade
-//! section.
-//!
-//! A metadata block is the run of `- **Key**: value` lines that RFDs and
-//! tickets carry too ([`doc::metadata`]): at the top of a fragment, or below a
-//! highlight's `# Title`.
-//! A value long enough to wrap continues on indented lines below its key.
-//!
-//! [`fields`] reads a block, [`with_credits`] writes credits into one, and
-//! [`marker`] finds the lines both formats hold to the rules about upgrade
-//! sections.
+//! Shared parsing helpers for fragments and highlights: `- **Key**: value`
+//! metadata blocks ([`doc::metadata`]), `Credits` overrides, and `BREAKING
+//! CHANGE:` markers.
 
 use std::{fmt, num::NonZeroU64};
 
@@ -18,37 +9,27 @@ use doc::metadata;
 
 use crate::forge::Forge;
 
-/// The tokens that open an upgrade section: the one Conventional Commits uses,
-/// and its synonym.
+/// Prefixes that open an upgrade section in a fragment.
 const MARKERS: [&str; 2] = ["BREAKING CHANGE:", "BREAKING-CHANGE:"];
 
-/// The field that lists who to credit in place of the ones history names.
 pub(crate) const CREDITS: &str = "Credits";
-
-/// The shortest prefix of a commit's hash a credit takes, as `git log
-/// --oneline` writes one.
 const SHORTEST_HASH: usize = 7;
-
-/// The longest commit hash: a SHA-256 one.
 const LONGEST_HASH: usize = 64;
 
-/// A credit a fragment or highlight lists in place of the ones history names.
+/// Explicit attribution entry from a `- **Credits**:` metadata field,
+/// overriding git history attribution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListedCredit {
-    /// A change request, by its number: written `#1207`, or `!1207` as GitLab
-    /// writes a merge request.
+    /// Pull request (`#1207`) or GitLab merge request (`!1207`) number.
     ChangeRequest(NonZeroU64),
 
-    /// A commit, by its hash or a prefix of it at least seven characters long,
-    /// lowercase.
+    /// Lowercase hexadecimal commit hash (7 to 64 characters).
     Commit(String),
 }
 
 impl ListedCredit {
-    /// Read a credit as a file writes it.
-    ///
-    /// `None` for anything but `#` or `!` followed by a positive number, or a
-    /// hexadecimal commit hash of 7 to 64 characters.
+    /// Parse a credit value (`#1207`, `!1207`, or a 7 to 64 character hex
+    /// commit hash).
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         let text = text.trim();
@@ -61,8 +42,8 @@ impl ListedCredit {
         hash.then(|| Self::Commit(text.to_ascii_lowercase()))
     }
 
-    /// The credit as a file on `forge` writes it: `!1207` on GitLab and `#1207`
-    /// elsewhere, or the commit's hash.
+    /// Format the credit for `forge` (`!1207` on GitLab, `#1207` elsewhere, or
+    /// the commit hash).
     #[must_use]
     pub fn written(&self, forge: Forge) -> String {
         match (self, forge) {
@@ -74,32 +55,27 @@ impl ListedCredit {
 }
 
 impl fmt::Display for ListedCredit {
-    /// The credit as a project on GitHub, or on no forge, writes it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.written(Forge::GitHub))
     }
 }
 
-/// One field of a metadata block.
+/// Parsed metadata field from a `- **Key**: value` block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Field {
-    /// The key, as written.
     pub(crate) key: String,
 
-    /// The value, with the lines it wraps onto joined by single spaces and the
-    /// escapes a Markdown formatter adds undone.
+    /// Field value with wrapped continuation lines collapsed and Markdown
+    /// escapes unescaped.
     pub(crate) value: String,
 
-    /// The number of the field's line in the file, counting from 1.
+    /// 1-based line number where the field starts.
     pub(crate) line: usize,
 }
 
-/// The metadata block that starts at `lines[start]`, if a field opens there,
-/// and the index of the first line after it.
-///
-/// The block is the field lines and the indented lines continuing them, up to
-/// the first line that is neither, so a file without a block reads as no fields
-/// that end where they start.
+/// Parse a contiguous `- **Key**: value` metadata block starting at
+/// `lines[start]`, including indented continuation lines, and return the parsed
+/// fields alongside the index of the first line after the block.
 pub(crate) fn fields(lines: &[&str], start: usize) -> (Vec<Field>, usize) {
     let mut fields: Vec<Field> = vec![];
     let mut index = start;
@@ -131,13 +107,10 @@ pub(crate) fn fields(lines: &[&str], start: usize) -> (Vec<Field>, usize) {
     (fields, index)
 }
 
-/// The credit `field`, a `Credits` field, names; `None` when its value names
-/// none.
 pub(crate) fn credit(field: &Field) -> Option<ListedCredit> {
     ListedCredit::parse(&field.value)
 }
 
-/// What an invalid `Credits` field says, for the errors of both formats.
 pub(crate) fn invalid_credit(line: usize, value: &str) -> String {
     format!(
         "line {line} credits `{value}`, which is neither a change request, such as `#1207`, nor a \
@@ -145,7 +118,7 @@ pub(crate) fn invalid_credit(line: usize, value: &str) -> String {
     )
 }
 
-/// `source` with its byte order mark dropped and every `\r\n` read as `\n`.
+/// Strip a leading UTF-8 BOM and normalize `\r\n` line endings to `\n`.
 pub(crate) fn normalize(source: &str) -> String {
     source
         .strip_prefix('\u{feff}')
@@ -153,23 +126,20 @@ pub(crate) fn normalize(source: &str) -> String {
         .replace("\r\n", "\n")
 }
 
-/// Whether `line` is a level-one heading, `# Title`, the line a highlight opens
-/// with.
+/// Return whether `line` is an ATX level-1 heading (`# ...`).
 pub(crate) fn is_title(line: &str) -> bool {
     line.trim_start()
         .strip_prefix('#')
         .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']))
 }
 
-/// `source`, a fragment or, with `highlight`, a highlight, with `credits`
-/// listed in its metadata block as `Credits` fields, each as a file on `forge`
-/// writes it.
+/// Insert `credits` as `- **Credits**:` metadata fields into `source` (a
+/// fragment, or a highlight when `highlight` is true), formatted for `forge`.
 ///
-/// The fields go at the end of the block, which is at the top of a fragment and
-/// below a highlight's title; a file without a block gets one there.
-/// The rest of the file is kept as it is, line endings and byte order mark
-/// included.
-/// The file must not list credits already, since it would then list both.
+/// Appends to the existing metadata block (at the top of a fragment or below
+/// the `# Title` of a highlight), or creates a new block if none exists,
+/// preserving the original BOM and line endings.
+/// Assumes `source` does not already contain `Credits` fields.
 #[must_use]
 pub fn with_credits(
     source: &str,
@@ -199,7 +169,6 @@ pub fn with_credits(
     }
     let (existing, end) = fields(&plain, start);
     let at = if existing.is_empty() {
-        // A new block, set off from the text after it.
         if start < plain.len() {
             block.push_str(newline);
         }
@@ -223,11 +192,9 @@ pub fn with_credits(
     written
 }
 
-/// The index in `plain`, a file's lines without their line endings, where its
-/// metadata block starts or would start: the first line with text, or with
-/// `highlight`, the first after the title.
-///
-/// The number of lines when there is no such line.
+/// Return the line index where the metadata block starts (or would be
+/// inserted): the first non-empty line for a fragment, or the first non-empty
+/// line after the `# Title` heading for a highlight.
 fn block_start(plain: &[&str], highlight: bool) -> usize {
     let has_text = |index: &usize| !plain[*index].trim().is_empty();
 
@@ -240,14 +207,14 @@ fn block_start(plain: &[&str], highlight: bool) -> usize {
     }
 }
 
-/// The token that opens an upgrade section `line` starts with, if it starts
+/// Return the `BREAKING CHANGE:` or `BREAKING-CHANGE:` prefix if `line` starts
 /// with one.
 pub(crate) fn marker(line: &str) -> Option<&'static str> {
     MARKERS.into_iter().find(|marker| line.starts_with(marker))
 }
 
-/// Parse options that read a body as GitHub renders it, tables included: a
-/// table can take a line that would otherwise start a paragraph.
+/// Comrak options with GFM table parsing enabled so table rows cannot be
+/// misparsed as paragraph starts.
 pub(crate) fn markdown_options() -> Options<'static> {
     Options {
         extension: Extension {

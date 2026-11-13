@@ -1,15 +1,12 @@
-//! A release, as its notes are built: its version and date, its overview, and
-//! every highlight and fragment it ships, each with who it credits.
+//! Assembling a [`Release`] from a fragments directory and git history.
 //!
-//! [`read`] builds one from a release's directory, or from what no tag ships
-//! yet: the top level of a fragments directory, and the directory of every
-//! release without a tag.
-//! It credits each file to the commits that wrote or changed it while it sat at
-//! the top level, read from the default branch's history, and the `forge`
-//! module says what such a credit reads like and where it links.
+//! [`read`] loads either a specific release subdirectory (`<version>/`) or all
+//! unreleased changes (the top level of the fragments directory plus any
+//! `<version>/` subdirectory without a `v<version>` git tag), resolves credits
+//! from git history and [`forge`], and sorts highlights and entries.
 //!
-//! A [`Release`] serializes to the JSON other tools render from, versioned by
-//! [`FORMAT`]:
+//! A [`Release`] serializes to the versioned JSON schema ([`FORMAT`]) consumed
+//! by site generators and external tools:
 //!
 //! ```json
 //! {
@@ -38,11 +35,12 @@
 //! }
 //! ```
 //!
-//! A release without a tag has a `null` date, and the unreleased fragments have
-//! a `null` version too.
-//! An entry without an upgrade section has a `null` `upgrade`.
+//! Untagged releases serialize with `"date": null`, unreleased changes also
+//! have `"version": null`, and non-breaking entries have `"upgrade": null`.
 //!
 //! See `docs/rfd/122-release-pipeline.md`.
+//!
+//! [`forge`]: crate::forge
 
 use std::{collections::BTreeMap, fmt, fs, io, num::NonZeroU64};
 
@@ -62,60 +60,57 @@ use crate::{
     links::Links,
 };
 
-/// The version of the JSON a [`Release`] serializes to, written as its
-/// `format`, so a consumer can refuse a shape it doesn't know.
+/// Schema version written in the `"format"` field when a [`Release`] is
+/// serialized to JSON.
 pub const FORMAT: u32 = 1;
 
-/// A release's notes, before they are rendered.
+/// Assembled release data prior to rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
-    /// The release's version; `None` for what no tag ships yet.
+    /// Release version, or `None` for unreleased changes.
     pub version: Option<Version>,
 
-    /// The day the release's tag was made, as `YYYY-MM-DD`; `None` while the
-    /// release has no tag.
+    /// Creation date (`YYYY-MM-DD`) of tag `v<version>`, or `None` if untagged.
     pub date: Option<String>,
 
-    /// The release's introduction, as Markdown: what its `overview.md` holds,
-    /// or else a summary of what it ships.
+    /// Release introduction as Markdown: the contents of
+    /// `<version>/overview.md` if non-empty, or a generated entry count
+    /// summary.
     pub overview: String,
 
-    /// The highlights, ordered by their first credit and then by slug.
+    /// Highlights ordered by first credit and then by slug.
     pub highlights: Vec<Credited<Highlight>>,
 
-    /// The fragments, grouped by type in the order release notes show the
-    /// types, and within a type ordered by their first credit and then by slug.
+    /// Fragment entries grouped by [`Type`] in release-note order, and within
+    /// each type ordered by first credit and then by slug.
     pub entries: Vec<Credited<Fragment>>,
 }
 
-/// A fragment or highlight in a release, and who it credits.
+/// A fragment or highlight paired with its resolved [`Credit`] list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credited<T> {
-    /// The file's slug, such as `retry-idle-turns` for
-    /// `retry-idle-turns.fixed.md`.
+    /// File slug (e.g. `retry-idle-turns` for `retry-idle-turns.fixed.md`).
     pub slug: String,
 
-    /// The change requests and commits that wrote or changed the file while it
-    /// sat at the top level, oldest first and each once, or the ones its
-    /// `Credits` fields list instead.
+    /// Deduplicated change requests and commits credited for this file, ordered
+    /// from oldest to newest.
     pub credits: Vec<Credit>,
 
-    /// The file, read into its format.
     pub file: T,
 }
 
-/// The heading each type's section has in the release notes.
+/// Custom section headings for changelog [`Type`]s.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Headings(BTreeMap<Type, String>);
 
 impl Headings {
-    /// Head the section of `type_` with `heading`.
+    /// Set the section heading for `type_`.
     pub fn set(&mut self, type_: Type, heading: impl Into<String>) {
         self.0.insert(type_, heading.into());
     }
 
-    /// The heading of the section of `type_`: the one it was given, or else its
-    /// id capitalized, such as `Added`.
+    /// Return the configured heading for `type_`, or its capitalized ID (e.g.
+    /// `"Added"`).
     #[must_use]
     pub fn of(&self, type_: Type) -> String {
         match self.0.get(&type_) {
@@ -124,8 +119,7 @@ impl Headings {
         }
     }
 
-    /// The headings given, each with the type it heads, in the order of the
-    /// types.
+    /// Iterate over configured `(Type, heading)` pairs in [`Type`] order.
     pub fn configured(&self) -> impl Iterator<Item = (Type, &str)> {
         self.0
             .iter()
@@ -139,27 +133,26 @@ impl FromIterator<(Type, String)> for Headings {
     }
 }
 
-/// Why [`read`] couldn't build a release.
+/// Error returned by [`read`].
 #[derive(Debug)]
 pub enum ReleaseError {
-    /// The fragments directory, or the part of it the release is, can't be
-    /// read, or breaks the rules `check` holds it to.
+    /// Failed to read or validate the fragments directory.
     Read(ReadError),
 
-    /// The release's `overview.md` can't be read.
+    /// Failed to read `<version>/overview.md`.
     Overview(CheckError),
 
-    /// The repository is a shallow clone, without the history credits are read
-    /// from.
+    /// Repository is a shallow clone and lacks full commit history for credits.
     Shallow,
 
-    /// A git command couldn't be run, or failed.
+    /// A `git` subprocess failed.
     Git(GitError),
 
-    /// git's log of the fragments directory doesn't read as one.
+    /// `git log` output could not be parsed.
     Log(String),
 
-    /// The forge links its credits, and there is no web address to link at.
+    /// The forge requires a repository web URL for credit links and none is
+    /// configured.
     NoAddress(NoAddress),
 }
 
@@ -202,26 +195,22 @@ impl From<NoAddress> for ReleaseError {
     }
 }
 
-/// Build the release that `part` of the fragments directory `dir` holds: a
-/// release's directory, or what no tag ships yet.
+/// Assemble the [`Release`] for `part` of the fragments directory `dir`.
 ///
-/// [`Part::Unreleased`] holds the top level and the directory of every release
-/// without a tag, `v<version>`, so a release counts as released once it is
-/// tagged, whenever its notes were filed.
+/// [`Part::Unreleased`] includes both the top-level files and any `<version>/`
+/// subdirectory that does not yet have a `v<version>` git tag.
 ///
-/// Credits link to the project on `forge`, at the web address `repository`
-/// gives, such as `https://github.com/dcdpr/jp`, or else at git's `origin`
-/// remote's; without a `forge`, to the one that address is on (see
-/// [`Forge::infer`]).
-/// A release's date is its tag's, `v<version>`.
-/// `headings` names the types in the summary that stands in for a missing
-/// overview.
+/// Credits link to `repository` (defaulting to the web URL of git's `origin`
+/// remote) on `forge` (defaulting to [`Forge::infer`]).
+/// A tagged release takes its date from tag `v<version>`.
+/// When `<version>/overview.md` is missing or empty, `headings` is used to
+/// generate a fallback summary.
 ///
 /// # Errors
 ///
-/// Returns why the part or its overview can't be read, refuses a shallow clone
-/// rather than build a release without its credits, and returns a git command
-/// that failed.
+/// Returns [`ReleaseError`] if the fragments directory or `overview.md` is
+/// unreadable or invalid, if the repository is a shallow clone, if `git` fails,
+/// or if `forge` requires a repository URL and none is available.
 pub fn read(
     dir: &Utf8Path,
     part: &Part,
@@ -281,7 +270,6 @@ pub fn read(
     })
 }
 
-/// A file that can list who to credit in place of the ones history names.
 trait Listed {
     fn credits(&self) -> Option<&[ListedCredit]>;
 }
@@ -298,21 +286,15 @@ impl Listed for Highlight {
     }
 }
 
-/// Where a file sorts among the others of its kind, by its first credit: change
-/// requests by number, then commits oldest first, then the files crediting
-/// nobody.
+/// Sort key for ordering files by their first credit: change requests by
+/// ascending number, then commits from oldest to newest, then uncredited files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Order {
     ChangeRequest(NonZeroU64),
-
-    /// A commit, by how many commits of the log are as old as it or older.
     Commit(usize),
-
     Nobody,
 }
 
-/// Each of `files` with its credits, from the project's history `commits`, and
-/// where it sorts by its first credit.
 fn credit<T: Listed>(
     project: &Project,
     commits: &[Commit],
@@ -339,11 +321,6 @@ fn credit<T: Listed>(
         .collect()
 }
 
-/// The credits a file lists as `listed`, and where it sorts by the first of
-/// them.
-///
-/// A listed commit sorts by its place in the project's history `commits`, and
-/// after every commit there when the history doesn't hold it.
 fn listed_credits(
     project: &Project,
     commits: &[Commit],
@@ -355,7 +332,6 @@ fn listed_credits(
             commits
                 .iter()
                 .position(|commit| commit.hash.starts_with(hash.as_str()))
-                // The log lists the newest first.
                 .map_or(usize::MAX, |index| commits.len() - index),
         ),
     });
@@ -372,7 +348,6 @@ fn listed_credits(
     (order, credits)
 }
 
-/// The credits for the commits of `commits` at `indices`, oldest first.
 fn history_credits(
     project: &Project,
     commits: &[Commit],
@@ -388,7 +363,6 @@ fn history_credits(
         if credits.is_empty() {
             order = match project.forge().change_request(&commit.message) {
                 Some(number) => Order::ChangeRequest(number),
-                // The log lists the newest first.
                 None => Order::Commit(commits.len() - index),
             };
         }
@@ -398,9 +372,8 @@ fn history_credits(
     (order, credits)
 }
 
-/// The fragments and highlights no tag ships: the ones at the top level of the
-/// fragments directory `dir`, and the ones in the directory of every release
-/// without a tag.
+/// Load all unreleased fragments and highlights: top-level files plus any
+/// `<version>/` subdirectory without a `v<version>` tag.
 fn unreleased(dir: &Utf8Path) -> Result<Contents, ReleaseError> {
     let mut contents = directory::read(dir, &Part::Unreleased)?;
     for version in directory::releases(dir).map_err(ReadError::from)? {
@@ -416,16 +389,14 @@ fn unreleased(dir: &Utf8Path) -> Result<Contents, ReleaseError> {
     Ok(contents)
 }
 
-/// Add `credit` to `credits` unless they hold it already.
 fn push_new(credits: &mut Vec<Credit>, credit: Credit) {
     if !credits.contains(&credit) {
         credits.push(credit);
     }
 }
 
-/// What `overview.md` in the release's directory `dir` holds, with its links
-/// inline, or `None` when there is no such file or it holds nothing but
-/// whitespace.
+/// Read `<dir>/overview.md` with reference links inlined, returning `None` if
+/// the file does not exist or contains only whitespace.
 fn overview(dir: &Utf8Path) -> Result<Option<String>, ReleaseError> {
     let path = dir.join(OVERVIEW);
     let source = match fs::read_to_string(&path) {
@@ -444,8 +415,8 @@ fn overview(dir: &Utf8Path) -> Result<Option<String>, ReleaseError> {
     Ok((!overview.is_empty()).then(|| overview.to_owned()))
 }
 
-/// What stands in for the overview of a release without one: its version, how
-/// many entries of each type it has, and its highlights' titles.
+/// Generate a fallback overview summarizing entry counts by type and highlight
+/// titles.
 fn summary(
     version: Option<&Version>,
     entries: &[Credited<Fragment>],
@@ -483,7 +454,7 @@ fn summary(
     summary
 }
 
-/// `items` as a sentence lists them: `a`, `a and b`, or `a, b, and c`.
+/// Format `items` as an Oxford-comma list (`a`, `a and b`, or `a, b, and c`).
 pub(crate) fn series(items: &[String]) -> String {
     match items {
         [] => String::new(),
@@ -493,7 +464,6 @@ pub(crate) fn series(items: &[String]) -> String {
     }
 }
 
-/// `id` with its first letter in upper case.
 fn capitalized(id: &str) -> String {
     let mut chars = id.chars();
     chars
@@ -542,7 +512,6 @@ impl Serialize for Release {
     }
 }
 
-/// A [`Release`] as its JSON holds it.
 #[derive(Serialize)]
 struct ReleaseJson<'a> {
     format: u32,

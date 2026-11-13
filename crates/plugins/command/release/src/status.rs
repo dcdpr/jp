@@ -1,15 +1,19 @@
-//! `jp release status`: where the releases stand, and what to run next.
+//! `jp release status`: reporting current release state and the next command to
+//! run.
 //!
-//! It reads what `cut`, `pick`, and `finalize` read: the release branches,
-//! notes branches, and `v` tags here and on `origin`, and the commit checked
-//! out, which stands for `main`.
-//! It says, in this order: that the checkout lacks commits of `origin`'s
-//! `main`; a pick a conflict stopped; what only this repository has, with the
-//! push that publishes it; each release in preparation, with where its notes
-//! are and the next step; the finalized releases with no publishable build kept
-//! in user-local storage; and, while no minor or major release is in
-//! preparation, whether the next one is due.
-//! It changes nothing.
+//! Inspects local and `origin` release branches, notes branches, and
+//! `v<version>` tags alongside the current checkout, reporting in order:
+//!
+//! 1. Whether the current checkout is behind `origin/main`.
+//! 2. Any paused `jp release pick` awaiting conflict resolution.
+//! 3. Unpushed local release branches, unmerged notes branches, and
+//!    `v<version>` tags (plus any diverged notes branches).
+//! 4. Each release currently in preparation, its notes status, and the next
+//!    action.
+//! 5. Finalized releases that do not yet have a publishable `release`-profile
+//!    build in user-local storage.
+//! 6. Whether the next minor or major release is due (when none is currently in
+//!    preparation).
 
 use camino::Utf8Path;
 use semver::Version;
@@ -24,11 +28,7 @@ use crate::{
     repository::{Branch, Checkout, MAIN, ORIGIN, Tags, Worktree},
 };
 
-/// Where the releases of the workspace stand at `now`, in seconds since the
-/// Unix epoch, and what to run next; `builds` is where builds are kept, when
-/// the workspace has user-local storage.
-///
-/// The error says why the repository can't be read.
+/// Render the release status report at Unix timestamp `now`.
 pub(crate) fn status(
     pipeline: &Pipeline<'_>,
     now: i64,
@@ -57,9 +57,6 @@ pub(crate) fn status(
         .values()
         .filter_map(|line| Some((line, releases.in_preparation(line)?)))
         .collect();
-    // A worktree is a checkout of the whole repository, so one is made only to
-    // read the notes of a release in preparation, and is removed before `due`
-    // checks out its own.
     if !in_preparation.is_empty() {
         let main = repo.worktrees.add("status", &checkout.head)?;
         for (line, version) in in_preparation {
@@ -87,12 +84,8 @@ pub(crate) fn status(
     Ok(paragraphs.join("\n\n") + "\n")
 }
 
-/// What only this repository has of the releases, with the push that publishes
-/// it: release branches and notes branches with commits `origin` lacks, leaving
-/// out notes branches the checkout has merged, and `v` tags.
-/// Then the notes branches here and on `origin` that diverged; diverged release
-/// branches stop reading the releases before this, saying how to bring them
-/// together.
+/// Report unpushed release branches, unmerged notes branches, local-only
+/// `v<version>` tags, and diverged notes branches.
 fn unpublished(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -130,9 +123,6 @@ fn unpublished(
     Ok(paragraphs)
 }
 
-/// The notes branches with commits `origin` lacks, leaving out the ones the
-/// commit checked out has merged, and the notes branches here and on `origin`
-/// that diverged.
 fn notes_branches(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -159,11 +149,8 @@ fn notes_branches(
     Ok((unpushed, diverged))
 }
 
-/// Whether the commit checked out has the files the notes branch `branch` of
-/// `version` filed, which makes it merged: pushing it again would only bring it
-/// back.
-///
-/// A branch only `origin` has counts as merged.
+/// Return whether every file in `<fragments_dir>/<version>/` on `branch` is
+/// already present in `checkout`.
 fn merged(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -182,9 +169,6 @@ fn merged(
         .is_subset(&repo.history.files_at(&checkout.head, &directory)?))
 }
 
-/// The paragraph saying only this repository has the branches `branches` and
-/// the tags `tags`, how to publish them, and how to delete what a rehearsal
-/// left; `None` when there are none.
 fn publish_them(branches: Vec<String>, tags: Vec<String>) -> Option<String> {
     if branches.is_empty() && tags.is_empty() {
         return None;
@@ -209,14 +193,11 @@ fn publish_them(branches: Vec<String>, tags: Vec<String>) -> Option<String> {
     ))
 }
 
-/// The finalized releases with no publishable build kept in `builds`, and the
-/// command that builds one; nothing when every one has.
 fn unbuilt(releases: &Releases, tags: &Tags, builds: &Utf8Path) -> Option<String> {
     let mut unbuilt = vec![];
     let mut newest = None;
     for version in &releases.tagged {
         let tag = releases::tag(version);
-        // `origin`'s tag is the one published.
         let Some(commit) = tags.origin.get(&tag).or_else(|| tags.local.get(&tag)) else {
             continue;
         };
@@ -242,15 +223,12 @@ fn unbuilt(releases: &Releases, tags: &Tags, builds: &Utf8Path) -> Option<String
     ))
 }
 
-/// The version of the release the notes branch `name` files the notes of.
 fn notes_version(name: &str) -> Option<Version> {
     let version = name.strip_prefix(NOTES_BRANCH)?.strip_prefix('v')?;
 
     Version::parse(version).ok()
 }
 
-/// Where `version`, in preparation on `line`, stands, and the next step: the
-/// notes are read from `checkout`, which `main` is a worktree of.
 fn preparing(
     pipeline: &Pipeline<'_>,
     releases: &Releases,

@@ -11,11 +11,9 @@ use serde_json::{Map, json};
 use super::*;
 use crate::repository_testing::Fixture;
 
-/// The root of JP's own repository, for the tests that read its files.
-///
-/// Read when the test runs rather than with `env!`: a target directory shared
-/// between worktrees can run a binary another worktree compiled, whose baked-in
-/// path names that worktree.
+/// Return the root of the JP repository at runtime (avoiding `env!`, which
+/// bakes in the compile-time worktree path when `CARGO_TARGET_DIR` is shared
+/// across worktrees).
 pub(crate) fn jp_root() -> Utf8PathBuf {
     let manifest = env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");
@@ -23,7 +21,6 @@ pub(crate) fn jp_root() -> Utf8PathBuf {
     Utf8PathBuf::from(manifest).join("../../../..")
 }
 
-/// A workspace whose fragments directory, `changelog.d`, exists.
 fn workspace() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir(root.path().join("changelog.d")).unwrap();
@@ -31,7 +28,6 @@ fn workspace() -> Utf8TempDir {
     root
 }
 
-/// The `init` running `args` in the workspace at `root`, as Jane Doe.
 fn init_message(root: &Utf8Path, args: &[&str]) -> InitMessage {
     InitMessage {
         version: jp_plugin::PROTOCOL_VERSION,
@@ -50,8 +46,6 @@ fn init_message(root: &Utf8Path, args: &[&str]) -> InitMessage {
     }
 }
 
-/// Run a session the way the host does: `message`, then a scripted reply to
-/// each request the plugin makes.
 fn session(message: &HostToPlugin, replies: &[HostToPlugin]) -> Vec<PluginToHost> {
     let mut input = serde_json::to_string(message).unwrap() + "\n";
     for reply in replies {
@@ -69,7 +63,6 @@ fn session(message: &HostToPlugin, replies: &[HostToPlugin]) -> Vec<PluginToHost
         .collect()
 }
 
-/// Run `jp release` with `args` in the workspace at `root`.
 fn command(root: &Utf8Path, args: &[&str], replies: &[HostToPlugin]) -> Vec<PluginToHost> {
     session(
         &HostToPlugin::Init(Box::new(init_message(root, args))),
@@ -77,7 +70,6 @@ fn command(root: &Utf8Path, args: &[&str], replies: &[HostToPlugin]) -> Vec<Plug
     )
 }
 
-/// Everything the session printed.
 fn printed(messages: &[PluginToHost]) -> String {
     messages
         .iter()
@@ -88,7 +80,6 @@ fn printed(messages: &[PluginToHost]) -> String {
         .collect()
 }
 
-/// How the session ended.
 fn exit(messages: &[PluginToHost]) -> &ExitMessage {
     match messages.last() {
         Some(PluginToHost::Exit(exit)) => exit,
@@ -100,19 +91,12 @@ fn read(root: &Utf8TempDir, path: &str) -> String {
     fs::read_to_string(root.path().join(path)).unwrap()
 }
 
-/// A workspace in a git repository on `main`, its fragments directory in place.
-///
-/// Git runs without the machine's configuration, so a signing setup or a hook
-/// can't change what a test commits.
 struct Repository {
     root: Utf8TempDir,
-
-    /// Holds the empty file git reads as its global configuration.
     home: Utf8TempDir,
 }
 
 impl Repository {
-    /// A repository whose `origin` is at `origin`.
     fn new(origin: &str) -> Self {
         let home = Utf8TempDir::new().unwrap();
         fs::write(home.path().join("gitconfig"), "").unwrap();
@@ -131,14 +115,12 @@ impl Repository {
         self.root.path()
     }
 
-    /// Write `contents` to `path`, below the workspace root.
     fn write(&self, path: &str, contents: &str) {
         let path = self.path().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, contents).unwrap();
     }
 
-    /// Commit every change in the work tree with `message`.
     fn commit(&self, message: &str) {
         self.git(&["add", "--all"]);
         self.git(&["commit", "--quiet", "--message", message]);
@@ -165,7 +147,6 @@ impl Repository {
     }
 }
 
-/// Each print of the session, as its channel, its format, and its text.
 fn prints(messages: &[PluginToHost]) -> Vec<(&str, &str, &str)> {
     messages
         .iter()
@@ -180,8 +161,6 @@ fn prints(messages: &[PluginToHost]) -> Vec<(&str, &str, &str)> {
         .collect()
 }
 
-/// Run `jp release` with `args` in the workspace at `root`, as Jane Doe, with
-/// `format_on_write` set to `format_on_write`.
 fn formatting(root: &Utf8Path, args: &[&str], format_on_write: &Value) -> Vec<PluginToHost> {
     let mut message = init_message(root, args);
     message.config = json!({
@@ -307,12 +286,10 @@ fn a_directory_init_set_up_passes_check() {
     assert_eq!(exit(&messages).code, 0);
 }
 
-/// The editor's answer: it closed, cleanly when `saved`.
 fn edited(saved: bool) -> HostToPlugin {
     HostToPlugin::Edited(EditedResponse { id: None, saved })
 }
 
-/// The files the session asked the host to open in the editor.
 fn opened(messages: &[PluginToHost]) -> Vec<Utf8PathBuf> {
     messages
         .iter()
@@ -826,8 +803,6 @@ fn making_a_release_needs_a_git_repository() {
     }
 }
 
-/// The `init` running `args` in the workspace at `root`, keeping builds in
-/// user-local storage at `storage`, with `options`.
 fn building(root: &Utf8Path, args: &[&str], storage: &Utf8Path, options: Value) -> InitMessage {
     let Value::Object(options) = options else {
         panic!("options are an object");

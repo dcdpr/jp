@@ -18,12 +18,10 @@ impl State {
     }
 }
 
-/// A release to create.
+/// Request body for creating a GitHub Release (`POST
+/// /repos/{owner}/{repo}/releases`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NewRelease {
-    /// The tag the release is of.
-    /// It has to exist: GitHub creates one that doesn't, at the tip of the
-    /// default branch.
     pub tag_name: String,
     pub name: String,
     pub body: String,
@@ -32,7 +30,8 @@ pub struct NewRelease {
     pub make_latest: Option<MakeLatest>,
 }
 
-/// Changes to a release: a field left `None` stays as it is.
+/// Request body for updating a GitHub Release (`PATCH
+/// /repos/{owner}/{repo}/releases/{id}`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ReleaseUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,10 +44,7 @@ pub struct ReleaseUpdate {
     pub make_latest: Option<MakeLatest>,
 }
 
-/// Whether a published release becomes the repository's latest, the one
-/// `releases/latest` serves.
-///
-/// GitHub makes a newly published release the latest unless told otherwise.
+/// Whether a release should be marked as the repository's `latest` release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MakeLatest {

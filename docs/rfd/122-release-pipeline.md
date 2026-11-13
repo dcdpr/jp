@@ -5,9 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
 - **Extends**: [RFD 116]
-- **Summary**: The `jp release` plugin cuts, tags, and builds releases on the
-  releasing machine, keeping their notes on `main`, for the person releasing to
-  publish.
+- **Summary**: Extends `jp release` to cut, cherry-pick, finalize, and build
+  releases locally while keeping release notes on `main`.
 
 ## Summary
 
@@ -256,17 +255,18 @@ branch that do not originate on `main`.
 
 ### Cutting at an earlier commit
 
-`jp release cut --at <commit>` cuts at a commit on `main`'s first-parent line
-that no release ships yet, instead of at the commit checked out.
-The release branch starts at that commit and the notes branch at the checkout,
-which files only the fragments whose changes that commit contains.
-So a project releases history it has no releases for, one period at a time, by
-writing each period's fragments after the fact with `Credits` naming the changes
-they describe ([RFD 121]); [RFD 123] does this for JP.
-The commit that starts the release deletes `changelog.d/` only when the tree has
-one, which such history does not, and git dates the commits and the tag as
-`GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` say, so a release cut after the fact
-can carry the date it would have had.
+`jp release cut --at <commit>` cuts a release at an earlier commit on `main`'s
+first-parent history that no existing release branch contains, rather than at
+the currently checked-out commit.
+The release branch starts at `<commit>`, while the notes branch starts at the
+current checkout and moves only the fragments whose changes `<commit>` contains.
+This lets a project backfill historical releases one period at a time by writing
+fragments with explicit `Credits` naming the historical commits or pull requests
+([RFD 121]); [RFD 123] uses this workflow to release JP's history.
+The initial commit on the release branch removes `changelog.d/` with
+`--ignore-unmatch` so commits that predate `changelog.d/` still succeed, and git
+respects `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` when dating the release
+commits and tag.
 
 ### Publishing
 
@@ -365,23 +365,24 @@ the tag, which keeps the notes the release was tagged with.
 
 ### Building a release
 
-`jp release build 0.3.0` builds a release's binaries on this machine:
+`jp release build 0.3.0` builds a release's artifacts on the local machine:
 
-1. It checks out the commit `v0.3.0` names in a temporary worktree, or, for a
-   release in preparation, its branch's tip.
-2. It runs the `build` command from the root of the checkout, so an old release
-   builds with today's build definition, with `{version}`, `{source}` (the
-   worktree), `{out}` (an empty directory), and `{profile}`: `release`, or
-   `quick` with `--quick`.
-   What the command prints is shown as it runs, and `--quiet` hides it.
-3. It checks what the command left in `{out}`: the archives, `checksums.txt`
-   with a SHA-256 for each, and `manifest.json`, which names the version,
-   commit, and profile built and the platform each archive is for, and nothing
-   else.
-   A build that fails, or whose output breaks any of this, is not kept, and the
-   check names every problem at once.
-4. It moves the result to `release/0.3.0/` in the workspace's user-local storage
-   (`jp path user-workspace`), replacing an earlier build of that version.
+1. Checks out the commit named by `v0.3.0` (or the tip of `release/0.3` while
+   the release is in preparation) in a temporary worktree.
+2. Runs the configured `build` command from the current workspace root (so
+   historical releases build with the current build script), substituting
+   `{version}`, `{source}` (the worktree path), `{out}` (an empty staging
+   directory), and `{profile}` (`release`, or `quick` with `--quick`).
+   Build output streams to the terminal unless `--quiet` is passed.
+3. Validates the contents of `{out}`: the artifact files, `checksums.txt`
+   (containing a SHA-256 entry for each artifact in `sha256sum` format), and
+   `manifest.json` (recording the version, commit, profile, and target triple
+   for each artifact), with no extra files allowed.
+   If the command fails or validation finds any problems, the staging directory
+   is discarded and all problems are reported together.
+4. Moves the validated directory to `release/0.3.0/` under workspace user-local
+   storage (`jp path user-workspace`), replacing any previous build for that
+   version.
 
 <!-- end list -->
 
@@ -438,21 +439,23 @@ own branches and its own version's directory.
 
 ### Abandoning a release
 
-`jp release abandon 0.3.0` undoes a release that `origin` has no tag for, so it
-can be cut again:
+`jp release abandon 0.3.0` retracts an unpublished release (one whose tag has
+not been pushed to `origin`) so it can be cut again:
 
-- It refuses while a later release exists, so releases are abandoned newest
-  first, and refuses a release `origin` has tagged, which is published.
-- It deletes the release's tag and notes branch here, and its release branch,
-  or, for a patch release, the commits from the one that started it.
-- On `release-notes/abandon-v0.3.0`, branched from the release's notes branch if
-  that has not merged and from the checkout if it has, it moves the release's
-  fragments and highlights back to the top level with their wording as edited.
-  A fragment `pick` copied from another release is deleted instead, and
-  `overview.md` stays in the release's directory, where the next cut of that
-  version finds it.
-- It prints the pushes that remove from `origin` what it removed here.
-  The new notes branch is merged into `main` like any other.
+- Refuses if a newer release exists (releases must be abandoned from newest to
+  oldest) or if `origin` already has tag `v0.3.0`.
+- Deletes the local tag `v0.3.0` and local notes branch `release-notes/v0.3.0`,
+  and either deletes `release/0.3` (for a `.0` release) or resets it to the
+  commit before `Starts-Release: 0.3.x` (for a patch release).
+- Creates `release-notes/abandon-v0.3.0` (from the notes branch if unmerged, or
+  from the current checkout if already merged) moving the release's fragments
+  and highlights back to the top level of `changelog.d/` with any wording edits
+  preserved.
+  Files copied by `pick` from another release are deleted instead, and
+  `overview.md` remains in `changelog.d/0.3.0/` for the next cut of that
+  version.
+- Prints the `git push` commands to delete the corresponding branches on
+  `origin`.
 
 ### Release notes and the upgrade guide
 
@@ -964,31 +967,33 @@ Depends on Phase 1 and the site phase of [RFD 116].
 
 ### Phase 5: Cutting the past, and abandoning
 
-`cut --at`, with fragments filed by the changes their `Credits` name, release
-branches started from trees without `changelog.d/`, and `abandon`.
-`cut` tells the person releasing to merge the notes branch into `main`.
+Implement `cut --at` (filing fragments by the commits referenced in their
+`Credits` fields and supporting trees without `changelog.d/`) and `abandon`.
+Have `cut` instruct the user to merge the notes branch into `main`.
 Depends on Phase 2.
 
 ### Phase 6: Building
 
-`build` with the `build` option and `--quick`, the build directory and its
-checks, and `status` naming finalized releases without a publishable build.
-`--remote` and `builders` land with a project's first remote builder.
+Implement `jp release build` with the `build` option and `--quick`, output
+directory validation (`manifest.json` and `checksums.txt`), and `status`
+reporting finalized releases without a publishable build.
+`--remote` and `builders` are deferred until a remote builder is added.
 Depends on Phase 2.
 
 ### Phase 7: Links and drafts
 
-The `repository` option, wherever notes are rendered and in `jp vite`'s
-snapshot, and draft pages for releases in preparation under `jp vite serve`.
+Add the `repository` option across release-note rendering and `jp vite`'s
+settings snapshot, and render draft pages for untagged releases in preparation
+under `jp vite serve`.
 Depends on Phase 4.
 
 ### Phase 8: Sites built with `jp vite`
 
-`jp vite build`, and the `jp-vite` binary rendering the release pages under
-`serve` and `build`, as `jp-vite changelog`, so only a `vitepress build` started
-by hand, as JP's docs build is, needs the `changelog` binary.
-`jp vite init`'s `package.json` runs `serve` and `build` as its `dev` and
-`build` scripts.
+Add `jp vite build` and have the `jp-vite` binary render release pages directly
+(via `jp-vite changelog`) under both `serve` and `build`, so only standalone
+`vitepress build` invocations require `changelog` on `PATH`.
+Update the `package.json` template written by `jp vite init` to run `jp vite
+serve` and `jp vite build` in its `dev` and `build` scripts.
 Depends on Phase 4.
 
 ## References

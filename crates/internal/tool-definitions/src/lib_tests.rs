@@ -13,8 +13,6 @@ const NOTES: Definitions = Definitions {
     offers: Some("categories"),
 };
 
-/// A plugin `memos` serving `add`, whose definition mirrors nothing from the
-/// configuration.
 const MEMOS: Definitions = Definitions {
     plugin: "memos",
     files: &[("add.toml", "# add\n")],
@@ -108,7 +106,6 @@ fn init_writes_one_file_per_definition() {
     );
 }
 
-/// A plugin with nothing to mirror has no `tools sync` to point at.
 #[test]
 fn init_names_no_sync_for_definitions_that_mirror_nothing() {
     let dir = Utf8TempDir::new().unwrap();

@@ -1,13 +1,13 @@
-//! A release's build: the files a project's build command made for one release,
-//! kept in a directory with `checksums.txt` and `manifest.json`.
+//! Validation for release build output directories (`manifest.json`,
+//! `checksums.txt`, and artifact files).
 //!
-//! `jp release build` holds what a build command left to this format with
-//! [`check`] before keeping it.
-//! A publisher reads a kept build's manifest with [`read_manifest`], compares
-//! what it names with what it publishes, and hashes the files again with
-//! [`check_files`], so it publishes nothing that changed since it was built.
+//! `jp release build` validates the output directory produced by a project's
+//! build command with [`check`] before persisting the build.
+//! Publishers load a stored build's manifest with [`read_manifest`], verify its
+//! metadata against the release being published, and re-verify artifact
+//! checksums with [`check_files`] before uploading.
 //!
-//! See: `docs/rfd/122-release-pipeline.md`, "Building a release"
+//! See `docs/rfd/122-release-pipeline.md` ("Building a release").
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -22,32 +22,32 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-/// The directory below a workspace's user-local storage builds are kept in, one
-/// directory per version.
+/// Subdirectory under workspace user-local storage where release builds are
+/// stored (`<user_workspace>/release/<version>/`).
 pub const BUILDS: &str = "release";
 
-/// The file a build lists what it made in.
+/// Build manifest filename inside a build directory.
 pub const MANIFEST: &str = "manifest.json";
 
-/// The file a build gives each file's SHA-256 in.
+/// SHA-256 checksum filename inside a build directory.
 pub const CHECKSUMS: &str = "checksums.txt";
 
-/// The version of [`Manifest`] this crate reads.
+/// Schema version of [`Manifest`] supported by this crate.
 pub const FORMAT: u64 = 1;
 
-/// How a release is built.
+/// Build profile passed to the release build command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Profile {
-    /// The binaries a release ships.
+    /// Production release build.
     Release,
 
-    /// Binaries made faster, to test a build with.
+    /// Faster unoptimized build for testing the release pipeline.
     Quick,
 }
 
 impl Profile {
-    /// The profile's name, as a build command is told it and a manifest names
-    /// it.
+    /// Profile identifier passed to the build command and recorded in
+    /// `manifest.json`.
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
@@ -63,10 +63,9 @@ impl fmt::Display for Profile {
     }
 }
 
-/// What a build made, as its `manifest.json` lists it.
+/// Parsed `manifest.json` describing the artifacts produced by a release build.
 ///
-/// Fields this crate doesn't read are ignored, so a newer build command can add
-/// some.
+/// Unknown JSON fields are ignored for forward compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Manifest {
     pub version: String,
@@ -75,19 +74,22 @@ pub struct Manifest {
     pub artifacts: Vec<Artifact>,
 }
 
-/// A file a build made, and the platform it is for.
+/// An artifact file recorded in [`Manifest`] and its target triple.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Artifact {
     pub file: String,
     pub target: String,
 }
 
-/// Check what a build of `version` from `commit` with `profile` left in `out`,
-/// and return its manifest.
+/// Validate the build output in `out` against `version`, `commit`, and
+/// `profile`, and return the parsed [`Manifest`].
 ///
-/// `manifest.json` has to name what was asked for, and its files have to pass
-/// [`check_files`].
-/// The error lists every problem found, one sentence each.
+/// Verifies that `manifest.json` matches the requested build parameters and
+/// that all artifacts and checksums pass [`check_files`].
+///
+/// # Errors
+///
+/// Returns every validation problem found as a list of human-readable messages.
 pub fn check(
     out: &Utf8Path,
     version: &Version,
@@ -124,12 +126,11 @@ pub fn check(
     }
 }
 
-/// What is wrong with the files of the build in `dir`, which `manifest` lists.
+/// Validate the artifact files and `checksums.txt` in `dir` against `manifest`.
 ///
-/// `manifest` has to list at least one file, each in `dir` and each with the
-/// platform it is for; `checksums.txt`, in `sha256sum`'s format, has to give
-/// each the SHA-256 of its contents, and nothing else may be in `dir`.
-/// Every problem found is listed, one sentence each.
+/// Requires at least one artifact with a valid file name and non-empty target,
+/// verifies that each listed file exists in `dir` and matches its SHA-256 entry
+/// in `checksums.txt`, and rejects any unlisted files in `dir`.
 #[must_use]
 pub fn check_files(dir: &Utf8Path, manifest: &Manifest) -> Vec<String> {
     let mut problems = vec![];
@@ -168,10 +169,12 @@ pub fn check_files(dir: &Utf8Path, manifest: &Manifest) -> Vec<String> {
     problems
 }
 
-/// Read the manifest of the build in `dir`.
+/// Read and parse `<dir>/manifest.json`.
 ///
-/// The error says it is missing, isn't JSON, is a format this crate doesn't
-/// read, or lacks what it has to name.
+/// # Errors
+///
+/// Returns an error if `manifest.json` is missing, malformed JSON, has an
+/// unsupported `format` version, or is missing required fields.
 pub fn read_manifest(dir: &Utf8Path) -> Result<Manifest, String> {
     let text = fs::read_to_string(dir.join(MANIFEST)).map_err(|error| match error.kind() {
         ErrorKind::NotFound => format!("The build wrote no {MANIFEST}."),
@@ -180,7 +183,8 @@ pub fn read_manifest(dir: &Utf8Path) -> Result<Manifest, String> {
     let value: Value =
         serde_json::from_str(&text).map_err(|error| format!("{MANIFEST} isn't JSON: {error}."))?;
 
-    // Read before the rest, which a newer format may lay out differently.
+    // Check `format` before deserializing so newer schema versions produce a
+    // version-mismatch error rather than a missing-field error.
     match value.get("format").and_then(Value::as_u64) {
         Some(FORMAT) => {}
         Some(format) => {
@@ -194,15 +198,14 @@ pub fn read_manifest(dir: &Utf8Path) -> Result<Manifest, String> {
     serde_json::from_value(value).map_err(|error| format!("{MANIFEST} can't be read: {error}."))
 }
 
-/// Whether `name` can be an archive's: a file directly in the build's
-/// directory, and neither of the files that describe the build.
+/// Return whether `name` is a plain file name (not a path or reserved metadata
+/// file) inside the build directory.
 fn is_file_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(['/', '\\'])
         && !matches!(name, "." | ".." | MANIFEST | CHECKSUMS)
 }
 
-/// What is wrong with `checksums.txt` in `out` for the archives `files`.
 fn check_checksums(out: &Utf8Path, files: &BTreeSet<&str>) -> Vec<String> {
     let Ok(text) = fs::read_to_string(out.join(CHECKSUMS)) else {
         return vec![format!("The build wrote no {CHECKSUMS}.")];
@@ -238,7 +241,6 @@ fn check_checksums(out: &Utf8Path, files: &BTreeSet<&str>) -> Vec<String> {
             continue;
         };
         let path = out.join(file);
-        // A missing archive is a problem of the manifest's.
         if !path.is_file() {
             continue;
         }
@@ -255,16 +257,12 @@ fn check_checksums(out: &Utf8Path, files: &BTreeSet<&str>) -> Vec<String> {
     problems
 }
 
-/// The length of a SHA-256 in hex: 32 bytes, two digits each.
 const SHA256_HEX_DIGITS: usize = 64;
-
-/// How much of a file [`sha256`] reads at a time.
 const READ_BUFFER_BYTES: usize = 64 * 1024;
 
-/// The SHA-256 and file name of a line of `checksums.txt`, as `sha256sum`
-/// writes them: the hash, a space, then a space or `*`, then the name.
-///
-/// The hash is returned in lowercase.
+/// Parse a `sha256sum`-formatted line (`<64-hex-digits>  <name>` or
+/// `<64-hex-digits> *<name>`), returning the lowercase hex digest and file
+/// name.
 fn parse_checksum(line: &str) -> Option<(String, &str)> {
     let (hash, rest) = line.split_at_checked(SHA256_HEX_DIGITS)?;
     if !hash.chars().all(|char| char.is_ascii_hexdigit()) {
@@ -276,7 +274,8 @@ fn parse_checksum(line: &str) -> Option<(String, &str)> {
     (!name.is_empty()).then(|| (hash.to_ascii_lowercase(), name))
 }
 
-/// What is in `out` besides the archives `files` and the files describing them.
+/// Report any entries in `out` that are not in `files`, `manifest.json`, or
+/// `checksums.txt`.
 fn strays(out: &Utf8Path, files: &BTreeSet<&str>) -> Vec<String> {
     let entries = match out.read_dir_utf8() {
         Ok(entries) => entries,
@@ -296,9 +295,7 @@ fn strays(out: &Utf8Path, files: &BTreeSet<&str>) -> Vec<String> {
         .collect()
 }
 
-/// The SHA-256 of the contents of the file at `path`, in lowercase hex.
-///
-/// The error says the file can't be read.
+/// Compute the lowercase hex SHA-256 digest of the file at `path`.
 fn sha256(path: &Utf8Path) -> Result<String, String> {
     let unreadable = |error| format!("{path} can't be read: {error}.");
     let mut file = File::open(path).map_err(unreadable)?;

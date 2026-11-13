@@ -6,7 +6,6 @@ fn parse(args: &[&str]) -> Command {
     Cli::try_parse_from(args).unwrap().command
 }
 
-/// `render`'s flags, as `changelog render` reads `args`.
 fn render(args: &[&str]) -> Render {
     let mut command = vec!["changelog", "render"];
     command.extend_from_slice(args);
@@ -162,7 +161,6 @@ fn the_release_notes_link_to_an_upgrade_page_beside_them_by_default() {
     );
 }
 
-/// A caller can make JSON the default, and `--format` still decides.
 #[test]
 fn the_format_is_the_callers_default_unless_named() {
     assert_eq!(render(&[]).view(Format::Json), Ok(View::Json));

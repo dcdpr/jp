@@ -4,8 +4,8 @@
 //! JP over a JSON-lines protocol on stdin/stdout.
 //! This crate defines the message types used by both sides.
 //!
-//! The `client` module is the plugin's side of the protocol: the handshake,
-//! sending and awaiting messages, and the body of a plugin binary's `main`.
+//! [`client`] implements the plugin-side handshake, message helpers, and binary
+//! `main` entry point.
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 

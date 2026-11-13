@@ -4,7 +4,6 @@ use serde_json::json;
 
 use super::*;
 
-/// The style JP's `.comfort.toml` sets.
 const JP_STYLE: &str = indoc! {"
     max_width = 80
     format_markdown = true
@@ -12,12 +11,10 @@ const JP_STYLE: &str = indoc! {"
     prune_reference_links = true
 "};
 
-/// Two sentences on one line, wider than JP's style allows.
 const TWO_SENTENCES: &str = "A turn that stalls while idle is retried instead of failing. The \
                              retry waits for the provider's own backoff, and gives up after three \
                              attempts, saying why.";
 
-/// A workspace whose fragments directory, `changelog.d`, exists.
 fn workspace() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir(root.path().join("changelog.d")).unwrap();
@@ -25,13 +22,10 @@ fn workspace() -> Utf8TempDir {
     root
 }
 
-/// `root`'s fragments directory, writing files as they are given.
 fn fragments(root: &Utf8TempDir) -> Fragments<'_> {
     Fragments::new(root.path(), root.path().join("changelog.d"), &json!({})).unwrap()
 }
 
-/// `root`'s fragments directory, laying files out in JP's style as they are
-/// written.
 fn formatted(root: &Utf8TempDir) -> Fragments<'_> {
     fs::write(root.path().join(".comfort.toml"), JP_STYLE).unwrap();
     let config = json!({

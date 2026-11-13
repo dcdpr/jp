@@ -1,26 +1,21 @@
-//! `jp release pick`: add commits from `main` to a release in preparation, or
-//! start the next patch release with them.
+//! `jp release pick`: cherry-picking commits from `main` into a release in
+//! preparation or starting the next patch release.
 //!
-//! `main` is the commit the workspace's checkout is at, which has to hold every
-//! commit of `origin`'s `main`, and the commits are picked from its
-//! first-parent line.
-//! They are cherry-picked onto the release branch with `git cherry-pick -x`, in
-//! the order `main` has them, leaving out what they change in the fragments
-//! directory, which a release branch doesn't have.
-//! The fragments and highlights they added are filed into the release's
-//! directory on its notes branch, `release-notes/v<version>`: the one the cut
-//! or an earlier pick made, with `main` merged into it so that it holds them,
-//! or a new one from `main`.
-//! One that no other release ships moves, so the next release doesn't list the
-//! change again; one another release ships too is copied, with its credits
-//! written into the copy's `Credits` fields, so both releases list it.
-//! Both branches are updated in this repository, and the pick prints the push
-//! that publishes them.
+//! Picks commits from the first-parent history of the current checkout onto the
+//! target release branch (`release/<major>.<minor>`) using `git cherry-pick -x`
+//! in chronological order, stripping any changes inside the fragments
+//! directory.
 //!
-//! A conflict stops the pick in its worktree, which is kept for the user to
-//! resolve, and `jp release pick --continue` finishes it.
-//! What the stopped pick has left to do is kept in the repository's git
-//! directory, beside its worktrees.
+//! Fragments and highlights added by the picked commits are filed into
+//! `<fragments_dir>/<version>/` on `release-notes/v<version>` (merging `main`
+//! into an existing notes branch first, or branching a new one from `main`).
+//! If no other release branch ships the commit, the file is moved; if another
+//! release branch also ships the commit, the file is copied with explicit
+//! `Credits` fields so both releases list the change.
+//!
+//! If a code conflict occurs during cherry-picking, the worktree is preserved
+//! and state is saved to `.git/jp-release-pick.json` so the user can resolve
+//! the conflict and run `jp release pick --continue`.
 
 use std::{collections::HashMap, fs, io};
 
@@ -35,91 +30,59 @@ use crate::{
     repository::{Branch, Checkout, MAIN, ORIGIN, Worktree},
 };
 
-/// The file, in the repository's git directory, that keeps a stopped pick.
+/// State filename in the repository's common git directory for a paused pick.
 const STOPPED: &str = "jp-release-pick.json";
 
-/// A pick a conflict stopped, as `--continue` finds it.
+/// Persisted state for a pick paused by a merge conflict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Stopped {
-    /// The worktree holding the release branch with the picks made so far.
     worktree: Utf8PathBuf,
-
-    /// The release the commits go into.
     version: String,
-
-    /// The hashes of the commits to pick, in the order `main` has them.
     commits: Vec<String>,
 
-    /// The index into `commits` of the pick that stopped, or `commits.len()`
-    /// once every pick is made.
+    /// Index in `commits` of the conflicting commit, or `commits.len()` once
+    /// all cherry-picks have completed.
     stopped: usize,
 }
 
-/// A commit to pick.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Commit {
     hash: String,
     subject: String,
 }
 
-/// A fragment or highlight a pick files into the release's directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Filed {
-    /// Where it is on `main`, below the fragments directory.
     from: String,
-
-    /// Where it goes, below the fragments directory.
     to: String,
-
     highlight: bool,
 
-    /// The copy's text, for a file another release ships too; `None` moves the
-    /// file.
+    /// File contents when copying a fragment/highlight also shipped by another
+    /// release, or `None` when moving the file.
     copy: Option<String>,
 }
 
-/// What a pick files on the release's notes branch, planned in a worktree at
-/// `main` with the notes branch merged in.
 struct Filing<'r> {
     notes: Worktree<'r>,
-
-    /// The notes branch, as it was before the pick.
     branch: Branch,
-
     files: Vec<Filed>,
-
-    /// The files the commits added that `main` no longer has, as notes for the
-    /// user.
     gone: Vec<String>,
 }
 
-/// Everything a pick needs settled before it changes a branch.
 struct Prepared<'r> {
-    /// The release branch, at the commit the pick builds on.
     line: Line,
-
-    /// This repository's release branch, as it was before the pick; `None` when
-    /// only `origin` has it.
     local: Option<String>,
-
-    /// Whether the pick starts the release.
     start: bool,
-
     filing: Filing<'r>,
 }
 
-/// What became of one cherry-pick.
 enum Picked {
     Done,
-
-    /// It stopped at a conflict in these paths, below the top of the work tree.
     Conflicts(Vec<String>),
 }
 
-/// Pick `commits` from `main` into release `version`, and say what was done and
-/// how to publish it.
-///
-/// The error says why nothing was picked, or where a conflict stopped the pick.
+/// Cherry-pick `commits` from `main` into release `version` and file their
+/// fragments on `release-notes/v<version>`.
 pub(crate) fn pick(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -135,7 +98,6 @@ pub(crate) fn pick(
                 stopped.version, stopped.worktree, stopped.worktree
             ));
         }
-        // Its worktree is gone, so the pick was dropped.
         remove(&state)?;
     }
 
@@ -170,11 +132,7 @@ pub(crate) fn pick(
     )
 }
 
-/// Finish the pick a conflict stopped, once the conflict is resolved, and say
-/// what was done and how to publish it.
-///
-/// The error says why it can't be finished yet; the stopped pick is kept, to
-/// try again.
+/// Resume a pick paused by a conflict after the user has staged the resolution.
 pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
     let repo = &pipeline.repo;
     let state = repo.worktrees.common_dir()?.join(STOPPED);
@@ -205,11 +163,6 @@ pub(crate) fn resume(pipeline: &Pipeline<'_>) -> Result<String, String> {
     finish_resumed(pipeline, &state, code, &version, &commits, &stopped)
 }
 
-/// Make the picks of `commits` into `version` the stopped pick `stopped` has
-/// left to do in `code`, once the one that stopped is resolved.
-///
-/// Returns `code` with every pick made; the error says what stopped it, with
-/// the pick kept in `code` and recorded in `state`.
 fn pick_rest<'r>(
     pipeline: &Pipeline<'_>,
     state: &Utf8Path,
@@ -248,11 +201,6 @@ fn pick_rest<'r>(
     Ok(code)
 }
 
-/// Update the branches for the stopped pick `stopped`, every pick of which is
-/// made in `code`, and say what was done and how to publish it.
-///
-/// The worktree is kept until the branches are updated; when they can't be, the
-/// error says how to try again.
 fn finish_resumed(
     pipeline: &Pipeline<'_>,
     state: &Utf8Path,
@@ -298,10 +246,9 @@ fn finish_resumed(
     }
 }
 
-/// The commits `commits` name, in the order `main` has them, each once.
-///
-/// The error names a commit that isn't on the first-parent line of `checkout`,
-/// that `line` has already, or that changes nothing but notes.
+/// Resolve and deduplicate `commits` in chronological order along the
+/// first-parent history of `checkout`, rejecting commits not on `main`, commits
+/// already on `line`, or commits that only touch the fragments directory.
 fn order(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -338,14 +285,11 @@ fn order(
         ordered.push((position, Commit { hash, subject }));
     }
 
-    // `main_line` lists the newest commit first.
     ordered.sort_by(|(a, _), (b, _)| b.cmp(a));
 
     Ok(ordered.into_iter().map(|(_, commit)| commit).collect())
 }
 
-/// Refuse the commit `hash` when it changes nothing outside the fragments
-/// directory.
 fn refuse_notes_only(pipeline: &Pipeline<'_>, hash: &str) -> Result<(), String> {
     if pipeline
         .repo
@@ -362,11 +306,6 @@ fn refuse_notes_only(pipeline: &Pipeline<'_>, hash: &str) -> Result<(), String> 
     ))
 }
 
-/// Settle where the pick of `commits` into `version` goes, and what it files on
-/// the release's notes branch.
-///
-/// Refuses a release branch or notes branch checked out in a worktree, before
-/// anything is picked.
 fn prepare<'r>(
     pipeline: &'r Pipeline<'_>,
     checkout: &Checkout,
@@ -390,13 +329,6 @@ fn prepare<'r>(
     })
 }
 
-/// Plan what the pick of `commits` onto `line` files for `version`: each
-/// fragment and highlight they added, moved or copied into the release's
-/// directory, on the release's notes branch with `checkout` merged in, or on a
-/// new one from `checkout`.
-///
-/// The error says why one can't be filed, such as an upgrade section `version`
-/// can't ship, or that the notes branch and `checkout` conflict.
 fn plan<'r>(
     pipeline: &'r Pipeline<'_>,
     checkout: &Checkout,
@@ -433,7 +365,6 @@ fn plan<'r>(
         dir: &dir,
     };
     for commit in commits {
-        // Whether another release ships the commit, asked once.
         let mut elsewhere = None;
 
         for added in history.added_by(&commit.hash) {
@@ -455,29 +386,16 @@ fn plan<'r>(
     Ok(filing)
 }
 
-/// What [`plan`] files the notes of a pick into `version`, onto `line`, by.
 struct Planner<'a, 'p> {
     pipeline: &'a Pipeline<'p>,
     releases: &'a Releases,
     line: &'a Line,
     version: &'a Version,
-
-    /// The history of the fragments directory along `main`'s line.
     history: &'a History,
-
-    /// The fragments directory, in a worktree at `main` with the notes branch
-    /// merged in.
     dir: &'a Utf8Path,
 }
 
 impl Planner<'_, '_> {
-    /// How the fragment or highlight at `now` below the fragments directory,
-    /// which the commit `hash` added, is filed into the release's directory:
-    /// moved, or copied with its credits when another release ships `hash` too;
-    /// `None` for a file filed there already, or that is neither.
-    ///
-    /// `elsewhere` keeps whether another release ships `hash`, once asked.
-    /// The error says why the file can't be filed.
     fn file(
         &self,
         hash: &str,
@@ -535,8 +453,6 @@ impl Planner<'_, '_> {
         }))
     }
 
-    /// Whether a release besides the one on `line` ships the commit `hash`,
-    /// asked of the repository once and kept in `elsewhere`.
     fn shipped_elsewhere(&self, hash: &str, elsewhere: &mut Option<bool>) -> Result<bool, String> {
         if let Some(shipped) = *elsewhere {
             return Ok(shipped);
@@ -554,13 +470,9 @@ impl Planner<'_, '_> {
     }
 }
 
-/// Merge the notes branch `name`, at `tip`, into `notes`, a worktree at `main`,
-/// so it holds both what `main` added since the branch started and the notes
-/// the branch filed.
-///
-/// `main` is the merge's first parent, so the history of the fragments
-/// directory is read along `main`'s line.
-/// A merge that conflicts is undone, and the error says how to resolve it.
+/// Merge `tip` (from `name`) into the `notes` worktree (checked out at `main`),
+/// keeping `main` as the first parent so [`History`] walks `main`'s
+/// first-parent line.
 fn merge_notes(notes: &Worktree<'_>, name: &str, tip: &str) -> Result<(), String> {
     let message = format!("Merge {MAIN} into {name}");
     let ran = notes.try_git(&["merge", "--no-edit", "--quiet", "--message", &message, tip])?;
@@ -582,11 +494,6 @@ fn merge_notes(notes: &Worktree<'_>, name: &str, tip: &str) -> Result<(), String
     ))
 }
 
-/// Whether the fragment or highlight `text`, at `path` below the fragments
-/// directory, lists the credits to give.
-///
-/// The error refuses a fragment with an upgrade section, which `version` can't
-/// ship unless it is a major release, or a minor one before 1.0.
 fn lists_credits(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -622,8 +529,6 @@ fn lists_credits(
     Ok(fragment.credits.is_some())
 }
 
-/// The message of the commit that files the notes of `commits`, picked onto
-/// `branch` for `version`.
 fn notes_message(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -659,18 +564,18 @@ fn notes_message(
     )
 }
 
-/// How many fragments and highlights `list` holds, as [`files`] says it.
 fn filed(list: &[Filed]) -> String {
     let highlights = list.iter().filter(|file| file.highlight).count();
 
     files(list.len() - highlights, highlights)
 }
 
-/// Cherry-pick `hash` in `code`, leaving out what it changes in the fragments
+/// Cherry-pick `hash` in `code`, stripping any changes to the fragments
 /// directory.
 ///
-/// A conflict in the fragments directory resolves by leaving those files out.
-/// A conflict anywhere else stops the pick, with the notes already left out.
+/// Conflicts inside the fragments directory are resolved automatically by
+/// removing the fragments directory; conflicts elsewhere return
+/// [`Picked::Conflicts`].
 fn pick_one(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<Picked, String> {
     let parents = code.git(&["rev-list", "--parents", "-n", "1", hash])?;
     let mut args = vec!["cherry-pick", "-x", "--keep-redundant-commits"];
@@ -689,8 +594,6 @@ fn pick_one(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<
         return Err(format!("Picking {} failed: {}", short(hash), ran.said()));
     }
 
-    // A release branch keeps no notes, so only a conflict in the code is the
-    // user's to resolve.
     leave_out_notes(pipeline, code)?;
     let conflicts = unmerged(code)?;
     if !conflicts.is_empty() {
@@ -701,10 +604,6 @@ fn pick_one(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<
     Ok(Picked::Done)
 }
 
-/// Finish the pick of `hash` a conflict stopped in `code`, once the conflict is
-/// resolved.
-///
-/// The error says what is left to do.
 fn resolve(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<(), String> {
     let picking = code
         .try_git(&["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"])?
@@ -724,7 +623,6 @@ fn resolve(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<(
         return Ok(());
     }
 
-    // The pick was committed in the worktree, or abandoned there.
     let message = code.git(&["log", "-1", "--format=%B"])?;
     if !message.contains(&format!("(cherry picked from commit {hash})")) {
         return Err(format!(
@@ -739,8 +637,6 @@ fn resolve(pipeline: &Pipeline<'_>, code: &Worktree<'_>, hash: &str) -> Result<(
     drop_notes(pipeline, code)
 }
 
-/// Remove the fragments directory from the index and the work tree of `code`,
-/// whatever a pick staged in it.
 fn leave_out_notes(pipeline: &Pipeline<'_>, code: &Worktree<'_>) -> Result<(), String> {
     code.git(&[
         "rm",
@@ -754,11 +650,9 @@ fn leave_out_notes(pipeline: &Pipeline<'_>, code: &Worktree<'_>) -> Result<(), S
     .map(drop)
 }
 
-/// Leave the fragments directory out of the last commit in `code`.
 fn drop_notes(pipeline: &Pipeline<'_>, code: &Worktree<'_>) -> Result<(), String> {
     leave_out_notes(pipeline, code)?;
 
-    // `--quiet` exits 1 when the index differs from the commit.
     let unchanged = code.try_git(&["diff", "--cached", "--quiet"])?.success;
     if !unchanged {
         code.git(&["commit", "--amend", "--no-edit", "--quiet", "--allow-empty"])?;
@@ -767,8 +661,6 @@ fn drop_notes(pipeline: &Pipeline<'_>, code: &Worktree<'_>) -> Result<(), String
     Ok(())
 }
 
-/// The paths with unresolved conflicts in `worktree`, below the top of the work
-/// tree.
 fn unmerged(worktree: &Worktree<'_>) -> Result<Vec<String>, String> {
     let listing = worktree.git(&["diff", "--name-only", "--diff-filter=U", "-z"])?;
 
@@ -779,10 +671,6 @@ fn unmerged(worktree: &Worktree<'_>) -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// Keep `code` and record what the pick of `commits` into `version` has left to
-/// do, from the commit at `index` whose pick stopped at a conflict in `paths`.
-///
-/// Returns what to tell the user.
 fn stop(
     state: &Utf8Path,
     code: Worktree<'_>,
@@ -809,11 +697,6 @@ fn stop(
     ))
 }
 
-/// Point the release branch at `picked`, the picks `prepared` planned made on
-/// top of it, file the notes on the notes branch, and say what was done and how
-/// to publish it.
-///
-/// A release branch already at `picked`, as a retry finds it, is left there.
 fn finish(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -827,10 +710,6 @@ fn finish(
     picked_report(pipeline, checkout, prepared, version, commits)
 }
 
-/// Point the release branch at `picked`, and file the notes `prepared` planned
-/// on the notes branch, when it planned any.
-///
-/// Refuses a release branch that moved since the pick started.
 fn update_branches(
     pipeline: &Pipeline<'_>,
     prepared: &Prepared<'_>,
@@ -864,8 +743,6 @@ fn update_branches(
     )
 }
 
-/// What the pick of `commits` into `version` did, as `prepared` planned it, and
-/// how to publish it.
 fn picked_report(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -932,10 +809,6 @@ fn picked_report(
     Ok(said)
 }
 
-/// The branches a pick of `commits` made, from a checkout ahead of `origin`'s
-/// `main`, that hold commits `origin`'s `main` lacks: the release branch
-/// `branch` when one of `commits` is such a commit, and the notes branch
-/// `notes`, when the pick filed notes on it.
 fn holding(
     pipeline: &Pipeline<'_>,
     checkout: &Checkout,
@@ -959,10 +832,6 @@ fn holding(
     Ok(holding)
 }
 
-/// Move or copy each file of `filing` into the release's directory, and commit
-/// it with `message`.
-///
-/// Returns the commit's hash.
 fn apply(pipeline: &Pipeline<'_>, filing: &Filing<'_>, message: &str) -> Result<String, String> {
     let workspace = filing.notes.workspace();
 
@@ -988,8 +857,7 @@ fn apply(pipeline: &Pipeline<'_>, filing: &Filing<'_>, message: &str) -> Result<
     filing.notes.commit(message)
 }
 
-/// The pick a conflict stopped, as the release it goes into and the worktree
-/// holding it, when there is one to continue.
+/// Return `(version, worktree_path)` if a paused pick is currently active.
 pub(crate) fn stopped(pipeline: &Pipeline<'_>) -> Result<Option<(String, Utf8PathBuf)>, String> {
     let state = pipeline.repo.worktrees.common_dir()?.join(STOPPED);
 
@@ -998,7 +866,6 @@ pub(crate) fn stopped(pipeline: &Pipeline<'_>) -> Result<Option<(String, Utf8Pat
         .map(|stopped| (stopped.version, stopped.worktree)))
 }
 
-/// The stopped pick `path` keeps, when there is one.
 fn load(path: &Utf8Path) -> Result<Option<Stopped>, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -1011,7 +878,6 @@ fn load(path: &Utf8Path) -> Result<Option<Stopped>, String> {
         .map_err(|error| format!("{path} doesn't hold a stopped pick ({error}); remove it."))
 }
 
-/// Keep `stopped` in `path`.
 fn save(path: &Utf8Path, stopped: &Stopped) -> Result<(), String> {
     let json = serde_json::to_string_pretty(stopped)
         .map_err(|error| format!("failed to write the stopped pick: {error}"))?;
@@ -1019,7 +885,6 @@ fn save(path: &Utf8Path, stopped: &Stopped) -> Result<(), String> {
     fs::write(path, json + "\n").map_err(|error| format!("failed to write {path}: {error}"))
 }
 
-/// Forget the stopped pick `path` keeps.
 fn remove(path: &Utf8Path) -> Result<(), String> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),

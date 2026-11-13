@@ -9,15 +9,13 @@ use crate::{
     repository_testing::Fixture,
 };
 
-/// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
+/// 2026-10-01 12:00:00 UTC in seconds since the Unix epoch.
 const OCTOBER_1: i64 = 1_790_856_000;
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// Make a release branch for 0.3, here and on `origin`: the commit that starts
-/// 0.3.0, and the commit `picked` picked onto it.
 fn release_branch(fixture: &Fixture, picked: &str) -> String {
     fixture.git(&["checkout", "--quiet", "-b", "release/0.3"]);
     fixture.commit("Start release 0.3.0\n\nStarts-Release: 0.3.0");
@@ -31,8 +29,6 @@ fn release_branch(fixture: &Fixture, picked: &str) -> String {
     tip
 }
 
-/// Commit to the branch `branch` without checking it out, and return the
-/// commit's hash.
 fn commit_on(fixture: &Fixture, branch: &str, message: &str) -> String {
     let tree = fixture.hash(&format!("{branch}^{{tree}}"));
     let parent = fixture.hash(branch);

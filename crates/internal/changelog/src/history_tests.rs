@@ -2,7 +2,6 @@ use std::num::NonZeroU64;
 
 use super::*;
 
-/// A commit changing `changes`, with a hash made of `id`.
 fn commit(id: char, changes: Vec<Change>) -> Commit {
     Commit {
         hash: id.to_string().repeat(40),
@@ -206,7 +205,6 @@ fn a_file_history_does_not_know_is_credited_to_nobody() {
     assert_eq!(credited(&commits, &["new.md"]), vec![Vec::<usize>::new()]);
 }
 
-/// The full hash `commit` gives the commit made of `id`.
 fn hash(id: char) -> String {
     id.to_string().repeat(40)
 }
@@ -215,8 +213,6 @@ fn history(commits: Vec<Commit>) -> History {
     History { commits }
 }
 
-/// A commit whose message names a pull request, as a GitHub squash commit's
-/// does.
 fn squashed(id: char, number: u64, changes: Vec<Change>) -> Commit {
     Commit {
         message: format!("Commit {id} (#{number})\n"),

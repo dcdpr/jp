@@ -10,34 +10,31 @@ Tracking ticket for [RFD 123].
 
 ## Implementation plan
 
-- [x] **Write the build script**: Turns the build spike into
-      `.config/release/build.sh`: the five targets, the release toolchain from
-      `[workspace.metadata.release]`, the `release` and `quick` profiles, the
-      archives, `checksums.txt`, and `manifest.json`.
-      Sets JP's `build` option and release toolchain, and makes `jp --version`
-      read `SOURCE_DATE_EPOCH`.
+- [x] **Write the build script**: Add `.config/release/build.sh` supporting all
+      five targets, `[workspace.metadata.release].toolchain`, the `release` and
+      `quick` profiles, archive packaging, `checksums.txt`, and `manifest.json`.
+      Configure JP's `build` option and release toolchain, and update `jp
+      --version` to read `SOURCE_DATE_EPOCH`.
       Depends on RFD 122's building phase.
-- [x] **Add install scripts**: Adds `install.sh` and `install.ps1` to
-      `.config/release/`, with the `{download}` placeholder a publisher fills in
-      and `JP_DOWNLOAD` to try them, and replaces the "no binaries" warning in
-      `docs/installation.md` with them, manual download and checksum
-      verification, the macOS quarantine note, and building from source.
+- [x] **Add install scripts**: Add `install.sh` and `install.ps1` to
+      `.config/release/` with the `{download}` placeholder and `JP_DOWNLOAD`
+      override, and update `docs/installation.md` with install script
+      instructions, manual download and checksum verification, the macOS
+      quarantine note, and building from source.
       Depends on Phase 1.
-- [x] **Add `jp release github`**: Creates the plugin with `publish`, its
-      `assets`, `upgrade_guide`, and `footer` settings, and `sync`, adds
-      GitHub's Releases API to `jp_github`, sets JP's settings to its install
-      scripts, its site's upgrade guides, and a footer with the install
-      commands, and runs `sync` in JP's CI on pushes to `main` that change a
-      version's directory.
+- [x] **Add `jp release github`**: Create
+      `crates/plugins/command/release-github` with `publish` (supporting
+      `assets`, `upgrade_guide`, and `footer`) and `sync`, add GitHub's Releases
+      API to `jp_github`, configure `release-github` in `.jp/config.toml`, and
+      run `sync` in JP's CI on pushes to `main` that modify `changelog.d/*/**`.
       Depends on Phases 1 and 2.
-- [ ] **Release JP's history**: Adds `just backfill` with `init`, `next`,
-      `proceed`, `revert`, and `publish`, and runs the trial; its `publish` is
-      JP's first release with binaries.
-      Depends on Phase 3 and RFD 122's phases for cutting the past, building,
-      and links and drafts.
+- [ ] **Release JP's history**: Add `just backfill` with `init`, `next`,
+      `proceed`, `revert`, `publish`, and `draft`, and execute the backfill
+      trial to publish JP's historical releases.
+      Depends on Phase 3 and RFD 122 Phases 5 to 7.
 
-Before the history's `publish`, the `documentation` environment is restricted to
-deployments from `main`; after it, [T-1f2jmb7]'s rulesets apply.
+Before running `just backfill publish`, restrict the `documentation` environment
+to deployments from `main`; afterwards, apply the rulesets in [T-1f2jmb7].
 
 [RFD 123]: ../rfd/123-distributing-the-jp-binary.md
 [T-1f2jmb7]: 1f2jmb7-protect-release-branches-and-release-tags-on-github.md

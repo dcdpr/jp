@@ -1,21 +1,23 @@
-//! `jp release abandon`: take back a release nobody has published, so it can be
-//! cut again.
+//! `jp release abandon`: retract an unpublished release so it can be cut or
+//! picked again.
 //!
-//! Releases are abandoned newest first, and one `origin` has tagged is
-//! published, which nothing takes back.
-//! The release's tag and notes branch are deleted here, with its release
-//! branch, or for a patch release the commits from the one that started it.
-//! The fragments and highlights its notes filed move back to the top of the
-//! fragments directory, with their wording as edited, on
-//! `release-notes/abandon-v<version>`: branched from the notes branch while
-//! `main` lacks its notes, and from the checkout once it has them.
-//! A file `pick` copied from another release is removed instead, and
-//! `overview.md` stays in the release's directory for the next cut of the
-//! version.
-//! When `main` has the notes at the top already, as when a notes branch nobody
-//! edited never merged, no abandon branch is made.
-//! Nothing is pushed: the command prints the pushes that take the release back
-//! on `origin`.
+//! Releases must be abandoned from newest to oldest, and any release whose tag
+//! has been pushed to `origin` cannot be abandoned.
+//!
+//! Abandoning a release:
+//!
+//! - Deletes the local tag `v<version>` and local notes branch
+//!   `release-notes/v<version>`.
+//! - Deletes `release/<major>.<minor>` for a minor or major release, or resets
+//!   the branch to the commit preceding `Starts-Release: <version>` for a patch
+//!   release.
+//! - Creates `release-notes/abandon-v<version>` moving the release's fragments
+//!   and highlights back to the top level of the fragments directory (removing
+//!   any files copied by `pick` from another release and leaving `overview.md`
+//!   in place).
+//!   If `main` already has the files at the top level unedited, no abandon
+//!   branch is created.
+//! - Prints the `git push` commands needed to remove the remote branches.
 
 use std::{fs, iter};
 
@@ -34,55 +36,36 @@ use crate::{
     repository::{MAIN, ORIGIN, Repository, Worktree},
 };
 
-/// What the abandon branch does to the files of the release's directory.
+/// Counts of files moved or removed on `release-notes/abandon-v<version>`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Moved {
-    /// Fragments moved back to the top level.
     fragments: usize,
-
-    /// Highlights moved back to the top level.
     highlights: usize,
-
-    /// Files `pick` copied from another release, removed.
     copies: usize,
 }
 
-/// What happens to one file of the release's directory.
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct Move {
-    /// The file's path below the fragments directory.
     from: String,
 
-    /// Where it goes below the fragments directory, or `None` to remove a file
-    /// `pick` copied.
+    /// Destination path relative to the fragments directory, or `None` to
+    /// delete a file copied by `pick`.
     to: Option<String>,
 
     highlight: bool,
 }
 
-/// What `abandon` took back in this repository, and what is left to take back
-/// on `origin`.
+/// Local ref changes performed by `abandon` and the remaining remote ref
+/// updates to print.
 #[derive(Debug, Default)]
 struct TakenBack {
-    /// What was deleted here, each as a sentence names it, such as
-    /// `release/0.1` or `the tag v0.1.0`.
     deleted: Vec<String>,
-
-    /// The release branch whose commits came off, and the commit it is back at.
     reset: Option<(String, String)>,
-
-    /// The branches to delete on `origin`.
     remove: Vec<String>,
-
-    /// The release branch to force-push to `origin`, which still has the
-    /// commits that came off it here.
     force: Option<String>,
 }
 
-/// Take back release `version`, and say what was undone and how to undo it on
-/// `origin`.
-///
-/// The error says why `version` can't be abandoned.
+/// Abandon release `version` locally and return a summary with the `git push`
+/// commands to update `origin`.
 pub(crate) fn abandon(pipeline: &Pipeline<'_>, version: &Version) -> Result<String, String> {
     let repo = &pipeline.repo;
     repo.origin.fetch()?;
@@ -95,17 +78,14 @@ pub(crate) fn abandon(pipeline: &Pipeline<'_>, version: &Version) -> Result<Stri
         repo.refs.refuse_checked_out(&line.branch)?;
     }
 
-    // The notes come back before anything is deleted, so a failure leaves the
-    // release as it was.
+    // Prepare the abandon branch before deleting refs so a failure leaves the
+    // release untouched.
     let moved = return_notes(pipeline, version, &checkout.head)?;
     let taken = take_back(pipeline, &releases, version)?;
 
     Ok(report(pipeline, version, &taken, moved))
 }
 
-/// Refuse to abandon `version` when `origin` has its tag, when nothing cut it,
-/// when a later release exists, while a pick into it is stopped, or when its
-/// abandon branch exists already.
 fn refuse(pipeline: &Pipeline<'_>, releases: &Releases, version: &Version) -> Result<(), String> {
     let tag = releases::tag(version);
     if releases.published.contains(version) {
@@ -154,12 +134,9 @@ fn refuse(pipeline: &Pipeline<'_>, releases: &Releases, version: &Version) -> Re
     Ok(())
 }
 
-/// Move the notes of `version` back to the top of the fragments directory on
-/// its abandon branch, as `main`, the commit `head`, will merge them; `None`
-/// when `head` has them there already.
-///
-/// The branch starts from the release's notes branch while `head` lacks files
-/// of the release's directory that branch has, and from `head` otherwise.
+/// Create `release-notes/abandon-v<version>` moving `version`'s fragments and
+/// highlights back to the top level of the fragments directory, or return
+/// `Ok(None)` if `head` already has those files at the top level.
 fn return_notes(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -187,8 +164,6 @@ fn return_notes(
     );
     let commit = worktree.commit(&message)?;
 
-    // From a notes branch `main` never merged, notes nobody edited come back
-    // as `main` has them already.
     let before = repo.history.merge_base(head, &base)?;
     if repo
         .history
@@ -202,12 +177,6 @@ fn return_notes(
     Ok(Some(moved))
 }
 
-/// Move the fragments and highlights in the directory of `version` in
-/// `worktree` back to the top of the fragments directory, removing the ones
-/// `pick` copied from another release, and stage it.
-///
-/// Refuses, before moving anything, a file whose place at the top level holds
-/// another file already.
 fn move_back(
     pipeline: &Pipeline<'_>,
     worktree: &Worktree<'_>,
@@ -225,11 +194,6 @@ fn move_back(
     apply_moves(pipeline, worktree, plan)
 }
 
-/// The fragments and highlights the directory of `version` holds in the
-/// fragments directory `dir` of `worktree`; `None` when it has no such
-/// directory.
-///
-/// The error lists the files that break their format.
 fn release_contents(
     worktree: &Worktree<'_>,
     dir: &Utf8Path,
@@ -246,11 +210,6 @@ fn release_contents(
     }
 }
 
-/// Where each file of `contents`, the directory of `version` in the fragments
-/// directory `dir`, goes: back to the top level, or nowhere for a copy `pick`
-/// made.
-///
-/// Refuses a file whose place at the top level holds another file already.
 fn plan_moves(
     pipeline: &Pipeline<'_>,
     dir: &Utf8Path,
@@ -305,9 +264,8 @@ fn plan_moves(
     Ok(plan)
 }
 
-/// Whether the file at `place`, which says `text`, is a copy `pick` made: a
-/// file at the same place at the top level or in one of the releases `others`
-/// says the same.
+/// Return whether the file at `place` with contents `text` is a copy created by
+/// `pick` of an identical file at the top level or in another release.
 fn is_copy(dir: &Utf8Path, place: &Place, others: &[Version], highlight: bool, text: &str) -> bool {
     let top = Place {
         part: Part::Unreleased,
@@ -324,8 +282,6 @@ fn is_copy(dir: &Utf8Path, place: &Place, others: &[Version], highlight: bool, t
     })
 }
 
-/// Refuse to move the files of `version` back to the top level when the paths
-/// `taken` there hold other files already.
 fn refuse_taken(version: &Version, taken: &[String]) -> Result<(), String> {
     if taken.is_empty() {
         return Ok(());
@@ -344,7 +300,6 @@ fn refuse_taken(version: &Version, taken: &[String]) -> Result<(), String> {
     ))
 }
 
-/// Make the moves of `plan` in `worktree` and stage them.
 fn apply_moves(
     pipeline: &Pipeline<'_>,
     worktree: &Worktree<'_>,
@@ -380,9 +335,6 @@ fn apply_moves(
     Ok(moved)
 }
 
-/// Delete the tag and notes branch of `version` here, and its release branch,
-/// or for a patch release the commits from the one that started it, and say
-/// what is left to take back on `origin`.
 fn take_back(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -405,9 +357,6 @@ fn take_back(
     Ok(taken)
 }
 
-/// Take `version` off its release branch `line`: the whole branch for the first
-/// release on it, and for a patch release the commits from the one that started
-/// it.
 fn take_back_line(
     repo: &Repository<'_>,
     line: &Line,
@@ -415,13 +364,9 @@ fn take_back_line(
     taken: &mut TakenBack,
 ) -> Result<(), String> {
     if version.patch == 0 {
-        // The first release on its branch, and with no later one, the only
-        // one.
         return delete_branch(repo, &line.branch, taken);
     }
 
-    // A patch release tagged by hand, with no commit starting it, has nothing
-    // on its branch to take back.
     let Some(started) = line
         .started
         .iter()
@@ -444,8 +389,6 @@ fn take_back_line(
     Ok(())
 }
 
-/// Delete the branch `name` here when it is here, and list it to delete on
-/// `origin` when it is there.
 fn delete_branch(repo: &Repository<'_>, name: &str, taken: &mut TakenBack) -> Result<(), String> {
     let branch = repo.refs.branch(name)?;
     if let Some(local) = &branch.local {
@@ -459,7 +402,6 @@ fn delete_branch(repo: &Repository<'_>, name: &str, taken: &mut TakenBack) -> Re
     Ok(())
 }
 
-/// What abandoning `version` took back, and the pushes and merge left to do.
 fn report(
     pipeline: &Pipeline<'_>,
     version: &Version,
@@ -492,7 +434,6 @@ fn report(
 
     let again = again(version);
     if commands.is_empty() {
-        // Without an abandon branch to merge, nothing is left to do.
         said.push_str(&format!("\n{version} can be {again}.\n"));
         return said;
     }
@@ -510,7 +451,6 @@ fn report(
     said
 }
 
-/// The sentence saying what abandoning `version` undid here.
 fn undone(version: &Version, taken: &TakenBack) -> String {
     let mut done = vec![];
     if let Some((branch, before)) = &taken.reset {
@@ -530,8 +470,6 @@ fn undone(version: &Version, taken: &TakenBack) -> String {
     }
 }
 
-/// How release `version` starts again once abandoned: a patch release with a
-/// pick, any other with a cut.
 fn again(version: &Version) -> &'static str {
     if version.patch == 0 {
         "cut again"
@@ -540,10 +478,8 @@ fn again(version: &Version) -> &'static str {
     }
 }
 
-/// Whether the texts `copy` and `original` of two files named `name` say the
-/// same, whatever credits either lists: what makes `copy` a copy `pick` made.
-///
-/// Texts that don't follow their format are not alike.
+/// Compare two fragments or highlights for identical content (ignoring
+/// `Credits` metadata, which `pick` injects when copying a file).
 fn alike(name: &str, highlight: bool, copy: &str, original: &str) -> bool {
     if highlight {
         let (Ok(copy), Ok(original)) = (highlight::parse(copy), highlight::parse(original)) else {
@@ -569,8 +505,6 @@ fn alike(name: &str, highlight: bool, copy: &str, original: &str) -> bool {
 }
 
 impl Moved {
-    /// What the abandon branch's commit does, as a clause, such as "moves the 2
-    /// fragments its notes filed back to the top of `changelog.d/`".
     fn changes(self, pipeline: &Pipeline<'_>) -> String {
         self.clauses(
             |files| {
@@ -583,8 +517,6 @@ impl Moved {
         )
     }
 
-    /// What was done, as a clause, such as "moved 2 fragments back to the top
-    /// of changelog.d/".
     fn describe(self, pipeline: &Pipeline<'_>) -> String {
         self.clauses(
             |files| format!("moved {files} back to the top of {}/", pipeline.fragments),
@@ -592,11 +524,6 @@ impl Moved {
         )
     }
 
-    /// The clauses for what moved and what was removed, joined with "and".
-    ///
-    /// `moved` words the fragments and highlights moved back, given them
-    /// counted, such as "2 fragments"; `removed` words the copies removed.
-    /// A clause with nothing to count is left out.
     fn clauses(
         self,
         moved: impl FnOnce(String) -> String,

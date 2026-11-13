@@ -6,7 +6,6 @@ use serde_json::json;
 
 use super::*;
 
-/// The style JP's `.comfort.toml` sets.
 const JP_STYLE: &str = indoc! {"
     max_width = 80
     format_markdown = true
@@ -14,7 +13,6 @@ const JP_STYLE: &str = indoc! {"
     prune_reference_links = true
 "};
 
-/// A highlight that follows the format.
 const HIGHLIGHT: &str = indoc! {"
     # Tool calls fan out
 
@@ -23,21 +21,11 @@ const HIGHLIGHT: &str = indoc! {"
     The assistant calls one tool on many inputs at once.
 "};
 
-/// Plays the user: each `open` leaves the next scripted content in the file,
-/// and each question is answered from a script.
 #[derive(Default)]
 struct Scripted {
-    /// What the editor leaves in the file, if it writes at all, and whether it
-    /// exits cleanly.
     edits: VecDeque<(Option<&'static str>, bool)>,
-
-    /// The answers to "open the editor again?".
     again: VecDeque<bool>,
-
-    /// The problems the user was asked about, in order.
     asked: Vec<String>,
-
-    /// Each file the editor opened, and what it held then.
     opened: Vec<(Utf8PathBuf, String)>,
 }
 
@@ -78,7 +66,6 @@ impl Editing for Scripted {
     }
 }
 
-/// A workspace whose fragments directory, `changelog.d`, exists.
 fn workspace() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir(root.path().join("changelog.d")).unwrap();
@@ -86,13 +73,10 @@ fn workspace() -> Utf8TempDir {
     root
 }
 
-/// `root`'s fragments directory, writing files as they are given.
 fn fragments(root: &Utf8TempDir) -> Fragments<'_> {
     Fragments::new(root.path(), root.path().join("changelog.d"), &json!({})).unwrap()
 }
 
-/// `root`'s fragments directory, laying files out in JP's style as they are
-/// written.
 fn formatted(root: &Utf8TempDir) -> Fragments<'_> {
     fs::write(root.path().join(".comfort.toml"), JP_STYLE).unwrap();
     let config = json!({

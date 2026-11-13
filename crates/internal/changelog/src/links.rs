@@ -1,16 +1,12 @@
-//! Reference-style links, rewritten so any part of a document stands alone.
+//! Rewriting reference-style Markdown links (`[text][label]`, `[label][]`,
+//! `[label]`) to inline links (`[text](url)`).
 //!
-//! A reference-style link, `[text][label]` or `[label]`, reads its URL from a
-//! definition, `[label]: url`, which can sit anywhere in the document.
-//! A formatter that gathers the definitions at the end of the file puts them
-//! below a fragment's upgrade section, so the entry, read apart from them,
-//! links nowhere.
-//! And two documents placed one after the other can each define a label
-//! differently, in which case the first definition wins for both.
-//!
-//! [`Links::read`] finds what to change, and [`Links::standalone`] writes any
-//! part of the document with its reference-style links and images inline,
-//! `[text](url)`, and its definitions gone.
+//! Reference link definitions (`[label]: url`) often sit at the bottom of a
+//! file below a fragment's upgrade section, and two fragments rendered into the
+//! same document may define the same label with different URLs.
+//! [`Links::read`] locates all reference links, images, and link definitions in
+//! a Markdown document, and [`Links::standalone`] renders any byte range with
+//! its links inlined and top-level definitions stripped.
 
 use std::{iter, ops::Range};
 
@@ -22,19 +18,21 @@ use comrak::{
 
 use crate::document;
 
-/// The changes that make a document's links stand alone.
+/// Reference-link rewrites and link-definition removals for a Markdown
+/// document.
 pub(crate) struct Links {
-    /// Byte ranges of the document, each with the text that replaces it, in
-    /// order and none overlapping.
+    /// Non-overlapping `(byte_range, replacement)` edits sorted by start
+    /// offset.
     edits: Vec<(Range<usize>, String)>,
 }
 
 impl Links {
-    /// Find the reference-style links and images in `markdown`, and the
-    /// definitions they read.
+    /// Locate all reference-style links, reference images, and link definitions
+    /// in `markdown`.
     ///
-    /// The definitions are dropped only when every link could be rewritten, so
-    /// a link left as written keeps the definition it reads.
+    /// Top-level link definitions are stripped only when every link in the
+    /// document was classified, so any link left untouched retains its
+    /// definition.
     pub(crate) fn read(markdown: &str) -> Self {
         let arena = Arena::new();
         let root = parse_document(&arena, markdown, &document::markdown_options());
@@ -66,10 +64,8 @@ impl Links {
         Self { edits }
     }
 
-    /// `markdown[range]`, with its links inline and its definitions gone.
-    ///
-    /// `markdown` is the document [`Links::read`] read, and `range` starts and
-    /// ends at a line: no link or definition spans two such parts.
+    /// Return `markdown[range]` with reference links rewritten to inline links
+    /// and top-level link definitions removed.
     pub(crate) fn standalone(&self, markdown: &str, range: Range<usize>) -> String {
         let mut out = String::with_capacity(range.len());
         let mut cursor = range.start;
@@ -87,27 +83,24 @@ impl Links {
     }
 }
 
-/// The byte offset each line of `text` starts at, the first line's included.
+/// Return the starting byte offset of each line in `text`.
 pub(crate) fn line_starts(text: &str) -> Vec<usize> {
     iter::once(0)
         .chain(text.match_indices('\n').map(|(index, _)| index + 1))
         .collect()
 }
 
-/// How a link or image is written.
 enum Form {
-    /// Inline, `[text](url)`, or an autolink, `<url>`: nothing to change.
+    /// Inline link (`[text](url)`) or autolink (`<url>`).
     Inline,
 
-    /// In reference form, with the byte range after its text that inline form
-    /// replaces: the label, `[label]` or `[]`, or nothing at all when the text
-    /// is the label.
+    /// Reference link, carrying the byte range of its trailing `[label]` / `[]`
+    /// suffix (or an empty range at the end of `[shortcut]`) to replace with
+    /// `(url)`.
     Reference(Range<usize>),
 }
 
-/// How the link or image at `sourcepos` in `markdown` is written.
-///
-/// `None` when its source can't be read as a link, which leaves it as written.
+/// Classify the link or image at `sourcepos` in `markdown`.
 fn form(markdown: &str, starts: &[usize], sourcepos: &Sourcepos, image: bool) -> Option<Form> {
     let range = byte_range(markdown, starts, sourcepos)?;
     let source = &markdown[range.clone()];
@@ -126,8 +119,6 @@ fn form(markdown: &str, starts: &[usize], sourcepos: &Sourcepos, image: bool) ->
         return Some(Form::Inline);
     }
 
-    // A label is one bracketed run reaching the end, or nothing: anything else
-    // means the text's closing bracket was misread.
     if !label.is_empty() && closing_bracket(label) != Some(label.len() - 1) {
         return None;
     }
@@ -135,9 +126,8 @@ fn form(markdown: &str, starts: &[usize], sourcepos: &Sourcepos, image: bool) ->
     Some(Form::Reference(range.end - label.len()..range.end))
 }
 
-/// The byte range `sourcepos` spans in `markdown`.
-///
-/// comrak counts lines and columns from 1, and includes the end column.
+/// Convert comrak's 1-based inclusive `sourcepos` to a byte range in
+/// `markdown`.
 fn byte_range(markdown: &str, starts: &[usize], sourcepos: &Sourcepos) -> Option<Range<usize>> {
     let start = starts.get(sourcepos.start.line.checked_sub(1)?)?
         + sourcepos.start.column.checked_sub(1)?;
@@ -151,10 +141,8 @@ fn byte_range(markdown: &str, starts: &[usize], sourcepos: &Sourcepos) -> Option
     readable.then_some(start..end)
 }
 
-/// The byte index of the `]` that closes the `[` `text` opens with.
-///
-/// Brackets nest, a backslash escapes the byte after it, and brackets inside a
-/// code span don't count, as CommonMark reads a link's text.
+/// Find the byte index of the `]` that closes the leading `[` of `text`,
+/// respecting nested brackets, backslash escapes, and inline code spans.
 fn closing_bracket(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     if bytes.first() != Some(&b'[') {
@@ -185,7 +173,6 @@ fn closing_bracket(text: &str) -> Option<usize> {
     None
 }
 
-/// How many backticks run from `index` in `bytes`.
 fn backticks(bytes: &[u8], index: usize) -> usize {
     bytes
         .iter()
@@ -194,8 +181,8 @@ fn backticks(bytes: &[u8], index: usize) -> usize {
         .count()
 }
 
-/// The index of the last backtick of the first run of exactly `count` at or
-/// after `from`: where a code span opened by as many backticks closes.
+/// Find the end index of the first backtick run of length `count` at or after
+/// `from`.
 fn closing_run(bytes: &[u8], from: usize, count: usize) -> Option<usize> {
     let mut index = from;
     while let Some(&byte) = bytes.get(index) {
@@ -214,7 +201,8 @@ fn closing_run(bytes: &[u8], from: usize, count: usize) -> Option<usize> {
     None
 }
 
-/// The inline form of a link to `url` titled `title`: `(url "title")`.
+/// Format an inline link destination and optional title as `(url)` or `(url
+/// "title")`.
 fn inline(url: &str, title: &str) -> String {
     let destination = if bare(url) {
         url.to_owned()
@@ -225,13 +213,12 @@ fn inline(url: &str, title: &str) -> String {
         return format!("({destination})");
     }
 
-    // On one line, so no text the rewrite moves can start a line of its own.
     let title = escaped(&title.replace('\n', " "), &['\\', '"']);
     format!("({destination} \"{title}\")")
 }
 
-/// Whether `url` can be written as it is, outside angle brackets: it holds no
-/// whitespace, `<`, `>`, or `\`, and its parentheses balance.
+/// Return whether `url` can be written as a bare CommonMark link destination
+/// without `<...>` delimiters.
 fn bare(url: &str) -> bool {
     let mut depth = 0_usize;
     for c in url.chars() {
@@ -250,7 +237,6 @@ fn bare(url: &str) -> bool {
     !url.is_empty() && depth == 0
 }
 
-/// `text` with a backslash before each of the `special` characters.
 fn escaped(text: &str, special: &[char]) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -263,13 +249,12 @@ fn escaped(text: &str, special: &[char]) -> String {
     out
 }
 
-/// The lines holding the document's top-level definitions, each as the byte
-/// range of the line and its line break.
+/// Return the byte ranges of top-level link reference definitions in
+/// `markdown`.
 ///
-/// A definition leaves no node behind, so a line no top-level block covers
-/// holds one, or nothing.
-/// One inside a list or a quote stays where it is: once every link is inline,
-/// nothing reads it.
+/// Comrak consumes link reference definitions without emitting AST nodes, so
+/// any non-empty line not covered by a top-level AST child is a reference
+/// definition.
 fn definitions<'a>(root: &'a AstNode<'a>, markdown: &str, starts: &[usize]) -> Vec<Range<usize>> {
     let mut covered = vec![false; starts.len()];
     for node in root.children() {

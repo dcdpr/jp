@@ -5,16 +5,11 @@ use serde_json::{Value, json};
 
 use super::*;
 
-/// The commit the builds in these tests are of.
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
-
-/// The archive the builds in these tests hold, and its SHA-256.
 const ARCHIVE: &str = "jp-aarch64-apple-darwin.tar.xz";
 const CONTENTS: &str = "an archive\n";
 const HASH: &str = "4cd36b3ca046f7c17e81e1aa31bf2dc6a91b98c94238810db57456b4904d3a22";
 
-/// Keep a build of 0.3.0 made with `profile` in `dir`, as `jp release build`
-/// would.
 fn keep_build(dir: &Utf8Path, profile: &str) {
     fs::create_dir_all(dir).unwrap();
     fs::write(dir.join(ARCHIVE), CONTENTS).unwrap();
@@ -202,7 +197,6 @@ fn the_highest_published_release_is_the_one_to_be_latest() {
     assert_eq!(highest(&releases[..3], "v0.3.1"), None);
 }
 
-/// A Release on the mock server, which uploads to the server too.
 fn release_json(base: &str, id: u64, tag: &str, draft: bool, assets: &Value) -> Value {
     json!({
         "id": id,
@@ -255,7 +249,6 @@ fn plan(version: Version) -> Plan {
     }
 }
 
-/// Answer the tag check for `tag` with `commit`.
 async fn tag_at(server: &MockServer, tag: &str, commit: &str) {
     server
         .mock_async(|when, then| {
@@ -266,7 +259,6 @@ async fn tag_at(server: &MockServer, tag: &str, commit: &str) {
         .await;
 }
 
-/// Answer the listing of Releases with `releases`.
 async fn releases_are(server: &MockServer, releases: Value) {
     server
         .mock_async(|when, then| {
@@ -278,7 +270,6 @@ async fn releases_are(server: &MockServer, releases: Value) {
         .await;
 }
 
-/// Accept each of `names` uploaded to the Release with `id`.
 async fn uploads_to(server: &MockServer, id: u64, names: &[&str]) {
     for (index, name) in (100..).zip(names) {
         server

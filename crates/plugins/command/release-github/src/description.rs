@@ -1,25 +1,19 @@
-//! A Release's description: the release's notes, then its upgrade guide unless
-//! the notes link to one elsewhere, then the workspace's footer.
+//! Formatting and comparison for GitHub Release descriptions.
 
 use changelog::{Headings, Release, markdown};
 use semver::Version;
 
 use crate::options::{DOWNLOAD, VERSION};
 
-/// The heading the upgrade guide follows the notes under, when the description
-/// includes it.
 const UPGRADE_GUIDE: &str = "Upgrade guide";
 
-/// The description of the Release of `version`, whose files GitHub serves from
-/// `download`.
+/// Render the GitHub Release description for `version`.
 ///
-/// Breaking entries link to the upgrade guide at `upgrade_guide`, an address
-/// with `{version}` in it.
-/// Without one, the guide follows the notes under a heading of its own, where
-/// the entries' links can't reach it: GitHub gives a description's headings no
-/// anchors.
-/// `footer` ends the description, with `{version}` and `{download}` in it
-/// replaced.
+/// When `upgrade_guide` is `Some`, breaking entries link to that URL (with
+/// `{version}` substituted).
+/// When `None`, the upgrade guide is appended inline under `# Upgrade guide`.
+/// If `footer` is present, it is appended at the end with `{version}` and
+/// `{download}` substituted.
 pub(crate) fn description(
     release: &Release,
     headings: &Headings,
@@ -54,9 +48,8 @@ pub(crate) fn description(
     text
 }
 
-/// Whether two descriptions read the same: GitHub hands back a description
-/// edited on its site with `\r\n` line endings, and may drop trailing
-/// whitespace.
+/// Compare two descriptions after normalizing `\r\n` line endings and trailing
+/// whitespace, which GitHub may alter when a release is edited in the web UI.
 pub(crate) fn same(published: &str, rendered: &str) -> bool {
     let normalize = |text: &str| text.replace("\r\n", "\n").trim_end().to_owned();
 

@@ -1,29 +1,26 @@
-//! One highlight: an editorial section of the release notes, for a feature
-//! worth more than its entry.
+//! Parsing and validation for release highlights (`highlights/<slug>.md`).
 //!
-//! A highlight is a Markdown file in a `highlights/` directory, named
-//! `<slug>.md`.
-//! It opens with the section's title, then lists the people it credits in a
-//! metadata block, one `Authors` field each, and the rest is the section's
-//! prose:
+//! A highlight is an editorial section of the release notes for a feature worth
+//! more than a single changelog bullet.
+//! It starts with a `# Title` heading, followed by a metadata block with one or
+//! more `- **Authors**:` fields (and optional `- **Credits**:` overrides), and
+//! the section's prose body:
 //!
 //! ```markdown
 //! # Unified editor and inline reply widget
 //!
 //! - **Authors**: @JeanMertz
 //!
-//! Every prompt in JP now runs through a single editor service, and short
-//! replies can be written inline without leaving the conversation view.
+//! Every prompt in JP runs through a single editor service, and short replies
+//! can be written inline without leaving the conversation view.
 //! ```
 //!
-//! The block can list `Credits` too, which replace the credits history names,
-//! as a fragment's do.
+//! Highlights do not have a change [`Type`] or an upgrade section; the
+//! corresponding fragment carries both.
+//! Any line starting with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is rejected
+//! so upgrade instructions cannot be placed in a highlight by mistake.
 //!
-//! A highlight has no type and no upgrade section: the fragment for the change
-//! carries both.
-//! A line that starts with an upgrade section's token is an error, so a section
-//! meant for the upgrade guide can't end up in the release notes' prose
-//! instead.
+//! [`Type`]: crate::Type
 
 use std::fmt;
 
@@ -32,53 +29,48 @@ use crate::{
     links::{Links, line_starts},
 };
 
-/// The field that names someone to credit for the feature.
 const AUTHORS: &str = "Authors";
 
-/// A highlight, as [`parse`] reads it.
+/// Parsed release highlight returned by [`parse`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Highlight {
-    /// The heading of the highlight's section in the release notes.
+    /// Section heading in the release notes.
     pub title: String,
 
-    /// The people credited for the feature, as written, such as `@JeanMertz`.
+    /// Credited authors in declaration order (e.g. `@JeanMertz`).
     pub authors: Vec<String>,
 
-    /// The credits to give in place of the ones history names, when the file
-    /// lists them.
+    /// Explicit `- **Credits**:` overrides from the metadata block, if present.
     pub credits: Option<Vec<ListedCredit>>,
 
-    /// The section's prose, as Markdown.
-    ///
-    /// Its links are inline, `[text](url)`, whichever form the file wrote them
-    /// in, so the prose stands alone beside other highlights.
+    /// Markdown prose body with reference links rewritten to inline
+    /// `[text](url)` links.
     pub body: String,
 }
 
-/// A document that doesn't hold a well-formed highlight.
-///
-/// Lines count from 1 at the top of the file.
+/// Validation error returned by [`parse`].
+/// Line numbers are 1-based from the start of the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HighlightError {
-    /// The first line with text isn't a `# Title` heading with a title.
+    /// First non-empty line is not a non-empty `# Title` heading.
     NoTitle,
 
-    /// The metadata block lists no `Authors`.
+    /// Metadata block contains no `Authors` field.
     NoAuthors,
 
-    /// An `Authors` field names nobody.
+    /// An `Authors` field has an empty value.
     EmptyAuthor { line: usize },
 
-    /// The metadata block lists a field other than `Authors` and `Credits`.
+    /// Metadata block contains a field other than `Authors` or `Credits`.
     UnknownField { line: usize, key: String },
 
-    /// A `Credits` field names neither a change request nor a commit.
+    /// A `Credits` field value is neither a change request nor a commit hash.
     InvalidCredit { line: usize, value: String },
 
-    /// Nothing but whitespace follows the title and the metadata block.
+    /// No prose follows the title and metadata block.
     EmptyBody,
 
-    /// A line starts with an upgrade section's token.
+    /// A body line starts with an upgrade section marker.
     Marker { line: usize, marker: &'static str },
 }
 
@@ -121,15 +113,14 @@ impl fmt::Display for HighlightError {
 
 impl std::error::Error for HighlightError {}
 
-/// Read `source` as a highlight, held to every rule of the format.
+/// Parse and validate a release highlight.
 ///
-/// Lines may end in `\n` or `\r\n`, and a leading byte order mark is skipped.
-/// The title, each author, and the body are read without the whitespace around
-/// them.
+/// Normalizes `\r\n` line endings, strips a leading UTF-8 BOM, and trims
+/// surrounding whitespace from the title, authors, and body.
 ///
 /// # Errors
 ///
-/// Returns the first rule `source` breaks, reading from the top.
+/// Returns the first [`HighlightError`] encountered in `source`.
 pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
     let source = document::normalize(source);
     let lines: Vec<&str> = source.lines().collect();
@@ -176,13 +167,6 @@ pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
     })
 }
 
-/// The authors and the credits a highlight's metadata block lists.
-///
-/// # Errors
-///
-/// Returns the first field that is neither an author nor a credit, an empty
-/// author, a credit that names neither a change request nor a commit, or that
-/// no author is listed.
 fn authors_and_credits(
     fields: Vec<Field>,
 ) -> Result<(Vec<String>, Vec<ListedCredit>), HighlightError> {
@@ -214,8 +198,8 @@ fn authors_and_credits(
     Ok((authors, credits))
 }
 
-/// The title of the `# Title` heading `line` holds, without the space around
-/// it; `None` when `line` holds no such heading, or one with no title.
+/// Extract the trimmed heading text from a `# Title` line, returning `None` if
+/// `line` is not a level-1 heading or has an empty title.
 fn title(line: &str) -> Option<&str> {
     if !document::is_title(line) {
         return None;

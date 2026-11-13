@@ -4,16 +4,11 @@ use indoc::indoc;
 use super::*;
 use crate::fragment::Type;
 
-/// A fragment's text that follows the format, for a file named
-/// `<slug>.fixed.md`.
 const FRAGMENT: &str = "A turn that stalls while idle is retried.\n";
 
-/// A highlight that follows the format.
 const HIGHLIGHT: &str = "# Tool calls fan out\n\n- **Authors**: @JeanMertz\n\nThe assistant calls \
                          one tool on many inputs at once.\n";
 
-/// A fragments directory holding `files`, each a path below it and the file's
-/// contents.
 fn fragments_dir(files: &[(&str, &str)]) -> Utf8TempDir {
     let dir = camino_tempfile::tempdir().unwrap();
     for (path, contents) in files {
@@ -25,14 +20,12 @@ fn fragments_dir(files: &[(&str, &str)]) -> Utf8TempDir {
     dir
 }
 
-/// Each problem in `report`, as its path below `dir` and its message.
 fn problems(report: &Report, dir: &Utf8Path) -> Vec<String> {
     report
         .problems
         .iter()
         .map(|problem| {
             let path = problem.path.strip_prefix(dir).unwrap();
-            // Written with `/` on every platform, so one expectation fits all.
             format!("{}: {}", path.as_str().replace('\\', "/"), problem.kind)
         })
         .collect()

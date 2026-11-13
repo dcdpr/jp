@@ -1,29 +1,23 @@
-//! `jp release cut`: start the next minor or major release from `main`.
+//! `jp release cut`: starting the next minor or major release from `main`.
 //!
-//! `main` is the commit the workspace's checkout is at, which has to hold every
-//! commit of `origin`'s `main`.
-//! The release branch, `release/<major>.<minor>`, starts there, or with `--at`
-//! at an earlier commit of the checkout's first-parent line, with one commit
-//! that removes the fragments directory, when the tree has one, and runs
-//! `bump`.
-//! The notes branch, `release-notes/v<version>`, starts at the checkout with
-//! one commit that moves the unreleased fragments and highlights whose changes
-//! the release branch ships into the release's directory and runs `bump`;
-//! merging it into `main` files the release's notes.
-//! The code a release ships and the notes it lists are chosen together, however
-//! long the notes take to merge.
-//! Both branches are made in this repository, and the cut prints the push that
-//! publishes them.
+//! Creates two local branches without pushing:
 //!
-//! A fragment or highlight describes the changes its `Credits` name, or else
-//! the commit that added it, and a release branch ships a change when it holds
-//! the commit, from `main`'s history at its cut or through a pick.
-//! One at the top level is unreleased unless a release branch already ships
-//! every change it describes; such a file waits for that release's notes
-//! branch.
-//! A cut refuses while a release branch or `v` tag exists only in this
-//! repository, such as one a rehearsal left behind: the cut would count it as a
-//! release made.
+//! - `release/<major>.<minor>`, starting at the current checkout (or an earlier
+//!   first-parent commit passed via `--at`) with a commit that removes the
+//!   fragments directory and runs `bump`.
+//! - `release-notes/v<version>`, starting at the current checkout with a commit
+//!   that moves all unreleased fragments and highlights shipped by the release
+//!   branch into `<fragments_dir>/<version>/` and runs `bump`.
+//!   Merging this branch into `main` files the release notes.
+//!
+//! A fragment or highlight is attributed to the commits referenced by its
+//! `Credits` fields, or to the commit that added it when `Credits` is omitted.
+//! A top-level file is considered unreleased unless an existing release branch
+//! already contains all of its attributed commits.
+//!
+//! Refuses to run while any local-only release branch or `v<version>` tag
+//! exists, so leftover rehearsal refs cannot be mistaken for published
+//! releases.
 
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -46,29 +40,23 @@ use crate::{
 /// A fragment or highlight at the top level of the fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TopLevel {
-    /// Its path below the fragments directory.
+    /// Path relative to the fragments directory.
     pub path: String,
-
     pub highlight: bool,
-
-    /// Whether it has an upgrade section.
     pub breaking: bool,
 
-    /// The changes it describes, as the hashes of the commits that made them:
-    /// the ones its `Credits` name, or else the commit that added it; none when
-    /// no commit added it at the top level.
+    /// Commit hashes of the changes described by this file (from `Credits` or
+    /// the commit that added the file).
     pub changes: Vec<String>,
 
-    /// The release branches that ship every change it describes, by name; none
-    /// when it is unreleased.
+    /// Release branches that contain every commit in `changes`.
+    /// Empty when the file is unreleased.
     pub shipping: Vec<String>,
 }
 
-/// Start the next release from `main`, or `requested`, at the commit checked
-/// out or at the earlier commit `at`, and say what was made and how to publish
-/// it.
-///
-/// The error says why nothing was started.
+/// Cut the next minor or major release (or `requested`) from the current
+/// checkout (or the earlier commit `at`) and return a summary with the `git
+/// push` command to publish both branches.
 pub(crate) fn cut(
     pipeline: &Pipeline<'_>,
     requested: Option<&Version>,
@@ -98,7 +86,6 @@ pub(crate) fn cut(
     let started = start_branch(pipeline, &at, &cut.version)?;
     repo.refs.set_branch(&cut.branch, &started, None)?;
     if let Err(error) = repo.refs.set_branch(&cut.notes_branch, &noted, None) {
-        // Without its notes branch, the release branch would block the next cut.
         drop(repo.refs.delete_branch(&cut.branch, &started));
         return Err(error);
     }
@@ -106,29 +93,16 @@ pub(crate) fn cut(
     cut.report(repo, &checkout, &at)
 }
 
-/// A release being cut, as its commit message and report name it.
 struct Cut {
     version: Version,
-
-    /// The release branch, such as `release/0.3`.
     branch: String,
-
     notes_branch: String,
-
-    /// Where the release is cut from, such as `main` or `4e1f0a2, an earlier
-    /// commit of main`.
     from: String,
-
-    /// The files it files, counted, such as "3 fragments and a highlight".
     files: String,
-
-    /// The release's directory, below the workspace root, with a trailing `/`.
     destination: String,
 }
 
 impl Cut {
-    /// Release `version`, cut at the commit `at` of `checkout` and filing
-    /// `filed`.
     fn new(
         pipeline: &Pipeline<'_>,
         checkout: &Checkout,
@@ -157,7 +131,6 @@ impl Cut {
         }
     }
 
-    /// The message of the notes branch's commit.
     fn message(&self, pipeline: &Pipeline<'_>) -> String {
         let bump = if pipeline.options.bump.is_some() {
             format!(", and writes the version {}", self.version)
@@ -177,8 +150,6 @@ impl Cut {
         )
     }
 
-    /// What was made, cut at the commit `at` of `checkout`, and how to publish
-    /// it.
     fn report(
         &self,
         repo: &Repository<'_>,
@@ -216,11 +187,8 @@ impl Cut {
     }
 }
 
-/// The unreleased files at the top level of the fragments directory in `notes`,
-/// a worktree at the commit checked out, whose changes the commit `at` has.
-///
-/// Refuses a checkout with no unreleased fragments, and a cut point that ships
-/// the change of none of them.
+/// Return the unreleased top-level fragments and highlights in `notes` whose
+/// changes are ancestors of `at`.
 fn shipped_at(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -253,7 +221,6 @@ fn shipped_at(
     Ok(filed)
 }
 
-/// Refuse while the notes branch `notes_branch` exists, here or on `origin`.
 fn refuse_existing(repo: &Repository<'_>, notes_branch: &str) -> Result<(), String> {
     let existing = repo.refs.branch(notes_branch)?;
     if existing.local.is_none() && existing.origin.is_none() {
@@ -267,12 +234,6 @@ fn refuse_existing(repo: &Repository<'_>, notes_branch: &str) -> Result<(), Stri
     ))
 }
 
-/// The version a cut filing `filed` starts: `requested`, or the next minor
-/// release, or from 1.0 on the next major one when a file has an upgrade
-/// section.
-///
-/// The error refuses a version that can't ship a change that requires users to
-/// act when one of `filed` has an upgrade section.
 fn next_version(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -306,10 +267,6 @@ fn next_version(
     ))
 }
 
-/// The commit to start the release at: the commit checked out, or `at`, which
-/// has to be on its first-parent line and in no release branch yet.
-///
-/// The error says why `at` can't start a release.
 fn cut_point(
     repo: &Repository<'_>,
     checkout: &Checkout,
@@ -344,8 +301,6 @@ fn cut_point(
     Ok(hash)
 }
 
-/// Refuse while a release branch or a `v` tag exists only in this repository,
-/// since a cut would count it as a release made.
 fn refuse_unpublished(repo: &Repository<'_>) -> Result<(), String> {
     let branches: Vec<String> = repo
         .refs
@@ -385,8 +340,6 @@ fn refuse_unpublished(repo: &Repository<'_>) -> Result<(), String> {
     ))
 }
 
-/// The fragments and highlights at the top level of the fragments directory in
-/// `notes` that no release branch ships.
 fn unreleased(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -405,9 +358,8 @@ fn unreleased(
     Ok(files)
 }
 
-/// The fragments and highlights at the top level of the fragments directory in
-/// `tree`, which has to have one, each with the release branches that ship the
-/// change that added it.
+/// Load all top-level fragments and highlights in `tree` and resolve which
+/// release branches already ship their changes.
 pub(crate) fn top_level(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -463,21 +415,13 @@ pub(crate) fn top_level(
     Ok(top_level)
 }
 
-/// What the fragments and highlights of one tree describe, and which release
-/// branches ship it, each read once.
+/// Cached commit and release-branch lookup state for a single worktree.
 struct Changes<'p> {
     pipeline: &'p Pipeline<'p>,
     releases: &'p Releases,
     forge: Forge,
-
-    /// The commit whose fragments directory is read.
     tree: String,
-
-    /// The commit that merged each change request on the first-parent line of
-    /// [`Self::tree`], read when a credit first names one.
     merged: Option<HashMap<NonZeroU64, String>>,
-
-    /// The release branches that ship each change, by the hash of its commit.
     shipped_by: HashMap<String, Vec<String>>,
 }
 
@@ -497,13 +441,8 @@ impl<'p> Changes<'p> {
         })
     }
 
-    /// The changes the file at `path`, below the fragments directory,
-    /// describes: the commits its `credits` name, or else `origin`, the commit
-    /// that added it.
-    ///
-    /// A change request names the commit that merged it, which only a forge can
-    /// find, so without one only the commits `credits` name count.
-    /// The error names a credit no commit answers to.
+    /// Resolve the commit hashes described by `path` from its explicit
+    /// `credits` (falling back to `origin`, the commit that added the file).
     fn described(
         &mut self,
         path: &str,
@@ -525,8 +464,6 @@ impl<'p> Changes<'p> {
         Ok(changes)
     }
 
-    /// The commit `credit`, which the file at `path` lists, names; `None` for a
-    /// change request without a forge to find it by.
     fn change(&mut self, path: &str, credit: &ListedCredit) -> Result<Option<String>, String> {
         let pipeline = self.pipeline;
         let number = match credit {
@@ -559,7 +496,6 @@ impl<'p> Changes<'p> {
         })
     }
 
-    /// The release branches that ship every one of `changes`, by name.
     fn shipping(&mut self, changes: &[String]) -> Result<Vec<String>, String> {
         let mut shipping: Option<Vec<String>> = None;
         for change in changes {
@@ -589,11 +525,8 @@ impl<'p> Changes<'p> {
     }
 }
 
-/// The commit that merged each change request, as `forge` writes them into the
-/// commits it merges, read from the log `Repository::first_parent_log` writes,
-/// newest first.
-///
-/// The oldest commit naming a change request is the one that merged it.
+/// Map each change request number to the oldest commit in `log` that references
+/// it on `forge`.
 fn merges(log: &str, forge: Forge) -> HashMap<NonZeroU64, String> {
     let mut merges = HashMap::new();
     for record in log.split('\0') {
@@ -609,10 +542,8 @@ fn merges(log: &str, forge: Forge) -> HashMap<NonZeroU64, String> {
     merges
 }
 
-/// How many fragments at the top level of the fragments directory in the commit
-/// `main` no release branch ships; none when it has no fragments directory.
-///
-/// Highlights aren't counted: a release needs a fragment to list.
+/// Return the number of unreleased top-level fragments (excluding highlights)
+/// at commit `main`.
 pub(crate) fn unreleased_count(
     pipeline: &Pipeline<'_>,
     releases: &Releases,
@@ -628,10 +559,6 @@ pub(crate) fn unreleased_count(
     Ok(unreleased.iter().filter(|file| !file.highlight).count())
 }
 
-/// Move each of `unreleased` into the directory of release `version` in
-/// `notes`, run `bump`, and commit it all with `message`.
-///
-/// Returns the commit's hash.
 fn file_notes(
     pipeline: &Pipeline<'_>,
     notes: &Worktree<'_>,
@@ -663,10 +590,6 @@ fn file_notes(
     notes.commit(message)
 }
 
-/// Make the commit that starts release `version` on its branch, on top of the
-/// commit `at`: the fragments directory removed, and `bump` run.
-///
-/// Returns the commit's hash.
 fn start_branch(pipeline: &Pipeline<'_>, at: &str, version: &Version) -> Result<String, String> {
     let code = pipeline.repo.worktrees.add("cut", at)?;
     // History from before the project kept fragments has no directory to remove.

@@ -1,30 +1,29 @@
-//! A fragments directory, held to its layout, and every fragment and highlight
-//! in it to its format.
+//! Layout validation and file loading for a fragments directory.
 //!
-//! The paths a fragments directory holds are a closed set:
+//! The allowed paths inside a fragments directory are a closed set:
 //!
 //! ```text
 //! changelog.d/
-//!   README.md                     the directory's documentation, never read
-//!   enable-explicit.removed.md    a fragment no release has taken yet
+//!   README.md                     directory documentation (ignored)
+//!   enable-explicit.removed.md    unreleased fragment
 //!   highlights/
-//!     fan-out.md                  a highlight no release has taken yet
-//!   0.3.0/                        a release's directory, named after its version
-//!     overview.md                 the release's introduction, never read here
-//!     retry-idle-turns.fixed.md   a fragment the release took
+//!     fan-out.md                  unreleased highlight
+//!   0.3.0/                        release subdirectory named by version
+//!     overview.md                 release overview (read by release::read)
+//!     retry-idle-turns.fixed.md   released fragment
 //!     highlights/
-//!       plugin-tools.md           a highlight the release took
+//!       plugin-tools.md           released highlight
 //! ```
 //!
-//! A fragment is `<slug>.<type>.md` ([`fragment::name`]), and a highlight
-//! `<slug>.md`.
-//! Anything else is a [`Problem`] rather than a file left unread, so a stray
-//! file fails loudly instead of vanishing when a release is assembled.
+//! Fragments are named `<slug>.<type>.md` ([`fragment::name`]) and highlights
+//! are named `<slug>.md`.
+//! Any other file or directory is reported as a [`Problem`] rather than
+//! silently skipped, so stray files cannot be omitted when a release is
+//! assembled.
 //!
-//! [`check`] holds the whole directory to these rules.
-//! [`read`] holds one [`Part`] of it to them, the top level or one release's
-//! directory, and returns each fragment and highlight in it, read into its
-//! format.
+//! [`check`] validates the entire directory, including released subdirectories.
+//! [`read`] validates and loads a single [`Part`] (either the top-level
+//! unreleased files or one release subdirectory).
 
 use std::{fmt, fs, io};
 
@@ -36,29 +35,25 @@ use crate::{
     highlight::{self, Highlight, HighlightError},
 };
 
-/// The file at the top level that documents the directory.
+/// Top-level documentation file skipped during fragment checks.
 const README: &str = "README.md";
 
-/// The file in a release's directory that introduces the release.
+/// Release introduction file in `<version>/overview.md`.
 pub(crate) const OVERVIEW: &str = "overview.md";
 
-/// The directory, at the top level and in each release's directory, that holds
-/// highlights.
 const HIGHLIGHTS: &str = "highlights";
-
-/// The extension a highlight's file name ends in.
 const EXTENSION: &str = ".md";
 
-/// What [`check`] found in a fragments directory.
+/// Validation summary returned by [`check`].
 #[derive(Debug, Default)]
 pub struct Report {
-    /// How many files were read as fragments, released ones included.
+    /// Number of fragment files checked, including released subdirectories.
     pub fragments: usize,
 
-    /// How many files were read as highlights, released ones included.
+    /// Number of highlight files checked, including released subdirectories.
     pub highlights: usize,
 
-    /// Every problem, in the order of the paths they concern.
+    /// Validation problems sorted by file path.
     pub problems: Vec<Problem>,
 }
 
@@ -93,14 +88,13 @@ impl fmt::Display for Report {
     }
 }
 
-/// A path in a fragments directory that breaks a rule.
+/// A validation failure at a path in a fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem {
-    /// The file or directory, as the fragments directory [`check`] was given
-    /// joined with the path below it.
+    /// Path to the offending file or directory, joined onto the root passed to
+    /// [`check`].
     pub path: Utf8PathBuf,
 
-    /// The rule it breaks.
     pub kind: ProblemKind,
 }
 
@@ -110,33 +104,31 @@ impl fmt::Display for Problem {
     }
 }
 
-/// The rule a [`Problem`] breaks.
+/// Reason a path failed fragments directory validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProblemKind {
-    /// A fragment that doesn't follow its format.
+    /// Fragment file failed format validation.
     MalformedFragment(FragmentError),
 
-    /// A highlight that doesn't follow its format.
+    /// Highlight file failed format validation.
     MalformedHighlight(HighlightError),
 
-    /// A fragment or highlight whose contents aren't UTF-8 text.
+    /// File contents are not valid UTF-8.
     NotUtf8,
 
-    /// A file outside a `highlights/` directory whose name isn't
-    /// `<slug>.<type>.md`.
+    /// File outside `highlights/` is not named `<slug>.<type>.md`.
     FragmentName(NameError),
 
-    /// A file in a `highlights/` directory whose name isn't `<slug>.md`.
+    /// File inside `highlights/` is not named `<slug>.md`.
     NotAHighlight,
 
-    /// A directory at the top level that is neither `highlights/` nor named
-    /// after a semantic version.
+    /// Top-level subdirectory is neither `highlights/` nor a semantic version.
     NotARelease,
 
-    /// A directory in a release's directory other than its `highlights/`.
+    /// Subdirectory inside `<version>/` other than `highlights/`.
     NestedInRelease,
 
-    /// A directory in a `highlights/` directory.
+    /// Subdirectory inside `highlights/`.
     NestedInHighlights,
 }
 
@@ -165,7 +157,7 @@ impl fmt::Display for ProblemKind {
     }
 }
 
-/// A file or directory [`check`] or [`read`] couldn't read.
+/// I/O error reading a file or directory during [`check`] or [`read`].
 #[derive(Debug)]
 pub struct CheckError {
     pub path: Utf8PathBuf,
@@ -184,35 +176,34 @@ impl std::error::Error for CheckError {
     }
 }
 
-/// One part of a fragments directory, which [`read`] reads on its own.
+/// Subset of a fragments directory loaded by [`read`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Part {
-    /// The fragments and highlights at the top level, which no release has
-    /// taken yet.
+    /// Top-level unreleased fragments and highlights.
     Unreleased,
 
-    /// The directory of the release with this version.
+    /// Subdirectory for a specific release version.
     Release(Version),
 }
 
-/// Where a fragment or highlight sits in a fragments directory.
+/// Location of a fragment or highlight within a fragments directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Place {
-    /// The top level, or a release's directory.
+    /// Top-level unreleased area or a release subdirectory.
     pub part: Part,
 
-    /// Whether it sits in a `highlights/` directory.
+    /// Whether the file lives under `highlights/`.
     pub highlight: bool,
 
-    /// The file's name, such as `retry-idle-turns.fixed.md`.
+    /// File name (e.g. `retry-idle-turns.fixed.md`).
     pub name: String,
 }
 
 impl Place {
-    /// Read `path`, below the fragments directory with `/` between its parts,
-    /// such as `retry-idle-turns.fixed.md` or `0.3.0/highlights/fan-out.md`.
+    /// Parse a `/`-separated path relative to the fragments directory (e.g.
+    /// `retry-idle-turns.fixed.md` or `0.3.0/highlights/fan-out.md`).
     ///
-    /// `None` for a path at which the layout holds no fragment or highlight.
+    /// Returns `None` if `path` is not a valid fragment or highlight location.
     #[must_use]
     pub fn parse(path: &str) -> Option<Self> {
         let mut parts: Vec<&str> = path.split('/').collect();
@@ -235,7 +226,7 @@ impl Place {
         })
     }
 
-    /// The path below the fragments directory, with `/` between its parts.
+    /// Format the `/`-separated path relative to the fragments directory.
     #[must_use]
     pub fn path(&self) -> String {
         let mut path = match &self.part {
@@ -252,39 +243,39 @@ impl Place {
     }
 }
 
-/// The fragments and highlights one [`Part`] of a fragments directory holds,
-/// each read into its format, in the order of their paths.
+/// Parsed fragments and highlights from a single [`Part`] of a fragments
+/// directory, sorted by path.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Contents {
     pub fragments: Vec<Filed<Fragment>>,
     pub highlights: Vec<Filed<Highlight>>,
 }
 
-/// A fragment or highlight, and where it is filed in the fragments directory.
+/// A parsed fragment or highlight paired with its location in the fragments
+/// directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filed<T> {
-    /// The file's slug: its name without `.md`, and a fragment's without its
-    /// type, so `retry-idle-turns` for `retry-idle-turns.fixed.md`.
+    /// File slug without `.md` or `.<type>` (e.g. `retry-idle-turns` for
+    /// `retry-idle-turns.fixed.md`).
     pub slug: String,
 
-    /// The file's path below the fragments directory, with `/` between its
-    /// parts on every platform, such as `0.3.0/highlights/fan-out.md`.
+    /// `/`-separated path relative to the fragments directory (e.g.
+    /// `0.3.0/highlights/fan-out.md`).
     pub path: String,
 
-    /// The file, read into its format.
     pub file: T,
 }
 
-/// Why [`read`] couldn't return the contents of a part.
+/// Error returned by [`read`].
 #[derive(Debug)]
 pub enum ReadError {
-    /// The fragments directory has no directory for the release.
+    /// The release subdirectory `<dir>/<version>/` does not exist.
     NoRelease { dir: Utf8PathBuf, version: Version },
 
-    /// A file or directory couldn't be read.
+    /// A file or directory could not be read.
     Unreadable(CheckError),
 
-    /// Paths in the part break the layout, or files in it their format.
+    /// One or more paths or files failed validation.
     Problems(Vec<Problem>),
 }
 
@@ -311,16 +302,14 @@ impl From<CheckError> for ReadError {
     }
 }
 
-/// Check every path in the fragments directory `dir` against the layout, and
-/// every fragment and highlight against its format, released ones included.
+/// Validate every path, fragment, and highlight in `dir`, including released
+/// subdirectories.
 ///
-/// `README.md` at the top level and `overview.md` in a release's directory are
-/// never read: neither holds a fragment.
+/// Skips top-level `README.md` and per-release `overview.md` files.
 ///
 /// # Errors
 ///
-/// Returns the first file or directory that can't be read, `dir` itself
-/// included: a missing fragments directory is an error, not an empty one.
+/// Returns [`CheckError`] if `dir` or any entry inside it cannot be read.
 pub fn check(dir: &Utf8Path) -> Result<Report, CheckError> {
     let mut report = Report::default();
     read_top_level(dir, true, &mut report, &mut Contents::default())?;
@@ -328,18 +317,16 @@ pub fn check(dir: &Utf8Path) -> Result<Report, CheckError> {
     Ok(report)
 }
 
-/// Read the fragments and highlights of `part` of the fragments directory
-/// `dir`, holding its paths to the layout and its files to their formats as
-/// [`check`] does.
+/// Validate and load all fragments and highlights in `part` of `dir`.
 ///
-/// [`Part::Unreleased`] reads the top level without entering any release's
-/// directory.
+/// [`Part::Unreleased`] reads only the top level without descending into
+/// release subdirectories.
 ///
 /// # Errors
 ///
-/// Returns [`ReadError::NoRelease`] for a release without a directory, the
-/// first file or directory that can't be read, or every [`Problem`] in the
-/// part.
+/// Returns [`ReadError::NoRelease`] if the release subdirectory is missing,
+/// [`ReadError::Unreadable`] on I/O failure, or [`ReadError::Problems`] if any
+/// path or file in `part` is invalid.
 pub fn read(dir: &Utf8Path, part: &Part) -> Result<Contents, ReadError> {
     let mut report = Report::default();
     let mut contents = Contents::default();
@@ -366,12 +353,12 @@ pub fn read(dir: &Utf8Path, part: &Part) -> Result<Contents, ReadError> {
     Ok(contents)
 }
 
-/// The versions of the releases whose directories the fragments directory `dir`
-/// holds, oldest first.
+/// Return the release versions that have subdirectories in `dir`, sorted from
+/// oldest to newest.
 ///
 /// # Errors
 ///
-/// Returns why `dir` can't be read.
+/// Returns [`CheckError`] if `dir` cannot be read.
 pub fn releases(dir: &Utf8Path) -> Result<Vec<Version>, CheckError> {
     let mut versions: Vec<Version> = entries(dir)?
         .into_iter()
@@ -383,8 +370,6 @@ pub fn releases(dir: &Utf8Path) -> Result<Vec<Version>, CheckError> {
     Ok(versions)
 }
 
-/// Read the top level of the fragments directory `dir`, and each release's
-/// directory in it when `releases` is set.
 fn read_top_level(
     dir: &Utf8Path,
     releases: bool,
@@ -403,10 +388,6 @@ fn read_top_level(
     Ok(())
 }
 
-/// Read the directory `name`, at `path` in the top level of the fragments
-/// directory: `highlights/`, or a release's directory when `releases` is set.
-///
-/// Any other directory is a problem.
 fn read_top_level_dir(
     path: &Utf8Path,
     name: &str,
@@ -428,8 +409,6 @@ fn read_top_level_dir(
     Ok(())
 }
 
-/// Read the release's directory `dir`, which is `below` in the fragments
-/// directory.
 fn read_release(
     dir: &Utf8Path,
     below: &str,
@@ -459,8 +438,6 @@ fn read_release(
     Ok(())
 }
 
-/// Read the `highlights/` directory `dir`, at the top level or in a release's
-/// directory, which is `below` in the fragments directory.
 fn read_highlights(
     dir: &Utf8Path,
     below: &str,
@@ -486,16 +463,12 @@ fn read_highlights(
     Ok(())
 }
 
-/// The format a file is held to, decided by the directory it sits in.
 #[derive(Clone, Copy)]
 enum Format {
     Fragment,
     Highlight,
 }
 
-/// Read the file at `path`, named `name` and `below` in the fragments
-/// directory, as `format`, into `contents` when it follows the format and into
-/// `report` when it doesn't.
 fn read_file(
     path: &Utf8Path,
     name: &str,
@@ -558,9 +531,8 @@ fn read_file(
     Ok(())
 }
 
-/// Whether `path`, below the fragments directory with `/` between its parts, is
-/// a file at the top level or in its `highlights/`, where a fragment or
-/// highlight sits until a release takes it.
+/// Return whether `path` (relative to the fragments directory) is a top-level
+/// fragment or highlight rather than inside a `<version>/` subdirectory.
 pub(crate) fn is_unreleased(path: &str) -> bool {
     let name = path
         .strip_prefix(HIGHLIGHTS)
@@ -570,22 +542,17 @@ pub(crate) fn is_unreleased(path: &str) -> bool {
     !name.is_empty() && !name.contains('/')
 }
 
-/// Whether `name` names a release's directory: a semantic version, such as
-/// `0.3.0` or `1.0.0-rc.1`, with no `v` in front.
+/// Return whether `name` is a valid semantic version without a `v` prefix.
 fn is_version(name: &str) -> bool {
     Version::parse(name).is_ok()
 }
 
-/// One entry of a directory.
 struct Entry {
     name: String,
-
-    /// Whether the entry is a directory, or a symbolic link to one.
     is_dir: bool,
 }
 
-/// Every entry of `dir`, ordered by name, so problems are reported in the same
-/// order on every machine.
+/// Read and sort the entries of `dir` by name for deterministic output.
 fn entries(dir: &Utf8Path) -> Result<Vec<Entry>, CheckError> {
     let unreadable = |source| CheckError {
         path: dir.to_owned(),
@@ -605,7 +572,6 @@ fn entries(dir: &Utf8Path) -> Result<Vec<Entry>, CheckError> {
     Ok(entries)
 }
 
-/// `count` followed by the noun it counts.
 fn counted(count: usize, one: &str, many: &str) -> String {
     let noun = if count == 1 { one } else { many };
     format!("{count} {noun}")

@@ -53,11 +53,11 @@ pub(crate) const POLL: Duration = Duration::from_secs(2);
 /// server and the clock.
 pub(crate) const TICK: Duration = Duration::from_millis(200);
 
-/// The environment variable naming this binary to the site's loaders, which
-/// render the release pages with it, as `jp-vite changelog render`.
+/// Environment variable passing the `jp-vite` binary path to VitePress data
+/// loaders so they can invoke `jp-vite changelog render`.
 ///
-/// Without it, as under a `vitepress build` run by hand, the loaders run the
-/// `changelog` binary on `PATH` instead.
+/// When unset (e.g. under a standalone `vitepress build`), loaders fall back to
+/// running `changelog` from `PATH`.
 pub(crate) const BIN: &str = "JP_VITE_BIN";
 
 /// Where `cargo install` finds the plugins.
@@ -326,16 +326,9 @@ fn start(
     })
 }
 
-/// The command running `vitepress <subcommand>` with `args` in `site_dir`,
-/// through the project's package manager, with `renderer`, the `jp-vite`
-/// binary, in [`BIN`] when it is known.
-///
-/// `JP_VITE_SERVE`, `JP_VITE_PROBLEM`, and [`BIN`] are never passed on from
-/// this process's environment: they are set here, or by [`start`] for the dev
-/// server.
-/// Its stdin is closed, since the plugin's own carries the protocol, and its
-/// output is piped, for the plugin to forward to the host, which owns the
-/// terminal.
+/// Build a [`Command`] to run `vitepress <subcommand>` with `args` in
+/// `site_dir` via the project's package manager, setting [`BIN`] to `renderer`
+/// when provided.
 pub(crate) fn vitepress_command(
     site_dir: &Utf8Path,
     subcommand: &str,

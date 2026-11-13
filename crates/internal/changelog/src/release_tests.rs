@@ -7,31 +7,19 @@ use indoc::indoc;
 use super::*;
 use crate::forge::CreditKind;
 
-/// 2026-10-01 at noon UTC, as seconds since the epoch: the first commit is a
-/// day later.
+/// 2026-10-01 12:00:00 UTC in seconds since the Unix epoch.
 const START: u64 = 1_790_856_000;
-
-/// A day, in seconds.
 const DAY: u64 = 86_400;
 
-/// A repository a test writes history into.
-///
-/// Git runs without the machine's configuration, so a signing setup or a hook
-/// can't reach in, and every commit and tag is made a day after the last, in
-/// UTC+2.
+/// Isolated git repository fixture for release tests, advancing commit and tag
+/// timestamps by one day per operation in UTC+2.
 struct Repository {
     dir: Utf8TempDir,
-
-    /// Holds the empty file git reads as its global configuration.
     home: Utf8TempDir,
-
-    /// How many commits and tags were made.
     days: Cell<u64>,
 }
 
 impl Repository {
-    /// A repository on `main` whose `origin` is `origin`, with an empty
-    /// fragments directory.
     fn new(origin: Option<&str>) -> Self {
         let home = Utf8TempDir::new().unwrap();
         fs::write(home.path().join("gitconfig"), "").unwrap();
@@ -63,21 +51,17 @@ impl Repository {
         self.path().join("changelog.d")
     }
 
-    /// Write `contents` to `path`, below the repository's root.
     fn write(&self, path: &str, contents: &str) {
         let path = self.path().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, contents).unwrap();
     }
 
-    /// Commit every change in the work tree with `message`.
     fn commit(&self, message: &str) {
         self.git(&["add", "--all"]);
         self.dated(&["commit", "--quiet", "--message", message]);
     }
 
-    /// Move each of `paths`, below the fragments directory, into the release's
-    /// directory `version`.
     fn file_into(&self, version: &str, paths: &[&str]) {
         for path in paths {
             let to = format!("changelog.d/{version}/{path}");
@@ -86,17 +70,14 @@ impl Repository {
         }
     }
 
-    /// Tag `HEAD` as `name`, with an annotated tag.
     fn tag(&self, name: &str) {
         self.dated(&["tag", "--annotate", name, "--message", name]);
     }
 
-    /// The full hash of `revision`.
     fn hash(&self, revision: &str) -> String {
         self.git(&["rev-parse", revision]).trim().to_owned()
     }
 
-    /// Run git with `args`, dated a day after the last dated run.
     fn dated(&self, args: &[&str]) -> String {
         let days = self.days.get() + 1;
         self.days.set(days);
@@ -135,8 +116,6 @@ impl Repository {
     }
 }
 
-/// The repository JP's own would look like after cutting 0.3.0, and merging a
-/// change and a correction since.
 fn jp_after_cutting_0_3_0() -> Repository {
     let repository = Repository::new(Some("git@github.com:dcdpr/jp.git"));
 
@@ -207,7 +186,6 @@ fn release(version: &str) -> Part {
     Part::Release(Version::parse(version).unwrap())
 }
 
-/// Each entry's slug, and the labels of its credits.
 fn entry_credits(release: &Release) -> Vec<(&str, Vec<&str>)> {
     release
         .entries

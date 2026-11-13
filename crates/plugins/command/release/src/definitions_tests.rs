@@ -6,12 +6,10 @@ use changelog::Type;
 use super::*;
 use crate::{tests::jp_root, tool::TOOLS};
 
-/// JP's own definitions of the tools this plugin serves.
 fn jp_definitions() -> Utf8PathBuf {
     jp_root().join(".jp/mcp/tools/release")
 }
 
-/// Every file in `dir`, parsed, by file name.
 fn read_definitions(dir: &Utf8Path) -> Vec<(String, toml::Value)> {
     let mut files: Vec<(String, toml::Value)> = fs::read_dir(dir)
         .unwrap_or_else(|error| panic!("{dir}: {error}"))
@@ -28,7 +26,6 @@ fn read_definitions(dir: &Utf8Path) -> Vec<(String, toml::Value)> {
     files
 }
 
-/// The embedded definitions, parsed, by file name.
 fn templates() -> Vec<(String, toml::Value)> {
     DEFINITIONS
         .files
@@ -40,8 +37,6 @@ fn templates() -> Vec<(String, toml::Value)> {
         .collect()
 }
 
-/// The tools a set of definitions routes to this plugin, each as the name the
-/// plugin knows it by and its definition.
 fn routed(files: &[(String, toml::Value)]) -> Vec<(String, toml::Value)> {
     let mut routed = vec![];
     for (file, value) in files {

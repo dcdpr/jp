@@ -1,17 +1,17 @@
-//! One changelog fragment: the entry recording a change for the people using
-//! the software.
+//! Parsing and validation for individual changelog fragments.
 //!
-//! A fragment is a Markdown file named `<slug>.<type>.md`, such as
-//! `retry-idle-turns.fixed.md`: the name holds the change's [`Type`]
-//! ([`name`]), and the text is the entry the release notes list:
+//! A fragment is a Markdown file named `<slug>.<type>.md` (e.g.
+//! `retry-idle-turns.fixed.md`).
+//! The file name encodes the change [`Type`] ([`name`]), and the body contains
+//! the release-note entry:
 //!
 //! ```markdown
 //! A turn that stalls while idle is retried instead of failing.
 //! ```
 //!
-//! A fragment can open with a metadata block whose `Credits` fields replace the
-//! credits history names, one per line, each a change request or a commit's
-//! hash:
+//! A fragment may start with a metadata block containing `- **Credits**:`
+//! fields (one change request or commit hash per line) to override git history
+//! attribution:
 //!
 //! ```markdown
 //! - **Credits**: #1207
@@ -19,21 +19,18 @@
 //! A turn that stalls while idle is retried instead of failing.
 //! ```
 //!
-//! A change that requires users to act carries its section of the release's
-//! upgrade guide, an [`Upgrade`]: a paragraph that starts with `BREAKING
-//! CHANGE:` or `BREAKING-CHANGE:`, the rest of which is the section's title,
-//! and every paragraph after it, which are its body.
-//! A line that starts with either token anywhere else, inside a code block or
-//! partway through a paragraph, is an error rather than text.
-//! That keeps a plain search for the token in step with [`parse`]: a fragment
-//! the search finds has an upgrade section, or fails to parse.
+//! Breaking changes include an [`Upgrade`] section: a top-level paragraph
+//! starting with `BREAKING CHANGE:` or `BREAKING-CHANGE:` (whose remainder
+//! forms the section title), followed by one or more body paragraphs explaining
+//! how to upgrade.
+//! Any line starting with either marker inside a code block or mid-paragraph is
+//! rejected so that a plain-text search for the marker always agrees with
+//! [`parse`].
 //!
-//! The entry and the upgrade section are each given with their links inline,
-//! `[text](url)`, so each stands alone wherever it is placed: a reference-style
-//! link reads its URL from a definition anywhere in the file, which a formatter
-//! puts at its end, below the upgrade section.
-//!
-//! Paragraphs and code blocks are read as GitHub renders Markdown.
+//! Reference-style links (`[text][label]`) in both the entry and the upgrade
+//! section are rewritten to inline links (`[text](url)`) so each section can be
+//! rendered standalone even when link definitions sit at the bottom of the
+//! file.
 
 use std::{fmt, ops::Range, str::FromStr};
 
@@ -48,33 +45,30 @@ use crate::{
     links::{Links, line_starts},
 };
 
-/// The extension a fragment's file name ends in.
 const EXTENSION: &str = ".md";
 
-/// What a change means for the people using the software.
-///
-/// The ids are fixed, so a fragment means the same in every project.
-/// Types order as release notes show them.
+/// Category of a user-visible change, ordered as sections appear in release
+/// notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
-    /// A new capability the user can now reach.
+    /// A new user-facing capability.
     Added,
     /// A change to existing behavior.
     Changed,
-    /// Something still working but slated for removal.
+    /// A feature still working but slated for removal.
     Deprecated,
-    /// Something taken away.
+    /// A removed feature or option.
     Removed,
-    /// A bug fix the user would notice.
+    /// A user-visible bug fix.
     Fixed,
-    /// A fix with security relevance.
+    /// A security-relevant fix.
     Security,
     /// A user-visible performance improvement.
     Performance,
 }
 
 impl Type {
-    /// Every type, in the order release notes show them.
+    /// All fragment types in release-note section order.
     pub const ALL: [Self; 7] = [
         Self::Added,
         Self::Changed,
@@ -85,7 +79,8 @@ impl Type {
         Self::Performance,
     ];
 
-    /// The id a fragment's file name holds the type by, such as `added`.
+    /// Identifier used in fragment file names (`<slug>.<type>.md`), such as
+    /// `added`.
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -99,7 +94,7 @@ impl Type {
         }
     }
 
-    /// What the type is used for, in one sentence.
+    /// One-sentence description of what this change type covers.
     #[must_use]
     pub const fn description(self) -> &'static str {
         match self {
@@ -123,7 +118,6 @@ impl fmt::Display for Type {
 impl FromStr for Type {
     type Err = UnknownType;
 
-    /// Read a type from its id, written as a file name writes it.
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         Self::ALL
             .into_iter()
@@ -132,7 +126,7 @@ impl FromStr for Type {
     }
 }
 
-/// A string that is none of the seven type ids.
+/// Error returned when parsing an unrecognized [`Type`] identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownType(pub String);
 
@@ -151,16 +145,17 @@ impl fmt::Display for UnknownType {
 
 impl std::error::Error for UnknownType {}
 
-/// What a file name is, when it isn't a fragment's: `<slug>.<type>.md`.
+/// Error returned by [`name`] when a file name does not match
+/// `<slug>.<type>.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NameError {
-    /// The name doesn't end in `.md`, or nothing comes before its type.
+    /// File name does not end with `.md` or has an empty slug.
     NotAFragment,
 
-    /// Nothing but a slug comes before `.md`.
+    /// File name has no `<type>` segment before `.md`.
     MissingType { slug: String },
 
-    /// What comes between the slug and `.md` is none of the seven type ids.
+    /// Segment before `.md` is not a valid [`Type`] identifier.
     UnknownType { type_: String },
 }
 
@@ -189,14 +184,14 @@ impl fmt::Display for NameError {
 
 impl std::error::Error for NameError {}
 
-/// The slug and the type the file name `name` holds: `retry-idle-turns` and
-/// [`Type::Fixed`] for `retry-idle-turns.fixed.md`.
+/// Parse a fragment file name (`<slug>.<type>.md`) into its slug and [`Type`].
 ///
-/// The slug is everything before the type, dots included.
+/// The slug is everything before `.<type>.md`, including any dots.
 ///
 /// # Errors
 ///
-/// Returns why `name` isn't a fragment's file name.
+/// Returns [`NameError`] if `name` does not match `<slug>.<type>.md` with a
+/// valid [`Type`].
 pub fn name(name: &str) -> Result<(&str, Type), NameError> {
     let stem = name
         .strip_suffix(EXTENSION)
@@ -218,89 +213,79 @@ pub fn name(name: &str) -> Result<(&str, Type), NameError> {
     Ok((slug, type_))
 }
 
-/// The file name of the fragment of type `type_` named `slug`:
-/// `<slug>.<type>.md`.
+/// Format the fragment file name `<slug>.<type>.md`.
 #[must_use]
 pub fn file_name(slug: &str, type_: Type) -> String {
     format!("{slug}.{type_}{EXTENSION}")
 }
 
-/// Every type's id, as an error lists them.
 fn ids() -> String {
     let ids: Vec<&str> = Type::ALL.iter().map(|type_| type_.id()).collect();
 
     ids.join(", ")
 }
 
-/// A fragment, as [`parse`] reads it.
+/// Parsed changelog fragment returned by [`parse`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fragment {
-    /// What the change means for users, which the file name holds.
+    /// Change category parsed from the file name.
     pub type_: Type,
 
-    /// The credits to give in place of the ones history names, when the file
-    /// lists them.
+    /// Explicit `- **Credits**:` overrides from the metadata block, if present.
     pub credits: Option<Vec<ListedCredit>>,
 
-    /// The entry the release notes list, as Markdown: the body before its
-    /// upgrade section, or all of it.
-    ///
-    /// Its links are inline, `[text](url)`, whichever form the file wrote them
-    /// in.
+    /// Release-note entry as Markdown (everything before the upgrade section),
+    /// with reference links rewritten to inline `[text](url)` links.
     pub entry: String,
 
-    /// The fragment's section of the upgrade guide, for a change that requires
-    /// users to act.
+    /// Upgrade guide section for breaking changes, if present.
     pub upgrade: Option<Upgrade>,
 }
 
-/// A fragment's section of a release's upgrade guide.
-///
-/// Its links are inline, `[text](url)`, whichever form the file wrote them in.
+/// Upgrade guide section parsed from a fragment, with reference links rewritten
+/// to inline `[text](url)` links.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Upgrade {
-    /// What broke: the rest of the paragraph the token opens, on one line.
+    /// Single-line section title following the `BREAKING CHANGE:` marker.
     pub title: String,
 
-    /// What changed, why, and how to upgrade, as Markdown: every paragraph
-    /// after the title.
+    /// Markdown paragraphs following the title paragraph.
     pub body: String,
 }
 
-/// A document that doesn't hold a well-formed fragment.
-///
-/// Lines count from 1 at the top of the file.
+/// Validation error returned by [`parse`].
+/// Line numbers are 1-based from the start of the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FragmentError {
-    /// The metadata block lists a type, which the file name holds.
+    /// Metadata block contains a `Type` field, which belongs in the file name.
     TypeField { line: usize },
 
-    /// The metadata block lists a field other than `Credits`.
+    /// Metadata block contains a field other than `Credits`.
     UnknownField { line: usize, key: String },
 
-    /// A `Credits` field names neither a change request nor a commit.
+    /// A `Credits` field value is neither a change request nor a commit hash.
     InvalidCredit { line: usize, value: String },
 
-    /// Nothing but whitespace, or the metadata block, is in the file.
+    /// File contains no entry text outside whitespace and metadata.
     EmptyBody,
 
-    /// A line inside a code block starts with an upgrade section's token.
+    /// A line inside a code block starts with an upgrade section marker.
     MarkerInCodeBlock { line: usize, marker: &'static str },
 
-    /// A line starts with an upgrade section's token without starting a
+    /// A line starts with an upgrade section marker without opening a top-level
     /// paragraph.
     MarkerOutsideParagraph { line: usize, marker: &'static str },
 
-    /// A second paragraph opens an upgrade section.
+    /// More than one paragraph starts with an upgrade section marker.
     SecondUpgradeSection { line: usize },
 
-    /// Nothing comes before the upgrade section.
+    /// No entry text precedes the upgrade section.
     EmptyEntry { line: usize, marker: &'static str },
 
-    /// The paragraph opening the upgrade section holds nothing but its token.
+    /// The upgrade section's opening paragraph contains only the marker.
     EmptyUpgradeTitle { line: usize, marker: &'static str },
 
-    /// Nothing follows the upgrade section's title.
+    /// No body paragraphs follow the upgrade section's title paragraph.
     EmptyUpgradeBody { line: usize },
 }
 
@@ -354,14 +339,13 @@ impl fmt::Display for FragmentError {
 
 impl std::error::Error for FragmentError {}
 
-/// Read `source` as a fragment of type `type_`, which its file name holds, held
-/// to every rule of the format.
+/// Parse and validate a changelog fragment of category `type_`.
 ///
-/// Lines may end in `\n` or `\r\n`, and a leading byte order mark is skipped.
+/// Normalizes `\r\n` line endings and strips a leading UTF-8 BOM.
 ///
 /// # Errors
 ///
-/// Returns the first rule `source` breaks, reading from the top.
+/// Returns the first [`FragmentError`] encountered in `source`.
 pub fn parse(type_: Type, source: &str) -> Result<Fragment, FragmentError> {
     let source = document::normalize(source);
     let lines: Vec<&str> = source.lines().collect();
@@ -386,8 +370,6 @@ pub fn parse(type_: Type, source: &str) -> Result<Fragment, FragmentError> {
     })
 }
 
-/// The credits a fragment's metadata block lists, which takes no field but
-/// `Credits`; `None` when it lists none.
 fn credits(fields: &[Field]) -> Result<Option<Vec<ListedCredit>>, FragmentError> {
     let mut credits = vec![];
     for field in fields {
@@ -410,23 +392,19 @@ fn credits(fields: &[Field]) -> Result<Option<Vec<ListedCredit>>, FragmentError>
     Ok((!credits.is_empty()).then_some(credits))
 }
 
-/// The paragraph that opens a fragment's upgrade section.
+/// Paragraph that opens a fragment's upgrade section.
 struct Opening {
-    /// Its lines, as 0-based indices into the body's.
+    /// 0-based line range within `body`.
     lines: Range<usize>,
 
-    /// The number of its first line in the file.
+    /// 1-based line number in the full file.
     line: usize,
 
-    /// The token it starts with.
     marker: &'static str,
 }
 
-/// The entry and the upgrade section of a fragment's `body`, whose first line
-/// is line `first_line` of the file.
-///
-/// The rules are checked against the file as written, so a line an error names
-/// is the file's; each part then reads its links' URLs from the whole file.
+/// Parse the entry and optional upgrade section from `body` (whose first line
+/// is 1-based `first_line` in the full file), then inline any reference links.
 fn body(body: &str, first_line: usize) -> Result<(String, Option<Upgrade>), FragmentError> {
     if body.trim().is_empty() {
         return Err(FragmentError::EmptyBody);
@@ -447,10 +425,10 @@ fn body(body: &str, first_line: usize) -> Result<(String, Option<Upgrade>), Frag
     Ok((entry, Some(upgrade)))
 }
 
-/// The paragraph opening the upgrade section of `body`, split into `lines`, if
-/// it has one.
+/// Locate the paragraph opening the upgrade section in `body`, if any.
 ///
-/// Every line starting with a token has to open a paragraph, and only one may.
+/// Rejects markers inside code blocks, markers that do not start a top-level
+/// paragraph, and multiple upgrade sections.
 fn opening(
     body: &str,
     lines: &[&str],
@@ -484,8 +462,6 @@ fn opening(
     Ok(opening)
 }
 
-/// The entry before `opening` in `body`, and the upgrade section it opens, with
-/// the links `links` found in `body` inline.
 fn upgrade(
     body: &str,
     links: &Links,
@@ -522,8 +498,8 @@ fn upgrade(
     Ok((entry, Upgrade { title, body: rest }))
 }
 
-/// The title `paragraph` gives an upgrade section: the paragraph after its
-/// `marker`, its lines joined into one.
+/// Strip `marker` from the opening paragraph and collapse wrapped lines into a
+/// single-line title.
 fn title(paragraph: &str, marker: &str) -> String {
     let mut parts = vec![];
     for (index, line) in paragraph.lines().enumerate() {
@@ -541,8 +517,6 @@ fn title(paragraph: &str, marker: &str) -> String {
     parts.join(" ")
 }
 
-/// Every line in `lines` that starts with an upgrade section's token, as its
-/// 0-based index and the token.
 fn marked_lines(lines: &[&str]) -> Vec<(usize, &'static str)> {
     lines
         .iter()
@@ -551,13 +525,10 @@ fn marked_lines(lines: &[&str]) -> Vec<(usize, &'static str)> {
         .collect()
 }
 
-/// Where a body's paragraphs and code blocks sit, as ranges of 0-based line
-/// indices.
+/// Line ranges (0-based) of top-level paragraphs and code blocks in a fragment
+/// body.
 struct Blocks {
-    /// The paragraphs at the top level of the body, outside any list or quote.
     paragraphs: Vec<Range<usize>>,
-
-    /// The code blocks, fenced or indented, wherever they sit.
     code: Vec<Range<usize>>,
 }
 
@@ -584,12 +555,10 @@ impl Blocks {
         Self { paragraphs, code }
     }
 
-    /// Whether the line at `index` is inside a code block.
     fn in_code(&self, index: usize) -> bool {
         self.code.iter().any(|block| block.contains(&index))
     }
 
-    /// The lines of the paragraph starting at `index`, if one does.
     fn paragraph_at(&self, index: usize) -> Option<Range<usize>> {
         self.paragraphs
             .iter()
@@ -598,8 +567,7 @@ impl Blocks {
     }
 }
 
-/// The 0-based indices of the lines a block spans, from comrak's 1-based line
-/// numbers.
+/// Convert comrak's 1-based inclusive line numbers to a 0-based `Range<usize>`.
 fn indices(sourcepos: &Sourcepos) -> Range<usize> {
     sourcepos.start.line.saturating_sub(1)..sourcepos.end.line
 }

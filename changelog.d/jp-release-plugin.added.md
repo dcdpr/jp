@@ -1,4 +1,4 @@
-The `jp release` plugin keeps a project's release notes as changelog fragments,
-one per change users notice, and highlights for features worth a story.
-`jp release fixed`, and a command like it for each other type, writes a fragment
-in your editor.
+Add the `jp release` command plugin for managing changelog fragments and release
+highlights in `changelog.d/`, with editor commands (`jp release added`, `jp
+release fixed`, `jp release highlight`), validation (`jp release check`), and
+the `changelog_add` tool.

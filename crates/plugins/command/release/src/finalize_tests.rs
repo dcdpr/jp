@@ -15,7 +15,6 @@ fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// Finalize release `at` in `fixture`'s workspace.
 fn finalized(fixture: &Fixture, at: &str) -> Result<String, String> {
     let shell = fixture.shell();
     let options = options();
@@ -24,7 +23,6 @@ fn finalized(fixture: &Fixture, at: &str) -> Result<String, String> {
     finalize(&pipeline, &version(at))
 }
 
-/// Cut the next release in `fixture`'s workspace.
 fn cut_here(fixture: &Fixture) {
     let shell = fixture.shell();
     let options = options();
@@ -32,7 +30,6 @@ fn cut_here(fixture: &Fixture) {
     cut(&pipeline, None, None).unwrap();
 }
 
-/// The message of the tag `tag` in the workspace's repository.
 fn tag_message(fixture: &Fixture, tag: &str) -> String {
     fixture
         .git(&["tag", "--list", "--format=%(contents)", tag])
@@ -40,8 +37,6 @@ fn tag_message(fixture: &Fixture, tag: &str) -> String {
         .to_owned()
 }
 
-/// A workspace whose release 0.1.0, listing `Retried.`, was cut here, its
-/// branches not yet published.
 fn cut_0_1_0() -> Fixture {
     let fixture = Fixture::new();
     fixture.write(
@@ -55,7 +50,6 @@ fn cut_0_1_0() -> Fixture {
     fixture
 }
 
-/// [`cut_0_1_0`], with its notes branch merged into `main`, and `main` pushed.
 fn filed_0_1_0() -> Fixture {
     let fixture = cut_0_1_0();
     fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0 (#2)");

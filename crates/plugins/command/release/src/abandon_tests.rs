@@ -7,10 +7,8 @@ use crate::{
     cut::cut, finalize::finalize, options::Options, pick::pick, repository_testing::Fixture,
 };
 
-/// A `bump` that writes the version into `VERSION`, wherever git runs.
 const BUMP: &str = "git config --file VERSION version.current {version}";
 
-/// The options of a project on `forge`, with [`BUMP`].
 fn options_for(forge: &str) -> Options {
     let Value::Object(options) = json!({ "forge": forge, "bump": BUMP }) else {
         panic!("options are an object");
@@ -23,7 +21,6 @@ fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// Run `command` in the workspace of `fixture`, without a forge.
 fn run(
     fixture: &Fixture,
     command: impl FnOnce(&Pipeline<'_>) -> Result<String, String>,
@@ -31,7 +28,6 @@ fn run(
     run_with(fixture, &options_for("none"), command)
 }
 
-/// Run `command` in the workspace of `fixture` with `options`.
 fn run_with(
     fixture: &Fixture,
     options: &Options,
@@ -43,8 +39,6 @@ fn run_with(
     command(&pipeline)
 }
 
-/// A workspace whose release 0.1.0, listing one fix, was cut here, nothing of
-/// it published.
 fn cut_0_1_0() -> Fixture {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -55,8 +49,6 @@ fn cut_0_1_0() -> Fixture {
     fixture
 }
 
-/// [`cut_0_1_0`], with both branches published and the notes merged into
-/// `main`.
 fn filed_0_1_0() -> Fixture {
     let fixture = cut_0_1_0();
     fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);

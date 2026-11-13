@@ -2,7 +2,6 @@ use indoc::indoc;
 
 use super::*;
 
-/// All of `markdown`, standing alone, without the blank lines it ends with.
 fn standalone(markdown: &str) -> String {
     Links::read(markdown)
         .standalone(markdown, 0..markdown.len())

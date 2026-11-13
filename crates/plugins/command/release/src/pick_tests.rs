@@ -6,14 +6,12 @@ use serde_json::{Value, json};
 use super::*;
 use crate::{cut::cut, finalize::finalize, options::Options, repository_testing::Fixture};
 
-/// A `bump` that writes the version into `VERSION`, wherever git runs.
 const BUMP: &str = "git config --file VERSION version.current {version}";
 
 fn options() -> Options {
     options_for("none")
 }
 
-/// The options of a project on `forge`.
 fn options_for(forge: &str) -> Options {
     let Value::Object(options) = json!({ "forge": forge, "bump": BUMP }) else {
         panic!("options are an object");
@@ -26,8 +24,6 @@ fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// A workspace whose release 0.1.0 was cut here from a fix, nothing of it
-/// published.
 fn cut_0_1_0() -> Fixture {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -38,7 +34,6 @@ fn cut_0_1_0() -> Fixture {
     fixture
 }
 
-/// Run `command` in the workspace of `fixture`, without a forge.
 fn run(
     fixture: &Fixture,
     command: impl FnOnce(&Pipeline<'_>) -> Result<String, String>,
@@ -46,7 +41,6 @@ fn run(
     run_with(fixture, &options(), command)
 }
 
-/// Run `command` in the workspace of `fixture` with `options`.
 fn run_with(
     fixture: &Fixture,
     options: &Options,
@@ -58,8 +52,6 @@ fn run_with(
     command(&pipeline)
 }
 
-/// A workspace on GitLab whose release 0.1.0 is tagged and published, and the
-/// hash of a fix merged since through merge request `!5`.
 fn on_gitlab_with_a_fix() -> (Fixture, String) {
     let fixture = cut_0_1_0();
     fixture.merge_notes("0.1.0", "chore(release): Cut release 0.1.0");
@@ -74,8 +66,6 @@ fn on_gitlab_with_a_fix() -> (Fixture, String) {
     (fixture, hash)
 }
 
-/// Commit a change to `path` and a fragment `slug` with `message`, push it, and
-/// return the commit's hash.
 fn change(fixture: &Fixture, path: &str, slug: &str, message: &str) -> String {
     fixture.write(path, &format!("// {message}\n"));
     fixture.fragment(slug, "fixed", message);
@@ -85,7 +75,6 @@ fn change(fixture: &Fixture, path: &str, slug: &str, message: &str) -> String {
     hash
 }
 
-/// The worktree a stopped pick kept.
 fn stopped(fixture: &Fixture) -> Utf8PathBuf {
     let state = fs::read_to_string(fixture.root().join(".git").join(STOPPED)).unwrap();
     let stopped: Stopped = serde_json::from_str(&state).unwrap();
@@ -93,7 +82,6 @@ fn stopped(fixture: &Fixture) -> Utf8PathBuf {
     stopped.worktree
 }
 
-/// What a pick that picked one commit and filed one fragment into 0.1.0 says.
 const PICKED_AND_FILED: &str =
     "Picked 1 commit onto release/0.1 for release 0.1.0.\nFiled 1 fragment into \
      changelog.d/0.1.0/ on release-notes/v0.1.0.\n\nNothing is published yet. Publish them \

@@ -1,14 +1,14 @@
-//! Publishing a release to GitHub: its build's files and the workspace's
-//! assets, attached to the Release of its tag, with its notes as the
-//! description.
+//! Publishing a release to GitHub: uploading build artifacts and configured
+//! workspace assets to the GitHub Release for `v<version>`.
 //!
-//! A new Release is created as a draft, given its files, and then published, so
-//! it never shows without them.
-//! An existing Release is updated in place: its title and description are
-//! replaced, and so is each file of a name this publish attaches; files of
-//! other names stay.
-//! The Release of the highest version is marked the latest each time, since
-//! GitHub would otherwise make the most recently published one the latest.
+//! New releases are created as drafts, populated with assets, and then
+//! published so they never appear without their files.
+//! Existing releases are updated in place: the title, description, and any
+//! matching asset filenames are replaced while other attached files are
+//! preserved.
+//! The highest published semantic version is explicitly marked as `latest` so
+//! publishing a patch on an older release line does not steal the `latest`
+//! badge.
 
 use std::{collections::BTreeSet, fmt::Write as _, fs};
 
@@ -23,63 +23,48 @@ use semver::Version;
 
 use crate::{github::Repository, options::DOWNLOAD};
 
-/// A file to attach to a Release.
+/// A file to upload as a GitHub Release asset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Upload {
     pub(crate) name: String,
     pub(crate) contents: Vec<u8>,
 }
 
-/// A release to publish.
+/// Inputs for publishing a single GitHub Release.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Plan {
     pub(crate) version: Version,
 
-    /// The commit the release's build is of, which its tag on GitHub has to
-    /// name.
+    /// Commit hash that tag `v<version>` on GitHub must point to.
     pub(crate) commit: String,
 
-    /// The Release's description.
+    /// Rendered release description.
     pub(crate) body: String,
 
-    /// The files to attach, each name once.
+    /// Assets to attach, with unique filenames.
     pub(crate) uploads: Vec<Upload>,
 }
 
 impl Plan {
-    /// The tag of the release, such as `v0.3.0`.
     pub(crate) fn tag(&self) -> String {
         format!("v{}", self.version)
     }
 }
 
-/// What a publish did.
+/// Outcome of publishing a GitHub Release.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Published {
-    /// The Release's page.
     pub(crate) url: String,
-
-    /// Whether the publish created the Release.
     pub(crate) created: bool,
-
-    /// The files attached, in the order they were.
     pub(crate) uploaded: Vec<String>,
-
-    /// The files an earlier publish attached that were replaced.
     pub(crate) replaced: Vec<String>,
-
-    /// The files the Release has that this publish didn't attach.
     pub(crate) kept: Vec<String>,
-
-    /// The version of the Release marked the latest.
     pub(crate) latest: Version,
 }
 
-/// The files of the publishable build of `version` kept in `dir`, and the
-/// commit it was built from.
-///
-/// The build has to be of `version`, made with the `release` profile, and
-/// unchanged since: every file's SHA-256 has to match its `checksums.txt`.
+/// Load and validate the `release`-profile build of `version` stored in `dir`,
+/// returning its commit hash and the files to upload (archives,
+/// `checksums.txt`, and `manifest.json`).
 pub(crate) fn read_build(
     dir: &Utf8Path,
     version: &Version,
@@ -135,10 +120,8 @@ pub(crate) fn read_build(
     Ok((manifest.commit, uploads))
 }
 
-/// The files `assets` names, relative to the workspace at `root`, each with
-/// every `{download}` in it replaced by `download`.
-///
-/// A file that isn't UTF-8 text is attached as it is.
+/// Load the workspace-relative `assets` from `root`, substituting `{download}`
+/// with `download` in UTF-8 files and leaving binary files unchanged.
 pub(crate) fn assets(
     root: &Utf8Path,
     assets: &[impl AsRef<Utf8Path>],
@@ -174,7 +157,7 @@ pub(crate) fn assets(
     Ok(uploads)
 }
 
-/// Refuse two files that would be attached under one name.
+/// Return an error if any two `uploads` share the same filename.
 pub(crate) fn distinct(uploads: &[Upload]) -> Result<(), String> {
     let mut seen = BTreeSet::new();
     let twice: BTreeSet<&str> = uploads
@@ -197,12 +180,11 @@ pub(crate) fn distinct(uploads: &[Upload]) -> Result<(), String> {
     ))
 }
 
-/// Publish `plan` as the Release of its tag in `repository`, through `client`.
+/// Publish `plan` to `repository` via `client`, calling `progress` before each
+/// asset upload.
 ///
-/// `progress` is told of each file as it is attached.
-/// The tag has to be on GitHub already, at the commit the build is of: a
-/// Release of a tag GitHub doesn't have would make one, at the tip of the
-/// default branch.
+/// Verifies that tag `v<version>` already exists on GitHub at `plan.commit` so
+/// creating the release does not implicitly create a tag on the default branch.
 pub(crate) async fn publish(
     client: &Octocrab,
     repository: &Repository,
@@ -247,8 +229,8 @@ pub(crate) async fn publish(
     })
 }
 
-/// The Release of `version`: `existing`, retitled and given `body`, or else a
-/// new draft; and whether it is new.
+/// Create a draft release for `version` or update `existing`'s title and body,
+/// returning `(release, created)`.
 async fn open(
     client: &Octocrab,
     repository: &Repository,
@@ -283,8 +265,8 @@ async fn open(
     }
 }
 
-/// Attach `uploads` to `release`, each in place of a file of its name the
-/// Release has; return the names attached and the names replaced.
+/// Upload `uploads` to `release`, deleting any existing assets with the same
+/// filename first, and return `(uploaded_names, replaced_names)`.
 async fn attach(
     client: &Octocrab,
     repository: &Repository,
@@ -320,9 +302,8 @@ async fn attach(
     Ok((uploaded, replaced))
 }
 
-/// Publish `release`, the Release of `version`, if it is a draft, and mark the
-/// highest version among it and the published `releases` the latest; return the
-/// Release as published and the version marked.
+/// Undraft `release` (if it is a draft) and ensure the highest published
+/// semantic version between `version` and `releases` is marked as `latest`.
 async fn release_as_latest(
     client: &Octocrab,
     repository: &Repository,
@@ -362,7 +343,7 @@ async fn release_as_latest(
     Ok((published, latest))
 }
 
-/// Refuse to publish unless GitHub has `tag`, and it names `commit`.
+/// Verify that `tag` exists on GitHub and resolves to `commit`.
 async fn check_tag(
     client: &Octocrab,
     repository: &Repository,
@@ -398,11 +379,8 @@ async fn check_tag(
     ))
 }
 
-/// The highest version of the published Releases other than the one of `tag`,
-/// and that Release's id.
-///
-/// Drafts, pre-releases, and Releases of tags that aren't `v<version>` don't
-/// count.
+/// Return the highest published non-prerelease version in `releases` (excluding
+/// `tag`) and its GitHub Release ID.
 pub(crate) fn highest(releases: &[Release], tag: &str) -> Option<(Version, u64)> {
     releases
         .iter()
@@ -414,12 +392,10 @@ pub(crate) fn highest(releases: &[Release], tag: &str) -> Option<(Version, u64)>
         .max_by(|(version, _), (other, _)| version.cmp(other))
 }
 
-/// The version a tag `v<version>` names.
 pub(crate) fn version_of(tag: &str) -> Option<Version> {
     tag.strip_prefix('v')?.parse().ok()
 }
 
-/// What to say of a publish of `version`.
 pub(crate) fn summary(published: &Published, version: &Version) -> String {
     let verb = if published.created {
         "Published"
@@ -438,7 +414,6 @@ pub(crate) fn summary(published: &Published, version: &Version) -> String {
             .join("\n")
     );
 
-    // Writing to a `String` can't fail.
     if !published.replaced.is_empty() {
         let _ = write!(
             text,
@@ -467,7 +442,6 @@ pub(crate) fn summary(published: &Published, version: &Version) -> String {
     text
 }
 
-/// `names`, each in backticks, joined into a list a sentence can hold.
 fn names(names: &[String]) -> String {
     let quoted: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
     match quoted.as_slice() {
@@ -477,7 +451,6 @@ fn names(names: &[String]) -> String {
     }
 }
 
-/// `count` of `noun`, as `1 file` or `9 files`.
 fn count(count: usize, noun: &str) -> String {
     if count == 1 {
         format!("1 {noun}")
@@ -486,7 +459,6 @@ fn count(count: usize, noun: &str) -> String {
     }
 }
 
-/// Each problem on a line of its own, as a list.
 fn list(problems: &[String]) -> String {
     problems
         .iter()
@@ -495,7 +467,6 @@ fn list(problems: &[String]) -> String {
         .join("\n")
 }
 
-/// The first 7 characters of a commit's hash.
 fn short(hash: &str) -> &str {
     hash.get(..7).unwrap_or(hash)
 }

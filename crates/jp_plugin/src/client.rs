@@ -1,10 +1,9 @@
-//! The plugin's side of the protocol: reading what the host sends on the
-//! plugin's stdin, and sending the plugin's messages on its stdout.
+//! Plugin-side helpers for the command plugin JSON-lines protocol over `stdin`
+//! and `stdout`.
 //!
-//! [`start`] answers the host's first message, [`main`] is the body of a plugin
-//! binary's `main`, and the rest send or wait for one message each.
-//! Every function reports a failure as a message for the user, the way a
-//! plugin's `run` returns it.
+//! [`start`] handles the initial `describe` or `init` handshake, [`main`]
+//! provides the standard `main()` entry point for plugin binaries, and the
+//! remaining functions send or receive individual protocol messages.
 
 use std::{
     io::{self, BufRead, BufReader, IsTerminal as _, Stdin, Stdout, Write},
@@ -21,24 +20,21 @@ use crate::{
     ready,
 };
 
-/// The package a plugin binary is built from, as Cargo describes it.
-///
-/// Build it with [`package!`], in the plugin's crate.
+/// Cargo package metadata for a plugin binary, constructed via [`package!`].
 ///
 /// [`package!`]: crate::package!
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Package {
     pub version: &'static str,
 
-    /// The package's authors, separated by `:`, as `CARGO_PKG_AUTHORS` holds
-    /// them.
+    /// Colon-separated author list from `CARGO_PKG_AUTHORS`.
     pub authors: &'static str,
 
-    /// The package's repository address; empty when it names none.
+    /// Repository URL from `CARGO_PKG_REPOSITORY` (empty if unset).
     pub repository: &'static str,
 }
 
-/// The [`Package`] of the crate the macro is used in.
+/// Capture the calling crate's [`Package`] metadata at compile time.
 #[macro_export]
 macro_rules! package {
     () => {
@@ -50,12 +46,12 @@ macro_rules! package {
     };
 }
 
-/// The answer to `describe` for the plugin `name`, from its embedded
-/// `manifest`, its `help` text, and the `package` it is built from.
+/// Build a [`DescribeResponse`] for plugin `name` from its embedded `manifest`,
+/// `help` text, and [`Package`] metadata.
 ///
 /// # Errors
 ///
-/// Returns why `manifest` can't be read.
+/// Returns an error if `manifest` cannot be parsed.
 pub fn describe(
     manifest: &str,
     name: &str,
@@ -71,19 +67,17 @@ pub fn describe(
     Ok(describe)
 }
 
-/// Answer the host's first message.
+/// Handle the host's initial message (`describe` or `init`).
 ///
-/// A `describe` is answered with what `describe` returns, which ends the
-/// session.
-/// An `init` from a host speaking at least protocol `required` is answered with
-/// `ready` and returned; one from an older host is answered with `exit`, which
-/// ends the session.
-/// `binary` names the plugin's executable in the error for a host that stopped
-/// responding.
+/// - On [`HostToPlugin::Describe`], sends the response produced by `describe`
+///   and returns `Ok(None)`.
+/// - On [`HostToPlugin::Init`], verifies that `init.version >= required`.
+///   If compatible, sends `ready` and returns `Ok(Some(init))`; otherwise sends
+///   an `exit` error message and returns `Ok(None)`.
 ///
 /// # Errors
 ///
-/// Returns why the first message can't be read or answered, or that it was
+/// Returns an error if reading or writing fails, or if the first message is
 /// neither `describe` nor `init`.
 pub fn start(
     stdin: &mut impl BufRead,
@@ -112,11 +106,11 @@ pub fn start(
     Ok(Some(*init))
 }
 
-/// Send `message` to the host, as one line of JSON.
+/// Serialize and write `message` as a single JSON line to `stdout`, then flush.
 ///
 /// # Errors
 ///
-/// Returns why the message can't be written.
+/// Returns an error if serialization, writing, or flushing fails.
 pub fn send(stdout: &mut impl Write, message: &PluginToHost) -> Result<(), String> {
     let json =
         serde_json::to_string(message).map_err(|error| format!("serialize error: {error}"))?;
@@ -127,14 +121,13 @@ pub fn send(stdout: &mut impl Write, message: &PluginToHost) -> Result<(), Strin
         .map_err(|error| format!("flush error: {error}"))
 }
 
-/// Wait for the host's next message.
+/// Read and deserialize the next [`HostToPlugin`] message from `stdin`.
 ///
 /// # Errors
 ///
-/// Returns why the message can't be read.
-/// A host that closed the pipe without answering is reported as one that may be
-/// another build than `binary`, the plugin's executable: an older `jp` does
-/// that when it gives up on a message it couldn't read.
+/// Returns an error if `stdin` reaches EOF (naming `binary` to suggest checking
+/// for a version mismatch with `jp`), if an I/O error occurs, or if the JSON is
+/// malformed.
 pub fn read(stdin: &mut impl BufRead, binary: &str) -> Result<HostToPlugin, String> {
     let mut line = String::new();
     let count = stdin
@@ -149,11 +142,11 @@ pub fn read(stdin: &mut impl BufRead, binary: &str) -> Result<HostToPlugin, Stri
     serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
 }
 
-/// Print `text`, written in `format`, on the host's `channel`.
+/// Send a [`PrintMessage`] to the host.
 ///
 /// # Errors
 ///
-/// Returns why the message can't be written.
+/// Returns an error if the message cannot be written to `stdout`.
 pub fn print(
     stdout: &mut impl Write,
     text: &str,
@@ -171,12 +164,11 @@ pub fn print(
     )
 }
 
-/// End the session with exit code `code`: success with 0, and otherwise a
-/// failure, which the host reports with `reason`.
+/// Send an [`ExitMessage`] with `code` and optional failure `reason`.
 ///
 /// # Errors
 ///
-/// Returns why the message can't be written.
+/// Returns an error if the message cannot be written to `stdout`.
 pub fn exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
     send(
         stdout,
@@ -188,12 +180,13 @@ pub fn exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(
     )
 }
 
-/// End the session with exit code `code`, which reports the command's result
-/// rather than a failure, as a check that found problems does.
+/// Send an [`ExitMessage`] with `code`, marking non-zero exit codes as
+/// `expected: true` (for commands like `check` or `due` that use exit code 1 to
+/// report a normal status result rather than a runtime error).
 ///
 /// # Errors
 ///
-/// Returns why the message can't be written.
+/// Returns an error if the message cannot be written to `stdout`.
 pub fn result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
     send(
         stdout,
@@ -205,13 +198,11 @@ pub fn result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
     )
 }
 
-/// Answer the tool call `init` carried with `outcome`, and end the session.
-///
-/// `outcome` is serialized as a local tool prints its outcome.
+/// Send a [`ToolOutcomeMessage`] with `outcome` followed by a `0` exit message.
 ///
 /// # Errors
 ///
-/// Returns why `outcome` can't be serialized or the messages written.
+/// Returns an error if `outcome` cannot be serialized or written to `stdout`.
 pub fn answer_tool(stdout: &mut impl Write, outcome: &impl Serialize) -> Result<(), String> {
     let outcome = serde_json::to_value(outcome)
         .map_err(|error| format!("failed to serialize the tool outcome: {error}"))?;
@@ -223,13 +214,12 @@ pub fn answer_tool(stdout: &mut impl Write, outcome: &impl Serialize) -> Result<
     exit(stdout, 0, None)
 }
 
-/// Ask the host to collect text from the user, as `request` says, and wait for
-/// it.
+/// Send a [`ComposeRequest`] to the host and wait for the user's response.
 ///
 /// # Errors
 ///
-/// Returns that nothing was composed, the host's error, that the host shut
-/// down, or why the exchange failed; `binary` is as [`read`] takes it.
+/// Returns an error if the prompt was cancelled, the host returned an error or
+/// shut down, or reading/writing failed.
 pub fn compose(
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
@@ -248,11 +238,11 @@ pub fn compose(
     }
 }
 
-/// The body of a plugin binary's `main`: serve the host with `run` over stdin
-/// and stdout, and exit with a failure when `run` fails.
+/// Entry point helper for command plugin binaries.
 ///
-/// Run from a terminal rather than by `jp`, the binary prints `help` and says
-/// to run it as `jp <command>` instead of waiting for a host that isn't there.
+/// When invoked directly in a terminal (`stdin` is a TTY), prints `help()` and
+/// a note to run `jp <command>` instead of blocking on `stdin`.
+/// Otherwise runs `run` over `stdin` and `stdout`.
 #[must_use]
 pub fn main(
     command: &str,

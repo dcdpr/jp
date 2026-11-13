@@ -1,8 +1,4 @@
-//! The `jp-release-github` executable: a thin shell around
-//! [`jp_release_github`].
-//!
-//! Everything the plugin does lives in the library, so it can be tested without
-//! spawning a process.
+//! Entry point for the `jp-release-github` command plugin binary.
 
 use std::process::ExitCode;
 

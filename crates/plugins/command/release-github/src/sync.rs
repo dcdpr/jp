@@ -1,17 +1,17 @@
-//! Keeping each Release's description in step with its release's notes, which
-//! go on being corrected after the release is published.
+//! Synchronizing published GitHub Release descriptions with the release notes
+//! in `changelog.d/<version>/`.
 
 use jp_github::{Octocrab, params::ReleaseUpdate};
 use semver::Version;
 
 use crate::{description::same, github::Repository, publish::version_of};
 
-/// Rewrite the description of each Release of `repository` that doesn't read as
-/// `describe` renders it, and return the versions rewritten, lowest first.
+/// Update the description of every GitHub Release in `repository` whose current
+/// body differs from `describe(version)`, returning the updated versions sorted
+/// from lowest to highest.
 ///
-/// `describe` renders the description of a version, or `None` for a version
-/// without notes, whose Release is left alone; so is a Release of a tag that
-/// isn't `v<version>`.
+/// Skips releases whose tag does not match `v<version>` or for which `describe`
+/// returns `None`.
 pub(crate) async fn sync(
     client: &Octocrab,
     repository: &Repository,
@@ -54,7 +54,6 @@ pub(crate) async fn sync(
     Ok(updated)
 }
 
-/// What to say of a sync that rewrote the descriptions of `updated`.
 pub(crate) fn summary(updated: &[Version]) -> String {
     let versions: Vec<String> = updated.iter().map(Version::to_string).collect();
     match versions.as_slice() {

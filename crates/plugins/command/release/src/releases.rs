@@ -1,154 +1,133 @@
-//! What the tags and release branches, in this repository and on `origin`, say
-//! about a project's releases, and what `cut`, `pick`, and `finalize` may do
-//! next.
+//! Pure domain model and state-machine rules for release branches, notes
+//! branches, and release tags.
 //!
-//! A tag `v0.3.0` finalizes release 0.3.0.
-//! A release branch, `release/0.3`, holds the code of every 0.3.x release:
-//! `main` at the cut, and on top of it two kinds of commit.
-//! The commit that starts a release carries a `Starts-Release: 0.3.1` trailer,
-//! and a commit picked from `main` ends its message with `(cherry picked from
-//! commit <hash>)`, as `git cherry-pick -x` writes it.
-//! A release is in preparation from the commit that starts it until its tag.
-//! A minor or major release is cut when the commit that starts it is made.
-//! Its notes are filed on `main` from a notes branch, `release-notes/v0.3.0`.
+//! - A `v<version>` tag finalizes a release (e.g. `v0.3.0`).
+//! - A release branch (`release/<major>.<minor>`) holds all `<major>.<minor>.x`
+//!   releases.
+//!   Each release on the branch starts with a commit carrying a
+//!   `Starts-Release: <version>` trailer, followed by any commits cherry-picked
+//!   from `main` (`(cherry picked from commit <hash>)`).
+//! - A release is in preparation from its `Starts-Release` commit until its
+//!   `v<version>` tag is created.
+//! - Release notes are prepared on `release-notes/v<version>` and merged into
+//!   `main`.
 //!
-//! Everything here reads what git printed and decides; the `repository` module
-//! runs git.
+//! All git subprocess calls live in [`crate::repository`]; this module parses
+//! git output and enforces version and branch transitions.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use semver::Version;
 
-/// The trailer the commit that starts a release on its branch carries, naming
-/// the release's version.
+/// Commit trailer marking the start of a release on a release branch.
 pub(crate) const STARTS_RELEASE: &str = "Starts-Release";
 
-/// What `git cherry-pick -x` writes into a picked commit's message, followed by
-/// the picked commit's hash and `)`.
+/// Prefix written by `git cherry-pick -x` before `<hash>)`.
 const PICKED_FROM: &str = "(cherry picked from commit ";
 
-/// What every release branch's name starts with.
 pub(crate) const RELEASE_BRANCH: &str = "release/";
-
-/// What every notes branch's name starts with.
 pub(crate) const NOTES_BRANCH: &str = "release-notes/";
 
-/// What the tags and release branches here and on `origin` say about the
-/// releases.
+/// Release state parsed from local and `origin` tags and release branches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Releases {
-    /// The versions a `v` tag finalized, here or on `origin`.
-    ///
-    /// Tags of pre-releases are left out.
+    /// Non-prerelease versions with a `v<version>` tag locally or on `origin`.
     pub tagged: BTreeSet<Version>,
 
-    /// The versions `origin` has a `v` tag for.
+    /// Non-prerelease versions with a `v<version>` tag on `origin`.
     pub published: BTreeSet<Version>,
 
-    /// Every release branch, by the major and minor version its releases share.
+    /// Release branches keyed by `(major, minor)`.
     pub lines: BTreeMap<(u64, u64), Line>,
 }
 
-/// A release branch.
+/// State of a single `release/<major>.<minor>` branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Line {
-    /// Its name, such as `release/0.3`.
     pub branch: String,
-
-    /// The hash of its tip.
     pub tip: String,
 
-    /// The releases started on it, oldest first.
+    /// Releases started on this branch (`Starts-Release` commits), ordered from
+    /// oldest to newest.
     pub started: Vec<Started>,
 
-    /// The hashes of the commits of `main` picked onto it.
+    /// Hashes of `main` commits cherry-picked onto this branch.
     pub picked: BTreeSet<String>,
 }
 
-/// A release started on its release branch.
+/// A `Starts-Release` commit on a release branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Started {
     pub version: Version,
-
-    /// The hash of the commit that starts it.
     pub hash: String,
 
-    /// When the commit that starts it was made, in seconds since the Unix
-    /// epoch.
+    /// Commit timestamp in seconds since the Unix epoch.
     pub at: i64,
 }
 
-/// Where `pick` puts its commits.
+/// Target release branch for `jp release pick`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Target<'a> {
     pub line: &'a Line,
 
-    /// Whether the release has yet to start: a patch release, after the line's
-    /// last release was tagged.
+    /// Whether `pick` must create a new `Starts-Release` commit before
+    /// cherry-picking (starting a new patch release after the previous release
+    /// on `line` was tagged).
     pub start: bool,
 }
 
-/// Where a branch in this repository stands against `origin`'s branch of the
-/// same name.
+/// Relationship between a local branch and its remote-tracking branch on
+/// `origin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Standing {
-    /// Only this repository has it.
+    /// Exists only in the local repository.
     Local,
 
-    /// Only `origin` has it.
+    /// Exists only on `origin`.
     Remote,
 
-    /// Both have it, at the same commit.
+    /// Local and `origin` point to the same commit.
     Published,
 
-    /// This repository's has every commit of `origin`'s, and more.
+    /// Local is a strict descendant of `origin`.
     Ahead,
 
-    /// `origin`'s has every commit of this repository's, and more.
+    /// `origin` is a strict descendant of local.
     Behind,
 
-    /// Each has commits the other lacks.
+    /// Local and `origin` have diverged.
     Diverged,
 }
 
 impl Standing {
-    /// Whether this repository has commits of the branch `origin` doesn't.
     pub(crate) fn unpushed(self) -> bool {
         matches!(self, Self::Local | Self::Ahead)
     }
 }
 
-/// The name of the release branch holding the releases `major.minor.x`.
 pub(crate) fn branch(version: &Version) -> String {
     format!("{RELEASE_BRANCH}{}.{}", version.major, version.minor)
 }
 
-/// The name of the branch that files the notes of release `version` on `main`.
 pub(crate) fn notes_branch(version: &Version) -> String {
     format!("{NOTES_BRANCH}v{version}")
 }
 
-/// The name of the branch that moves the notes of the abandoned release
-/// `version` back to the top of the fragments directory on `main`.
 pub(crate) fn abandon_branch(version: &Version) -> String {
     format!("{NOTES_BRANCH}abandon-v{version}")
 }
 
-/// The name of the tag that finalizes release `version`.
 pub(crate) fn tag(version: &Version) -> String {
     format!("v{version}")
 }
 
-/// The major and minor version the release branch `name` holds, when it is
-/// named like one, such as `release/0.3`.
+/// Parse `(major, minor)` from a `release/<major>.<minor>` branch name.
 pub(crate) fn line_of(name: &str) -> Option<(u64, u64)> {
     let (major, minor) = name.strip_prefix(RELEASE_BRANCH)?.split_once('.')?;
 
     Some((number(major)?, number(minor)?))
 }
 
-/// `text` as a number written the way semantic versions write them: digits,
-/// with no leading zero.
 fn number(text: &str) -> Option<u64> {
     let digits = !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
     if !digits || (text.len() > 1 && text.starts_with('0')) {
@@ -158,12 +137,11 @@ fn number(text: &str) -> Option<u64> {
     text.parse().ok()
 }
 
-/// The tags `git ls-remote --tags` lists, each `<hash>\trefs/tags/<name>`, as
-/// their names and the commits they name.
+/// Parse `git ls-remote --tags` / `git for-each-ref` lines
+/// (`<hash>\trefs/tags/<name>`) into a map from tag name to commit hash.
 ///
-/// An annotated tag is listed twice, first with the hash of the tag object,
-/// then peeled, as `refs/tags/<name>^{}`, with its commit's: the peeled line
-/// wins, wherever it stands.
+/// For annotated tags, the peeled `refs/tags/<name>^{}` entry overrides the tag
+/// object hash.
 pub(crate) fn parse_tags(listing: &str) -> BTreeMap<String, String> {
     let mut tags = BTreeMap::new();
     let mut peeled = BTreeMap::new();
@@ -185,8 +163,7 @@ pub(crate) fn parse_tags(listing: &str) -> BTreeMap<String, String> {
     tags
 }
 
-/// The versions the tags `names` finalize: each `v`, then a semantic version
-/// that is no pre-release.
+/// Extract non-prerelease semantic versions from `v<version>` tag names.
 pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTreeSet<Version> {
     names
         .into_iter()
@@ -198,11 +175,8 @@ pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTree
         .collect()
 }
 
-/// The releases started on a release branch, oldest first, and the commits of
-/// `main` picked onto it, read from `git log -z --format=%H%n%ct%n%B` of the
-/// branch's commits that are not on `main`, newest first.
-///
-/// The error names a commit the log gives no date.
+/// Parse `Starts-Release` commits (oldest first) and cherry-picked commit
+/// hashes from `git log -z --format=%H%n%ct%n%B` output.
 pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), String> {
     const FIELDS: usize = 3;
 
@@ -214,7 +188,6 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
         if record.is_empty() {
             continue;
         }
-        // The hash, the date, and the message, which can hold more newlines.
         let mut fields = record.splitn(FIELDS, '\n');
         let commit = fields.next().unwrap_or_default();
         let at = fields
@@ -223,7 +196,6 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
             .ok_or_else(|| format!("The log of a release branch gives commit {commit} no date."))?;
         let message = fields.next().unwrap_or_default();
 
-        // Both trailers sit in the last paragraph, where git writes trailers.
         let trailers = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
         for line in trailers.lines().map(str::trim) {
             let version = line
@@ -251,40 +223,39 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
     Ok((started, picked))
 }
 
-/// The message of the commit that starts release `version` on its branch.
 pub(crate) fn start_message(version: &Version) -> String {
     format!("chore(release): Start release {version}\n\n{STARTS_RELEASE}: {version}\n")
 }
 
-/// When the tag object `text`, as `git cat-file tag` prints it, was made, in
-/// seconds since the Unix epoch: the time on its `tagger` line.
+/// Extract the Unix timestamp from the `tagger` header line of `git cat-file
+/// tag` output.
 pub(crate) fn tagger_time(text: &str) -> Option<i64> {
     let tagger = text
         .lines()
         .take_while(|line| !line.is_empty())
         .find_map(|line| line.strip_prefix("tagger "))?;
 
-    // `Name <email> 1792584000 +0200`: the time, then its time zone.
+    // Format: `tagger Name <email> <unix_seconds> <tz_offset>`
     let mut fields = tagger.rsplit(' ');
     fields.next()?;
 
     fields.next()?.parse().ok()
 }
 
-/// Whether release `version` may ship a change that requires users to act: a
-/// major release, or a minor one before 1.0.
+/// Return whether `version` is allowed to contain breaking changes (a major
+/// release, or a `0.x.0` minor release).
 pub(crate) fn can_break(version: &Version) -> bool {
     version.patch == 0 && (version.major == 0 || version.minor == 0)
 }
 
 impl Releases {
-    /// The newest version a tag finalized or a release branch started.
+    /// Highest version across all tagged and started releases.
     pub(crate) fn latest(&self) -> Option<&Version> {
         self.tagged.iter().chain(self.started()).max()
     }
 
-    /// The newest minor or major release a tag finalized or a release branch
-    /// started: the last release cut.
+    /// Highest minor or major version (`patch == 0`) across all tagged and
+    /// started releases.
     pub(crate) fn newest_cut(&self) -> Option<&Version> {
         self.tagged
             .iter()
@@ -293,9 +264,8 @@ impl Releases {
             .max()
     }
 
-    /// When `version` was started on its release branch, in seconds since the
-    /// Unix epoch; `None` when no commit on the branch starts it, such as for a
-    /// release tagged by hand.
+    /// Return the Unix timestamp of the `Starts-Release` commit for `version`,
+    /// or `None` if `version` was tagged without a `Starts-Release` commit.
     pub(crate) fn started_at(&self, version: &Version) -> Option<i64> {
         self.line(version)?
             .started
@@ -304,8 +274,7 @@ impl Releases {
             .map(|started| started.at)
     }
 
-    /// The release in preparation on `line`: the last one started on it, until
-    /// its tag.
+    /// Return the untagged version currently in preparation on `line`, if any.
     pub(crate) fn in_preparation<'a>(&self, line: &'a Line) -> Option<&'a Version> {
         line.started
             .last()
@@ -313,14 +282,12 @@ impl Releases {
             .filter(|version| !self.tagged.contains(*version))
     }
 
-    /// The release branch that holds `version`.
     pub(crate) fn line(&self, version: &Version) -> Option<&Line> {
         self.lines.get(&(version.major, version.minor))
     }
 
-    /// The release branches that ship the change the commit `hash` made: those
-    /// whose history holds it, as `containing` lists them by name, and those it
-    /// was picked onto.
+    /// Return all release branches that contain `hash` either in their branch
+    /// ancestry (`containing`) or via cherry-pick.
     pub(crate) fn shipping(&self, hash: &str, containing: &[String]) -> Vec<&Line> {
         self.lines
             .values()
@@ -328,12 +295,7 @@ impl Releases {
             .collect()
     }
 
-    /// The version `cut` starts: `requested`, or the next minor release after
-    /// the newest one tagged or started, or from 1.0 on the next major one when
-    /// `breaking`.
-    ///
-    /// The first release is 0.1.0.
-    /// The error says why the version can't be cut.
+    /// Resolve and validate the version for `jp release cut`.
     pub(crate) fn next_cut(
         &self,
         breaking: bool,
@@ -374,11 +336,8 @@ impl Releases {
         Ok(version)
     }
 
-    /// Where `pick` puts commits for `version`: into the release in preparation
-    /// on its branch, or into the next patch release of a branch whose last
-    /// release is tagged, which `pick` then starts.
-    ///
-    /// The error says what `pick` accepts instead.
+    /// Resolve and validate the target release branch for `jp release pick
+    /// <version>`.
     pub(crate) fn pick_target(&self, version: &Version) -> Result<Target<'_>, String> {
         let Some(line) = self.line(version) else {
             return Err(if version.patch == 0 {
@@ -420,10 +379,8 @@ impl Releases {
         Ok(Target { line, start: true })
     }
 
-    /// The release branch whose tip `finalize` tags as `version`: the one
-    /// holding `version` in preparation.
-    ///
-    /// The error says why `version` can't be finalized.
+    /// Resolve and validate the release branch to tag for `jp release finalize
+    /// <version>`.
     pub(crate) fn finalize_target(&self, version: &Version) -> Result<&Line, String> {
         if self.published.contains(version) {
             return Err(format!(
@@ -457,7 +414,6 @@ impl Releases {
         }
     }
 
-    /// The patch release after the last release tagged on `line`.
     fn next_patch(&self, line: &Line) -> Option<Version> {
         let last = line
             .started
@@ -469,7 +425,6 @@ impl Releases {
         Some(Version::new(last.major, last.minor, last.patch + 1))
     }
 
-    /// Every version a release branch started.
     fn started(&self) -> impl Iterator<Item = &Version> {
         self.lines
             .values()
