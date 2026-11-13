@@ -283,6 +283,41 @@ printf '{{"format":1,"version":"%s","commit":"%s","profile":"%s","artifacts":[{{
         assert_eq!(kept(builds.path(), "0.1.0").commit, tip);
     }
 
+    /// The backfill (RFD 123) cuts releases at earlier commits of `main`, with
+    /// git's dates set to the day each release ends, which can be before the
+    /// commit the release branch starts from.
+    #[test]
+    fn a_release_cut_at_an_earlier_commit_with_an_earlier_date_is_built_from_its_branch() {
+        let fixture = Fixture::new();
+        fixture.git(&["rm", "-r", "--quiet", "changelog.d"]);
+        fixture.write("src/model.rs", "// Shows the model.\n");
+        let first = fixture.commit("feat: Show the model");
+        fixture.write("src/retry.rs", "// Retries.\n");
+        fixture.commit("fix: Retry idle turns");
+        fixture.write("changelog.d/README.md", "# Changelog fragments\n");
+        fixture.write(
+            "changelog.d/model.added.md",
+            &format!("- **Credits**: {}\n\nShows the model.\n", &first[..12]),
+        );
+        fixture.commit("docs: Describe the first release");
+        fixture.push();
+        // 2001-09-09, long before any of the fixture's commits.
+        let shell = fixture.shell_at(1_000_000_000);
+        let options = options();
+        let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
+        cut(&pipeline, Some(&version("0.1.0")), Some(&first)).unwrap();
+        fixture.publish(&["release/0.1", "release-notes/v0.1.0"]);
+        fixture.write("build.sh", &script(None));
+        let builds = Utf8TempDir::new().unwrap();
+        let tip = fixture.hash("release/0.1");
+
+        let (built, _) = build_in(&fixture, builds.path(), "0.1.0", Profile::Quick);
+
+        assert!(built.is_ok(), "{built:?}");
+        assert_eq!(fixture.hash("release/0.1^"), first);
+        assert_eq!(kept(builds.path(), "0.1.0").commit, tip);
+    }
+
     #[test]
     fn a_quick_build_replaces_an_earlier_build_for_testing() {
         let fixture = finalized_0_1_0();
