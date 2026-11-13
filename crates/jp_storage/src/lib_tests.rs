@@ -790,7 +790,11 @@ fn write_base_config(conv_dir: &Utf8Path, mtime_secs: u64) {
 /// Write a valid, loadable conversation stream (`base_config.json` +
 /// `events.json`).
 fn write_valid_stream(conv_dir: &Utf8Path) {
-    let (base_config, events) = ConversationStream::new_test().to_parts().unwrap();
+    write_stream(conv_dir, &ConversationStream::new_test());
+}
+
+fn write_stream(conv_dir: &Utf8Path, stream: &ConversationStream) {
+    let (base_config, events) = stream.to_parts().unwrap();
     fs::write(
         conv_dir.join(BASE_CONFIG_FILE),
         serde_json::to_string(&base_config).unwrap(),
@@ -990,20 +994,6 @@ fn one_turn_stream() -> ConversationStream {
     stream.start_turn(ChatRequest::from("hello"));
     stream.push_event(ChatResponse::message("hi there"));
     stream
-}
-
-fn write_stream(conv_dir: &Utf8Path, stream: &ConversationStream) {
-    let (base_config, events) = stream.to_parts().unwrap();
-    fs::write(
-        conv_dir.join(BASE_CONFIG_FILE),
-        serde_json::to_string(&base_config).unwrap(),
-    )
-    .unwrap();
-    fs::write(
-        conv_dir.join(EVENTS_FILE),
-        serde_json::to_string(&events).unwrap(),
-    )
-    .unwrap();
 }
 
 #[test]

@@ -101,9 +101,9 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// its config.
     ///
     /// Selects the same storage root as [`Self::load_conversation_stream`], but
-    /// skips `base_config.json` and `config_delta` entries.
-    /// Conversations with a corrupt or unreadable stored config still return
-    /// their events.
+    /// does not read `base_config.json` or parse `config_delta` entries.
+    /// A conversation whose stream load fails on either still returns its
+    /// events.
     fn load_conversation_events(
         &self,
         id: &ConversationId,

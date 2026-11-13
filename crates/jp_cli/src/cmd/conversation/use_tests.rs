@@ -1,15 +1,16 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, event::ChatRequest};
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::backend::{FsStorageBackend, InMemoryStorageBackend};
+use jp_storage::backend::{FsStorageBackend, InMemoryStorageBackend, LoadBackend as _};
 use jp_workspace::{
     LockResult, Workspace,
     session::{Session, SessionId, SessionSource},
 };
+use serde_json::{Value, json};
 use tokio::runtime::Runtime;
 
 use super::*;
@@ -306,14 +307,14 @@ fn filter_range_narrows_then_grep_matches() {
 fn filter_grep_drops_a_match_whose_stream_does_not_load() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
-    let fs = FsStorageBackend::new(&root.join("storage")).unwrap();
+    let backend = FsStorageBackend::new(&root.join("storage")).unwrap();
 
     let id_ok = make_id(1000);
     let id_broken = make_id(2000);
     let config = Arc::new(AppConfig::new_test());
 
     {
-        let mut ws = Workspace::in_memory(&root).with_backend(Arc::new(fs.clone()));
+        let mut ws = Workspace::in_memory(&root).with_backend(Arc::new(backend.clone()));
         for id in [id_ok, id_broken] {
             ws.create_conversation_with_id(id, Conversation::default(), config.clone());
             let h = ws.acquire_conversation(&id).unwrap();
@@ -323,13 +324,25 @@ fn filter_grep_drops_a_match_whose_stream_does_not_load() {
         }
     }
 
-    let base_config = fs.conversation_base_config_path(&id_broken).unwrap();
-    std::fs::write(base_config, "not valid json").unwrap();
+    // A config delta whose `op` this build does not know. The event search
+    // skips config deltas, and the stream load fails on this one.
+    let events_path = backend.conversation_events_path(&id_broken).unwrap();
+    let mut events: Vec<Value> = serde_json::from_slice(&fs::read(&events_path).unwrap()).unwrap();
+    events.push(json!({
+        "type": "config_delta",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "op": "from_the_future"
+    }));
+    fs::write(&events_path, serde_json::to_string(&events).unwrap()).unwrap();
+
+    // Startup validation checks structure only, so it does not trash the
+    // conversation before `c use` runs.
+    assert!(!backend.sanitize().unwrap().has_repairs());
 
     // `FsStorageBackend` stores session mappings in user storage, which is not
     // configured in this fixture, so keep sessions in memory.
     let mut workspace = Workspace::in_memory(&root)
-        .with_backend(Arc::new(fs))
+        .with_backend(Arc::new(backend))
         .with_sessions(Arc::new(InMemoryStorageBackend::new()));
     workspace.load_conversation_index();
 
