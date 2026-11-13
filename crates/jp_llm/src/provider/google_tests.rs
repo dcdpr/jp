@@ -289,7 +289,6 @@ fn test_map_model_gemini_4_hydrogen() {
     assert_eq!(details.display_name, Some("Gemini 4 Hydrogen".to_owned()));
     assert_eq!(details.context_window, Some(1_048_576));
     assert_eq!(details.max_output_tokens, Some(65_536));
-    // Low through xhigh, with no `minimal`: the API rejects it.
     assert_eq!(
         details.reasoning,
         Some(ReasoningDetails::leveled(false, true, true, true, true, false).always_on())
@@ -459,8 +458,6 @@ fn test_absolute_effort_resolves_against_configured_max_tokens() {
     assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::High));
 }
 
-/// An `xhigh` effort on a model whose ladder includes `xhigh` is sent as that
-/// level, not clamped to `high`.
 #[test]
 fn test_xhigh_effort_requests_xhigh_level_when_supported() {
     let model = table_details((PROVIDER, "gemini-4-hydrogen").try_into().unwrap());
@@ -501,9 +498,8 @@ fn test_xhigh_effort_requests_xhigh_level_when_supported() {
     );
 }
 
-/// The API reference lists the level as `XHIGH`, without a separator.
-/// `X_HIGH`, which a `SCREAMING_SNAKE_CASE` rename of `XHigh` produces, is not
-/// among the listed values.
+/// Gemini's API expects `"XHIGH"` without an underscore, not the `"X_HIGH"`
+/// that a `SCREAMING_SNAKE_CASE` serde rename of `XHigh` would produce.
 ///
 /// See:
 /// <https://aistudio.google.com/api-reference/generate-content/generate-content#request-body>
@@ -695,19 +691,13 @@ async fn test_unknown_model_inferred_thinking_level()
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
-/// Records a live request to Gemini 4 Hydrogen at the `xhigh` thinking level.
-///
-/// Validates what the unit tests cannot: that `streamGenerateContent` accepts
-/// `thinkingLevel: "XHIGH"` for this model, and that the response decodes.
-/// The model details come from the catalog entry, so the recorded request is
-/// the one JP builds for `google/gemini-4-hydrogen` with `-r xhigh`.
 #[test(tokio::test)]
 async fn test_gemini_4_hydrogen_xhigh_reasoning()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     let id: ModelIdConfig = "google/gemini-4-hydrogen".parse().unwrap();
 
-    // Mirrors what `map_model` derives: the ladder from the catalog, and the
-    // limits from the API.
+    // Combine the catalog entry with the token limits `map_model` reads from
+    // the API.
     let mut details = table_details(id.clone());
     details.context_window = Some(1_048_576);
     details.max_output_tokens = Some(65_536);
