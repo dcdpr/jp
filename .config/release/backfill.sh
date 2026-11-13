@@ -152,11 +152,67 @@ newest_first() { sort -t. -k1,1nr -k2,2nr -k3,3nr; }
 # Whether version $1 is $2 or later.
 at_least() { [ "$(printf '%s\n%s\n' "$1" "$2" | newest_first | sed -n 1p)" = "$1" ]; }
 
+# The versions the commits in the range $1 start: the `Starts-Release`
+# trailers of their messages, read as `jp release` reads them. git reads
+# trailers only from a message's last paragraph, which misses them when a hook
+# appends a sign-off after a blank line, so every trailer block that ends a
+# message counts here, back to the first paragraph that isn't one.
+started_in() {
+  git log --format='%B%x1e' "$1" |
+    awk '
+      # Whether line i is a trailer, the continuation of one, or the line
+      # that `git cherry-pick -x` writes.
+      function trailer(i) {
+        return line[i] ~ /^[ \t]/ || line[i] ~ /^\(cherry picked from commit / ||
+          line[i] ~ /^[A-Za-z0-9-]+[ \t]*:/
+      }
+      # Whether paragraph p is a trailer block by the rule git uses: all of
+      # its lines are trailers, or a trailer git writes is among them and at
+      # least a quarter of its lines are trailers.
+      function block(p,   i, trailers, generated, total) {
+        trailers = 0
+        generated = 0
+        for (i = first[p]; i <= last[p]; i++) {
+          if (trailer(i)) trailers++
+          if (line[i] ~ /^Signed-off-by: / || line[i] ~ /^\(cherry picked from commit /)
+            generated = 1
+        }
+        total = last[p] - first[p] + 1
+        return trailers == total || (generated && trailers * 4 >= total)
+      }
+      BEGIN { RS = "\036" }
+      {
+        count = split($0, line, "\n")
+        paragraphs = 0
+        inside = 0
+        for (i = 1; i <= count; i++) {
+          if (line[i] ~ /^[ \t\r]*$/) {
+            inside = 0
+            continue
+          }
+          if (!inside) first[++paragraphs] = i
+          inside = 1
+          last[paragraphs] = i
+        }
+        # Paragraph 1 is the subject, which never holds trailers.
+        for (p = paragraphs; p > 1 && block(p); p--) {
+          for (i = first[p]; i <= last[p]; i++) {
+            text = line[i]
+            sub(/^[ \t]+/, "", text)
+            if (sub(/^Starts-Release:/, "", text)) {
+              gsub(/^[ \t]+|[ \t\r]+$/, "", text)
+              if (text != "") print text
+            }
+          }
+        }
+      }'
+}
+
 # The releases in preparation: started on a release branch, without a tag.
 preparing() {
   local branch version
   for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/release); do
-    for version in $(git log --format='%(trailers:key=Starts-Release,valueonly)' "main..$branch"); do
+    for version in $(started_in "main..$branch"); do
       if ! git rev-parse --quiet --verify "refs/tags/v$version" >/dev/null; then
         printf '%s\n' "$version"
       fi

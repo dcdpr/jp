@@ -156,12 +156,39 @@ fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
     );
 }
 
-/// Only the last paragraph holds trailers, so a message that mentions one
-/// earlier doesn't start a release.
+/// A hook that appends a sign-off after a blank line puts it in a paragraph of
+/// its own, which git takes for the message's only trailer block.
 #[test]
-fn only_the_last_paragraph_holds_trailers() {
-    let log = "1111\n1792584000\nDocument the pipeline\n\nStarts-Release: 0.9.0 marks a \
-               start.\n\nSee the RFD.\n";
+fn trailers_before_a_paragraph_of_sign_offs_still_count() {
+    // As `git log -z --format=%H%n%ct%n%B` writes it, newest first.
+    let log = concat!(
+        "2222\n1792670400\nRetry idle turns\n\n(cherry picked from commit 8888)\n\n",
+        "Signed-off-by: Jane Doe <jane@example.com>\n\0",
+        "0000\n1792584000\nchore(release): Start release 0.3.0\n\nStarts-Release: 0.3.0\n\n",
+        "Signed-off-by: Jane Doe <jane@example.com>\n",
+    );
+
+    let (started, picked) = parse_line(log).unwrap();
+
+    assert_eq!(started, [Started {
+        version: version("0.3.0"),
+        hash: "0000".to_owned(),
+        at: 1_792_584_000,
+    }]);
+    assert_eq!(picked, BTreeSet::from(["8888".to_owned()]));
+}
+
+/// Trailers end a message, so a trailer-like line in the subject, in a
+/// paragraph of prose, or before one, doesn't start a release.
+#[test]
+fn trailer_like_lines_in_the_body_are_not_trailers() {
+    let log = concat!(
+        "3333\n1792756800\nStarts-Release: 0.9.0\n\0",
+        "2222\n1792670400\nDocument the pipeline\n\nStarts-Release: 0.9.0\n\n",
+        "See the RFD.\n\nSigned-off-by: Jane Doe <jane@example.com>\n\0",
+        "1111\n1792584000\nDocument the pipeline\n\n",
+        "Starts-Release: 0.9.0 marks a start.\n\nSee the RFD.\n",
+    );
 
     assert_eq!(parse_line(log), Ok((vec![], BTreeSet::new())));
 }

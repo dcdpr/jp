@@ -170,6 +170,8 @@ fn a_release_neither_tagged_nor_in_preparation_is_not_built() {
 /// The builds below run `build.sh` with `sh`.
 #[cfg(unix)]
 mod built {
+    use std::os::unix::fs::PermissionsExt as _;
+
     use super::*;
     use crate::finalize::finalize;
 
@@ -281,6 +283,36 @@ printf '{{"format":1,"version":"%s","commit":"%s","profile":"%s","artifacts":[{{
             )
         );
         assert_eq!(kept(builds.path(), "0.1.0").commit, tip);
+    }
+
+    /// A `commit-msg` hook that appends a sign-off after a blank line, as some
+    /// people's setups do, puts it in a paragraph after `Starts-Release`.
+    #[test]
+    fn a_release_whose_start_commit_a_hook_signs_off_is_built() {
+        let fixture = Fixture::new();
+        fixture.fragment("retry", "fixed", "Retried.");
+        fixture.commit("fix: Retry (#1)");
+        fixture.push();
+        let hook = fixture.root().join(".git/hooks/commit-msg");
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::write(
+            &hook,
+            "#!/bin/sh\nprintf '\\nSigned-off-by: Tester <tester@example.com>\\n' >> \"$1\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        run(&fixture, |pipeline| cut(pipeline, None, None)).unwrap();
+        fixture.write("build.sh", &script(None));
+        let builds = Utf8TempDir::new().unwrap();
+
+        let (built, _) = build_in(&fixture, builds.path(), "0.1.0", Profile::Quick);
+
+        assert_eq!(
+            fixture.message("release/0.1").trim_end(),
+            "chore(release): Start release 0.1.0\n\nStarts-Release: 0.1.0\n\nSigned-off-by: \
+             Tester <tester@example.com>"
+        );
+        assert!(built.is_ok(), "{built:?}");
     }
 
     /// The backfill (RFD 123) cuts releases at earlier commits of `main`, with

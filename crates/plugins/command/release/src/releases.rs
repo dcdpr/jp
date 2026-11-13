@@ -15,7 +15,10 @@
 //! All git subprocess calls live in [`crate::repository`]; this module parses
 //! git output and enforces version and branch transitions.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem,
+};
 
 use semver::Version;
 
@@ -24,6 +27,10 @@ pub(crate) const STARTS_RELEASE: &str = "Starts-Release";
 
 /// Prefix written by `git cherry-pick -x` before `<hash>)`.
 const PICKED_FROM: &str = "(cherry picked from commit ";
+
+/// Prefixes of the trailers git writes itself, which make a paragraph that is
+/// partly prose a trailer block.
+const GENERATED: [&str; 2] = ["Signed-off-by: ", PICKED_FROM];
 
 pub(crate) const RELEASE_BRANCH: &str = "release/";
 pub(crate) const NOTES_BRANCH: &str = "release-notes/";
@@ -196,8 +203,7 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
             .ok_or_else(|| format!("The log of a release branch gives commit {commit} no date."))?;
         let message = fields.next().unwrap_or_default();
 
-        let trailers = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
-        for line in trailers.lines().map(str::trim) {
+        for line in trailer_lines(message).into_iter().map(str::trim) {
             let version = line
                 .strip_prefix(STARTS_RELEASE)
                 .and_then(|rest| rest.strip_prefix(':'))
@@ -221,6 +227,73 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
     started.reverse();
 
     Ok((started, picked))
+}
+
+/// Return the lines of the trailer blocks that end `message`, in order.
+///
+/// git reads trailers only from a message's last paragraph.
+/// A tool that appends a trailer without git, such as a hook adding
+/// `Signed-off-by`, can put it in a paragraph of its own after the trailers
+/// already there, so every trailer block at the end of the message counts, back
+/// to the first paragraph that isn't one.
+/// The subject never counts.
+fn trailer_lines(message: &str) -> Vec<&str> {
+    let mut paragraphs = vec![];
+    let mut paragraph = vec![];
+    for line in message.lines() {
+        if line.trim().is_empty() {
+            if !paragraph.is_empty() {
+                paragraphs.push(mem::take(&mut paragraph));
+            }
+        } else {
+            paragraph.push(line);
+        }
+    }
+    if !paragraph.is_empty() {
+        paragraphs.push(paragraph);
+    }
+
+    let body = paragraphs.get(1..).unwrap_or_default();
+    let blocks = body
+        .iter()
+        .rev()
+        .take_while(|lines| is_trailer_block(lines))
+        .count();
+
+    body.iter()
+        .skip(body.len() - blocks)
+        .flatten()
+        .copied()
+        .collect()
+}
+
+/// Whether `lines`, one paragraph, is a trailer block by git's rule: every line
+/// is a trailer, or a trailer git writes is among them and at least a quarter
+/// of the lines are trailers.
+fn is_trailer_block(lines: &[&str]) -> bool {
+    let trailers = lines.iter().filter(|line| is_trailer(line)).count();
+    let generated = lines
+        .iter()
+        .any(|line| GENERATED.iter().any(|prefix| line.starts_with(prefix)));
+
+    trailers == lines.len() || (generated && trailers * 4 >= lines.len())
+}
+
+/// Whether `line` is a trailer (`Token: value`), the continuation of one, or
+/// the line `git cherry-pick -x` writes.
+fn is_trailer(line: &str) -> bool {
+    if line.starts_with([' ', '\t']) || line.starts_with(PICKED_FROM) {
+        return true;
+    }
+    let Some((token, _)) = line.split_once(':') else {
+        return false;
+    };
+    let token = token.trim_end();
+
+    !token.is_empty()
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
 pub(crate) fn start_message(version: &Version) -> String {
