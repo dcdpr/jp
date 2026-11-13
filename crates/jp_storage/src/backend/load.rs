@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 
 use crate::{LoadError, validate::ValidationError};
 
@@ -96,6 +96,18 @@ pub trait LoadBackend: Send + Sync + Debug {
         id: &ConversationId,
         fallback: &PartialAppConfig,
     ) -> std::result::Result<ConversationStream, LoadError>;
+
+    /// Load a single conversation's events in stream order without resolving
+    /// its config.
+    ///
+    /// Selects the same storage root as [`Self::load_conversation_stream`], but
+    /// does not read `base_config.json` or parse `config_delta` entries.
+    /// A conversation whose stream load fails on either still returns its
+    /// events.
+    fn load_conversation_events(
+        &self,
+        id: &ConversationId,
+    ) -> std::result::Result<Vec<ConversationEvent>, LoadError>;
 
     /// Return conversation IDs whose `expires_at` timestamp is in the past.
     ///

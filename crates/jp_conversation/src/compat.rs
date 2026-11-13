@@ -20,7 +20,7 @@
 //! config cannot be finalized and the conversation still fails to load.
 //! Both passes exist to keep that last resort from being reached.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
 use jp_config::{
     AppConfig, PartialAppConfig, Schema, SchemaType,
@@ -29,6 +29,10 @@ use jp_config::{
 use serde_json::{Value, json};
 use serde_path_to_error::{Path as ErrorPath, Segment};
 use tracing::warn;
+
+/// Cached [`AppConfig`] schema reused across [`deserialize_partial_config`]
+/// calls.
+static SCHEMA: LazyLock<Schema> = LazyLock::new(AppConfig::schema);
 
 /// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating schema
 /// changes.
@@ -45,9 +49,7 @@ use tracing::warn;
 /// Used for both the base config snapshot (`base_config.json`) and config delta
 /// events in the event stream.
 pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
-    let schema = AppConfig::schema();
-
-    let stripped = strip_unknown_fields(&mut value, &schema);
+    let stripped = strip_unknown_fields(&mut value, &SCHEMA);
     if stripped.count() > 0 {
         warn!(
             count = stripped.count(),

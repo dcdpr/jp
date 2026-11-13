@@ -3231,6 +3231,115 @@ fn test_malformed_known_chat_response_fails_deserialization() {
     assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
 }
 
+fn stream_with_tool_round_trip() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("read it"));
+
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("src/main.rs".into()));
+    stream.push(ToolCallRequest {
+        id: "tc1".into(),
+        name: "read_file".into(),
+        arguments: args,
+    });
+    stream.push(ToolCallResponse {
+        id: "tc1".into(),
+        result: Ok("file contents here".into()),
+    });
+    stream.push(ChatResponse::message("done"));
+    stream
+}
+
+fn bare_events(stream: &ConversationStream) -> Vec<ConversationEvent> {
+    stream
+        .iter_events_by_turn()
+        .map(|event| event.event.clone())
+        .collect()
+}
+
+#[test]
+fn events_from_parts_reads_the_events_a_stream_holds() {
+    let stream = stream_with_tool_round_trip();
+    let (_, events) = stream.to_parts().unwrap();
+
+    let read = ConversationStream::events_from_parts(events).unwrap();
+
+    // Tool arguments and results are stored base64-encoded, so equality here
+    // also shows they were decoded.
+    assert_eq!(read, bare_events(&stream));
+}
+
+#[test]
+fn events_from_parts_skips_config_deltas_without_parsing_them() {
+    let stream = stream_with_tool_round_trip();
+    let (base_config, mut events) = stream.to_parts().unwrap();
+
+    events.insert(
+        2,
+        serde_json::json!({
+            "event_id": "delta01",
+            "type": "config_delta",
+            "timestamp": "2025-01-01 00:00:00.0",
+            "op": "from_the_future"
+        }),
+    );
+
+    // Full stream loading parses `config_delta` entries and rejects the unknown `op`.
+    assert!(
+        ConversationStream::from_parts(base_config, events.clone(), &PartialAppConfig::empty())
+            .is_err()
+    );
+
+    let read = ConversationStream::events_from_parts(events).unwrap();
+    assert_eq!(read, bare_events(&stream));
+}
+
+#[test]
+fn events_from_parts_reads_a_legacy_events_array() {
+    let stream = stream_with_tool_round_trip();
+    let (base_config, events) = stream.to_parts().unwrap();
+
+    let mut first = base_config.as_object().unwrap().clone();
+    first.insert("type".into(), Value::String("config_delta".into()));
+    let mut legacy = vec![Value::Object(first)];
+    legacy.extend(events);
+
+    let read = ConversationStream::events_from_parts(legacy).unwrap();
+    assert_eq!(read, bare_events(&stream));
+}
+
+#[test]
+fn events_from_parts_skips_entries_this_build_cannot_read() {
+    let stream = stream_with_tool_round_trip();
+    let (_, mut events) = stream.to_parts().unwrap();
+    events.push(serde_json::json!({
+        "type": "unknown_future_kind",
+        "timestamp": "2025-01-01 00:01:00.0"
+    }));
+    events.push(future_commentary("Editing the parser next."));
+
+    let read = ConversationStream::events_from_parts(events).unwrap();
+    assert_eq!(read, bare_events(&stream));
+}
+
+#[test]
+fn events_from_parts_fails_on_a_corrupt_known_event() {
+    let events = vec![serde_json::json!({
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "message": 5
+    })];
+
+    assert!(ConversationStream::events_from_parts(events).is_err());
+}
+
+#[test]
+fn events_from_parts_fails_on_an_entry_that_is_not_an_object() {
+    let events = vec![Value::String("not an entry".into())];
+
+    assert!(ConversationStream::events_from_parts(events).is_err());
+}
+
 /// A `commentary` chat response as a newer jp stores it; this build cannot read
 /// it.
 fn future_commentary(text: &str) -> Value {
