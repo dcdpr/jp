@@ -1,13 +1,74 @@
-use std::fs;
+use std::{
+    fs,
+    time::{Duration, SystemTime},
+};
 
+use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
+use chrono::{TimeZone as _, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use test_log::test;
 
 use super::*;
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, value::write_json,
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
+    scan::SCAN_CACHE_FILE, value::write_json,
 };
+
+const TWO_EVENTS: &str = r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"},{"timestamp":"2026-01-02T11:30:00Z","type":"chat_response","content":"b"}]"#;
+const ONE_EVENT: &str =
+    r#"[{"timestamp":"2026-03-04T05:06:07Z","type":"chat_request","content":"a"}]"#;
+
+/// [`TWO_EVENTS`] with a later last timestamp and the same size in bytes.
+const TWO_EVENTS_LATER: &str = r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"},{"timestamp":"2026-01-09T11:30:00Z","type":"chat_response","content":"b"}]"#;
+
+/// Write a conversation with the given `events.json` body and no
+/// `base_config.json`, returning its directory.
+fn write_with_events(storage: &camino::Utf8Path, id: &ConversationId, events: &str) -> Utf8PathBuf {
+    let dir = storage.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&dir).unwrap();
+    write_json(&dir.join(METADATA_FILE), &Conversation::default()).unwrap();
+    fs::write(dir.join(EVENTS_FILE), events).unwrap();
+    dir
+}
+
+fn set_mtime(path: &camino::Utf8Path, when: SystemTime) {
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+}
+
+fn set_dir_mtimes(dir: &camino::Utf8Path, when: SystemTime) {
+    for name in [METADATA_FILE, EVENTS_FILE] {
+        set_mtime(&dir.join(name), when);
+    }
+}
+
+/// Overwrite `path` with spaces of the same byte length while preserving its
+/// modification time.
+fn blank_keeping_stamp(path: &camino::Utf8Path) {
+    let meta = fs::metadata(path).unwrap();
+    let modified = meta.modified().unwrap();
+    fs::write(path, " ".repeat(usize::try_from(meta.len()).unwrap())).unwrap();
+    set_mtime(path, modified);
+}
+
+/// Overwrite `path` with same-sized `content` while preserving its modification
+/// time.
+fn rewrite_keeping_stamp(path: &camino::Utf8Path, content: &str) {
+    let meta = fs::metadata(path).unwrap();
+    assert_eq!(u64::try_from(content.len()).unwrap(), meta.len());
+    let modified = meta.modified().unwrap();
+    fs::write(path, content).unwrap();
+    set_mtime(path, modified);
+}
+
+fn an_hour_ago() -> SystemTime {
+    SystemTime::now() - Duration::from_hours(1)
+}
 
 /// Write a valid conversation to disk under the given storage root.
 fn write_valid(storage: &camino::Utf8Path, id: &ConversationId) {
@@ -335,4 +396,243 @@ fn tmp_files_are_swept_only_when_the_conversation_is_unlocked() {
         !in_flight.exists(),
         "an orphaned temp file is reaped once nobody holds the lock"
     );
+}
+
+#[test]
+fn an_unchanged_conversation_is_not_parsed_again() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(tmp.path(), &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, an_hour_ago());
+
+    assert_eq!(storage.validate_conversations().valid.len(), 1);
+
+    // Same size and modification time, so validation uses the cached scan
+    // without re-reading the blanked file.
+    blank_keeping_stamp(&dir.join(EVENTS_FILE));
+
+    let result = storage.validate_conversations();
+    assert_eq!(result.valid.len(), 1);
+    assert!(result.invalid.is_empty());
+}
+
+#[test]
+fn a_rewritten_events_file_is_validated_again() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(tmp.path(), &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, an_hour_ago());
+
+    assert_eq!(storage.validate_conversations().valid.len(), 1);
+
+    fs::write(dir.join(EVENTS_FILE), r#"[{"broken": true}]"#).unwrap();
+
+    let result = storage.validate_conversations();
+    assert!(result.valid.is_empty());
+    assert!(matches!(
+        result.invalid[0].error,
+        ValidationError::CorruptEvents { .. }
+    ));
+}
+
+#[test]
+fn tmp_files_are_cleaned_up_for_an_unchanged_conversation() {
+    // A crash between writing `events.json.tmp` and the rename leaves
+    // `events.json` untouched, so the sweep must not depend on the cache.
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(tmp.path(), &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, an_hour_ago());
+
+    assert_eq!(storage.validate_conversations().valid.len(), 1);
+    fs::write(dir.join("events.json.tmp"), "partial").unwrap();
+
+    assert_eq!(storage.validate_conversations().valid.len(), 1);
+    assert!(!dir.join("events.json.tmp").exists());
+}
+
+#[test]
+fn the_scan_is_reused_by_the_next_process() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+    let open = || {
+        Storage::new(workspace.clone())
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap()
+    };
+    let user_dir = user_root.join("abc");
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(&user_dir, &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, an_hour_ago());
+
+    assert_eq!(open().validate_conversations().valid.len(), 1);
+    assert!(
+        user_dir
+            .join(CONVERSATIONS_DIR)
+            .join(SCAN_CACHE_FILE)
+            .is_file()
+    );
+
+    blank_keeping_stamp(&dir.join(EVENTS_FILE));
+
+    let result = open().validate_conversations();
+    assert_eq!(result.valid.len(), 1);
+    assert!(result.invalid.is_empty());
+}
+
+#[test]
+fn a_scan_of_a_just_modified_file_is_not_reused_by_the_next_process() {
+    // Files modified within `MTIME_GRANULARITY` of the scan cannot be
+    // distinguished from a same-tick rewrite, so they are not persisted to the
+    // scan cache. Setting mtime in the future guarantees it falls within the
+    // window.
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+    let open = || {
+        Storage::new(workspace.clone())
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap()
+    };
+    let user_dir = user_root.join("abc");
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(&user_dir, &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, SystemTime::now() + Duration::from_hours(1));
+
+    assert_eq!(open().validate_conversations().valid.len(), 1);
+
+    blank_keeping_stamp(&dir.join(EVENTS_FILE));
+
+    let result = open().validate_conversations();
+    assert!(result.valid.is_empty());
+    assert!(matches!(
+        result.invalid[0].error,
+        ValidationError::CorruptEvents { .. }
+    ));
+}
+
+#[test]
+fn a_same_stamp_rewrite_just_after_a_scan_is_read_again() {
+    // On a filesystem with coarse timestamps, a same-size rewrite in the same
+    // clock tick preserves both size and modification time. A scan that ran
+    // one second after the write must not be cached.
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(tmp.path(), &id, TWO_EVENTS);
+    let written = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    set_dir_mtimes(&dir, written);
+
+    let scan_started = written + Duration::from_secs(1);
+    assert_eq!(
+        storage.validate_conversations_at(scan_started).valid.len(),
+        1
+    );
+
+    rewrite_keeping_stamp(&dir.join(EVENTS_FILE), TWO_EVENTS_LATER);
+
+    let conversation = storage.load_conversation_metadata(&id).unwrap();
+    assert_eq!(
+        conversation.last_event_at,
+        Some(Utc.with_ymd_and_hms(2026, 1, 9, 11, 30, 0).unwrap())
+    );
+
+    blank_keeping_stamp(&dir.join(EVENTS_FILE));
+
+    let result = storage.validate_conversations_at(scan_started);
+    assert!(result.valid.is_empty());
+    assert!(matches!(
+        result.invalid[0].error,
+        ValidationError::CorruptEvents { .. }
+    ));
+}
+
+#[test]
+fn a_scan_taken_just_after_a_write_is_not_persisted_by_a_later_validation() {
+    // When the same `Storage` instance validates again after the granularity
+    // window has passed, it must re-parse the rewritten file rather than
+    // persisting the earlier uncached scan.
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+    let open = || {
+        Storage::new(workspace.clone())
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap()
+    };
+    let user_dir = user_root.join("abc");
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(&user_dir, &id, TWO_EVENTS);
+    let written = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    set_dir_mtimes(&dir, written);
+
+    let storage = open();
+    let just_after = written + Duration::from_secs(1);
+    assert_eq!(storage.validate_conversations_at(just_after).valid.len(), 1);
+
+    rewrite_keeping_stamp(&dir.join(EVENTS_FILE), TWO_EVENTS_LATER);
+
+    let later = written + Duration::from_hours(1);
+    assert_eq!(storage.validate_conversations_at(later).valid.len(), 1);
+
+    let fresh = open();
+    assert_eq!(fresh.validate_conversations_at(later).valid.len(), 1);
+    let conversation = fresh.load_conversation_metadata(&id).unwrap();
+    assert_eq!(
+        conversation.last_event_at,
+        Some(Utc.with_ymd_and_hms(2026, 1, 9, 11, 30, 0).unwrap())
+    );
+}
+
+#[test]
+fn metadata_loads_take_the_event_summary_from_the_scan() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(tmp.path(), &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, an_hour_ago());
+
+    assert_eq!(storage.validate_conversations().valid.len(), 1);
+    blank_keeping_stamp(&dir.join(EVENTS_FILE));
+
+    let expected_last = Some(Utc.with_ymd_and_hms(2026, 1, 2, 11, 30, 0).unwrap());
+
+    let single = storage.load_conversation_metadata(&id).unwrap();
+    assert_eq!(single.events_count, 2);
+    assert_eq!(single.last_event_at, expected_last);
+
+    let batch = storage.load_conversation_metadata_batch(&[id]);
+    let batched = batch[0].1.as_ref().unwrap();
+    assert_eq!(batched.events_count, 2);
+    assert_eq!(batched.last_event_at, expected_last);
+}
+
+#[test]
+fn metadata_loads_count_a_rewritten_events_file_again() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = write_with_events(tmp.path(), &id, TWO_EVENTS);
+    set_dir_mtimes(&dir, an_hour_ago());
+
+    assert_eq!(storage.validate_conversations().valid.len(), 1);
+    fs::write(dir.join(EVENTS_FILE), ONE_EVENT).unwrap();
+
+    let expected_last = Some(Utc.with_ymd_and_hms(2026, 3, 4, 5, 6, 7).unwrap());
+
+    let single = storage.load_conversation_metadata(&id).unwrap();
+    assert_eq!(single.events_count, 1);
+    assert_eq!(single.last_event_at, expected_last);
+
+    let batch = storage.load_conversation_metadata_batch(&[id]);
+    let batched = batch[0].1.as_ref().unwrap();
+    assert_eq!(batched.events_count, 1);
+    assert_eq!(batched.last_event_at, expected_last);
 }
