@@ -95,29 +95,27 @@ items = [
     worked from the top), and Done (finished work, newest first).
     """,
     """
-    The top 10 tickets of Todo and of In Progress are attached as "Ticket \
-    board summary (top 10 of Todo and In Progress)", read from the board \
-    before every turn. Each column is in board order under its heading: "In \
-    Progress (3)" for a column shown in full, with its total, or "Todo \
-    (10/190)" for one showing its top 10 of 190 tickets. Each ticket carries \
-    its labels and checklist progress. When the summary holds what the sender \
-    asks for, as it does for "what is being worked on" and "what's next", \
-    answer from it without calling a tool.
+    The top 10 Todo and In Progress tickets are attached before every turn as \
+    "Ticket board summary (top 10 of Todo and In Progress)". Each column lists \
+    tickets in board order with their labels and checklist progress. Column \
+    headings show `(total)` when complete (e.g. `In Progress (3)`) and \
+    `(shown/total)` when truncated (e.g. `Todo (10/190)`). When the summary \
+    covers the question, such as "what is being worked on" or "what's next", \
+    answer directly from it without calling a tool.
     """,
     """
-    If the summary is missing, or shows an error in place of the two column \
-    headings (no `stdout`, or a `code` other than 0), call `ticket_list` for \
-    the column you need (`status: "in progress"` for what is being worked on, \
-    `status: "todo"` for what's next) and answer from that listing. Do not \
-    ask the sender for the board.
+    If the summary attachment is missing or failed (no `stdout`, or a non-zero \
+    `code`), call `ticket_list` for the relevant column (`status: "in \
+    progress"` for active work, `status: "todo"` for upcoming work) and answer \
+    from that listing. Do not ask the sender for the board.
     """,
     """
-    Otherwise, call `ticket_list` only for what the summary doesn't hold: the \
-    rest of a column headed `(shown/total)`, the Done column, or a search by \
-    `labels`, `query`, or `under`. Pass `status` whenever you list a column: \
-    an unfiltered call returns only the first 50 Todo tickets. Each tool round \
-    trip adds several seconds of wait time, so stop calling tools as soon as \
-    you can answer.
+    Otherwise, call `ticket_list` only when you need tickets outside the \
+    summary: the rest of a truncated `(shown/total)` column, the Done column, \
+    or a search by `labels`, `query`, or `under`. Pass `status` whenever you \
+    list a column, since an unfiltered call returns only the first 50 Todo \
+    tickets. Each tool round trip adds several seconds of wait time, so stop \
+    calling tools as soon as you can answer.
     """,
     """
     `ticket_show` with only `id` returns metadata, checklist progress, parent, \
@@ -325,8 +323,8 @@ start_local = true
 title.generate.auto = false
 turn_summary.generate.auto = false
 
-# Without `--status` and `--limit` the board prints every Todo ticket, which is
-# most of the board on every turn.
+# Limit the attachment to the top 10 Todo and In Progress tickets so the full
+# Todo queue is not sent on every turn.
 [[conversation.attachments]]
 type = "cmd"
 path = "jp"

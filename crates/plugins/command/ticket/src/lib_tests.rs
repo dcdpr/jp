@@ -1350,7 +1350,7 @@ fn board_prints_each_column_in_board_order() {
     );
 }
 
-/// The columns print in board order, whatever order they are named in.
+/// Columns print in board order regardless of the order in `statuses`.
 #[test]
 fn board_prints_only_the_statuses_named() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1371,8 +1371,7 @@ fn board_prints_only_the_statuses_named() {
     );
 }
 
-/// A limit cuts every column, and Done to the limit rather than to
-/// `board.done_limit`.
+/// `limit` truncates every column and overrides `board.done_limit` for Done.
 #[test]
 fn board_limit_cuts_every_column() {
     let dir = Utf8TempDir::new().unwrap();

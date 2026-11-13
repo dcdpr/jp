@@ -276,17 +276,18 @@ enum Command {
 
     /// Print the board: Todo, In Progress, and Done, each in board order.
     ///
-    /// Done shows its top `board.done_limit` tickets; `list` shows them all.
-    /// A column not shown in full is headed by how many of its tickets are
-    /// shown, as in `Todo (10/190)`.
+    /// Done is truncated to `board.done_limit` tickets unless `--limit` is
+    /// passed; `list` shows every Done ticket.
+    /// Truncated columns show `(<shown>/<total>)` in their heading, such as
+    /// `Todo (10/190)`.
     Board {
-        /// Only this column: `todo`, `in progress`, or `done`.
-        /// Repeat for more than one; they print in board order.
+        /// Print only this column: `todo`, `in progress`, or `done`.
+        /// Repeat to include multiple columns; they print in board order.
         #[arg(long = "status")]
         statuses: Vec<Status>,
 
-        /// Show at most this many tickets of each column, from the top.
-        /// Takes the place of `board.done_limit` for Done.
+        /// Maximum number of tickets to show per column, from the top.
+        /// Overrides `board.done_limit` for Done.
         #[arg(long)]
         limit: Option<usize>,
     },
@@ -1732,15 +1733,14 @@ fn rename(
     .into())
 }
 
-/// Print the board, one column after another.
+/// Print the board's columns vertically in board order (`Todo`, `In Progress`,
+/// `Done`).
 ///
-/// Stacked rather than side by side, which would wrap on a narrow terminal.
-/// Only the columns in `statuses` are printed, in board order; an empty
-/// `statuses` prints all three.
-/// Every column is cut to its top `limit` tickets.
-/// Without a `limit`, only Done is cut, to its top `layout.done_limit` tickets.
-/// A column shown in full is headed by its total, as in `Todo (190)`; a column
-/// that was cut by how many of its tickets are shown, as in `Todo (10/190)`.
+/// If `statuses` is non-empty, only the listed columns are printed.
+/// Each column is truncated to `limit` tickets, or to `layout.done_limit` for
+/// `Done` when `limit` is `None`.
+/// Column headings show `(<total>)` when complete and `(<shown>/<total>)` when
+/// truncated.
 fn show_board(
     dir: &Utf8Path,
     layout: &BoardOptions,
