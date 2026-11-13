@@ -1,0 +1,290 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "xhigh",
+            "exclude": false
+          },
+          "stop_words": []
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "allow",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "joins_reasoning": true,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "sanitize": "strip",
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "subscription_flow": "acp",
+          "acp_config_dirs": {},
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
+        }
+      }
+    },
+    "plugins": {
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "google",
+              "name": "gemini-4-hydrogen"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost? Answer in one sentence."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Begin Dissecting the Problem**\n\nI'm now zeroing in on the riddle. The core challenge lies in unpacking the cost difference and total cost into two separate variables, with \"cost\" being the key one to look at. I'm focusing on the constraint that the problem is solvable through a very simple mathematical process, and it requires a concise solution.\n\n\n**Finalizing the Solution**\n\nThe calculation is complete, and I've verified the cost of the ball is indeed $0.05, or 5 cents. I've drafted three versions, and I'm settling on Draft 2 as the clearest and most persuasive while remaining within the one-sentence limit: \"The ball costs $0.05 (5 cents), making the bat $1.05 for a total of $1.10.\" I am now confident.\n\n\n"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The ball costs $0.05 (5 cents), which means the bat costs $1.05 and their combined total is $1.10.",
+      "metadata": {
+        "google_thought_signature": "RXNFUkNyNFJBV2tVZlJNUXBWTEE0MkxtSkJSUjQ2eG55a2xYcE5jd0o2b0lTcFdnT21qMDJKa2xlUmd5R2lad0NJTEVCSjgzcytKSW9ZYk9GUzNzbWtyZjlONStLNUlRT2MwMmRkU3prZUU3ZTFEeXVGNUgvNEV1U2ZvbVU3bllhRWFhd1J0YmFWZ1J4OHZvSGdaT2xQTGFCTUJZWXR4VXF3cnVMQUZuZlR3anJ4dXFHdGl1N3BOTWRCL082c1RwbDBhbVFEMjNWbVk5cUgxY3VOalhwc2d0Z0V2VnNZaHc5ZHFvU0l0S0RWVHdTcVIyVzlMUDlHbEhxSDQvMTFyUndYMnpOelVFcGgxNTdNck5aNC9XemdRWWREbWNDK1cyYnVRSHVMNVp1MWtpT1YvUzRUQkNTZmRJazhENzcrdFFyenY1V0xuOXh4N3lia3Z2a1UxdlhUcm9GZmQzelJrUzhDVnVER201WVdQKzVDQXMyN3JkN2ppRzF5NDQ5MU1lTUVVb0FOdnlTdjRQbmtwenliRFhPMHpNRUltaTE5UnYzeUxObEUxY0p2QU9BbGJwRk5KZTdTZVA5bDBzWUdjaXgzQXpNMm5UdWl5Tm5DdEV1a3p0UVJmR3NMREVKdHpaNFl2L3dNLzdHN0RxM28xWW85M21oUXVodGk3ck81cjZHQ3drMHljK3VlMGZIOTVOUyt2SVRyTm8yNTNOL2c3akMyQldGT1pmeHR3akE3ZHBZRTQ0VWtyczNKS1J6UXZaVUswMHJIOEJJZjhSWVZWY0pXdHFCaXYzR3g4TG94ZzM5aUlTYzJ1aXJwOFhCQXkrdmIwSG93NTV2QXlyTFpuNFk4M2ZnbFNXUSthQjN5Tzh5U21HQkU0Z2EvdDVTM2daNkRHTWxwMUIwem44bUUrekRFbjdoanZWT2FMVDQ2TzRobGhCdkdyTDQ0bjIybTNmVDQ3ajVzOE80YmpRTzFVQjVBa0RsQVNjMllQcnZxWEs1MWgwR0NudVpNa0FMeGxHSWFUWUlycmN3TG1sK1Rob2N4M2VvL0c0YXdGOTJTTkUzbENrNnJsYzNRNkdpU3AxSXluR3pacy9nZWlNNlloakl3RVJEbmdvU2tBM2hWK2xVMGU2d2M1T29rUDNhZnhva25hamUrNUxDejloMmJKQkNDdXZ5aE5Wd0xCTGUrc2hzZ0VSTTNYUzliL0tBbWt1RlQrYjVEeFYxRjMvc29DVkZhcWU0a0lKdVFtRHY1L0pybmlPMVplRnVIVEx6dytYbkpqT1ZySHhsRzZhZ1E0YmhQcEVRUmVIUEZVTDRxT2ZzbDEzVFpSTnZwZVZ3ak5tU0dtL1B2d21CNXRSRG1CSnRYdDNuaXJIOWVwOGdUU2RQUGl3NXBMbEZFLzM5OVRaaEVlMlJUV3VoRnVLTTBkRGtMOHJHNmRKSmp2Z090aWFEaWQxUlprbkoxeFF4QTZIU2pLS1RhQzdrZDJiR3dlQkNqbDVDMUZPTERPZ1FJNXlNMjFuMjU3Uis4RllVMklPTVRYSFRUcXRnV2ppRlVqWlFBdWl0MCtZNElINzJRMmRBV0N5bnZ5Yi9PUWxTU1BGU0wvUkx0QkVRT2dRYTI4eURua2QxRkZMVFJlTU5GRXNITWkzYitHa0hFQlc2QXczc0xvc2FHQzV6dENKZ2k3aGFPd3F4RGdVYmVtcWJsZ0c5WENOTCtDdkZ3eVFxM2FhK28wSkNTWnJlcFFmWnpSZEtHT3g4eHlrWStKNFlsSzVIVjNHRlBURFVZTzJlNjI4TjBBNk9EMDM1dTRobUthV2EzVll1UktOQWVkc2s5dnNBRDJWNXlXYUsrZi96SmM1eW5QVGhmUTdYeEQranJHc3pUQ2pPNmo1S21aV0hHQ0EvcWFpOGVlZGR6K2ZGaDVocm8rZ1YzejJCSmNwcVdVbEVMUDN1RkVQT2JJNHlZdkRBRnhCZ0Nvcno3OGxSc2ZYeVpkOVBpL3ZvdklLRlA3Sm4xNndBRC9pNUd0OGl5a3dXQW0rNk45bDRBeFl0WXpuUHBOaUxzTjR1c0txRXBZWVloRWhrdzdnRGRqdEYxOUtFYnQxZEx1UHFQRGwyN3VLbGJvOGp3dFpNRTBTbkxzSHE2Um9MUjBucS9GN3RXWWorVjBIT2F2bStRMitNam9Mb3V4dDlhOUNRNjh6b2JFczFmc1ZsZGlNM0lMTUtmRjFmRGF2TXVQUU83NWRxZzNFUlRLK1FRc2hzaVdvLzF0MmFpWDVoK1RaYzM5OUdjSnJQMm5iazFreXZQaUJwQUNrREpPSDV2dk42UlJLci8xMjlEOURKYVR5cU5ocW5LTXpFdHpVR1Q0ZENZU0pXaUdKUUFJYk8zNXlYY0dIYkludXZSVkIyU28wbi8veSt1dlBiVGRKbHZCcUFPWWJia1pzS1F1TFZLNmxNWGVFMk5aamthd0JoRTlyOGxjTUZ6UlhTenpPR0Joc0tnQ2ZIQ3Z3dVhFd2YyVE9yMlQwN3lRUStNaGVNZUVTMFh6N2QrWnptVEdaYzlRcHV1dDZ1NjgvWlg1VUVqYjMxYS8xcGMyWHFId3lFcS8zZU40WnEyL0lQcFhJRzBHUURHbXJpUytWY0lKanl1RHExUUdTeThvdHltZjNlTzZIb1oyRm5NUFhkNE1IWjIzOFhBRmNyN0NGNEI3YkgvMjVpa09WYkNOeml1TnFBSVZuZ29WZ0xUTnVCelJWVURaZTM1V0N2ZmQzWVV5MDNxYnNCN3FIQWx6eUdGbkVRd0s0eTJ5enhLWkxBOWJYQUdNVTZjUWJkNFFOVUFPTzZjb0EyYXBUSTQxa3RGNnZ1dFgyN3BhRnlCVzV1c2pCK3hlME82YmxSWXdCdFBPLzg3L0EyUmg2MTllL0V4aVRwTlVHOUd0NFBKRi9odzh6SjFBcEZMTGxOWXNpVXhpZ3M3RVNCR1VPMVY5K3RjM3ZSNTd5YUZnb2gyRG1qYWdxdXRqRnpkSXpQbmRxOTNGbWgrLzJEUjQrZ0VnLzhMQVpKUG13MFVQNjhvRHNHQTJObTNoYkV3N1VjUm5POHNxRy9QTDU1QWFTcUI2YkpyckhMQm9RRUpkZnJvbHBaa3k0cTNjTXRLUTE5WTUxQlFFZmxjL1JPcXZzdi9qbmRRc2JJQ3hEU05xT1YrRi9YMllLcy83YWVFalNoaUlXNFNkYjBoVEMzVGx4UEZwd1duRmtCY1ZlcjRwZGVIaE8rYzhGbDlhamZQUS9Bdk5PVmhwMFYyR1R4RVFScDBwUUEycWVSUnpwa3kxcTR2RlRHSEZlL2FLOVMrZlVaMlgvVkZzNGFIYmJpUXZWQytJMGVvaDVmcEJUMDZXRnRKZjJ4Z2k0R1R6K2h3c2F4Q1h6R3JoVDFTWTFvcU9GeXJBblB2b3ArL3ZlcTg0NFJGdHJVNjZKZWZEa0o2RUJIbVNMdW1DSjFmN2tsWUxyTk0vL1JWZ29GTHgxRTkrbkg5cm9CSDlZcUFpWnRxSlBjcFhFYnU1T1BFUmo4UVBiUktyRlpLOWViMlJOZkRUREFJOXR0UkdJTHRnNStUeDk4enRSV2FrbStjcEk2K1lwb0h6b0pkSVVhT2cyanRUQkhCQTRRL0o4R0JDcUJ4Nm9LWDRHUnFFeWdCN3pCaVhwWHlmUjZGYy9XWisyeHJjbGNqNTlsN1UrZUsvSEFZRHU5c3NaSnNlZDR6NkZmWTh0aUhhQUhCUFUyektwVGZraXhwSnh2dHpHaDU3ckUxOU5YUHdGVm9keUg0TXFiUmgwcXJ0Yll4TnNFcTY0cUtqMVFMRHN2bTFNNXpGZDhGc01NcjFGQmFlWXF4RUlwbGdUandGenJUWXNYVHUyTzZSUytXQUdRd2ptTE1FcCtZcERMaHZMM1VHcTByTVl3a3AzdmRXUGt3b0RTMHVRSXNnMHd5clBRMjdhVTNVcmYvdmhWQmhjaytVRC90bi9XOWVPV0tHZA=="
+      }
+    }
+  ]
+}
