@@ -2672,6 +2672,7 @@ mod map_event {
                         builder
                             .handle_flush(index, metadata)
                             .unwrap()
+                            .unwrap()
                             .into_chat_response()
                             .unwrap(),
                     );
@@ -2988,6 +2989,7 @@ mod map_event {
                     stored.push(
                         builder
                             .handle_flush(index, metadata)
+                            .unwrap()
                             .unwrap()
                             .into_tool_call_request()
                             .unwrap(),

@@ -11,10 +11,12 @@ use jp_conversation::{
 };
 use jp_llm::{
     event::{Event, EventPart, FinishReason},
-    event_builder::EventBuilder,
+    event_builder::{EventBuilder, InvalidToolCall},
 };
 use jp_printer::Printer;
 use jp_term::background::DefaultBackground;
+use serde_json::Map;
+use tracing::warn;
 
 use crate::{
     cmd::query::{interrupt::InterruptAction, stream::TurnView},
@@ -113,6 +115,14 @@ pub enum CommittedEvent {
     /// The shell should run the permission/preparation pipeline immediately so
     /// prompts appear at the same streaming boundary as before.
     ToolCallRequest(ToolCallRequest),
+
+    /// A tool call was committed whose arguments the provider did not deliver
+    /// as a JSON object.
+    ///
+    /// The stream holds its [`ToolCallRequest`] without arguments.
+    /// The shell must answer the call with a response saying why it was
+    /// rejected, and must not run it.
+    InvalidToolCall(InvalidToolCall),
 }
 
 impl CommittedEvent {
@@ -316,8 +326,10 @@ impl TurnCoordinator {
                 HandleEventOutcome::new(Action::Continue)
             }
             Event::Flush { index, metadata } => {
-                let Some(event) = self.event_builder.handle_flush(index, metadata) else {
-                    return HandleEventOutcome::new(Action::Continue);
+                let event = match self.event_builder.handle_flush(index, metadata) {
+                    Ok(Some(event)) => event,
+                    Ok(None) => return HandleEventOutcome::new(Action::Continue),
+                    Err(call) => return self.record_invalid_tool_call(stream, call),
                 };
 
                 // Detect tool-call requests before consuming `event`, so
@@ -408,6 +420,43 @@ impl TurnCoordinator {
                 HandleEventOutcome::new(Action::Continue)
             }
         }
+    }
+
+    /// Record a tool call the provider finished with arguments that are not a
+    /// JSON object.
+    ///
+    /// The call is committed as a [`ToolCallRequest`] without arguments and
+    /// with the metadata the provider attached to it, so the conversation keeps
+    /// what the assistant asked for and the response that rejects the call has
+    /// a request to answer.
+    ///
+    /// A call without an id or a name is dropped instead.
+    /// No response can be paired with a request that has no id, and a request
+    /// without a name asks for no tool.
+    fn record_invalid_tool_call(
+        &self,
+        stream: &mut ConversationStream,
+        call: InvalidToolCall,
+    ) -> HandleEventOutcome {
+        if call.id.is_empty() || call.name.is_empty() {
+            warn!(
+                id = call.id,
+                name = call.name,
+                reason = %call.reason,
+                "Dropping a tool call with invalid arguments and no id or name."
+            );
+            return HandleEventOutcome::new(Action::Continue);
+        }
+
+        let mut event = ConversationEvent::now(ToolCallRequest {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            arguments: Map::new(),
+        });
+        event.metadata.clone_from(&call.metadata);
+        self.push_event(stream, event);
+
+        HandleEventOutcome::committed(Action::Continue, CommittedEvent::InvalidToolCall(call))
     }
 
     fn transition_from_streaming(
@@ -836,7 +885,7 @@ struct JsonEmitter {
 impl JsonEmitter {
     fn emit(&self, event: &ConversationEvent) {
         let Ok(json) = serde_json::to_value(event) else {
-            tracing::warn!("Failed to serialize event to JSON, skipping.");
+            warn!("Failed to serialize event to JSON, skipping.");
             return;
         };
         let line = if self.printer.format().is_json_pretty() {

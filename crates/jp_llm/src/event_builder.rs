@@ -30,6 +30,9 @@
 //!   call begins, followed by `ToolCallPart::ArgumentChunk` events as JSON
 //!   arrives.
 //!   The Flush after the last chunk marks the tool call as complete.
+//! - **Tool call arguments are checked on flush**: a tool call whose
+//!   accumulated argument text is not a JSON object is returned as an
+//!   [`InvalidToolCall`], never as a `ToolCallRequest`.
 
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -68,7 +71,8 @@ pub fn structured_data(events: Vec<Event>) -> Option<Value> {
                 metadata,
             } => builder.handle_part(index, part, metadata),
             Event::Flush { index, metadata } => {
-                flushed.extend(builder.handle_flush(index, metadata));
+                // A rejected tool call carries no structured payload.
+                flushed.extend(builder.handle_flush(index, metadata).ok().flatten());
             }
             Event::Finished(_) => flushed.extend(builder.drain()),
             // Control and progress events carry no structured payload.
@@ -84,6 +88,54 @@ pub fn structured_data(events: Vec<Event>) -> Option<Value> {
         .into_iter()
         .filter_map(ConversationEvent::into_chat_response)
         .find_map(ChatResponse::into_structured_data)
+}
+
+/// A tool call the provider finished whose arguments are not a JSON object.
+///
+/// [`EventBuilder::handle_flush`] returns this in place of a
+/// [`ToolCallRequest`], so a call the model stopped writing halfway, or wrote
+/// as something other than an object, is never read as a call without
+/// arguments.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("tool call `{name}` has invalid arguments: {reason}")]
+pub struct InvalidToolCall {
+    /// The provider's ID for the call; empty if the stream never carried one.
+    pub id: String,
+
+    /// The tool's name; empty if the stream never carried one.
+    pub name: String,
+
+    /// The argument text exactly as the provider streamed it.
+    pub arguments_json: String,
+
+    /// Why `arguments_json` was rejected.
+    pub reason: InvalidArguments,
+
+    /// The metadata a [`ToolCallRequest`] event for this call would have
+    /// carried: what the provider attached to the call's parts and to its
+    /// flush.
+    pub metadata: Map<String, Value>,
+}
+
+/// Why a tool call's argument text is not a usable arguments object.
+///
+/// The `Truncated` and `Malformed` variants hold the JSON parser's message,
+/// which locates the error by line and column.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidArguments {
+    /// The text ends before the JSON value does, which is what a provider that
+    /// stops generating in the middle of a call leaves behind.
+    #[error("the arguments end before the JSON does ({0})")]
+    Truncated(String),
+
+    /// The text is not JSON.
+    #[error("the arguments are not valid JSON ({0})")]
+    Malformed(String),
+
+    /// The text is valid JSON, but its top-level value is not an object.
+    /// Holds what the value is, worded for the message: `an array`, `null`.
+    #[error("the arguments are {0}, not a JSON object")]
+    NotAnObject(&'static str),
 }
 
 /// Accumulates streamed events into complete [`ConversationEvent`]s.
@@ -204,14 +256,23 @@ impl EventBuilder {
     /// Flushes the buffer for the given index, producing a complete
     /// [`ConversationEvent`].
     ///
-    /// Returns `None` if the index had no buffered content (or was a
+    /// Returns `Ok(None)` if the index had no buffered content (or was a
     /// whitespace-only message that was dropped).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidToolCall`] if the index buffered a tool call whose
+    /// argument text is not a JSON object.
+    /// The buffer is consumed either way: flushing the same index again returns
+    /// `Ok(None)`.
     pub fn handle_flush(
         &mut self,
         index: usize,
         metadata: Map<String, Value>,
-    ) -> Option<ConversationEvent> {
-        let buffer = self.buffers.remove(&index)?;
+    ) -> Result<Option<ConversationEvent>, InvalidToolCall> {
+        let Some(buffer) = self.buffers.remove(&index) else {
+            return Ok(None);
+        };
 
         let mut event = match buffer {
             IndexBuffer::Reasoning { content } => {
@@ -221,7 +282,7 @@ impl EventBuilder {
             // Reasoning is kept even when empty, because the metadata attached
             // below can be the whole point of the event: a thinking signature
             // or a redacted-thinking payload that later requests need.
-            IndexBuffer::Message { content } if content.trim().is_empty() => return None,
+            IndexBuffer::Message { content } if content.trim().is_empty() => return Ok(None),
             IndexBuffer::Message { content } => {
                 ConversationEvent::now(ChatResponse::Message { message: content })
             }
@@ -231,13 +292,17 @@ impl EventBuilder {
                 arguments_json,
                 decoding,
             } => {
-                let mut arguments = if arguments_json.trim().is_empty() {
-                    serde_json::Map::new()
-                } else {
-                    serde_json::from_str(&arguments_json).unwrap_or_else(|e| {
-                        warn!("Failed to parse tool call arguments JSON: {e}");
-                        serde_json::Map::new()
-                    })
+                let mut arguments = match parse_arguments(&arguments_json) {
+                    Ok(arguments) => arguments,
+                    Err(reason) => {
+                        return Err(InvalidToolCall {
+                            id,
+                            name,
+                            arguments_json,
+                            reason,
+                            metadata: self.take_metadata(index, metadata),
+                        });
+                    }
                 };
                 if let Some(decoding) = decoding {
                     decoding.apply(&mut arguments);
@@ -257,16 +322,18 @@ impl EventBuilder {
             }
         };
 
-        // Merge metadata accumulated from Part events (e.g. thinking
-        // signatures that arrive via SignatureDelta).
-        if let Some(part_metadata) = self.metadata.remove(&index) {
-            event.metadata.extend(part_metadata);
-        }
+        event.metadata.extend(self.take_metadata(index, metadata));
 
-        // Merge metadata from the Flush event itself.
-        event.metadata.extend(metadata);
+        Ok(Some(event))
+    }
 
-        Some(event)
+    /// Takes the metadata for the event flushed at `index`: what its `Part`
+    /// events accumulated (e.g. thinking signatures that arrive via
+    /// `SignatureDelta`), then what the `Flush` event itself carried.
+    fn take_metadata(&mut self, index: usize, flush: Map<String, Value>) -> Map<String, Value> {
+        let mut metadata = self.metadata.remove(&index).unwrap_or_default();
+        metadata.extend(flush);
+        metadata
     }
 
     /// Flushes all remaining buffers.
@@ -304,7 +371,9 @@ impl EventBuilder {
                     self.metadata.remove(&index);
                     return None;
                 }
-                self.handle_flush(index, Map::new())
+                // Only a tool-call buffer can be rejected, and those were
+                // dropped above.
+                self.handle_flush(index, Map::new()).ok().flatten()
             })
             .collect()
     }
@@ -462,6 +531,31 @@ impl IndexBuffer {
             Self::Structured { .. } => "Structured",
         }
     }
+}
+
+/// Parses the argument text a tool call accumulated.
+///
+/// Empty text is a call without arguments: a provider with none to send streams
+/// no argument chunks.
+fn parse_arguments(json: &str) -> Result<Map<String, Value>, InvalidArguments> {
+    if json.trim().is_empty() {
+        return Ok(Map::new());
+    }
+
+    let kind = match serde_json::from_str(json) {
+        Ok(Value::Object(arguments)) => return Ok(arguments),
+        Ok(Value::Null) => "null",
+        Ok(Value::Bool(_)) => "a boolean",
+        Ok(Value::Number(_)) => "a number",
+        Ok(Value::String(_)) => "a string",
+        Ok(Value::Array(_)) => "an array",
+        Err(error) if error.is_eof() => {
+            return Err(InvalidArguments::Truncated(error.to_string()));
+        }
+        Err(error) => return Err(InvalidArguments::Malformed(error.to_string())),
+    };
+
+    Err(InvalidArguments::NotAnObject(kind))
 }
 
 /// Logs a warning when a part's type doesn't match the existing buffer.

@@ -952,25 +952,37 @@ async fn drive_turn(
                                 }
                             }
 
-                            // On a flushed tool-call request: clear the temp
-                            // line and hand the call to the coordinator. It
-                            // formats the call and asks what it needs to right
-                            // away; its header and approval prompt follow every
-                            // call before it, while the stream carries on.
-                            if let CommittedEvent::ToolCallRequest(req) = committed {
-                                tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
-                                tool_renderer.complete(&req.id);
+                            match committed {
+                                // On a flushed tool-call request: clear the temp
+                                // line and hand the call to the coordinator. It
+                                // formats the call and asks what it needs to
+                                // right away; its header and approval prompt
+                                // follow every call before it, while the stream
+                                // carries on.
+                                CommittedEvent::ToolCallRequest(req) => {
+                                    tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
+                                    tool_renderer.complete(&req.id);
 
-                                let mut host = Host {
-                                    prompter: &prompter,
-                                    inquiry_backend: &inquiry_backend,
-                                    conv: &conv,
-                                    turn_state: &mut turn_state,
-                                    renderer: &mut tool_renderer,
-                                    printer: &printer,
-                                    interactive,
-                                };
-                                tool_coordinator.submit(req, &mut host);
+                                    let mut host = Host {
+                                        prompter: &prompter,
+                                        inquiry_backend: &inquiry_backend,
+                                        conv: &conv,
+                                        turn_state: &mut turn_state,
+                                        renderer: &mut tool_renderer,
+                                        printer: &printer,
+                                        interactive,
+                                    };
+                                    tool_coordinator.submit(req, &mut host);
+                                }
+                                // The request recorded for this call has no
+                                // arguments, so it is answered rather than
+                                // submitted: the assistant is told what was
+                                // wrong with what it sent.
+                                CommittedEvent::InvalidToolCall(call) => {
+                                    tool_renderer.complete(&call.id);
+                                    tool_coordinator.reject(&call);
+                                }
+                                CommittedEvent::None | CommittedEvent::Content => {}
                             }
 
                             if is_finished {

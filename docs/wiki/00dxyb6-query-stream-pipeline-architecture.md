@@ -130,32 +130,52 @@ A **cycle** is a single request-response exchange with the LLM:
 
 ### Event Model
 
-LLM providers stream events using our internal representation:
+LLM providers stream `Event`s, defined in [`jp_llm::event`]:
 
 ```rust
 pub enum Event {
-    /// A part of a completed event.
-    Part {
-        /// Index identifying which logical event this belongs to.
-        /// Different indices = different events (reasoning, message, tool
-        /// call).
-        index: usize,
+    /// A chunk of one logical event, identified by `index`.
+    Part { index: usize, part: EventPart, metadata: Map<String, Value> },
 
-        /// The partial event content.
-        event: ConversationEvent,
-    },
+    /// Every part for `index` has arrived.
+    Flush { index: usize, metadata: Map<String, Value> },
 
-    /// Flush all parts with the given index.
-    /// After flush, parts are merged into a complete ConversationEvent.
-    Flush {
-        index: usize,
-        metadata: IndexMap<String, Value>,
-    },
+    /// Repairs to earlier events, recorded as an overlay.
+    Patch(Vec<EventPatch>),
 
     /// The response stream has finished.
     Finished(FinishReason),
+
+    /// A liveness signal that carries no content.
+    KeepAlive,
+
+    /// Display-only progress for a tool call whose arguments are pending.
+    ToolCallPending { id: String, name: String },
+    ToolCallPendingEnd { id: String },
+
+    /// A provider decision the user must see, rendered as chrome.
+    Notice(String),
+}
+
+pub enum EventPart {
+    Message(String),
+    Reasoning(String),
+    Structured(String),
+    ToolCall(ToolCallPart),
+}
+
+pub enum ToolCallPart {
+    /// The call's identity. The first non-empty id and name win.
+    Start { id: String, name: String, decoding: Option<Arc<ArgumentDecoding>> },
+
+    /// A chunk of the call's arguments, as JSON text.
+    ArgumentChunk(String),
 }
 ```
+
+Only `Part` and `Flush` carry content.
+The other variants are control and progress signals that the Turn Coordinator or
+the turn loop acts on; none of them becomes a conversation event.
 
 **Key properties:**
 
@@ -163,30 +183,41 @@ pub enum Event {
    Parts with the same index are accumulated together.
 
 2. **Flush boundary**: A `Flush { index }` signals that all parts for that index
-   are complete and should be merged into a single `ConversationEvent`.
+   are complete.
+   The [Event Builder](#event-builder) turns them into a single
+   `ConversationEvent`, carrying the metadata of the parts and of the flush.
 
 3. **Ordering**: Indices are assigned in order.
    Flush events arrive in index order.
    This preserves the sequence of events.
 
-4. **Tool calls are single-part**: The `ToolCallRequestAggregator` ensures tool
-   call requests are delivered as complete, single-part events (never chunked).
+4. **Tool calls arrive in parts**: a `Start` with the call's id and name, then
+   zero or more `ArgumentChunk`s that together hold the arguments as JSON text.
+   The `Flush` completes the call, and only then are the arguments parsed.
+   A provider that receives a call in one piece, such as Google or Ollama, emits
+   the `Start` and a single `ArgumentChunk` together.
+   `decoding` is request-local: it tells the Event Builder which `null`
+   placeholders a strict schema forced into the arguments, and is never
+   persisted.
 
-**Example stream (single cycle):**
+**Example stream (single cycle, metadata omitted):**
 
 ```
-Part { index: 0, ChatResponse::Reasoning("Let ") }
-Part { index: 0, ChatResponse::Reasoning("me think") }
+Part { index: 0, Reasoning("Let ") }
+Part { index: 0, Reasoning("me think") }
 Flush { index: 0 }                                      → Reasoning complete
 
-Part { index: 1, ChatResponse::Message("The ") }
-Part { index: 1, ChatResponse::Message("answer is") }
+Part { index: 1, Message("The ") }
+Part { index: 1, Message("answer is") }
 Flush { index: 1 }                                      → Message complete
 
-Part { index: 2, ToolCallRequest(calculator) }
+Part { index: 2, ToolCall(Start { id: "call_1", name: "calculator" }) }
+Part { index: 2, ToolCall(ArgumentChunk("{\"expr\":")) }
+Part { index: 2, ToolCall(ArgumentChunk("\"2+2\"}")) }
 Flush { index: 2 }                                      → Tool call 1 complete
 
-Part { index: 3, ToolCallRequest(database) }
+Part { index: 3, ToolCall(Start { id: "call_2", name: "database" }) }
+Part { index: 3, ToolCall(ArgumentChunk("{}")) }
 Flush { index: 3 }                                      → Tool call 2 complete
 
 Finished(Completed)                                     → CYCLE ENDS HERE
@@ -208,16 +239,17 @@ Reasoning about tool results requires a follow-up cycle after we return
 **Example of interleaved content (still single cycle):**
 
 ```
-Part { index: 0, ChatResponse::Message("Here's what") }
+Part { index: 0, Message("Here's what") }
 Flush { index: 0 }                                      → Message block 1
 
-Part { index: 1, ChatResponse::Reasoning("Hmm, I need") }
+Part { index: 1, Reasoning("Hmm, I need") }
 Flush { index: 1 }                                      → Reasoning (mid-response)
 
-Part { index: 2, ChatResponse::Message("I found") }
+Part { index: 2, Message("I found") }
 Flush { index: 2 }                                      → Message block 2
 
-Part { index: 3, ToolCallRequest(search) }
+Part { index: 3, ToolCall(Start { id: "call_1", name: "search" }) }
+Part { index: 3, ToolCall(ArgumentChunk("{\"query\":\"jp\"}")) }
 Flush { index: 3 }                                      → Tool call
 
 Finished(Completed)                                     → CYCLE ENDS
@@ -241,8 +273,9 @@ pub struct ConversationEvent {
 }
 
 pub enum EventKind {
+    TurnStart(TurnStart),
     ChatRequest(ChatRequest),
-    ChatResponse(ChatResponse),      // Reasoning or Message
+    ChatResponse(ChatResponse),      // Message, Reasoning, or Structured
     ToolCallRequest(ToolCallRequest),
     ToolCallResponse(ToolCallResponse),
     InquiryRequest(InquiryRequest),
@@ -254,8 +287,9 @@ pub enum EventKind {
 
 ```rust
 pub enum ChatResponse {
-    Reasoning { reasoning: String },
     Message { message: String },
+    Reasoning { reasoning: String },
+    Structured { data: Value },
 }
 ```
 
@@ -520,12 +554,14 @@ enum Action:
 
 ### Event Builder
 
-Accumulates streamed chunks into complete `ConversationEvent` instances.
+Accumulates streamed `EventPart` chunks into complete `ConversationEvent`
+instances.
+`EventBuilder` lives in `jp_llm::event_builder`.
 
 **Key insight:** Uses index-based buffering.
 Each index gets its own buffer.
-On `Flush { index }`, the buffer for that index is finalized and pushed to
-`ConversationStream`.
+On `Flush { index }`, the buffer for that index is turned into one event and
+returned to the caller, which pushes it to the `ConversationStream`.
 
 **State:**
 
@@ -534,58 +570,84 @@ struct EventBuilder:
     // Buffers keyed by event index
     buffers: HashMap<usize, IndexBuffer>
 
-    // Reference to the conversation stream
-    stream: &mut ConversationStream
+    // Metadata carried by the parts of each index
+    metadata: HashMap<usize, Map<String, Value>>
 
 enum IndexBuffer:
     Reasoning { content: String }
     Message { content: String }
-    ToolCall { request: ToolCallRequest }
+    Structured { content: String }
+    ToolCall { id, name, arguments_json: String, decoding }
 ```
 
 **Pseudo-code:**
 
 ```
-fn handle_part(index, event):
-    match event.kind:
-        ChatResponse::Reasoning(r) =>
+fn handle_part(index, part, metadata):
+    self.metadata[index].extend(metadata)
+
+    match part:
+        Reasoning(text) | Message(text) | Structured(text) =>
             buffers.entry(index)
-                .or_insert(IndexBuffer::Reasoning(""))
-                .append(r)
+                .or_insert(<empty buffer of that kind>)
+                .append(text)
 
-        ChatResponse::Message(m) =>
+        ToolCall(Start { id, name, decoding }) =>
+            // The first non-empty id and name win
             buffers.entry(index)
-                .or_insert(IndexBuffer::Message(""))
-                .append(m)
+                .or_insert(IndexBuffer::ToolCall)
+                .set_identity(id, name, decoding)
 
-        ToolCallRequest(tc) =>
-            // Tool calls are always single-part, never appended
-            buffers.insert(index, IndexBuffer::ToolCall(tc))
+        ToolCall(ArgumentChunk(json)) =>
+            buffers.entry(index)
+                .or_insert(IndexBuffer::ToolCall)
+                .arguments_json.append(json)
 
-fn handle_flush(index, metadata):
-    buffer = buffers.remove(index)
+fn handle_flush(index, metadata) -> Result<Option<ConversationEvent>, InvalidToolCall>:
+    buffer = buffers.remove(index)      // nothing buffered: Ok(None)
+    metadata = self.metadata.remove(index) + metadata
 
     event = match buffer:
         Reasoning { content } =>
             ConversationEvent::now(ChatResponse::Reasoning(content))
+        Message { content } if content is whitespace =>
+            return Ok(None)
         Message { content } =>
             ConversationEvent::now(ChatResponse::Message(content))
-        ToolCall { request } =>
-            ConversationEvent::now(request)
+        Structured { content } =>
+            ConversationEvent::now(ChatResponse::Structured(parse(content)))
+        ToolCall { id, name, arguments_json, decoding } =>
+            match parse_arguments(arguments_json):
+                Ok(arguments) =>
+                    ConversationEvent::now(
+                        ToolCallRequest { id, name, decoding.apply(arguments) })
+                Err(reason) =>
+                    return Err(InvalidToolCall {
+                        id, name, arguments_json, reason, metadata })
 
     event.metadata.extend(metadata)
-    stream.push(event)
+    Ok(Some(event))
 
-fn handle_tool_response(response):
-    // Tool responses come from Tool Executor, not LLM stream
-    stream.add_tool_call_response(response)
+fn drain() -> Vec<ConversationEvent>:
+    // The stream ended. Flush every buffer that is left, except tool calls:
+    // one that never got its Flush is incomplete, and is dropped.
 ```
 
 **Properties:**
 
 - One index = one event type (never mixes reasoning and message)
 - Flush order matches index order (preserves sequence)
-- Tool calls are single-part (guaranteed by `ToolCallRequestAggregator`)
+- Tool-call parts accumulate as text until the `Flush` (see
+  [Event Model](#event-model)); the arguments are parsed then, not as they
+  arrive.
+- A tool call's arguments are a JSON object, or the call is rejected.
+  Empty argument text is a call without arguments.
+  Text that ends before the JSON does, is not JSON, or is JSON of another type
+  comes back as an `InvalidToolCall`, never as a `ToolCallRequest` with empty
+  arguments.
+  The Turn Coordinator records such a call without its arguments, and the Tool
+  Coordinator answers it with an error instead of running it (see [Tool Error
+  Handling](#tool-error-handling)).
 
 ### Chat Response Renderer
 
@@ -1277,7 +1339,7 @@ The Turn Coordinator implements this state machine:
 ```
 LLM Provider
      │
-     │ Event::Part { index: 0, ChatResponse::Reasoning("Let me") }
+     │ Event::Part { index: 0, Reasoning("Let me") }
      ▼
 Turn Coordinator (state: Streaming)
      │
@@ -1296,7 +1358,7 @@ Markdown Renderer                    Event Builder
 
 LLM Provider
      │
-     │ Event::Part { index: 0, ChatResponse::Reasoning(" think\n\n") }
+     │ Event::Part { index: 0, Reasoning(" think\n\n") }
      ▼
 Turn Coordinator
      │
@@ -1305,7 +1367,7 @@ Turn Coordinator
      ▼                                    ▼
 Markdown Renderer                    Event Builder
      │                                    │
-     │ buffer.push(" think\n\n")          │ buffers[0].append(" think\n")
+     │ buffer.push(" think\n\n")          │ buffers[0].append(" think\n\n")
      │ → emits "Let me think\n\n"         │
      │ → formatter → printer              │
      │                                    │
@@ -1325,11 +1387,15 @@ Turn Coordinator
      ▼
 Event Builder
      │
-     │ finalize buffers[0]
-     │ stream.push(ConversationEvent {
+     │ finalize buffers[0], return ConversationEvent {
      │     kind: ChatResponse::Reasoning("Let me think\n\n"),
      │     metadata: metadata
-     │ })
+     │ }
+     │
+     ▼
+Turn Coordinator
+     │
+     │ stream.push(event)
      │
      ▼
 ConversationStream: [Reasoning("Let me think\n\n")]
@@ -1340,7 +1406,8 @@ ConversationStream: [Reasoning("Let me think\n\n")]
 ```
 LLM Provider
      │
-     │ Event::Part { index: 2, ToolCallRequest(calculator) }
+     │ Event::Part { index: 2, ToolCall(Start { id: "call_1", name: "calculator" }) }
+     │ Event::Part { index: 2, ToolCall(ArgumentChunk("{\"expr\":\"2+2\"}")) }
      │ Event::Flush { index: 2 }
      │ Event::Finished(Completed)
      ▼
@@ -1798,6 +1865,22 @@ ToolCallResponse {
 LLM receives error, can respond appropriately
 ```
 
+A tool call that cannot be run is answered the same way, and no executor is
+created for it:
+
+- **Unavailable tool**: the LLM named a tool that is not enabled.
+- **Invalid arguments**: the provider finished the call, but its argument text
+  is not a JSON object (see [Event Builder](#event-builder)).
+  The response says what was wrong and quotes the end of the text, so an
+  assistant whose call was cut off by the output token limit can see where it
+  stopped.
+
+The request recorded for a call with invalid arguments carries no arguments, so
+it reads like a call that takes none.
+The Tool Coordinator therefore keeps the rejection until the next response
+starts: a restart, which submits every call that has no response yet, answers
+the call with the same error again rather than running it.
+
 -----
 
 ## Testing Strategy
@@ -1810,14 +1893,26 @@ Each component can be tested in isolation:
 
 ```
 test "accumulates reasoning chunks":
-    builder = EventBuilder::new(mock_stream)
-    builder.handle_part(0, Reasoning("Hello "))
-    builder.handle_part(0, Reasoning("world"))
-    builder.handle_flush(0, {})
+    builder = EventBuilder::new()
+    builder.handle_part(0, Reasoning("Hello "), {})
+    builder.handle_part(0, Reasoning("world"), {})
 
-    assert mock_stream.events == [
+    assert builder.handle_flush(0, {}) == Ok(Some(
         ConversationEvent { kind: Reasoning("Hello world") }
-    ]
+    ))
+
+test "rejects truncated tool call arguments":
+    builder = EventBuilder::new()
+    builder.handle_part(0, ToolCall(Start { id: "call_1", name: "fs_modify_file" }), {})
+    builder.handle_part(0, ToolCall(ArgumentChunk("{\"path\": \"src/ma")), {})
+
+    assert builder.handle_flush(0, {}) == Err(InvalidToolCall {
+        id: "call_1",
+        name: "fs_modify_file",
+        arguments_json: "{\"path\": \"src/ma",
+        reason: Truncated("EOF while parsing a string at line 1 column 16"),
+        metadata: {},
+    })
 ```
 
 **Markdown Renderer:**
@@ -1835,15 +1930,16 @@ test "buffers until valid markdown":
 
 ```
 test "transitions to Executing on tool call":
-    coordinator = TurnCoordinator::new()
-    coordinator.start_turn(request)
-    coordinator.handle_event(Part { index: 0, Message("Hi") })
-    coordinator.handle_event(Part { index: 1, ToolCallRequest(...) })
-    coordinator.handle_event(Flush { index: 0 })
-    coordinator.handle_event(Flush { index: 1 })
-    coordinator.handle_event(Finished)
+    coordinator = TurnCoordinator::new(...)
+    coordinator.start_turn(stream, request)
+    coordinator.handle_event(stream, Part { index: 0, Message("Hi") })
+    coordinator.handle_event(stream, Part { index: 1, ToolCall(Start { id: "call_1", name: "tool" }) })
+    coordinator.handle_event(stream, Part { index: 1, ToolCall(ArgumentChunk("{}")) })
+    coordinator.handle_event(stream, Flush { index: 0 })
+    coordinator.handle_event(stream, Flush { index: 1 })
+    coordinator.handle_event(stream, Finished(Completed))
 
-    assert coordinator.state() == Executing
+    assert coordinator.current_phase() == Executing
 ```
 
 **Tool Cancellation:**
@@ -1878,9 +1974,10 @@ test "complete turn with tool call":
     mock_llm = MockLlm::new(vec![
         Part { index: 0, Message("Let me check") },
         Flush { index: 0 },
-        Part { index: 1, ToolCallRequest(calculator) },
+        Part { index: 1, ToolCall(Start { id: "call_1", name: "calculator" }) },
+        Part { index: 1, ToolCall(ArgumentChunk("{\"expr\":\"6*7\"}")) },
         Flush { index: 1 },
-        Finished,
+        Finished(Completed),
     ])
 
     mock_tool = MockToolExecutor::new(|req| {
@@ -1904,12 +2001,18 @@ test "complete turn with tool call":
 ```
 test "events are persisted in stream order":
     for events in arbitrary_event_sequences():
-        builder = EventBuilder::new(stream)
+        builder = EventBuilder::new()
+        built = []
         for event in events:
-            builder.handle(event)
+            match event:
+                Part { index, part, metadata } =>
+                    builder.handle_part(index, part, metadata)
+                Flush { index, metadata } =>
+                    if let Ok(Some(e)) = builder.handle_flush(index, metadata):
+                        built.push((index, e))
 
         // Verify order matches flush order
-        assert stream.events.indices() == sorted(flush_indices)
+        assert built.indices() == flush_indices(events)
 ```
 
 -----
@@ -1986,3 +2089,4 @@ maintaining backward compatibility until the final cleanup.
 [Event ID]: 00dxybc-conversation.md#event-id
 [JP Query Architecture]: 00dxyb5-jp-query-architecture.md
 [RFD 097]: ../rfd/097-stable-event-identifiers.md
+[`jp_llm::event`]: ../../crates/jp_llm/src/event.rs

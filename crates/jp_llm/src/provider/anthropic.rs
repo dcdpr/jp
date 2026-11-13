@@ -923,8 +923,10 @@ fn call(
 
                     // Flush the chain builder so accumulated parts become
                     // complete ConversationEvents with merged metadata.
+                    // Tool-call parts never reach it, so no flush is rejected.
                     if needs_event_buffer && let Event::Flush { index, metadata } = &flush {
-                        chain_events.extend(chain_builder.handle_flush(*index, metadata.clone()));
+                        let flushed = chain_builder.handle_flush(*index, metadata.clone());
+                        chain_events.extend(flushed.ok().flatten());
                     }
 
                     yield flush;

@@ -976,6 +976,8 @@ fn map_candidate(
             }) => {
                 let tool_id = id.unwrap_or_else(|| format!("{name}_{index}"));
                 let args_json = match arguments {
+                    // The client reads a call without `args` as `null`.
+                    Value::Null => "{}".to_owned(),
                     Value::Object(map) => serde_json::to_string(&map).unwrap_or_default(),
                     v => serde_json::to_string(&v).unwrap_or_default(),
                 };

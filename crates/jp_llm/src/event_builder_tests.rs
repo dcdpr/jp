@@ -11,7 +11,7 @@ fn test_accumulates_reasoning_chunks() {
 
     builder.handle_part(0, EventPart::Reasoning("Hello ".into()), Map::new());
     builder.handle_part(0, EventPart::Reasoning("world".into()), Map::new());
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     assert_matches!(
         &event.kind,
@@ -26,7 +26,7 @@ fn test_accumulates_message_chunks() {
 
     builder.handle_part(1, EventPart::Message("Hello ".into()), Map::new());
     builder.handle_part(1, EventPart::Message("world".into()), Map::new());
-    let event = builder.handle_flush(1, Map::new()).unwrap();
+    let event = builder.handle_flush(1, Map::new()).unwrap().unwrap();
 
     match &event.kind {
         EventKind::ChatResponse(ChatResponse::Message { message }) => {
@@ -49,7 +49,7 @@ fn test_handles_tool_call() {
         }),
         Map::new(),
     );
-    let event = builder.handle_flush(2, Map::new()).unwrap();
+    let event = builder.handle_flush(2, Map::new()).unwrap().unwrap();
 
     let req = event.as_tool_call_request().expect("expected a tool call");
     assert_eq!(req.name, "test_tool");
@@ -111,7 +111,7 @@ fn test_merges_multi_part_tool_call() {
         Map::new(),
     );
 
-    let event = builder.handle_flush(1, Map::new()).unwrap();
+    let event = builder.handle_flush(1, Map::new()).unwrap().unwrap();
 
     let req = event.as_tool_call_request().expect("expected a tool call");
     assert_eq!(req.id, "call_42");
@@ -154,7 +154,7 @@ fn test_multi_part_tool_call_first_write_wins_for_id_and_name() {
         Map::new(),
     );
 
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     let req = event.as_tool_call_request().expect("expected a tool call");
 
@@ -177,9 +177,9 @@ fn test_interleaved_indices() {
     builder.handle_part(0, EventPart::Message(" Part 2".into()), Map::new());
 
     // Flush 1 first
-    let event1 = builder.handle_flush(1, Map::new()).unwrap();
+    let event1 = builder.handle_flush(1, Map::new()).unwrap().unwrap();
     // Flush 0 second
-    let event2 = builder.handle_flush(0, Map::new()).unwrap();
+    let event2 = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     assert_matches!(
         &event1.kind,
@@ -202,7 +202,7 @@ fn test_metadata_preserved_on_flush() {
     let mut metadata = Map::new();
     metadata.insert("tokens".to_string(), Value::Number(100.into()));
 
-    let event = builder.handle_flush(0, metadata).unwrap();
+    let event = builder.handle_flush(0, metadata).unwrap().unwrap();
 
     assert_eq!(
         event.metadata.get("tokens"),
@@ -236,7 +236,7 @@ fn test_part_metadata_accumulated_through_flush() {
     );
 
     // Flush with no additional metadata.
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     // Content should be accumulated.
     assert_matches!(
@@ -269,7 +269,7 @@ fn test_part_and_flush_metadata_merged() {
         Value::String("flush_value".into()),
     );
 
-    let event = builder.handle_flush(0, flush_metadata).unwrap();
+    let event = builder.handle_flush(0, flush_metadata).unwrap().unwrap();
 
     assert_eq!(
         event.metadata.get("from_part"),
@@ -286,7 +286,7 @@ fn test_whitespace_only_message_not_persisted() {
     let mut builder = EventBuilder::new();
 
     builder.handle_part(0, EventPart::Message("\n\n".into()), Map::new());
-    assert!(builder.handle_flush(0, Map::new()).is_none());
+    assert_eq!(builder.handle_flush(0, Map::new()), Ok(None));
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn test_ignores_mismatched_event_type() {
     // Try to append Message to same index (should be ignored)
     builder.handle_part(0, EventPart::Message("Hello".into()), Map::new());
 
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
     assert_matches!(
         &event.kind,
         EventKind::ChatResponse(ChatResponse::Reasoning { reasoning })
@@ -356,7 +356,7 @@ fn test_peek_partial_events_after_partial_flush() {
     builder.handle_part(1, EventPart::Message("Partial answer".into()), Map::new());
 
     // Flush index 0 only
-    builder.handle_flush(0, Map::new());
+    builder.handle_flush(0, Map::new()).unwrap();
 
     // Only index 1 should remain
     assert_matches!(
@@ -375,7 +375,7 @@ fn test_accumulates_structured_chunks() {
         EventPart::Structured("\": \"Alice\"}".into()),
         Map::new(),
     );
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     let resp = event.as_chat_response().unwrap();
     assert_eq!(resp.as_structured_data(), Some(&json!({"name": "Alice"})));
@@ -386,7 +386,7 @@ fn test_structured_malformed_json_falls_back_to_string() {
     let mut builder = EventBuilder::new();
 
     builder.handle_part(0, EventPart::Structured("{\"truncated".into()), Map::new());
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     let resp = event.as_chat_response().unwrap();
     assert_eq!(
@@ -407,7 +407,7 @@ fn test_structured_preserves_metadata() {
 
     let mut flush_meta = Map::new();
     flush_meta.insert("tokens".into(), json!(42));
-    let event = builder.handle_flush(0, flush_meta).unwrap();
+    let event = builder.handle_flush(0, flush_meta).unwrap().unwrap();
 
     assert_eq!(
         event.metadata.get("provider"),
@@ -476,6 +476,167 @@ fn drain_drops_incomplete_tool_call_but_keeps_partial_text() {
     ));
 }
 
+/// Flush one call, `call_1` to `fs_modify_file`, whose argument text is
+/// `arguments`.
+fn flush_tool_call(arguments: &str) -> Result<Option<ConversationEvent>, InvalidToolCall> {
+    let mut builder = EventBuilder::new();
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::Start {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            decoding: None,
+        }),
+        Map::new(),
+    );
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::ArgumentChunk(arguments.into())),
+        Map::new(),
+    );
+
+    builder.handle_flush(0, Map::new())
+}
+
+/// A provider that stops generating in the middle of a call still closes the
+/// call's block, so the unfinished text reaches a flush.
+/// It must not be read as a call without arguments.
+#[test]
+fn truncated_tool_call_arguments_are_rejected() {
+    assert_eq!(
+        flush_tool_call(r#"{"path": "src/main.rs", "content": "fn ma"#),
+        Err(InvalidToolCall {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            arguments_json: r#"{"path": "src/main.rs", "content": "fn ma"#.into(),
+            reason: InvalidArguments::Truncated(
+                "EOF while parsing a string at line 1 column 41".into()
+            ),
+            metadata: Map::new(),
+        })
+    );
+}
+
+#[test]
+fn malformed_tool_call_arguments_are_rejected() {
+    assert_eq!(
+        flush_tool_call(r#"{"path": "a.rs"}{"path": "b.rs"}"#),
+        Err(InvalidToolCall {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            arguments_json: r#"{"path": "a.rs"}{"path": "b.rs"}"#.into(),
+            reason: InvalidArguments::Malformed("trailing characters at line 1 column 17".into()),
+            metadata: Map::new(),
+        })
+    );
+}
+
+#[test]
+fn non_object_tool_call_arguments_are_rejected() {
+    assert_eq!(
+        flush_tool_call(r#"["src/main.rs"]"#),
+        Err(InvalidToolCall {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            arguments_json: r#"["src/main.rs"]"#.into(),
+            reason: InvalidArguments::NotAnObject("an array"),
+            metadata: Map::new(),
+        })
+    );
+}
+
+/// `null` is not read as "no arguments": a provider with none to send streams
+/// no argument text, and one that holds a parsed `null` says so itself.
+#[test]
+fn null_tool_call_arguments_are_rejected() {
+    assert_eq!(
+        flush_tool_call("null"),
+        Err(InvalidToolCall {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            arguments_json: "null".into(),
+            reason: InvalidArguments::NotAnObject("null"),
+            metadata: Map::new(),
+        })
+    );
+}
+
+#[test]
+fn empty_object_tool_call_arguments_are_accepted() {
+    let event = flush_tool_call("{}").unwrap().unwrap();
+
+    assert_eq!(
+        event.as_tool_call_request(),
+        Some(&ToolCallRequest {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            arguments: Map::new(),
+        })
+    );
+}
+
+/// Whoever records a rejected call needs the metadata its request event would
+/// have carried, such as a signature the provider expects back.
+#[test]
+fn rejected_tool_call_keeps_part_and_flush_metadata() {
+    let mut builder = EventBuilder::new();
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::Start {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            decoding: None,
+        }),
+        Map::from_iter([("from_part".to_owned(), json!("part_value"))]),
+    );
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::ArgumentChunk(r#"{"path""#.into())),
+        Map::new(),
+    );
+
+    let rejected = builder
+        .handle_flush(
+            0,
+            Map::from_iter([("from_flush".to_owned(), json!("flush_value"))]),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        Value::Object(rejected.metadata),
+        json!({"from_part": "part_value", "from_flush": "flush_value"})
+    );
+}
+
+/// A rejection consumes the buffer like any flush, so a provider that flushes
+/// the index twice does not have the call rejected twice.
+#[test]
+fn duplicate_flush_after_a_rejected_tool_call_returns_nothing() {
+    let mut builder = EventBuilder::new();
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::Start {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+            decoding: None,
+        }),
+        Map::new(),
+    );
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::ArgumentChunk(r#"{"path""#.into())),
+        Map::new(),
+    );
+
+    let rejected = builder.handle_flush(0, Map::new()).unwrap_err();
+    assert_eq!(
+        rejected.reason,
+        InvalidArguments::Truncated("EOF while parsing an object at line 1 column 7".into())
+    );
+
+    assert_eq!(builder.handle_flush(0, Map::new()), Ok(None));
+}
+
 #[test]
 fn test_structured_array_response() {
     let mut builder = EventBuilder::new();
@@ -485,7 +646,7 @@ fn test_structured_array_response() {
         EventPart::Structured("[\"title one\",\"title two\"]".into()),
         Map::new(),
     );
-    let event = builder.handle_flush(0, Map::new()).unwrap();
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
     let resp = event.as_chat_response().unwrap();
     assert_eq!(

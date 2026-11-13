@@ -34,7 +34,7 @@ async fn plans_follow_tool_names_across_interleaved_calls() {
                 metadata,
             } => builder.handle_part(index, part, metadata),
             Event::Flush { index, metadata } => {
-                let event = builder.handle_flush(index, metadata).unwrap();
+                let event = builder.handle_flush(index, metadata).unwrap().unwrap();
                 assert_eq!(event.metadata, Map::new());
                 let call = event.into_tool_call_request().unwrap();
                 calls.push(json!({"id": call.id, "name": call.name, "arguments": call.arguments}));

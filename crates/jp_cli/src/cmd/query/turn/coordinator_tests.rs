@@ -1,6 +1,6 @@
 use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig, types::color::Color};
 use jp_conversation::event::{ChatResponse, ToolCallRequest};
-use jp_llm::event::FinishReason;
+use jp_llm::{event::FinishReason, event_builder::InvalidArguments};
 use jp_printer::{OutputFormat, Printer};
 use serde_json::{Map, Value, json};
 
@@ -1332,6 +1332,132 @@ fn flush_producing_tool_call_surfaces_request_as_committed_event() {
         }
         other => panic!("expected committed ToolCallRequest, got {other:?}"),
     }
+}
+
+/// A tool call flushed with arguments that are not a JSON object is recorded,
+/// so the conversation keeps what the assistant asked for, but it is surfaced
+/// as invalid rather than as a request: the shell answers it and never runs it.
+#[test]
+fn flush_of_invalid_tool_call_arguments_surfaces_the_call_as_invalid() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_start(1, "call_42", "fs_modify_file")
+            .with_metadata_field("signature", "sig_1"),
+    );
+    coordinator.handle_event(&mut stream, Event::tool_call_args(1, r#"{"path": "src/ma"#));
+
+    let outcome = coordinator.handle_event(&mut stream, Event::flush(1));
+
+    assert!(matches!(outcome.action, Action::Continue));
+    assert_eq!(
+        outcome.committed,
+        CommittedEvent::InvalidToolCall(InvalidToolCall {
+            id: "call_42".into(),
+            name: "fs_modify_file".into(),
+            arguments_json: r#"{"path": "src/ma"#.into(),
+            reason: InvalidArguments::Truncated(
+                "EOF while parsing a string at line 1 column 16".into()
+            ),
+            metadata: Map::from_iter([("signature".to_owned(), json!("sig_1"))]),
+        })
+    );
+
+    // The recorded request carries no arguments, and keeps the metadata the
+    // provider attached to the call.
+    let recorded: Vec<_> = stream
+        .iter()
+        .filter(|e| e.event.is_tool_call_request())
+        .collect();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(
+        recorded[0].event.as_tool_call_request(),
+        Some(&ToolCallRequest {
+            id: "call_42".into(),
+            name: "fs_modify_file".into(),
+            arguments: Map::new(),
+        })
+    );
+    assert_eq!(
+        Value::Object(recorded[0].event.metadata.clone()),
+        json!({"signature": "sig_1"})
+    );
+}
+
+/// A rejected call can only be answered through its id.
+/// Without one it is dropped: recorded, it would be a request no response can
+/// ever be paired with.
+#[test]
+fn an_invalid_tool_call_without_an_id_is_not_recorded() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    coordinator.handle_event(&mut stream, Event::tool_call_start(1, "", "fs_modify_file"));
+    coordinator.handle_event(&mut stream, Event::tool_call_args(1, r#"{"path": "src/ma"#));
+
+    let outcome = coordinator.handle_event(&mut stream, Event::flush(1));
+
+    assert!(matches!(outcome.action, Action::Continue));
+    assert_eq!(outcome.committed, CommittedEvent::None);
+    assert_eq!(
+        stream
+            .iter()
+            .filter(|e| e.event.is_tool_call_request())
+            .count(),
+        0
+    );
+}
+
+/// A rejected call without a name asks for no tool the assistant could be told
+/// to call again, so it is dropped like one without an id.
+#[test]
+fn an_invalid_tool_call_without_a_name_is_not_recorded() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    coordinator.handle_event(&mut stream, Event::tool_call_start(1, "call_42", ""));
+    coordinator.handle_event(&mut stream, Event::tool_call_args(1, r#"{"path": "src/ma"#));
+
+    let outcome = coordinator.handle_event(&mut stream, Event::flush(1));
+
+    assert!(matches!(outcome.action, Action::Continue));
+    assert_eq!(outcome.committed, CommittedEvent::None);
+    assert_eq!(
+        stream
+            .iter()
+            .filter(|e| e.event.is_tool_call_request())
+            .count(),
+        0
+    );
 }
 
 /// Regression for the duplicate-render bug: a second `Flush` after the

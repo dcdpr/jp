@@ -828,7 +828,10 @@ pub async fn run_chat_completion_mode(
                                     index: idx,
                                     metadata,
                                 } => {
-                                    if let Some(mut event) = builder.handle_flush(idx, metadata) {
+                                    let flushed = builder
+                                        .handle_flush(idx, metadata)
+                                        .expect("tool call arguments are a JSON object");
+                                    if let Some(mut event) = flushed {
                                         // Normalize timestamp for deterministic snapshots.
                                         event.timestamp =
                                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();

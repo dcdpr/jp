@@ -225,6 +225,8 @@ fn map_event(
         let index = idx + 2;
         let id = format!("{name}_{index}");
         let args_json = match arguments {
+            // A call without arguments, as Ollama parsed it.
+            Value::Null => "{}".to_owned(),
             Value::Object(map) => serde_json::to_string(&map).unwrap_or_default(),
             v => serde_json::to_string(&v).unwrap_or_default(),
         };

@@ -192,6 +192,9 @@ A scalar emits a single `Scalar` fragment followed by `Done`.
 If the root value is not an object (for example, a bare string), the parser
 streams it directly as `String("chunk")` fragments followed by `Done`.
 The protocol handles any JSON shape without a special error case.
+Such a root can be displayed, but it is not a tool call that can run:
+`EventBuilder::handle_flush` rejects it (see [`EventBuilder` and
+`TurnCoordinator` integration](#eventbuilder-and-turncoordinator-integration)).
 
 #### Aggregator layer
 
@@ -294,9 +297,14 @@ When `EventBuilder::handle_part` receives `ToolCall(ArgumentChunk(chunk))`:
 3. It wraps each fragment in `ToolCallArgumentProgress` (with `tool_call_id` and
    `tool_name`) and returns the progress events to the caller.
 
-`EventBuilder::handle_flush` is unchanged: it returns the final
-`ToolCallRequest`, whose `arguments` map is already populated by
-`FragmentAggregator`.
+`EventBuilder::handle_flush` keeps its contract.
+It returns the final `ToolCallRequest`, whose `arguments` map is already
+populated by `FragmentAggregator`, or an `InvalidToolCall` when the argument
+text is not one complete JSON object: the text ended before the root value
+closed, it was not JSON, or its root was not an object.
+A call with no argument text at all is a call without arguments.
+The check reads the `arguments_json` buffer today, so `IncrementalArgParser`
+has to report these three cases once that buffer is gone.
 
 `TurnCoordinator` already matches on `EventPart::ToolCall` variants (per [RFD
 012]) and forwards the progress events returned for `ArgumentChunk` parts to
@@ -313,7 +321,9 @@ EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
 
 ### Backwards compatibility
 
-- The final `ToolCallRequest` event emitted on flush is unchanged.
+- The final `ToolCallRequest` event emitted on flush is unchanged, and so is
+  the `InvalidToolCall` returned in its place for arguments that are not one
+  complete JSON object.
 - `ToolCallArgumentProgress` events are ephemeral and are not persisted to
   `ConversationStream`.
 - No new `Event` variants are added; this RFD builds on the `EventPart` types
@@ -441,6 +451,13 @@ Rejected because:
   without improving time-to-first-argument.
   This assumption should be validated empirically with Anthropic, OpenRouter,
   and Llamacpp.
+
+- **Rejected calls without the raw buffer.** `InvalidToolCall` carries the
+  argument text as the provider streamed it, and the response that rejects the
+  call quotes the end of that text back to the assistant.
+  This RFD removes the buffer that text comes from.
+  The parser either keeps a bounded tail of its input for this case, or the
+  rejection stops quoting the text.
 
 ## Implementation Plan
 

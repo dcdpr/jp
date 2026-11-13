@@ -1257,3 +1257,217 @@ async fn a_stop_while_the_assistant_answers_a_formatters_question_cancels_it() {
     .await
     .unwrap();
 }
+
+/// A source whose `tool` calls run at once, logging the id of every call an
+/// executor is created for in `created`.
+fn logging_source(
+    created: &Arc<Mutex<Vec<String>>>,
+    runs: &Arc<AtomicUsize>,
+) -> TestExecutorSource {
+    let created = Arc::clone(created);
+    let runs = Arc::clone(runs);
+    StagedExecutor::source(move |request, _| {
+        created.lock().unwrap().push(request.id.clone());
+        StagedExecutor::new(request, false, &runs)
+    })
+}
+
+/// A call whose arguments are not a JSON object is answered with an error that
+/// says so, and no executor is ever created for it.
+/// The call sent next to it runs as usual, and both responses go back to the
+/// assistant.
+#[tokio::test]
+async fn a_call_with_non_object_arguments_is_answered_without_an_executor() {
+    Box::pin(timeout(Duration::from_secs(10), async {
+        let config = described_tool(&json!({"run": "allow"}));
+        let runs = Arc::new(AtomicUsize::new(0));
+        let created = Arc::new(Mutex::new(Vec::new()));
+        let provider = Arc::new(SequentialMockProvider {
+            responses: vec![
+                vec![
+                    Event::tool_call_start(0, "call_bad", "tool"),
+                    Event::tool_call_args(0, "[1]"),
+                    Event::flush(0),
+                    Event::tool_call_start(1, "call_ok", "tool"),
+                    Event::tool_call_args(1, r#"{"n":1}"#),
+                    Event::flush(1),
+                    Event::Finished(FinishReason::Completed),
+                ],
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+
+        let turn = Scenario::new(
+            &config,
+            logging_source(&created, &runs),
+            provider.clone(),
+            &[],
+        )
+        .run()
+        .await;
+
+        turn.result.unwrap();
+        assert_eq!(turn.responses, vec![
+            ToolCallResponse {
+                id: "call_bad".into(),
+                result: Err(
+                    "Tool 'tool' was not run: the arguments are an array, not a JSON object. Call \
+                     it again with its arguments as one complete JSON object.\n\nThe arguments \
+                     received were:\n[1]"
+                        .into()
+                ),
+            },
+            ToolCallResponse {
+                id: "call_ok".into(),
+                result: Ok("ran".into()),
+            },
+        ]);
+        assert_eq!(*created.lock().unwrap(), vec!["call_ok".to_owned()]);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            provider.call_index.load(Ordering::SeqCst),
+            2,
+            "the responses were sent back to the assistant"
+        );
+    }))
+    .await
+    .unwrap();
+}
+
+/// A response that runs out of output tokens in the middle of a call's
+/// arguments still closes the call.
+/// The call is the only one in the response: it is answered with what was cut
+/// off, nothing runs, and the assistant gets the answer.
+#[tokio::test]
+async fn a_call_cut_short_by_the_token_limit_is_answered_without_an_executor() {
+    Box::pin(timeout(Duration::from_secs(10), async {
+        let config = described_tool(&json!({"run": "allow"}));
+        let runs = Arc::new(AtomicUsize::new(0));
+        let created = Arc::new(Mutex::new(Vec::new()));
+        let provider = Arc::new(SequentialMockProvider {
+            responses: vec![
+                vec![
+                    Event::tool_call_start(0, "call_cut", "tool"),
+                    Event::tool_call_args(0, r#"{"n": 1, "text": "unfinis"#),
+                    Event::flush(0),
+                    Event::Finished(FinishReason::MaxTokens),
+                ],
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+
+        let turn = Scenario::new(
+            &config,
+            logging_source(&created, &runs),
+            provider.clone(),
+            &[],
+        )
+        .run()
+        .await;
+
+        turn.result.unwrap();
+        assert_eq!(turn.responses, vec![ToolCallResponse {
+            id: "call_cut".into(),
+            result: Err(
+                "Tool 'tool' was not run: the arguments end before the JSON does (EOF while \
+                 parsing a string at line 1 column 25). Call it again with its arguments as one \
+                 complete JSON object. The arguments may have been cut off by the output token \
+                 limit; if so, send less in a single call.\n\nThe arguments received \
+                 were:\n{\"n\": 1, \"text\": \"unfinis"
+                    .into()
+            ),
+        }]);
+        assert_eq!(*created.lock().unwrap(), Vec::<String>::new());
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            provider.call_index.load(Ordering::SeqCst),
+            2,
+            "the response was sent back to the assistant"
+        );
+    }))
+    .await
+    .unwrap();
+}
+
+/// A restart submits every call that has no response yet, and the request
+/// recorded for a rejected call looks like a call without arguments.
+/// It is answered with its rejection again, not run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_does_not_run_a_call_rejected_for_its_arguments() {
+    Box::pin(timeout(Duration::from_secs(10), async {
+        let config = described_tool(&json!({"run": "allow"}));
+        let runs = Arc::new(AtomicUsize::new(0));
+        let created = Arc::new(Mutex::new(Vec::new()));
+        let stalled = Arc::new(Notify::new());
+        // The first executor stalls while preparing, which holds the tool
+        // phase open for the restart.
+        let source = StagedExecutor::source({
+            let runs = Arc::clone(&runs);
+            let created = Arc::clone(&created);
+            let stalled = Arc::clone(&stalled);
+            move |request, made| {
+                created.lock().unwrap().push(request.id.clone());
+                let executor = StagedExecutor::new(request, false, &runs);
+                if made == 0 {
+                    return executor.preparing(Preparing::Stalling(Arc::clone(&stalled)));
+                }
+                executor
+            }
+        });
+        let provider = Arc::new(SequentialMockProvider {
+            responses: vec![
+                vec![
+                    Event::tool_call_start(0, "call_bad", "tool"),
+                    Event::tool_call_args(0, "[1]"),
+                    Event::flush(0),
+                    Event::tool_call_start(1, "call_ok", "tool"),
+                    Event::tool_call_args(1, r#"{"n":1}"#),
+                    Event::flush(1),
+                    Event::Finished(FinishReason::Completed),
+                ],
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let (router, signals) = test_router();
+        let pressed = tokio::spawn(press_ctrl_c_in_tool_phase(router.clone(), signals, stalled));
+
+        // `t`: Restart.
+        let mut scenario = Scenario::new(&config, source, provider.clone(), &['t']);
+        scenario.router = router;
+        let turn = scenario.run().await;
+        pressed.await.unwrap();
+
+        turn.result.unwrap();
+        assert_eq!(turn.responses, vec![
+            ToolCallResponse {
+                id: "call_bad".into(),
+                result: Err(
+                    "Tool 'tool' was not run: the arguments are an array, not a JSON object. Call \
+                     it again with its arguments as one complete JSON object.\n\nThe arguments \
+                     received were:\n[1]"
+                        .into()
+                ),
+            },
+            ToolCallResponse {
+                id: "call_ok".into(),
+                result: Ok("ran".into()),
+            },
+        ]);
+        // One executor before the restart and one after it, both for the call
+        // that was accepted.
+        assert_eq!(*created.lock().unwrap(), vec![
+            "call_ok".to_owned(),
+            "call_ok".to_owned()
+        ]);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 2);
+    }))
+    .await
+    .unwrap();
+}
