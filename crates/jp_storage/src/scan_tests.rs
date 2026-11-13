@@ -24,6 +24,12 @@ fn scanned(modified_secs: u64) -> ScannedDir {
     }
 }
 
+fn absolute_dir(tmp: &Utf8Path, name: &str) -> Utf8PathBuf {
+    let dir = tmp.join("conversations").join(name);
+    assert!(dir.is_absolute());
+    dir
+}
+
 fn stamps_of(scanned: &ScannedDir) -> DirStamps {
     DirStamps {
         metadata: Some(scanned.metadata),
@@ -150,7 +156,7 @@ fn extend_leaves_out_entries_modified_inside_the_granularity_window() {
 fn saved_entries_load_into_a_fresh_cache() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join(SCAN_CACHE_FILE);
-    let dir = Utf8PathBuf::from("/ws/conversations/a");
+    let dir = absolute_dir(tmp.path(), "a");
     let entry = scanned(100);
 
     ScanCache::default().save(
@@ -171,8 +177,8 @@ fn save_leaves_out_entries_modified_inside_the_granularity_window() {
     // entry may reach disk.
     let tmp = tempdir().unwrap();
     let path = tmp.path().join(SCAN_CACHE_FILE);
-    let old = Utf8PathBuf::from("/ws/conversations/old");
-    let recent = Utf8PathBuf::from("/ws/conversations/recent");
+    let old = absolute_dir(tmp.path(), "old");
+    let recent = absolute_dir(tmp.path(), "recent");
 
     ScanCache::default().save(
         &path,
@@ -210,11 +216,12 @@ fn save_leaves_out_relative_directories() {
 fn save_does_not_rewrite_a_file_holding_the_same_entries() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join(SCAN_CACHE_FILE);
-    let dir = Utf8PathBuf::from("/ws/conversations/a");
+    let dir = absolute_dir(tmp.path(), "a");
     let started = UNIX_EPOCH + Duration::from_secs(200);
     let cache = ScanCache::default();
 
     cache.save(&path, [(dir.clone(), scanned(100))], started);
+    assert!(path.is_file(), "the first save writes the entry");
     // A sentinel only survives if the second save skips the write.
     fs::write(&path, "sentinel").unwrap();
     cache.save(&path, [(dir, scanned(100))], started);
@@ -226,8 +233,8 @@ fn save_does_not_rewrite_a_file_holding_the_same_entries() {
 fn save_drops_directories_missing_from_the_scan() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join(SCAN_CACHE_FILE);
-    let kept = Utf8PathBuf::from("/ws/conversations/kept");
-    let removed = Utf8PathBuf::from("/ws/conversations/removed");
+    let kept = absolute_dir(tmp.path(), "kept");
+    let removed = absolute_dir(tmp.path(), "removed");
     let started = UNIX_EPOCH + Duration::from_secs(200);
     let cache = ScanCache::default();
 
