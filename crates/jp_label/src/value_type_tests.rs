@@ -13,3 +13,15 @@ fn a_date_is_a_zero_padded_calendar_date() {
     assert!(!ValueType::Date.accepts("1w"));
     assert!(!ValueType::Date.accepts(""));
 }
+
+/// `chrono`'s `%Y` round-trips signed and expanded years, which would order
+/// before every four-digit year when compared as text.
+#[test]
+fn a_date_has_a_four_digit_unsigned_year() {
+    assert!(!ValueType::Date.accepts("+10000-01-01"));
+    assert!(!ValueType::Date.accepts("-0001-01-01"));
+    assert!(!ValueType::Date.accepts("+2026-12-01"));
+    assert!(!ValueType::Date.accepts("02026-12-01"));
+    assert!(ValueType::Date.accepts("0001-01-01"));
+    assert!(ValueType::Date.accepts("9999-12-31"));
+}

@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
     findMiscountedLabels,
+    findMistypedLabels,
     findSharedLabels,
     findUnknownLabels,
 } from '../site/jp-vite/loaders/ticket-shared.mjs'
@@ -102,6 +103,48 @@ test('a label on several tickets names them all', () => {
             + 'Keep each on one ticket by taking it off the others '
             + '(`jp ticket label rm --id <id> key=value`), or drop `unique` from the key in '
             + '`plugins.command.ticket.options.labels`.',
+    )
+})
+
+// A key holding dates takes a zero-padded `YYYY-MM-DD` calendar date, as
+// `jp ticket` checks it.
+const DATED = {
+    due: { description: 'When', values: [], open: true, max: 1, type: 'date' },
+    dueness: { description: 'Free text', values: [], open: true },
+}
+
+test('a board with no typed key has nothing to report', () => {
+    assert.equal(findMistypedLabels([ticket('T-02wt0k1', ['area=1w'])], VOCABULARY), null)
+})
+
+test('dates written YYYY-MM-DD pass', () => {
+    const tickets = [
+        ticket('T-02wt0k1', ['due=2026-12-01']),
+        ticket('T-02wt0k2', ['due=2028-02-29', 'dueness=1w']),
+        ticket('T-02wt0k3', []),
+    ]
+
+    assert.equal(findMistypedLabels(tickets, DATED), null)
+})
+
+test('a value under a date key that is not a date is named', () => {
+    const tickets = [
+        ticket('T-02wt0k1', ['due=1w']),
+        ticket('T-02wt0k2', ['due=2026-1-5']),
+        ticket('T-02wt0k3', ['due=2026-02-30']),
+        ticket('T-02wt0k4', ['due=+10000-01-01']),
+        ticket('T-02wt0k5', ['due=2026-12-01']),
+    ]
+
+    assert.equal(
+        findMistypedLabels(tickets, DATED),
+        'Tickets carry labels that are not of their key\'s type:\n'
+            + '  T-02wt0k1: due=1w (a date, written YYYY-MM-DD)\n'
+            + '  T-02wt0k2: due=2026-1-5 (a date, written YYYY-MM-DD)\n'
+            + '  T-02wt0k3: due=2026-02-30 (a date, written YYYY-MM-DD)\n'
+            + '  T-02wt0k4: due=+10000-01-01 (a date, written YYYY-MM-DD)\n\n'
+            + 'Set each to a value of its type (`jp ticket label set --id <id> key=value`). '
+            + '`jp ticket check` says the same.',
     )
 })
 

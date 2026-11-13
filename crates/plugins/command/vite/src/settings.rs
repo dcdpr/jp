@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
-use jp_label::Unique;
+use jp_label::{Unique, ValueType};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -147,6 +147,10 @@ pub(crate) struct Label {
     /// left out when any number of tickets may carry it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unique: Option<&'static str>,
+
+    /// The kind of value an open key holds, `date`; left out for free text.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<&'static str>,
 }
 
 #[expect(
@@ -217,6 +221,7 @@ pub(crate) fn snapshot(
                         min: facet.min(),
                         max: facet.max(),
                         unique: facet.unique().map(Unique::as_str),
+                        value_type: facet.value_type().map(ValueType::as_str),
                     })
                 })
                 .collect(),

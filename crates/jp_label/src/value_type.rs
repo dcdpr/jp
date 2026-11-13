@@ -17,6 +17,10 @@ use serde::Deserialize;
 /// order.
 pub(crate) const DATE_FORMAT: &str = "%Y-%m-%d";
 
+/// The shape a [`ValueType::Date`] value has before it is parsed: a digit for
+/// each `0`, and the `-` separators where they stand.
+const DATE_SHAPE: &[u8] = b"0000-00-00";
+
 /// Expected format for values of an open vocabulary key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -60,12 +64,20 @@ impl fmt::Display for ValueType {
 
 /// Whether `value` is a valid calendar date in zero-padded `YYYY-MM-DD` format.
 ///
-/// `NaiveDate::parse_from_str` accepts unpadded components like `2026-1-5`,
-/// which would sort after `2026-10-01` lexicographically.
-/// Re-formatting checks that the input is zero-padded.
+/// The shape is checked before parsing: `NaiveDate::parse_from_str` accepts
+/// unpadded components (`2026-1-5`) and signed or expanded years
+/// (`+10000-01-01`), neither of which orders chronologically as text.
 pub(crate) fn is_date(value: &str) -> bool {
-    NaiveDate::parse_from_str(value, DATE_FORMAT)
-        .is_ok_and(|date| date.format(DATE_FORMAT).to_string() == value)
+    let shaped = value.len() == DATE_SHAPE.len()
+        && value
+            .bytes()
+            .zip(DATE_SHAPE)
+            .all(|(byte, &shape)| match shape {
+                b'-' => byte == b'-',
+                _ => byte.is_ascii_digit(),
+            });
+
+    shaped && NaiveDate::parse_from_str(value, DATE_FORMAT).is_ok()
 }
 
 #[cfg(test)]
