@@ -103,6 +103,20 @@ that can be picked up, merged, or discussed separately; nor a step of the `plan`
 tool, which tracks the assistant's progress through one conversation and is kept
 with it.
 
+### Closed Prompt
+
+A prompt whose wait for input was ended from outside it, without an answer: by
+the code that opened it, once it no longer needs the answer, or by a graceful
+shutdown.
+A `PromptCloser` in `jp_inquire` closes the prompts opened under it, and
+`jp_inquire::close_all` closes every prompt in the process.
+
+**Not the same as** a cancelled or an interrupted prompt, which the user ends at
+the keyboard with Escape or Ctrl-C.
+
+**Scope**: `InlineReply`.
+A prompt the `inquire` crate draws, `InlineSelect` included, cannot be closed.
+
 ### CommandConfig
 
 The shape of an external command JP runs on behalf of the user: a program,
@@ -233,6 +247,15 @@ Storage sanitization (`Workspace::sanitize`, [RFD-052]) checks the conversations
 on disk at startup and moves broken ones to the trash.
 Stream repair (`ConversationStream::sanitize`) fixes structural problems in an
 event stream, such as a tool call with no response.
+
+### Drain Timeout
+
+How long background tasks get to finish their `run` phase once the command has
+returned, before they are cancelled.
+The `timeout` of `TaskHandler::sync` in `jp_task::handler`.
+
+**Not the same as** a shutdown budget, which a command claims for work of its
+own that is still running after a shutdown request.
 
 ### EditorBackend
 
@@ -462,6 +485,19 @@ tier under load, and bill at whatever actually served it.
 
 **Not the same as** the model: a tier changes what the request costs and how
 fast it is served, not which weights answer it.
+
+### Shutdown Budget
+
+How long a command may keep running after a graceful shutdown is requested, for
+a command that stops its own work in order instead of being dropped at the
+request.
+The code that owns such work claims a budget for as long as the work lasts, and
+the longest budget claimed is the one that applies.
+`ShutdownBudgets` in `jp_cli::shutdown`; a plugin run is the only claimant.
+
+**Not the same as** a plugin's shutdown timeout (`shutdown_timeout_secs`), which
+is one part of a plugin run's budget; nor the drain timeout, which background
+tasks get on every run, shut down or not.
 
 ### Signal Router
 

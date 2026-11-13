@@ -171,6 +171,14 @@ pub enum KvAssignmentErrorKind {
         known_keys: Vec<String>,
     },
 
+    /// A key that no longer exists, because its setting is configured at
+    /// another path.
+    #[error("moved to `{to}`")]
+    Moved {
+        /// The path the setting is configured at.
+        to: String,
+    },
+
     /// An out of bounds index was encountered.
     #[error("unknown index")]
     UnknownIndex {
@@ -1634,6 +1642,17 @@ pub(crate) fn missing_key<T>(kv: &KvAssignment) -> Result<T, BoxedError> {
         },
     )
     .into())
+}
+
+/// Convenience method to create an error for a key whose setting is configured
+/// at `to`.
+pub(crate) fn moved_key<T>(kv: &KvAssignment, to: &str) -> Result<T, BoxedError> {
+    Err(
+        KvAssignmentError::new(kv.key.full_path.clone(), KvAssignmentErrorKind::Moved {
+            to: to.to_owned(),
+        })
+        .into(),
+    )
 }
 
 #[cfg(test)]

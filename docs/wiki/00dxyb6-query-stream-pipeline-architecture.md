@@ -984,6 +984,29 @@ graceful shutdown.
 SIGTERM always requests a graceful shutdown and SIGQUIT always exits immediately
 (code 131); neither goes through the handler stack.
 
+A graceful shutdown drops the running command at its next await point, which
+releases its conversation locks and persists dirty conversations from their
+guards, and then drains background tasks.
+A plugin run is the exception to the drop: it stops its plugin and the turns the
+plugin delegated in order, within its shutdown budget.
+
+A shutdown request closes an open inline reply prompt (`jp_inquire::close_all`),
+which returns as cancelled.
+A prompt the `inquire` crate draws cannot be closed: the single-key select
+behind approvals, interrupt menus and confirmations, and the list select,
+password, text, confirm and multi-select prompts.
+Tool prompts and a plugin's `compose` prompts run on threads of their own, so
+one of those is left behind and teardown restores the terminal it held.
+An `inquire` prompt opened on the thread that polls the command holds the
+shutdown until it is answered.
+
+The tool coordinator closes a prompt the same way when the call it was opened
+for is settled while it is open, as when the connection to the JP MCP Server is
+lost.
+A prompt it cannot close, it waits for.
+An immediate exit (SIGQUIT, or a signal after shutdown began) restores the
+terminal an open prompt held before the process ends.
+
 **Two menu contexts:**
 
 1. **During Streaming**: Stream is paused, user chooses action

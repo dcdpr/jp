@@ -371,7 +371,15 @@ $ jp --cfg 'plugins.command.ticket.options.assistant=Ada'   # equivalent
 
 A list in the object replaces the existing list, just like `:=`.
 To replace an entire map instead of merging into it, use `:=` on the map key
-directly (for example, `plugins.command:={...}`).
+directly (for example, `plugins.command.ticket.options:={...}`).
+
+`plugins.command` and `conversation.tools` hold their `'*'` defaults beside
+their entries, so `:=` on either one merges into it.
+To replace their entries, state the strategy:
+
+```bash
+$ jp --cfg 'plugins.command:={"value": {"ticket": {"run": "allow"}}, "strategy": "replace"}'
+```
 
 #### Reset Keywords
 

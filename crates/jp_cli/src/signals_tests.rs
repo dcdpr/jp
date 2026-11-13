@@ -1,8 +1,30 @@
 use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::{fs, io::Write as _, process::Command};
 
+#[cfg(unix)]
+use camino_tempfile::tempdir;
+#[cfg(unix)]
+use jp_inquire::{InlineOption, InlineSelect};
+#[cfg(unix)]
+use jp_pty::{CommandBuilder, Size, Terminal};
 use tokio::sync::mpsc::{self, error::TryRecvError};
 
 use super::*;
+
+/// The environment variable naming the file
+/// [`a_prompt_left_open_until_the_process_exits`] writes its pid to.
+///
+/// Setting it is also what makes that test act as a probe.
+#[cfg(unix)]
+const EXIT_PROBE_PID_FILE: &str = "JP_TEST_EXIT_PROBE_PID_FILE";
+
+/// How long a step waits on the probe.
+///
+/// Generous: this waits on process startup under whatever else CI is running at
+/// the time.
+#[cfg(unix)]
+const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Push a handler scope onto the router state.
 fn push_handler(inner: &Arc<RouterInner>) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
@@ -324,4 +346,102 @@ async fn escalation_ladder_reaches_exit_through_signal_task() {
     .await
     .expect("the third press should reach the exit action");
     assert_eq!(signals.exit_codes(), vec![130]);
+}
+
+/// The exit action of [`SignalRouter::new`] gives back the terminal an open
+/// prompt holds before it ends the process.
+///
+/// The action ends the process it runs in, so it runs in a child: this test
+/// binary, started again in a pty to run only
+/// [`a_prompt_left_open_until_the_process_exits`], which opens a prompt and
+/// waits.
+/// SIGQUIT is routed straight to the exit action.
+///
+/// Giving the terminal back ends with the cursor at the start of the row below
+/// the prompt.
+/// A process that exits without doing so leaves the cursor on the prompt's row.
+///
+/// Unix only: Windows has no SIGQUIT, and a prompt open in a console receives
+/// Ctrl-C as a key.
+#[cfg(unix)]
+#[test]
+fn an_immediate_exit_gives_back_the_terminal_an_open_prompt_holds() {
+    let tmp = tempdir().expect("a temporary directory");
+    let pid_file = tmp.path().join("pid");
+
+    let terminal = Terminal::pty(Size::new(10, 80))
+        .expect("a pty")
+        .with_timeout(PROBE_TIMEOUT);
+    let mut command =
+        CommandBuilder::new(std::env::current_exe().expect("the path of this test binary"));
+    command.args([
+        "--exact",
+        "signals::tests::a_prompt_left_open_until_the_process_exits",
+        "--nocapture",
+    ]);
+    command.env(EXIT_PROBE_PID_FILE, pid_file.as_str());
+    let mut probe = terminal.spawn(command).expect("the probe to start");
+
+    let screen = terminal
+        .wait_for("the prompt", |screen| screen.contains("Run it?"))
+        .expect("the prompt to be drawn");
+    assert_eq!(screen.cursor().0, 0, "the cursor waits on the prompt's row");
+
+    let pid: u32 = fs::read_to_string(&pid_file)
+        .expect("the pid file to be written")
+        .parse()
+        .expect("a pid");
+
+    // Through the shell, whose `kill` is built in.
+    let sent = Command::new("sh")
+        .args(["-c", &format!("kill -QUIT {pid}")])
+        .status()
+        .expect("a shell to send the signal");
+    assert!(sent.success(), "SIGQUIT is sent to the probe: {sent}");
+
+    assert_eq!(
+        probe.wait_within(PROBE_TIMEOUT).expect("the exit check"),
+        Some(false),
+        "the probe exits with the code of a process ended by SIGQUIT"
+    );
+
+    let screen = terminal
+        .wait_for("the release", |screen| screen.cursor() == (1, 0))
+        .expect("the terminal to be given back");
+    assert_eq!(screen.used(), ["? Run it? [y,n,?]"], "{screen}");
+}
+
+/// The process
+/// [`an_immediate_exit_gives_back_the_terminal_an_open_prompt_holds`] signals:
+/// it routes OS signals the way `jp` does, opens a prompt, and leaves it
+/// unanswered.
+///
+/// Does nothing unless [`EXIT_PROBE_PID_FILE`] is set, which only that test
+/// does, for the child it starts.
+/// It is a test so that the test binary can be that child: a binary of its own
+/// in this package would be installed next to `jp`.
+#[cfg(unix)]
+#[test]
+fn a_prompt_left_open_until_the_process_exits() {
+    let Some(pid_file) = std::env::var_os(EXIT_PROBE_PID_FILE) else {
+        return;
+    };
+
+    let runtime = Runtime::new().expect("a runtime");
+    let _router = SignalRouter::new(&runtime, Duration::from_secs(2));
+
+    // Clears what the test harness printed, so the prompt is on the first row.
+    let mut stdout = io::stdout();
+    write!(stdout, "\x1b[2J\x1b[H").expect("the screen to be cleared");
+    stdout.flush().expect("the screen to be cleared");
+
+    fs::write(pid_file, std::process::id().to_string()).expect("the pid file to be written");
+
+    // Returns only once a key is typed, and nothing types one: the router's
+    // exit action ends the process while this waits.
+    let options = vec![
+        InlineOption::new('y', "run it"),
+        InlineOption::new('n', "skip it"),
+    ];
+    drop(InlineSelect::new("Run it?", options).prompt(&mut io::stdout()));
 }

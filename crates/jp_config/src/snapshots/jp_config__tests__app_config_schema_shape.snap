@@ -1343,27 +1343,12 @@ interrupt: InterruptConfig
 loader: LoaderConfig
   reset: "none" | null
 plugins: PluginsConfig
-  command: MergeableMap_CommandPluginConfig
-    |:
-      *: CommandPluginConfig
-        checksum:
-          |: ChecksumConfig
-            algorithm?: "sha256" | "sha1"
-            value: string
-          |: null
-        options: MergeableMap_JsonValue
-          |:
-            *: unknown
-          |: MergedMap_JsonValue
-            discard_when_merged?: bool
-            strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
-            value?:
-              *: unknown
-        run: "ask" | "allow" | "deny" | null
-    |: MergedMap_CommandPluginConfig
-      discard_when_merged?: bool
-      strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
-      value?:
+  command: CommandPluginsConfig
+    *: CommandPluginDefaultsConfig
+      run?: "ask" | "allow" | "deny"
+      shutdown_timeout_secs?: int
+    plugins (flattened): MergeableMap_CommandPluginConfig
+      |:
         *: CommandPluginConfig
           checksum:
             |: ChecksumConfig
@@ -1379,7 +1364,27 @@ plugins: PluginsConfig
               value?:
                 *: unknown
           run: "ask" | "allow" | "deny" | null
-  shutdown_timeout_secs?: int
+          shutdown_timeout_secs: int | null
+      |: MergedMap_CommandPluginConfig
+        discard_when_merged?: bool
+        strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+        value?:
+          *: CommandPluginConfig
+            checksum:
+              |: ChecksumConfig
+                algorithm?: "sha256" | "sha1"
+                value: string
+              |: null
+            options: MergeableMap_JsonValue
+              |:
+                *: unknown
+              |: MergedMap_JsonValue
+                discard_when_merged?: bool
+                strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+                value?:
+                  *: unknown
+            run: "ask" | "allow" | "deny" | null
+            shutdown_timeout_secs: int | null
 providers: ProviderConfig
   llm: LlmProviderConfig
     aliases: MergeableMap_ModelIdOrAliasConfig

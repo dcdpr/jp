@@ -10,7 +10,7 @@ use crate::{InlineOption, InlineReply, ReplyEditMode, ReplyOutcome, inline_selec
 /// This abstraction enables testing `InterruptHandler` without a real TTY.
 ///
 /// Requires `Send + Sync` to allow use in async contexts and across threads
-/// (e.g., `spawn_blocking` for tool prompts).
+/// (e.g., tool prompts, which run on threads of their own).
 pub trait PromptBackend: Send + Sync {
     /// Display a single-character inline select menu (like git's `[y/n/q/?]`).
     ///
@@ -105,6 +105,13 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
 }
 
 /// Terminal prompt backend using `jp_inquire` and `inquire`.
+///
+/// Its inline reply closes with [`close_all`] or a [`PromptCloser`].
+/// Its inline select, list select and password prompt are drawn by `inquire`,
+/// and return only when a key is typed.
+///
+/// [`PromptCloser`]: crate::PromptCloser
+/// [`close_all`]: crate::close_all
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TerminalPromptBackend;
 

@@ -281,8 +281,8 @@ fn law_holds_for_a_nested_key_dropped_from_plugin_options() {
         ("without unsets", fold(&prev, next.clone())),
     ] {
         assert_eq!(
-            entries(&folded.plugins.command["serve"].options),
-            entries(&next.plugins.command["serve"].options),
+            entries(&folded.plugins.command.plugins["serve"].options),
+            entries(&next.plugins.command.plugins["serve"].options),
             "{how}"
         );
     }
@@ -331,10 +331,13 @@ fn a_nested_key_added_to_plugin_options_is_not_a_replacement() {
 
     assert!(unsets.is_empty(), "{unsets:?}");
     for (how, options) in [
-        ("with unsets", &delta.plugins.command["serve"].options),
+        (
+            "with unsets",
+            &delta.plugins.command.plugins["serve"].options,
+        ),
         (
             "without unsets",
-            &prev.delta(next).plugins.command["serve"].options,
+            &prev.delta(next).plugins.command.plugins["serve"].options,
         ),
     ] {
         assert!(

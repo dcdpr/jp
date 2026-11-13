@@ -1,7 +1,9 @@
 use jp_config::{
     AppConfig, PartialAppConfig, Schema,
+    plugins::command::RunPolicy,
     schema::{BooleanType, StructType},
     style::window_rows::{RowCount, WindowRows},
+    types::map::{MergeableMap, MergedMapStrategy},
 };
 use serde_json::json;
 
@@ -131,6 +133,90 @@ fn strip_groups_removed_fields_by_the_object_that_held_them() {
             "plugins.command.serve-web": ["install"],
             "plugins.command.ticket": ["install"],
         })
+    );
+}
+
+/// A conversation stored while the plugin shutdown timeout was configured for
+/// every kind of plugin carries it at `plugins.shutdown_timeout_secs`.
+/// It reads as the command plugins' default, and the plugins stored beside it
+/// are kept.
+#[test]
+fn a_stored_plugin_shutdown_timeout_reads_as_the_command_plugin_default() {
+    let value = json!({
+        "plugins": {
+            "shutdown_timeout_secs": 30,
+            "command": {
+                "serve-web": { "run": "deny" }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    let command = &config.plugins.command;
+
+    assert_eq!(command.defaults.shutdown_timeout_secs, Some(30));
+    assert_eq!(command.plugins["serve-web"].run, Some(RunPolicy::Deny));
+    assert_eq!(command.plugins.len(), 1);
+}
+
+/// Moved, the stored timeout is a key the schema knows, so nothing is stripped
+/// and no warning is logged for a conversation that only predates the move.
+#[test]
+fn a_moved_plugin_shutdown_timeout_leaves_nothing_to_strip() {
+    let mut value = json!({ "plugins": { "shutdown_timeout_secs": 30 } });
+
+    migrate_plugin_shutdown_timeout(&mut value);
+
+    assert_eq!(
+        value,
+        json!({ "plugins": { "command": { "*": { "shutdown_timeout_secs": 30 } } } })
+    );
+
+    let stripped = strip_unknown_fields(&mut value, &AppConfig::schema());
+    assert_eq!(stripped.count(), 0);
+}
+
+#[test]
+fn a_command_plugin_default_already_stored_is_kept_over_the_old_key() {
+    let mut value = json!({
+        "plugins": {
+            "shutdown_timeout_secs": 30,
+            "command": { "*": { "shutdown_timeout_secs": 9 } }
+        }
+    });
+
+    migrate_plugin_shutdown_timeout(&mut value);
+
+    assert_eq!(
+        value,
+        json!({ "plugins": { "command": { "*": { "shutdown_timeout_secs": 9 } } } })
+    );
+}
+
+/// A plugins map stored with a strategy keeps `value` and `strategy` where
+/// plugin names otherwise sit, and the default joins them as a sibling key.
+#[test]
+fn a_stored_plugin_shutdown_timeout_moves_beside_a_plugins_map_stating_a_strategy() {
+    let value = json!({
+        "plugins": {
+            "shutdown_timeout_secs": 30,
+            "command": {
+                "value": { "serve-web": { "run": "deny" } },
+                "strategy": "replace"
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    let command = &config.plugins.command;
+
+    assert_eq!(command.defaults.shutdown_timeout_secs, Some(30));
+    assert_eq!(command.plugins["serve-web"].run, Some(RunPolicy::Deny));
+    assert!(
+        matches!(&command.plugins, MergeableMap::Merged(merged)
+            if merged.strategy == Some(MergedMapStrategy::Replace)),
+        "the stored strategy survives: {:?}",
+        command.plugins
     );
 }
 

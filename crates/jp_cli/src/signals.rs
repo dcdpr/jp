@@ -37,7 +37,7 @@
 //! graceful shutdown request.
 
 use std::{
-    fmt,
+    fmt, io,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -46,6 +46,8 @@ use std::{
 };
 
 use futures::{Stream, StreamExt as _};
+use jp_inquire::{release_terminal, terminal_held};
+use jp_printer::open_tty;
 use tokio::{
     runtime::{Handle, Runtime},
     sync::mpsc::{self, error::TrySendError},
@@ -119,6 +121,7 @@ impl SignalRouter {
         let signals = os_signals();
 
         Self::with_signal_source(runtime.handle(), signals, escalation_cooldown, |code| {
+            release_prompt_terminal();
             std::process::exit(code)
         })
     }
@@ -546,6 +549,31 @@ impl RouterInner {
         ) {
             self.shutdown_token.cancel();
         }
+    }
+}
+
+/// Give back the terminal an open prompt holds, ahead of an exit that runs no
+/// teardown.
+///
+/// An immediate exit leaves the prompt's thread behind mid-read, with the
+/// terminal in raw mode.
+///
+/// Written straight to the terminal, not through the printer: its worker may be
+/// in the middle of a write, and this exit waits for nothing.
+fn release_prompt_terminal() {
+    if !terminal_held() {
+        return;
+    }
+
+    // Where the printer draws prompts: the controlling terminal, or stdout
+    // without one.
+    let released = match open_tty() {
+        Some(mut tty) => release_terminal(&mut tty),
+        None => release_terminal(&mut io::stdout()),
+    };
+
+    if let Err(error) = released {
+        debug!(%error, "Failed to restore the terminal an open prompt held.");
     }
 }
 

@@ -13,6 +13,7 @@ use jp_config::{
         ResultMode, RunMode, access::PartialEnvRuleConfig,
     },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
+    plugins::command::RunPolicy,
     types::{command::CommandConfigOrString, vec::MergeableVec},
     util::build,
 };
@@ -2223,6 +2224,69 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     assert_eq!(
         model_delta["delta"]["assistant"]["model"]["id"]["name"],
         "gpt-model"
+    );
+}
+
+/// A conversation keeps the default plugin policy it was created under.
+///
+/// Its stored configuration states `plugins.command.'*'.run`, and the
+/// conversation layer sits above the config files, so a default the files
+/// change afterwards reaches new conversations and not this one.
+/// `--cfg` sits above the conversation layer, and does reach it.
+#[tokio::test]
+async fn a_conversation_keeps_the_default_plugin_policy_it_was_created_under() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+
+    // Created while the config files leave the default at `ask`.
+    let asking = AppConfig::new_test().to_partial();
+    let first = Query {
+        new_conversation: true,
+        query: inline_query("hello"),
+        ..Default::default()
+    };
+    let created = build_query_config(&workspace, asking.clone(), &[], &first, None);
+    assert_eq!(created.plugins.command.defaults.run, RunPolicy::Ask);
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(created.clone()), None)
+        .unwrap();
+    let conversation_id = lock.id();
+    run_mock_turn(&created, &lock, "hello", "Hi.").await;
+    drop(lock);
+
+    // From here on the config files deny every plugin that is not named.
+    let mut denying = asking.clone();
+    denying.plugins.command.defaults.run = Some(RunPolicy::Deny);
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let next = Query {
+        query: inline_query("again"),
+        ..Default::default()
+    };
+
+    let resumed = build_query_config(&workspace, denying.clone(), &[], &next, Some(&handle));
+    assert_eq!(
+        resumed.plugins.command.defaults.run,
+        RunPolicy::Ask,
+        "the conversation's stored default wins over the config files"
+    );
+
+    let fresh = build_query_config(&workspace, denying, &[], &first, None);
+    assert_eq!(
+        fresh.plugins.command.defaults.run,
+        RunPolicy::Deny,
+        "a new conversation takes the default the config files set"
+    );
+
+    let deny = "plugins.command.*.run=deny"
+        .parse::<KeyValueOrPath>()
+        .unwrap();
+    let overridden = build_query_config(&workspace, asking, &[deny], &next, Some(&handle));
+    assert_eq!(
+        overridden.plugins.command.defaults.run,
+        RunPolicy::Deny,
+        "`--cfg` wins over the conversation's stored default"
     );
 }
 

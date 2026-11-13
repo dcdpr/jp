@@ -427,32 +427,34 @@ fn a_removed_command_plugin_survives_the_next_invocation() {
         .base
         .plugins
         .command
+        .plugins
         .insert("serve".to_owned(), plugin(RunPolicy::Allow));
     pipeline
         .base
         .plugins
         .command
+        .plugins
         .insert("ticket".to_owned(), plugin(RunPolicy::Deny));
 
     let before = pipeline.base.clone();
     let mut after = pipeline.base.clone();
-    after.plugins.command.shift_remove("serve");
+    after.plugins.command.plugins.shift_remove("serve");
 
     let mut unsets = Vec::new();
     let delta = before.delta_with_unsets(after.clone(), "", &mut unsets);
 
     assert_eq!(unsets, ["plugins.command.serve"]);
-    assert!(!delta.plugins.command.contains_key("serve"));
+    assert!(!delta.plugins.command.plugins.contains_key("serve"));
 
     let partial = pipeline.partial_with_conversation(after, &unsets).unwrap();
 
     assert!(
-        !partial.plugins.command.contains_key("serve"),
+        !partial.plugins.command.plugins.contains_key("serve"),
         "clearing the path has to remove the entry, not empty it: an entry that is there is not a \
          gap for filling to close"
     );
     assert!(
-        partial.plugins.command.contains_key("ticket"),
+        partial.plugins.command.plugins.contains_key("ticket"),
         "and the plugin it kept is still there"
     );
 }

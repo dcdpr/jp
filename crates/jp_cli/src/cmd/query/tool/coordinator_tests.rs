@@ -893,15 +893,17 @@ async fn a_lost_connection_settles_every_call_without_asking() {
     assert_eq!(strip_ansi(&stderr.lock()), "");
 }
 
-/// A prompt already open when the connection is lost is waited for before the
-/// calls are handed back, and its answer changes nothing.
+/// Two calls, where the connection is lost while the first call's approval
+/// prompt is open on `prompts`.
 ///
-/// The prompt runs on a thread of its own and owns the terminal until it is
-/// answered.
-/// Returning while it is open would leave it on screen over the turn's error,
-/// with its answer sent to a batch that no longer exists.
-#[tokio::test]
-async fn a_lost_connection_waits_for_an_open_prompt() {
+/// Returns what the calls were handed back with, and whether that happened
+/// without the prompt being answered.
+/// A prompt still open half a second after the connection is lost is answered
+/// through `answer`, approving the call.
+async fn lose_the_connection_with_a_prompt_open(
+    prompts: Arc<HeldPromptBackend>,
+    answer: std::sync::mpsc::Sender<char>,
+) -> (ExecutionResult, bool) {
     let mut tools = ask_tools();
     tools.insert(
         "lost_tool".to_owned(),
@@ -911,8 +913,6 @@ async fn a_lost_connection_waits_for_an_open_prompt() {
         )
         .unwrap(),
     );
-    let (answer, answers) = std::sync::mpsc::channel();
-    let prompts = Arc::new(HeldPromptBackend::new(answers));
     // The connection is lost only once the first call's approval prompt is
     // open, so the loss always lands while it is waiting for an answer.
     let opened = Arc::clone(&prompts.opened);
@@ -966,45 +966,168 @@ async fn a_lost_connection_waits_for_an_open_prompt() {
     );
     tokio::pin!(driving);
 
-    assert!(
-        tokio::time::timeout(Duration::from_millis(500), &mut driving)
-            .await
-            .is_err(),
-        "the calls were handed back while the approval prompt was still open"
-    );
+    if let Ok(result) = tokio::time::timeout(Duration::from_millis(500), &mut driving).await {
+        return (result, true);
+    }
+
     answer.send('y').unwrap();
     let result = tokio::time::timeout(Duration::from_secs(5), driving)
         .await
         .expect("answering the prompt lets the calls be handed back");
 
+    (result, false)
+}
+
+/// What each call of [`lose_the_connection_with_a_prompt_open`] is handed back
+/// with: neither ran.
+fn both_calls_lost() -> Vec<(&'static str, Result<String, String>)> {
+    vec![
+        (
+            "call_1",
+            Err(
+                "Tool 'my_tool' was not executed: JP could not complete the call. You may retry \
+                 it."
+                .to_owned(),
+            ),
+        ),
+        (
+            "call_2",
+            Err(
+                "Tool 'lost_tool' was not executed: JP could not complete the call. You may retry \
+                 it."
+                .to_owned(),
+            ),
+        ),
+    ]
+}
+
+/// The responses in `result`, by call.
+fn responses(result: &ExecutionResult) -> Vec<(&str, Result<String, String>)> {
+    result
+        .reviews
+        .iter()
+        .map(|(id, review)| (id.as_str(), review.response.result.clone()))
+        .collect()
+}
+
+/// A prompt that can be closed, open for a call that the lost connection
+/// settled, is closed: the calls are handed back without anybody answering it.
+#[tokio::test]
+async fn a_lost_connection_closes_an_open_prompt() {
+    let (answer, answers) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldPromptBackend::closing(answers));
+
+    let (result, unanswered) =
+        lose_the_connection_with_a_prompt_open(Arc::clone(&prompts), answer).await;
+
+    assert!(
+        unanswered,
+        "the approval prompt was left open for the user to answer"
+    );
+    assert_eq!(result.outcome, ExecutionOutcome::ConnectionLost);
+    assert_eq!(responses(&result), both_calls_lost());
+    assert_eq!(prompts.shown.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// A prompt that cannot be closed is waited for before the calls are handed
+/// back, and its answer changes nothing.
+///
+/// The prompt runs on a thread of its own and owns the terminal until it is
+/// answered.
+/// Returning while it is open would leave it on screen over the turn's error,
+/// with its answer sent to a batch that no longer exists.
+#[tokio::test]
+async fn a_lost_connection_waits_for_an_open_prompt_that_cannot_be_closed() {
+    let (answer, answers) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldPromptBackend::new(answers));
+
+    let (result, unanswered) =
+        lose_the_connection_with_a_prompt_open(Arc::clone(&prompts), answer).await;
+
+    assert!(
+        !unanswered,
+        "the calls were handed back while the approval prompt was still open"
+    );
     assert_eq!(result.outcome, ExecutionOutcome::ConnectionLost);
     assert_eq!(
-        result
-            .reviews
-            .iter()
-            .map(|(id, review)| (id.as_str(), review.response.result.clone()))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                "call_1",
-                Err(
-                    "Tool 'my_tool' was not executed: JP could not complete the call. You may \
-                     retry it."
-                        .to_owned()
-                )
-            ),
-            (
-                "call_2",
-                Err(
-                    "Tool 'lost_tool' was not executed: JP could not complete the call. You may \
-                     retry it."
-                        .to_owned()
-                )
-            ),
-        ],
+        responses(&result),
+        both_calls_lost(),
         "approving the call after the connection was lost does not run it"
     );
     assert_eq!(prompts.shown.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// A run that ends while an approval prompt is open does not wait for the
+/// prompt to be answered.
+///
+/// A runtime waits for its blocking tasks before it shuts down, and a prompt
+/// returns only when a key is typed, so a prompt running as a blocking task
+/// keeps `jp` from exiting until somebody answers it.
+#[test]
+fn a_runtime_shuts_down_while_an_approval_prompt_is_open() {
+    let (answer, answers) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldPromptBackend::new(answers));
+    let source = TestExecutorSource::new().with_executor("my_tool", |request| {
+        Box::new(
+            MockExecutor::completed(&request.id, &request.name, "ran").with_permission_info(
+                PermissionInfo {
+                    tool_id: request.id.clone(),
+                    state_key: request.id.clone(),
+                    tool_name: request.name.clone(),
+                    tool_source: ToolSource::Builtin { tool: None },
+                    run_mode: RunMode::Ask,
+                    arguments: Value::Object(Map::new()),
+                },
+            ),
+        )
+    });
+    let mut coordinator = ToolCoordinator::new(ask_tools(), Box::new(source));
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    let mut turn_state = TurnState::default();
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let driving = drive(
+            &mut coordinator,
+            vec![ToolCallRequest {
+                id: "call_1".into(),
+                name: "my_tool".into(),
+                arguments: Map::new(),
+            }],
+            prompts.clone(),
+            Arc::new(MockInquiryBackend::new(HashMap::new())),
+            &mut turn_state,
+            &conv,
+            &printer,
+        );
+        tokio::pin!(driving);
+
+        // Dropped once the prompt is open, the way a shutdown request drops the
+        // command it interrupts.
+        tokio::select! {
+            () = prompts.opened.notified() => {}
+            _ = &mut driving => panic!("the call was settled without its approval prompt"),
+        }
+    });
+
+    // Answers the prompt if the runtime is still shutting down ten seconds from
+    // now, and reports that it had to.
+    let (ended, has_ended) = std::sync::mpsc::channel::<()>();
+    let rescue = std::thread::spawn(move || {
+        let waited = has_ended.recv_timeout(Duration::from_secs(10)).is_err();
+        answer.send('n').ok();
+        waited
+    });
+
+    drop(runtime);
+    ended.send(()).ok();
+
+    assert!(
+        !rescue.join().unwrap(),
+        "the runtime waited for the approval prompt to be answered"
+    );
 }
 
 /// Tools named `name` whose calls an argument formatter describes, and which
@@ -1583,6 +1706,11 @@ async fn an_unanswered_formatter_question_settles_the_call() {
 struct HeldPromptBackend {
     answers: std::sync::Mutex<std::sync::mpsc::Receiver<char>>,
 
+    /// Whether an open select returns once it is closed, as a prompt that polls
+    /// `jp_inquire::close_requested` does, or goes on waiting for its answer,
+    /// as a prompt that `inquire` draws does.
+    closes: bool,
+
     /// Notified each time an inline select opens.
     opened: Arc<Notify>,
 
@@ -1591,11 +1719,21 @@ struct HeldPromptBackend {
 }
 
 impl HeldPromptBackend {
+    /// A backend whose selects only an answer ends.
     fn new(answers: std::sync::mpsc::Receiver<char>) -> Self {
         Self {
             answers: std::sync::Mutex::new(answers),
+            closes: false,
             opened: Arc::new(Notify::new()),
             shown: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// A backend whose selects also end when they are closed.
+    fn closing(answers: std::sync::mpsc::Receiver<char>) -> Self {
+        Self {
+            closes: true,
+            ..Self::new(answers)
         }
     }
 }
@@ -1610,11 +1748,21 @@ impl PromptBackend for HeldPromptBackend {
     ) -> Result<char, InquireError> {
         self.shown.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.opened.notify_one();
-        self.answers
-            .lock()
-            .unwrap()
-            .recv()
-            .map_err(|_| InquireError::OperationCanceled)
+
+        let answers = self.answers.lock().unwrap();
+        loop {
+            match answers.recv_timeout(Duration::from_millis(5)) {
+                Ok(answer) => return Ok(answer),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(InquireError::OperationCanceled);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if self.closes && jp_inquire::close_requested() {
+                        return Err(InquireError::OperationInterrupted);
+                    }
+                }
+            }
+        }
     }
 
     fn inline_reply(

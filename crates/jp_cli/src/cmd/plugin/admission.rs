@@ -94,17 +94,22 @@ pub(crate) enum Reason {
 /// 1. `run = "deny"` refuses.
 /// 2. A pinned checksum the binary does not match refuses.
 /// 3. `run = "allow"` runs.
-/// 4. `run = "ask"`, the default, runs an official binary the registry
-///    publishes, or one the approval store holds, and asks about anything else.
-pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginConfig>) -> Verdict {
+/// 4. `run = "ask"` runs an official binary the registry publishes, or one the
+///    approval store holds, and asks about anything else.
+///
+/// `run` is the plugin's own in `config`, or `default` for a plugin that sets
+/// none: the `run` of `plugins.command.'*'`.
+pub(crate) fn decide(
+    candidate: &Candidate<'_>,
+    config: Option<&CommandPluginConfig>,
+    default: RunPolicy,
+) -> Verdict {
     let name = &candidate.plugin.name;
     let path = &candidate.plugin.path;
 
-    let policy = config.and_then(|c| c.run).unwrap_or_default();
-    if policy == RunPolicy::Deny {
-        return Verdict::Refuse(format!(
-            "plugin `{name}` is denied by configuration (plugins.command.{name}.run = \"deny\")"
-        ));
+    let own = config.and_then(|c| c.run);
+    if let Some(refusal) = denial(name, own, Some(default)) {
+        return Verdict::Refuse(refusal);
     }
 
     if let Some(pinned) = config.and_then(|c| c.checksum.as_ref())
@@ -118,7 +123,7 @@ pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginCon
         return Verdict::Refuse(refusal);
     }
 
-    if policy == RunPolicy::Allow {
+    if own.unwrap_or(default) == RunPolicy::Allow {
         return Verdict::Run;
     }
 
@@ -133,6 +138,28 @@ pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginCon
         ApprovalMatch::None if candidate.official => Reason::NotTheRelease,
         ApprovalMatch::None => Reason::New,
     })
+}
+
+/// Why the plugin `name` is refused, when configuration denies it; `None` when
+/// it does not.
+///
+/// `own` is the plugin's own `run`, and `default` the `run` of
+/// `plugins.command.'*'`, which decides for a plugin that sets none.
+/// The refusal names whichever of the two keys denies.
+pub(crate) fn denial(
+    name: &str,
+    own: Option<RunPolicy>,
+    default: Option<RunPolicy>,
+) -> Option<String> {
+    let key = match (own, default) {
+        (Some(RunPolicy::Deny), _) => format!("plugins.command.{name}.run"),
+        (None, Some(RunPolicy::Deny)) => "plugins.command.'*'.run".to_owned(),
+        _ => return None,
+    };
+
+    Some(format!(
+        "plugin `{name}` is denied by configuration ({key} = \"deny\")"
+    ))
 }
 
 /// Why a binary is refused, when its contents do not match the checksum pinned
@@ -307,7 +334,7 @@ pub(crate) fn admit(
         approval: approvals.check(&plugin.name, &plugin.path, &sha256),
     };
 
-    let reason = match decide(&candidate, config) {
+    let reason = match decide(&candidate, config, plugins_config.command.defaults.run) {
         Verdict::Run => {
             debug!(name = plugin.name, path = %plugin.path, "Plugin admitted.");
             return Ok(sha256);
