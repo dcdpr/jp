@@ -6,16 +6,16 @@
 //! into the turn as an interrupt reply (like `[r] Reply` in the terminal), one
 //! reply at a time, and never ahead of an earlier message from the same chat.
 //! Any other message waits in the [`Queue`].
-//! Before either, a message can wait in the [`Inbox`] for a model to decide
-//! what to do with it: answer it, ignore it, or, for a message that may give a
-//! command, start a new conversation or compact the current one.
+//! Before either, when a [`Decide`] classifier is configured, incoming messages
+//! pass through the [`Inbox`], which classifies each message as `answer`,
+//! `ignore`, `new_conversation`, or `compact`.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
-//! Every query passes `--cfg` overrides that disable every configured tool,
-//! then apply the configured persona, which enables the tools it names, then
-//! the sender's identity so that tickets, RFDs, and wiki pages created during
-//! the turn are attributed to the sender.
+//! Every query passes `--cfg` overrides that disable all configured tools,
+//! apply the configured persona (which re-enables its allowed tools), and set
+//! the sender's identity so created tickets, RFDs, and wiki pages are
+//! attributed to the sender.
 //! If the bridge stops while a turn is running, it waits for the turn to finish
 //! and verifies the working tree before releasing the checkout lock.
 //!
@@ -55,7 +55,7 @@ const NO_ANSWER: &str = "(No answer.)";
 const SILENT: &str = "NO_REPLY";
 
 /// User-facing message sent when a turn fails; the underlying error is logged.
-const FAILED: &str = "Sorry, that didn't work. The bridge's log says why.";
+const FAILED: &str = "Oops, something went wrong. Ask an admin to check the bridge logs.";
 
 const NEW_CONVERSATION: &str = "Your next message starts a new conversation.";
 
@@ -63,8 +63,8 @@ const NOTHING_TO_COMPACT: &str = "There's no conversation to compact yet.";
 
 const BUSY_COMPACTING: &str = "I'm still answering here. Ask me to compact once I've replied.";
 
-const PAUSED: &str = "Changes are paused until the last ones have been reviewed. I'll answer as \
-                      soon as that's done.";
+const PAUSED: &str = "The bridge is paused until an admin reviews the last changes. Your message \
+                      is queued and I'll reply once it resumes.";
 
 /// State of the currently executing turn.
 #[derive(Debug)]
@@ -81,7 +81,7 @@ struct Running {
 /// Completion event from a spawned host task.
 #[derive(Debug)]
 pub(crate) enum Event {
-    /// The host has the active turn's request, on this conversation.
+    /// The host accepted the active turn's request on `conversation`.
     Started {
         conversation: String,
     },
@@ -90,7 +90,7 @@ pub(crate) enum Event {
         result: Result<(), String>,
     },
 
-    /// What to do with the first message in the inbox.
+    /// Classification result for the front message in the inbox.
     Decided {
         result: Result<Verdict, String>,
     },
@@ -322,8 +322,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     self.outbox.send(&incoming.chat, NEW_CONVERSATION);
                 }
                 Action::Compact => {
-                    // The running turn holds its conversation; compacting it
-                    // now would find it locked.
+                    // The active turn holds the conversation lock, so
+                    // compaction cannot run concurrently.
                     let busy = self
                         .running
                         .as_ref()
@@ -332,7 +332,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                         None => self.outbox.send(&incoming.chat, NOTHING_TO_COMPACT),
                         Some(_) if busy => self.outbox.send(&incoming.chat, BUSY_COMPACTING),
                         Some(conversation) => {
-                            // No turn starts while the conversation is compacted.
+                            // Hold the queue while compaction holds the conversation lock.
                             self.queue.hold();
                             compact(
                                 &self.host,
@@ -364,7 +364,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         }
 
-        // Only the person the turn runs as, so what it writes stays theirs.
+        // Only inject replies from the active turn's sender so author
+        // attribution stays consistent.
         let conversation = self
             .running
             .as_ref()
