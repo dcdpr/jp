@@ -48,7 +48,7 @@ use ticket::{
     store,
 };
 
-use crate::options::{LABELS_KEY, Options, leftover_labels_file};
+use crate::options::{BoardOptions, LABELS_KEY, Options, leftover_labels_file};
 
 /// The name the plugin is configured under, `plugins.command.ticket`.
 pub(crate) const PLUGIN: &str = "ticket";
@@ -277,7 +277,19 @@ enum Command {
     /// Print the board: Todo, In Progress, and Done, each in board order.
     ///
     /// Done shows its top `board.done_limit` tickets; `list` shows them all.
-    Board,
+    /// A column not shown in full is headed by how many of its tickets are
+    /// shown, as in `Todo (10/190)`.
+    Board {
+        /// Only this column: `todo`, `in progress`, or `done`.
+        /// Repeat for more than one; they print in board order.
+        #[arg(long = "status")]
+        statuses: Vec<Status>,
+
+        /// Show at most this many tickets of each column, from the top.
+        /// Takes the place of `board.done_limit` for Done.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 
     /// Move a ticket next to another in the same column of the board.
     #[command(group(ArgGroup::new("place").required(true)))]
@@ -1560,7 +1572,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             uncheck,
         }),
 
-        Command::Board => show_board(dir, ctx.options.board.done_limit),
+        Command::Board { statuses, limit } => show_board(dir, &ctx.options.board, &statuses, limit),
 
         Command::Rank { id, before, after } => rank(dir, id, before, after),
 
@@ -1723,9 +1735,18 @@ fn rename(
 /// Print the board, one column after another.
 ///
 /// Stacked rather than side by side, which would wrap on a narrow terminal.
-/// Done is cut to its top `done_limit` tickets, and its heading says how many
-/// there are.
-fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
+/// Only the columns in `statuses` are printed, in board order; an empty
+/// `statuses` prints all three.
+/// Every column is cut to its top `limit` tickets.
+/// Without a `limit`, only Done is cut, to its top `layout.done_limit` tickets.
+/// A column shown in full is headed by its total, as in `Todo (190)`; a column
+/// that was cut by how many of its tickets are shown, as in `Todo (10/190)`.
+fn show_board(
+    dir: &Utf8Path,
+    layout: &BoardOptions,
+    statuses: &[Status],
+    limit: Option<usize>,
+) -> Result<Output, String> {
     let entries = store::list(dir).map_err(|error| error.to_string())?;
     let order = board::read(dir).map_err(|error| error.to_string())?;
 
@@ -1740,6 +1761,10 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
 
     let mut columns = vec![];
     for status in [Status::Todo, Status::InProgress, Status::Done] {
+        if !statuses.is_empty() && !statuses.contains(&status) {
+            continue;
+        }
+
         let column: Vec<TicketId> = tickets
             .iter()
             .filter(|(_, ticket)| ticket.metadata.status == status)
@@ -1748,14 +1773,11 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
         let laid_out = order.arrange(status, &column);
 
         let total = laid_out.len();
-        let shown = if status == Status::Done {
-            total.min(done_limit)
-        } else {
-            total
-        };
+        let limit = limit.or((status == Status::Done).then_some(layout.done_limit));
+        let shown = limit.map_or(total, |limit| total.min(limit));
 
         let mut text = if shown < total {
-            format!("{status} ({total}, showing {shown})\n")
+            format!("{status} ({shown}/{total})\n")
         } else {
             format!("{status} ({total})\n")
         };
