@@ -269,6 +269,39 @@ fn test_map_model_gemini_4_argon() {
     assert_eq!(details.prefill, None);
 }
 
+#[test]
+fn test_map_model_gemini_4_hydrogen() {
+    let model = types::Model {
+        base_model_id: "gemini-4-hydrogen".to_owned(),
+        display_name: "Gemini 4 Hydrogen".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "gemini-4-hydrogen").try_into().unwrap()
+    );
+    assert_eq!(details.display_name, Some("Gemini 4 Hydrogen".to_owned()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(false, true, true, true, true, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.prefill, None);
+}
+
 /// A model whose ladder is unknown still honours the caller's effort.
 /// Dropping it would make `-r high` silently do nothing on any thinking model
 /// newer than this binary, which is most of Gemini's current catalog.
@@ -423,6 +456,59 @@ fn test_absolute_effort_resolves_against_configured_max_tokens() {
         .expect("configured reasoning sends a thinking config");
 
     assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::High));
+}
+
+#[test]
+fn test_xhigh_effort_requests_xhigh_level_when_supported() {
+    let model = table_details((PROVIDER, "gemini-4-hydrogen").try_into().unwrap());
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::XHigh),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("configured reasoning sends a thinking config");
+
+    assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::XHigh));
+    assert_eq!(
+        thinking.thinking_budget, None,
+        "a level-based model takes no token budget"
+    );
+}
+
+/// Gemini's API expects `"XHIGH"` without an underscore, not the `"X_HIGH"`
+/// that a `SCREAMING_SNAKE_CASE` serde rename of `XHigh` would produce.
+///
+/// See:
+/// <https://aistudio.google.com/api-reference/generate-content/generate-content#request-body>
+#[test]
+fn test_xhigh_level_wire_spelling() {
+    assert_eq!(
+        serde_json::to_value(types::ThinkingLevel::XHigh).unwrap(),
+        Value::from("XHIGH")
+    );
 }
 
 /// A model the API reports as not thinking is recorded as not reasoning, even
@@ -601,6 +687,34 @@ async fn test_unknown_model_inferred_thinking_level()
             },
         )))
         .event(ChatRequest::from("What is 2 + 2?"));
+
+    run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
+#[test(tokio::test)]
+async fn test_gemini_4_hydrogen_xhigh_reasoning()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let id: ModelIdConfig = "google/gemini-4-hydrogen".parse().unwrap();
+
+    // Combine the catalog entry with the token limits `map_model` reads from
+    // the API.
+    let mut details = table_details(id.clone());
+    details.context_window = Some(1_048_576);
+    details.max_output_tokens = Some(65_536);
+
+    let request = TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(PartialReasoningConfig::Custom(
+            PartialCustomReasoningConfig {
+                effort: Some(ReasoningEffort::XHigh),
+                exclude: Some(false),
+            },
+        )))
+        .event(ChatRequest::from(
+            "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How \
+             much does the ball cost? Answer in one sentence.",
+        ));
 
     run_test(PROVIDER, function_name!(), Some(request)).await
 }

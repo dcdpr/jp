@@ -205,6 +205,7 @@ gpt = "sol"
 # Google aliases
 carbon = "google/gemini-4-carbon"
 argon = "google/gemini-4-argon"
+hydrogen = "google/gemini-4-hydrogen"
 flash = "google/gemini-3.8-flash"
 google = "flash"
 gemini = "flash"

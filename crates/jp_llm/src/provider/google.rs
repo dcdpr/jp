@@ -261,7 +261,7 @@ fn create_request(
                         low,
                         medium,
                         high,
-                        xhigh: _,
+                        xhigh,
                         max: _,
                     }) => {
                         let level = config
@@ -276,6 +276,7 @@ fn create_request(
                             ReasoningEffort::Low if low => Some(types::ThinkingLevel::Low),
                             ReasoningEffort::Medium if medium => Some(types::ThinkingLevel::Medium),
                             ReasoningEffort::High if high => Some(types::ThinkingLevel::High),
+                            ReasoningEffort::XHigh if xhigh => Some(types::ThinkingLevel::XHigh),
 
                             // Any other level is unsupported and clamps to high
                             // (the documented default). Warn rather than clamp
@@ -596,6 +597,24 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
                 max_output_tokens: None,
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-hydrogen"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
                 ),
                 knowledge_cutoff: Some(date(2026, 3, 1)),
                 deprecated: Some(ModelDeprecation::Active),
