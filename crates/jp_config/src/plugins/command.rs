@@ -21,7 +21,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
         PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_mergeable_value_map,
-        delta_mergeable_value_map_at, delta_opt, delta_opt_partial, path,
+        delta_mergeable_value_map_at, delta_opt, delta_opt_at, delta_opt_partial, path,
     },
     fill::{FillDefaults, fill_map},
     internal::merge::map_with_strategy,
@@ -358,11 +358,13 @@ impl PartialConfigDelta for PartialCommandPluginConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            run: delta_opt(self.run.as_ref(), next.run),
+            run: delta_opt_at(&path(prefix, "run"), self.run.as_ref(), next.run, unsets),
             checksum: delta_opt_partial(self.checksum.as_ref(), next.checksum),
-            shutdown_timeout_secs: delta_opt(
+            shutdown_timeout_secs: delta_opt_at(
+                &path(prefix, "shutdown_timeout_secs"),
                 self.shutdown_timeout_secs.as_ref(),
                 next.shutdown_timeout_secs,
+                unsets,
             ),
             options: delta_mergeable_value_map_at(
                 &path(prefix, "options"),
