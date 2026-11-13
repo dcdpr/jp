@@ -171,11 +171,10 @@ pub enum KvAssignmentErrorKind {
         known_keys: Vec<String>,
     },
 
-    /// A key that no longer exists, because its setting is configured at
-    /// another path.
+    /// A key whose setting has moved to another path.
     #[error("moved to `{to}`")]
     Moved {
-        /// The path the setting is configured at.
+        /// New configuration path for the setting.
         to: String,
     },
 

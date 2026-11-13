@@ -1,22 +1,15 @@
-//! A program a pty test spawns to open one prompt and report how it ended.
+//! Test probe for PTY tests that opens a prompt and prints its outcome.
 //!
-//! The first argument names the prompt:
+//! The first argument selects the prompt:
 //!
-//! - `select`: an [`InlineSelect`] with two options.
-//! - `select-default`: the same, with a default and a help message.
-//! - `reply`: an [`InlineReply`].
+//! - `select`: [`InlineSelect`] with two options.
+//! - `select-default`: [`InlineSelect`] with a default option and help message.
+//! - `reply`: [`InlineReply`].
 //!
-//! With a second argument, the probe closes every prompt once the file it names
-//! appears, the way a program that is shutting down does.
-//! Only the reply acts on that: `inquire` draws the select, and waits for a
-//! key.
-//!
-//! For a reply, the terminal is put in raw mode before anything is printed, so
-//! the test can answer reedline's cursor-position query as soon as the first
-//! row appears: typed earlier, the answer would be echoed onto the screen.
-//!
-//! When the prompt returns, the probe prints its outcome on the row the cursor
-//! was left on.
+//! If a second argument is provided, a background thread polls for that file to
+//! appear and then calls [`close_all`].
+//! Only `reply` responds to `close_all`; `inquire`-backed selects wait for a
+//! keystroke.
 
 use std::{
     env,
@@ -29,7 +22,6 @@ use std::{
 use crossterm::terminal;
 use jp_inquire::{InlineOption, InlineReply, InlineSelect, close_all};
 
-/// How often the probe looks for the file that tells it to close its prompt.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 fn main() -> io::Result<()> {

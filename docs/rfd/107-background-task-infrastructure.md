@@ -13,8 +13,8 @@ The `jp_task` crate provides JP's bounded background task primitive: async work
 that runs alongside a command and gets one best-effort opportunity to commit
 results to the workspace before JP exits.
 Use it for work that should not block the user's query and whose result can be
-dropped if the task does not finish within the drain timeout: the time tasks get
-to finish once the command has returned.
+dropped if the task does not finish within the drain timeout (the time
+background tasks are given to finish after the command returns).
 Task errors are logged and dropped; they never fail the parent command.
 
 ## When to use a background task

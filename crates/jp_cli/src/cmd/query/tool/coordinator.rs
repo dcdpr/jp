@@ -273,13 +273,11 @@ fn stderr_sink(
     Some(Arc::new(move |line: &str| sink.push(line)))
 }
 
-/// A prompt that owns the terminal.
+/// Handle to the currently active terminal prompt for a tool call.
 ///
-/// Closes the prompt when dropped, so a prompt never outlives the batch it
-/// reports to: a batch that is abandoned, or dropped along with a turn that is
-/// shut down, takes its prompt off the screen.
+/// Signals [`PromptCloser::close`] on drop so the prompt is closed if the batch
+/// or turn is dropped while the prompt is open.
 struct OpenPrompt {
-    /// The call the prompt was opened for.
     call: usize,
     closer: PromptCloser,
 }
@@ -332,10 +330,11 @@ struct Batch {
     /// Whether a prompt owns the terminal.
     prompting: bool,
 
-    /// The prompt that owns the terminal, until it is answered or closed.
+    /// Active prompt holding the terminal, if any.
     ///
-    /// A closed prompt still owns the terminal until it reports back, so
-    /// `prompting` outlasts this.
+    /// Cleared when the prompt is answered or closed.
+    /// Because a closed prompt retains the terminal until its thread returns,
+    /// `prompting` can remain `true` after `open_prompt` becomes `None`.
     open_prompt: Option<OpenPrompt>,
 
     /// Whether the response has finished streaming, so no more calls arrive.
@@ -374,7 +373,8 @@ impl Batch {
         }
     }
 
-    /// Hand the terminal to a prompt for `call`, returning what closes it.
+    /// Mark the terminal as held by a prompt for `call` and return its
+    /// [`PromptCloser`].
     fn open_prompt(&mut self, call: usize) -> PromptCloser {
         let closer = PromptCloser::new();
         self.prompting = true;
@@ -386,14 +386,13 @@ impl Batch {
         closer
     }
 
-    /// Take the terminal back from the prompt that reported back.
+    /// Mark the terminal as released after the active prompt returns.
     fn prompt_returned(&mut self) {
         self.prompting = false;
         self.open_prompt = None;
     }
 
-    /// Close the open prompt once the call it was opened for has its response:
-    /// nothing is waiting for the answer.
+    /// Close the active prompt if its tool call has already settled.
     fn close_settled_prompt(&mut self) {
         let settled = self
             .open_prompt
@@ -1166,12 +1165,11 @@ impl ToolCoordinator {
     /// `interrupts` carries interrupts from a client driving the turn from
     /// outside the process; one is taken per call, and the rest stay queued.
     ///
-    /// A prompt still open once its call is settled is closed, and waited for
-    /// until it has given the terminal back.
-    /// A prompt that cannot be closed is waited for until it is answered, and
-    /// its answer changes nothing.
-    /// No prompt that `inquire` draws can be closed, and the approval prompt is
-    /// one of them.
+    /// If a prompt is still open when its call settles, it is closed (when the
+    /// widget supports closing) and awaited until it releases the terminal.
+    /// Prompts rendered by `inquire` (such as the approval prompt) cannot be
+    /// closed programmatically and wait for a keystroke before returning; their
+    /// answer is discarded.
     ///
     /// [`submit`]: Self::submit
     pub(crate) async fn finish(
@@ -1205,10 +1203,9 @@ impl ToolCoordinator {
         let mut outcome = ExecutionOutcome::Completed;
         let mut stop = Stop::default();
 
-        // A call can be settled while its prompt is open, as when the
-        // connection is lost or a client stops the calls. The prompt is
-        // closed, and waited for until it reports back: it owns the terminal
-        // until then.
+        // If a call settles while its prompt is open (e.g. on connection loss
+        // or client interrupt), close the prompt and wait for its thread to
+        // release the terminal.
         while !batch.settled() || batch.prompting {
             batch.close_settled_prompt();
 
@@ -2642,14 +2639,12 @@ impl Drop for ToolCoordinator {
     }
 }
 
-/// Run `prompt` on a thread of its own, closing the prompts it opens once
-/// `closer` is closed.
+/// Run `prompt` on a dedicated OS thread under [`closing_on`].
 ///
-/// Not every prompt can be closed: one that `inquire` draws returns only when a
-/// key is typed.
-/// A runtime waits for its blocking tasks before it shuts down, so the prompt
-/// must not be one of them: a run that ends while such a prompt is open would
-/// not exit until somebody answered it.
+/// Prompts that use `inquire` block until the user presses a key and cannot be
+/// closed programmatically.
+/// Spawning a plain OS thread rather than `tokio::task::spawn_blocking`
+/// prevents Tokio runtime shutdown from hanging on an unanswered prompt.
 fn spawn_prompt(closer: PromptCloser, prompt: impl FnOnce() + Send + 'static) {
     thread::spawn(move || closing_on(&closer, prompt));
 }

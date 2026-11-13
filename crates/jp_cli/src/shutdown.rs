@@ -1,13 +1,16 @@
-//! Ending a command on a graceful shutdown request.
+//! Graceful shutdown coordination for CLI commands.
 //!
-//! A graceful shutdown is requested by an unhandled or escalated Ctrl-C, or by
-//! SIGTERM, and cancels the signal router's shutdown token.
+//! A graceful shutdown is triggered by an unhandled or escalated Ctrl-C or by
+//! SIGTERM, which cancels the signal router's shutdown token.
 //!
-//! [`until_shutdown`] is what every command runs under.
-//! The request drops the command, unless part of it holds a claim on
-//! [`ShutdownBudgets`]: work that has to be stopped in order claims the time
-//! that takes, and the command is dropped once no claim is left or the longest
-//! one has run out.
+//! Every command runs under [`until_shutdown`].
+//! When shutdown is requested, the command future is dropped immediately unless
+//! it holds a claim in [`ShutdownBudgets`].
+//! Subsystems that need asynchronous cleanup (such as stopping a command plugin
+//! or waiting for delegated turns to persist state) claim a budget via
+//! [`ShutdownBudgets::claim`] and observe the shutdown token themselves.
+//! [`until_shutdown`] waits until all claims are released or the longest claim
+//! expires before dropping the command.
 
 use std::{sync::Arc, time::Duration};
 
@@ -16,21 +19,18 @@ use tokio_util::sync::CancellationToken;
 
 use crate::cmd;
 
-/// The time the running command has claimed to stop its work in, once a
-/// graceful shutdown is requested.
+/// Tracks grace-period budgets claimed by the running command for graceful
+/// shutdown.
 ///
-/// A command with nothing claimed is dropped at the request, which is right for
-/// work a drop ends cleanly.
-/// Work that has to be stopped in order (a child process asked to exit, a turn
-/// left to record where it stopped) cannot be stopped from a drop.
-/// The code that owns such work claims a budget with [`Self::claim`] for as
-/// long as the work lasts, and watches the shutdown token itself.
+/// Commands without active claims are dropped as soon as shutdown is requested.
+/// Subsystems that cannot clean up synchronously on drop claim a budget with
+/// [`Self::claim`] for the duration of their work and handle the shutdown token
+/// directly.
 ///
-/// Cloning gives another view of the same claims.
+/// Cloning shares the underlying claim set.
 #[derive(Debug, Clone)]
 pub(crate) struct ShutdownBudgets {
-    /// A watch channel, so the wait in [`until_shutdown`] wakes when a budget
-    /// is claimed or released.
+    /// Notifies [`until_shutdown`] when claims are added or removed.
     claims: Arc<watch::Sender<Claims>>,
 }
 
@@ -45,9 +45,10 @@ impl Default for ShutdownBudgets {
 }
 
 impl ShutdownBudgets {
-    /// Claim `budget` to stop work in, until the returned guard is dropped.
+    /// Claim `budget` for graceful shutdown cleanup until the returned guard is
+    /// dropped.
     ///
-    /// Several claims can be held at once, and the longest one is the budget.
+    /// When multiple claims are active, the maximum claimed duration applies.
     #[must_use]
     pub(crate) fn claim(&self, budget: Duration) -> ShutdownBudgetGuard {
         let mut id = ClaimId(0);
@@ -64,14 +65,14 @@ impl ShutdownBudgets {
         }
     }
 
-    /// The longest budget claimed, or `None` while nothing is claimed.
+    /// Return the maximum claimed budget, or `None` if no claims are active.
     #[cfg(test)]
     pub(crate) fn longest(&self) -> Option<Duration> {
         self.claims.borrow().longest()
     }
 }
 
-/// Releases its claim on a shutdown budget on drop.
+/// Guard that releases a [`ShutdownBudgets`] claim when dropped.
 pub(crate) struct ShutdownBudgetGuard {
     claims: Arc<watch::Sender<Claims>>,
     id: ClaimId,
@@ -79,22 +80,17 @@ pub(crate) struct ShutdownBudgetGuard {
 
 impl Drop for ShutdownBudgetGuard {
     fn drop(&mut self) {
-        // By id rather than by position, so guards can drop in any order.
         self.claims
             .send_modify(|claims| claims.held.retain(|(id, _)| *id != self.id));
     }
 }
 
-/// Identity of a claim, unique among the claims of one [`ShutdownBudgets`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ClaimId(u64);
 
-/// The budgets claimed and not yet released.
 #[derive(Debug, Default)]
 struct Claims {
-    /// Source for unique claim ids.
     next_id: u64,
-
     held: Vec<(ClaimId, Duration)>,
 }
 
@@ -104,18 +100,17 @@ impl Claims {
     }
 }
 
-/// Run `command` until it returns, or until a graceful shutdown request ends
-/// it.
+/// Run `command` until it completes or a graceful shutdown budget expires.
 ///
-/// A command holding no claim on `budgets` at the request is dropped at once,
-/// which releases its conversation locks and persists its dirty conversations
-/// (guard-scoped persistence).
+/// If `command` holds no claims in `budgets` when `shutdown` is cancelled, it
+/// is dropped immediately, releasing conversation locks and flushing dirty
+/// conversations via guard-scoped persistence.
 ///
-/// A command holding one keeps running after the request, until it returns,
-/// releases its last claim, or has run for the longest budget claimed since the
-/// request, whichever comes first.
+/// If `command` holds one or more claims, it continues running until it
+/// returns, releases all claims, or exceeds the longest claimed budget
+/// (measured from when `shutdown` was cancelled).
 ///
-/// Returns [`cmd::Error::interrupted`] when `command` was dropped.
+/// Returns [`cmd::Error::interrupted`] if `command` is dropped due to shutdown.
 pub(crate) async fn until_shutdown(
     command: impl Future<Output = cmd::Output>,
     shutdown: &CancellationToken,
@@ -128,16 +123,14 @@ pub(crate) async fn until_shutdown(
     }
 }
 
-/// Wait for a graceful shutdown request, and then for the budget claimed on
-/// `budgets` to be released or to run out.
+/// Wait for `shutdown` to be cancelled, then wait until all claims in `budgets`
+/// are released or the longest claimed duration elapses.
 async fn out_of_budget(shutdown: &CancellationToken, budgets: &ShutdownBudgets) {
     shutdown.cancelled().await;
     let requested = Instant::now();
 
     let mut claims = budgets.claims.subscribe();
     loop {
-        // Marked as seen where it is read, so a claim made or released after
-        // this read ends the wait below.
         let Some(budget) = claims.borrow_and_update().longest() else {
             return;
         };
@@ -149,10 +142,10 @@ async fn out_of_budget(shutdown: &CancellationToken, budgets: &ShutdownBudgets) 
     }
 }
 
-/// Run `then` once a graceful shutdown is requested.
+/// Spawn a task on `runtime` that runs `then` when `shutdown` is cancelled.
 ///
-/// From a runtime worker, so it runs while the thread that polls the command is
-/// blocked.
+/// Running on a runtime worker ensures `then` executes even if the main command
+/// thread is blocked in a synchronous prompt.
 pub(crate) fn on_shutdown(
     runtime: &Handle,
     shutdown: CancellationToken,

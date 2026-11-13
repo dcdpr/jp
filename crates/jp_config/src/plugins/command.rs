@@ -2,9 +2,8 @@
 //!
 //! A command plugin is a standalone `jp-<name>` binary that JP runs as `jp
 //! <name>`.
-//! `[plugins.command.'*']` sets defaults for all of them, and
-//! `[plugins.command.<name>]` configures one: its execution policy, a pinned
-//! checksum, how long it gets to shut down, and the options passed to it.
+//! Configure defaults for all command plugins under `[plugins.command.'*']` and
+//! individual plugins under `[plugins.command.<name>]`.
 //!
 //! ```toml
 //! [plugins.command.'*']
@@ -40,43 +39,40 @@ use crate::{
 pub struct CommandPluginsConfig {
     /// Defaults for every command plugin.
     ///
-    /// A plugin that sets the same key under `plugins.command.<name>` uses its
-    /// own value instead.
+    /// Individual plugins can override these settings under
+    /// `plugins.command.<name>`.
     #[setting(nested, rename = "*")]
     pub defaults: CommandPluginDefaultsConfig,
 
     /// Per-plugin configuration, keyed by plugin name (e.g. `serve-web`).
     ///
-    /// Entries merge by key, so a plugin configured in a later layer joins the
-    /// ones an earlier layer set.
-    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
-    /// them instead.
+    /// Entries merge by key across configuration layers.
+    /// Set `{ value = { ... }, strategy = "replace" }` to replace entries from
+    /// earlier layers instead.
     #[setting(nested, flatten, merge = map_with_strategy)]
     plugins: MergeableMap<CommandPluginConfig>,
 }
 
 impl CommandPluginsConfig {
-    /// The configuration of the command plugin `name`, if it has any.
+    /// Return the per-plugin configuration for `name`, if configured.
     ///
-    /// Holds what the plugin sets for itself.
-    /// A value it leaves to the defaults is read through the accessor for that
-    /// value, such as [`Self::shutdown_timeout`].
+    /// Fields left unset on the returned [`CommandPluginConfig`] fall back to
+    /// `self.defaults` (see [`Self::shutdown_timeout`]).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&CommandPluginConfig> {
         self.plugins.get(name)
     }
 
-    /// Configure the command plugin `name`, replacing what it was configured
-    /// with.
+    /// Set the configuration for command plugin `name`, replacing any existing
+    /// entry.
     pub fn insert(&mut self, name: String, plugin: CommandPluginConfig) {
         self.plugins.insert(name, plugin);
     }
 
-    /// How long the command plugin `name` gets to exit once it is asked to shut
-    /// down.
+    /// Return the graceful shutdown timeout for command plugin `name`.
     ///
-    /// The plugin's own `shutdown_timeout_secs`, or the default for a plugin
-    /// that sets none or is not configured at all.
+    /// Uses the plugin's `shutdown_timeout_secs` if set, falling back to
+    /// `defaults.shutdown_timeout_secs`.
     #[must_use]
     pub fn shutdown_timeout(&self, name: &str) -> Duration {
         let secs = self
@@ -92,11 +88,10 @@ impl CommandPluginsConfig {
 impl AssignKeyValue for PartialCommandPluginsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            // The plugins map is flattened, so a wrapper stating how it merges
-            // arrives with no key of its own, where an object naming several
-            // plugins also arrives. Its `value` and `strategy` are the
-            // wrapper's keys, not plugin names, so it goes to the map rather
-            // than being dispatched key by key.
+            // Because `plugins` is flattened, a `{ value, strategy }` map
+            // wrapper arrives at the empty key alongside plain per-plugin
+            // objects. Route it directly to `self.plugins` so `value` and
+            // `strategy` are not treated as plugin names.
             "" if kv.states_map_strategy() => kv.assign_to_mergeable_entry(&mut self.plugins)?,
             "" => kv.try_merge_object(self)?,
             _ if kv.p("*") => self.defaults.assign(kv)?,
@@ -129,9 +124,8 @@ impl FillDefaults for PartialCommandPluginsConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             defaults: self.defaults.fill_from(defaults.defaults),
-            // Key by key, so a plugin only the defaults declare is added
-            // while one this layer already has keeps its own value. A map
-            // that states a strategy is left alone.
+            // Fill missing plugin entries from `defaults` without overwriting
+            // entries or an explicit merge strategy set on `self`.
             plugins: match self.plugins {
                 merged @ MergeableMap::Merged(_) => merged,
                 MergeableMap::Map(entries) => fill_map(entries, defaults.plugins.into_map()).into(),
@@ -144,8 +138,8 @@ impl ToPartial for CommandPluginsConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             defaults: self.defaults.to_partial(),
-            // Per key rather than `replace`: a plugin the workspace config
-            // gained after this conversation was created still reaches it.
+            // Emit per-key entries rather than a `replace` map so plugins added
+            // in lower layers remain visible.
             plugins: map_to_partial_per_key(self.plugins.iter()),
         }
     }
@@ -159,16 +153,16 @@ pub struct CommandPluginDefaultsConfig {
     ///
     /// Defaults to `ask`.
     ///
-    /// - `ask`: run an official plugin's published release and a binary you
-    ///   approved, and prompt before running any other.
+    /// - `ask`: run official plugin releases and previously approved binaries
+    ///   without prompting; prompt before running any other binary.
     /// - `allow`: run without prompting.
     /// - `deny`: never run.
     ///
-    /// `unattended` is accepted as a deprecated spelling of `allow`.
+    /// `unattended` is accepted as a deprecated alias for `allow`.
     ///
     /// Applies to every command plugin that does not set its own
     /// `plugins.command.<name>.run`.
-    /// Set it to `deny` to run only the plugins you allow by name:
+    /// Set this to `deny` to run only the plugins you allow by name:
     ///
     /// ```toml
     /// [plugins.command.'*']
@@ -178,17 +172,17 @@ pub struct CommandPluginDefaultsConfig {
     /// run = "allow"
     /// ```
     ///
-    /// Set to `allow`, it runs every `jp-*` binary found on `$PATH` without
-    /// asking.
+    /// Setting this to `allow` runs every `jp-*` binary on `$PATH` without
+    /// prompting.
     #[setting(default)]
     pub run: RunPolicy,
 
-    /// How long a command plugin gets to exit after JP asks it to shut down, in
-    /// seconds.
+    /// Grace period in seconds for a command plugin to exit after JP sends a
+    /// `shutdown` request.
     ///
     /// Defaults to `5`.
-    /// Once the time is up, JP kills the plugin and every process it started.
-    /// Set to `0` to kill plugins as soon as shutdown is requested.
+    /// When the timeout expires, JP terminates the plugin and its process tree.
+    /// Set to `0` to kill plugins immediately when shutdown is requested.
     ///
     /// Applies to every command plugin that does not set its own
     /// `plugins.command.<name>.shutdown_timeout_secs`.
@@ -252,8 +246,8 @@ impl ToPartial for CommandPluginDefaultsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Default, schematic::ConfigEnum)]
 #[config(rename_all = "snake_case", serde_as_string)]
 pub enum RunPolicy {
-    /// Run an official plugin's published release and an approved binary, and
-    /// prompt the user before running any other.
+    /// Run official plugin releases and previously approved binaries without
+    /// prompting; prompt before running any other binary.
     #[default]
     Ask,
     /// Run without prompting.
@@ -282,16 +276,16 @@ pub enum RunPolicy {
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct CommandPluginConfig {
-    /// Execution policy.
+    /// Execution policy for this plugin.
     ///
     /// If unset, falls back to `plugins.command.'*'.run`.
     ///
-    /// - `ask`: run the binary if it is the official plugin's published release
-    ///   or one you approved, and prompt before running it otherwise
-    /// - `allow`: run without prompting
-    /// - `deny`: never run this plugin
+    /// - `ask`: run official plugin releases and previously approved binaries
+    ///   without prompting; prompt before running any other binary.
+    /// - `allow`: run without prompting.
+    /// - `deny`: never run this plugin.
     ///
-    /// `unattended` is accepted as a deprecated spelling of `allow`.
+    /// `unattended` is accepted as a deprecated alias for `allow`.
     pub run: Option<RunPolicy>,
 
     /// Pinned binary checksum.
@@ -299,21 +293,18 @@ pub struct CommandPluginConfig {
     /// When set, JP refuses to run the plugin if the binary's checksum doesn't
     /// match.
     /// This protects against unexpected binary changes.
-    /// A checksum is one binary's, so `plugins.command.'*'` has no default for
-    /// it.
-    /// Uses the same `ChecksumConfig` as MCP servers.
     #[setting(nested)]
     pub checksum: Option<ChecksumConfig>,
 
-    /// How long this plugin gets to exit after JP asks it to shut down, in
-    /// seconds.
+    /// Grace period in seconds for this plugin to exit after JP sends a
+    /// `shutdown` request.
     ///
     /// If unset, falls back to `plugins.command.'*'.shutdown_timeout_secs`.
-    /// Once the time is up, JP kills the plugin and every process it started.
-    /// Set to `0` to kill the plugin as soon as shutdown is requested.
+    /// When the timeout expires, JP terminates the plugin and its process tree.
+    /// Set to `0` to kill the plugin immediately when shutdown is requested.
     ///
-    /// Raise it for a plugin that has work to finish before it exits, such as
-    /// one that waits for a running turn to stop:
+    /// Increase this for plugins that need extra time to finish in-flight work,
+    /// such as waiting for an active turn to complete:
     ///
     /// ```toml
     /// [plugins.command.serve-chat]
@@ -323,14 +314,14 @@ pub struct CommandPluginConfig {
 
     /// Opaque options passed to the plugin in the `init` message.
     ///
-    /// JP does not validate these — they are forwarded as-is in the config
-    /// section of the init message.
+    /// JP does not validate these; they are forwarded as-is in the `config`
+    /// field of the `init` message.
     /// The plugin is responsible for parsing and error reporting.
     ///
-    /// Options merge key by key, recursing into nested tables, so a later layer
-    /// only replaces the options it names.
-    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
-    /// the options earlier layers set instead.
+    /// Options merge key by key across configuration layers, recursing into
+    /// nested tables.
+    /// Set `{ value = { ... }, strategy = "replace" }` to replace options from
+    /// earlier layers instead.
     #[setting(nested, merge = map_with_strategy)]
     pub options: MergeableMap<JsonValue>,
 }

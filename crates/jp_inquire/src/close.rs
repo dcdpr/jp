@@ -1,20 +1,19 @@
-//! Closing a prompt nobody is going to answer.
+//! Programmatic closing for interactive prompts.
 //!
-//! A widget waits for a key, and two things end the wait without one:
+//! Prompts can be closed without user input in two ways:
 //!
-//! - [`close_all`] closes every prompt in the process.
-//!   A program calls it when it is shutting down.
-//! - A [`PromptCloser`] closes the prompts opened under it with [`closing_on`].
-//!   A caller that opens a prompt on a thread of its own keeps the closer, and
-//!   closes the prompt once it no longer needs the answer.
+//! - [`close_all`] closes every prompt in the process (used during graceful
+//!   shutdown).
+//! - [`PromptCloser`] closes prompts opened within a [`closing_on`] scope on
+//!   the target thread (used when a caller no longer needs a prompt's answer).
 //!
-//! Both are sticky: a prompt opened after the close returns at once, without
-//! drawing.
+//! Both are sticky: a prompt opened after a close request returns immediately
+//! without rendering.
 //!
-//! [`InlineReply`] closes.
-//! A prompt the `inquire` crate draws does not, because `inquire` waits in a
-//! read that only a key ends: [`InlineSelect`], and the widgets behind
-//! [`PromptBackend::select`] and [`PromptBackend::password`].
+//! [`InlineReply`] supports programmatic closing.
+//! Prompts rendered by the `inquire` crate ([`InlineSelect`],
+//! [`PromptBackend::select`], and [`PromptBackend::password`]) block in a
+//! synchronous key read and cannot be closed until the user presses a key.
 //!
 //! [`InlineReply`]: crate::InlineReply
 //! [`InlineSelect`]: crate::InlineSelect
@@ -30,63 +29,60 @@ use std::{
     time::Duration,
 };
 
-/// How long a waiting widget goes without checking whether it is to close.
+/// Polling interval for checking whether a prompt has been asked to close.
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Set once every prompt in the process is to close.
+/// Process-wide flag set by [`close_all`].
 static ALL_CLOSED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
-    /// Closes the prompts this thread opens.
+    /// Thread-local [`PromptCloser`] installed by [`closing_on`].
     static SCOPED: RefCell<Option<PromptCloser>> = const { RefCell::new(None) };
 }
 
-/// Closes the prompts opened under it with [`closing_on`].
+/// Handle that closes prompts opened within a [`closing_on`] scope.
 ///
-/// Cloning gives another handle on the same prompts.
+/// Cloning shares the same underlying flag.
 #[derive(Debug, Clone, Default)]
 pub struct PromptCloser(Arc<AtomicBool>);
 
 impl PromptCloser {
-    /// A closer nothing has been opened under yet.
+    /// Create a new unclosed [`PromptCloser`].
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Close the open prompt, and every prompt opened under this closer from
-    /// now on.
+    /// Close the active prompt and any subsequent prompts opened under this
+    /// closer.
     pub fn close(&self) {
         self.0.store(true, Ordering::Release);
     }
 
-    /// Whether [`Self::close`] was called.
+    /// Return `true` if [`Self::close`] has been called.
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.0.load(Ordering::Acquire)
     }
 }
 
-/// Run `prompts`, closing every prompt it opens on this thread once `closer` is
-/// closed.
+/// Run `prompts` with `closer` installed on the current thread.
 ///
-/// A prompt opened on another thread is not covered.
+/// Prompts opened on other threads are unaffected.
 pub fn closing_on<T>(closer: &PromptCloser, prompts: impl FnOnce() -> T) -> T {
     let _scope = Scope::enter(closer.clone());
     prompts()
 }
 
-/// Close every open prompt in the process, and every prompt opened from now on.
-///
-/// For a program that is shutting down: nothing reopens them.
+/// Close all open and future prompts in the process.
 pub fn close_all() {
     ALL_CLOSED.store(true, Ordering::Release);
 }
 
-/// Whether the prompt this thread has open, or is about to open, is to close.
+/// Return `true` if the current thread's prompt scope or [`close_all`] has
+/// requested a close.
 ///
-/// What [`InlineReply`] watches while it waits for a key.
-/// A [`PromptBackend`] of another kind polls it to close the same way.
+/// Polled by [`InlineReply`] and custom [`PromptBackend`] implementations.
 ///
 /// [`InlineReply`]: crate::InlineReply
 /// [`PromptBackend`]: crate::prompt::PromptBackend
@@ -95,25 +91,25 @@ pub fn close_requested() -> bool {
     CloseWatch::current().requested()
 }
 
-/// What closes the prompts of the thread it was taken on.
-///
-/// Taken on the thread that opens the prompt, and polled from any thread.
+/// Snapshot of the current thread's [`PromptCloser`] that can be polled from
+/// another thread.
 #[derive(Debug, Clone)]
 pub(crate) struct CloseWatch(Option<PromptCloser>);
 
 impl CloseWatch {
-    /// The closer this thread's prompts are opened under, if any.
+    /// Capture the current thread's [`PromptCloser`], if any.
     pub(crate) fn current() -> Self {
         Self(SCOPED.with(|scoped| scoped.borrow().clone()))
     }
 
-    /// Whether the prompts are to close.
+    /// Return `true` if [`close_all`] or the captured [`PromptCloser`] has
+    /// fired.
     pub(crate) fn requested(&self) -> bool {
         ALL_CLOSED.load(Ordering::Acquire) || self.0.as_ref().is_some_and(PromptCloser::is_closed)
     }
 }
 
-/// Puts back the closer a [`closing_on`] call replaced, when it ends.
+/// Guard that restores the previous thread-local [`PromptCloser`] on drop.
 struct Scope(Option<PromptCloser>);
 
 impl Scope {

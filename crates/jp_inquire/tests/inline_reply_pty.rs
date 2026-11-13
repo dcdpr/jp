@@ -81,8 +81,6 @@ fn a_seeded_buffer_is_shown_without_redrawing_the_screen() {
     );
 }
 
-/// A reply nobody submits is closed from outside: it returns as cancelled, and
-/// what follows starts on the row below it.
 #[test]
 fn a_closed_reply_returns_without_being_submitted() {
     let tmp = tempdir().expect("a temporary directory");

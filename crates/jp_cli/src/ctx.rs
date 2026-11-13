@@ -310,13 +310,11 @@ pub(crate) trait IntoPartialAppConfig {
 
 impl Drop for Ctx {
     fn drop(&mut self) {
-        // A run that was shut down while a prompt was open ends with the prompt
-        // still waiting on a thread of its own, since only a key makes it
-        // return. The process exits without it, so the terminal it holds is
-        // given back here.
+        // If shutdown abandoned a prompt on its background thread, restore the
+        // terminal before shutting down the printer.
         if terminal_held() {
-            // Unshaded: the release erases below the prompt, and a shaded
-            // writer fills an erase with its region's background.
+            // Clear any active region background so the erase sequence does not
+            // fill with shaded background color.
             self.printer.set_prompt_background(None);
 
             if let Err(error) = release_terminal(&mut self.printer.prompt_writer()) {

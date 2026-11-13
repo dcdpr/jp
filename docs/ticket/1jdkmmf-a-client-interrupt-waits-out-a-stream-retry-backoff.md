@@ -32,11 +32,12 @@ A provider's `Retry-After` is used when given, under the same cap.
   turn backs off goes unanswered for the rest of the wait.
   For `jp serve-chat`, a "stop" sent during a rate-limit wait appears to hang,
   and the conversation stays locked until the wait ends.
-- On a graceful shutdown the host queues a stop for every delegated turn
-  (`RunningTurns::stop_all`) and aborts what is still running five seconds later
+- On graceful shutdown, the host sends `Stop` to every delegated turn
+  (`RunningTurns::stop_all`) and aborts any turn still running after 5 seconds
   (`TURN_STOP_GRACE`).
-  A turn in a backoff does not read the stop, so it is aborted rather than
-  ending on its own.
+  Because a turn sleeping in retry backoff does not poll `TurnInterrupts`, it
+  ignores the stop request and is aborted after the grace period instead of
+  stopping cleanly.
 
 ## Fix
 

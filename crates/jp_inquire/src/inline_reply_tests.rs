@@ -101,7 +101,6 @@ fn ctrl_c_maps_to_cancelled() {
     );
 }
 
-/// A reply that was closed is not sent, whatever had been typed into it.
 #[test]
 fn a_break_maps_to_cancelled() {
     assert_eq!(

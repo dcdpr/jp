@@ -98,22 +98,19 @@ shutdown_timeout_secs = 5         # default: 5
 run = "allow"                     # execution policy
 ```
 
-The defaults mirror `[conversation.tools.'*']`: a plugin that sets the same key
-under its own name uses its own value.
-A setting lives under the kind of plugin it applies to, so a kind without a
-process to stop does not carry a shutdown timeout.
-
-`run` and `shutdown_timeout_secs` have a default.
-`checksum` and `options` do not: a checksum is the digest of one binary, so a
-shared one would refuse every other plugin, and options are the plugin's own.
+The defaults under `[plugins.command.'*']` mirror `[conversation.tools.'*']`:
+per-plugin settings under `[plugins.command.<name>]` override the defaults.
+`run` and `shutdown_timeout_secs` can be set in `[plugins.command.'*']`;
+`checksum` and `options` are per-plugin only.
 
 #### `plugins.command.'*'.run`
 
-The execution policy of every command plugin that does not set its own `run`.
+Default execution policy for command plugins that do not set their own `run`
+key.
 Defaults to `ask`; see [Per-Plugin Configuration](#per-plugin-configuration) for
-the values.
+the accepted values.
 
-Setting it to `deny` runs only the plugins allowed by name:
+Set this to `deny` to run only explicitly allowed plugins:
 
 ```toml
 [plugins.command.'*']
@@ -123,8 +120,7 @@ run = "deny"
 run = "allow"
 ```
 
-Setting it to `allow` trusts every `jp-*` binary on `$PATH` by name, without a
-prompt or an approval.
+Setting it to `allow` runs every `jp-*` binary on `$PATH` without prompting.
 
 #### `plugins.command.'*'.shutdown_timeout_secs`
 
@@ -159,8 +155,8 @@ port = 3141
 | `allow` | Run without prompting.                                       |
 | `deny`  | Never run. JP exits with an error if the plugin is invoked.  |
 
-A plugin that sets no `run` uses `plugins.command.'*'.run`, which is `ask`
-unless configured.
+If unset on a plugin, `run` falls back to `plugins.command.'*'.run` (default:
+`ask`).
 The `run` policy applies at every execution point, regardless of how the binary
 was discovered.
 Under `ask`, two kinds of binary run without prompting: an official binary whose
@@ -176,10 +172,9 @@ the user interactively during execution.
 
 **`shutdown_timeout_secs`**: Overrides
 `plugins.command.'*'.shutdown_timeout_secs` for this plugin.
-Unset by default, in which case the default applies.
-A plugin with work to finish before it exits, such as one waiting for a
-delegated turn to stop, gets a longer grace period this way without lengthening
-it for every other plugin:
+If unset, falls back to `plugins.command.'*'.shutdown_timeout_secs`.
+Increase this for plugins that need extra time to finish in-flight work before
+exiting, such as waiting for a delegated turn to stop:
 
 ```toml
 [plugins.command.serve-chat]
@@ -376,12 +371,11 @@ Admission runs before every plugin process spawn, including `describe` probes
 ([RFD 072]).
 By the time admission runs, routing has already resolved the binary path
 (downloading a missing official plugin if needed, which does not read config).
-Admission then evaluates the plugin's resolved configuration in order.
-Its `run` is `plugins.command.<name>.run`, or `plugins.command.'*'.run` for a
-plugin that sets none:
+Admission then evaluates the plugin's resolved configuration in order, using
+`plugins.command.<name>.run` or falling back to `plugins.command.'*'.run`:
 
-1. **Deny**: If `run = "deny"`, abort with an error that names the key that
-   denies.
+1. **Deny**: If `run = "deny"`, abort with an error naming the config key that
+   denied execution.
 2. **Pinned checksum**: If `checksum` is configured and the binary's digest does
    not match, abort.
    This check also applies to newly downloaded official binaries: the registry

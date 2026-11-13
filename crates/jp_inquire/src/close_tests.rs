@@ -19,12 +19,9 @@ fn a_closed_closer_closes_the_prompts_opened_under_it() {
 
     assert!(!before);
     assert!(after);
-    // The closer covered that call only.
     assert!(!close_requested());
 }
 
-/// A prompt can be asked to close before it opens, as when its caller stops
-/// needing the answer between two prompts.
 #[test]
 fn a_closer_closed_beforehand_closes_the_prompts_opened_later() {
     let closer = PromptCloser::new();
@@ -58,8 +55,6 @@ fn a_closer_does_not_cover_another_thread() {
     assert!(!elsewhere);
 }
 
-/// A widget hands its watch to a helper thread, which has to see the closer of
-/// the thread the widget is on.
 #[test]
 fn a_watch_is_polled_from_any_thread() {
     let closer = PromptCloser::new();

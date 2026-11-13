@@ -552,21 +552,16 @@ impl RouterInner {
     }
 }
 
-/// Give back the terminal an open prompt holds, ahead of an exit that runs no
-/// teardown.
+/// Restore the terminal if a prompt is open when the process exits immediately.
 ///
-/// An immediate exit leaves the prompt's thread behind mid-read, with the
-/// terminal in raw mode.
-///
-/// Written straight to the terminal, not through the printer: its worker may be
-/// in the middle of a write, and this exit waits for nothing.
+/// Writes directly to `/dev/tty` (or `stdout`) rather than going through the
+/// printer, because immediate exit (`SIGQUIT` or third Ctrl-C) does not wait
+/// for the printer worker.
 fn release_prompt_terminal() {
     if !terminal_held() {
         return;
     }
 
-    // Where the printer draws prompts: the controlling terminal, or stdout
-    // without one.
     let released = match open_tty() {
         Some(mut tty) => release_terminal(&mut tty),
         None => release_terminal(&mut io::stdout()),

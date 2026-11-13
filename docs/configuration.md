@@ -373,9 +373,10 @@ A list in the object replaces the existing list, just like `:=`.
 To replace an entire map instead of merging into it, use `:=` on the map key
 directly (for example, `plugins.command.ticket.options:={...}`).
 
-`plugins.command` and `conversation.tools` hold their `'*'` defaults beside
-their entries, so `:=` on either one merges into it.
-To replace their entries, state the strategy:
+`plugins.command` and `conversation.tools` combine their `'*'` defaults and
+named entries in a single table, so `:=` on either key merges the named entries
+rather than replacing the map.
+To replace all named entries, pass a map wrapper with `"strategy": "replace"`:
 
 ```bash
 $ jp --cfg 'plugins.command:={"value": {"ticket": {"run": "allow"}}, "strategy": "replace"}'

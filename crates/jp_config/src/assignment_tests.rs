@@ -909,8 +909,6 @@ fn an_object_assigned_to_a_map_replaces_it() {
     );
 }
 
-/// `plugins.command` is a block holding the defaults beside the plugins, so an
-/// object assigned to it names what to change and leaves the rest.
 #[test]
 fn an_object_assigned_to_the_command_plugins_block_keeps_the_plugins_it_does_not_name() {
     let mut config = plugins_allowed_by_files();
@@ -934,7 +932,6 @@ fn an_object_assigned_to_the_command_plugins_block_keeps_the_plugins_it_does_not
     );
 }
 
-/// Stating `replace` is how the plugins themselves are swapped out whole.
 #[test]
 fn a_replace_strategy_assigned_to_the_command_plugins_block_drops_the_other_plugins() {
     let mut config = plugins_allowed_by_files();

@@ -1,12 +1,5 @@
-//! A prompt nobody answers, in a real terminal.
-//!
-//! The probe opens a widget on a thread of its own and, once told to, gives the
-//! terminal back and exits with the widget still waiting for a key.
-//! No test here types an answer, so a probe that exits did so with its prompt
-//! open.
-//!
-//! Unix only: the reply test answers reedline's cursor-position query by typing
-//! the reply, and on Windows reedline asks the console instead.
+//! PTY integration tests for [`jp_inquire::release_terminal`] when a prompt is
+//! abandoned on a background thread.
 #![cfg(unix)]
 
 use std::{fs, time::Duration};
@@ -14,13 +7,7 @@ use std::{fs, time::Duration};
 use camino_tempfile::tempdir;
 use jp_pty::{CommandBuilder, Size, Terminal};
 
-/// The probe binary, built by cargo alongside this test.
 const PROBE: &str = env!("CARGO_BIN_EXE_abandoned_prompt_probe");
-
-/// How long a step waits on the child.
-///
-/// Longer than the harness default: this waits on process startup under
-/// whatever else CI is running at the time.
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 #[test]

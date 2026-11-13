@@ -106,9 +106,9 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
 
 /// Terminal prompt backend using `jp_inquire` and `inquire`.
 ///
-/// Its inline reply closes with [`close_all`] or a [`PromptCloser`].
-/// Its inline select, list select and password prompt are drawn by `inquire`,
-/// and return only when a key is typed.
+/// [`InlineReply`] prompts can be closed via [`close_all`] or [`PromptCloser`].
+/// [`InlineSelect`], `select`, and `password` are rendered by `inquire` and
+/// block until the user presses a key.
 ///
 /// [`PromptCloser`]: crate::PromptCloser
 /// [`close_all`]: crate::close_all

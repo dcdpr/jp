@@ -7,7 +7,7 @@
 //! Bracketed paste is enabled for the duration of the prompt, so pasted text
 //! (including newlines) is inserted into the buffer literally instead of being
 //! replayed as keystrokes, where the first newline would submit the reply.
-//! The widget itself never spawns an editor — it only signals intent via
+//! The widget itself never spawns an editor; it only signals intent via
 //! [`ReplyOutcome::OpenEditor`], keeping `jp_inquire` free of editor concerns.
 
 use std::{
@@ -36,16 +36,16 @@ use crate::{
     terminal::LEAVE_WIDGET,
 };
 
-/// How many reply widgets are waiting for input.
+/// Number of active [`InlineReply`] prompts currently awaiting input.
 static OPEN: AtomicUsize = AtomicUsize::new(0);
 
-/// Whether a reply widget is waiting for input, with bracketed paste on and its
-/// keyboard enhancement flags pushed.
+/// Return `true` if an [`InlineReply`] prompt is currently active (with
+/// bracketed paste and keyboard enhancement flags enabled).
 pub(crate) fn is_open() -> bool {
     OPEN.load(Ordering::Acquire) > 0
 }
 
-/// Counts one reply widget as open until it drops.
+/// Guard that increments [`OPEN`] while an [`InlineReply`] is active.
 struct OpenReply;
 
 impl OpenReply {
@@ -83,7 +83,7 @@ pub enum ReplyEditMode {
 pub enum ReplyOutcome {
     /// The user pressed Enter.
     ///
-    /// Carries the buffer, which may be empty — the meaning of an empty
+    /// Carries the buffer, which may be empty; the meaning of an empty
     /// submission is the caller's policy.
     Submit(String),
 
@@ -166,8 +166,8 @@ impl InlineReply {
     /// The caller drains any buffered terminal output before calling and
     /// restores it afterwards.
     ///
-    /// A closed prompt keeps the rows it drew above the cursor, and leaves the
-    /// cursor at the start of the row below.
+    /// When closed programmatically, leaves the rendered prompt rows intact and
+    /// moves the cursor to the start of the line below.
     pub fn prompt(&self, output: Box<dyn Write + Send>) -> Result<ReplyOutcome, InquireError> {
         let watch = CloseWatch::current();
         if watch.requested() {
@@ -215,8 +215,8 @@ impl InlineReply {
 
         let signal = signal?;
         if matches!(signal, Signal::ExternalBreak(_)) {
-            // reedline returns from a break with the cursor where it was in
-            // the buffer, for a host that goes on to call it again.
+            // Reedline returns from an external break with the cursor inside
+            // the buffer; move to the next line and clear below the prompt.
             output.write_all(LEAVE_WIDGET.as_bytes())?;
             output.flush()?;
         }
@@ -292,10 +292,8 @@ fn outcome_from_signal(signal: Signal, buffer: &str) -> ReplyOutcome {
     }
 }
 
-/// The stream a reply is drawn on.
-///
-/// reedline owns its output for as long as the engine lives, and the widget
-/// writes to the same stream once reedline has returned, so the two share it.
+/// Shared writer wrapper so [`InlineReply::prompt`] can write [`LEAVE_WIDGET`]
+/// after `reedline` returns.
 #[derive(Clone)]
 struct SharedOutput(Arc<Mutex<Box<dyn Write + Send>>>);
 
@@ -315,13 +313,13 @@ impl Write for SharedOutput {
     }
 }
 
-/// Raises reedline's break signal once the reply is to close, for as long as
-/// the reply is open.
+/// Background watcher that sets reedline's break signal when [`CloseWatch`]
+/// fires.
 ///
-/// reedline clears the flag it is given when it acts on it, and a close stays
-/// requested, so the flag is reedline's own and a thread raises it.
+/// Reedline resets its break flag when handling the break, whereas
+/// [`CloseWatch`] remains set, so a dedicated `AtomicBool` is bridged from a
+/// polling thread.
 struct CloseSignal {
-    /// Dropped to tell the thread that the reply has returned.
     open: Option<mpsc::Sender<()>>,
     thread: Option<thread::JoinHandle<()>>,
 }

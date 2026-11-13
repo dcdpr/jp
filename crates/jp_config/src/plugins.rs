@@ -27,15 +27,15 @@ pub struct PluginsConfig {
     /// Command plugins: standalone `jp-<name>` binaries that JP runs as `jp
     /// <name>`.
     ///
-    /// `[plugins.command.'*']` sets defaults for all of them, and
-    /// `[plugins.command.<name>]` configures one.
+    /// Configure defaults under `[plugins.command.'*']` and individual plugins
+    /// under `[plugins.command.<name>]`.
     #[setting(nested)]
     pub command: CommandPluginsConfig,
 }
 
 impl PluginsConfig {
-    /// The `options` the command plugin `name` is configured with, empty when
-    /// it has none.
+    /// Return the configured `options` map for command plugin `name`, or an
+    /// empty map if the plugin is not configured.
     #[must_use]
     pub fn command_options(&self, name: &str) -> Map<String, Value> {
         self.command
@@ -55,8 +55,6 @@ impl AssignKeyValue for PartialPluginsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            // Only a command plugin has a process to shut down, so the timeout
-            // is a setting of that kind of plugin.
             "shutdown_timeout_secs" => {
                 return moved_key(&kv, "plugins.command.*.shutdown_timeout_secs");
             }

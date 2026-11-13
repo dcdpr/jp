@@ -1,25 +1,13 @@
-//! The inline select, answered from the keyboard of a real terminal.
-//!
-//! Each test types into the probe's prompt and reads back what the terminal
-//! shows once the prompt has returned.
-//!
-//! Unix only: the probe is spawned into a pty.
+//! PTY integration tests for [`jp_inquire::InlineSelect`].
 #![cfg(unix)]
 
 use std::time::Duration;
 
 use jp_pty::{Child, CommandBuilder, Screen, Size, Terminal};
 
-/// The probe binary, built by cargo alongside this test.
 const PROBE: &str = env!("CARGO_BIN_EXE_prompt_probe");
-
-/// How long a step waits on the child.
-///
-/// Longer than the harness default: this waits on process startup under
-/// whatever else CI is running at the time.
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Start the probe with `args`, and wait for its prompt to be drawn.
 fn open(args: &[&str]) -> (Terminal, Child) {
     let terminal = Terminal::pty(Size::new(12, 80))
         .expect("a pty")
@@ -35,7 +23,6 @@ fn open(args: &[&str]) -> (Terminal, Child) {
     (terminal, probe)
 }
 
-/// Wait for the probe to report how its prompt ended, and to exit.
 fn outcome(terminal: &Terminal, mut probe: Child) -> Screen {
     let screen = terminal
         .wait_for("the outcome", |screen| screen.contains("outcome:"))
@@ -159,9 +146,6 @@ fn a_question_mark_lists_the_options_and_asks_again() {
     assert_eq!(screen.row(6), "outcome: Ok('n')", "{screen}");
 }
 
-/// A key that names no option is kept as input and chooses nothing: Enter
-/// reports it, and the prompt stays open until the key is replaced by one that
-/// names an option.
 #[test]
 fn a_key_that_is_no_option_waits_to_be_corrected() {
     let (terminal, probe) = open(&["select"]);

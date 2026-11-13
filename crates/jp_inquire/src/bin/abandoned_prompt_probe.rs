@@ -1,19 +1,13 @@
-//! A program a pty test spawns to leave a prompt unanswered.
+//! Test probe for `abandoned_prompt_pty` that exits while a prompt is still
+//! open on a background thread.
 //!
-//! It opens the widget its first argument names on a thread of its own, waits
-//! for the file its second argument names to appear, gives the terminal back,
-//! and exits with the widget still waiting for a key.
+//! Spawns the widget named by the first argument (`reply` or `select`) on a
+//! background thread, waits for the marker file named by the second argument to
+//! appear, calls [`release_terminal`], and prints `terminal_held()` before and
+//! after the release along with the escaped output of `release_terminal`.
 //!
-//! For a reply, the terminal is put in raw mode before anything is printed, so
-//! the test can answer reedline's cursor-position query as soon as the first
-//! row appears: typed earlier, the answer would be echoed onto the screen.
-//! A select is left to enter raw mode itself.
-//!
-//! The probe prints whether the terminal is held before it gives it back, and
-//! afterwards what [`release_terminal`] wrote, escaped, and whether the
-//! terminal is still held.
-//! The rows printed afterwards end in a bare line feed, which returns the
-//! carriage only on a terminal that has left raw mode.
+//! For `reply`, raw mode is enabled before printing so the PTY test can send
+//! reedline's cursor-position response without echoing it.
 
 use std::{
     env,
@@ -26,7 +20,6 @@ use std::{
 use crossterm::terminal;
 use jp_inquire::{InlineOption, InlineReply, InlineSelect, release_terminal, terminal_held};
 
-/// How often the probe looks for the file that tells it to go on.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 fn main() -> io::Result<()> {
@@ -46,7 +39,6 @@ fn main() -> io::Result<()> {
     write!(stdout, "above\r\n")?;
     stdout.flush()?;
 
-    // Never joined: the widget waits for a key the test does not type.
     thread::spawn(move || {
         if reply {
             drop(InlineReply::new("Reply:").prompt(Box::new(io::stdout())));
@@ -63,7 +55,6 @@ fn main() -> io::Result<()> {
         thread::sleep(POLL_INTERVAL);
     }
 
-    // On the row below the widget, which is where the release starts from.
     write!(stdout, "\r\nheld before: {}", terminal_held())?;
 
     let mut written = Vec::new();

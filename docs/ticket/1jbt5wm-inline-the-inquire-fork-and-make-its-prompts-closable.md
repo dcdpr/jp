@@ -10,33 +10,33 @@
 - **Label**: type=task
 
 Bring JP's `inquire` fork into `crates/contrib/inquire`, then change its key
-reader so a prompt it draws can be closed without a key.
+reader so prompts it renders can be closed programmatically without user input.
 
 JP uses `inquire` from a personal fork: `JeanMertz/inquire`, branch `merged`,
 pinned in `Cargo.lock` at `0b68068` (0.9.1), which carries the
 submit-on-valid-parse change of upstream PR 321.
 `jp_cli` and `jp_inquire` depend on it, both with the `crossterm` feature only.
-A restriction in `inquire` can only be lifted in `inquire`, and today that is a
-change in another repository.
+Changing `inquire`'s input loop currently requires modifying an external
+repository.
 RFD 092 defers widget-level cancellation "until the fork is inlined into
 `crates/contrib`".
-This ticket is that inlining, with the first change that needs it.
+This ticket tracks that inlining and the key-reader change that depends on it.
 
 ## The restriction
 
-A prompt `inquire` draws returns only when a key is typed.
+Prompts rendered by `inquire` return only when a key is pressed.
 `CrosstermKeyReader::read_key` (`inquire/src/terminal/crossterm.rs`) loops on
 `crossterm::event::read()`, which blocks.
 The reader is private to the crate: `InputReader` and `prompt_with_backend` are
 `pub(crate)`, so nothing outside `inquire` can substitute one or make it return.
 
-JP's other widget closes today.
-`InlineReply` is built on reedline, which has a break signal, and `jp_inquire`
-raises it once `jp_inquire::close_requested()` says so.
-`close_requested` covers a graceful shutdown (`jp_inquire::close_all`) and the
-`PromptCloser` a prompt was opened under, which is how the tool coordinator
-closes the prompt of a call that was settled.
-The same check is what `inquire` needs to consult.
+`InlineReply` already supports programmatic closing: it is built on `reedline`,
+whose break signal `jp_inquire` sets when `jp_inquire::close_requested()`
+returns `true`.
+`close_requested` covers both graceful shutdown (`jp_inquire::close_all`) and
+the `PromptCloser` a prompt was opened under (used by the tool coordinator to
+close the prompt of a settled tool call).
+`inquire`'s key reader needs to consult the same check.
 
 `inquire` widgets are constructed at 22 call sites in 10 files:
 

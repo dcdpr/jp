@@ -40,8 +40,6 @@ fn a_cfg_argument_can_deny_approving() {
     assert_eq!(check(&[deny]), Err(denied_message()));
 }
 
-/// The default policy of command plugins denies approving too, the refusal
-/// names it, and a plugin allowed by name is approved under it.
 #[test]
 #[serial(env_vars)]
 fn the_default_policy_denies_approving_unless_the_plugin_has_its_own() {

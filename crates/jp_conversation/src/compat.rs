@@ -49,8 +49,8 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(AppConfig::schema);
 /// Used for both the base config snapshot (`base_config.json`) and config delta
 /// events in the event stream.
 pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
-    // Before the strip, which would otherwise take the old key for an unknown
-    // one and drop its value.
+    // Run before `strip_unknown_fields` so the legacy key is migrated rather
+    // than stripped as unknown.
     migrate_plugin_shutdown_timeout(&mut value);
 
     let stripped = strip_unknown_fields(&mut value, &SCHEMA);
@@ -144,14 +144,11 @@ fn remove_at_path(value: &mut Value, path: &ErrorPath) -> bool {
     }
 }
 
-/// Move a plugin shutdown timeout stored at `plugins.shutdown_timeout_secs` to
-/// `plugins.command.*.shutdown_timeout_secs`, the path it is configured at.
+/// Migrate `plugins.shutdown_timeout_secs` to
+/// `plugins.command.*.shutdown_timeout_secs`.
 ///
-/// The timeout was a setting of every kind of plugin before it became a default
-/// of command plugins, and every base config written then carries the old key.
-///
-/// A value already stored at the current path is kept, and the old key is
-/// dropped.
+/// Preserves any value already present at
+/// `plugins.command.*.shutdown_timeout_secs` and removes the legacy key.
 fn migrate_plugin_shutdown_timeout(value: &mut Value) {
     let Some(plugins) = value.get_mut("plugins").and_then(Value::as_object_mut) else {
         return;
@@ -160,8 +157,8 @@ fn migrate_plugin_shutdown_timeout(value: &mut Value) {
         return;
     };
 
-    // The defaults sit under `*`, beside the plugins by name, or beside `value`
-    // and `strategy` when the stored plugins map states how it merges.
+    // Insert `*` alongside per-plugin entries (or alongside `value` and
+    // `strategy` when the map uses a merge wrapper).
     let defaults = plugins
         .entry("command")
         .or_insert_with(|| json!({}))

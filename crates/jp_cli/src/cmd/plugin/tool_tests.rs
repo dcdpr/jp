@@ -272,8 +272,6 @@ fn a_denied_plugin_is_refused_even_when_approved() {
     );
 }
 
-/// A plugin tool's plugin is admitted under the default policy of command
-/// plugins when it sets none of its own.
 #[test]
 fn a_plugin_denied_by_the_default_policy_is_refused_even_when_approved() {
     let machine = Machine::new().with_plugin("ticket", "v1");

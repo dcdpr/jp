@@ -79,12 +79,10 @@ fn edit_refused(message: &str) -> HostToPlugin {
     })
 }
 
-/// A prompt backend whose reply waits for the test to submit it, and that fails
-/// the test if anything else is asked.
+/// Mock prompt backend whose `inline_reply` blocks until the test sends a
+/// [`ReplyOutcome`].
 struct HeldReply {
     outcomes: Mutex<std::sync::mpsc::Receiver<ReplyOutcome>>,
-
-    /// Notified once the reply is open.
     opened: Arc<Notify>,
 }
 
@@ -140,7 +138,6 @@ impl PromptBackend for HeldReply {
     }
 }
 
-/// A composer whose reply prompt is `prompts`, with a terminal behind it.
 fn composer_asking(prompts: Arc<HeldReply>) -> Composer {
     Composer {
         printer: Arc::new(Printer::sink()),
@@ -151,7 +148,6 @@ fn composer_asking(prompts: Arc<HeldReply>) -> Composer {
     }
 }
 
-/// A request for a multi-line reply.
 fn reply_request() -> ComposeRequest {
     ComposeRequest {
         id: Some("1".to_owned()),
@@ -167,7 +163,6 @@ async fn a_compose_request_is_answered_with_what_the_user_submits() {
     let prompts = Arc::new(HeldReply::new(outcomes));
     let composer = composer_asking(Arc::clone(&prompts));
 
-    // Submitted once the prompt is open.
     tokio::spawn(async move {
         prompts.opened.notified().await;
         submit
@@ -192,17 +187,12 @@ async fn a_compose_request_is_answered_with_what_the_user_submits() {
     );
 }
 
-/// A prompt nobody answers must not keep the host from shutting down.
-///
-/// The prompt is still open when the wait ends: its outcome is only sent once
-/// the wait is over.
 #[tokio::test]
 async fn a_shutdown_request_ends_the_wait_for_a_compose_prompt_left_open() {
     let (submit, outcomes) = std::sync::mpsc::channel();
     let prompts = Arc::new(HeldReply::new(outcomes));
     let composer = composer_asking(Arc::clone(&prompts));
 
-    // Requested once the prompt is open.
     let shutdown = CancellationToken::new();
     {
         let shutdown = shutdown.clone();
@@ -221,7 +211,6 @@ async fn a_shutdown_request_ends_the_wait_for_a_compose_prompt_left_open() {
 
     assert_eq!(response, None);
 
-    // Lets the prompt's thread go.
     submit.send(ReplyOutcome::Cancelled).unwrap();
 }
 
@@ -2434,10 +2423,8 @@ fn a_worker_dies_with_a_plugin_that_never_reads_init() {
     }
 }
 
-/// Write the plugin `name` into `dir` as a script, and return the file to run.
-///
-/// The script is `sh` on Unix and `powershell` on Windows, and the two do the
-/// same thing.
+/// Write a test plugin script `jp-{name}` into `dir` and return its executable
+/// path.
 #[cfg(unix)]
 fn script_plugin(dir: &Utf8Path, name: &str, sh: &str, _powershell: &str) -> Utf8PathBuf {
     use std::os::unix::fs::PermissionsExt as _;
@@ -2449,14 +2436,11 @@ fn script_plugin(dir: &Utf8Path, name: &str, sh: &str, _powershell: &str) -> Utf
     path
 }
 
-/// Write the plugin `name` into `dir` as a script, and return the file to run.
+/// Write a test plugin script `jp-{name}` into `dir` and return its executable
+/// path.
 ///
-/// The script is `sh` on Unix and `powershell` on Windows, and the two do the
-/// same thing.
-///
-/// The file to run is a batch file that starts PowerShell on the script beside
-/// it: a batch file is something Windows can start directly, and PowerShell
-/// reads a whole line from a pipe, however long, which `set /p` does not.
+/// Writes a `.bat` wrapper that invokes PowerShell on a companion `.ps1`
+/// script, since `cmd.exe`'s `set /p` truncates long protocol lines.
 #[cfg(windows)]
 fn script_plugin(dir: &Utf8Path, name: &str, _sh: &str, powershell: &str) -> Utf8PathBuf {
     let path = dir.join(format!("jp-{name}.bat"));
@@ -2471,15 +2455,11 @@ fn script_plugin(dir: &Utf8Path, name: &str, _sh: &str, powershell: &str) -> Utf
     path
 }
 
-/// What shutting down a plugin that ignores `Shutdown` showed.
+/// Timing and shutdown budget observations from
+/// [`shut_down_a_plugin_ignoring_shutdown`].
 struct IgnoredShutdown {
-    /// How long the run took to end after shutdown was requested.
     took: Duration,
-
-    /// The shutdown budget claimed while the plugin was running.
     claimed_while_running: Option<Duration>,
-
-    /// The shutdown budget still claimed once the run had returned.
     claimed_afterwards: Option<Duration>,
 }
 
@@ -2556,12 +2536,6 @@ Start-Sleep -Seconds 600
     }
 }
 
-/// A plugin that ignores `Shutdown` is killed once the default
-/// `shutdown_timeout_secs` of command plugins has passed, not after a fixed
-/// grace period.
-///
-/// With the timeout at zero the kill follows the request at once; at the
-/// built-in five seconds the run would take at least that long to end.
 #[test]
 fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
     let mut config = AppConfig::new_test();
@@ -2574,18 +2548,11 @@ fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
         "killed {:?} after shutdown was requested",
         shown.took
     );
-    // No grace, the 5 seconds its turns get, and the 2 second margin.
+    // 0s plugin grace + 5s turn grace + 2s margin.
     assert_eq!(shown.claimed_while_running, Some(Duration::from_secs(7)));
-    // The claim is the run's, and goes when the run returns.
     assert_eq!(shown.claimed_afterwards, None);
 }
 
-/// A plugin's own `shutdown_timeout_secs` decides when it is killed, over the
-/// default.
-///
-/// The default is five seconds, which a run falling back to it would take at
-/// least.
-/// Another plugin is given an hour, which must not reach this one either.
 #[test]
 fn a_plugin_ignoring_shutdown_is_killed_after_its_own_grace() {
     let mut partial = PartialAppConfig::new_test();
@@ -2602,24 +2569,14 @@ fn a_plugin_ignoring_shutdown_is_killed_after_its_own_grace() {
 
     let shown = shut_down_a_plugin_ignoring_shutdown(config);
 
-    // At the default five seconds the run would take at least that long.
     assert!(
         shown.took < Duration::from_secs(3),
         "killed {:?} after shutdown was requested",
         shown.took
     );
-    // Its own grace of none, not the five seconds of the default or the hour
-    // of another plugin's.
     assert_eq!(shown.claimed_while_running, Some(Duration::from_secs(7)));
 }
 
-/// A shutdown request while a plugin runs reaches the plugin as `shutdown`, and
-/// the run waits for the plugin to act on it.
-///
-/// Run the way `jp` runs every command: until the shutdown token ends it, under
-/// the budget the run claims.
-/// The plugin takes a moment to stop and only then records the message it was
-/// sent, so the record exists when the run returns only if the host waited.
 #[test]
 fn a_shutdown_request_waits_for_the_plugin_to_stop() {
     let tmp = tempdir().unwrap();
@@ -2698,8 +2655,7 @@ Start-Sleep -Milliseconds 200
         fs::read_to_string(&stopped).unwrap(),
         "{\"type\":\"shutdown\"}\n"
     );
-    // The default grace of 5 seconds, the 5 its turns get, and the 2 second
-    // margin.
+    // 5s default plugin grace + 5s turn grace + 2s margin.
     assert_eq!(
         *claimed_while_running.lock().unwrap(),
         Some(Duration::from_secs(12))
@@ -2707,8 +2663,6 @@ Start-Sleep -Milliseconds 200
     assert_eq!(budgets.longest(), None);
 }
 
-/// An official plugin that is not installed is not downloaded when the default
-/// policy of command plugins denies it, and is when it is allowed by name.
 #[test]
 fn a_plugin_the_default_policy_denies_is_refused_before_it_is_installed() {
     let mut plugins = AppConfig::new_test().plugins;
@@ -2739,14 +2693,13 @@ fn a_plugin_the_default_policy_denies_is_refused_before_it_is_installed() {
 
 #[test]
 fn a_plugin_run_gets_its_grace_and_its_turns_grace_to_shut_down() {
-    // The plugin's 30 seconds, the 5 its turns get, and the 2 second margin.
+    // 30s plugin grace + 5s turn grace + 2s margin.
     assert_eq!(
         shutdown_budget(Duration::from_secs(30)),
         Duration::from_secs(37)
     );
 }
 
-/// Records that it was dropped.
 struct DropFlag(Arc<AtomicBool>);
 
 impl Drop for DropFlag {
@@ -2755,21 +2708,17 @@ impl Drop for DropFlag {
     }
 }
 
-/// Until shutdown is requested a turn is waited for, and the request is what
-/// stops it.
 #[tokio::test(start_paused = true)]
 async fn a_shutdown_request_stops_the_turns_still_running() {
     let running = RunningTurns::default();
     let mut interrupts = running.register(conversation_id(1));
     let (acted, action) = oneshot::channel();
 
-    // Ends when it is told to, and not before.
     let mut turns = JoinSet::new();
     turns.spawn(async move {
         drop(acted.send(interrupts.next().await));
     });
 
-    // Requested ten seconds into the wait.
     let shutdown = CancellationToken::new();
     {
         let shutdown = shutdown.clone();
@@ -2788,7 +2737,6 @@ async fn a_shutdown_request_stops_the_turns_still_running() {
     .expect("the turn ended once it was asked to stop");
 
     assert_eq!(action.await.unwrap(), Some(InterruptAction::Stop));
-    // The turn ended at the request, so its grace was never waited out.
     assert_eq!(started.elapsed(), Duration::from_secs(10));
 }
 
@@ -2798,7 +2746,6 @@ async fn a_turn_that_does_not_stop_is_aborted_after_its_grace() {
     let interrupts = running.register(conversation_id(1));
     let dropped = Arc::new(AtomicBool::new(false));
 
-    // Holds its interrupt channel open and never reads it.
     let mut turns = JoinSet::new();
     {
         let held = (DropFlag(Arc::clone(&dropped)), interrupts);
@@ -2821,11 +2768,9 @@ async fn a_turn_that_does_not_stop_is_aborted_after_its_grace() {
 
     assert_eq!(started.elapsed(), Duration::from_secs(5));
     assert!(turns.is_empty());
-    // Aborting a turn drops it, which is what releases its conversation lock.
     assert!(dropped.load(Ordering::Acquire));
 }
 
-/// A turn does the user's work, so only a shutdown request cuts it short.
 #[tokio::test(start_paused = true)]
 async fn a_turn_is_waited_for_while_no_shutdown_is_requested() {
     let running = RunningTurns::default();

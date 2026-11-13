@@ -146,10 +146,10 @@ prints `terminating program…` and exits, bounding graceful shutdown.
 The watchdog's countdown replaces the background-task drain's 2-second
 "Cancelling background tasks…" line so a single countdown covers the entire
 teardown.
-A command that stops its own work in order instead of being dropped (a plugin
-run, see [Handler policy](#handler-policy)) claims a shutdown budget for as long
-as that work lasts, and the watchdog counts down from the longest budget claimed
-when it is longer than `timeout_secs`.
+Commands that perform ordered asynchronous teardown instead of stopping on drop
+(such as command plugin runs; see [Handler policy](#handler-policy)) claim a
+shutdown budget for the duration of their work, and the watchdog counts down
+from the longest claimed budget when it exceeds `timeout_secs`.
 
 ```toml
 [interrupt.shutdown]
@@ -179,26 +179,21 @@ shutdown token, so a single watcher covers them all.
 The watchdog owns the countdown rendering (via the `Printer`) and the hard-exit
 deadline, keeping the router free of terminal UI per [RFD 045].
 
-**Open prompts.** A graceful shutdown closes the prompts it can, and does not
-wait on the ones it leaves behind.
-When the shutdown token cancels, an open reedline-based `InlineReply` closes and
-returns as cancelled, so the code that opened it carries on to where the command
-can be dropped.
-A prompt the `inquire` crate draws cannot be closed, because `inquire` waits in
-a read that only a key ends.
-That is the single-key `InlineSelect` (permission prompts, interrupt menus,
-confirmations) and the list select, password, text, confirm, and multi-select
-prompts.
-Tool prompts and plugin `compose` prompts run on threads of their own, so a run
-that ends with one of those open leaves it behind, and teardown restores the
-terminal on the widget's behalf: it leaves raw mode, undoes the modes and
-styling the widget set, and moves the cursor below the prompt.
-An `inquire` prompt opened on the thread that polls the command holds a graceful
-shutdown until it is answered; the watchdog's deadline bounds that.
-Closing `inquire` prompts takes a change to its key reader, which waits on
-inlining the fork (see [Non-Goals](#non-goals)).
-The watchdog's hard exit and the third rung restore the terminal the same way
-before they exit.
+**Open prompts.** When the shutdown token is cancelled, any open reedline-based
+`InlineReply` prompt closes and returns `Cancelled`, unblocking its caller so
+the command can be dropped.
+Prompts rendered by the `inquire` crate (`InlineSelect`, `Select`,
+`MultiSelect`, `Confirm`, `Text`, and `Password`) block in a synchronous key
+read and cannot be closed programmatically until the `inquire` fork is inlined
+(see [Non-Goals](#non-goals)).
+Tool prompts and plugin `compose` prompts run on dedicated OS threads rather
+than the Tokio blocking pool, so runtime shutdown does not wait for them;
+teardown restores the terminal (disabling raw mode, resetting terminal modes and
+SGR attributes, showing the cursor, and moving to the line below the prompt).
+An `inquire` prompt running on the main command thread blocks graceful shutdown
+until answered or until the watchdog deadline expires.
+Both the watchdog hard exit and the third-press immediate exit restore the
+terminal before exiting.
 
 **Output discipline.** Every shutdown message and countdown goes through the
 `Printer` on the chrome channel (stderr), formatted according to the active
@@ -307,11 +302,11 @@ render its own terminal UI:
    The shutdown token cancels, the dispatch thread sends
    `HostToPlugin::Shutdown`, and the existing grace-then-SIGKILL window runs.
    The top-level `select` does not drop a plugin run when the token cancels,
-   because a dropped run never delivers `Shutdown` and cuts its delegated turns
-   off mid-write.
-   The run ends itself within its shutdown budget (the plugin's grace period,
-   then five seconds for the turns it delegated to stop) and is dropped only if
-   it outlasts that budget.
+   because dropping the future would skip sending `Shutdown` and abort delegated
+   turns mid-write.
+   Instead, the run completes its own teardown within its shutdown budget (the
+   plugin's grace period plus 5 seconds for delegated turns to stop) and is
+   dropped only if that budget expires.
 3. **3rd press**: without sending a protocol message, the router's exit path
    walks a process-global kill-on-exit registry to send SIGKILL to the child,
    and JP exits.

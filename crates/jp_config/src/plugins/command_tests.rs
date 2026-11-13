@@ -7,17 +7,14 @@ use serde_json::json;
 use super::*;
 use crate::types::map::{MergedMap, MergedMapStrategy};
 
-/// One layer of the `[plugins.command]` section.
 fn section_layer(toml: &str) -> PartialCommandPluginsConfig {
     toml::from_str(toml).unwrap()
 }
 
-/// Resolve `toml` as the `[plugins.command]` section.
 fn section(toml: &str) -> CommandPluginsConfig {
     CommandPluginsConfig::from_partial(section_layer(toml).finalize(&()).unwrap(), vec![]).unwrap()
 }
 
-/// The run policy `layer` holds for the plugin `name`.
 fn run_of(layer: &PartialCommandPluginsConfig, name: &str) -> Option<RunPolicy> {
     layer.plugins.get(name).and_then(|plugin| plugin.run)
 }
@@ -55,7 +52,7 @@ fn a_plugins_own_shutdown_timeout_overrides_the_default() {
         config.shutdown_timeout("serve-chat"),
         Duration::from_secs(90)
     );
-    // Zero is a value of the plugin's own, not the absence of one.
+    // Explicit 0 disables the grace period rather than falling back to the default.
     assert_eq!(config.shutdown_timeout("serve-web"), Duration::ZERO);
 }
 
@@ -66,12 +63,9 @@ fn a_plugin_that_is_not_configured_gets_the_default() {
         shutdown_timeout_secs = 90
     "});
 
-    // No layer sets the default, so it is the built-in five seconds.
     assert_eq!(config.shutdown_timeout("ticket"), Duration::from_secs(5));
 }
 
-/// `'*'` holds the defaults.
-/// It is not a plugin of that name.
 #[test]
 fn the_defaults_are_not_a_plugin() {
     let config = section(indoc! {"
@@ -95,8 +89,6 @@ fn the_default_shutdown_timeout_is_assigned_by_key() {
     assert_eq!(layer.plugins, MergeableMap::default());
 }
 
-/// An object assigned to the section names the defaults and plugins side by
-/// side, the way a file does.
 #[test]
 fn an_object_assigns_the_defaults_and_the_plugins_it_names() {
     let mut layer = section_layer(indoc! {r#"
@@ -116,17 +108,10 @@ fn an_object_assigns_the_defaults_and_the_plugins_it_names() {
 
     assert_eq!(layer.defaults.shutdown_timeout_secs, Some(20));
     assert_eq!(run_of(&layer, "serve"), Some(RunPolicy::Allow));
-    // The section is a block, so a plugin the object does not name stays.
     assert_eq!(run_of(&layer, "ticket"), Some(RunPolicy::Deny));
     assert!(!layer.plugins.contains_key("*"));
 }
 
-/// The plugins map takes a strategy, even though its entries are flattened to
-/// sit directly under `plugins.command`, and takes it the same way through TOML
-/// and through `--cfg`.
-///
-/// Flattened, the wrapper's own keys arrive where plugin names arrive, so they
-/// have to be recognised as the wrapper's before being read as plugin names.
 #[test]
 fn the_plugins_map_accepts_a_replace_strategy() {
     let from_toml = section_layer(indoc! {r#"
@@ -184,8 +169,6 @@ fn a_later_layer_overrides_the_default_and_keeps_the_plugins_of_earlier_layers()
     assert_eq!(run_of(&layer, "ticket"), Some(RunPolicy::Deny));
 }
 
-/// A layer that sets no default takes the one from the layer it is filled from,
-/// along with the plugins only that layer configures.
 #[test]
 fn a_missing_default_is_filled_in_and_a_set_one_is_kept() {
     let below = section_layer(indoc! {r#"
@@ -215,7 +198,6 @@ fn a_missing_default_is_filled_in_and_a_set_one_is_kept() {
     assert_eq!(set.defaults.shutdown_timeout_secs, Some(30));
 }
 
-/// A conversation records only what differs from the layer below it.
 #[test]
 fn a_changed_default_is_all_its_delta_carries() {
     let prev = section_layer(indoc! {r#"
@@ -246,8 +228,6 @@ fn a_changed_default_is_all_its_delta_carries() {
     );
 }
 
-/// A plugin dropped from the section is reported by its own path: the map is
-/// flattened, so its entries sit directly under `plugins.command`.
 #[test]
 fn a_dropped_plugin_is_cleared_at_its_path_under_the_section() {
     let prev = section_layer(indoc! {r#"
@@ -317,8 +297,6 @@ fn the_default_run_policy_is_assigned_by_key() {
     assert_eq!(layer.plugins, MergeableMap::default());
 }
 
-/// The default and a plugin's own policy are separate keys, so a later layer
-/// changing one leaves the other as an earlier layer set it.
 #[test]
 fn a_later_layer_overrides_the_default_run_policy_and_keeps_a_plugins_own() {
     let mut layer = section_layer(indoc! {r#"
@@ -377,9 +355,8 @@ fn a_changed_default_run_policy_is_carried_by_its_delta_and_a_round_trip() {
     "#});
     assert_eq!(config.to_partial().defaults.run, Some(RunPolicy::Deny));
 
-    // A resolved config has no unset fields, so its partial states the built-in
-    // value too. A conversation stores that partial, which is why the default it
-    // was created under stays its default.
+    // `to_partial` emits the resolved default so conversations preserve the
+    // default they were created with.
     assert_eq!(section("").to_partial().defaults.run, Some(RunPolicy::Ask));
 }
 
@@ -396,8 +373,6 @@ fn run_policy_roundtrip() {
     assert_eq!(parsed, RunPolicy::Allow);
 }
 
-/// `unattended` is the retired spelling of `allow`, and plugin config written
-/// before the rename keeps working.
 #[test]
 fn unattended_reads_as_allow() {
     let partial: PartialCommandPluginConfig = toml::from_str(r#"run = "unattended""#).unwrap();
@@ -427,7 +402,6 @@ fn command_plugin_config_from_toml() {
     assert_eq!(opts["web"]["host"], json!("0.0.0.0"));
 }
 
-/// Layer `next` over `base` the way the config pipeline does, and resolve.
 fn layer(base: &str, next: &str) -> CommandPluginConfig {
     let mut partial: PartialCommandPluginConfig = toml::from_str(base).unwrap();
     let next: PartialCommandPluginConfig = toml::from_str(next).unwrap();
@@ -475,9 +449,6 @@ fn a_later_layer_merges_nested_options_recursively() {
     );
 }
 
-/// An empty list is a value, not the absence of one: a plugin can give `[]` a
-/// meaning of its own, so it reaches the plugin from one layer, and replaces a
-/// list an earlier layer set.
 #[test]
 fn an_empty_list_in_the_options_is_kept() {
     let single = layer("", indoc! {"
@@ -546,8 +517,6 @@ fn a_plugins_shutdown_timeout_is_assigned_by_key() {
     assert_eq!(partial.shutdown_timeout_secs, Some(90));
 }
 
-/// A conversation records only what differs from the layer below it, and reads
-/// its own value back from the resolved config.
 #[test]
 fn a_plugins_shutdown_timeout_survives_a_delta_and_a_round_trip() {
     let prev: PartialCommandPluginConfig = toml::from_str("shutdown_timeout_secs = 90").unwrap();

@@ -29,6 +29,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Attachment](#attachment)
     - [Background Task](#background-task)
     - [Checklist Item](#checklist-item)
+    - [Closed Prompt](#closed-prompt)
     - [CommandConfig](#commandconfig)
     - [Compacted View](#compacted-view)
     - [Compaction](#compaction)
@@ -37,6 +38,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [Display Sanitization](#display-sanitization)
+    - [Drain Timeout](#drain-timeout)
     - [EditorBackend](#editorbackend)
     - [Envelope](#envelope)
     - [Event Overlay](#event-overlay)
@@ -55,6 +57,7 @@ In disagreements between code and docs, the code is authoritative.
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
     - [Service Tier](#service-tier)
+    - [Shutdown Budget](#shutdown-budget)
     - [Signal Router](#signal-router)
     - [Subscription Flow](#subscription-flow)
     - [Summary](#summary)
@@ -105,17 +108,15 @@ with it.
 
 ### Closed Prompt
 
-A prompt whose wait for input was ended from outside it, without an answer: by
-the code that opened it, once it no longer needs the answer, or by a graceful
-shutdown.
-A `PromptCloser` in `jp_inquire` closes the prompts opened under it, and
-`jp_inquire::close_all` closes every prompt in the process.
+A prompt whose wait for input is ended programmatically without user input,
+either by its caller when the answer is no longer needed (`PromptCloser` in
+`jp_inquire`) or by graceful shutdown (`jp_inquire::close_all`).
 
-**Not the same as** a cancelled or an interrupted prompt, which the user ends at
-the keyboard with Escape or Ctrl-C.
+**Not the same as** a cancelled or interrupted prompt, which the user ends at
+the keyboard with `Esc` or `Ctrl+C`.
 
-**Scope**: `InlineReply`.
-A prompt the `inquire` crate draws, `InlineSelect` included, cannot be closed.
+**Scope**: Only `InlineReply` supports programmatic closing; prompts rendered by
+the `inquire` crate (including `InlineSelect`) block until a key is pressed.
 
 ### CommandConfig
 
@@ -250,12 +251,12 @@ event stream, such as a tool call with no response.
 
 ### Drain Timeout
 
-How long background tasks get to finish their `run` phase once the command has
-returned, before they are cancelled.
-The `timeout` of `TaskHandler::sync` in `jp_task::handler`.
+The maximum time background tasks are given to finish their `run` phase after a
+command returns before they are cancelled.
+Passed as the `timeout` parameter to `TaskHandler::sync` in `jp_task::handler`.
 
-**Not the same as** a shutdown budget, which a command claims for work of its
-own that is still running after a shutdown request.
+**Not the same as** a [Shutdown Budget](#shutdown-budget), which bounds how long
+a running command may continue after a graceful shutdown request.
 
 ### EditorBackend
 
@@ -488,16 +489,16 @@ fast it is served, not which weights answer it.
 
 ### Shutdown Budget
 
-How long a command may keep running after a graceful shutdown is requested, for
-a command that stops its own work in order instead of being dropped at the
-request.
-The code that owns such work claims a budget for as long as the work lasts, and
-the longest budget claimed is the one that applies.
-`ShutdownBudgets` in `jp_cli::shutdown`; a plugin run is the only claimant.
+The grace period a running command claims to finish asynchronous teardown after
+a graceful shutdown is requested, before `until_shutdown` drops the command
+future.
+Tracked by `ShutdownBudgets` in `jp_cli::shutdown`; when multiple claims are
+held, the maximum claimed duration applies.
 
 **Not the same as** a plugin's shutdown timeout (`shutdown_timeout_secs`), which
-is one part of a plugin run's budget; nor the drain timeout, which background
-tasks get on every run, shut down or not.
+is one component of a plugin run's shutdown budget, or the [Drain
+Timeout](#drain-timeout), which applies to background tasks after a command
+returns.
 
 ### Signal Router
 

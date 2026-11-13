@@ -893,13 +893,13 @@ async fn a_lost_connection_settles_every_call_without_asking() {
     assert_eq!(strip_ansi(&stderr.lock()), "");
 }
 
-/// Two calls, where the connection is lost while the first call's approval
-/// prompt is open on `prompts`.
+/// Drive two tool calls where the stream drops while the first call's approval
+/// prompt is open.
 ///
-/// Returns what the calls were handed back with, and whether that happened
-/// without the prompt being answered.
-/// A prompt still open half a second after the connection is lost is answered
-/// through `answer`, approving the call.
+/// Returns the [`ExecutionResult`] and whether `drive` completed before any
+/// answer was sent.
+/// If `drive` is still waiting after 500ms, sends `'y'` on `answer` and awaits
+/// completion.
 async fn lose_the_connection_with_a_prompt_open(
     prompts: Arc<HeldPromptBackend>,
     answer: std::sync::mpsc::Sender<char>,
@@ -978,8 +978,6 @@ async fn lose_the_connection_with_a_prompt_open(
     (result, false)
 }
 
-/// What each call of [`lose_the_connection_with_a_prompt_open`] is handed back
-/// with: neither ran.
 fn both_calls_lost() -> Vec<(&'static str, Result<String, String>)> {
     vec![
         (
@@ -1001,7 +999,6 @@ fn both_calls_lost() -> Vec<(&'static str, Result<String, String>)> {
     ]
 }
 
-/// The responses in `result`, by call.
 fn responses(result: &ExecutionResult) -> Vec<(&str, Result<String, String>)> {
     result
         .reviews
@@ -1010,8 +1007,6 @@ fn responses(result: &ExecutionResult) -> Vec<(&str, Result<String, String>)> {
         .collect()
 }
 
-/// A prompt that can be closed, open for a call that the lost connection
-/// settled, is closed: the calls are handed back without anybody answering it.
 #[tokio::test]
 async fn a_lost_connection_closes_an_open_prompt() {
     let (answer, answers) = std::sync::mpsc::channel();
@@ -1029,13 +1024,8 @@ async fn a_lost_connection_closes_an_open_prompt() {
     assert_eq!(prompts.shown.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
-/// A prompt that cannot be closed is waited for before the calls are handed
-/// back, and its answer changes nothing.
-///
-/// The prompt runs on a thread of its own and owns the terminal until it is
-/// answered.
-/// Returning while it is open would leave it on screen over the turn's error,
-/// with its answer sent to a batch that no longer exists.
+/// Unclosable prompts must return before `finish` completes so the prompt does
+/// not remain on screen after the batch ends, and any late approval is ignored.
 #[tokio::test]
 async fn a_lost_connection_waits_for_an_open_prompt_that_cannot_be_closed() {
     let (answer, answers) = std::sync::mpsc::channel();
@@ -1057,12 +1047,6 @@ async fn a_lost_connection_waits_for_an_open_prompt_that_cannot_be_closed() {
     assert_eq!(prompts.shown.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
-/// A run that ends while an approval prompt is open does not wait for the
-/// prompt to be answered.
-///
-/// A runtime waits for its blocking tasks before it shuts down, and a prompt
-/// returns only when a key is typed, so a prompt running as a blocking task
-/// keeps `jp` from exiting until somebody answers it.
 #[test]
 fn a_runtime_shuts_down_while_an_approval_prompt_is_open() {
     let (answer, answers) = std::sync::mpsc::channel();
@@ -1706,20 +1690,15 @@ async fn an_unanswered_formatter_question_settles_the_call() {
 struct HeldPromptBackend {
     answers: std::sync::Mutex<std::sync::mpsc::Receiver<char>>,
 
-    /// Whether an open select returns once it is closed, as a prompt that polls
-    /// `jp_inquire::close_requested` does, or goes on waiting for its answer,
-    /// as a prompt that `inquire` draws does.
+    /// Whether `inline_select` exits when `jp_inquire::close_requested()`
+    /// fires.
     closes: bool,
 
-    /// Notified each time an inline select opens.
     opened: Arc<Notify>,
-
-    /// How many inline selects have opened.
     shown: std::sync::atomic::AtomicUsize,
 }
 
 impl HeldPromptBackend {
-    /// A backend whose selects only an answer ends.
     fn new(answers: std::sync::mpsc::Receiver<char>) -> Self {
         Self {
             answers: std::sync::Mutex::new(answers),
@@ -1729,7 +1708,6 @@ impl HeldPromptBackend {
         }
     }
 
-    /// A backend whose selects also end when they are closed.
     fn closing(answers: std::sync::mpsc::Receiver<char>) -> Self {
         Self {
             closes: true,

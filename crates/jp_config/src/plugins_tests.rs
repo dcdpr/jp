@@ -4,8 +4,6 @@ use serde_json::json;
 use super::*;
 use crate::PartialAppConfig;
 
-/// The shutdown timeout is a command plugin setting, so a file that still sets
-/// it for every kind of plugin is refused.
 #[test]
 fn a_shutdown_timeout_outside_the_command_section_is_refused_in_a_file() {
     let error =
@@ -18,8 +16,6 @@ fn a_shutdown_timeout_outside_the_command_section_is_refused_in_a_file() {
     );
 }
 
-/// `--cfg` names the key the setting moved to, where a file's parser only says
-/// which keys it knows.
 #[test]
 fn a_shutdown_timeout_outside_the_command_section_is_refused_naming_where_it_went() {
     let mut config = PartialAppConfig::empty();
@@ -35,7 +31,6 @@ fn a_shutdown_timeout_outside_the_command_section_is_refused_naming_where_it_wen
     assert_eq!(config, PartialAppConfig::empty());
 }
 
-/// `JP_CFG_PLUGINS_SHUTDOWN_TIMEOUT_SECS`, as the environment layer reads it.
 #[test]
 fn a_shutdown_timeout_outside_the_command_section_is_refused_from_the_environment() {
     let mut config = PartialAppConfig::empty();

@@ -987,25 +987,25 @@ SIGTERM always requests a graceful shutdown and SIGQUIT always exits immediately
 A graceful shutdown drops the running command at its next await point, which
 releases its conversation locks and persists dirty conversations from their
 guards, and then drains background tasks.
-A plugin run is the exception to the drop: it stops its plugin and the turns the
-plugin delegated in order, within its shutdown budget.
+Command plugin runs instead claim a shutdown budget so they can stop the plugin
+process and any delegated turns before returning.
 
-A shutdown request closes an open inline reply prompt (`jp_inquire::close_all`),
-which returns as cancelled.
-A prompt the `inquire` crate draws cannot be closed: the single-key select
-behind approvals, interrupt menus and confirmations, and the list select,
-password, text, confirm and multi-select prompts.
-Tool prompts and a plugin's `compose` prompts run on threads of their own, so
-one of those is left behind and teardown restores the terminal it held.
-An `inquire` prompt opened on the thread that polls the command holds the
-shutdown until it is answered.
+A shutdown request closes any open `InlineReply` prompt via
+`jp_inquire::close_all`.
+Prompts rendered by the `inquire` crate (`InlineSelect`, `Select`,
+`MultiSelect`, `Confirm`, `Text`, and `Password`) block until a key is pressed
+and cannot be closed programmatically.
+Tool prompts and plugin `compose` prompts run on dedicated OS threads; if a run
+exits while one is open, the thread is left behind and teardown restores the
+terminal.
+An `inquire` prompt running on the main command thread blocks graceful shutdown
+until answered.
 
-The tool coordinator closes a prompt the same way when the call it was opened
-for is settled while it is open, as when the connection to the JP MCP Server is
-lost.
-A prompt it cannot close, it waits for.
-An immediate exit (SIGQUIT, or a signal after shutdown began) restores the
-terminal an open prompt held before the process ends.
+The tool coordinator also closes a tool call's prompt when the call settles
+while the prompt is open (for example, when the connection to the JP MCP Server
+is lost), and waits for unclosable prompts to return before finishing the batch.
+Immediate exits (`SIGQUIT` or a third Ctrl-C) restore the terminal before
+terminating the process.
 
 **Two menu contexts:**
 

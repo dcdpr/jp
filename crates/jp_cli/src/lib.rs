@@ -577,10 +577,9 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let shutdown = ctx.signals.shutdown_token();
     let budgets = ctx.shutdown_budgets.clone();
 
-    // A prompt waiting for a key on this thread keeps the command from being
-    // polled, so a shutdown request goes unnoticed until the prompt returns.
-    // Closing the prompt returns the command to where it can be dropped. Only
-    // the reply prompt closes; one that `inquire` draws waits for its key.
+    // Close any active closable prompt (such as `InlineReply`) on shutdown so
+    // synchronous prompt waits unblock and `until_shutdown` can drop the
+    // command.
     on_shutdown(&rt, shutdown.clone(), jp_inquire::close_all);
 
     let output = rt.block_on(until_shutdown(

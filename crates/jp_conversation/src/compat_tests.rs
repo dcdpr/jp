@@ -136,10 +136,6 @@ fn strip_groups_removed_fields_by_the_object_that_held_them() {
     );
 }
 
-/// A conversation stored while the plugin shutdown timeout was configured for
-/// every kind of plugin carries it at `plugins.shutdown_timeout_secs`.
-/// It reads as the command plugins' default, and the plugins stored beside it
-/// are kept.
 #[test]
 fn a_stored_plugin_shutdown_timeout_reads_as_the_command_plugin_default() {
     let value = json!({
@@ -159,8 +155,6 @@ fn a_stored_plugin_shutdown_timeout_reads_as_the_command_plugin_default() {
     assert_eq!(command.plugins.len(), 1);
 }
 
-/// Moved, the stored timeout is a key the schema knows, so nothing is stripped
-/// and no warning is logged for a conversation that only predates the move.
 #[test]
 fn a_moved_plugin_shutdown_timeout_leaves_nothing_to_strip() {
     let mut value = json!({ "plugins": { "shutdown_timeout_secs": 30 } });
@@ -193,8 +187,6 @@ fn a_command_plugin_default_already_stored_is_kept_over_the_old_key() {
     );
 }
 
-/// A plugins map stored with a strategy keeps `value` and `strategy` where
-/// plugin names otherwise sit, and the default joins them as a sibling key.
 #[test]
 fn a_stored_plugin_shutdown_timeout_moves_beside_a_plugins_map_stating_a_strategy() {
     let value = json!({

@@ -292,9 +292,8 @@ Its conversation stays locked until the turn ends, and the host waits for it
 without a timeout because the turn performs user work.
 The user can stop a running turn early through the interrupt ladder.
 A graceful shutdown request also ends the wait: once the plugin has exited or
-been terminated, the host stops every delegated turn still running, the way a
-plugin's own `interrupt` request asking for a stop does, and aborts any turn
-that has not ended five seconds later.
+been terminated, the host sends a `stop` interrupt to every running delegated
+turn and aborts any turn still running after 5 seconds.
 
 #### Shutdown
 
@@ -310,12 +309,12 @@ The plugin begins graceful shutdown and sends `exit` when done.
 If the plugin does not exit within a configurable grace period (default 5
 seconds), JP terminates it.
 
-JP keeps running until the plugin has exited and the turns it delegated have
-ended.
-It then exits with the code the plugin's `exit` carried, or with 0 when the
-plugin exited or was terminated without sending one.
-A plugin run still going after the grace period and the five seconds its turns
-get is cut off, and JP exits with code 130.
+JP waits for the plugin to exit and for its delegated turns to finish before
+exiting.
+It exits with the status code from the plugin's `exit` message, or `0` if the
+plugin exited or was terminated after `shutdown` without sending `exit`.
+If the plugin run exceeds its shutdown budget (the plugin's grace period plus 5
+seconds for delegated turns), JP drops the run and exits with code `130`.
 
 JP owns the plugin's entire process tree for the lifetime of the invocation, not
 just the spawned child process.

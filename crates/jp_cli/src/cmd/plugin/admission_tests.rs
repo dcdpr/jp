@@ -184,8 +184,6 @@ fn allow_runs_without_asking() {
     );
 }
 
-/// `plugins.command.'*'.run` is the policy of a plugin that sets none, whether
-/// or not the plugin is configured at all.
 #[test]
 fn a_plugin_without_its_own_policy_gets_the_default() {
     let plugin = plugin("webui");
@@ -204,7 +202,6 @@ fn a_plugin_without_its_own_policy_gets_the_default() {
     );
 }
 
-/// The refusal names the key that denies, which is not one the plugin has.
 #[test]
 fn a_default_of_deny_refuses_and_names_the_default() {
     let plugin = plugin("webui");
@@ -261,8 +258,6 @@ fn a_plugins_own_policy_overrides_the_default() {
     );
 }
 
-/// A default of `allow` trusts a plugin by name, as its own `allow` does, and a
-/// pinned checksum still decides which contents that name may have.
 #[test]
 fn a_pinned_checksum_refuses_a_mismatch_under_a_default_of_allow() {
     let plugin = plugin("webui");
@@ -282,7 +277,6 @@ fn a_pinned_checksum_refuses_a_mismatch_under_a_default_of_allow() {
     );
 }
 
-/// `admit` reads the default from the configuration it is given.
 #[test]
 fn admit_applies_the_default_policy_of_the_configuration() {
     let tmp = tempdir().unwrap();

@@ -97,8 +97,8 @@ pub(crate) enum Reason {
 /// 4. `run = "ask"` runs an official binary the registry publishes, or one the
 ///    approval store holds, and asks about anything else.
 ///
-/// `run` is the plugin's own in `config`, or `default` for a plugin that sets
-/// none: the `run` of `plugins.command.'*'`.
+/// Uses the plugin's `run` policy from `config` if set, falling back to
+/// `default` (`plugins.command.'*'.run`).
 pub(crate) fn decide(
     candidate: &Candidate<'_>,
     config: Option<&CommandPluginConfig>,
@@ -140,12 +140,11 @@ pub(crate) fn decide(
     })
 }
 
-/// Why the plugin `name` is refused, when configuration denies it; `None` when
-/// it does not.
+/// Return the refusal message if configuration denies plugin `name`, or `None`
+/// if it is allowed.
 ///
-/// `own` is the plugin's own `run`, and `default` the `run` of
-/// `plugins.command.'*'`, which decides for a plugin that sets none.
-/// The refusal names whichever of the two keys denies.
+/// Checks the plugin's `own` policy first, falling back to `default`
+/// (`plugins.command.'*'.run`), and names the key that denied execution.
 pub(crate) fn denial(
     name: &str,
     own: Option<RunPolicy>,

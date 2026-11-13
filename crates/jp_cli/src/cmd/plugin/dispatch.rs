@@ -86,17 +86,17 @@ use crate::{
     editor::{draft_query_text, draft_revision, report_editor_failure},
 };
 
-/// How long a turn that was asked to stop has to end before it is aborted.
+/// Grace period for a stopped turn to finish before it is aborted.
 const TURN_STOP_GRACE: Duration = Duration::from_secs(5);
 
-/// Room in a plugin run's shutdown budget for the steps that follow the two
-/// graces: reaping the plugin, and the bounded wait on its stderr.
+/// Extra time in a plugin run's shutdown budget for reaping the child process
+/// and draining its stderr.
 const SHUTDOWN_MARGIN: Duration = Duration::from_secs(2);
 
-/// How long a plugin run takes at most to end once a graceful shutdown is
-/// requested, for a plugin that gets `grace` to exit.
+/// Total shutdown budget for a plugin run with plugin exit timeout `grace`.
 ///
-/// The turns the plugin left running get [`TURN_STOP_GRACE`] after that.
+/// Combines the plugin's `grace`, [`TURN_STOP_GRACE`] for any running turns,
+/// and [`SHUTDOWN_MARGIN`] for process cleanup.
 fn shutdown_budget(grace: Duration) -> Duration {
     grace + TURN_STOP_GRACE + SHUTDOWN_MARGIN
 }
@@ -107,19 +107,12 @@ fn shutdown_budget(grace: Duration) -> Duration {
 /// ends of it: the plugin's stdin carries the protocol, so it has no terminal
 /// to read keys from, and only the host knows which editor `Ctrl+X` opens.
 ///
-/// Holds handles rather than borrows, so the message loop it belongs to can
-/// take the context mutably, and a prompt can run on a thread of its own.
+/// Owns `Arc` handles rather than borrowing `Ctx`, so prompts can run on a
+/// dedicated thread while the message loop borrows `Ctx` mutably.
 #[derive(Clone)]
 pub(crate) struct Composer {
     printer: Arc<Printer>,
-
-    /// Renders the widgets, rather than the composer building them.
-    ///
-    /// Everything the widget owns — its keybindings, and the hints that
-    /// describe them — lives behind here, so a second caller cannot quietly
-    /// ship a reply buffer with the wrong edit mode or no key hints at all.
     prompts: Arc<dyn PromptBackend>,
-
     editor: Option<Arc<dyn EditorBackend>>,
     edit_mode: ReplyEditMode,
     interactive: bool,
@@ -449,12 +442,10 @@ pub(crate) async fn run_plugin(
         interactive: ctx.term.interactive,
     };
 
-    // How long a plugin asked to shut down has to exit before it is killed.
     let grace = config.plugins.command.shutdown_timeout(name);
 
-    // A shutdown request is this run's to act on until it returns: the plugin
-    // is asked to stop and waited for, and so are the turns it asked for. A
-    // run that is dropped does neither.
+    // Claim a shutdown budget so `until_shutdown` does not drop `run_plugin`
+    // before the plugin and its delegated turns have had time to stop.
     let _shutdown_budget = ctx.shutdown_budgets.claim(shutdown_budget(grace));
 
     let PluginProcess {
@@ -568,15 +559,12 @@ pub(crate) async fn run_plugin(
     result
 }
 
-/// Wait for the turns a plugin asked for to end.
+/// Wait for delegated turns to finish.
 ///
-/// Without a bound while no shutdown is requested: a turn takes as long as the
-/// assistant takes, and the work is the user's.
-///
-/// A graceful shutdown request stops every turn still running, the way a
-/// plugin's own `interrupt` request does, so each records where it stopped.
-/// What is still running `grace` later is aborted, which drops it and releases
-/// its conversation.
+/// Waits indefinitely while no shutdown is requested.
+/// When `shutdown` is cancelled, sends a stop request to all running turns so
+/// each can persist its partial state, and aborts any turn still running after
+/// `grace` (dropping its task and releasing its conversation lock).
 async fn finish_turns(
     turns: &mut JoinSet<()>,
     running: &RunningTurns,
@@ -997,21 +985,19 @@ async fn answer_compose(
     )
 }
 
-/// Collect what a plugin's `compose` request asks for, or `None` once a
-/// graceful shutdown is requested.
+/// Run a plugin's `compose` prompt on a dedicated thread, returning `None` if
+/// `shutdown` is cancelled first.
 ///
-/// The prompt runs on a thread of its own.
-/// Run on the thread that polls the message loop, a prompt nobody answers would
-/// keep a shutdown request from being acted on: several of these prompts are
-/// `inquire`'s, which only a key ends.
-/// A prompt still open at shutdown is left behind on its thread, and goes
-/// unanswered: the plugin is being stopped, and nothing reads the answer.
+/// Running the prompt on its own thread keeps the message loop free to observe
+/// shutdown requests even when the prompt blocks in `inquire` waiting for a
+/// keystroke.
+/// If shutdown is requested while the prompt is open, the thread is left behind
+/// and no response is sent to the plugin.
 async fn compose(
     composer: &Composer,
     request: ComposeRequest,
     shutdown: &CancellationToken,
 ) -> Option<ComposeResponse> {
-    // What a prompt that fails to report back answers with: nothing collected.
     let declined = ComposeResponse {
         id: request.id.clone(),
         text: None,
@@ -1959,10 +1945,9 @@ impl RunningTurns {
             .remove(&conversation);
     }
 
-    /// Queue a stop for every running turn.
+    /// Send [`InterruptAction::Stop`] to every running turn.
     ///
-    /// A turn that has ended, or that has a queue full of interrupts it has not
-    /// read, is skipped: neither can be told anything more.
+    /// Skips turns whose interrupt channel is already closed or full.
     fn stop_all(&self) {
         // A panic elsewhere leaves the map as it was, and the turns in it
         // still have to be stopped.

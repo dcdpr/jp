@@ -1,13 +1,10 @@
 use super::*;
 
-/// A command that returns `after` it starts, whatever is requested meanwhile.
 async fn command_taking(after: Duration) -> cmd::Output {
     tokio::time::sleep(after).await;
     Ok(())
 }
 
-/// A command that claims `budget` once `unclaimed` has passed, holds the claim
-/// for `held`, and returns a minute after releasing it.
 async fn command_claiming(
     budgets: ShutdownBudgets,
     unclaimed: Duration,
@@ -22,7 +19,6 @@ async fn command_claiming(
     Ok(())
 }
 
-/// A shutdown token cancelled `after` this call.
 fn shutdown_requested_in(after: Duration) -> CancellationToken {
     let token = CancellationToken::new();
     let cancel = token.clone();
@@ -154,12 +150,9 @@ async fn a_command_still_running_when_its_budget_runs_out_is_dropped() {
 
     assert_eq!(error.message.as_deref(), Some("Interrupted"));
     assert_eq!(error.code.get(), 130);
-    // One second until the request, then the five that were claimed.
     assert_eq!(started.elapsed(), Duration::from_secs(6));
 }
 
-/// A command claims its budget when it starts the work that needs one, which is
-/// after it started running.
 #[tokio::test(start_paused = true)]
 async fn a_budget_claimed_while_the_command_runs_is_the_one_a_later_request_gets() {
     let budgets = ShutdownBudgets::default();
@@ -180,11 +173,9 @@ async fn a_budget_claimed_while_the_command_runs_is_the_one_a_later_request_gets
     .unwrap_err();
 
     assert_eq!(error.message.as_deref(), Some("Interrupted"));
-    // Claimed at two seconds, requested at three, dropped five after that.
     assert_eq!(started.elapsed(), Duration::from_secs(8));
 }
 
-/// A request that arrives before the command has claimed a budget finds none.
 #[tokio::test(start_paused = true)]
 async fn a_request_before_a_budget_is_claimed_drops_the_command_at_once() {
     let budgets = ShutdownBudgets::default();
@@ -209,8 +200,6 @@ async fn a_request_before_a_budget_is_claimed_drops_the_command_at_once() {
     assert_eq!(budgets.longest(), None);
 }
 
-/// The work that needed stopping in order is done, so what is left of the
-/// command is dropped the way a command with nothing claimed is.
 #[tokio::test(start_paused = true)]
 async fn a_claim_released_before_the_request_leaves_the_command_to_be_dropped_at_once() {
     let budgets = ShutdownBudgets::default();
@@ -234,8 +223,6 @@ async fn a_claim_released_before_the_request_leaves_the_command_to_be_dropped_at
     assert_eq!(started.elapsed(), Duration::from_secs(4));
 }
 
-/// A claim covers the work it was made for.
-/// Once that work has stopped, the rest of its budget is not waited out.
 #[tokio::test(start_paused = true)]
 async fn a_claim_released_after_the_request_drops_the_command_then() {
     let budgets = ShutdownBudgets::default();
@@ -256,11 +243,9 @@ async fn a_claim_released_after_the_request_drops_the_command_then() {
     .unwrap_err();
 
     assert_eq!(error.message.as_deref(), Some("Interrupted"));
-    // Released at three seconds, with 28 of the 30 claimed still to go.
     assert_eq!(started.elapsed(), Duration::from_secs(3));
 }
 
-/// Stopping one piece of work can start another that needs longer.
 #[tokio::test(start_paused = true)]
 async fn a_longer_claim_made_after_the_request_extends_the_budget() {
     let budgets = ShutdownBudgets::default();
@@ -282,12 +267,9 @@ async fn a_longer_claim_made_after_the_request_extends_the_budget() {
     .unwrap_err();
 
     assert_eq!(error.message.as_deref(), Some("Interrupted"));
-    // Requested at one second, and the 20 claimed at two count from there.
     assert_eq!(started.elapsed(), Duration::from_secs(21));
 }
 
-/// The budget is the longest claim still held, so releasing that one leaves the
-/// shorter claim to decide.
 #[tokio::test(start_paused = true)]
 async fn releasing_the_longest_claim_leaves_the_shorter_one_to_run_out() {
     let budgets = ShutdownBudgets::default();
@@ -309,6 +291,5 @@ async fn releasing_the_longest_claim_leaves_the_shorter_one_to_run_out() {
     .unwrap_err();
 
     assert_eq!(error.message.as_deref(), Some("Interrupted"));
-    // The 20 are released at three seconds; the five run out at six.
     assert_eq!(started.elapsed(), Duration::from_secs(6));
 }

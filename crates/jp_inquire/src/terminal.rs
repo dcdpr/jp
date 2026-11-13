@@ -1,12 +1,10 @@
-//! Giving the terminal back on behalf of a widget that cannot.
+//! Terminal restoration for prompts abandoned on background threads.
 //!
-//! A widget puts the terminal in raw mode for as long as it waits for a key,
-//! and restores it when it returns.
-//! Nothing can make a waiting widget return: `inquire` and `reedline` both
-//! block in a read that only input ends.
-//! A program that has to exit while a widget waits on another thread leaves
-//! that thread behind, and calls [`release_terminal`] first so the terminal it
-//! hands back is usable.
+//! Interactive widgets enable raw mode while waiting for input and restore it
+//! when they return.
+//! Because `inquire` and `reedline` block in synchronous reads until a key is
+//! pressed, a process exiting while a prompt is open on a background thread
+//! must restore the terminal itself via [`release_terminal`].
 
 use std::io::{self, Write};
 
@@ -14,54 +12,47 @@ use crossterm::terminal;
 
 use crate::inline_reply;
 
-/// Turns bracketed paste off, which reedline turns on for a reply.
+/// Escape sequence to disable bracketed paste mode (enabled by `reedline`).
 const DISABLE_BRACKETED_PASTE: &str = "\x1b[?2004l";
 
-/// Pops the keyboard enhancement flags reedline pushes for a reply.
+/// Escape sequence to pop kitty keyboard enhancement flags (pushed by
+/// `reedline`).
 ///
-/// A terminal without the kitty keyboard protocol ignores it, and reedline
-/// pushes nothing there.
+/// Ignored by terminals that do not support the kitty keyboard protocol.
 const POP_KEYBOARD_ENHANCEMENT: &str = "\x1b[<1u";
 
-/// Resets every text attribute.
+/// Escape sequence to reset all SGR text attributes.
 ///
-/// A widget drawn inside a shaded region waits with the region's background
-/// still active, and the erase in [`LEAVE_WIDGET`] fills with the active
-/// background.
+/// Prevents [`LEAVE_WIDGET`]'s erase-below sequence from filling with an active
+/// shaded region's background color.
 const RESET_ATTRIBUTES: &str = "\x1b[0m";
 
-/// Shows the cursor, which a select menu hides.
+/// Escape sequence to show the cursor (hidden by `inquire` select menus).
 const SHOW_CURSOR: &str = "\x1b[?25h";
 
-/// Moves to the start of the next row and erases from there down, so output
-/// that follows starts on a row of its own with none of the widget's rows below
-/// it.
+/// Moves the cursor to the start of the next line and erases to the end of the
+/// screen.
 pub(crate) const LEAVE_WIDGET: &str = "\r\n\x1b[J";
 
-/// Whether the terminal is in raw mode, which a widget enters for as long as it
-/// waits for a key.
+/// Return `true` if the terminal currently has raw mode enabled.
 ///
-/// `false` when the terminal's mode cannot be read, which is the case without a
-/// terminal.
+/// Returns `false` if no controlling terminal is available or its mode cannot
+/// be queried.
 #[must_use]
 pub fn terminal_held() -> bool {
     terminal::is_raw_mode_enabled().unwrap_or(false)
 }
 
-/// Put the terminal back the way the open widgets found it, leaving them open.
+/// Restore terminal state while an unanswered prompt remains open on a
+/// background thread.
 ///
-/// Leaves raw mode, undoes the modes and styling the widgets set, and moves the
-/// cursor to a row below what they drew.
-/// `out` is the stream the widgets draw on.
-///
-/// The widgets keep waiting for input and are not told.
-/// One that returns afterwards redraws on a terminal it no longer owns, so this
-/// is for a program about to exit.
+/// Disables raw mode, resets terminal modes and text attributes on `out`, shows
+/// the cursor, and moves to a clean line below the prompt.
+/// Intended for process exit paths where the prompt thread is abandoned.
 ///
 /// # Errors
 ///
-/// Returns an error when the terminal's mode cannot be restored, or `out`
-/// cannot be written to.
+/// Returns an error if raw mode cannot be disabled or writing to `out` fails.
 pub fn release_terminal(out: &mut dyn Write) -> io::Result<()> {
     terminal::disable_raw_mode()?;
 
@@ -69,8 +60,7 @@ pub fn release_terminal(out: &mut dyn Write) -> io::Result<()> {
     out.flush()
 }
 
-/// What [`release_terminal`] writes: the reply widget's modes when
-/// `reply_open`, then what every widget needs.
+/// Build the escape sequence written by [`release_terminal`].
 fn release_sequence(reply_open: bool) -> String {
     let mut sequence = String::new();
     if reply_open {
