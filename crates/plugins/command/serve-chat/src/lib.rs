@@ -61,48 +61,48 @@ const REQUIRED_PROTOCOL: u32 = 14;
 /// `protocol` must match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 14,
-    description: "Relay chat messages to JP turns, and the answers back",
+    description: "Relay chat messages to JP turns and send the answers back",
     command: ["serve", "chat"],
 );
 
 /// CLI `--help` output, also printed when the binary is invoked directly.
 pub const HELP_TEXT: &str = "\
-Relay messages from a chat app to JP turns, and the answers back.
+Relay messages from a chat app to JP turns and send the answers back.
 
 Usage: jp serve chat
 
-Runs until stopped. Every message from a configured person becomes a turn,
-run by `jp` under the configured persona, and the turn's answer is sent back.
+Runs until stopped. Every message from a configured sender becomes a turn
+run by `jp` under the configured persona, and the turn's final answer is sent
+back to the chat.
 
 Configuration (`plugins.command.serve-chat.options`):
 
-  persona            A configuration every turn runs under, as --cfg takes it.
-  cfg                More configurations, applied after the persona.
-  admin              The person told when the bridge pauses.
-  rollover           `daily`, or the weekday a new conversation starts on.
-  conversation_ttl   How long a conversation is kept. Default: 7d (14d weekly).
-  signal.account     The Signal account to run as. Required.
-  signal.account_id  The account's id, to recognize mentions of it.
-  signal.command     The signal-cli executable. Default: signal-cli.
-  signal.attachments_dir  Where signal-cli saves attachments.
-  decide             Ask a model what to do with each message: answer it,
-                     ignore it, or, when it starts by mentioning the bot,
-                     start a new conversation or compact the current one.
-                     `url`, `model`,
-                     `api_key_env` (default JEV_API_KEY; empty for no token),
-                     `threshold` (default 0.5), `instructions`.
-  compact            The compactions \"@bot compact\" asks for: `from`, `to`,
-                     and `reasoning`, `tool_calls`, or `summary`. Default:
-                     reasoning and tool calls stripped from turns 2 to -2.
-  people.<key>       Who is answered: `name`, and their `signal` account.
-  checkout.enabled   Lock, pull, and check the checkout. Default: true.
-  checkout.writable  Directories a turn may change.
-                     Default: docs/ticket, docs/rfd, docs/wiki.
-  checkout.pull_interval  How often to pull between turns. Default: 5m.
+  persona                 Configuration every turn runs under (passed via --cfg).
+  cfg                     Extra --cfg overrides applied after `persona`.
+  admin                   Key in `people` notified when the bridge pauses.
+  rollover                `daily`, or the weekday a new conversation starts on.
+  conversation_ttl        How long a conversation is kept. Default: 7d (14d weekly).
+  signal.account          Signal account to run as. Required.
+  signal.account_id       Account UUID (ACI) used to recognize mentions and replies.
+  signal.command          `signal-cli` executable. Default: signal-cli.
+  signal.attachments_dir  Directory where `signal-cli` saves attachments.
+  decide                  Pre-turn classifier (`url`, `model`, `api_key_env`
+                          [default JEV_API_KEY; empty for no token], `threshold`
+                          [default 0.5], `instructions`). Classifies each message
+                          as `answer`, `ignore`, `new_conversation`, or `compact`.
+  compact                 Compaction rules for \"@bot compact\" (`from`, `to`, and
+                          `reasoning`, `tool_calls`, or `summary`). Default: strip
+                          reasoning and tool calls from turns 2 to -2.
+  people.<key>            Allowed sender (`name` and `signal` number or UUID).
+  checkout.enabled        Lock, pull, and check the git checkout. Default: true.
+  checkout.writable       Directories a turn may modify.
+                          Default: docs/ticket, docs/rfd, docs/wiki.
+  checkout.pull_interval  How often to pull when idle. Default: 5m.
 
-Nothing a turn writes is committed. Take it for review from the checkout, under
-the lock at `git rev-parse --git-path jp-serve-chat.lock`; the bridge pulls
-again once the tree is clean.";
+Turns leave uncommitted changes in the working tree. Pull them into a review
+worktree with `just chat-take` (which locks `git rev-parse --git-path
+jp-serve-chat.lock`); the bridge resumes pulling once the working tree is
+clean.";
 
 /// How many received chat messages can wait for the bridge before the
 /// transport's reader blocks.
