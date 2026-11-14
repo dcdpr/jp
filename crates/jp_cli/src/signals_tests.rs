@@ -1,8 +1,24 @@
 use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::{fs, io::Write as _, process::Command};
 
+#[cfg(unix)]
+use camino_tempfile::tempdir;
+#[cfg(unix)]
+use jp_inquire::{InlineOption, InlineSelect};
+#[cfg(unix)]
+use jp_pty::{CommandBuilder, Size, Terminal};
 use tokio::sync::mpsc::{self, error::TryRecvError};
 
 use super::*;
+
+/// Environment variable naming the PID file for
+/// [`a_prompt_left_open_until_the_process_exits`].
+#[cfg(unix)]
+const EXIT_PROBE_PID_FILE: &str = "JP_TEST_EXIT_PROBE_PID_FILE";
+
+#[cfg(unix)]
+const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Push a handler scope onto the router state.
 fn push_handler(inner: &Arc<RouterInner>) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
@@ -324,4 +340,86 @@ async fn escalation_ladder_reaches_exit_through_signal_task() {
     .await
     .expect("the third press should reach the exit action");
     assert_eq!(signals.exit_codes(), vec![130]);
+}
+
+/// Verify that [`SignalRouter::new`]'s immediate-exit handler restores the
+/// terminal when a prompt is open.
+///
+/// Spawns this test binary in a PTY running
+/// [`a_prompt_left_open_until_the_process_exits`], sends `SIGQUIT`, and checks
+/// that the cursor moves to the start of the line below the prompt.
+#[cfg(unix)]
+#[test]
+fn an_immediate_exit_gives_back_the_terminal_an_open_prompt_holds() {
+    let tmp = tempdir().expect("a temporary directory");
+    let pid_file = tmp.path().join("pid");
+
+    let terminal = Terminal::pty(Size::new(10, 80))
+        .expect("a pty")
+        .with_timeout(PROBE_TIMEOUT);
+    let mut command =
+        CommandBuilder::new(std::env::current_exe().expect("the path of this test binary"));
+    command.args([
+        "--exact",
+        "signals::tests::a_prompt_left_open_until_the_process_exits",
+        "--nocapture",
+    ]);
+    command.env(EXIT_PROBE_PID_FILE, pid_file.as_str());
+    let mut probe = terminal.spawn(command).expect("the probe to start");
+
+    let screen = terminal
+        .wait_for("the prompt", |screen| screen.contains("Run it?"))
+        .expect("the prompt to be drawn");
+    assert_eq!(screen.cursor().0, 0, "the cursor waits on the prompt's row");
+
+    let pid: u32 = fs::read_to_string(&pid_file)
+        .expect("the pid file to be written")
+        .parse()
+        .expect("a pid");
+
+    let sent = Command::new("sh")
+        .args(["-c", &format!("kill -QUIT {pid}")])
+        .status()
+        .expect("a shell to send the signal");
+    assert!(sent.success(), "SIGQUIT is sent to the probe: {sent}");
+
+    assert_eq!(
+        probe.wait_within(PROBE_TIMEOUT).expect("the exit check"),
+        Some(false),
+        "the probe exits with the code of a process ended by SIGQUIT"
+    );
+
+    let screen = terminal
+        .wait_for("the release", |screen| screen.cursor() == (1, 0))
+        .expect("the terminal to be given back");
+    assert_eq!(screen.used(), ["? Run it? [y,n,?]"], "{screen}");
+}
+
+/// Child-process entrypoint for
+/// [`an_immediate_exit_gives_back_the_terminal_an_open_prompt_holds`].
+///
+/// No-op unless [`EXIT_PROBE_PID_FILE`] is set.
+/// Starts a [`SignalRouter`], opens an [`InlineSelect`] prompt, and blocks
+/// until killed by a signal.
+#[cfg(unix)]
+#[test]
+fn a_prompt_left_open_until_the_process_exits() {
+    let Some(pid_file) = std::env::var_os(EXIT_PROBE_PID_FILE) else {
+        return;
+    };
+
+    let runtime = Runtime::new().expect("a runtime");
+    let _router = SignalRouter::new(&runtime, Duration::from_secs(2));
+
+    let mut stdout = io::stdout();
+    write!(stdout, "\x1b[2J\x1b[H").expect("the screen to be cleared");
+    stdout.flush().expect("the screen to be cleared");
+
+    fs::write(pid_file, std::process::id().to_string()).expect("the pid file to be written");
+
+    let options = vec![
+        InlineOption::new('y', "run it"),
+        InlineOption::new('n', "skip it"),
+    ];
+    drop(InlineSelect::new("Run it?", options).prompt(&mut io::stdout()));
 }

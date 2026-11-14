@@ -3,13 +3,13 @@
 use camino::{Utf8Path, Utf8PathBuf, absolute_utf8};
 use chrono::Utc;
 use clap::{Arg, ArgMatches, Command, value_parser};
-use jp_config::{PartialAppConfig, plugins::command::RunPolicy};
+use jp_config::PartialAppConfig;
 use jp_plugin::{PROTOCOL_VERSION, registry::ApprovedPlugin};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    admission::{pin_digest, pin_mismatch},
+    admission::{denial, pin_digest, pin_mismatch},
     approvals::ApprovalStore,
     discovery::{self, LocalPlugin, Location, ManifestState},
     dispatch, registry,
@@ -143,12 +143,11 @@ impl Approve {
 
 /// Refuse to run a plugin to approve it when `config` denies it.
 fn check_not_denied(config: &PartialAppConfig, name: &str) -> cmd::Output {
-    if config.plugins.command.get(name).and_then(|c| c.run) == Some(RunPolicy::Deny) {
-        return Err(format!(
-            "plugin `{name}` is denied by configuration (plugins.command.{name}.run = \"deny\"), \
-             so it is not run to approve it"
-        )
-        .into());
+    let command = &config.plugins.command;
+    let own = command.plugins.get(name).and_then(|c| c.run);
+
+    if let Some(refusal) = denial(name, own, command.defaults.run) {
+        return Err(format!("{refusal}, so it is not run to approve it").into());
     }
 
     Ok(())
@@ -163,6 +162,7 @@ fn check_pin(config: &PartialAppConfig, name: &str, path: &Utf8Path, sha256: &st
     let Some(pin) = config
         .plugins
         .command
+        .plugins
         .get(name)
         .and_then(|c| c.checksum.as_ref())
     else {

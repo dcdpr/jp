@@ -13,7 +13,8 @@ The `jp_task` crate provides JP's bounded background task primitive: async work
 that runs alongside a command and gets one best-effort opportunity to commit
 results to the workspace before JP exits.
 Use it for work that should not block the user's query and whose result can be
-dropped if the task does not finish within the shutdown budget.
+dropped if the task does not finish within the drain timeout (the time
+background tasks are given to finish after the command returns).
 Task errors are logged and dropped; they never fail the parent command.
 
 ## When to use a background task
@@ -23,7 +24,7 @@ Spawn a background task when:
 - The work is independent of the user's immediate response (title generation,
   garbage collection, refresh sweeps).
 - The work is cancellable, and losing its result is acceptable if the task does
-  not finish within the shutdown budget.
+  not finish within the drain timeout.
 - Completed results must be written to the workspace before JP exits, but do not
   need to be visible to the user mid-query.
 
@@ -125,8 +126,8 @@ rt.block_on(
 ).map_err(Error::Task)?;
 ```
 
-The 10-second budget is the soft deadline for `run` before cancellation, and the
-hard deadline is 2 seconds later.
+The 10-second drain timeout is the soft deadline for `run` before cancellation,
+and the hard deadline is 2 seconds later.
 The `sync` phase that follows has no handler-level timeout, so `sync` bodies
 must stay small (see Boundaries).
 
@@ -162,7 +163,7 @@ Two implementations live under `jp_task::task`:
   them before `sync` executes.
   If a task mutates a conversation, `sync` must reacquire its own lock and
   handle contention when another session holds it (skip and log; do not block).
-- **Unbounded `sync` phase.** The shutdown budget applies only to `run`.
+- **Unbounded `sync` phase.** The drain timeout applies only to `run`.
   Once `run` returns, `task.sync` is awaited sequentially with no handler-level
   deadline.
   Heavy work (scans, LLM calls, network I/O, retry loops) belongs in `run`, not

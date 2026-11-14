@@ -82,11 +82,14 @@ pub enum PluginKind {
 
 ### Configuration Schema
 
-The `[plugins]` section in `AppConfig` configures global plugin settings and
-per-plugin policies:
+The `[plugins]` section in `AppConfig` holds one section per kind of plugin.
+`[plugins.command]` configures command plugins: defaults for all of them under
+`'*'`, and per-plugin policies by name:
 
 ```toml
-[plugins]
+# Defaults for every command plugin.
+[plugins.command.'*']
+run = "ask"                       # default: "ask"
 # Grace period (seconds) before SIGKILL after sending Shutdown.
 shutdown_timeout_secs = 5         # default: 5
 
@@ -95,11 +98,36 @@ shutdown_timeout_secs = 5         # default: 5
 run = "allow"                     # execution policy
 ```
 
-#### `plugins.shutdown_timeout_secs`
+The defaults under `[plugins.command.'*']` mirror `[conversation.tools.'*']`:
+per-plugin settings under `[plugins.command.<name>]` override the defaults.
+`run` and `shutdown_timeout_secs` can be set in `[plugins.command.'*']`;
+`checksum` and `options` are per-plugin only.
+
+#### `plugins.command.'*'.run`
+
+Default execution policy for command plugins that do not set their own `run`
+key.
+Defaults to `ask`; see [Per-Plugin Configuration](#per-plugin-configuration) for
+the accepted values.
+
+Set this to `deny` to run only explicitly allowed plugins:
+
+```toml
+[plugins.command.'*']
+run = "deny"
+
+[plugins.command.serve-web]
+run = "allow"
+```
+
+Setting it to `allow` runs every `jp-*` binary on `$PATH` without prompting.
+
+#### `plugins.command.'*'.shutdown_timeout_secs`
 
 Grace period in seconds between sending `Shutdown` over the protocol and
 forcibly terminating (`SIGKILL`) the plugin and its child processes.
-Applies to all command plugins.
+Applies to every command plugin that does not set its own
+`shutdown_timeout_secs`.
 
 #### Per-Plugin Configuration
 
@@ -123,10 +151,12 @@ port = 3141
 | Value   | Behavior                                                     |
 | ------- | ------------------------------------------------------------ |
 | `ask`   | Run verified official binaries and approved binaries; prompt |
-|         | for any other. The default for every plugin.                 |
+|         | for any other.                                               |
 | `allow` | Run without prompting.                                       |
 | `deny`  | Never run. JP exits with an error if the plugin is invoked.  |
 
+If unset on a plugin, `run` falls back to `plugins.command.'*'.run` (default:
+`ask`).
 The `run` policy applies at every execution point, regardless of how the binary
 was discovered.
 Under `ask`, two kinds of binary run without prompting: an official binary whose
@@ -139,6 +169,17 @@ re-prompting after every build during local plugin development.
 `allow` governs only the admission decision; an allowed plugin can still prompt
 the user interactively during execution.
 `unattended` is accepted as a deprecated alias for `allow` and logs a warning.
+
+**`shutdown_timeout_secs`**: Overrides
+`plugins.command.'*'.shutdown_timeout_secs` for this plugin.
+If unset, falls back to `plugins.command.'*'.shutdown_timeout_secs`.
+Increase this for plugins that need extra time to finish in-flight work before
+exiting, such as waiting for a delegated turn to stop:
+
+```toml
+[plugins.command.serve-chat]
+shutdown_timeout_secs = 90
+```
 
 **`checksum`**: Pins the binary to a specific digest.
 When set, JP computes the binary's checksum before execution and refuses to run
@@ -330,17 +371,19 @@ Admission runs before every plugin process spawn, including `describe` probes
 ([RFD 072]).
 By the time admission runs, routing has already resolved the binary path
 (downloading a missing official plugin if needed, which does not read config).
-Admission then evaluates the plugin's resolved configuration in order:
+Admission then evaluates the plugin's resolved configuration in order, using
+`plugins.command.<name>.run` or falling back to `plugins.command.'*'.run`:
 
-1. **Deny**: If `plugins.command.<name>.run = "deny"`, abort with an error.
+1. **Deny**: If `run = "deny"`, abort with an error naming the config key that
+   denied execution.
 2. **Pinned checksum**: If `checksum` is configured and the binary's digest does
    not match, abort.
    This check also applies to newly downloaded official binaries: the registry
    checksum verifies download integrity, while the config pin verifies that the
    binary matches the version the user reviewed.
 3. **Allow**: If `run = "allow"`, spawn the binary.
-4. **Ask** (default): Spawn the binary if it is an official plugin whose SHA-256
-   matches its registry entry, or if its path and SHA-256 match an entry in the
+4. **Ask**: Spawn the binary if it is an official plugin whose SHA-256 matches
+   its registry entry, or if its path and SHA-256 match an entry in the
    [approval store](#approval-store).
    Otherwise, prompt the user for approval, or abort if no interactive terminal
    is attached (see [Approval Store](#approval-store)).

@@ -19,6 +19,7 @@ parking_lot = { workspace = true }
 reedline = { workspace = true }
 
 [dev-dependencies]
+camino-tempfile = { workspace = true }
 # A terminal to draw into, so the reply widget is asserted against what a
 # terminal shows rather than the bytes it was sent.
 jp_pty = { workspace = true }
@@ -31,4 +32,18 @@ workspace = true
 [[bin]]
 name = "inline_reply_probe"
 path = "src/bin/inline_reply_probe.rs"
+test = false
+
+# The same, for a prompt that is left unanswered: reached through
+# `CARGO_BIN_EXE_abandoned_prompt_probe`.
+[[bin]]
+name = "abandoned_prompt_probe"
+path = "src/bin/abandoned_prompt_probe.rs"
+test = false
+
+# The same, for a prompt that is answered or closed: reached through
+# `CARGO_BIN_EXE_prompt_probe`.
+[[bin]]
+name = "prompt_probe"
+path = "src/bin/prompt_probe.rs"
 test = false

@@ -2657,6 +2657,7 @@ dependencies = [
 name = "jp_inquire"
 version = "0.1.0"
 dependencies = [
+ "camino-tempfile",
  "crossterm",
  "inquire",
  "jp_pty",

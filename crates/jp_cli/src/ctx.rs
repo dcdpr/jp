@@ -8,16 +8,18 @@ use std::{
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
+use jp_inquire::{release_terminal, terminal_held};
 use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
+use tracing::warn;
 
 use crate::{
     Globals, Result, bootstrap::ExecutionContext, config_pipeline::ConfigResetEvents,
-    format::sanitize_mode, signals::SignalRouter,
+    format::sanitize_mode, shutdown::ShutdownBudgets, signals::SignalRouter,
 };
 
 /// Context for the CLI application
@@ -57,6 +59,10 @@ pub(crate) struct Ctx {
     /// Routes OS signals: Ctrl-C escalation, scoped interrupt handlers, and the
     /// root shutdown token.
     pub(crate) signals: SignalRouter,
+
+    /// The time the command has claimed to stop its work in, once a graceful
+    /// shutdown is requested.
+    pub(crate) shutdown_budgets: ShutdownBudgets,
 
     /// A `--cfg` reset keyword's persistence payload ([RFD 038]).
     ///
@@ -159,6 +165,7 @@ impl Ctx {
             mcp_client,
             task_handler: TaskHandler::default(),
             signals: SignalRouter::new(&runtime, escalation_cooldown),
+            shutdown_budgets: ShutdownBudgets::default(),
             config_reset: None,
             runtime,
 
@@ -303,6 +310,18 @@ pub(crate) trait IntoPartialAppConfig {
 
 impl Drop for Ctx {
     fn drop(&mut self) {
+        // If shutdown abandoned a prompt on its background thread, restore the
+        // terminal before shutting down the printer.
+        if terminal_held() {
+            // Clear any active region background so the erase sequence does not
+            // fill with shaded background color.
+            self.printer.set_prompt_background(None);
+
+            if let Err(error) = release_terminal(&mut self.printer.prompt_writer()) {
+                warn!(%error, "Failed to restore the terminal an open prompt held.");
+            }
+        }
+
         self.printer.shutdown();
     }
 }

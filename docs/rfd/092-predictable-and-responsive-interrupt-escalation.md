@@ -146,6 +146,10 @@ prints `terminating program…` and exits, bounding graceful shutdown.
 The watchdog's countdown replaces the background-task drain's 2-second
 "Cancelling background tasks…" line so a single countdown covers the entire
 teardown.
+Commands that perform ordered asynchronous teardown instead of stopping on drop
+(such as command plugin runs; see [Handler policy](#handler-policy)) claim a
+shutdown budget for the duration of their work, and the watchdog counts down
+from the longest claimed budget when it exceeds `timeout_secs`.
 
 ```toml
 [interrupt.shutdown]
@@ -174,6 +178,22 @@ shutdown token, so a single watcher covers them all.
 `run_inner` spawns the watchdog once, as soon as the router exists.
 The watchdog owns the countdown rendering (via the `Printer`) and the hard-exit
 deadline, keeping the router free of terminal UI per [RFD 045].
+
+**Open prompts.** When the shutdown token is cancelled, any open reedline-based
+`InlineReply` prompt closes and returns `Cancelled`, unblocking its caller so
+the command can be dropped.
+Prompts rendered by the `inquire` crate (`InlineSelect`, `Select`,
+`MultiSelect`, `Confirm`, `Text`, and `Password`) block in a synchronous key
+read and cannot be closed programmatically until the `inquire` fork is inlined
+(see [Non-Goals](#non-goals)).
+Tool prompts and plugin `compose` prompts run on dedicated OS threads rather
+than the Tokio blocking pool, so runtime shutdown does not wait for them;
+teardown restores the terminal (disabling raw mode, resetting terminal modes and
+SGR attributes, showing the cursor, and moving to the line below the prompt).
+An `inquire` prompt running on the main command thread blocks graceful shutdown
+until answered or until the watchdog deadline expires.
+Both the watchdog hard exit and the third-press immediate exit restore the
+terminal before exiting.
 
 **Output discipline.** Every shutdown message and countdown goes through the
 `Printer` on the chrome channel (stderr), formatted according to the active
@@ -281,6 +301,12 @@ render its own terminal UI:
 2. **2nd press**: JP takes over.
    The shutdown token cancels, the dispatch thread sends
    `HostToPlugin::Shutdown`, and the existing grace-then-SIGKILL window runs.
+   The top-level `select` does not drop a plugin run when the token cancels,
+   because dropping the future would skip sending `Shutdown` and abort delegated
+   turns mid-write.
+   Instead, the run completes its own teardown within its shutdown budget (the
+   plugin's grace period plus 5 seconds for delegated turns to stop) and is
+   dropped only if that budget expires.
 3. **3rd press**: without sending a protocol message, the router's exit path
    walks a process-global kill-on-exit registry to send SIGKILL to the child,
    and JP exits.
@@ -449,8 +475,8 @@ Introduce the Interactive predicate (controlling-terminal availability, exposed
 via `Ctx`) to gate all interrupt menus added in later phases.
 Add the `[interrupt.shutdown]` config, the `gracefully shutting down…` and
 `terminating program…` messages, the exit convention, the watchdog task in
-`run_inner` (replacing the drain's countdown), and the ESC-continue /
-counter-reset menu cancel contract.
+`run_inner` (replacing the drain's countdown and honoring a command's shutdown
+budget), and the ESC-continue / counter-reset menu cancel contract.
 Route all shutdown output through the `Printer`, including NDJSON wrapping for
 stderr chrome.
 This phase is independent of the others.

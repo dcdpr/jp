@@ -2037,6 +2037,7 @@ fn test_from_parts_drops_removed_plugin_install_keys_and_keeps_the_rest() {
         .insert("serve-web".to_owned(), CommandPluginConfig {
             run: Some(RunPolicy::Deny),
             checksum: None,
+            shutdown_timeout_secs: None,
             options: MergeableMap::default(),
         });
 
@@ -2044,6 +2045,7 @@ fn test_from_parts_drops_removed_plugin_install_keys_and_keeps_the_rest() {
     delta
         .plugins
         .command
+        .plugins
         .insert("ticket".to_owned(), PartialCommandPluginConfig {
             run: Some(RunPolicy::Allow),
             ..PartialCommandPluginConfig::default()
@@ -2059,10 +2061,7 @@ fn test_from_parts_drops_removed_plugin_install_keys_and_keeps_the_rest() {
     // Written the way a conversation stored before the removal spells it.
     let base_config = serde_json::to_string(&base_config)
         .unwrap()
-        .replace(
-            "\"shutdown_timeout_secs\":",
-            "\"auto_install\":true,\"shutdown_timeout_secs\":",
-        )
+        .replace("\"plugins\":{", "\"plugins\":{\"auto_install\":true,")
         .replace("\"run\":\"deny\"", "\"install\":true,\"run\":\"deny\"");
     let events = serde_json::to_string(&events)
         .unwrap()

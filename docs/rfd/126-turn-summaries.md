@@ -240,8 +240,8 @@ while its `TurnStart` keeps the same `event_id`:
 
 - **While a summary is in flight.** `Query::run` snapshots the candidate turns
   while holding the conversation lock, then releases the lock before
-  `TaskHandler::sync` waits for background tasks (up to [RFD 107]'s shutdown
-  budget) and reacquires it.
+  `TaskHandler::sync` waits for background tasks (up to [RFD 107]'s drain
+  timeout) and reacquires it.
   Another process can edit the conversation during that window.
   To detect concurrent edits, the task hashes each turn's stripped transcript
   (including event IDs) into a *fingerprint*.
@@ -311,7 +311,7 @@ Turn 2 (jp query "...")
 When the summary request finishes during Turn $N+1$, it adds no exit latency.
 If it outlasts the turn (for example, on a cold local model, a short assistant
 reply, or a catch-up batch on an older conversation), `TaskHandler::sync` waits
-under [RFD 107]'s shutdown budget: it prints `⏱ Finishing background tasks…`
+under [RFD 107]'s drain timeout: it prints `⏱ Finishing background tasks…`
 after 1 second and cancels the task after 10 seconds.
 The task is not cancelled when the assistant turn ends, because a summary model
 slower than the assistant turn would otherwise have every result discarded and
@@ -392,7 +392,7 @@ lock:
 - **One-turn lag on persisted summaries.** Turn $N$'s `TurnStart.summary`
   remains `None` on disk until Turn $N+1$ runs.
 - **A slow summary model can delay exit.** When the summary request outlasts the
-  overlapped turn, the CLI waits for it up to [RFD 107]'s shutdown budget, most
+  overlapped turn, the CLI waits for it up to [RFD 107]'s drain timeout, most
   often while catching up on an older conversation.
   If routine queries regularly hit the `Finishing background tasks…` prompt, we
   can instead cancel the task when the turn ends and accept retrying unfinished

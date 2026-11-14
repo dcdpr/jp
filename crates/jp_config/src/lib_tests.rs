@@ -1080,6 +1080,7 @@ fn test_ensure_no_missing_assignments() {
             match &error.error {
                 KvAssignmentErrorKind::KvParse { .. }
                 | KvAssignmentErrorKind::UnknownKey { .. }
+                | KvAssignmentErrorKind::Moved { .. }
                 | KvAssignmentErrorKind::UnknownIndex { .. } => {}
 
                 KvAssignmentErrorKind::Json(_)
@@ -1222,6 +1223,7 @@ fn a_dotted_plugin_option_keeps_the_run_policy() {
     let run = |p: &PartialAppConfig, plugin: &str| {
         p.plugins
             .command
+            .plugins
             .clone()
             .into_map()
             .get(plugin)

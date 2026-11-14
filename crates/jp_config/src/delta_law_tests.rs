@@ -12,6 +12,8 @@
 //! These tests hold each collection to that, across every way one resolved
 //! snapshot can differ from another.
 
+use std::time::Duration;
+
 use indexmap::IndexMap;
 use indoc::indoc;
 use schematic::PartialConfig as _;
@@ -22,6 +24,7 @@ use crate::{
     assignment::{AssignKeyValue as _, KvAssignment},
     conversation::tool::access::{PartialAccessConfig, PartialEnvRuleConfig},
     delta::PartialConfigDelta as _,
+    plugins::command::RunPolicy,
     types::{
         json_value::JsonValue,
         map::MergeableMap,
@@ -244,6 +247,93 @@ fn fold_with_unsets(prev: &PartialAppConfig, next: PartialAppConfig) -> PartialA
     folded
 }
 
+/// A conversation's stored config, in which `serve-chat` sets its own `run` and
+/// `shutdown_timeout_secs` over different `plugins.command.'*'` defaults.
+fn plugin_overrides() -> PartialAppConfig {
+    let mut partial = crate::AppConfig::new_test().to_partial();
+    for assignment in [
+        "plugins.command.*.run=deny",
+        "plugins.command.*.shutdown_timeout_secs=20",
+        "plugins.command.serve-chat.run=allow",
+        "plugins.command.serve-chat.shutdown_timeout_secs=90",
+    ] {
+        partial
+            .assign(assignment.parse::<KvAssignment>().unwrap())
+            .unwrap();
+    }
+
+    crate::util::build(partial).unwrap().to_partial()
+}
+
+/// Clear a key of `prev` with a `--cfg` `assignment`, then fold the delta onto
+/// `prev` the way the next invocation reads the conversation.
+///
+/// Returns the config the clearing invocation ran with, and the one the fold
+/// reaches.
+fn clear_and_fold(
+    prev: &PartialAppConfig,
+    assignment: &str,
+) -> (crate::AppConfig, crate::AppConfig) {
+    let mut next = prev.clone();
+    next.assign(assignment.parse::<KvAssignment>().unwrap())
+        .unwrap();
+    let cleared = crate::util::build(next).unwrap();
+
+    let folded = crate::util::build(fold_with_unsets(prev, cleared.to_partial())).unwrap();
+
+    (cleared, folded)
+}
+
+/// A plugin's own timeout cleared with `--cfg` falls back to the `'*'` default
+/// on later turns too.
+///
+/// `AppConfig::fields()` names `plugins.command` as one map, so
+/// `clearing_any_field_survives_a_fold` never clears a plugin's own keys.
+#[test]
+fn clearing_a_plugins_own_shutdown_timeout_survives_a_fold() {
+    let (cleared, folded) = clear_and_fold(
+        &plugin_overrides(),
+        "plugins.command.serve-chat.shutdown_timeout_secs:=null",
+    );
+
+    assert_eq!(
+        cleared.plugins.command.shutdown_timeout("serve-chat"),
+        Duration::from_secs(20),
+        "the clearing invocation falls back to the default"
+    );
+    assert_eq!(
+        folded.plugins.command.shutdown_timeout("serve-chat"),
+        Duration::from_secs(20),
+        "the stored 90 seconds stays cleared"
+    );
+    assert_eq!(folded, cleared);
+}
+
+/// A plugin's own `allow` cleared with `--cfg` stays cleared, so the plugin
+/// falls back to the `'*'` policy of `deny` on later turns too.
+#[test]
+fn clearing_a_plugins_own_run_policy_survives_a_fold() {
+    let (cleared, folded) =
+        clear_and_fold(&plugin_overrides(), "plugins.command.serve-chat.run:=null");
+
+    let run = |config: &crate::AppConfig| {
+        config
+            .plugins
+            .command
+            .get("serve-chat")
+            .and_then(|plugin| plugin.run)
+    };
+
+    assert_eq!(
+        run(&cleared),
+        None,
+        "the clearing invocation has no own policy"
+    );
+    assert_eq!(run(&folded), None, "the stored `allow` stays cleared");
+    assert_eq!(folded.plugins.command.defaults.run, RunPolicy::Deny);
+    assert_eq!(folded, cleared);
+}
+
 /// Fold a delta that carries no unsets, so its values alone must say it.
 fn fold(prev: &PartialAppConfig, next: PartialAppConfig) -> PartialAppConfig {
     let delta = prev.delta(next);
@@ -281,8 +371,8 @@ fn law_holds_for_a_nested_key_dropped_from_plugin_options() {
         ("without unsets", fold(&prev, next.clone())),
     ] {
         assert_eq!(
-            entries(&folded.plugins.command["serve"].options),
-            entries(&next.plugins.command["serve"].options),
+            entries(&folded.plugins.command.plugins["serve"].options),
+            entries(&next.plugins.command.plugins["serve"].options),
             "{how}"
         );
     }
@@ -331,10 +421,13 @@ fn a_nested_key_added_to_plugin_options_is_not_a_replacement() {
 
     assert!(unsets.is_empty(), "{unsets:?}");
     for (how, options) in [
-        ("with unsets", &delta.plugins.command["serve"].options),
+        (
+            "with unsets",
+            &delta.plugins.command.plugins["serve"].options,
+        ),
         (
             "without unsets",
-            &prev.delta(next).plugins.command["serve"].options,
+            &prev.delta(next).plugins.command.plugins["serve"].options,
         ),
     ] {
         assert!(
