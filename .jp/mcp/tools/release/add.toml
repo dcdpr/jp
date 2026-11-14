@@ -27,6 +27,11 @@ Record a breaking change, with its section of the upgrade guide, under a name of
 ```json
 {"type": "removed", "slug": "legacy-flag", "body": "`jp query --legacy` is gone.\n\nBREAKING CHANGE: `jp query --legacy` is no longer accepted\n\nDrop the flag: what it chose is the default now."}
 ```
+
+Record a feature made in two earlier pull requests:
+```json
+{"type": "added", "credits": ["#1182", "#1183"], "body": "The assistant can call one tool on many inputs in a single request."}
+```
 '''
 
 # Allow `FormatArguments` without prompting so the user sees a preview of the
@@ -74,3 +79,18 @@ refused; indent the line or put the token in inline code to show it.
 type = "string"
 required = false
 summary = "A short name for the file, such as `retry-idle-turns`; derived from the entry's first words when omitted."
+
+[conversation.tools.changelog_add.parameters.credits]
+type = "array"
+items.type = "string"
+required = false
+summary = "The changes the fragment describes, such as `#1207` or a commit hash, when they were made earlier."
+description = """
+Each is a pull request (`#1207`, or `!1207` on GitLab) or a commit hash of 7 to
+64 characters, and is written as one of the fragment's `Credits` fields. Credits
+replace the ones read from git history, and decide which release the fragment
+belongs to: the first one that ships every change they name.
+
+Leave them out for a change made in the current branch, which the commit adding
+the fragment credits.
+"""

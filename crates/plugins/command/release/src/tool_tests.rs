@@ -172,6 +172,53 @@ fn add_names_the_file_by_the_slug_it_is_given() {
     );
 }
 
+/// The credits a fragment is given open it as its `Credits` fields, once each,
+/// and the file is named after the entry rather than the credits.
+#[test]
+fn add_writes_the_credits_it_is_given() {
+    let root = workspace();
+
+    let outcome = add(
+        &root,
+        json!({
+            "type": "fixed",
+            "body": "Crashes are fixed.",
+            "credits": ["#12", "3F2A9C1B4E5D", "#12"]
+        }),
+    );
+
+    assert_eq!(
+        content(outcome),
+        "Wrote changelog.d/crashes-are-fixed.fixed.md"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("changelog.d/crashes-are-fixed.fixed.md")).unwrap(),
+        "- **Credits**: #12\n- **Credits**: 3f2a9c1b4e5d\n\nCrashes are fixed.\n"
+    );
+}
+
+#[test]
+fn a_credit_that_names_no_change_is_refused() {
+    let root = workspace();
+
+    let message = error_message(add(
+        &root,
+        json!({ "type": "fixed", "body": "Crashes are fixed.", "credits": ["PR 12"] }),
+    ));
+
+    assert_eq!(
+        message,
+        "`PR 12` is no credit: name a pull request, such as `#1207`, or a commit hash of 7 to 64 \
+         characters."
+    );
+    assert!(
+        fs::read_dir(root.path().join("changelog.d"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+}
+
 /// The preview shows the file whole, where it goes, and writes nothing.
 #[test]
 fn a_preview_shows_the_file_and_writes_nothing() {

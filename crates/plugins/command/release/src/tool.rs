@@ -7,7 +7,7 @@
 //! [`AccessPolicy`].
 
 use camino::{Utf8Path, Utf8PathBuf};
-use changelog::Type;
+use changelog::{Forge, ListedCredit, Type, with_credits};
 use jp_md::format::Formatter;
 use jp_plugin::message::{InitMessage, ToolAction, ToolCall};
 use jp_tool::{AccessPolicy, Action, Context, Outcome};
@@ -57,6 +57,15 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     };
     let body = args.required::<String>("body")?;
     let slug = args.optional::<String>("slug")?;
+    let credits = match listed(&args.optional::<Vec<String>>("credits")?.unwrap_or_default()) {
+        Ok(credits) => credits,
+        Err(refusal) => return refuse(refusal),
+    };
+    let forge = options
+        .notes
+        .forge
+        .unwrap_or_else(|| Forge::infer(options.notes.repository.as_deref()));
+    let text = with_credits(&format!("{}\n", body.trim()), false, &credits, forge);
 
     let fragments = match Fragments::new(root, root.join(&relative), &init.config) {
         Ok(fragments) => fragments,
@@ -64,7 +73,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     };
     // Plan and validate before branching on `call.action` so invalid arguments
     // fail during `FormatArguments` before prompting the user for approval.
-    let planned = match entry::plan(&fragments, type_, &body, slug.as_deref()) {
+    let planned = match entry::plan(&fragments, type_, &text, slug.as_deref()) {
         Ok(planned) => planned,
         Err(refusal) => return refuse(refusal),
     };
@@ -127,6 +136,25 @@ fn check_access(init: &InitMessage, call: &ToolCall, dir: &Utf8Path) -> Result<(
     ctx.check_create(dir).map_err(unreachable)?;
 
     Ok(())
+}
+
+/// Parse the `credits` argument, each a pull request (`#1207`, or `!1207` on
+/// GitLab) or a commit hash, dropping repeats.
+fn listed(values: &[String]) -> Result<Vec<ListedCredit>, String> {
+    let mut credits = vec![];
+    for value in values {
+        let credit = ListedCredit::parse(value).ok_or_else(|| {
+            format!(
+                "`{value}` is no credit: name a pull request, such as `#1207`, or a commit hash \
+                 of 7 to 64 characters."
+            )
+        })?;
+        if !credits.contains(&credit) {
+            credits.push(credit);
+        }
+    }
+
+    Ok(credits)
 }
 
 struct Arguments<'a>(&'a Map<String, Value>);
