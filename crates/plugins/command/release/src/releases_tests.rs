@@ -127,13 +127,13 @@ fn an_annotated_tag_names_the_commit_it_peels_to() {
 
 #[test]
 fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
-    // As `git log -z --format=%H%n%ct%n%B` writes it, newest first.
+    // As `git log -z --format=%H%n%ct%n%(trailers)` writes it, newest first.
     let log = concat!(
-        "3333\n1792843200\nFix the help text\n\nSigned-off-by: Jane Doe <jane@example.com>\n",
+        "3333\n1792843200\nSigned-off-by: Jane Doe <jane@example.com>\n",
         "(cherry picked from commit 9999)\n\0",
-        "2222\n1792756800\nStart release 0.3.1\n\nStarts-Release: 0.3.1\n\0",
-        "1111\n1792670400\nRetry idle turns\n\n(cherry picked from commit 8888)\n\0",
-        "0000\n1792584000\nStart release 0.3.0\n\nStarts-Release: 0.3.0\n",
+        "2222\n1792756800\nStarts-Release: 0.3.1\n\0",
+        "1111\n1792670400\n(cherry picked from commit 8888)\n\0",
+        "0000\n1792584000\nStarts-Release: 0.3.0\n",
     );
 
     let (started, picked) = parse_line(log).unwrap();
@@ -156,41 +156,68 @@ fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
     );
 }
 
-/// Only the last paragraph holds trailers, so a message that mentions one
-/// earlier doesn't start a release.
-#[test]
-fn only_the_last_paragraph_holds_trailers() {
-    let log = "1111\n1792584000\nDocument the pipeline\n\nStarts-Release: 0.9.0 marks a \
-               start.\n\nSee the RFD.\n";
-
-    assert_eq!(parse_line(log), Ok((vec![], BTreeSet::new())));
-}
-
 #[test]
 fn a_commit_without_a_date_does_not_read_as_a_log() {
     assert_eq!(
-        parse_line("1111\nStart release 0.3.0\n\nStarts-Release: 0.3.0\n"),
+        parse_line("1111\nStarts-Release: 0.3.0\n"),
         Err("The log of a release branch gives commit 1111 no date.".to_owned())
     );
 }
 
 #[test]
-fn the_start_message_carries_the_trailer_it_is_read_back_by() {
-    let message = start_message(&version("0.3.0"));
-
+fn the_start_message_ends_in_its_trailer() {
     assert_eq!(
-        message,
+        start_message(&version("0.3.0")),
         "chore(release): Start release 0.3.0\n\nStarts-Release: 0.3.0\n"
     );
+}
+
+/// What `cut` and `pick` wrote, read back by git with a sign-off in the same
+/// trailer block.
+#[test]
+fn trailers_git_reads_back_pass_the_check() {
+    let log = concat!(
+        "1111\n1792670400\n(cherry picked from commit 8888aaaabbbb)\n",
+        "Signed-off-by: Jane Doe <jane@example.com>\n\0",
+        "0000\n1792584000\nStarts-Release: 0.3.1\nSigned-off-by: Jane Doe <jane@example.com>\n",
+    );
+
     assert_eq!(
-        parse_line(&format!("0000\n{OCTOBER_1}\n{message}"))
-            .unwrap()
-            .0,
-        [Started {
-            version: version("0.3.0"),
-            hash: "0000".to_owned(),
-            at: OCTOBER_1,
-        }]
+        check_written(log, Some(&version("0.3.1")), &["8888aaaabbbb"]),
+        Ok(())
+    );
+}
+
+/// A hook that puts a blank line before a sign-off leaves git reading only the
+/// sign-off.
+#[test]
+fn trailers_git_doesnt_read_back_fail_the_check() {
+    let start = "0000\n1792584000\nSigned-off-by: Jane Doe <jane@example.com>\n";
+    let pick = "1111\n1792670400\nSigned-off-by: Jane Doe <jane@example.com>\n";
+
+    assert_eq!(
+        check_written(start, Some(&version("0.3.0")), &[]),
+        Err(
+            "git doesn't read `Starts-Release: 0.3.0` among the trailers of the commit that would \
+             start 0.3.0, so no command would find the release, and no branch was changed. A \
+             `prepare-commit-msg` or `commit-msg` hook that puts a blank line before the lines it \
+             adds, such as a sign-off, causes this: git reads trailers from the last paragraph of \
+             a message only. Have the hook add its lines to the trailer block, such as with `git \
+             interpret-trailers`, and run this again."
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        check_written(pick, None, &["8888aaaabbbb"]),
+        Err(
+            "git doesn't read the `(cherry picked from commit <hash>)` line of the pick of \
+             8888aaa among its trailers, so a later release would ship the change again, and no \
+             branch was changed. A `prepare-commit-msg` or `commit-msg` hook that puts a blank \
+             line before the lines it adds, such as a sign-off, causes this: git reads trailers \
+             from the last paragraph of a message only. Have the hook add its lines to the \
+             trailer block, such as with `git interpret-trailers`, and run this again."
+                .to_owned()
+        )
     );
 }
 

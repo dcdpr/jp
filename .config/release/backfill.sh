@@ -164,9 +164,11 @@ preparing() {
   done
 }
 
-# The commit that starts release $1 on its release branch.
+# The commit that starts release $1 on its release branch: the one whose
+# trailers git reads as `Starts-Release: $1`.
 start_of() {
-  git log -1 --format=%H --fixed-strings --grep="Starts-Release: $1" "refs/heads/release/${1%.*}"
+  git log --format='%H %(trailers:key=Starts-Release,valueonly)' "refs/heads/release/${1%.*}" |
+    awk -v version="$1" '$2 == version { print $1; exit }'
 }
 
 # The version the next period's release takes: the minor release after the

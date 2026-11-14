@@ -176,7 +176,8 @@ pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTree
 }
 
 /// Parse `Starts-Release` commits (oldest first) and cherry-picked commit
-/// hashes from `git log -z --format=%H%n%ct%n%B` output.
+/// hashes from `git log -z --format=%H%n%ct%n%(trailers)` output, which holds
+/// each commit's trailers as git reads them.
 pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), String> {
     const FIELDS: usize = 3;
 
@@ -194,9 +195,8 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
             .next()
             .and_then(|at| at.trim().parse::<i64>().ok())
             .ok_or_else(|| format!("The log of a release branch gives commit {commit} no date."))?;
-        let message = fields.next().unwrap_or_default();
+        let trailers = fields.next().unwrap_or_default();
 
-        let trailers = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
         for line in trailers.lines().map(str::trim) {
             let version = line
                 .strip_prefix(STARTS_RELEASE)
@@ -221,6 +221,44 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
     started.reverse();
 
     Ok((started, picked))
+}
+
+/// Check that git reads what `jp release` wrote among the trailers of the
+/// commits it just made: `Starts-Release: <version>` when it started release
+/// `started`, and the `git cherry-pick -x` line of each commit in `picked`.
+///
+/// `log` is the [`parse_line`] input for those commits.
+pub(crate) fn check_written(
+    log: &str,
+    started: Option<&Version>,
+    picked: &[&str],
+) -> Result<(), String> {
+    let (read_started, read_picked) = parse_line(log)?;
+
+    let unread = if let Some(version) =
+        started.filter(|version| !read_started.iter().any(|start| start.version == **version))
+    {
+        format!(
+            "`{STARTS_RELEASE}: {version}` among the trailers of the commit that would start \
+             {version}, so no command would find the release"
+        )
+    } else if let Some(hash) = picked.iter().find(|hash| !read_picked.contains(**hash)) {
+        format!(
+            "the `{PICKED_FROM}<hash>)` line of the pick of {} among its trailers, so a later \
+             release would ship the change again",
+            hash.get(..7).unwrap_or(hash)
+        )
+    } else {
+        return Ok(());
+    };
+
+    Err(format!(
+        "git doesn't read {unread}, and no branch was changed. A `prepare-commit-msg` or \
+         `commit-msg` hook that puts a blank line before the lines it adds, such as a sign-off, \
+         causes this: git reads trailers from the last paragraph of a message only. Have the hook \
+         add its lines to the trailer block, such as with `git interpret-trailers`, and run this \
+         again."
+    ))
 }
 
 pub(crate) fn start_message(version: &Version) -> String {

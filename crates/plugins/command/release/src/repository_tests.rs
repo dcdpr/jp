@@ -148,6 +148,41 @@ fn a_release_branch_origin_lacks_is_read_from_here() {
     assert_eq!(repository.releases().unwrap().lines.len(), 1);
 }
 
+/// What a release branch started and picked is read from the trailers git
+/// reads: a trailer next to a sign-off counts, one in a paragraph of prose
+/// doesn't, and neither does one that a blank line separates from the last
+/// paragraph.
+#[test]
+fn releases_are_read_from_the_trailers_git_reads() {
+    let fixture = Fixture::new();
+    let main = fixture.hash("HEAD");
+    fixture.git(&["checkout", "--quiet", "-b", "release/0.3"]);
+    let start = fixture.commit(
+        "Start release 0.3.0\n\nStarts-Release: 0.3.0\nSigned-off-by: Jane Doe <jane@example.com>",
+    );
+    fixture
+        .commit("Document the trailer\n\nStarts-Release: 0.3.1 starts a release.\n\nSee the RFD.");
+    fixture.commit(&format!(
+        "Fix a bug\n\n(cherry picked from commit {main})\n\nSigned-off-by: Jane Doe \
+         <jane@example.com>"
+    ));
+    fixture.git(&["checkout", "--quiet", "main"]);
+    let shell = fixture.shell();
+    let repository = Repository::open(&shell, fixture.root()).unwrap();
+    repository.origin.fetch().unwrap();
+
+    let releases = repository.releases().unwrap();
+
+    let line = &releases.lines[&(0, 3)];
+    let started: Vec<(String, &str)> = line
+        .started
+        .iter()
+        .map(|started| (started.version.to_string(), started.hash.as_str()))
+        .collect();
+    assert_eq!(started, [("0.3.0".to_owned(), start.as_str())]);
+    assert_eq!(line.picked, BTreeSet::new());
+}
+
 #[test]
 fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
     let fixture = Fixture::new();

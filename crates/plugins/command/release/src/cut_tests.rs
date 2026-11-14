@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
 use super::*;
+#[cfg(unix)]
+use crate::repository_testing::SIGN_OFF_AFTER_A_BLANK_LINE;
 use crate::{options::Options, repository_testing::Fixture};
 
 const HIGHLIGHT: &str =
@@ -22,6 +24,37 @@ fn options_with(options: &Value) -> Options {
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
+}
+
+/// A hook that leaves git unable to read the start commit's `Starts-Release`
+/// trailer stops the cut before it makes a branch.
+#[cfg(unix)]
+#[test]
+fn a_start_commit_whose_trailer_git_cant_read_is_refused() {
+    let fixture = Fixture::new();
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
+    fixture.hook("prepare-commit-msg", SIGN_OFF_AFTER_A_BLANK_LINE);
+    let shell = fixture.shell();
+    let options = options();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
+
+    let refused = cut(&pipeline, None, None);
+
+    assert_eq!(
+        refused,
+        Err(
+            "git doesn't read `Starts-Release: 0.1.0` among the trailers of the commit that would \
+             start 0.1.0, so no command would find the release, and no branch was changed. A \
+             `prepare-commit-msg` or `commit-msg` hook that puts a blank line before the lines it \
+             adds, such as a sign-off, causes this: git reads trailers from the last paragraph of \
+             a message only. Have the hook add its lines to the trailer block, such as with `git \
+             interpret-trailers`, and run this again."
+                .to_owned()
+        )
+    );
+    assert_eq!(fixture.branches(), ["main"]);
 }
 
 #[test]

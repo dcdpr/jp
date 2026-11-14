@@ -725,6 +725,9 @@ fn update_branches(
             short(&prepared.line.tip)
         ));
     }
+    let written = repo.history.log_between(&prepared.line.tip, picked)?;
+    let hashes: Vec<&str> = commits.iter().map(|commit| commit.hash.as_str()).collect();
+    releases::check_written(&written, prepared.start.then_some(version), &hashes)?;
     if prepared.local.as_deref() != Some(picked) {
         repo.refs
             .set_branch(branch, picked, prepared.local.as_deref())?;

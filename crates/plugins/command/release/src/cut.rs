@@ -84,6 +84,8 @@ pub(crate) fn cut(
         &cut.message(pipeline),
     )?;
     let started = start_branch(pipeline, &at, &cut.version)?;
+    let written = repo.history.log_between(&at, &started)?;
+    releases::check_written(&written, Some(&cut.version), &[])?;
     repo.refs.set_branch(&cut.branch, &started, None)?;
     if let Err(error) = repo.refs.set_branch(&cut.notes_branch, &noted, None) {
         drop(repo.refs.delete_branch(&cut.branch, &started));

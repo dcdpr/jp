@@ -4,6 +4,8 @@ use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
+#[cfg(unix)]
+use crate::repository_testing::SIGN_OFF_AFTER_A_BLANK_LINE;
 use crate::{cut::cut, finalize::finalize, options::Options, repository_testing::Fixture};
 
 const BUMP: &str = "git config --file VERSION version.current {version}";
@@ -87,6 +89,42 @@ const PICKED_AND_FILED: &str =
      changelog.d/0.1.0/ on release-notes/v0.1.0.\n\nNothing is published yet. Publish them \
      with:\n\n    git push origin release/0.1 release-notes/v0.1.0\n\nthen merge \
      release-notes/v0.1.0 into main once its notes are final.\n";
+
+/// A hook that leaves git unable to read the `-x` line of a pick stops the pick
+/// before it moves a branch, since a later release would ship the change again.
+#[cfg(unix)]
+#[test]
+fn a_pick_whose_trailer_git_cant_read_is_refused() {
+    let fixture = cut_0_1_0();
+    let tip = fixture.hash("release/0.1");
+    let notes = fixture.hash("release-notes/v0.1.0");
+    let hash = change(
+        &fixture,
+        "src/model.rs",
+        "model",
+        "feat: Show the model (#2)",
+    );
+    fixture.hook("prepare-commit-msg", SIGN_OFF_AFTER_A_BLANK_LINE);
+
+    let refused = run(&fixture, |pipeline| {
+        pick(pipeline, &version("0.1.0"), &[hash[..7].to_owned()])
+    });
+
+    assert_eq!(
+        refused,
+        Err(format!(
+            "git doesn't read the `(cherry picked from commit <hash>)` line of the pick of {} \
+             among its trailers, so a later release would ship the change again, and no branch \
+             was changed. A `prepare-commit-msg` or `commit-msg` hook that puts a blank line \
+             before the lines it adds, such as a sign-off, causes this: git reads trailers from \
+             the last paragraph of a message only. Have the hook add its lines to the trailer \
+             block, such as with `git interpret-trailers`, and run this again.",
+            &hash[..7]
+        ))
+    );
+    assert_eq!(fixture.hash("release/0.1"), tip);
+    assert_eq!(fixture.hash("release-notes/v0.1.0"), notes);
+}
 
 #[test]
 fn a_pick_files_its_fragment_on_the_notes_branch_with_main_merged_in() {

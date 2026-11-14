@@ -56,11 +56,14 @@ impl<'a> History<'a> {
             .git(&["log", "--first-parent", "-z", "--format=%H%n%B", hash])
     }
 
-    /// Return `git log -z --format=%H%n%ct%n%B` for `from..to`.
+    /// Return `git log -z --format=%H%n%ct%n%(trailers)` for `from..to`: each
+    /// commit's hash, its commit time, and the trailers git reads from its
+    /// message.
     pub(crate) fn log_between(&self, from: &str, to: &str) -> Result<String, String> {
         let range = format!("{from}..{to}");
 
-        self.git.git(&["log", "-z", "--format=%H%n%ct%n%B", &range])
+        self.git
+            .git(&["log", "-z", "--format=%H%n%ct%n%(trailers)", &range])
     }
 
     pub(crate) fn merge_base(&self, one: &str, other: &str) -> Result<String, String> {

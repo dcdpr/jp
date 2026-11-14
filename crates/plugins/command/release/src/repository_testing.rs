@@ -1,6 +1,8 @@
 //! Isolated git workspace and bare `origin` remote fixture for release pipeline
 //! tests.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::{
     fs,
     process::{Command, Output},
@@ -10,6 +12,12 @@ use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 
 use crate::shell::Shell;
+
+/// A `prepare-commit-msg` hook that adds a sign-off after a blank line, which
+/// leaves git reading only the sign-off among a message's trailers.
+#[cfg(unix)]
+pub(crate) const SIGN_OFF_AFTER_A_BLANK_LINE: &str =
+    "#!/bin/sh\nprintf '\\nSigned-off-by: Tester <tester@example.com>\\n' >> \"$1\"\n";
 
 pub(crate) struct Fixture {
     work: Utf8TempDir,
@@ -84,6 +92,16 @@ impl Fixture {
         let path = self.root().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, contents).unwrap();
+    }
+
+    /// Install `script` as the repository's `name` hook, such as
+    /// `prepare-commit-msg`.
+    #[cfg(unix)]
+    pub(crate) fn hook(&self, name: &str, script: &str) {
+        let path = self.root().join(".git/hooks").join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     pub(crate) fn fragment(&self, slug: &str, type_: &str, entry: &str) {
