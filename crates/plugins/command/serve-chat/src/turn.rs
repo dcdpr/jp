@@ -3,7 +3,7 @@
 //! [`run_turn`] is the entry point: it queries the host's configured tools,
 //! prepends a `--cfg` override disabling all of them via [`turn_cfg`], and runs
 //! the turn on the chat's active conversation (or starts a new one).
-//! [`cfg`] builds the persona and sender-attribution overrides for each turn.
+//! [`cfg()`] builds the persona and sender-attribution overrides for each turn.
 
 use chrono::NaiveDate;
 use serde_json::{Map, Value, json};
