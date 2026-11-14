@@ -437,20 +437,16 @@ impl StreamError {
 /// Try to extract a human-readable error message from a JSON error response
 /// body.
 ///
-/// Three envelope shapes are recognized, in this order:
+/// Three envelope shapes are recognized, in priority order:
 ///
-/// - Nested — `{"error": {"message": "..."}}`, used by OpenAI, Anthropic and
+/// - Nested: `{"error": {"message": "..."}}`, used by OpenAI, Anthropic, and
 ///   Google.
-/// - Flat — `{"message": "...", "type": "...", "code": "..."}`, used by
-///   Cerebras for every status it returns.
-/// - Detail — `{"detail": "..."}`, used by FastAPI servers, such as a gateway
-///   in front of vLLM.
-///   A `detail` that is not a string (FastAPI's list of validation errors) is
-///   not read.
-///
-/// A body carrying more than one is read in that order: a provider that nests
-/// is describing the failure there, and its outer keys belong to something
-/// else.
+/// - Flat: `{"message": "...", "type": "...", "code": "..."}`, used by
+///   Cerebras.
+/// - Detail: `{"detail": "..."}`, used by FastAPI servers (such as a gateway in
+///   front of vLLM).
+///   Non-string `detail` values, such as FastAPI validation error arrays, are
+///   ignored.
 fn extract_api_error_body(body: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
 

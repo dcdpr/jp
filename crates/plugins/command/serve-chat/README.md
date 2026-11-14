@@ -228,9 +228,8 @@ configured or not.
    jp --cfg @/path/to/bridge.toml serve chat
    ```
 
-   Add `-vv` to see the bridge's log; dropped messages, failed turns, and failed
-   pulls are logged there.
-   Each `decide` call and each turn is logged with its timings, as fields.
+   Add `-vv` to see the bridge's structured logs, including dropped messages,
+   failed turns and pulls, and timing fields for each `decide` call and turn.
 
 5. Pull uncommitted changes from the bridge into a local review worktree:
 

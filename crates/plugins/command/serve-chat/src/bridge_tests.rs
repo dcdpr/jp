@@ -38,8 +38,6 @@ struct HostLog {
     answer: Option<String>,
     cfgs: Vec<Vec<String>>,
     tools: Result<Vec<String>, String>,
-
-    /// How long reading the configured tools takes.
     tools_delay: Duration,
     compactions: Vec<oneshot::Sender<Result<Vec<StoredCompaction>, String>>>,
     compacted: Vec<Vec<Compaction>>,
@@ -74,7 +72,6 @@ impl FakeHost {
         self.0.lock().unwrap().calls.clone()
     }
 
-    /// The message of every log event, in order.
     fn logs(&self) -> Vec<String> {
         let log = self.0.lock().unwrap();
         log.logs
@@ -83,7 +80,6 @@ impl FakeHost {
             .collect()
     }
 
-    /// The fields of every log event with `message`, in order.
     fn logged(&self, message: &str) -> Vec<Value> {
         let log = self.0.lock().unwrap();
         log.logs
@@ -929,8 +925,6 @@ struct FakeDecider {
     answers: Mutex<Vec<Result<Verdict, String>>>,
     asked: Mutex<Vec<String>>,
     offered: Mutex<Vec<&'static [Action]>>,
-
-    /// How long each decision takes.
     delay: Duration,
 }
 
@@ -969,7 +963,6 @@ fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>
     deciding_after(Duration::ZERO, answers)
 }
 
-/// A fixture whose decider takes `delay` to answer.
 fn deciding_after(
     delay: Duration,
     answers: Vec<Result<Verdict, String>>,

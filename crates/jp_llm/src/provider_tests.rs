@@ -197,12 +197,10 @@ fn tool_calls(history: &[ConversationEventWithConfig]) -> Vec<&ToolCallRequest> 
         .collect()
 }
 
-/// The events of the response under assertion, the last one so far.
 fn last_response(responses: &[Vec<TestEvent>]) -> &[TestEvent] {
     responses.last().map_or(&[], Vec::as_slice)
 }
 
-/// The tool call requests in one response.
 fn requested(response: &[TestEvent]) -> Vec<&ToolCallRequest> {
     response
         .iter()
@@ -228,8 +226,9 @@ fn answer_every_tool_call(provider: ProviderId, result: &'static str) -> TestReq
             });
         }
 
-        // Asserted on the response rather than the history, so a failure shows
-        // everything the provider sent back, finish reason included.
+        // Assert on the raw response events rather than the conversation
+        // history so a failure shows everything the provider returned,
+        // including the finish reason.
         Some(request.assert_chat(|responses| {
             let response = last_response(responses);
             let answer = response
@@ -249,19 +248,14 @@ fn answer_every_tool_call(provider: ProviderId, result: &'static str) -> TestReq
     })
 }
 
-/// Providers whose test model makes one tool call per response, even when asked
-/// for two.
+/// Providers whose test model only emits one tool call per response.
 ///
-/// Cerebras's `gpt-oss-120b` made one call in two recording runs, its reasoning
-/// saying it can only call one function per turn.
-/// Cerebras sends `parallel_tool_calls` on by default, so the request can't
-/// change that.
+/// Cerebras's `gpt-oss-120b` only emits one tool call per turn even though
+/// Cerebras enables `parallel_tool_calls` by default.
 const NO_PARALLEL_TOOL_CALLS: &[ProviderId] = &[ProviderId::Cerebras];
 
-/// More than one tool call in a single response.
-///
-/// Each call has to keep its own arguments, and the provider has to accept one
-/// result per call before the model answers.
+/// Verify that parallel tool calls in a single response keep their own
+/// arguments and that the provider accepts a result for each call.
 async fn tool_call_parallel(
     provider: ProviderId,
     test_name: &str,
@@ -308,10 +302,9 @@ async fn tool_call_parallel(
     run_test_mode(provider, test_name, requests, mode).await
 }
 
-/// A tool whose arguments nest objects inside an array.
-///
-/// This is the shape a tool with `fan_out` configured is advertised with: an
-/// `ops` array holding one object of the tool's own arguments per operation.
+/// Verify that a tool with an array of nested argument objects (the shape
+/// produced by `fan_out`) round-trips without turning omitted optional fields
+/// into `null`.
 async fn tool_call_nested_arguments(
     provider: ProviderId,
     test_name: &str,
@@ -370,9 +363,9 @@ async fn tool_call_nested_arguments(
                     "expected `ops` to name both files, got: {ops:?}"
                 );
 
-                // A provider that encodes an optional property as nullable
-                // receives `null` for one the model left out. The tool must
-                // not: `null` is not an integer.
+                // Providers that encode optional properties as nullable in
+                // strict schemas must strip `null` before emitting tool call
+                // arguments, since `null` is not a valid integer.
                 assert!(
                     ops.iter()
                         .all(|op| op.get("start_line") != Some(&Value::Null)),
@@ -385,10 +378,8 @@ async fn tool_call_nested_arguments(
     run_test_mode(provider, test_name, requests, mode).await
 }
 
-/// A tool call whose result is an error.
-///
-/// The cassette pins how the provider's request encodes a failed result, and
-/// that the provider accepts it and the model answers.
+/// Verify that the provider accepts an error [`ToolCallResponse`] and returns a
+/// follow-up answer.
 async fn tool_call_error(provider: ProviderId, test_name: &str, mode: ProviderTestMode) -> Result {
     if !records_new_cases(provider, mode) {
         return Ok(());
@@ -402,7 +393,6 @@ async fn tool_call_error(provider: ProviderId, test_name: &str, mode: ProviderTe
     run_test_mode(provider, test_name, requests, mode).await
 }
 
-/// A tool that takes no arguments, so a call to it carries none.
 async fn tool_call_without_parameters(
     provider: ProviderId,
     test_name: &str,

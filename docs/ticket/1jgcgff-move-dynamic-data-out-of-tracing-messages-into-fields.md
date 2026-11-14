@@ -56,12 +56,11 @@ braces) and already carry `id` as a field.
 ## Enforcement
 
 Converting the sites once does not keep them converted.
-A dylint rule flagging a tracing macro whose message is not a plain string
-literal, or that carries format arguments, would.
+A dylint rule can enforce this by flagging any tracing macro whose message is
+not a plain string literal or contains format arguments.
 It belongs with the other dylint candidates in T-1dhk8ac (step 2), next to
 `PROSE_IN_TRACE_FIELD`.
-Until then the convention has to be written down where contributors and
-assistants read it.
+Until then, document the convention where contributors and assistants read it.
 
 - [ ] Convert the sites the grep found
 - [ ] Convert the multi-line invocations

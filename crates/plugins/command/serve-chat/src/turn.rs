@@ -1,9 +1,9 @@
-//! Building a turn's request and running it on the `jp` host.
+//! Turn request construction and execution on the `jp` host.
 //!
-//! [`run_turn`] reads the configured tools, prepends the override that disables
-//! all of them ([`turn_cfg`]), and then starts the turn on the chat's
-//! conversation, or in a new one.
-//! [`cfg`] is the persona and sender attribution every turn runs under.
+//! [`run_turn`] is the entry point: it queries the host's configured tools,
+//! prepends a `--cfg` override disabling all of them via [`turn_cfg`], and runs
+//! the turn on the chat's active conversation (or starts a new one).
+//! [`cfg`] builds the persona and sender-attribution overrides for each turn.
 
 use chrono::NaiveDate;
 use serde_json::{Map, Value, json};
@@ -74,7 +74,8 @@ pub(crate) struct TurnRequest {
     pub content: String,
     pub title: String,
 
-    /// [`cfg()`], before [`turn_cfg`] prepends the tool-disabling override.
+    /// `--cfg` arguments from [`cfg()`], before [`turn_cfg`] prepends the
+    /// tool-disabling override.
     pub cfg: Vec<String>,
 
     pub expires_in: String,

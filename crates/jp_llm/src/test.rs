@@ -593,16 +593,13 @@ pub async fn run_chat_completion(
     .await
 }
 
-/// The environment variable naming the server one route records against.
+/// Return the environment variable that overrides the recording URL for
+/// `provider` and `mode`.
 ///
-/// `JP_TEST_UPSTREAM_` followed by the route's fixture directory in upper case,
-/// such as `JP_TEST_UPSTREAM_VLLM` or `JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION`.
-/// Each route reads only its own variable, so one recording run can aim a
-/// self-hosted provider at a remote server while every other provider records
-/// against its own endpoint.
-///
-/// Has no effect on playback, which answers from the cassette and never
-/// forwards.
+/// Formatted as `JP_TEST_UPSTREAM_<ROUTE>` using the route's uppercase fixture
+/// directory name (e.g. `JP_TEST_UPSTREAM_VLLM` or
+/// `JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION`).
+/// Ignored during playback.
 fn upstream_env(provider: ProviderId, mode: ProviderTestMode) -> String {
     format!(
         "JP_TEST_UPSTREAM_{}",
@@ -610,16 +607,13 @@ fn upstream_env(provider: ProviderId, mode: ProviderTestMode) -> String {
     )
 }
 
-/// The server the recorder forwards to.
+/// Return the upstream base URL the VCR recorder forwards requests to.
 ///
-/// The route's configured base URL, unless the route's [`upstream_env`]
-/// variable names another one.
-/// A self-hosted provider is configured with a loopback address, which finds a
-/// server only on the machine doing the recording; the variable aims the
-/// recording at a deployment elsewhere.
-///
-/// Only the upstream moves.
-/// Requests still travel through the mock server that writes the cassette.
+/// Defaults to the route's configured base URL unless overridden by its
+/// [`upstream_env`] variable (for example, to record a self-hosted provider
+/// against a remote server instead of `localhost`).
+/// Requests still pass through the local mock server so the cassette is
+/// recorded.
 fn record_upstream(
     provider: ProviderId,
     mode: ProviderTestMode,

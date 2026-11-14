@@ -121,8 +121,6 @@ fn create_request_asks_the_template_to_skip_thinking_when_reasoning_is_off() {
     );
 }
 
-/// llama.cpp allows one tool call per response unless the request asks for
-/// more.
 #[test]
 fn create_request_allows_parallel_tool_calls_when_tools_are_declared() {
     let details = ModelDetails::empty((PROVIDER, "Qwen3.5-9B-GGUF").try_into().unwrap());

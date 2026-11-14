@@ -2971,8 +2971,8 @@ mod map_event {
         }
     }
 
-    /// Run wire events through [`map_event`] and the [`EventBuilder`], as the
-    /// turn does, returning the tool call requests they end up as.
+    /// Run wire events through [`map_event`] and [`EventBuilder`] and return
+    /// the resulting [`ToolCallRequest`]s.
     fn stored_tool_calls(wire_events: serde_json::Value) -> Vec<ToolCallRequest> {
         let wire_events: Vec<types::Event> = serde_json::from_value(wire_events).unwrap();
         let mut builder = EventBuilder::new();

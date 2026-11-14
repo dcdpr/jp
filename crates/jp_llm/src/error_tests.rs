@@ -165,8 +165,6 @@ async fn a_subscription_400_model_not_found_is_an_unknown_model() {
     assert_eq!(err.kind, StreamErrorKind::UnknownModel);
 }
 
-/// A gateway routing to several vLLM servers answers in its own envelope, and
-/// names the models it does serve.
 #[tokio::test]
 async fn a_gateway_404_for_an_unknown_model_is_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(
@@ -239,8 +237,6 @@ fn extract_api_error_body_prefers_the_nested_envelope() {
     );
 }
 
-/// FastAPI-style servers, such as a gateway in front of vLLM, put their
-/// explanation in `detail`.
 #[test]
 fn extract_api_error_body_reads_a_detail_envelope() {
     assert_eq!(
@@ -265,7 +261,7 @@ fn extract_api_error_body_prefers_a_message_over_detail() {
 fn extract_api_error_body_ignores_bodies_without_a_message() {
     assert_eq!(extract_api_error_body("not json at all"), None);
     assert_eq!(extract_api_error_body(r#"{"message":42}"#), None);
-    // FastAPI's validation errors are a list of objects, not a sentence.
+    // FastAPI validation errors use a list of objects rather than a string.
     assert_eq!(
         extract_api_error_body(r#"{"detail":[{"loc":["body"],"msg":"field required"}]}"#),
         None

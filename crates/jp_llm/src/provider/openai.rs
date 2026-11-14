@@ -2583,12 +2583,12 @@ impl ReasoningState {
     }
 }
 
-/// Argument text the `function_call_arguments.delta` events have delivered for
-/// each unfinished function call, keyed by output index.
+/// Accumulated `function_call_arguments.delta` text for each unfinished
+/// function call, keyed by output index.
 ///
-/// A finished function call item repeats its complete arguments.
-/// [`map_event`] compares the two to emit the arguments the deltas did not
-/// deliver.
+/// `OutputItemDone` carries the complete arguments for a function call.
+/// [`map_event`] compares them against the accumulated deltas to emit any
+/// unstreamed suffix.
 #[derive(Default)]
 struct StreamedArguments(HashMap<usize, String>);
 
@@ -2597,17 +2597,15 @@ impl StreamedArguments {
         self.0.entry(index).or_default().push_str(delta);
     }
 
-    /// Return the arguments of the finished function call `item` that its
-    /// deltas did not deliver.
+    /// Return any unstreamed suffix of the finished function call's arguments.
     ///
-    /// Returns `None` when the deltas delivered all of them, and for an item
-    /// that is not a function call.
+    /// Returns `None` if `item` is not a function call or if the deltas already
+    /// delivered the full `arguments` string.
     ///
     /// # Errors
     ///
-    /// Fails when the item's arguments do not start with the streamed deltas.
-    /// Chunks already emitted cannot be taken back, and the call must not run
-    /// with arguments the model did not send.
+    /// Returns an error if `call.arguments` does not start with the accumulated
+    /// deltas, since already-emitted argument chunks cannot be retracted.
     fn finish(
         &mut self,
         index: usize,
@@ -2791,13 +2789,12 @@ fn map_event(
                 | types::OutputItem::ComputerToolCall(_) => return vec![],
             };
 
-            // A function call's start and argument chunks are emitted from the
-            // `OutputItemAdded` and `FunctionCallArgumentsDelta` events. The
-            // finished item repeats the complete arguments, and it is the only
-            // place the subscription host's own client (Codex) reads them
-            // from: the subscription host sends parallel calls without any
-            // deltas. Emit what the deltas did not deliver, or a call flushed
-            // without its arguments runs with an empty argument map.
+            // Function call start and argument chunks are normally emitted from
+            // `OutputItemAdded` and `FunctionCallArgumentsDelta`. However, the
+            // ChatGPT subscription endpoint omits `FunctionCallArgumentsDelta`
+            // events for parallel calls and only includes the arguments on the
+            // finished `OutputItemDone` item. Emit any suffix the deltas did
+            // not deliver before flushing the tool call.
             match arguments.finish(index, &item) {
                 Ok(missing) => {
                     events.extend(missing.map(|missing| Ok(Event::tool_call_args(index, missing))));

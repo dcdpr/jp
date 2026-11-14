@@ -118,14 +118,10 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// names.
     fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send;
 
-    /// Log an event.
-    ///
-    /// `message` names the event and is the same for every occurrence, which
-    /// `&'static str` enforces.
-    /// Everything that varies between occurrences goes in `fields`.
+    /// Log a structured event with static `message` text and dynamic `fields`.
     fn log_with(&self, level: Level, message: &'static str, fields: Map<String, Value>);
 
-    /// Log an event that has no fields.
+    /// Log an event without additional fields.
     fn log(&self, level: Level, message: &'static str) {
         self.log_with(level, message, Map::new());
     }

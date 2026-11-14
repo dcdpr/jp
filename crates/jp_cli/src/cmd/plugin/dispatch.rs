@@ -2610,14 +2610,15 @@ fn handle_read_config(
     })
 }
 
-/// A plugin log's structured fields as compact JSON, or `None` without any.
+/// Serialize a plugin log's structured fields as compact JSON, or return `None`
+/// if empty.
 fn log_fields(log: &LogMessage) -> Option<String> {
     (!log.fields.is_empty()).then(|| Value::Object(log.fields.clone()).to_string())
 }
 
 fn emit_log(log: &LogMessage) {
-    // `tracing` fixes an event's field names at compile time, so the plugin's
-    // own field names travel as one `fields` value.
+    // `tracing` requires static field names at compile time, so dynamic plugin
+    // fields are serialized into a single `fields` attribute.
     let fields = log_fields(log);
     let fields = fields.as_deref().map(tracing::field::display);
 

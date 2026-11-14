@@ -23,9 +23,6 @@
 //! inspected when the turn ends.
 //! If a turn modifies or creates any file outside the configured writable
 //! directories, the bridge pauses until the working tree is clean again.
-//!
-//! Each decision and each turn the host accepted is logged with how long it
-//! took.
 
 use std::{sync::Arc, time::Duration};
 
@@ -98,10 +95,10 @@ struct Running {
 /// Completion event from a spawned host task.
 #[derive(Debug)]
 pub(crate) enum Event {
-    /// The host accepted the active turn's request on `conversation`, after
-    /// spending `tools` reading the configured tools.
+    /// The host accepted the active turn's request on `conversation`.
     Started {
         conversation: String,
+        /// Time spent reading the configured tools before starting the turn.
         tools: Duration,
     },
 
@@ -109,8 +106,7 @@ pub(crate) enum Event {
         result: Result<(), String>,
     },
 
-    /// Classification result for the front message in the inbox, which the
-    /// decide API took `took` to answer.
+    /// Classification result for the front message in the inbox.
     Decided {
         result: Result<Verdict, String>,
         took: Duration,
@@ -697,8 +693,6 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
     /// Spawn a turn on the current conversation for `waiting.chat`, creating
     /// the conversation if needed.
-    ///
-    /// `picked` is when `waiting` left the queue.
     fn start(&mut self, waiting: Waiting, picked: Instant) {
         let conversation = self
             .conversations
@@ -767,19 +761,18 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 }
 
-/// `duration` as a log field, in whole milliseconds.
+/// Convert `duration` to whole milliseconds as a JSON [`Value`].
 fn millis(duration: Duration) -> Value {
     u64::try_from(duration.as_millis())
         .unwrap_or(u64::MAX)
         .into()
 }
 
-/// The log fields for a finished turn: its chat, its conversation, and how long
-/// each phase took in milliseconds.
+/// Build the timing and metadata log fields for a completed turn.
 ///
-/// The turn ran until `ended`, and its answer was read and handed to the
-/// transport by `answered`.
-/// Returns `None` for a turn the host never accepted.
+/// `ended` is when the turn finished on the host; `answered` is when its final
+/// response was read and handed to the transport.
+/// Returns `None` if the host never accepted the turn.
 fn phases(running: &Running, ended: Instant, answered: Instant) -> Option<Map<String, Value>> {
     let (accepted, tools) = running.accepted?;
     let conversation = running.conversation.as_deref()?;
