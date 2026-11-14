@@ -1,0 +1,45 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "run_me_2",
+                        name: "run_me",
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool `run_me` failed because the simulated disk is currently full.\n\nThis is likely a side effect of my attempt to \"run\" it in the first place, or perhaps the system has reached its storage limit for this session. If you have any other tasks or questions, feel free to ask!",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

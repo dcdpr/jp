@@ -1,10 +1,121 @@
 ---
 source: crates/jp_test/src/mock.rs
-assertion_line: 134
 expression: v
 ---
 [
     [
+        Part {
+            index: 1,
+            part: Message(
+                "I w",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ill ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "run t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "he to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ol",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " with a ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "default",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " string a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "rgum",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "en",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "t and a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " single ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "elemen",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "t array a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "r",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "gument.",
+            ),
+            metadata: {},
+        },
         Flush {
             index: 0,
             metadata: {},
@@ -13,7 +124,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "XKlv3S6qUhMOu2TFBjOi50mehedlfHVg",
+                    id: "n2iYkI6xKzeWiU0luNlVTNzERwnlToiI",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -104,33 +215,6 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\\\",",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    " \\\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    "foo",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
                     "\\\"]",
                 ),
             ),
@@ -191,189 +275,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "ssful",
+                "s",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ly w",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ith the ar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "gu",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "men",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ts",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " `foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "=\"Hell",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "o ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "Worl",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "d\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "` a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "nd ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "`ba",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "r=",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "[\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "]`. The",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " output in",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "d",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ica",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "tes: **",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "wor",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "king!**",
+                "sfully.",
             ),
             metadata: {},
         },

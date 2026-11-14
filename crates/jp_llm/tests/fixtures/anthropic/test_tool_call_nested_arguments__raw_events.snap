@@ -1,0 +1,172 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "toolu_01Jvx5EWziatFheKmcte7JZ9",
+                    name: "read_files",
+                    decoding: None,
+                },
+            ),
+            metadata: {},
+        },
+        KeepAlive,
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"ops\":",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    " [{\"pat",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "h\":\"a.t",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "xt\"},{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "path\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "b.txt\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "]}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        KeepAlive,
+        Part {
+            index: 0,
+            part: Message(
+                "Based",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " on the read",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " results",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "\n\n-",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " **a.txt** contains",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ": `alpha`\n-",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " **b.txt** contains",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ": `beta`",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

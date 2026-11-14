@@ -1,0 +1,59 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "get_weather_0",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Paris"),
+                        },
+                    },
+                ),
+                metadata: {
+                    "google_thought_signature": String("CiQBaRR9E25Jj+eqAQ065DlyV2Zu86HzmAf9cZZpOZLvBrSOUuMKbwFpFH0Tleu6FsicU07wkoFa0laWvJhoyfn0R1CbzS0TMtlYBB3DzHdNwbdyszo7oi7lv7Ptju0e3h7+co7hc6/t9FChd2Si97ktKFqCGjbmJH/taBmJ6amB6vmJ0s4/vqk0en6hhLBB2g6OKjShiAqOAgFpFH0Ts8Fwmz0AMDymPx4GWi9F+r+PJI0m80FbNjpjXwHvx8hDbBJAntu6NPoT2kS2GbrkAEmduOHNgFK5veEZR4qqlMKeOOLgj793NalqQNzNUqLy9x2Z6oqZbR6FMq4m18inI8wrSwdrJOWhPt9Qxwytm/WmhyDi6NhlVrt9SYtkcLBLJSaDW+tIdEWC51AsTM0DHhco6kEenQVEYP9UCHfofmHu4Uerg7losk0DLfDdZO0e9fVymtukOr3QRmLApOLstS7D9mkPAFaKBufJdrjd6af7w2buRf1igaLs+VXyNo9K2Wrq0vfWB4i0lLsU67nxIbwxehZRzT6tsdgXNM4ckUa31LkHZL0uVQqIAgFpFH0T2X7nvHdr303khteu76BEFo7x/jCVgMLsgs4eKaYidRs7RrRSfme7GqRWL7NOpytE+4rCLdlC5TiXZMqnj5CwtXiM+0nCdgk55r57mLo8dwpmRwYoN0jcHw7aCZHulgxqq134xqqpfLxunQmYBBQcmFP0pqpHomS5HpLNew1H5bRgp2er735o0DcESgz4tfQXNVfPU60HGjaq078u82179BxgOuPqHmxswhrh5e9ZdrHrxg5169rlkPzWL2YnfiTLyURZuCm6lm3C+uSCi0CKfjiivKvOCoNVQlrrvPGZH2DURjcWYNKUysMv0AtdSBFlGW/SHVMDog7vdCZDJxZmzLB2KAplAWkUfRNItyQXEWoPf7B3h/blUgSm974ks/aeaLbnj9GEmJ/U4lTi7V9u+VlaKASZ9rT6UMoH/lWuzh+W9PjXCDeGZUzPGnnw6niQXST6KLDqp0AiksKpB3p5636HpWWb36EFOck="),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "get_weather_1",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Tokyo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The weather in Paris is 18 degrees and sunny. The weather in Tokyo is also 18 degrees and sunny.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

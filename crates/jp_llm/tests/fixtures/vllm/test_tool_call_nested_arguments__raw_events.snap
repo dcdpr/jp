@@ -1,0 +1,127 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                Start {
+                    id: "chatcmpl-tool-8fd95cdb4b0bfd22",
+                    name: "read_files",
+                    decoding: Some(
+                        ArgumentDecoding {
+                            omit_null: [],
+                            properties: {
+                                "ops": ArgumentDecoding {
+                                    omit_null: [],
+                                    properties: {},
+                                    items: Some(
+                                        ArgumentDecoding {
+                                            omit_null: [
+                                                "start_line",
+                                            ],
+                                            properties: {},
+                                            items: None,
+                                        },
+                                    ),
+                                },
+                            },
+                            items: None,
+                        },
+                    ),
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"ops\": ",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "[{\"path\": \"a.txt\", \"start_line\": null}, {\"path\": \"b.txt\", \"start_line\": null}]}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 1,
+            part: Message(
+                "- **a.txt** co",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ntains: `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "alpha`\n- ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "**b.txt** cont",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ains:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `beta`",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

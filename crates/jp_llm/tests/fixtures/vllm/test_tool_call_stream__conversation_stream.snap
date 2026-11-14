@@ -259,32 +259,32 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I'll call the tool with some values that fit its schema:\n\n"
+      "message": "I'll call the `run_me` tool with valid arguments. Since `foo` and `bar` are both required, I'll provide `foo` as its string value and `bar` as the array form (its only allowed values are `[\"foo\"]` or the `[\"foo\", \"bar\"]` enum array, with items restricted to `\"foo\"` or `\"bar\"`).\n\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "chatcmpl-tool-8bef0cd026442499",
+      "id": "chatcmpl-tool-bb7964bb980257df",
       "name": "run_me",
       "arguments": {
+        "foo": "Zm9v",
         "bar": [
           "Zm9v",
           "YmFy"
-        ],
-        "foo": "SGVsbG8sIHRvb2wh"
+        ]
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "chatcmpl-tool-8bef0cd026442499",
+      "id": "chatcmpl-tool-bb7964bb980257df",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully and returned **\"working!\"**"
+      "message": "The tool executed successfully and returned **\"working!\"**"
     }
   ]
 }

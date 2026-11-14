@@ -1,0 +1,312 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": []
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "allow",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "joins_reasoning": true,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "sanitize": "strip",
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "subscription_flow": "acp",
+          "acp_config_dirs": {},
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
+        }
+      }
+    },
+    "plugins": {
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want, then tell me how it went."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnEtTkE1RVpQMmZDUnhqV1oxTEJrOUs5MURVcmhIUzIxWXNvQWkwRVNZUFF5WnE0ZlFkSDRqOW9ZNTNfVVNYZ252cjd6ZHN2anJFMnNjZ3BYU1NITGt3cWh2RUowQktORFROTmhjeUFwRHBQT0JONGVIMnF4bGVQYTlrYTBRRlBUYWhDR2NKT1dVRDlXRW9naGpuNlJqUjE2LUtrTTJndFRwUlNZcUI1TmRfTlpDc3BTOUU3VHJfZ2cyNWRxQ21GUGRuX21ObWp4ejN0Q05WaFpyU1Y1ZlJ0eXNJeVFDLXI2cUQzT2YzZjBvX2hlU01HZWpuQVpFWm02bVV1b3lTcWRtZDM0UHhVLXF6T3BURkZxamwwdkZSQTJnNHlESlBOX0RyMHVEMS1xcUVYdndZSGxMSXNaSXNBbHhWTjFaTVhObVB5Y3l3d0pfbkgtUGpoTGd6aFdYRUhfS2gzWXJjY2hTSlJoNzg3bTd4OF95NWhBT25qb1FPbExDckZScWlhMmh6ZF9MUTdhS0ZPU29QMVhxazQ0LXFyU1ZPcm1mRmdQZGZvbGJpdXBnVWNuak1BUVBCSFdfSy1rbUVTX2hwdHk2Z3cyWFY5V1c0czBfb19yOUowOFNFb3ZubHhuUjh5eFgwMC05b0RmM3JWdzM1SkFvWEhVczNMWlRxVzF4RldWODY1MU1MdHc1RlcyeF91RDlxWWFQd25YMjBJTlFHbFk1ZThiSVVyWF8wYi0zVHhRWlczMHZmVmowek9hZE04TU10RTFab3RRSDZvVGw0bzZhd2REb00tQ3RUSEo4OXhVSTlhTjI3cm9QWWZKcWFqSFd2NXUyNnVXTlpGekJ5V004MElDSGV5VDh2SmcyN3p1Z2I0SHZOckdfelJqdTNUR3RLM3VUU0xxNnRhYlJTb3pCbFBPczdiNTI4S2ZpWmRscWRzT2llN1BXZzZsbjZlR05aYjJ2SFZaS0lwTHc4SnZGY2Zad25oT0ZpdWlERW5EeHV4S2FtZDdSczE0VjVTdWp2WlJXWXE2bE9BdjBJdmFVOVd2aXFBNXFHMFhqdFZ3aTY3dU1pOU5XQVNtazJTbzNhQk1jTHhtNEFxNUFsSXpoOUdqZ0pDblZsN1dKQzNFNkwtaXVjOW5WWkpWMl9PNDVnc3NLOHEwWjZkZFZ0RF9pd3AyNTUySXNHNU85RWxXT0tDOW8xcUFTenF1S0JGenptdDZkQ1p4MDZpMG5Qb2pBVnFXc1RsN1ozTUxqdE1zRWdscXRMWHMxbGlFcDI4S3FzLVVFeld4WkUtR2tTR2xkV0g0QWlmdEg5Y0lLNEtYSGo0Ym5ncGJqT2k1YzdTYlFkN2s3bzM5UWFpMTNkVVI5MVNYTGQzRjJ6WTVyeVlOdDlWcUtYS0xwelhWTFE1cnJKYmZvZ29zZWIxZVR2Z1V6aXNPU1QzVm1JMDhSVTQ1T0tMZmdfVjJrajNVeW5ZMExNQmVuUUIzSUVxR0xpMFhiVHR6WXR4WnE3LS1yTUxwY0lMMnRRX2ZWcWIzNUNmTU1pYUdVd3ladVZHMkN0THZOTDRtWlRkRjJXUXVUYXBJcHVFNzM4WmJtcmxKV2J6Sl9WVV9ya0VvZkhWWWdibXFBcE84S2xwRFc0cWVPRURUMVJwd3BoQi0wejdtRnJNa0FCOFVZcFRHRllyYkNyajZTVWxIcUJKQ2RiREJwVWhqYUJYU29uVHlsQlNqV2lkNEs3RXk5dlFzOXVLXzdCbXZ2VXFRZ2g3Rmo4bm0wWGR0ZmxJTDdpdmc4VVVEbmpBSXRmWUNOaklhS3dfbkJYT3k4R3lBVmlGTi1zajRVZzB5bHdkQVd2dy02U0JBa0c0V3htQzRUNjdtbzcyOG16ajhMWkZwdEU3a1JaQTBYOGFRSFRKVzFlRGlUYkJhNFRaS1N1UUZheVpVQ1E3b1ZhSEZnRjAtZ0NSbUdzaXBVQ0FvVHpJZlFWb3lmZkMtSzVjWVc5TURzbzNBTWl0TWwwbEVETU9LUVU5bGc1aHFUaUh6RnpPVDV4c3F5QVZCay0yYndlaFdNWEhIdVJKYmdFOTBEVGUyUHlaUVlIX1RVRk9xWG9xeUpINlMwcVBwQ0E5RF9Ybkx4NzBWZHpHaE9lS0pnbWNTOTl3SmFrYUhmRllVamFuamZReDA1MXlFV0pDZV9CQVVxZTIxSzk3YTdYY3pOZ0FsbGF3bnc1eDltRFlLVnVxaXBnQlBjeHBfZko1VE8td1RGUXJmNTVlX0hWdDZielpnb2xmRXpES092QWZIZjZTM0Mtd2FnX0F0NXRQR3NMOElQbEtrVHRUWUxtQ3E3aFB5LWhIdnlXd3Jna1dBT3NzUUVacXVpa0dhbXJRN0lMUU55dWV5dkZZVGdTdVdEVVFRMlRqLXp2clUweHhGQk01d2ItbS1hRnk1TVRKVFYyMkNudzF0TjNBV1dkY180SlJhdTRiV196TXp5dDFtenA5Zm5nSzVtc0hJeHZwUVVLWGdtbDFRbVgwbmRjYkVFeE5ZVExHdlA0RFg2MGsxdHA3RUdHWVB1ajNVVWRTbHc0VGxJUmU5X01yaGRzZWprM1daMnRyTGtaNUhkLVBhLTE4S2hmbGFkc2Q4ZGRJU3NJOUVxdEhpUEdydEhWR0NKS3dILUgweWMybVM4cHBEMU81Q083VlliSEJoTHBZYVZUcmx0M1o1RGNOemItclE9LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMDg0MDMxZmZmMWUzMzY4MDAxNmFmOGQwMzhlMDZjODdkMThjNzQ3NjM1OTJjMzA1ZmM=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_vYiXbiQDaIruWo10RuonyRL6",
+      "name": "run_me",
+      "arguments": {
+        "foo": "dGVzdA==",
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_vYiXbiQDaIruWo10RuonyRL6",
+      "content": "YHJ1bl9tZWAgZmFpbGVkOiB0aGUgZGlzayBpcyBmdWxsLg==",
+      "is_error": true
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnEtTkE2OElOTWRUdDdiZDB5dDZnZGRxUHhLUEk2bndid0tJRzBpWjJIYjZOQ0lxZ0pvdXZOd2NVdlZablV5aHlQUXIxOVFib3lkNG44WXBqTjJuRjI2X3RIZUhKYjBuZjdiLTJhV0dDeHdMLWJsTUxtNmNqVWpjX0tyNk1KMVlvR0l5V2FzejVkbGNxTTZUMEhHOE5iTGRLdE1YRUwyM1lHYWtBODNSSDhXNFIyNFpnWjZvdFd0bTVxNVdYY0ZWQkJuMVpkdVJxUVA1N1VvMTdWQUo3U2JWTFZUSW9YRGM1Sk1XWkV6OG10NjUxRVVsYWlILW5hcGZLTmpSQUV4aTcwenljMmhFNjMxLXZydmRWQTJuYm5fX2R5SHoxWXZmWFdpLXotbEN0dERZSERaM2lwcHdfTmVmZ1ZPSmYwbk5BUjN6SnlOdE9hV2I5Q25OOTZLU2JacWFxelFBNHZKM3ZMN0pwcnIzN0ZRa0lGaUF6ZWNaSXY0cU5wS0paZzh0bEVOMUU5MVFrVTJIcld1MEJjejMyUnhfeTdEU2NCSGcxVzNubmY1NlZ6Nkd3VG5YZEpJUjZyeUNPNkVWOWd6c0ZhOC0yRlluMjJJV1dISzdlUmRyTFV5bndVcEJ6bk1JeTNhenFoVnlQWmNvT1dOWHUwTk9QRUxvVll3cWtLRXNjdVlPQjVWYUJJWFNsakEzdVcxUWpXU0pUQnhlZTJzcjdaZmpjU0VWZ2FOai1mOUswMGZ4ZllKdkxvT25adzJCcVplQkJsLU1vVWxfaUtuT3c5Q0xMT1Y1NWZ5bFBtQWVVVnhlLXVPRE1YUnpGMnFvaEEyOElZZzNVS2ZGY2Vpblp1dVNzbVlsSWpGYnhYUHN2TUhIa0M5U0pEbmdhWC13VEpjT0FtdjFpWHN2S0pjdVJXbVdjLWdwQUQ4SVM4YUtrQzJYbEtqazc2WF96TzdLaTA5Ynd2ckxDSVU1TG1IeXY0alRZdjB1THhhY3gyem1DSWx0QjQ5SUhKMzNQOWVsbDAzZDFlR0Fwa3h0RlBEZGI5cFdYelNscm1MZ2Y0ZmFjaHV4Y18yZzNZUmVkWlhGc0x3UnR3akJrbm5qY3NLcWVUQlBVTXJaMU0zOEFraHV2MTlDYmZFbWFUa1MwUTJqTnhtcmhiUlo2akZNT29iODY2SlZBaWtNNF9mZjdrYXl2QWdwUGVraG5fYXVxc1V1UUpkR1R4cHRSU1BTaU9BOTBsLWZaREpxWkM2VndfSjFPbGwyUVQ2S0IxTWdzUmhRcVVVT2RkWm9lMV9HT2ZwVmhqZlpTWWRab0lxblJ0VFJyNVNoVzlzUWVnLUVGSFIyUEtqRXR3M1dzaEo2OC1HM3JrRll2d0k4X2U4cGtNTjFjUHNjdllNbEVMdUctck5KRko4U0xlYTRBWmZLV0cwLTlxVEE1TkxGU0JrTDVXbF93dXlGME9pcHlnNGxsaHFqMTdidlpGS3VyWG9PTWtWQ2EtaUlPUy1Fa05BbXRrQ1E3ckNjSTZ4N3ZOVUsxMUdtTEZOamVrNVlwaVZwNWg2NkJpVWVsUThUdmZaV3BrQUEyZll4cDFzbkZiSTBzNWY1R0ZfRzQ5NjJIYmFDLS01empEd1JZVWdkU2pXcVlYazg2MFl1bWdzWm5PUXVFSXJvcFlRS0lIZTAzajNZYVdMMmpOV0VZcWM0dU1vU2hjODFtWld4bVBOY05jWS14TEtzVFdUY0FVVW1EWEFpSVdGN1BZQzZJbWxGaXB5TE5jTHNrd2RGcU1KTXF0Y2ExWGJQWm9yZXg0cE1WdHVHWndUT1lMYXVGUVpuMlR2eDZTak45UVYwVElqVUJVYm5JbGxiM3BpQThXVy1zRXRCSW9aOEMxUlluenBmbHlfRWVlWXhKVnRLeHEzdUVRdzRwbXIxNk5wWGpwZWRYbmdGQV9xRFF0RkoyWURwYjFfRUkzeUxyRzZROGRvbTVqSXJheDhZVWVrXzJJNUFGNHRMRVZXcHNjaExvME5pSmpETmJvR3FGVDFCZ3ZUcEJkQ2t2QW5PMFNFYmMyeVdldkNtUTFyT2FOQzRpay1DTUc4WndBY19FeDJVb1AwXzAtTG5XS3RoVHVMUmZYZ1NwamJ5eDAwRDU4Zlg0emtJdTNCUUJqeG5qS3paR1cxOVVHUmRxWkVFbU9uTjhYR0dFX0loWVZ4eGhQaGQ2WGEyODFIcUd5bmtkaTl5c2N2YzhVYlVpRVFxLWg1c1pLYXFQZGxiNGphN2NucWpJRXJOREdYdFhFeHV1SmJ0a0dPcVdSX2JHaXVtV05FZ3JsbDluZkM2VkVRTVgxSVBUQjI3Q1NGbDFqWWFuVGE0TUhBdjR6NmdQX3JqNzJzdXJWS0pCZFpUejd6bmZhSmdyTnUtU3lnRE11TWdENXExVUxrSmhXR0tjclRuX0FTc0FQaS0xN05vMkxWWnBsRkI1UDJPbFN1THZmSE5FSVNBV0hCTGRhazlxTVRQRGY3TGcxXzIxdFpZek1UbF9xTlJCWnMyTjJYektlUi02VHhYUU9oZHFSVHZBOVh5YWtRVFdkcEU2TjQ1VlFjRGNDc1R2eC1yeGJKU2RUWUQ5TW1HUS00UkswaXBvUFFMeFRwLUxmOUpvNUJiSUtfbUg3SUlnSGRsNWhQRGY1dGlJUnlKbzJnbllBY3NQZ0dfWThOUm0yNnZLTFlyRC1zWDg9LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGQ1Njk0YzBhZGQ1MjFiMTAxNmFmOGQwM2E3MzY4ODdkMTljYjZlZjA0NWE1ZDM1Mjk=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I ran the tool with the arguments {\"foo\":\"test\", \"bar\":\"foo\". The tool failed and returned the error: \"run_me failed: the disk is full.\"\n\nWhat that means and next steps:\n- Cause: the tool could not complete because the system reported no available disk space.\n- Immediate fixes you can try:\n  1. Free disk space on the machine running the tool (delete unneeded files, rotate logs, clear caches, or expand the disk).\n  2. If the tool writes to a specific directory, check filesystem usage (df -h) and inode usage (df -i) and clear that directory.\n  3. If you control the environment, restart services or the host after freeing space to ensure processes can allocate files.\n- If you want, I can:\n  - Attempt to run the tool again after you free space.\n  - Suggest specific cleanup commands for your OS (Linux, macOS, Windows).\n  - Inspect what files or directories are consuming the most space if you can provide directory listing or allow me to run diagnostic commands.\n\nWhich would you like me to do next?"
+    }
+  ]
+}

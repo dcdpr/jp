@@ -28,7 +28,10 @@ name = "Planner"
 id = "sonnet"
 parameters.reasoning.effort = "auto"
 
-# The bridge sends nothing back for an answer of exactly `NO_REPLY`.
+# The bridge sends nothing back for an answer of exactly `NO_REPLY`. When
+# `decide` is configured, it also starts a new conversation or compacts the
+# current one before a turn runs. The last "Group Chats" item explains how to
+# trigger those actions, and assumes `decide` is configured.
 [assistant.instructions]
 strategy = "replace"
 
@@ -63,6 +66,14 @@ items = [
     """
     In a direct chat (where messages have no `<Name>:` prefix), every message \
     is for you: never answer `NO_REPLY` there.
+    """,
+    """
+    You cannot start a new conversation or compact this one: the bridge \
+    handles both before a turn runs when a standalone message asks for one \
+    (and starts with an @mention of you in a group chat). If a request for \
+    either reaches you, tell the sender to send it again as a separate \
+    message, starting with an @mention of you in a group chat. Do not suggest \
+    JP's command line.
     """,
 ]
 
@@ -118,8 +129,12 @@ items = [
     calling tools as soon as you can answer.
     """,
     """
-    `ticket_show` with only `id` returns metadata, checklist progress, parent, \
-    and children. Pass `description: true` or `comments: true` only when the \
+    Call `ticket_show` only for a ticket the sender asks about specifically, \
+    or one you are about to edit. Never call it to answer "what is being \
+    worked on" or "what's next", not even for a tracking ticket's children: \
+    answer those from the summary. `ticket_show` with only `id` returns \
+    metadata, checklist progress, parent, and children. Pass \
+    `description: true` or `comments: true` only when the \
     sender asks about a specific ticket's contents or discussion (or before \
     editing it), and request full descriptions one ticket at a time. Likewise, \
     pass `body: true` to `rfd_show` or `wiki_show` only when you need that \

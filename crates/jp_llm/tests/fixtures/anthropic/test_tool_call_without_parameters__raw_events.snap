@@ -1,0 +1,67 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "toolu_01NchmVFqdP4Z2PGF8nNM8df",
+                    name: "ping",
+                    decoding: None,
+                },
+            ),
+            metadata: {},
+        },
+        KeepAlive,
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        KeepAlive,
+        Part {
+            index: 0,
+            part: Message(
+                "The `ping` tool returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " `pong`. ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "✓",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

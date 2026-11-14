@@ -437,23 +437,26 @@ impl StreamError {
 /// Try to extract a human-readable error message from a JSON error response
 /// body.
 ///
-/// Two envelope shapes are recognized:
+/// Three envelope shapes are recognized, in priority order:
 ///
-/// - Nested — `{"error": {"message": "..."}}`, used by OpenAI, Anthropic and
+/// - Nested: `{"error": {"message": "..."}}`, used by OpenAI, Anthropic, and
 ///   Google.
-/// - Flat — `{"message": "...", "type": "...", "code": "..."}`, used by
-///   Cerebras for every status it returns.
-///
-/// A body carrying both is read as nested: a provider that nests is describing
-/// the failure there, and its outer `message` belongs to something else.
+/// - Flat: `{"message": "...", "type": "...", "code": "..."}`, used by
+///   Cerebras.
+/// - Detail: `{"detail": "..."}`, used by FastAPI servers (such as a gateway in
+///   front of vLLM).
+///   Non-string `detail` values, such as FastAPI validation error arrays, are
+///   ignored.
 fn extract_api_error_body(body: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
 
     let nested = parsed.get("error").and_then(|e| e.get("message"));
     let flat = parsed.get("message");
+    let detail = parsed.get("detail");
 
     nested
         .or(flat)
+        .or(detail)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
 }
@@ -793,6 +796,7 @@ pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
 /// - Cerebras: `"code": "model_archived"`
 /// - vLLM (`404` only): `"param": "model"`, or `"type": "NotFoundError"` with a
 ///   `"does not exist"` message on older servers
+/// - A gateway in front of vLLM (`404` only): `{"detail": "unknown model: …"}`
 pub(crate) fn looks_like_unknown_model(status: u16, body: &str) -> bool {
     if !matches!(status, 400 | 404) {
         return false;
@@ -815,7 +819,8 @@ pub(crate) fn looks_like_unknown_model(status: u16, body: &str) -> bool {
     status == 404
         && (field("param") == Some("model")
             || (field("type") == Some("NotFoundError")
-                && field("message").is_some_and(|message| message.contains("does not exist"))))
+                && field("message").is_some_and(|message| message.contains("does not exist")))
+            || field("detail").is_some_and(|detail| detail.starts_with("unknown model:")))
 }
 
 /// Heuristic check for transient network/proxy failures based on error text.

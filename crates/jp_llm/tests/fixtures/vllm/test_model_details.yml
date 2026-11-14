@@ -11,18 +11,18 @@ then:
       "object": "list",
       "data": [
         {
-          "id": "Qwen/Qwen3.8-Flash-Next-NVFP4",
+          "id": "Qwen/Qwen3.8-27B-FP8",
           "object": "model",
-          "created": 1789995687,
+          "created": 1794649977,
           "owned_by": "flash-next-rtx",
           "root": "/model",
           "parent": null,
-          "max_model_len": 131072,
+          "max_model_len": 1000000,
           "permission": [
             {
-              "id": "modelperm-9d01a509d01965fe",
+              "id": "modelperm-85d2c27025bcc572",
               "object": "model_permission",
-              "created": 1789995687,
+              "created": 1794649977,
               "allow_create_engine": false,
               "allow_sampling": true,
               "allow_logprobs": true,
@@ -36,18 +36,18 @@ then:
           ]
         },
         {
-          "id": "rtx6000",
+          "id": "GLM-5.3-Flash-NVFP4-Spark",
           "object": "model",
-          "created": 1789995687,
-          "owned_by": "flash-next-rtx",
-          "root": "/model",
+          "created": 1794649977,
+          "owned_by": "tobor-spark",
+          "root": "/models/glm53-flash-nvfp4-spark",
           "parent": null,
-          "max_model_len": 131072,
+          "max_model_len": 1048576,
           "permission": [
             {
-              "id": "modelperm-a8e7c2ee7f0f1f25",
+              "id": "modelperm-b25b82390292b49d",
               "object": "model_permission",
-              "created": 1789995687,
+              "created": 1794649977,
               "allow_create_engine": false,
               "allow_sampling": true,
               "allow_logprobs": true,

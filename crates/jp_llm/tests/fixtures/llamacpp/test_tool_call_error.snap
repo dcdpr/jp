@@ -1,0 +1,43 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "pNPXrOLDqqOWRpoBKITdGd8oSGWNYE1C",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("bar"),
+                            "bar": String("[\"foo\", \"bar\"]"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool execution failed because the disk is full. This prevents the tool from running successfully. To proceed, we might need to free up some disk space or retry the operation later when resources are available.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

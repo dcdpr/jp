@@ -1,0 +1,60 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_3e665e7475514fe8a6f0a52a49b38d7e",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Paris"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_0620793925924c60b3412659e5306d06",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Tokyo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "- **Paris:** 18°C and sunny  \n- **Tokyo:** 18°C and sunny",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_05a0005bad9bf2fc016af7239ffbf887d2a66327b07bc50140"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

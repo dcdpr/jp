@@ -9,7 +9,8 @@
 //!   over `signal-cli` in JSON-RPC mode.
 //! - `bridge` routes messages from allowed senders to conversations and
 //!   schedules turns, with `inbox` buffering messages awaiting a `decide`
-//!   verdict and `queue` batching messages awaiting a turn.
+//!   verdict and `queue` batching messages awaiting a turn; `turn` builds each
+//!   turn's request and runs it on the host.
 //! - `checkout` locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable
 //!   directories.
@@ -28,6 +29,7 @@ mod signal;
 mod state;
 mod text;
 mod transport;
+mod turn;
 
 use std::{
     env,
@@ -43,7 +45,7 @@ use crate::{
     bridge::Bridge,
     checkout::{GitCheckout, Unguarded},
     decide::{Decide, SystemOne},
-    host::{Host as _, HostClient, Level},
+    host::{Host as _, HostClient, Level, fields},
     options::Options,
     signal::{Logger, Signal},
     state::State,
@@ -183,7 +185,8 @@ fn serve(
     runtime.block_on(async {
         let (inbound_tx, inbound) = mpsc::channel(INBOUND_CAPACITY);
         let log_client = client.clone();
-        let log: Logger = Arc::new(move |level, message| log_client.log(level, &message));
+        let log: Logger =
+            Arc::new(move |level, message, data| log_client.log_with(level, message, data));
         let (signal, _process) = Signal::spawn(&options.signal, log, inbound_tx)?;
         let outbox: Arc<dyn Outbox> = signal;
 
@@ -197,9 +200,10 @@ fn serve(
                 "people"
             }
         ));
-        client.log(
+        client.log_with(
             Level::INFO,
-            &format!("Bridge state is kept in {}", state_dir(init)?),
+            "Using state directory.",
+            fields([("path", state_dir(init)?.as_str().into())]),
         );
 
         if !options.checkout.enabled {

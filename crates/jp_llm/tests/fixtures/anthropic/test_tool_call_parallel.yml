@@ -1,0 +1,284 @@
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "claude-haiku-4-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "disabled"
+      },
+      "stream": true,
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": false
+      },
+      "tools": [
+        {
+          "type": "custom",
+          "name": "get_weather",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "enum": [
+                  "Paris",
+                  "Tokyo"
+                ]
+              }
+            },
+            "required": [
+              "city"
+            ]
+          },
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "5m"
+          }
+        }
+      ],
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011Ch17T17vziLihTzr7DFHH","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":588,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":22,"service_tier":"standard","inference_geo":"not_available","speed":"standard"},"diagnostics":null}              }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_015BndXVPHm1N6XAJGUJiX3N","name":"get_weather","input":{},"caller":{"type":"direct"}}  }
+    
+    event: ping
+    data: {"type": "ping"}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\""}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":": \"Pari"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"s\"}"}     }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0        }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_0189rNnEwiZZfycECE4s81nc","name":"get_weather","input":{},"caller":{"type":"direct"}}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\""}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":": \"Toky"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"o\"}"}             }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1          }
+    
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":588,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":90}          }
+    
+    event: message_stop
+    data: {"type":"message_stop"             }
+    
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "claude-haiku-4-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_015BndXVPHm1N6XAJGUJiX3N",
+              "input": {
+                "city": "Paris"
+              },
+              "name": "get_weather"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_0189rNnEwiZZfycECE4s81nc",
+              "input": {
+                "city": "Tokyo"
+              },
+              "name": "get_weather"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_015BndXVPHm1N6XAJGUJiX3N",
+              "content": "18 degrees and sunny",
+              "is_error": false
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_0189rNnEwiZZfycECE4s81nc",
+              "content": "18 degrees and sunny",
+              "is_error": false
+            }
+          ]
+        }
+      ],
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "disabled"
+      },
+      "stream": true,
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011Ch17T5GxZQXf3xgn6LdQW","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":203,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available","speed":"standard"},"diagnostics":null}          }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}             }
+    
+    event: ping
+    data: {"type": "ping"}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Based"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" on the weather data:"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\n**Paris**:"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" 18°"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"C and"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" sunny "}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"☀️"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\n**Tokyo**: 18°"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"C and sunny ☀"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"️"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nInterestingly, both cities"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" are"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" currently"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" experiencing the"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" same weather conditions - a"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" pleasant"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" 18 "}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"degrees Celsius with sunny sk"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ies. This"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" is quite a"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" coinc"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"idence!"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Both"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" cities should"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" have beautiful"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" weather"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" today"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"."}    }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0  }
+    
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":203,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":81}         }
+    
+    event: message_stop
+    data: {"type":"message_stop"        }
+    

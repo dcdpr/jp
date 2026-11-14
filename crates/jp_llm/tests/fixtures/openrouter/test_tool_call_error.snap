@@ -1,0 +1,83 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABq-NA5EZP2fCRxjWZ1LBk9K91DUrhHS21YsoAi0ESYPQyZq4fQdH4j9oY53_USXgnvr7zdsvjrE2scgpXSSHLkwqhvEJ0BKNDTNNhcyApDpPOBN4eH2qxlePa9ka0QFPTahCGcJOWUD9WEoghjn6RjR16-KkM2gtTpRSYqB5Nd_NZCspS9E7Tr_gg25dqCmFPdn_mNmjxz3tCNVhZrSV5fRtysIyQC-r6qD3Of3f0o_heSMGejnAZEZm6mUuoySqdmd34PxU-qzOpTFFqjl0vFRA2g4yDJPN_Dr0uD1-qqEXvwYHlLIsZIsAlxVN1ZMXNmPycywwJ_nH-PjhLgzhWXEH_Kh3YrcchSJRh787m7x8_y5hAOnjoQOlLCrFRqia2hzd_LQ7aKFOSoP1Xqk44-qrSVOrmfFgPdfolbiupgUcnjMAQPBHW_K-kmES_hpty6gw2XV9WW4s0_o_r9J08SEovnlxnR8yxX00-9oDf3rVw35JAoXHUs3LZTqW1xFWV8651MLtw5FW2x_uD9qYaPwnX20INQGlY5e8bIUrX_0b-3TxQZW30vfVj0zOadM8MMtE1ZotQH6oTl4o6awdDoM-CtTHJ89xUI9aN27roPYfJqajHWv5u26uWNZFzByWM80ICHeyT8vJg27zugb4HvNrG_zRju3TGtK3uTSLq6tabRSozBlPOs7b528KfiZdlqdsOie7PWg6ln6eGNZb2vHVZKIpLw8JvFcfZwnhOFiuiDEnDxuxKamd7Rs14V5SujvZRWYq6lOAv0IvaU9WviqA5qG0XjtVwi67uMi9NWASmk2So3aBMcLxm4Aq5AlIzh9GjgJCnVl7WJC3E6L-iuc9nVZJV2_O45gssK8q0Z6ddVtD_iwp2552IsG5O9ElWOKC9o1qASzquKBFzzmt6dCZx06i0nPojAVqWsTl7Z3MLjtMsEglqtLXs1liEp28Kqs-UEzWxZE-GkSGldWH4AiftH9cIK4KXHj4bngpbjOi5c7SbQd7k7o39Qai13dUR91SXLd3F2zY5ryYNt9VqKXKLpzXVLQ5rrJbfogoseb1eTvgUzisOST3VmI08RU45OKLfg_V2kj3UynY0LMBenQB3IEqGLi0XbTtzYtxZq7--rMLpcIL2tQ_fVqb35CfMMiaGUwyZuVG2CtLvNL4mZTdF2WQuTapIpuE738ZbmrlJWbzJ_VU_rkEofHVYgbmqApO8KlpDW4qeOEDT1RpwphB-0z7mFrMkAB8UYpTGFYrbCrj6SUlHqBJCdbDBpUhjaBXSonTylBSjWid4K7Ey9vQs9uK_7BmvvUqQgh7Fj8nm0XdtflIL7ivg8UUDnjAItfYCNjIaKw_nBXOy8GyAViFN-sj4Ug0ylwdAWvw-6SBAkG4WxmC4T67mo728mzj8LZFptE7kRZA0X8aQHTJW1eDiTbBa4TZKSuQFayZUCQ7oVaHFgF0-gCRmGsipUCAoTzIfQVoyffC-K5cYW9MDso3AMitMl0lEDMOKQU9lg5hqTiHzFzOT5xsqyAVBk-2bwehWMXHHuRJbgE90DTe2PyZQYH_TUFOqXoqyJH6S0qPpCA9D_XnLx70VdzGhOeKJgmcS99wJakaHfFYUjanjfQx051yEWJCe_BAUqe21K97a7XczNgAllawnw5x9mDYKVuqipgBPcxp_fJ5TO-wTFQrf55e_HVt6bzZgolfEzDKOvAfHf6S3C-wag_At5tPGsL8IPlKkTtTYLmCq7hPy-hHvyWwrgkWAOssQEZquikGamrQ7ILQNyueyvFYTgSuWDUQQ2Tj-zvrU0xxFBM5wb-m-aFy5MTJTV22Cnw1tN3AWWdc_4JRau4bW_zMzyt1mzp9fngK5msHIxvpQUKXgml1QmX0ndcbEExNYTLGvP4DX60k1tp7EGGYPuj3UUdSlw4TlIRe9_Mrhdsejk3WZ2trLkZ5Hd-Pa-18Khfladsd8ddISsI9EqtHiPGrtHVGCJKwH-H0yc2mS8ppD1O5CO7VYbHBhLpYaVTrlt3Z5DcNzb-rQ=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_084031fff1e33680016af8d038e06c87d18c74763592c305fc"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_vYiXbiQDaIruWo10RuonyRL6",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABq-NA68INMdTt7bd0yt6gddqPxKPI6nwbwKIG0iZ2Hb6NCIqgJouvNwcUvVZnUyhyPQr19Qboyd4n8YpjN2nF26_tHeHJb0nf7b-2aWGCxwL-blMLm6cjUjc_Kr6MJ1YoGIyWasz5dlcqM6T0HG8NbLdKtMXEL23YGakA83RH8W4R24ZgZ6otWtm5q5WXcFVBBn1ZduRqQP57Uo17VAJ7SbVLVTIoXDc5JMWZEz8mt651EUlaiH-napfKNjRAExi70zyc2hE631-vrvdVA2nbn__dyHz1YvfXWi-z-lCttDYHDZ3ippw_NefgVOJf0nNAR3zJyNtOaWb9CnN96KSbZqaqzQA4vJ3vL7Jprr37FQkIFiAzecZIv4qNpKJZg8tlEN1E91QkU2HrWu0Bcz32Rx_y7DScBHg1W3nnf56Vz6GwTnXdJIR6ryCO6EV9gzsFa8-2FYn22IWWHK7eRdrLUynwUpBznMIy3azqhVyPZcoOWNXu0NOPELoVYwqkKEscuYOB5VaBIXSljA3uW1QjWSJTBxee2sr7ZfjcSEVgaNj-f9K00fxfYJvLoOnZw2BqZeBBl-MoUl_iKnOw9CLLOV55fylPmAeUVxe-uODMXRzF2qohA28IYg3UKfFceinZuuSsmYlIjFbxXPsvMHHkC9SJDngaX-wTJcOAmv1iXsvKJcuRWmWc-gpAD8IS8aKkC2XlKjk76X_zO7Ki09bwvrLCIU5LmHyv4jTYv0uLxacx2zmCIltB49IHJ33P9ell03d1eGApkxtFPDdb9pWXzSlrmLgf4fachuxc_2g3YRedZXFsLwRtwjBknnjcsKqeTBPUMrZ1M38Akhuv19CbfEmaTkS0Q2jNxmrhbRZ6jFMOob866JVAikM4_ff7kayvAgpPekhn_auqsUuQJdGTxptRSPSiOA90l-fZDJqZC6Vw_J1Oll2QT6KB1MgsRhQqUUOddZoe1_GOfpVhjfZSYdZoIqnRtTRr5ShW9sQeg-EFHR2PKjEtw3WshJ68-G3rkFYvwI8_e8pkMN1cPscvYMlELuG-rNJFJ8SLea4AZfKWG0-9qTA5NLFSBkL5Wl_wuyF0Oipyg4llhqj17bvZFKurXoOMkVCa-iIOS-EkNAmtkCQ7rCcI6x7vNUK11GmLFNjek5YpiVp5h66BiUelQ8TvfZWpkAA2fYxp1snFbI0s5f5GF_G4962HbaC--5zjDwRYUgdSjWqYXk860YumgsZnOQuEIropYQKIHe03j3YaWL2jNWEYqc4uMoShc81mZWxmPNcNcY-xLKsTWTcAUUmDXAiIWF7PYC6ImlFipyLNcLskwdFqMJMqtca1XbPZorex4pMVtuGZwTOYLauFQZn2Tvx6SjN9QV0TIjUBUbnIllb3piA8WW-sEtBIoZ8C1RYnzpfly_EeeYxJVtKxq3uEQw4pmr16NpXjpedXngFA_qDQtFJ2YDpb1_EI3yLrG6Q8dom5jIrax8YUek_2I5AF4tLEVWpschLo0NiJjDNboGqFT1BgvTpBdCkvAnO0SEbc2yWevCmQ1rOaNC4ik-CMG8ZwAc_Ex2UoP0_0-LnWKthTuLRfXgSpjbyx00D58fX4zkIu3BQBjxnjKzZGW19UGRdqZEEmOnN8XGGE_IhYVxxhPhd6Xa281HqGynkdi9yscvc8UbUiEQq-h5sZKaqPdlb4ja7cnqjIErNDGXtXExuuJbtkGOqWR_bGiumWNEgrll9nfC6VEQMX1IPTB27CSFl1jYanTa4MHAv4z6gP_rj72surVKJBdZTz7znfaJgrNu-SygDMuMgD5q1ULkJhWGKcrTn_ASsAPi-17No2LVZplFB5P2OlSuLvfHNEISAWHBLdak9qMTPDf7Lg1_21tZYzMTl_qNRBZs2N2XzKeR-6TxXQOhdqRTvA9XyakQTWdpE6N45VQcDcCsTvx-rxbJSdTYD9MmGQ-4RK0ipoPQLxTp-Lf9Jo5BbIK_mH7IIgHdl5hPDf5tiIRyJo2gnYAcsPgG_Y8NRm26vKLYrD-sX8=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0d5694c0add521b1016af8d03a736887d19cb6ef045a5d3529"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I ran the tool with the arguments {\"foo\":\"test\", \"bar\":\"foo\". The tool failed and returned the error: \"run_me failed: the disk is full.\"\n\nWhat that means and next steps:\n- Cause: the tool could not complete because the system reported no available disk space.\n- Immediate fixes you can try:\n  1. Free disk space on the machine running the tool (delete unneeded files, rotate logs, clear caches, or expand the disk).\n  2. If the tool writes to a specific directory, check filesystem usage (df -h) and inode usage (df -i) and clear that directory.\n  3. If you control the environment, restart services or the host after freeing space to ensure processes can allocate files.\n- If you want, I can:\n  - Attempt to run the tool again after you free space.\n  - Suggest specific cleanup commands for your OS (Linux, macOS, Windows).\n  - Inspect what files or directories are consuming the most space if you can provide directory listing or allow me to run diagnostic commands.\n\nWhich would you like me to do next?",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

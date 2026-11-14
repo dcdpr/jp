@@ -1,0 +1,148 @@
+when:
+  path: /api/chat
+  method: POST
+  json_body_str: >-
+    {
+      "model": "qwen3.5:9b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer.",
+          "tool_calls": [],
+          "thinking": null
+        }
+      ],
+      "tools": [
+        {
+          "type": "Function",
+          "function": {
+            "name": "get_weather",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string",
+                  "enum": [
+                    "Paris",
+                    "Tokyo"
+                  ]
+                }
+              },
+              "required": [
+                "city"
+              ]
+            }
+          }
+        }
+      ],
+      "options": {},
+      "stream": true,
+      "think": false
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/x-ndjson
+  body: |
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:40.535843Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_z9optp3p","function":{"index":0,"name":"get_weather","arguments":{"city":"Paris"}}}]},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.143421Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_rvhz7y70","function":{"index":1,"name":"get_weather","arguments":{"city":"Tokyo"}}}]},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.164742Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":1961255542,"load_duration":5120250,"prompt_eval_count":301,"prompt_eval_cached_count":0,"prompt_eval_duration":720572000,"eval_count":53,"eval_duration":1201830000}
+---
+when:
+  path: /api/chat
+  method: POST
+  json_body_str: >-
+    {
+      "model": "qwen3.5:9b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer.",
+          "tool_calls": [],
+          "thinking": null
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "get_weather",
+                "arguments": {
+                  "city": "Paris"
+                }
+              }
+            }
+          ],
+          "thinking": null
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "get_weather",
+                "arguments": {
+                  "city": "Tokyo"
+                }
+              }
+            }
+          ],
+          "thinking": null
+        },
+        {
+          "role": "tool",
+          "content": "18 degrees and sunny",
+          "tool_calls": [],
+          "thinking": null
+        },
+        {
+          "role": "tool",
+          "content": "18 degrees and sunny",
+          "tool_calls": [],
+          "thinking": null
+        }
+      ],
+      "options": {},
+      "stream": true,
+      "think": false
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/x-ndjson
+  body: |
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.533815Z","message":{"role":"assistant","content":"Here"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.556329Z","message":{"role":"assistant","content":" is"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.580438Z","message":{"role":"assistant","content":" the"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.602706Z","message":{"role":"assistant","content":" current"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.624493Z","message":{"role":"assistant","content":" weather"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.646875Z","message":{"role":"assistant","content":" information"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.668554Z","message":{"role":"assistant","content":" for"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.690483Z","message":{"role":"assistant","content":" both"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.713015Z","message":{"role":"assistant","content":" cities"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.759029Z","message":{"role":"assistant","content":":"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.806973Z","message":{"role":"assistant","content":"\n\n*"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.859605Z","message":{"role":"assistant","content":"   **"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.882064Z","message":{"role":"assistant","content":"Paris"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.907558Z","message":{"role":"assistant","content":"**:"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.951918Z","message":{"role":"assistant","content":" 1"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:41.974424Z","message":{"role":"assistant","content":"8"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.002433Z","message":{"role":"assistant","content":" degrees"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.030368Z","message":{"role":"assistant","content":" and"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.053691Z","message":{"role":"assistant","content":" sunny"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.102977Z","message":{"role":"assistant","content":"\n*"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.1522Z","message":{"role":"assistant","content":"   **"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.174125Z","message":{"role":"assistant","content":"Tok"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.20183Z","message":{"role":"assistant","content":"yo"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.231607Z","message":{"role":"assistant","content":"**:"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.283857Z","message":{"role":"assistant","content":" 1"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.311512Z","message":{"role":"assistant","content":"8"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.33597Z","message":{"role":"assistant","content":" degrees"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.363425Z","message":{"role":"assistant","content":" and"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.390113Z","message":{"role":"assistant","content":" sunny"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-13T14:49:42.411765Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":1245003083,"load_duration":1038958,"prompt_eval_count":129,"prompt_eval_cached_count":0,"prompt_eval_duration":348679000,"eval_count":36,"eval_duration":877853000}

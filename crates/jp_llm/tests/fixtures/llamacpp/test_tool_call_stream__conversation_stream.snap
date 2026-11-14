@@ -259,24 +259,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "FpyxzrUobenAo9FIhFP3Z8FnxbvMV4L9",
+      "id": "5xvrFtGYAKPauN8T1Kb0Kcob3gXiVUi1",
       "name": "run_me",
       "arguments": {
-        "foo": "YmFy",
+        "foo": "dGVzdA==",
         "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "FpyxzrUobenAo9FIhFP3Z8FnxbvMV4L9",
+      "id": "5xvrFtGYAKPauN8T1Kb0Kcob3gXiVUi1",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully! It executed with the arguments `foo=\"bar\"` and `bar=[\"foo\", \"bar\"]`, returning the output `working!`. Let me know if you'd like to try another set of arguments or explore different tools!"
+      "message": "The tool executed successfully with the provided arguments. It received a simple string `\"test\"` for the `foo` parameter and a list `[\"foo\", \"bar\"]` for the `bar` parameter, and it responded with a confirmation message: \"working!\".\n\nLet me know if you'd like to try different inputs or explore other functionality!"
     }
   ]
 }

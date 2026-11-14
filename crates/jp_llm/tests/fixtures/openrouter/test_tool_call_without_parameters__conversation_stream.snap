@@ -1,0 +1,294 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": []
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "allow",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "joins_reasoning": true,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "sanitize": "strip",
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "subscription_flow": "acp",
+          "acp_config_dirs": {},
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
+        }
+      }
+    },
+    "plugins": {
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Call the `ping` tool."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnE5eU92Q00ya3F1ajhrZW16VE1WZTMzU1VDX0xxbEJfWXRIWGQwUTF3aUh1U2ZLVC1DMXcxeDRKMnliUGxoeEJYWDdXUTVidFBNQjhNSzBUcjFMZF9qYmRCdU1kc0JvUkIxVHBjNWdscGV1cU1OZF93WXlCRDk2TnlZWUNwRy1PZ0l5MGc4UHVESDgyV2ZiYWsyVndneFdmNzdfUWhvbmNIMjlWY3pGM056cXdBbVg1dHVoUExhdUprZFJ3b2cxWWtBOHdtQmtObWxkQktvYUIzVDFjblFMUkQ2Zk9fSkVBTlBSWEVNekFnNzhqWXYtN1ZmbVJkbjJfdFNCNFhVOVJBLW9wUFN0eGgtZ0I0aEVQSGtKRzREYUw0MnhMdXMyZ0xSQUdDZEs4anBBV0RDenVpbEFOZS1PNkdtV3NWNURWLVA3emY2eHdZVmJNUVlXOEhsekNwdV9aSHNsZXVkbnhUUE9zcUFxdXVrekR3RWUta0x0SVI0ZDdYQlgzN3ZBbk1ENDBpUElHSnBDUWh0NFpRTEpvd2h2S3Q4Z04xVEtwWGk1RzNNLUVod0FYa0d4RUkzZVVOaUlVUTI0R05pSVRFOTF1U2kwbnNpSlNpNXEyQ3FSOUE2R3B0OXRkZEJJS1lNMWVKY1BQc3NmN25xOGZVQXdMNGM3RHNCTTlQSU53QVN6T3FHNDNLdW5RSDNQUFhuSTlYOVpjZVBzWFZZaFlzS2c2bkxnMHQ2SXR3eTZKdi1TUFhrQjZJNnVCb2xyREFBUmR6dFhBMTgxVks3blVTM19DVEN4Q1dJT3FMb25UT3BCMTJEUTBUbEdGVE5YR3djUUkxR2ZHd3NEYU0xU0lWUWtZdjJuUlo0LTlVMzJHa0RvbUlIMU1VOWNFRzZmQnZMQmhWeHM1anphUktmT05Nc0pINjQ5WlRSalc5S09IQnR0R3NVWk82RTJDQ2tCS2Z0ZElZb0NVaVdKYjQ0c2VvZXpZTGhtRGNqNTdCS1dGQS1rRXBrazNfeWR0aGt6SVdxN0R0V3VxdHRWSGV0VGtiR3A3N2VtVWNFa1Z6MlEwd1J4ck8tamxxYjZGNE4yb2p6TTVMLUlXSUhiNUhNbDZ4VXgwLUZlQ2wtVTh2RDB5d2l3WnZaMXI5NDZlZTRXeGM3dVhkYm5ScFBjclRrdnUwYW40TGhWM0pveGpIQUkyMkVVbmxHTWNUZTg2bnZWbTRtbExqejZpdjk0SmtfNlRpV0JiY1JYeFRBbDlzVHVPUncwTUFCaElVUkZKT0VNYTZtdEJEeEZMenpuRnJ0dC1uUnpkeDRfSWc4LWZTOFNhMWJ0cFh5N0stZF9hbUJudF9LLVQ0RTJ1THNremRsZExaSktKZ3Z3cnZXbWRhZnJOakM3UmJBQnZ4elpoRWZ6Xy0wdG1HYkR4Q1Zac3I5T2t6eU41alF1MXdDRGljVmRYZGEteWZ4enBndjJhSk1SWEpvQ0hOb1cyOUhHREI4SVIwN0lmYmd3MGtzR0pKb290OGdfRHJBbkVfaTZmd2hyd2FPMFNXM2hvSjA1bndaRlpoSXRYZzJKY25YZC1yX0pqNlhNel9JQ2ZiOXhlTjlXZUotUlhoX3ZGcDhGRkJkdlFuN1Qtajh3RmlZRGpkWkdaSnc2SHdCSkFkcmFIVXhUaUZ6RDUwT243MVZ0aXRQc0FyZGhvei1DRFQ5bUlLblhOZVY5TXBSakdWYThDUUFuTG03ZjktejZqdWN0bmVFeEtVVjZYdWp5OWlCOWctYnN0YUJkaUxsZFoyQVNGUk12bW5RN2M2TjluRERnVzlMamtpcERoS2J2VXg2TV9ETXBzdS14bWFRemcyR1FLQXNMX09oM1dnZkVNMTJmVExmUnMwQXh3WjVid2dGb3dJX2R4Q3VDeWQ1X2hMU0Q2UXZ3MWJOVDVNUGV3TzhOa3A1b3BHS3hNTWRGbVd3WFpCZ2ZLV19qQ3ZsSmRxakRBM3ZfUXh1RTdma2ktZF9UaExITjZXZGN1QVJoMldlY2x4T0I3V1NIQkJraDRfTzFVWW01dDIxOGN0aVA4LXpjYWlUeHlZTTFEU0huMm9PZkNoVGxnTVIwQ1NocExnaURmVVJqbzFwTi1hZnlTVjlDODZmWHRxTDA2bURrUWFzRHoyWlZ0cUU3cktBcGxKUlpxa29FZURhRDgzSjB1N3VBZ3I5TVZqRGZMV3o1VzBuNEFXRzlMYngtNFJmLUZhX2dUTDJRZ1hyeEloWTJ2dTgzV3Y2M2ZMQ3VIYl9zTmtIV1ZMc01zMEc3QzBCMGZCRVhCYmZCRUJXYmxyQzhCS2FBQ3gwS3NwbGQxeHRsUzhGMnFybUFLa2NlQy16S2pmS1lrSExqODV5NFZQQ3JYcHRCVTlWRDc3dGNJUDc5UHpCTzU4SGRlN0g3cjdSVnY2TDBFbUdBZ1hlbTZtamN1UGtWZzFveE1nalA5RnAzR2FobE5sZl9zZExqTFlGbWo5M0V1cWRNTHhHVXdoQUhZSlY2YWNxMDQtTEluSUFsQ3JMaUVxNUlqNHdxRmk2NTI4SE93VHpBMGIzOVNieVFjS0h2ZDR4LXpOdmN4eDNyMG5RTjVLSVlxemlOS1FtWERaM2hwcmQ2ZlpfeXdjNUFQdTZtS1dsazBWbngwb3pSczFBWENVMnhEdVJONGxkcHREeHB5SWNoNGtXVlQ3bVUyWXlIQlUxdUU9LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGEyZDg4MDRhYjI0YmZlNjAxNmFmNzIzYWY2YWY4ODdkMTkwZDA0N2M3MmQ2MmM5OTc=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_zmY866qoz466UDT3TGHKk6ij",
+      "name": "ping",
+      "arguments": {}
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_zmY866qoz466UDT3TGHKk6ij",
+      "content": "cG9uZw==",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "pong"
+    }
+  ]
+}

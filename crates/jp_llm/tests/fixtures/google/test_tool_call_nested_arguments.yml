@@ -1,0 +1,167 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "read_files",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "ops": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "The files to read, one element per file.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "enum": [
+                            "a.txt",
+                            "b.txt"
+                          ]
+                        },
+                        "start_line": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "ops"
+                ],
+                "additionalProperties": false
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "VALIDATED",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "read_files","args": {"ops": [{"path": "a.txt"},{"path": "b.txt"}]}},"thoughtSignature": "CiQBaRR9EzgiT+Ij1sKdTy1lGA9jC1zTPI5w9z1EP8JyJ1tTOMIKXAFpFH0Tf2zrRc8B1AbUGVgEDIhbJgsWlmgliWKOWe6li1WYynNtejG6omh5NVvfkBmGcK1saohsF9H8GkMt7UhBFsVn1ooedQm+t4djR4Q06LSkOE6yLmZEKNyGCtIBAWkUfRMyPmP/dGu0DFKf7/K1AogNbpFNduDrr4J9MBDbusGwIDek8N/l+6wrmCJ4Ro4H9tP4MdOZs3WN4wd0UN0D0BMN4Vwn1TG4xZ/ipTwcoeig2BqlsU0EZmY011GXxBVSjdpxYSjCr2l+CQkbafec6QKV+1rM3y6CIGEUapuDweDBOMtpn3XNISikVe/ANbQ6QIJKvGjQ9DJpoenklqSgtolIJwBVWk36LJxnBCx1T1qP1o7uxFsdBAU0Ez9HcCJybF2CyTuvKgUsF1KyXHXxCr4BAWkUfRN97u8SQCvs7U0iQ+kKtcJFhxrvgFrLV4b4cdnyDka5bRRxuG8eV8eXiMsr+g3648yYCDZXpCo6JSCct9IJWqbVlpwYF/a9BdQUMaEEQtpFLicKg3Xwi/ScfJKdmf4ssYnA1791YyjkaN+hHf4xfGXIxWo9wPUCDO2NQcibZ9ukYVQLLL686+F0FFzFKzrE/AZv4DEWbPmGNPHjKop1+TslK0KB4N+eFQvTycmZCzkURO3vlNPCasmUmAr+AQFpFH0TA+aChtoOTS2bBjPQ70RpCI4oaDFXY0oz69a9GBTAYOr0JRl4rJLJUsB3IteTeVXPcfwMcQgL6pvPfWwDQiVKcPHYiunE7D3mN8gjH5nxEeSndUEegel1ltH9O77wMkXQQl4jFs8vEw2ybWdYUmQMug43xQ9+Ny7dDuP4nVNyfMRX9DEptVmqZGz0I0qJxBBUyMKO3WGftLkNwC1xEq9k3/vbvmbjryiN0T0HM0dEFE+Ful2ni3ocGtqgyVbVLfFkTbeMJp95HcdR8JtS9hFc3f4mdd+fFfVJJRaLDb5sPAa59lz0lsIi/owvBUhwBM3sY0U5wcM4HuplCtQBAWkUfRN8MtbxnvrhIJ1gaTMhSWJ5DIL4e4Gq/1GI+mEXdhL7m9XmLoVat2e4TnQWOU8jU1ZYsu9tF+8OcBc+LN4MxhysMw9kr7CkmhcTMJXu3S0Vq/61EVJvSx0gT0GEkPryKuiWEFjjyvqkzxayNKDWxLpCU0PdIg4xHNpfE6ccvMgndv1ww3ACEgL7S3HzBnLmkTKbNwtuCt4DzlTZR2A8BZmScVmmCaRSDCAG7Fj5aGTqHkGcWtOLaU44+tuvLFAFX8Lxhc8xWR0l8AEVyOKJqGEKrwEBaRR9EwpQ/Tu6fC/I4nS/dVIrRMK4uOqma2PS/0ILAuO6w3IB7ZEXT9vmv1rAU2vFDMYTnV4zBLNOzQzw+aW3xSA41ur6kkR9u1nHMOxisnJQWmk11mxq94GFwu0OvxAHAKn2CaX4p1hbrQRTBUZGyrBkFpXS0Ms8HZIKgHBrQ1MlIuqXwgmuwEmHyEiYeRJGecUXVh9u/TDK3LIYtCNMK5sbQmSrN/Ha0lQsJ/JHCo0BAWkUfRNzas7GUt+VqLf7qMxO0dN/qaM9yniN2AqK8l9QIRdZFA/13io4UNR+xNPOwI+jAZ2yoitafiMguSlYBT/0MeKB2txDZmA0oPUn4nf2qvARa3LH90DQ379QvTIsXYYIdR2NbLF0mI8UkfMo47rh1iJdarux/35mmDPFFeCXqaK3rJ7adsakaudP"}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 151,"candidatesTokenCount": 29,"totalTokenCount": 474,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 151}],"thoughtsTokenCount": 294,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "Xi_4aqWFAouJkdUPoLW8qA0"}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "read_files_0",
+                "name": "read_files",
+                "args": {
+                  "ops": [
+                    {
+                      "path": "a.txt"
+                    },
+                    {
+                      "path": "b.txt"
+                    }
+                  ]
+                }
+              },
+              "thoughtSignature": "CiQBaRR9EzgiT+Ij1sKdTy1lGA9jC1zTPI5w9z1EP8JyJ1tTOMIKXAFpFH0Tf2zrRc8B1AbUGVgEDIhbJgsWlmgliWKOWe6li1WYynNtejG6omh5NVvfkBmGcK1saohsF9H8GkMt7UhBFsVn1ooedQm+t4djR4Q06LSkOE6yLmZEKNyGCtIBAWkUfRMyPmP/dGu0DFKf7/K1AogNbpFNduDrr4J9MBDbusGwIDek8N/l+6wrmCJ4Ro4H9tP4MdOZs3WN4wd0UN0D0BMN4Vwn1TG4xZ/ipTwcoeig2BqlsU0EZmY011GXxBVSjdpxYSjCr2l+CQkbafec6QKV+1rM3y6CIGEUapuDweDBOMtpn3XNISikVe/ANbQ6QIJKvGjQ9DJpoenklqSgtolIJwBVWk36LJxnBCx1T1qP1o7uxFsdBAU0Ez9HcCJybF2CyTuvKgUsF1KyXHXxCr4BAWkUfRN97u8SQCvs7U0iQ+kKtcJFhxrvgFrLV4b4cdnyDka5bRRxuG8eV8eXiMsr+g3648yYCDZXpCo6JSCct9IJWqbVlpwYF/a9BdQUMaEEQtpFLicKg3Xwi/ScfJKdmf4ssYnA1791YyjkaN+hHf4xfGXIxWo9wPUCDO2NQcibZ9ukYVQLLL686+F0FFzFKzrE/AZv4DEWbPmGNPHjKop1+TslK0KB4N+eFQvTycmZCzkURO3vlNPCasmUmAr+AQFpFH0TA+aChtoOTS2bBjPQ70RpCI4oaDFXY0oz69a9GBTAYOr0JRl4rJLJUsB3IteTeVXPcfwMcQgL6pvPfWwDQiVKcPHYiunE7D3mN8gjH5nxEeSndUEegel1ltH9O77wMkXQQl4jFs8vEw2ybWdYUmQMug43xQ9+Ny7dDuP4nVNyfMRX9DEptVmqZGz0I0qJxBBUyMKO3WGftLkNwC1xEq9k3/vbvmbjryiN0T0HM0dEFE+Ful2ni3ocGtqgyVbVLfFkTbeMJp95HcdR8JtS9hFc3f4mdd+fFfVJJRaLDb5sPAa59lz0lsIi/owvBUhwBM3sY0U5wcM4HuplCtQBAWkUfRN8MtbxnvrhIJ1gaTMhSWJ5DIL4e4Gq/1GI+mEXdhL7m9XmLoVat2e4TnQWOU8jU1ZYsu9tF+8OcBc+LN4MxhysMw9kr7CkmhcTMJXu3S0Vq/61EVJvSx0gT0GEkPryKuiWEFjjyvqkzxayNKDWxLpCU0PdIg4xHNpfE6ccvMgndv1ww3ACEgL7S3HzBnLmkTKbNwtuCt4DzlTZR2A8BZmScVmmCaRSDCAG7Fj5aGTqHkGcWtOLaU44+tuvLFAFX8Lxhc8xWR0l8AEVyOKJqGEKrwEBaRR9EwpQ/Tu6fC/I4nS/dVIrRMK4uOqma2PS/0ILAuO6w3IB7ZEXT9vmv1rAU2vFDMYTnV4zBLNOzQzw+aW3xSA41ur6kkR9u1nHMOxisnJQWmk11mxq94GFwu0OvxAHAKn2CaX4p1hbrQRTBUZGyrBkFpXS0Ms8HZIKgHBrQ1MlIuqXwgmuwEmHyEiYeRJGecUXVh9u/TDK3LIYtCNMK5sbQmSrN/Ha0lQsJ/JHCo0BAWkUfRNzas7GUt+VqLf7qMxO0dN/qaM9yniN2AqK8l9QIRdZFA/13io4UNR+xNPOwI+jAZ2yoitafiMguSlYBT/0MeKB2txDZmA0oPUn4nf2qvARa3LH90DQ379QvTIsXYYIdR2NbLF0mI8UkfMo47rh1iJdarux/35mmDPFFeCXqaK3rJ7adsakaudP"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "read_files_0",
+                "name": "read_files",
+                "response": {
+                  "content": "a.txt: alpha\nb.txt: beta"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "The file `"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 386,"candidatesTokenCount": 3,"totalTokenCount": 389,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 386}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "Xy_4asvpCLqWvdIPnLO7oQ8"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "a.txt` contains:\n```\na.txt: alpha\n```"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 386,"candidatesTokenCount": 19,"totalTokenCount": 405,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 386}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "Xy_4asvpCLqWvdIPnLO7oQ8"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "\nThe file `b.txt` contains:\n```\nb.txt: beta\n```"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 386,"candidatesTokenCount": 38,"totalTokenCount": 424,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 386}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "Xy_4asvpCLqWvdIPnLO7oQ8"}
+    

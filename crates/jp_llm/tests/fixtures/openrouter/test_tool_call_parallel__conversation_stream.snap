@@ -1,0 +1,327 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": []
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "allow",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "joins_reasoning": true,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "sanitize": "strip",
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "subscription_flow": "acp",
+          "acp_config_dirs": {},
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
+        }
+      }
+    },
+    "plugins": {
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnE5eU90R2JLa1ZOU0J2WUxnY1RHUGRHOHZ3aF9GRTRGT3RGTDZGcVFmWU1PdGRMLWphUUVzN3M1SElxTklOdlREckhQVjZrbnZycTBXRmlpMUdUamp0RWFBSFBxcGUxQXpSR3VzWkFjX09EejY5U2VFelI4RjJpVTVjTlFVd296Rm5rbDVybHdVVjVWTTNUVXg0dEdhVTAtRkJvQkdWcEdXUzJwZVM1RU5kb2hlb196WDlrS3E1UFlIU0FORC1RSUM1YjFFWmowMkpuaVd4NU1OT050VXdFc1U5Ty13Q2lMSk9ZT1A2X0d3M1c2MUdTV0JEOV9RSHM0VlRTWW1Hci03MFVacm45TmptM2ZsT3h6WkllU3ZKeGJlalRXS0dBamZlMGhCbjJGYXUwSUEtQlFnc1BDQnNvcUpHak5jbFdVSkV1TDhNc2FEU3FiVVVQZ2xrNWJMWHRvNnVrZmxWYWtITGY5LTEwTk1GSUFrTFpnQU1WOVZlWXpscEVfdFQ2M2RZZmQtSUpIRVNhVWdld0RBdG1FUWpKaVByMllBaUtFYVVWcEotWWNtTjlzOTdCVDJER25nYTdTUW9KOGNtTVQtQlU4aGhIdHl3Z1p2dDlZNFl1VlV2YVowelVWTmVvSkR5RkxYQTNTZ2hESWNINV9lUkRqd3Z5b2RUYVcxdDNmUGxPd0lGTnFmMHI4UHhDS0NOWUhNNjhTQXU2M0RXdzJudUgySDdETEJ2ZVNLQTE2M0UxczcwbXpCbXJZN1R2aUxWMDRtX3ZWNEY3ck84d0hwbHZaUnk5cENUT2I3Q1duSDNXVkljN2ZQVlNkMlZGVXhVamF6WWtVRVl1MXpOZ1JFQ3FxR0dYT0NET0dQX3JYSV90QXM0VGxIcWNGY3RkSDdQZ04xbUE3R3U5MHBxUjc4eFhYalZrUVRWcWU5Q1pLSEJrTkVZWVp6aUNpU3dZUG9zMGFjOFBqVHlYQ3RxZkJZTlhWdk5HTWY3YW5HUFdZck15VkNULVJjemM4Nk5YbVd6VHNMUHUxQXBPY01naUVaaVFCdmZENXpMYlJkclVoU2FrVDVqRnR2SUZwRUhGWWUzejhNTDI3UTZUTFlrVlBwTU11eHFEVm50aUp2SmF4V3FKc1dOU1hEbkJlSDdmRlJuOU8zbXczYXlCNWJRZngzQk53a19MWExYQ1RtYVR0QlVPMUdUVFNqWk9RVjc1a0dMX0dXU2pmdmpSSlhOdXN2dWxOcTZPdzRvSjFQcjA5NTBIOTRybHF6QndrRlNENEUzZFNVd0xXeWUxY19IZHFlQkRmZl9LWUczalRib0haUUZvQmdIQUt1YVBhb0Uxa2pSeERyYlU0TEZpVDJmY0paeDNvZ2xIcmFQVFZXWGxwMXBMQk9PRHNTUlo0QU9uVF9RcFpVY2IzZFUtLTZPeFlZcE1nOW5KeUdyd0x0UjRrX2NzaTh1SXhNWFRYc0NDX3VjUVg4V3c4ZzVESXN5MlozRF9QLXIzdENucHc3b284cHZubjIycXRmaDNiaFNhWXp0YXNyX0ZVVzl1QkxJUUxfMDVxR2dPQ0NzQjJhLXRQX1MxejJuTTNWZWxVeGpkcjRXeENBazN6cUp6Qkc2MUJqc3dsUlJQOGFMUUVTdGRQb3MyUFlFMUpjUk92dFJxdVBvTG9ZWVZDQzc2VG41NnkzeWJncEc5c215cmVDSTNuOFZQTmJNeEE4VzYtbHh6bEdGTmNKOVNvM3p3bDVoXzA4cjAwOF9mbnZWVndpcGlUYngwZk1sbUxBdTdoMjNTS29xTlNaYk1BTFhaMXJpUUlyanU5ZG5qTXZjdzN6OVZlNzM3ZlYwdUQ1MXI2bG9ka0xydTNmSDh3cEJCWjdmWlFRT2h5ZEFsZjctOEFJb3k5T1lhOWtqN1p0LVVWZThUbTk4QVczRjNWd0ZFRGhUdm50d2hQXzBkejZHcjh6MEoxQzVDdVRsX1htOE1ydHh0aEtEdFpQTXhNVEZlc0pjN2tEMWJybGU5UVprV2o4X0JvWUZsal9INFN4UVN6cE5JMVZYc2xiLU90VmcxT0REd1pBTmQybktmelU0WnNPcDF0M0J0VS1jUDdOaHh5NWpNUWl0bGdnWm5wdzRQN0lvMmZhRmQwY3kzUkRfTWZPYlRUSXpvMnR3SmZOSWZ2NDlFUDhWbUhCdlU2LW01NC1SZk5LSlN0WTlTRVlVWkxMSWl2M3ZVUDVVSmNBUlp3R0lYNFJCU1FKc2xDcUJzeGZTYmxMUmp5cEdrcHFBLUxXTjh3ekVZRUpyRkxFQUc5cGhaVkNma1ZqTjFfRjc1TGFtd3NIbUVLalFDTjZZekZBeDBoM0poRnFtUTdfLWpJcWR3ZTcwcWhtTGpSMFFFS3Y5ZkxwZl9md3FfbEJQVVMtQnl2bVY4ZnlGUl9xVXJWZmQxRHVfVFpnOTFJVVVBZ19LQ1VQUlNlMXRwcjZyMzZwM0NxYnBMTG8tMmpiR1dIbGQ4V3FsMHBlTlhXaWxtVzc1VlYtajFTUy1YSHZscTBMSkozZU5jS3hpcWlMdmFlQ1lsQTlST0gzRVlQWUl6WVBaVFBTaklpZjMwNkxZb1JDaEVoSTc2eXc2Tm1keGhRSUxmRzJBX3Y0ZFdEeS16NEVYR2U4WmxQOHpackdTTlE3SGFmRk5Ib0Q4LUVqa2FrN285Nm5QMi1uLXpHTXBMdm5kb0E9LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMDRkN2IyNjQ4YjVjM2RiZjAxNmFmNzIzYWM3ZjhjODdkMTgyMWY3ZjYxZDViNTVlODY=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_yoZdeFe8BPOshe4Q3qGBAUie",
+      "name": "get_weather",
+      "arguments": {
+        "city": "UGFyaXM="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_szaHfQ8K4rBzGagNSJfLOGRx",
+      "name": "get_weather",
+      "arguments": {
+        "city": "VG9reW8="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_yoZdeFe8BPOshe4Q3qGBAUie",
+      "content": "MTggZGVncmVlcyBhbmQgc3Vubnk=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_szaHfQ8K4rBzGagNSJfLOGRx",
+      "content": "MTggZGVncmVlcyBhbmQgc3Vubnk=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnE5eU90clBvRG1mQVN5MC02VmhuTnlVU05oUTRqbHFERExrMGp2OFB3YjlfekpxeWRQcGVPcWduQ3FzT0ppSnZvcm04b296OXJXRS16SVFxSF9kVGd0X1J3YjlCdkRhS1hYZHBqM2NKY29jajBLN0dlTFQ2QVlxSnE1XzVzdzhmdTRSZEx1RmpRX3g2SjI4UnBjOHVGd29CU000b2VtbzhRWm1OTll0UW1nVUpHUmdXZndFSkIyWTdQS1B0UnJmVE9DT3RYZVJUMU83cGF4Q21XMm00UnNDTVc3cDlCc1gwT2R5N0JRZ0Y4X2xna1pFOVo3c195RGhCTUhYN0Rsdi00c3diWHNrVXJlcUdmeTFMQmp3M2lkQ1NfcGhDWjVHa09heEV2bVV5Tk5zb0VGckxKQWl6ZklLa0tJdE45MkdwaWs0UXQzRHhhSGR0amY5aEw3amtvb1FkZllCaW5uNmtHMkpXanBkS1JHMlpNczRKaWhFTEdaZ2Y3LV9iSVZVN05NNWVGc2tJR0NXYktkd24wUG9ON2pjaWxlNFNOUnd5U2w0dlR5OUNBVmxXVFU4YzlFcGJFRUJ5TkcwZDlVOXhab1RyOWs0VEcxaUNqU3BWT3c2b05zM0t2TUtPclRCQkNqcnZTS1pIbmd6bnpoc2ZjaVJONTc5Vm9HdUtjQlpOZm0tbC12NTc5RGc2ZkVWekQzNWJJa2dDYjdzTldWdEpwZmFZVWlaQ1NDN2pjRTk3WVlQRGJZU0RYbGNvQ3o5Y013Y3JCYXlweFB1aXJHSFJUTWU4Y18xQWpCekVZVU13WVJKT0Rvb1NHT21SYlRWdktIZjh1WTFQOGk0YjVKNnEwNnd6aDYwRXhaSmgwdExleDVRRlZXZXNWVGFua0ZXY1lYTEdCV2MySjFERXZWOEpWV0FwcEZuZE5mQ0dDZ1ZwUkpwVmpJcWdFYWRJZTJaX3Z2RXBYN3RuQmt4TGlHc2IzbkdFU0J2d2ZzTGs0QktVT2dOdmh3MTFoQ2NaTVJsZ3hyWmx4R1NncmxOeVlDM3B0eTlRMk1EcTk2RGN3R2k4T2RaaW02NTM2U0lvQjVQeDZrYUN3SGpOZ3I2MEdwWkRIbFlRZ3hpLTExUUU0TVFCYk8yNTloZFlPdXpWVnJVN05jNVh5aFdQLUpqaXpnUXY3anMxLUdQbzhFamdXVkR1X0V6WUtzMkMwRmtaMW9Ec3dZTlowaWVZaXQwT1pGTXFJZG1Xb3J4MXB2ZjRoSEFsNDFtYUhFX1o3ZlRNOV91Mm1aYkJINjhHM0lyLWV3YmgwZnJSa3Vvc0JEWHUwOUlHejZHamJIdk50MHU3V251Zk5jOC1wdDlMWGJJY0hBTGZSdEkyc3dhWEdkN1d4N01FVFlUa3huOWgwWjlidTJWTDZBVC1oOElCa2EzbE15d1c5NkxwZUlhNnp6QUxjY0FLTnlBTElQVlZBMnpvMGxGemVqelBjcjhZRlBjRFNVaF9wMXliN0ktVTJnWVhtT3pRaHdDWm11WmxvTG1JN3FsZDh2ZG1tQTM0VGFoZTE1T0RJNmM1c1MwdDV6M3EteUVCTlJjVjFXZFo5QldyT0xxbVlLQldCclNZQVNYYm12S29uWjJVUlFHZF80UWhtVDQ5M3h5T3U1NTlRX0d0X3FzN3VHTWxnM0dKejJpZ3ZhT1FuSDhnOXpkUU9ybU9TMHdoVUtDck4zQ29BQ3M0MXFzSDZza1Q3T280Y2xuWGZydm0xREhnajdJNVBmTEhFUGxqYVFmR3ZYLUNCbXVVYWNEWENENDdYUzlHWVRPcGlOSzJZTzRKY2VTTkVDbjFYSThCdElwd3FBcTFPVWRwQTFVQmx3b21HMllOSDFPTDQ4UVRWVW15T1ctZDRSYkxYcGVETFVqejl3cl9za2pyWHVDcTFxVzFuajU4dHF4bU5SRW9rZE83aGhoSGpJNWhqeUUwMWpQMWQzUDZlRWlvZk9UNVNKbUFpQlNYN1NFVDVyVFBQWXdrQ3pCT2kxRnk0TXlteUk5ckRvMUJZLVRxTjRsY3A1OTRicmxaX3JCYUlicHFQaE5idWhiV2hCeDZ3UFRZeExta3BjUlVlVVEyYWUwQXBiRXNEUFZtSFkzSUw5VGhMbHlZTk5fN0gyZWpxMnNCeXlkOVFiS19sWi00a2QycG1uVFJWNXVFM0E2VHhTMHdYMXpma3pFZ1FUYl81X1B0ZnE4ZVI4MDY5cXBxbkxpM3h6UnhaWU51UGx4WXhSYnc5NjJPbXdvSU4xNnRnZGUyc0ttOEJ4Ml9yNnhTX1dMaXUxS2Rqb0VBMHRHUzhLdVBabGlVNDVhZmpvZ3VaU0J5a1FqbkQzQTE0XzlvekhsejZOdHFFbzVvRmR1U1pSTmNJM3JUVExpMHhPY3Fjd1lBS2IxX0psWkVFcTBjZjBvb0FWM2thV3BsZnhQMlF4aElOTFllOEM5bldtVkw5c19nZzFQWkpSWlZFS0ZWSWlaUTI5YlBwN3BzUnd5U0dKbWVUSERrMDcxWUxmNXFBZ01kQTRwMkYwcE5UWFJWMjRPSjRHRlN2aVA2bnYxNE04N2tfc1dXUkxLY092NzBQb1UxZjU3cXVrbFBGeFpfY0dmbDlkbGdYeW5mS1l2VFFaemg4UDcxOWp4QzcxTEZTbEI2Q1lwbkl0bUw3b3dselRzbkVHcW5uZ25EeE5fdlIzODQ9LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGYyMmEzZjRiODVmODE2NzAxNmFmNzIzYWRjZGE0ODdkMWJmMjAyZDI0NTFiN2Y0YzM=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I called get_weather for both cities. Results:\n\n- Paris: 18°C, sunny\n- Tokyo: 18°C, sunny\n\nWould you like a 3-day forecast, clothing suggestions, or alerts for either city?"
+    }
+  ]
+}

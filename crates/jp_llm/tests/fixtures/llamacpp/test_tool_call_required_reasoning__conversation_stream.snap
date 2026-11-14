@@ -275,16 +275,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user is asking me to run a tool, but they haven't specified which tool or what arguments they want. Looking at the available function, I have \"run_me\" which takes two required parameters:\n- foo: string or null (default: \"foo\")\n- bar: string or array, must be \"foo\" or \"bar\" (enum)\n\nSince the user said \"whatever arguments you want\", I can choose any valid combination. Let me pick some reasonable values:\n- foo: I'll use \"test\" as a string value\n- bar: I'll use [\"foo\", \"bar\"] as an array with valid enum values\n\nThis should satisfy the requirements while demonstrating the function works.\n"
+      "reasoning": "The user is asking me to run a tool with whatever arguments I want. Looking at the available function, I have a `run_me` function that requires two parameters:\n- `foo`: a string or null, default is \"foo\"\n- `bar`: a string or array, with enum values [\"foo\", \"bar\"]\n\nSince the user said \"whatever arguments you want\", I'll choose reasonable values for these parameters. I'll use the default value for foo (\"foo\") and one of the allowed values for bar (\"foo\").\n\nLet me make the function call."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "n19Zg7uRIClo8uT6BobGdBU6pPoBmbMu",
+      "id": "AAQH0fOCOKOQ7FEc1rUn0FBCOS4b7S47",
       "name": "run_me",
       "arguments": {
-        "foo": "dGVzdA==",
-        "bar": "WyJmb28iLCAiYmFyIl0="
+        "foo": "Zm9v",
+        "bar": "Zm9v"
       }
     },
     {
@@ -303,14 +303,14 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "n19Zg7uRIClo8uT6BobGdBU6pPoBmbMu",
+      "id": "AAQH0fOCOKOQ7FEc1rUn0FBCOS4b7S47",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully with the provided arguments. The result indicates the operation completed without errors.\n\nIf you'd like to try different arguments or a specific tool, feel free to ask!"
+      "message": "The tool executed successfully! The function returned `working!`. \n\nI chose the following arguments:\n- `foo`: \"foo\" (the default value)\n- `bar`: \"foo\" (one of the allowed enum values)\n\nIs there anything specific you'd like me to try with different arguments?"
     }
   ]
 }

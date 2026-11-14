@@ -1,0 +1,300 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": []
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "allow",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "joins_reasoning": true,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "sanitize": "strip",
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "subscription_flow": "acp",
+          "acp_config_dirs": {},
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
+        }
+      }
+    },
+    "plugins": {
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "get_weather_0",
+      "name": "get_weather",
+      "arguments": {
+        "city": "UGFyaXM="
+      },
+      "metadata": {
+        "google_thought_signature": "Q2lRQmFSUjlFMjVKaitlcUFRMDY1RGx5VjJadTg2SHptQWY5Y1pacE9aTHZCclNPVXVNS2J3RnBGSDBUbGV1NkZzaWNVMDd3a29GYTBsYVd2SmhveWZuMFIxQ2J6UzBUTXRsWUJCM0R6SGROd2JkeXN6bzdvaTdsdjdQdGp1MGUzaDcrY283aGM2L3Q5RkNoZDJTaTk3a3RLRnFDR2pibUpIL3RhQm1KNmFtQjZ2bUowczQvdnFrMGVuNmhoTEJCMmc2T0tqU2hpQXFPQWdGcEZIMFRzOEZ3bXowQU1EeW1QeDRHV2k5RityK1BKSTBtODBGYk5qcGpYd0h2eDhoRGJCSkFudHU2TlBvVDJrUzJHYnJrQUVtZHVPSE5nRks1dmVFWlI0cXFsTUtlT09MZ2o3OTNOYWxxUU56TlVxTHk5eDJaNm9xWmJSNkZNcTRtMThpbkk4d3JTd2RySk9XaFB0OVF4d3l0bS9XbWh5RGk2TmhsVnJ0OVNZdGtjTEJMSlNhRFcrdElkRVdDNTFBc1RNMERIaGNvNmtFZW5RVkVZUDlVQ0hmb2ZtSHU0VWVyZzdsb3NrMERMZkRkWk8wZTlmVnltdHVrT3IzUVJtTEFwT0xzdFM3RDlta1BBRmFLQnVmSmRyamQ2YWY3dzJidVJmMWlnYUxzK1ZYeU5vOUsyV3JxMHZmV0I0aTBsTHNVNjdueElid3hlaFpSelQ2dHNkZ1hOTTRja1VhMzFMa0haTDB1VlFxSUFnRnBGSDBUMlg3bnZIZHIzMDNraHRldTc2QkVGbzd4L2pDVmdNTHNnczRlS2FZaWRSczdSclJTZm1lN0dxUldMN05PcHl0RSs0ckNMZGxDNVRpWFpNcW5qNUN3dFhpTSswbkNkZ2s1NXI1N21Mbzhkd3BtUndZb04wamNIdzdhQ1pIdWxneHFxMTM0eHFxcGZMeHVuUW1ZQkJRY21GUDBwcXBIb21TNUhwTE5ldzFINWJSZ3AyZXI3MzVvMERjRVNnejR0ZlFYTlZmUFU2MEhHamFxMDc4dTgyMTc5QnhnT3VQcUhteHN3aHJoNWU5WmRySHJ4ZzUxNjlybGtQeldMMlluZmlUTHlVUlp1Q202bG0zQyt1U0NpMENLZmppaXZLdk9Db05WUWxycnZQR1pIMkRVUmpjV1lOS1V5c012MEF0ZFNCRmxHVy9TSFZNRG9nN3ZkQ1pESnhabXpMQjJLQXBsQVdrVWZSTkl0eVFYRVdvUGY3QjNoL2JsVWdTbTk3NGtzL2FlYUxibmo5R0VtSi9VNGxUaTdWOXUrVmxhS0FTWjlyVDZVTW9IL2xXdXpoK1c5UGpYQ0RlR1pVelBHbm53Nm5pUVhTVDZLTERxcDBBaWtzS3BCM3A1NjM2SHBXV2IzNkVGT2NrPQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "get_weather_1",
+      "name": "get_weather",
+      "arguments": {
+        "city": "VG9reW8="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "get_weather_0",
+      "content": "MTggZGVncmVlcyBhbmQgc3Vubnk=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "get_weather_1",
+      "content": "MTggZGVncmVlcyBhbmQgc3Vubnk=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The weather in Paris is 18 degrees and sunny. The weather in Tokyo is also 18 degrees and sunny."
+    }
+  ]
+}

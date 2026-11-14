@@ -138,6 +138,28 @@ mod harness_tests {
 
         assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
     }
+
+    // One variable per route, so pointing one self-hosted provider at a remote
+    // server leaves every other provider recording against its own endpoint.
+    #[test]
+    fn each_route_reads_its_own_upstream_variable() {
+        assert_eq!(
+            upstream_env(ProviderId::Vllm, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_VLLM"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Llamacpp, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_LLAMACPP"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Openai, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_OPENAI"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Openai, ProviderTestMode::Subscription),
+            "JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION"
+        );
+    }
 }
 
 /// An entry in the per-request event log used for snapshot testing.
@@ -399,7 +421,7 @@ impl TestRequest {
         )
     }
 
-    #[expect(dead_code)]
+    /// Add an assertion that runs after this turn, with every response so far.
     pub fn assert_chat(mut self, assert: impl Fn(&[Vec<TestEvent>]) + 'static) -> Self {
         if let Self::Chat { assert: a, .. } = &mut self {
             *a = Arc::new(assert);
@@ -571,28 +593,34 @@ pub async fn run_chat_completion(
     .await
 }
 
-/// Environment variable naming the server to record against.
+/// Return the environment variable that overrides the recording URL for
+/// `provider` and `mode`.
 ///
-/// Has no effect on playback, which answers from the cassette and never
-/// forwards.
-const UPSTREAM_ENV: &str = "JP_TEST_UPSTREAM";
+/// Formatted as `JP_TEST_UPSTREAM_<ROUTE>` using the route's uppercase fixture
+/// directory name (e.g. `JP_TEST_UPSTREAM_VLLM` or
+/// `JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION`).
+/// Ignored during playback.
+fn upstream_env(provider: ProviderId, mode: ProviderTestMode) -> String {
+    format!(
+        "JP_TEST_UPSTREAM_{}",
+        fixture_dir(provider, mode).to_uppercase()
+    )
+}
 
-/// The server the recorder forwards to.
+/// Return the upstream base URL the VCR recorder forwards requests to.
 ///
-/// The provider's configured base URL, unless `JP_TEST_UPSTREAM` names another
-/// one.
-/// A self-hosted provider is configured with a loopback address, which finds a
-/// server only on the machine doing the recording; the variable aims the
-/// recording at a deployment elsewhere.
-///
-/// Only the upstream moves.
-/// Requests still travel through the mock server that writes the cassette.
-fn record_upstream(route: &dyn ProviderTestRoute, config: &LlmProviderConfig) -> String {
-    if let Ok(url) = env::var(UPSTREAM_ENV) {
-        return url;
-    }
-
-    route.base_url(config)
+/// Defaults to the route's configured base URL unless overridden by its
+/// [`upstream_env`] variable (for example, to record a self-hosted provider
+/// against a remote server instead of `localhost`).
+/// Requests still pass through the local mock server so the cassette is
+/// recorded.
+fn record_upstream(
+    provider: ProviderId,
+    mode: ProviderTestMode,
+    route: &dyn ProviderTestRoute,
+    config: &LlmProviderConfig,
+) -> String {
+    env::var(upstream_env(provider, mode)).unwrap_or_else(|_| route.base_url(config))
 }
 
 #[expect(clippy::too_many_lines)]
@@ -616,7 +644,7 @@ pub async fn run_chat_completion_mode(
         },
     };
 
-    let vcr = Vcr::new(record_upstream(route, &config))
+    let vcr = Vcr::new(record_upstream(provider_id, mode, route, &config))
         .with_fixture_suffix(&fixture_dir(provider_id, mode));
 
     vcr.cassette(

@@ -28,7 +28,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
 use crate::{
-    host::Level,
+    host::{Level, fields},
     lock,
     options::SignalOptions,
     text::{chunks, styled},
@@ -42,7 +42,8 @@ use crate::{
 /// some clients do not render inline.
 const MAX_MESSAGE: usize = 1800;
 
-pub(crate) type Logger = Arc<dyn Fn(Level, String) + Send + Sync>;
+/// Logs an event: its level, its static message, and its fields.
+pub(crate) type Logger = Arc<dyn Fn(Level, &'static str, Map<String, Value>) + Send + Sync>;
 
 /// Identifiers and attachment directory for the bridge's Signal account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +147,11 @@ impl Signal {
             .name("signal-stderr".into())
             .spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    stderr_log(Level::INFO, format!("signal-cli: {line}"));
+                    stderr_log(
+                        Level::INFO,
+                        "signal-cli stderr.",
+                        fields([("line", line.into())]),
+                    );
                 }
             })
             .map_err(|error| format!("failed to start the Signal log reader: {error}"))?;
@@ -168,7 +173,8 @@ impl Signal {
         if let Err(error) = writeln!(stdin, "{line}").and_then(|()| stdin.flush()) {
             (self.log)(
                 Level::ERROR,
-                format!("failed to write to signal-cli: {error}"),
+                "Failed to write to signal-cli.",
+                fields([("error", error.to_string().into())]),
             );
         }
     }
@@ -441,12 +447,16 @@ fn read_messages(
                     return;
                 }
             }
-            Line::Failed(error) => log(Level::WARN, format!("signal-cli request failed: {error}")),
+            Line::Failed(error) => log(
+                Level::WARN,
+                "signal-cli request failed.",
+                fields([("error", error.into())]),
+            ),
             Line::Ignored => {}
         }
     }
 
-    log(Level::ERROR, "signal-cli exited.".to_owned());
+    log(Level::ERROR, "signal-cli exited.", Map::new());
 }
 
 #[cfg(test)]

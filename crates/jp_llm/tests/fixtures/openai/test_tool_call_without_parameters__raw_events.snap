@@ -1,0 +1,61 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "call_Z7hyOj5zUmzTwWErw2lGmMYI",
+                    name: "ping",
+                    decoding: None,
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Message(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "pong",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {
+                "openai_item_id": String("msg_09e6fc4a81e4e38d016af723936c9087d2b1d89d58ffc42bb2"),
+                "openai_phase": String("final_answer"),
+            },
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

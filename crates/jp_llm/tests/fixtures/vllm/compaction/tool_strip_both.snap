@@ -3,7 +3,7 @@ source: crates/jp_llm/src/provider/compaction_request_tests.rs
 expression: request
 ---
 {
-  "model": "Qwen/Qwen3.8-Flash-Next-NVFP4",
+  "model": "Qwen/Qwen3.8-27B-FP8",
   "messages": [
     {
       "role": "user",

@@ -2315,8 +2315,8 @@ mod synthesize_non_streaming_output_item_events {
     use serde_json::{Map, json};
 
     use super::super::{
-        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, PHASE_KEY, ReasoningState, map_event,
-        synthesize_non_streaming_output_item_events,
+        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, PHASE_KEY, ReasoningState, StreamedArguments,
+        map_event, synthesize_non_streaming_output_item_events,
     };
     use crate::event::Event;
 
@@ -2331,9 +2331,18 @@ mod synthesize_non_streaming_output_item_events {
         reasoning_enabled: bool,
     ) -> Vec<Event> {
         let mut reasoning = ReasoningState::default();
+        let mut arguments = StreamedArguments::default();
         synthesize_non_streaming_output_item_events(index, item)
             .into_iter()
-            .flat_map(|event| map_event(event, is_structured, reasoning_enabled, &mut reasoning))
+            .flat_map(|event| {
+                map_event(
+                    event,
+                    is_structured,
+                    reasoning_enabled,
+                    &mut reasoning,
+                    &mut arguments,
+                )
+            })
             .collect::<std::result::Result<Vec<_>, _>>()
             .unwrap()
     }
@@ -2503,11 +2512,13 @@ mod synthesize_non_streaming_output_item_events {
 }
 
 mod map_event {
-    use jp_conversation::event::ChatResponse;
+    use jp_conversation::event::{ChatResponse, ToolCallRequest};
     use openai_responses::types;
     use serde_json::{Map, json};
 
-    use super::super::{ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, map_event};
+    use super::super::{
+        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, StreamedArguments, map_event,
+    };
     use crate::{event::Event, event_builder::EventBuilder};
 
     fn collect(event: types::Event) -> Vec<Event> {
@@ -2516,9 +2527,10 @@ mod map_event {
 
     fn collect_sequence(events: impl IntoIterator<Item = types::Event>) -> Vec<Event> {
         let mut reasoning = ReasoningState::default();
+        let mut arguments = StreamedArguments::default();
         events
             .into_iter()
-            .flat_map(|event| map_event(event, false, true, &mut reasoning))
+            .flat_map(|event| map_event(event, false, true, &mut reasoning, &mut arguments))
             .collect::<Result<_, _>>()
             .unwrap()
     }
@@ -2789,6 +2801,7 @@ mod map_event {
             false,
             false,
             &mut ReasoningState::default(),
+            &mut StreamedArguments::default(),
         );
         assert!(events.is_empty());
     }
@@ -2817,27 +2830,188 @@ mod map_event {
             false,
             false,
             &mut ReasoningState::default(),
+            &mut StreamedArguments::default(),
         );
 
         assert!(events.is_empty());
     }
 
-    #[test]
-    fn function_call_done_emits_only_flush() {
-        let events = collect(types::Event::OutputItemDone {
-            output_index: 2,
+    fn function_call_delta(index: u64, delta: &str) -> types::Event {
+        types::Event::FunctionCallArgumentsDelta {
+            delta: delta.to_owned(),
+            item_id: format!("fc_{index}"),
+            output_index: index,
+        }
+    }
+
+    fn function_call_done(index: u64, arguments: &str) -> types::Event {
+        types::Event::OutputItemDone {
+            output_index: index,
             item: serde_json::from_value(json!({
                 "type": "function_call",
-                "id": "fc_123",
+                "id": format!("fc_{index}"),
                 "status": "completed",
-                "arguments": "{\"path\":\"x\"}",
-                "call_id": "call_123",
+                "arguments": arguments,
+                "call_id": format!("call_{index}"),
                 "name": "run_me"
             }))
             .unwrap(),
-        });
+        }
+    }
 
-        assert_eq!(events, vec![Event::flush(2)]);
+    #[test]
+    fn function_call_done_after_complete_deltas_emits_only_flush() {
+        let events = collect_sequence([
+            function_call_delta(2, r#"{"path":"#),
+            function_call_delta(2, r#""x"}"#),
+            function_call_done(2, r#"{"path":"x"}"#),
+        ]);
+
+        assert_eq!(events, vec![
+            Event::tool_call_args(2, r#"{"path":"#),
+            Event::tool_call_args(2, r#""x"}"#),
+            Event::flush(2),
+        ]);
+    }
+
+    // The subscription host sends parallel calls without any deltas; the
+    // finished item is the only place their arguments arrive.
+    #[test]
+    fn function_call_done_emits_the_arguments_no_delta_delivered() {
+        let events = collect(function_call_done(2, r#"{"path":"x"}"#));
+
+        assert_eq!(events, vec![
+            Event::tool_call_args(2, r#"{"path":"x"}"#),
+            Event::flush(2),
+        ]);
+    }
+
+    #[test]
+    fn function_call_done_emits_the_arguments_the_deltas_stopped_short_of() {
+        let events = collect_sequence([
+            function_call_delta(2, r#"{"path":"#),
+            function_call_done(2, r#"{"path":"x"}"#),
+        ]);
+
+        assert_eq!(events, vec![
+            Event::tool_call_args(2, r#"{"path":"#),
+            Event::tool_call_args(2, r#""x"}"#),
+            Event::flush(2),
+        ]);
+    }
+
+    #[test]
+    fn function_call_done_contradicting_its_deltas_fails_the_stream() {
+        let mut reasoning = ReasoningState::default();
+        let mut arguments = StreamedArguments::default();
+        let mut events = vec![];
+        for event in [
+            function_call_delta(2, r#"{"path": "y"}"#),
+            function_call_done(2, r#"{"path":"x"}"#),
+        ] {
+            events.extend(map_event(
+                event,
+                false,
+                true,
+                &mut reasoning,
+                &mut arguments,
+            ));
+        }
+
+        let error = events.pop().unwrap().unwrap_err();
+        assert_eq!(
+            error.message(),
+            "OpenAI's finished `run_me` call contradicts its streamed arguments."
+        );
+        assert_eq!(
+            events.into_iter().collect::<Result<Vec<_>, _>>().unwrap(),
+            vec![Event::tool_call_args(2, r#"{"path": "y"}"#)]
+        );
+    }
+
+    #[test]
+    fn function_call_arguments_are_tracked_per_output_index() {
+        let events = collect_sequence([
+            function_call_delta(1, r#"{"path":"a"}"#),
+            function_call_done(2, r#"{"path":"b"}"#),
+            function_call_done(1, r#"{"path":"a"}"#),
+        ]);
+
+        assert_eq!(events, vec![
+            Event::tool_call_args(1, r#"{"path":"a"}"#),
+            Event::tool_call_args(2, r#"{"path":"b"}"#),
+            Event::flush(2),
+            Event::flush(1),
+        ]);
+    }
+
+    fn ticket_show_added(index: u64) -> serde_json::Value {
+        json!({
+            "type": "response.output_item.added", "output_index": index,
+            "item": {"type": "function_call", "id": format!("fc_{index}"),
+                     "status": "in_progress", "arguments": "",
+                     "call_id": format!("call_{index}"), "name": "ticket_show"}
+        })
+    }
+
+    fn ticket_show_done(index: u64, arguments: &str) -> serde_json::Value {
+        json!({
+            "type": "response.output_item.done", "output_index": index,
+            "item": {"type": "function_call", "id": format!("fc_{index}"),
+                     "status": "completed", "arguments": arguments,
+                     "call_id": format!("call_{index}"), "name": "ticket_show"}
+        })
+    }
+
+    fn ticket_show_request(index: u64, ticket: &str) -> ToolCallRequest {
+        ToolCallRequest {
+            id: format!("call_{index}"),
+            name: "ticket_show".to_owned(),
+            arguments: Map::from_iter([("ops".to_owned(), json!([{"id": ticket}]))]),
+        }
+    }
+
+    /// Run wire events through [`map_event`] and [`EventBuilder`] and return
+    /// the resulting [`ToolCallRequest`]s.
+    fn stored_tool_calls(wire_events: serde_json::Value) -> Vec<ToolCallRequest> {
+        let wire_events: Vec<types::Event> = serde_json::from_value(wire_events).unwrap();
+        let mut builder = EventBuilder::new();
+        let mut stored = vec![];
+        for event in collect_sequence(wire_events) {
+            match event {
+                Event::Part {
+                    index,
+                    part,
+                    metadata,
+                } => builder.handle_part(index, part, metadata),
+                Event::Flush { index, metadata } => {
+                    stored.push(
+                        builder
+                            .handle_flush(index, metadata)
+                            .unwrap()
+                            .into_tool_call_request()
+                            .unwrap(),
+                    );
+                }
+                event => panic!("Unexpected event: {event:?}"),
+            }
+        }
+        stored
+    }
+
+    #[test]
+    fn parallel_function_calls_without_deltas_keep_their_arguments() {
+        let stored = stored_tool_calls(json!([
+            ticket_show_added(0),
+            ticket_show_added(1),
+            ticket_show_done(0, r#"{"ops":[{"id":"T-1e92tft"}]}"#),
+            ticket_show_done(1, r#"{"ops":[{"id":"T-1e932pe"}]}"#),
+        ]));
+
+        assert_eq!(stored, vec![
+            ticket_show_request(0, "T-1e92tft"),
+            ticket_show_request(1, "T-1e932pe"),
+        ]);
     }
 }
 
@@ -2846,7 +3020,8 @@ mod map_non_streaming_response {
     use serde_json::{Map, json};
 
     use super::super::{
-        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, map_event, map_non_streaming_response,
+        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, StreamedArguments, map_event,
+        map_non_streaming_response,
     };
     use crate::event::{Event, FinishReason};
 
@@ -2914,6 +3089,7 @@ mod map_non_streaming_response {
             false,
             true,
             &mut reasoning,
+            &mut StreamedArguments::default(),
         );
         assert_eq!(
             events.into_iter().collect::<Result<Vec<_>, _>>().unwrap(),
@@ -2957,7 +3133,7 @@ mod map_non_streaming_finish_reason {
 /// Record with a valid `OPENAI_API_KEY`:
 ///
 /// ```sh
-/// RECORD=1 cargo test -p jp_llm recorded::
+/// RECORD=1 just test -p jp_llm -j1 --no-fail-fast provider::openai::tests::recorded::
 /// ```
 ///
 /// Until the cassettes exist, these tests fail on replay.
