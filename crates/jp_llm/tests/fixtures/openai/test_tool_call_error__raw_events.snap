@@ -8,7 +8,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 Start {
-                    id: "call_5rwaN9QkROd74NiI4VLoS87K",
+                    id: "call_TK9eQezMm3kcr4axKtbCeLWT",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -197,10 +197,101 @@ expression: v
             ),
             metadata: {},
         },
+        Part {
+            index: 0,
+            part: Message(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " passed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "{\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "\":\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "}`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " as",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " argument",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_0f06f5e4ab8357d9016af7238ba5dc87d29a717ff22b17012e"),
+                "openai_item_id": String("msg_06ea1a4fca2e77a2016af8d033f6e487d2b34051ac65bce130"),
                 "openai_phase": String("final_answer"),
             },
         },

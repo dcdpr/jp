@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_5rwaN9QkROd74NiI4VLoS87K",
+                        id: "call_TK9eQezMm3kcr4axKtbCeLWT",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -29,11 +29,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool failed to run because the disk is full.",
+                        message: "The tool failed to run because the disk is full. I passed `{\"bar\":\"foo\"}` as the argument.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0f06f5e4ab8357d9016af7238ba5dc87d29a717ff22b17012e"),
+                    "openai_item_id": String("msg_06ea1a4fca2e77a2016af8d033f6e487d2b34051ac65bce130"),
                     "openai_phase": String("final_answer"),
                 },
             },

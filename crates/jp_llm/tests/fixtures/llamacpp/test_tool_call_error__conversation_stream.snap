@@ -254,34 +254,29 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
-      "content": "Please run the tool, providing whatever arguments you want."
-    },
-    {
-      "timestamp": "2020-01-01 00:00:00.0",
-      "type": "chat_response",
-      "message": "I'll run the tool with some arguments."
+      "content": "Please run the tool, providing whatever arguments you want, then tell me how it went."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "9lKXlngFJNDi5aotoCcUOHy7JQsxlbsn",
+      "id": "pNPXrOLDqqOWRpoBKITdGd8oSGWNYE1C",
       "name": "run_me",
       "arguments": {
-        "foo": "SGVsbG8gV29ybGQ=",
+        "foo": "YmFy",
         "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "9lKXlngFJNDi5aotoCcUOHy7JQsxlbsn",
+      "id": "pNPXrOLDqqOWRpoBKITdGd8oSGWNYE1C",
       "content": "YHJ1bl9tZWAgZmFpbGVkOiB0aGUgZGlzayBpcyBmdWxsLg==",
       "is_error": true
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "It seems the tool encountered an issue because the disk is full. Here's a summary of what happened:\n\n- **Tool**: `run_me`\n- **Arguments Provided**:\n  - `foo`: \"Hello World\"\n  - `bar`: `[\"foo\", \"bar\"]`\n- **Error**: The disk is full.\n\n### Suggested Actions:\n1. **Free Up Disk Space**:\n   - Delete unnecessary files or logs.\n   - Clear temporary files or caches.\n   - Use disk cleanup tools specific to your operating system.\n\n2. **Retry the Tool**:\n   - Once disk space is available, re-run the tool with the same or adjusted arguments.\n\n3. **Check Tool Logs**:\n   - Review any logs from the tool to identify potential issues or optimize its operation.\n\nWould you like guidance on how to free up disk space on your specific operating system?"
+      "message": "The tool execution failed because the disk is full. This prevents the tool from running successfully. To proceed, we might need to free up some disk space or retry the operation later when resources are available."
     }
   ]
 }

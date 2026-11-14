@@ -14,14 +14,14 @@ expression: v
                 },
             ),
             metadata: {
-                "google_thought_signature": String("CiQBaRR9E6XwxNy8HHIPFaYYMjYvepEX0xYw6uULj373zWi+43EKZAFpFH0T6Lyi1CvnpDjW13EpzvYFLmiWH75KWIy2/5k/hRzEvJwOfEd0ZnhIh30dwxtdUmNB8wsJxAUaX70979F7rI1XcLT2QOVDz17lDtL93PJ3b/E0LGt31BjJ2joh2BPaz5QK0QEBaRR9EyPuGR+WRFXraajy85cJE9YnHx8Zs6Y3CV9La5/vrj1GgNReyxwlp6FhFaSLcpoqa9noWUSlCLA3DUy6g8QG+RkmC5iaLmXV/lZVQMG9UcT94qwFAFmRBlYVIoUiJuN9q4Z8sts36yxcexlXdTLJEeoSNEEhOoWmd+5bVcTxUa5p1wX5jNq7grM839qo8ZkDQyl/lu2e8xix4Hegp8uNny8CpWGqg4Pkxum6POS34oU/Kh0BrPc02IAzqPkzr1z9bSVm+PPTKhPbJ/tKkgq7AQFpFH0T4bYkPZB0U9aSNCuBx0UuUWNHNArItHnFSAG6Jt0SdhRimt/whDvtAySQlqa/+G4SBGvQnvzz4Aik+W7XxEiWz8QTn3DXprw+OFygOK4a18dom7DOuG67mtiV/HeFG4miiZOiYfRp/KMGS+rOVumFbSaiMDGiZ4oWFXDgByDJk3oHdN0x+kJ8lEgPZF76PMV0X6jNKAtCmEuJLegWFiCY4Zu2l2Fo40rAMNUU/xUA+Y+qqGz7uBwKsQEBaRR9E+1tmwdz4R9p7ALcgWdPSg7iKgc6+NLiitJUK9WVyHVQiuIPMuTp6d/f0nFbVo7w58v9rXxvYioLq5qg/hAdqugqMJ5DgRJvbVFv/7UoI+BIX/f82mbK2OQ0wXyCSyayf94MeO6ZKzsPO4128p6wZrsbKFS59bz8sHeqm5YAGRR3OOcxR9CVG8BnnL+350j+K9goceQ9STjrnjFoK4MR7rcTEZ1xT/DIYq4/RhcKdAFpFH0TG7wwDTfedfSNSkHqOhZOe2+rsWVqV6UD6UE66hmQdAGusT4iPJb+G9gCEdyeSO84xiJ/mFST1aQMVCBHn0tZAlDn094zazhUnqivEya4tb/rIpwNMrSZ3g1zaBbszanDq/6QzaFnivRQ/5nh6aZk"),
+                "google_thought_signature": String("Ci8BaRR9E5K4UclxYpv1QiWiZgEplszdxUYYAIDItn7Jwd4Epw0wJmwWFpTkVyFJBwpdAWkUfRNiAggCzTXU30O/38pe1tiE7VbRJDgP0wQIvN7Vp/JWG46MMZ6L1DCnArId5Yp3lr1R1VSekRN7SU6jQlX0hy4gGC3bDCnGbQgaCAkp6pt+vtvghk4b5IM0Cs0BAWkUfROFJGNvMU2ULbe5px004PY+dFnQKamgyTzwjdAzr7GAgJwQYwxyw/gdPdL33ePEvYVE6HzKfHNSTFFCikGN9tdZ8U77lAH6dsdJe3MrKMPbWY4Y7ztj3EuokEnpYVdyTITvh04inSCfa6zQhkBuRgF7O6q1CWL/Vx5dDpT+9RjK7rXSEJtYJenLr0d3sNgvOn0A3NTkCjkbMj6hRm8XqDig6p368mvmcUt4SqfZeiuhi4Wpufyds0Ojmus/89eMJ3ufxffOn1xUbQrPAQFpFH0TyXkqf9JcHewUIR70JcRpvUaUc1YqRdjiEff/uo3gIgt+/6S8UtvpBaZ63Fb+J69Z0mWgiy+x3Vd0CpBvVWma6XbyhZ1VVkjMXPc27s5NHfXE3GPHsSi+2ElCnhDCAldZ2W68DtMn8JU4sUZTttr4D4BB1Emx8Mng0gIlUgoektA6zHuejeQ74M2h/W5Gl92QAOUzM5bklu7anix4yk0O6gYDj3sGsxT5BcTAx97T68A9umgPgVlkTGEP+HrpFr9Qxvf0bAka5UNKFwq5AQFpFH0T8VQZZ9B3CG4VmgEQRsgUScrJzMy2TSnIr28K2GzLle6++I90Y3K1JG3PTUxd6wZWupzDTfXaMl3UaxOKs0NlIAMF+zCS70aD69/QE/qZw1mGzuKcqeLGaGGD5DeR5D9Mjd1A6s5pq9IyeGCRK6kWctQF5dOEIiLvJfZePhGvS3QeqQIfqdsW5/D5LJeL+/vQwWG78lelSC59iG/ckJJdjvNBx4dPTygEAbT6taFhTA8J2rgVCroBAWkUfRMK+dHfxC0XYuyMr0xdPXg4V83Pz0PqXA1HxME/ScYzL/J3ifEJqXKkaOrs/rZvoTK7TxBojBNPPJHDe1zKNPKLMKFpkOl39nQVM96HWGaeVKnlif9rg3VCjPhfOW1EPHEoQ/H6UlZBw1ALsfgpb3ZYc6wgdxQ/92AXXwuOw1OyNh3xB0N5HGZsnKu4n7dYn5Kh+a8dy+7zwJ1h+z+qBwFqM2EWwDNBavStl5mQvfISST0Goe4lCi4BaRR9E6sq67IzH2DhTnbl4BPmHUCadRjdofb/F/q0XrUOvhldW+xA90/X7WDf"),
             },
         },
         Part {
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\":\"bar\",\"bar\":\"foo\"}",
+                    "{\"foo\":\"baz\",\"bar\":[\"foo\",\"bar\"]}",
                 ),
             ),
             metadata: {},
@@ -35,6 +35,20 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 0,
+            part: Message(
+                "It",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " looks like the `run_me` tool execution failed because the disk is full.",
+            ),
+            metadata: {},
+        },
         Flush {
             index: 0,
             metadata: {},

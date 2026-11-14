@@ -254,12 +254,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
-      "content": "Please run the tool, providing whatever arguments you want."
+      "content": "Please run the tool, providing whatever arguments you want, then tell me how it went."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_5rwaN9QkROd74NiI4VLoS87K",
+      "id": "call_TK9eQezMm3kcr4axKtbCeLWT",
       "name": "run_me",
       "arguments": {
         "bar": "Zm9v"
@@ -268,16 +268,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_5rwaN9QkROd74NiI4VLoS87K",
+      "id": "call_TK9eQezMm3kcr4axKtbCeLWT",
       "content": "YHJ1bl9tZWAgZmFpbGVkOiB0aGUgZGlzayBpcyBmdWxsLg==",
       "is_error": true
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool failed to run because the disk is full.",
+      "message": "The tool failed to run because the disk is full. I passed `{\"bar\":\"foo\"}` as the argument.",
       "metadata": {
-        "openai_item_id": "bXNnXzBmMDZmNWU0YWI4MzU3ZDkwMTZhZjcyMzhiYTVkYzg3ZDI5YTcxN2ZmMjJiMTcwMTJl",
+        "openai_item_id": "bXNnXzA2ZWExYTRmY2EyZTc3YTIwMTZhZjhkMDMzZjZlNDg3ZDJiMzQwNTFhYzY1YmNlMTMw",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }

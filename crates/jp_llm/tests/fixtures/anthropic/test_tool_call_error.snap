@@ -9,11 +9,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01Xzd4TckgheyHVkajrdwA3a",
+                        id: "toolu_01AKhVQahgQLeZUUVNUzLKuK",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": String("foo"),
                         },
                     },
                 ),
@@ -30,7 +29,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I attempted to run the `run_me` tool with some example arguments (`bar: \"foo\"` and `foo: \"foo\"`), but it failed with an error indicating that the disk is full. This suggests the system doesn't have available storage space to execute the command.\n\nIs there something else I can help you with, or would you like me to try a different approach?",
+                        message: "It didn't go well! I tried to run the tool with the argument `bar: \"foo\"`, but it failed with an error indicating that the disk is full. This is a simulated storage error—the tool couldn't complete its operation because there's no available space on the disk.",
                     },
                 ),
                 metadata: {},

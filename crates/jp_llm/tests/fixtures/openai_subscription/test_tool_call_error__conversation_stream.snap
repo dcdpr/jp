@@ -254,7 +254,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
-      "content": "Please run the tool, providing whatever arguments you want."
+      "content": "Please run the tool, providing whatever arguments you want, then tell me how it went."
     },
     {
       "type": "config_delta",
@@ -273,10 +273,11 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_d93fc23bec0f49f981aab6fe240dcb7e",
+      "id": "call_6505b4614a2c4495a04dbe54d34d4c07",
       "name": "run_me",
       "arguments": {
-        "bar": "Zm9v"
+        "bar": "Zm9v",
+        "foo": "Zm9v"
       }
     },
     {
@@ -296,16 +297,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_d93fc23bec0f49f981aab6fe240dcb7e",
+      "id": "call_6505b4614a2c4495a04dbe54d34d4c07",
       "content": "YHJ1bl9tZWAgZmFpbGVkOiB0aGUgZGlzayBpcyBmdWxsLg==",
       "is_error": true
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool failed to run because the disk is full.",
+      "message": "The tool call failed because the disk is full.",
       "metadata": {
-        "openai_item_id": "bXNnXzA2MTkzZGY2NDBiOTRjOGYwMTZhZjcyMzk3MGQzODg3ZDJiYWIwNWNlMmViMTczZDBj",
+        "openai_item_id": "bXNnXzA0MTY2YTM0ZDA1OWI0ODgwMTZhZjhkMDM3NjI2MDg3ZDJhNzllZWIxNjBmM2M0YTQ4",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }

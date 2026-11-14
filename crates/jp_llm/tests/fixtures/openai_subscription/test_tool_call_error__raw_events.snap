@@ -8,7 +8,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 Start {
-                    id: "call_d93fc23bec0f49f981aab6fe240dcb7e",
+                    id: "call_6505b4614a2c4495a04dbe54d34d4c07",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -81,7 +81,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "\":",
+                    "\":\"",
                 ),
             ),
             metadata: {},
@@ -90,7 +90,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "null",
+                    "foo",
                 ),
             ),
             metadata: {},
@@ -99,7 +99,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "}",
+                    "\"}",
                 ),
             ),
             metadata: {},
@@ -137,21 +137,14 @@ expression: v
         Part {
             index: 0,
             part: Message(
+                " call",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
                 " failed",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " run",
             ),
             metadata: {},
         },
@@ -200,7 +193,7 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_06193df640b94c8f016af723970d3887d2bab05ce2eb173d0c"),
+                "openai_item_id": String("msg_04166a34d059b488016af8d037626087d2a79eeb160f3c4a48"),
                 "openai_phase": String("final_answer"),
             },
         },

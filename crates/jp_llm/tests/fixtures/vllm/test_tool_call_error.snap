@@ -7,14 +7,26 @@ expression: v
         Flushed(
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I'll run the tool with valid arguments. Let me check the requirements:\n- `foo`: required, string, defaults to \"foo\"\n- `bar`: required, string or array, must be \"foo\" (string) or an array of \"foo\"/\"bar\" items\n\nI'll provide `foo` as \"foo\" and `bar` as an array containing \"foo\" and \"bar\".\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "chatcmpl-tool-96198643f8d5a8f6",
+                        id: "chatcmpl-tool-a430f1c12b153efa",
                         name: "run_me",
                         arguments: {
                             "foo": String("foo"),
                             "bar": Array [
                                 String("foo"),
+                                String("bar"),
                             ],
                         },
                     },
@@ -32,7 +44,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool call failed because the disk is full. There isn't anything I can do about that from here — the underlying storage for this environment is at capacity.\n\nIf you'd like, you can:\n1. Free up space on the host and retry.\n2. Let me know if there's a different task I can help with that doesn't require running this tool.",
+                        message: "The tool was called successfully but failed with an error: **\"the disk is full.\"**\n\nThis means the arguments were accepted (they passed validation), but the tool couldn't complete its operation because there was no available disk space on the system. This is a server-side infrastructure issue, not a problem with the arguments provided.",
                     },
                 ),
                 metadata: {},

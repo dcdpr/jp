@@ -16,7 +16,6 @@ expression: v
                                 String("foo"),
                                 String("bar"),
                             ],
-                            "foo": String("Hello World"),
                         },
                     },
                 ),
@@ -33,7 +32,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "It seems the previous attempt to run a tool encountered an error indicating that the disk is full. This can happen if the system's temporary storage or logs have exceeded their capacity. Here are a few suggestions to address this issue:\n\n1. **Clear Cache/Logs**: Delete unnecessary cache files, old logs, or temporary files to free up space.\n2. **Check Disk Usage**: Use tools like `df -h` (Linux/macOS) or disk management apps (Windows) to identify large directories/files consuming storage.\n3. **Restart the System**: Sometimes a reboot can clear temporary buffers and resolve minor storage issues.\n4. **Upgrade Storage**: If the issue persists, consider expanding your storage capacity.\n\nLet me know how you'd like to proceed!",
+                        message: "The tool `run_me` failed because the simulated disk is currently full.\n\nThis is likely a side effect of my attempt to \"run\" it in the first place, or perhaps the system has reached its storage limit for this session. If you have any other tasks or questions, feel free to ask!",
                     },
                 ),
                 metadata: {},

@@ -8,7 +8,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 Start {
-                    id: "toolu_01Xzd4TckgheyHVkajrdwA3a",
+                    id: "toolu_01AKhVQahgQLeZUUVNUzLKuK",
                     name: "run_me",
                     decoding: None,
                 },
@@ -38,25 +38,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    " \"foo\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: ToolCall(
-                ArgumentChunk(
-                    ", \"foo\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: ToolCall(
-                ArgumentChunk(
-                    ": \"foo\"}",
+                    " \"foo\"}",
                 ),
             ),
             metadata: {},
@@ -74,42 +56,63 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "I attempted",
+                "It",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " to run the `",
+                " didn",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "run_me` tool with",
+                "'t go",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " some",
+                " well!",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " example",
+                " I",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " arguments (`",
+                " tried",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " to run the tool with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " argument `",
             ),
             metadata: {},
         },
@@ -123,42 +126,35 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                ": \"",
+                ":",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "foo\"` and `foo",
+                " \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                ": \"foo\"`), but",
+                "foo\"`,",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " it",
+                " but it",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " failed",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " with",
+                " failed with",
             ),
             metadata: {},
         },
@@ -172,84 +168,84 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                " error indicating that the disk is",
+                " error indicating that",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " full. This suggests the",
+                " the disk is full. This",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " system",
+                " is a",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " doesn't have available",
+                " sim",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " storage space to execute",
+                "ulated storage",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " the command.\n\nIs",
+                " error—",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " there something else I can help",
+                "the tool couldn",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " you with,",
+                "'t complete",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " or",
+                " its",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " would you like me",
+                " operation because",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " to try",
+                " there's no available space on",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " a different approach?",
+                " the disk.",
             ),
             metadata: {},
         },

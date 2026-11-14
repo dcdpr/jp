@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user asks to run the tool, providing whatever arguments we want. There's a function called run_me in namespace functions. We need to call it with arguments. The function signature: run_me({foo?: string, bar: string | array}). Required bar, optional foo. Since we can choose. Let's pass foo as \"test\", bar as \"example\". Or bar as array? We'll just pass bar as \"testBar\". Let's call function.",
+                        reasoning: "The user wants to run the tool. We have a function run_me with arguments foo optional, default \"foo\", and bar required, can be string or array. We need to call it. Provide some arguments. Let's call with bar: \"test\".",
                     },
                 ),
                 metadata: {},
@@ -20,11 +20,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "643edec24",
+                        id: "abd532e39",
                         name: "run_me",
                         arguments: {
-                            "foo": String("test"),
-                            "bar": String("example"),
+                            "bar": String("test"),
                         },
                     },
                 ),
@@ -41,7 +40,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user asks: \"Please run the tool, providing whatever arguments you want.\" They want the assistant to execute a tool. There's a tool `run_me` which seems to just echo back arguments. The user wants the assistant to run it with whatever arguments. The assistant attempted to run `run_me` with arguments {\"foo\":\"test\",\"bar\":\"example\"} but got an error: \"the disk is full\". Need to respond appropriately. We need to explain that the tool failed due to disk full, cannot run further. We can suggest alternative solution or ask for different approach. Since we cannot run the tool, inform them. Possibly we can simulate output manually? The tool is just a placeholder; we can describe what would happen. Provide apology.\n\nThus final answer: apologize and explain the failure, and maybe suggest modifications or that we can't run more.",
+                        reasoning: "The user asks to \"run the tool, providing whatever arguments you want, then tell me how it went.\" The tool \"run_me\" expects a string argument \"bar\". The user wants the assistant to run the tool and report the result. The tool failed with error \"the disk is full\". We need to respond accordingly. According to policy, it's okay to report the error. The assistant should convey that the tool could not run due to disk full. No policy violation. Provide explanation. Possibly suggest alternative approach.",
                     },
                 ),
                 metadata: {},
@@ -52,7 +51,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I’m sorry—I tried to invoke the `run_me` tool with a sample payload (e.g. `{\"foo\":\"test\",\"bar\":\"example\"}`), but the tool returned an error indicating that the disk is full and it can’t complete the request.\n\nBecause the tool isn’t able to run right now, I can’t provide you with its output. If you have a specific set of arguments you’d like me to try (or if you’d like to know what the tool would normally return for certain inputs), just let me know and I’ll describe the expected behavior based on the tool’s description. Otherwise, if there’s anything else you’d like help with, I’m happy to assist!",
+                        message: "I tried invoking the `run_me` tool with a simple test argument (`\"bar\": \"test\"`). Unfortunately, the call didn’t succeed—the tool returned an error indicating that the disk is full. In other words, the tool wasn’t able to complete its operation because it ran out of storage space.\n\nIf you need the tool to actually run, we’d have to resolve the disk‑space issue on the backend first. Let me know if there’s anything else I can help with in the meantime!",
                     },
                 ),
                 metadata: {},

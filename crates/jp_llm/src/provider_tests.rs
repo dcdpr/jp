@@ -84,10 +84,16 @@ async fn chat_completion_stream(
 }
 
 fn tool_call_base(provider: ProviderId) -> TestRequest {
+    tool_call_prompted(
+        provider,
+        "Please run the tool, providing whatever arguments you want.",
+    )
+}
+
+/// [`tool_call_base`] with its own prompt.
+fn tool_call_prompted(provider: ProviderId, prompt: &str) -> TestRequest {
     TestRequest::chat(provider)
-        .event(ChatRequest::from(
-            "Please run the tool, providing whatever arguments you want.",
-        ))
+        .event(ChatRequest::from(prompt))
         .tool(
             "run_me",
             json!({
@@ -216,13 +222,16 @@ fn requested(response: &[TestEvent]) -> Vec<&ToolCallRequest> {
 ///
 /// [`TestRequest::tool_call_response`] answers the last request only, which
 /// leaves the other calls of a response unanswered.
-fn answer_every_tool_call(provider: ProviderId, result: &'static str) -> TestRequest {
+fn answer_every_tool_call(
+    provider: ProviderId,
+    result: std::result::Result<&'static str, &'static str>,
+) -> TestRequest {
     TestRequest::func(move |history| {
         let mut request = TestRequest::chat(provider);
         for call in tool_calls(history) {
             request = request.event(ToolCallResponse {
                 id: call.id.clone(),
-                result: Ok(result.to_owned()),
+                result: result.map(str::to_owned).map_err(str::to_owned),
             });
         }
 
@@ -296,7 +305,7 @@ async fn tool_call_parallel(
                      {response:#?}"
                 );
             }),
-        answer_every_tool_call(provider, "18 degrees and sunny"),
+        answer_every_tool_call(provider, Ok("18 degrees and sunny")),
     ];
 
     run_test_mode(provider, test_name, requests, mode).await
@@ -372,7 +381,7 @@ async fn tool_call_nested_arguments(
                     "an omitted `start_line` arrived as null: {ops:?}"
                 );
             }),
-        answer_every_tool_call(provider, "a.txt: alpha\nb.txt: beta"),
+        answer_every_tool_call(provider, Ok("a.txt: alpha\nb.txt: beta")),
     ];
 
     run_test_mode(provider, test_name, requests, mode).await
@@ -386,8 +395,14 @@ async fn tool_call_error(provider: ProviderId, test_name: &str, mode: ProviderTe
     }
 
     let requests = vec![
-        tool_call_base(provider).tool_choice_fn("run_me"),
-        TestRequest::tool_call_response(Err("`run_me` failed: the disk is full."), true),
+        // The follow-up turn requires an answer, so the prompt asks for one:
+        // asked only to run the tool, Gemini answered the error with nothing.
+        tool_call_prompted(
+            provider,
+            "Please run the tool, providing whatever arguments you want, then tell me how it went.",
+        )
+        .tool_choice_fn("run_me"),
+        answer_every_tool_call(provider, Err("`run_me` failed: the disk is full.")),
     ];
 
     run_test_mode(provider, test_name, requests, mode).await
