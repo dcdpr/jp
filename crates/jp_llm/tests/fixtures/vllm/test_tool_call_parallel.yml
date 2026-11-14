@@ -1,0 +1,155 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "Qwen/Qwen3.8-27B-FP8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+        }
+      ],
+      "stream": true,
+      "reasoning_effort": "none",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string",
+                  "enum": [
+                    "Paris",
+                    "Tokyo"
+                  ]
+                }
+              },
+              "required": [
+                "city"
+              ],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id": "chatcmpl-9230c09ee85cea5b", "object": "chat.completion.chunk", "created": 1794649988, "model": "Qwen/Qwen3.8-27B-FP8", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "logprobs": null, "finish_reason": null}], "prompt_token_ids": null, "prompt_text": null, "service_tier": "default"}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-adb2a4748853f08e","type":"function","index":0,"function":{"name":"get_weather"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\": \""}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Paris"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"}"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-b9f02f8c62020b49","type":"function","index":1,"function":{"name":"get_weather"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"city\": \"Tok"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"yo"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9230c09ee85cea5b","object":"chat.completion.chunk","created":1794649988,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\"}"}}]},"logprobs":null,"finish_reason":"tool_calls","stop_reason":null,"token_ids":null}]}
+    
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "Qwen/Qwen3.8-27B-FP8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "chatcmpl-tool-adb2a4748853f08e",
+              "type": "function",
+              "function": {
+                "name": "get_weather",
+                "arguments": "{\"city\":\"Paris\"}"
+              }
+            },
+            {
+              "id": "chatcmpl-tool-b9f02f8c62020b49",
+              "type": "function",
+              "function": {
+                "name": "get_weather",
+                "arguments": "{\"city\":\"Tokyo\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "chatcmpl-tool-adb2a4748853f08e",
+          "content": "18 degrees and sunny"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "chatcmpl-tool-b9f02f8c62020b49",
+          "content": "18 degrees and sunny"
+        }
+      ],
+      "stream": true,
+      "reasoning_effort": "none"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id": "chatcmpl-8c42024a4b6d7a21", "object": "chat.completion.chunk", "created": 1794649989, "model": "Qwen/Qwen3.8-27B-FP8", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "logprobs": null, "finish_reason": null}], "prompt_token_ids": null, "prompt_text": null, "service_tier": "default"}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"Here"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" is"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" the current"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" weather for"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" both cities:\n\n"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"*   **Paris"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":":** 18"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"°C"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":","},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" Sunny"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"\n*   **"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"Tokyo:** "},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"18°C,"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-8c42024a4b6d7a21","object":"chat.completion.chunk","created":1794649989,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" Sunny"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null}]}
+    
+    
+    data: [DONE]
+    

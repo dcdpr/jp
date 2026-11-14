@@ -1,0 +1,157 @@
+when:
+  path: /api/chat
+  method: POST
+  json_body_str: >-
+    {
+      "model": "qwen3.5:9b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains.",
+          "tool_calls": [],
+          "thinking": null
+        }
+      ],
+      "tools": [
+        {
+          "type": "Function",
+          "function": {
+            "name": "read_files",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "ops": {
+                  "description": "The files to read, one element per file.",
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "enum": [
+                          "a.txt",
+                          "b.txt"
+                        ]
+                      },
+                      "start_line": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "ops"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "options": {},
+      "stream": true,
+      "think": false
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/x-ndjson
+  body: |
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.01836Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_my3c7gtd","function":{"index":0,"name":"read_files","arguments":{"ops":[{"path":"a.txt"},{"path":"b.txt"}]}}}]},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.039985Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":6611022375,"load_duration":4876770042,"prompt_eval_count":356,"prompt_eval_cached_count":0,"prompt_eval_duration":783508000,"eval_count":41,"eval_duration":941702000}
+---
+when:
+  path: /api/chat
+  method: POST
+  json_body_str: >-
+    {
+      "model": "qwen3.5:9b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains.",
+          "tool_calls": [],
+          "thinking": null
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "read_files",
+                "arguments": {
+                  "ops": [
+                    {
+                      "path": "a.txt"
+                    },
+                    {
+                      "path": "b.txt"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "thinking": null
+        },
+        {
+          "role": "tool",
+          "content": "a.txt: alpha\nb.txt: beta",
+          "tool_calls": [],
+          "thinking": null
+        }
+      ],
+      "options": {},
+      "stream": true,
+      "think": false
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/x-ndjson
+  body: |
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.412396Z","message":{"role":"assistant","content":"Based"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.434908Z","message":{"role":"assistant","content":" on"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.456501Z","message":{"role":"assistant","content":" the"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.477803Z","message":{"role":"assistant","content":" results"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.499738Z","message":{"role":"assistant","content":" of"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.523231Z","message":{"role":"assistant","content":" the"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.547Z","message":{"role":"assistant","content":" `"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.569044Z","message":{"role":"assistant","content":"read"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.591544Z","message":{"role":"assistant","content":"_files"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.613199Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.634632Z","message":{"role":"assistant","content":" call"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.656403Z","message":{"role":"assistant","content":":"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.724181Z","message":{"role":"assistant","content":"\n\n*"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.772033Z","message":{"role":"assistant","content":"   **"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.793352Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.815175Z","message":{"role":"assistant","content":"a"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.836836Z","message":{"role":"assistant","content":".txt"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.858777Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.880722Z","message":{"role":"assistant","content":"**"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.902303Z","message":{"role":"assistant","content":" contains"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.924307Z","message":{"role":"assistant","content":":"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.951691Z","message":{"role":"assistant","content":" `"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.975557Z","message":{"role":"assistant","content":"alpha"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:44.997955Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.041822Z","message":{"role":"assistant","content":"\n*"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.086056Z","message":{"role":"assistant","content":"   **"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.107816Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.129387Z","message":{"role":"assistant","content":"b"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.150948Z","message":{"role":"assistant","content":".txt"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.172485Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.196141Z","message":{"role":"assistant","content":"**"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.218167Z","message":{"role":"assistant","content":" contains"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.239924Z","message":{"role":"assistant","content":":"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.261777Z","message":{"role":"assistant","content":" `"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.283939Z","message":{"role":"assistant","content":"beta"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.305671Z","message":{"role":"assistant","content":"`"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-11-14T09:52:45.3281Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":1284850125,"load_duration":5972084,"prompt_eval_count":106,"prompt_eval_cached_count":0,"prompt_eval_duration":346527000,"eval_count":41,"eval_duration":915505000}

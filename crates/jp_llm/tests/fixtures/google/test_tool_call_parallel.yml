@@ -1,0 +1,163 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "get_weather",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "city": {
+                    "type": "string",
+                    "enum": [
+                      "Paris",
+                      "Tokyo"
+                    ]
+                  }
+                },
+                "required": [
+                  "city"
+                ],
+                "additionalProperties": false
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "VALIDATED",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "get_weather","args": {"city": "Paris"}},"thoughtSignature": "CiQBaRR9E25Jj+eqAQ065DlyV2Zu86HzmAf9cZZpOZLvBrSOUuMKbwFpFH0Tleu6FsicU07wkoFa0laWvJhoyfn0R1CbzS0TMtlYBB3DzHdNwbdyszo7oi7lv7Ptju0e3h7+co7hc6/t9FChd2Si97ktKFqCGjbmJH/taBmJ6amB6vmJ0s4/vqk0en6hhLBB2g6OKjShiAqOAgFpFH0Ts8Fwmz0AMDymPx4GWi9F+r+PJI0m80FbNjpjXwHvx8hDbBJAntu6NPoT2kS2GbrkAEmduOHNgFK5veEZR4qqlMKeOOLgj793NalqQNzNUqLy9x2Z6oqZbR6FMq4m18inI8wrSwdrJOWhPt9Qxwytm/WmhyDi6NhlVrt9SYtkcLBLJSaDW+tIdEWC51AsTM0DHhco6kEenQVEYP9UCHfofmHu4Uerg7losk0DLfDdZO0e9fVymtukOr3QRmLApOLstS7D9mkPAFaKBufJdrjd6af7w2buRf1igaLs+VXyNo9K2Wrq0vfWB4i0lLsU67nxIbwxehZRzT6tsdgXNM4ckUa31LkHZL0uVQqIAgFpFH0T2X7nvHdr303khteu76BEFo7x/jCVgMLsgs4eKaYidRs7RrRSfme7GqRWL7NOpytE+4rCLdlC5TiXZMqnj5CwtXiM+0nCdgk55r57mLo8dwpmRwYoN0jcHw7aCZHulgxqq134xqqpfLxunQmYBBQcmFP0pqpHomS5HpLNew1H5bRgp2er735o0DcESgz4tfQXNVfPU60HGjaq078u82179BxgOuPqHmxswhrh5e9ZdrHrxg5169rlkPzWL2YnfiTLyURZuCm6lm3C+uSCi0CKfjiivKvOCoNVQlrrvPGZH2DURjcWYNKUysMv0AtdSBFlGW/SHVMDog7vdCZDJxZmzLB2KAplAWkUfRNItyQXEWoPf7B3h/blUgSm974ks/aeaLbnj9GEmJ/U4lTi7V9u+VlaKASZ9rT6UMoH/lWuzh+W9PjXCDeGZUzPGnnw6niQXST6KLDqp0AiksKpB3p5636HpWWb36EFOck="},{"functionCall": {"name": "get_weather","args": {"city": "Tokyo"}}}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 71,"candidatesTokenCount": 30,"totalTokenCount": 237,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 71}],"thoughtsTokenCount": 136,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "YCP3apCQBpf4xN8P7K-0iAY"}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "get_weather_0",
+                "name": "get_weather",
+                "args": {
+                  "city": "Paris"
+                }
+              },
+              "thoughtSignature": "CiQBaRR9E25Jj+eqAQ065DlyV2Zu86HzmAf9cZZpOZLvBrSOUuMKbwFpFH0Tleu6FsicU07wkoFa0laWvJhoyfn0R1CbzS0TMtlYBB3DzHdNwbdyszo7oi7lv7Ptju0e3h7+co7hc6/t9FChd2Si97ktKFqCGjbmJH/taBmJ6amB6vmJ0s4/vqk0en6hhLBB2g6OKjShiAqOAgFpFH0Ts8Fwmz0AMDymPx4GWi9F+r+PJI0m80FbNjpjXwHvx8hDbBJAntu6NPoT2kS2GbrkAEmduOHNgFK5veEZR4qqlMKeOOLgj793NalqQNzNUqLy9x2Z6oqZbR6FMq4m18inI8wrSwdrJOWhPt9Qxwytm/WmhyDi6NhlVrt9SYtkcLBLJSaDW+tIdEWC51AsTM0DHhco6kEenQVEYP9UCHfofmHu4Uerg7losk0DLfDdZO0e9fVymtukOr3QRmLApOLstS7D9mkPAFaKBufJdrjd6af7w2buRf1igaLs+VXyNo9K2Wrq0vfWB4i0lLsU67nxIbwxehZRzT6tsdgXNM4ckUa31LkHZL0uVQqIAgFpFH0T2X7nvHdr303khteu76BEFo7x/jCVgMLsgs4eKaYidRs7RrRSfme7GqRWL7NOpytE+4rCLdlC5TiXZMqnj5CwtXiM+0nCdgk55r57mLo8dwpmRwYoN0jcHw7aCZHulgxqq134xqqpfLxunQmYBBQcmFP0pqpHomS5HpLNew1H5bRgp2er735o0DcESgz4tfQXNVfPU60HGjaq078u82179BxgOuPqHmxswhrh5e9ZdrHrxg5169rlkPzWL2YnfiTLyURZuCm6lm3C+uSCi0CKfjiivKvOCoNVQlrrvPGZH2DURjcWYNKUysMv0AtdSBFlGW/SHVMDog7vdCZDJxZmzLB2KAplAWkUfRNItyQXEWoPf7B3h/blUgSm974ks/aeaLbnj9GEmJ/U4lTi7V9u+VlaKASZ9rT6UMoH/lWuzh+W9PjXCDeGZUzPGnnw6niQXST6KLDqp0AiksKpB3p5636HpWWb36EFOck="
+            },
+            {
+              "functionCall": {
+                "id": "get_weather_1",
+                "name": "get_weather",
+                "args": {
+                  "city": "Tokyo"
+                }
+              },
+              "thoughtSignature": "skip_thought_signature_validator"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "get_weather_0",
+                "name": "get_weather",
+                "response": {
+                  "content": "18 degrees and sunny"
+                }
+              }
+            },
+            {
+              "functionResponse": {
+                "id": "get_weather_1",
+                "name": "get_weather",
+                "response": {
+                  "content": "18 degrees and sunny"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "The weather in Paris is "}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 236,"candidatesTokenCount": 5,"totalTokenCount": 241,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 236}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "YSP3at_6Bpmv28oP3eL0oA4"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "18 degrees and sunny. The weather in Tokyo is also 18 degrees and sunny"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 236,"candidatesTokenCount": 23,"totalTokenCount": 259,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 236}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "YSP3at_6Bpmv28oP3eL0oA4"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 236,"candidatesTokenCount": 24,"totalTokenCount": 260,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 236}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "YSP3at_6Bpmv28oP3eL0oA4"}
+    

@@ -37,6 +37,8 @@ camino-tempfile = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
 # Hashes a snapshot the way `just chat-take` does, in the `take.sh` tests.
 sha2 = { workspace = true }
+# Provides a paused clock (`start_paused = true`) for duration logging tests.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

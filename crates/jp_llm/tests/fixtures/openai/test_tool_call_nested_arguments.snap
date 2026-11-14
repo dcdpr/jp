@@ -1,0 +1,52 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_7pWGkbr7Jzjk3lSckSY8dsVx",
+                        name: "read_files",
+                        arguments: {
+                            "ops": Array [
+                                Object {
+                                    "path": String("a.txt"),
+                                },
+                                Object {
+                                    "path": String("b.txt"),
+                                },
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "- `a.txt` contains: `alpha`\n- `b.txt` contains: `beta`",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0e90cc9e345f2081016af82f70b96c87d2b5e8daeec08c81e0"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

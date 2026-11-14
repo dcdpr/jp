@@ -78,3 +78,16 @@ Candidates for JP:
 Step 1 has none of these costs, so it goes first; it may cover enough that step
 2 can wait.
 Whether to adopt step 2, and with which rules, needs an RFD.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-13T20:46:49Z
+
+Another step 2 candidate: a tracing macro whose message is not a plain string
+literal, or that carries format arguments (`warn!("Failed: {e}")`).
+It is the inverse of `PROSE_IN_TRACE_FIELD`: data in the message rather than
+prose in a field.
+T-1jgcgff converts the existing sites; this rule would keep them converted.

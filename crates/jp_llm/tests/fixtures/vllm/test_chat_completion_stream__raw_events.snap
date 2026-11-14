@@ -7,84 +7,91 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "We",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " need respond to user",
+                " user has",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"",
+                " sent a simple \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "Test message\". Simple",
+                "Test message.\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ". Need final.",
+                " This is likely",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " Maybe",
+                " just",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"",
+                " checking",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "Test received",
+                " if I",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ".",
+                "'m responsive.",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " How can I help",
+                " I'll",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "?\" in",
+                " give a brief,",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " English.\n",
+                " friendly acknowledgment",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".\n",
             ),
             metadata: {},
         },
@@ -95,35 +102,42 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Test received.",
+                "Got",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " I",
+                " it! I",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "’m",
+                "'m up",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " here and",
+                " and running. How",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " ready to help.",
+                " can I help you",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " today?",
             ),
             metadata: {},
         },

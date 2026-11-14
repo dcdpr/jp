@@ -250,6 +250,9 @@ fn create_request(
     if !converted_tools.is_empty() {
         body["tools"] = json!(converted_tools);
         body["tool_choice"] = json!(tool_choice_val);
+        // llama.cpp limits a response to one tool call unless asked otherwise:
+        // <https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md>
+        body["parallel_tool_calls"] = json!(true);
     }
 
     if let Some(schema) = structured_schema {

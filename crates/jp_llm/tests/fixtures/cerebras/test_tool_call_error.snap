@@ -1,0 +1,64 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user wants to run the tool. We have a function run_me with arguments foo optional, default \"foo\", and bar required, can be string or array. We need to call it. Provide some arguments. Let's call with bar: \"test\".",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "abd532e39",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("test"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user asks to \"run the tool, providing whatever arguments you want, then tell me how it went.\" The tool \"run_me\" expects a string argument \"bar\". The user wants the assistant to run the tool and report the result. The tool failed with error \"the disk is full\". We need to respond accordingly. According to policy, it's okay to report the error. The assistant should convey that the tool could not run due to disk full. No policy violation. Provide explanation. Possibly suggest alternative approach.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I tried invoking the `run_me` tool with a simple test argument (`\"bar\": \"test\"`). Unfortunately, the call didn’t succeed—the tool returned an error indicating that the disk is full. In other words, the tool wasn’t able to complete its operation because it ran out of storage space.\n\nIf you need the tool to actually run, we’d have to resolve the disk‑space issue on the backend first. Let me know if there’s anything else I can help with in the meantime!",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

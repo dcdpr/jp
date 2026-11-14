@@ -46,8 +46,9 @@ Open questions:
 - Where it runs.
   Cloud providers need API keys as CI secrets, and the subscription routes need
   a signed-in login (Claude Code for ACP). llama.cpp, Ollama, and vLLM need a
-  server (`JP_TEST_UPSTREAM`): a small model on the runner, a self-hosted
-  machine, or skipping them in the scheduled run.
+  server (`JP_TEST_UPSTREAM_<PROVIDER>`, such as `JP_TEST_UPSTREAM_VLLM`): a
+  small model on the runner, a self-hosted machine, or skipping them in the
+  scheduled run.
 - What a detected change produces: a draft PR with the re-recorded fixtures, an
   issue or ticket with the normalized diff, or both.
   Nothing should be committed to `main` automatically.

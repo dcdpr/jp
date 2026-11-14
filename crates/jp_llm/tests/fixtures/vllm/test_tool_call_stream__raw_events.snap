@@ -14,42 +14,217 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "ll call the tool wi",
+                "ll cal",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "th some",
+                "l the `run_m",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " valu",
+                "e` tool wit",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "es that ",
+                "h valid arguments",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "fit its sc",
+                ". Since `f",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "hema:\n\n",
+                "oo` and `b",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ar` are both requ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ired, I'll pr",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ovide `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " as its strin",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "g value an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "d `bar` as th",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "e arr",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ay fo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "rm (its only allowed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " values are",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `[\"foo\"]`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " o",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "r the `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "[\"foo\", ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"bar\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "]` enu",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "m",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arra",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "y, wit",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "h items res",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "tricte",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "d to `\"foo\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "` or `\"ba",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "r\"`).\n\n",
             ),
             metadata: {},
         },
@@ -61,7 +236,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "chatcmpl-tool-8bef0cd026442499",
+                    id: "chatcmpl-tool-bb7964bb980257df",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -80,7 +255,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\": ",
+                    "{\"foo\": ",
                 ),
             ),
             metadata: {},
@@ -89,7 +264,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "[\"foo\", \"bar\"], \"foo\": ",
+                    "\"foo\", \"bar\": ",
                 ),
             ),
             metadata: {},
@@ -98,7 +273,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\"Hello, tool!\"}",
+                    "[\"foo\", \"bar\"]}",
                 ),
             ),
             metadata: {},
@@ -119,7 +294,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "The tool ran successfu",
+                "The tool e",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "xecuted successfu",
             ),
             metadata: {},
         },

@@ -7,35 +7,98 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "I'll run t",
+                "I'll",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "he tool wi",
+                " invok",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "th some ar",
+                "e the `run_m",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "gum",
+                "e` tool with ar",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ents:\n\n",
+                "guments that sati",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "sfy its sch",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ema — ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "setting `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo` to its ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "allowed value a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "nd `bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "` to an allowed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " v",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "alue:\n\n",
             ),
             metadata: {},
         },
@@ -47,7 +110,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "chatcmpl-tool-95b70da4d5404eab",
+                    id: "chatcmpl-tool-acf11067a57dc7fb",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -75,7 +138,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\"Hello, world!\", \"bar\": ",
+                    "\"foo\", \"bar\": ",
                 ),
             ),
             metadata: {},
@@ -84,7 +147,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "[\"foo\"]}",
+                    "\"foo\"}",
                 ),
             ),
             metadata: {},
@@ -112,112 +175,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "lly and retur",
+                "lly and re",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ned **\"work",
+                "turned: `wo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ing!",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\"** — it seems ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "to have e",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "xecut",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ed with the ar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "guments I prov",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ided",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ":\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "- **fo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "o**: `\"Hello, ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "world!",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\"`\n- **bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "**: `[",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\"foo\"]`",
+                "rking!`",
             ),
             metadata: {},
         },

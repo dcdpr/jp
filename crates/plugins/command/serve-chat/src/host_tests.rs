@@ -389,6 +389,11 @@ fn log_print_and_exit_write_their_messages() {
     let client = HostClient::new(written.clone());
 
     client.log(Level::WARN, "Dropped a message.");
+    client.log_with(
+        Level::INFO,
+        "Turn ended.",
+        Map::from_iter([("run_ms".to_owned(), 5200.into())]),
+    );
     client.print("Relaying Signal messages.");
     client.exit(2, Some("No arguments.".to_owned())).unwrap();
 
@@ -397,6 +402,11 @@ fn log_print_and_exit_write_their_messages() {
             level: "warn".to_owned(),
             message: "Dropped a message.".to_owned(),
             fields: Map::new(),
+        }),
+        PluginToHost::Log(LogMessage {
+            level: "info".to_owned(),
+            message: "Turn ended.".to_owned(),
+            fields: Map::from_iter([("run_ms".to_owned(), 5200.into())]),
         }),
         PluginToHost::Print(PrintMessage {
             text: "Relaying Signal messages.\n".to_owned(),

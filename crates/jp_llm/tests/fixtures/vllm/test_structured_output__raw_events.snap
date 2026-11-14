@@ -7,7 +7,7 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                "{\n  ",
+                "{\n ",
             ),
             metadata: {},
         },
@@ -21,7 +21,14 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                "les\": [\n    \"Conve",
+                "les\": ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "[\n  \"AI Assistant Conve",
             ),
             metadata: {},
         },
@@ -35,35 +42,21 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                "n Title Gen",
+                "n Sta",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "e",
+                "r",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "ratio",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "\"\n  ]\n}",
+                "t\"\n ]\n}",
             ),
             metadata: {},
         },

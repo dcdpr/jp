@@ -1,0 +1,60 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABq9yOvCM2kquj8kemzTMVe33SUC_LqlB_YtHXd0Q1wiHuSfKT-C1w1x4J2ybPlhxBXX7WQ5btPMB8MK0Tr1Ld_jbdBuMdsBoRB1Tpc5glpeuqMNd_wYyBD96NyYYCpG-OgIy0g8PuDH82Wfbak2VwgxWf77_QhoncH29VczF3NzqwAmX5tuhPLauJkdRwog1YkA8wmBkNmldBKoaB3T1cnQLRD6fO_JEANPRXEMzAg78jYv-7VfmRdn2_tSB4XU9RA-opPStxh-gB4hEPHkJG4DaL42xLus2gLRAGCdK8jpAWDCzuilANe-O6GmWsV5DV-P7zf6xwYVbMQYW8HlzCpu_ZHsleudnxTPOsqAquukzDwEe-kLtIR4d7XBX37vAnMD40iPIGJpCQht4ZQLJowhvKt8gN1TKpXi5G3M-EhwAXkGxEI3eUNiIUQ24GNiITE91uSi0nsiJSi5q2CqR9A6Gpt9tddBIKYM1eJcPPssf7nq8fUAwL4c7DsBM9PINwASzOqG43KunQH3PPXnI9X9ZcePsXVYhYsKg6nLg0t6Itwy6Jv-SPXkB6I6uBolrDAARdztXA181VK7nUS3_CTCxCWIOqLonTOpB12DQ0TlGFTNXGwcQI1GfGwsDaM1SIVQkYv2nRZ4-9U32GkDomIH1MU9cEG6fBvLBhVxs5jzaRKfONMsJH649ZTRjW9KOHBttGsUZO6E2CCkBKftdIYoCUiWJb44seoezYLhmDcj57BKWFA-kEpkk3_ydthkzIWq7DtWuqttVHetTkbGp77emUcEkVz2Q0wRxrO-jlqb6F4N2ojzM5L-IWIHb5HMl6xUx0-FeCl-U8vD0ywiwZvZ1r946ee4Wxc7uXdbnRpPcrTkvu0an4LhV3JoxjHAI22EUnlGMcTe86nvVm4mlLjz6iv94Jk_6TiWBbcRXxTAl9sTuORw0MABhIURFJOEMa6mtBDxFLzznFrtt-nRzdx4_Ig8-fS8Sa1btpXy7K-d_amBnt_K-T4E2uLskzdldLZJKJgvwrvWmdafrNjC7RbABvxzZhEfz_-0tmGbDxCVZsr9OkzyN5jQu1wCDicVdXda-yfxzpgv2aJMRXJoCHNoW29HGDB8IR07Ifbgw0ksGJJoot8g_DrAnE_i6fwhrwaO0SW3hoJ05nwZFZhItXg2JcnXd-r_Jj6XMz_ICfb9xeN9WeJ-RXh_vFp8FFBdvQn7T-j8wFiYDjdZGZJw6HwBJAdraHUxTiFzD50On71VtitPsArdhoz-CDT9mIKnXNeV9MpRjGVa8CQAnLm7f9-z6juctneExKUV6Xujy9iB9g-bstaBdiLldZ2ASFRMvmnQ7c6N9nDDgW9LjkipDhKbvUx6M_DMpsu-xmaQzg2GQKAsL_Oh3WgfEM12fTLfRs0AxwZ5bwgFowI_dxCuCyd5_hLSD6Qvw1bNT5MPewO8Nkp5opGKxMMdFmWwXZBgfKW_jCvlJdqjDA3v_QxuE7fki-d_ThLHN6WdcuARh2WeclxOB7WSHBBkh4_O1UYm5t218ctiP8-zcaiTxyYM1DSHn2oOfChTlgMR0CShpLgiDfURjo1pN-afySV9C86fXtqL06mDkQasDz2ZVtqE7rKAplJRZqkoEeDaD83J0u7uAgr9MVjDfLWz5W0n4AWG9Lbx-4Rf-Fa_gTL2QgXrxIhY2vu83Wv63fLCuHb_sNkHWVLsMs0G7C0B0fBEXBbfBEBWblrC8BKaACx0Kspld1xtlS8F2qrmAKkceC-zKjfKYkHLj85y4VPCrXptBU9VD77tcIP79PzBO58Hde7H7r7RVv6L0EmGAgXem6mjcuPkVg1oxMgjP9Fp3GahlNlf_sdLjLYFmj93EuqdMLxGUwhAHYJV6acq04-LInIAlCrLiEq5Ij4wqFi6528HOwTzA0b39SbyQcKHvd4x-zNvcxx3r0nQN5KIYqziNKQmXDZ3hprd6fZ_ywc5APu6mKWlk0Vnx0ozRs1AXCU2xDuRN4ldptDxpyIch4kWVT7mU2YyHBU1uE=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0a2d8804ab24bfe6016af723af6af887d190d047c72d62c997"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_zmY866qoz466UDT3TGHKk6ij",
+                        name: "ping",
+                        arguments: {},
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "pong",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]
