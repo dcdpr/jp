@@ -215,13 +215,21 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
   and a working clone whose `origin` points to that bare repository, merges the
   release-tooling branch into the clone's `main`, and assigns a distinct
   workspace ID so backfill conversations and builds stay isolated.
-- `just backfill next` proposes a cut date roughly six weeks after the previous
-  release (prompting for an optional override), drafts changelog fragments from
-  the period's commits using the `prose` persona with explicit `Credits` ([RFD
-  121]), commits the fragments to `main`, runs `jp release cut --at <commit>`
-  with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the cut date, runs `jp
-  release build --quick` for the host Mac to verify the commit compiles before
-  editing notes, and checks out the notes branch.
+- `just backfill next` proposes the period's last day, roughly six weeks after
+  the previous release (prompting for an optional override), checks out the
+  period's last commit in a worktree beside the clone, and starts drafting.
+- `just backfill draft` drafts fragments in an interactive `jp query` with the
+  `release-notes` persona.
+  The model reads each change's diff and the release's code, which `jp query
+  --mount` shows it read-only, and writes each fragment through `changelog_add`
+  with explicit `Credits` ([RFD 121]), shown for approval before it is written.
+  The drafts stay uncommitted: `--only` drafts named changes, `--redo` replaces
+  named fragments, and `just backfill changes` lists the period's changes with
+  the fragments that credit them.
+- `just backfill cut` commits the fragments to `main`, runs `jp release cut --at
+  <commit>` with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the period's
+  last day, runs `jp release build --quick` for the host Mac to verify the
+  commit compiles, and checks out the notes branch.
 - The maintainer reviews and edits the notes on the notes branch, previewing
   them with `jp release render` or `just develop-docs`.
 - `just backfill proceed` merges the notes branch into `main`, runs `jp release
@@ -313,10 +321,10 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
 - **Linux ARM64 test coverage.** CI runs tests on Linux and Windows `x86_64`, so
   `aarch64-unknown-linux-gnu` is only verified by compilation (and optional
   local Docker runs).
-- **Historical cut points that fail to compile.** `just backfill next` runs a
+- **Historical cut points that fail to compile.** `just backfill cut` runs a
   host `--quick` build immediately after cutting so broken cut points are caught
-  before drafting release notes, and `just backfill revert` can move the cut
-  point to an adjacent commit.
+  before the notes are refined, and `just backfill revert` followed by `next`
+  moves the cut point to another day; the drafted fragments keep their credits.
 - **Xcode SDK / linker incompatibilities on older toolchains.** Newer macOS SDKs
   can fail to link with older Command Line Tools linkers; `build.sh` probes
   installed developer directories and selects one whose linker and SDK match.
