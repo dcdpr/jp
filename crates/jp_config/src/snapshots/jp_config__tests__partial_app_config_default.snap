@@ -297,10 +297,15 @@ PartialAppConfig {
         ),
     },
     plugins: PartialPluginsConfig {
-        shutdown_timeout_secs: None,
-        command: Map(
-            {},
-        ),
+        command: PartialCommandPluginsConfig {
+            defaults: PartialCommandPluginDefaultsConfig {
+                run: None,
+                shutdown_timeout_secs: None,
+            },
+            plugins: Map(
+                {},
+            ),
+        },
     },
     user: PartialUserConfig {
         name: None,

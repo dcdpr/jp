@@ -639,12 +639,17 @@ Ok(
                 ),
             },
             plugins: PartialPluginsConfig {
-                shutdown_timeout_secs: Some(
-                    5,
-                ),
-                command: Map(
-                    {},
-                ),
+                command: PartialCommandPluginsConfig {
+                    defaults: PartialCommandPluginDefaultsConfig {
+                        run: None,
+                        shutdown_timeout_secs: Some(
+                            5,
+                        ),
+                    },
+                    plugins: Map(
+                        {},
+                    ),
+                },
             },
             user: PartialUserConfig {
                 name: None,

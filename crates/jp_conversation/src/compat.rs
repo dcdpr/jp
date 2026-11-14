@@ -49,6 +49,10 @@ static SCHEMA: LazyLock<Schema> = LazyLock::new(AppConfig::schema);
 /// Used for both the base config snapshot (`base_config.json`) and config delta
 /// events in the event stream.
 pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
+    // Run before `strip_unknown_fields` so the legacy key is migrated rather
+    // than stripped as unknown.
+    migrate_plugin_shutdown_timeout(&mut value);
+
     let stripped = strip_unknown_fields(&mut value, &SCHEMA);
     if stripped.count() > 0 {
         warn!(
@@ -137,6 +141,33 @@ fn remove_at_path(value: &mut Value, path: &ErrorPath) -> bool {
             in_range
         }),
         Segment::Enum { .. } | Segment::Unknown => false,
+    }
+}
+
+/// Migrate `plugins.shutdown_timeout_secs` to
+/// `plugins.command.*.shutdown_timeout_secs`.
+///
+/// Preserves any value already present at
+/// `plugins.command.*.shutdown_timeout_secs` and removes the legacy key.
+fn migrate_plugin_shutdown_timeout(value: &mut Value) {
+    let Some(plugins) = value.get_mut("plugins").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(timeout) = plugins.remove("shutdown_timeout_secs") else {
+        return;
+    };
+
+    // Insert `*` alongside per-plugin entries (or alongside `value` and
+    // `strategy` when the map uses a merge wrapper).
+    let defaults = plugins
+        .entry("command")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .map(|command| command.entry("*").or_insert_with(|| json!({})))
+        .and_then(Value::as_object_mut);
+
+    if let Some(defaults) = defaults {
+        defaults.entry("shutdown_timeout_secs").or_insert(timeout);
     }
 }
 

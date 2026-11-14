@@ -129,6 +129,7 @@ fn is_pinned(config: &PartialAppConfig, name: &str) -> bool {
     config
         .plugins
         .command
+        .plugins
         .get(name)
         .is_some_and(|c| c.checksum.is_some())
 }

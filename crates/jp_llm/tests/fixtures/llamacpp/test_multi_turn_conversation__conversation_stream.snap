@@ -250,7 +250,12 @@ expression: v
       }
     },
     "plugins": {
-      "shutdown_timeout_secs": 5
+      "command": {
+        "*": {
+          "run": "ask",
+          "shutdown_timeout_secs": 5
+        }
+      }
     }
   },
   "events": [

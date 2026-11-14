@@ -49,6 +49,7 @@ use std::{
     fmt::Display,
     future::pending,
     sync::Arc,
+    thread,
 };
 
 use indexmap::IndexMap;
@@ -66,6 +67,7 @@ use jp_conversation::{
         InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
     },
 };
+use jp_inquire::{PromptCloser, closing_on};
 use jp_llm::query::ToolExecution;
 use jp_mcp::server::StderrSink;
 use jp_printer::Printer;
@@ -271,6 +273,21 @@ fn stderr_sink(
     Some(Arc::new(move |line: &str| sink.push(line)))
 }
 
+/// Handle to the currently active terminal prompt for a tool call.
+///
+/// Signals [`PromptCloser::close`] on drop so the prompt is closed if the batch
+/// or turn is dropped while the prompt is open.
+struct OpenPrompt {
+    call: usize,
+    closer: PromptCloser,
+}
+
+impl Drop for OpenPrompt {
+    fn drop(&mut self) {
+        self.closer.close();
+    }
+}
+
 /// The tool calls of one response, from arrival to their recorded responses.
 struct Batch {
     /// Every call the batch took, in the order the assistant sent them.
@@ -313,6 +330,13 @@ struct Batch {
     /// Whether a prompt owns the terminal.
     prompting: bool,
 
+    /// Active prompt holding the terminal, if any.
+    ///
+    /// Cleared when the prompt is answered or closed.
+    /// Because a closed prompt retains the terminal until its thread returns,
+    /// `prompting` can remain `true` after `open_prompt` becomes `None`.
+    open_prompt: Option<OpenPrompt>,
+
     /// Whether the response has finished streaming, so no more calls arrive.
     stream_ended: bool,
 
@@ -341,10 +365,42 @@ impl Batch {
             cancellation: CancellationToken::new(),
             prompts: VecDeque::new(),
             prompting: false,
+            open_prompt: None,
             stream_ended: false,
             released: false,
             progress: false,
             connection_lost: false,
+        }
+    }
+
+    /// Mark the terminal as held by a prompt for `call` and return its
+    /// [`PromptCloser`].
+    fn open_prompt(&mut self, call: usize) -> PromptCloser {
+        let closer = PromptCloser::new();
+        self.prompting = true;
+        self.open_prompt = Some(OpenPrompt {
+            call,
+            closer: closer.clone(),
+        });
+
+        closer
+    }
+
+    /// Mark the terminal as released after the active prompt returns.
+    fn prompt_returned(&mut self) {
+        self.prompting = false;
+        self.open_prompt = None;
+    }
+
+    /// Close the active prompt if its tool call has already settled.
+    fn close_settled_prompt(&mut self) {
+        let settled = self
+            .open_prompt
+            .as_ref()
+            .is_some_and(|open| matches!(self.calls[open.call].wait, Wait::Done));
+
+        if settled {
+            self.open_prompt = None;
         }
     }
 
@@ -1090,6 +1146,7 @@ impl ToolCoordinator {
         };
         self.dispatch(&mut batch, event, host);
         self.pump(&mut batch, host);
+        batch.close_settled_prompt();
         self.batch = Some(batch);
     }
 
@@ -1108,8 +1165,11 @@ impl ToolCoordinator {
     /// `interrupts` carries interrupts from a client driving the turn from
     /// outside the process; one is taken per call, and the rest stay queued.
     ///
-    /// A prompt still open once every call is settled is waited for: it owns
-    /// the terminal until answered, and its answer changes nothing.
+    /// If a prompt is still open when its call settles, it is closed (when the
+    /// widget supports closing) and awaited until it releases the terminal.
+    /// Prompts rendered by `inquire` (such as the approval prompt) cannot be
+    /// closed programmatically and wait for a keystroke before returning; their
+    /// answer is discarded.
     ///
     /// [`submit`]: Self::submit
     pub(crate) async fn finish(
@@ -1143,11 +1203,12 @@ impl ToolCoordinator {
         let mut outcome = ExecutionOutcome::Completed;
         let mut stop = Stop::default();
 
-        // A call can be settled while its prompt is open, as when the
-        // connection is lost or a client stops the calls. The prompt runs on a
-        // blocking thread nothing can stop, so it is waited for here rather
-        // than left on screen past the batch it reports to.
+        // If a call settles while its prompt is open (e.g. on connection loss
+        // or client interrupt), close the prompt and wait for its thread to
+        // release the terminal.
         while !batch.settled() || batch.prompting {
+            batch.close_settled_prompt();
+
             // One client interrupt per phase. Once the calls are being
             // cancelled, the answer they give back is settled, and a second
             // reply taken here would replace the first after both were reported
@@ -1372,7 +1433,7 @@ impl ToolCoordinator {
                 self.on_step(batch, call, result, host);
             }
             ToolEvent::Permission { call, result } => {
-                batch.prompting = false;
+                batch.prompt_returned();
                 // Settled while its prompt was open; the answer comes too late.
                 if matches!(batch.calls[call].wait, Wait::Done) {
                     return;
@@ -1387,7 +1448,7 @@ impl ToolCoordinator {
                 persist_level,
                 redact,
             } => {
-                batch.prompting = false;
+                batch.prompt_returned();
                 if batch.calls[call].question.take().is_none() {
                     return;
                 }
@@ -1410,7 +1471,7 @@ impl ToolCoordinator {
                 inquiry_id,
                 reason,
             } => {
-                batch.prompting = false;
+                batch.prompt_returned();
                 if batch.calls[call].question.take().is_none() {
                     return;
                 }
@@ -1460,7 +1521,7 @@ impl ToolCoordinator {
                 }
             }
             ToolEvent::Reviewed { call, review } => {
-                batch.prompting = false;
+                batch.prompt_returned();
                 self.on_reviewed(batch, call, review, host);
             }
             ToolEvent::Folded {
@@ -1696,11 +1757,11 @@ impl ToolCoordinator {
                     PreRender::Deferred => None,
                 };
                 call.wait = Wait::Approval(Box::new(info.clone()));
-                batch.prompting = true;
+                let closer = batch.open_prompt(index);
 
                 let prompter = Arc::clone(host.prompter);
                 let events = batch.events.clone();
-                tokio::task::spawn_blocking(move || {
+                spawn_prompt(closer, move || {
                     let result = prompter
                         .prompt_permission(&info)
                         .map_err(|error| error.to_string());
@@ -1953,13 +2014,13 @@ impl ToolCoordinator {
                     .set_prompt_background(host.renderer.current_region());
                 // The prompt is on screen even when nothing is drawn above it.
                 host.renderer.mark_drawn();
-                batch.prompting = true;
+                let closer = batch.open_prompt(call);
 
                 let prompter = Arc::clone(host.prompter);
                 let events = batch.events.clone();
                 let question_id = question.id.to_string();
                 let redact = question.answer_type == AnswerType::Secret;
-                tokio::task::spawn_blocking(move || {
+                spawn_prompt(closer, move || {
                     let event = match prompter.prompt_question(&question) {
                         Ok(result) => ToolEvent::Answered {
                             call,
@@ -1997,7 +2058,7 @@ impl ToolCoordinator {
                 let tool_name = batch.calls[call].tool_name.clone();
                 self.set_tool_state(&state_key, ToolCallState::AwaitingResultEdit);
                 host.renderer.mark_drawn();
-                batch.prompting = true;
+                let closer = batch.open_prompt(call);
                 Self::spawn_result_mode_prompt(
                     call,
                     tool_name,
@@ -2005,6 +2066,7 @@ impl ToolCoordinator {
                     mode,
                     Arc::clone(host.prompter),
                     batch.events.clone(),
+                    closer,
                 );
             }
         }
@@ -2515,8 +2577,9 @@ impl ToolCoordinator {
         result_mode: ResultMode,
         prompter: Arc<ToolPrompter>,
         events: mpsc::UnboundedSender<ToolEvent>,
+        closer: PromptCloser,
     ) {
-        tokio::task::spawn_blocking(move || {
+        spawn_prompt(closer, move || {
             // Whether the content changed is decided here, where both the
             // offered response and the user's answer are in hand. Downstream
             // it becomes `Review::edited`, which is what lets the execution
@@ -2574,6 +2637,16 @@ impl Drop for ToolCoordinator {
     fn drop(&mut self) {
         self.cancel();
     }
+}
+
+/// Run `prompt` on a dedicated OS thread under [`closing_on`].
+///
+/// Prompts that use `inquire` block until the user presses a key and cannot be
+/// closed programmatically.
+/// Spawning a plain OS thread rather than `tokio::task::spawn_blocking`
+/// prevents Tokio runtime shutdown from hanging on an unanswered prompt.
+fn spawn_prompt(closer: PromptCloser, prompt: impl FnOnce() + Send + 'static) {
+    thread::spawn(move || closing_on(&closer, prompt));
 }
 
 #[cfg(test)]
