@@ -391,10 +391,12 @@ static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
     use_replay_credentials: |config| {
         config.vllm.api_key_env = super::replay_credential_env().into();
     },
+    // A model the recording deployment serves; its `max_model_len` is the
+    // context window `model_details` reports.
     model: || ModelDetails {
-        id: "vllm/Qwen/Qwen3.8-Flash-Next-NVFP4".parse().unwrap(),
+        id: "vllm/Qwen/Qwen3.8-27B-FP8".parse().unwrap(),
         display_name: None,
-        context_window: Some(131_072),
+        context_window: Some(1_000_000),
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,

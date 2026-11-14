@@ -2672,3 +2672,31 @@ fn the_third_party_hint_says_where_the_plugin_comes_from() {
          (https://example.com/metrics).\n  Install it with `jp plugin install metrics`."
     );
 }
+
+#[test]
+fn a_plugin_logs_fields_are_forwarded_as_compact_json() {
+    let log = LogMessage {
+        level: "info".to_owned(),
+        message: "Turn ended.".to_owned(),
+        fields: Map::from_iter([
+            ("chat".to_owned(), json!("direct:1")),
+            ("run_ms".to_owned(), json!(5200)),
+        ]),
+    };
+
+    assert_eq!(
+        log_fields(&log).as_deref(),
+        Some(r#"{"chat":"direct:1","run_ms":5200}"#)
+    );
+}
+
+#[test]
+fn a_plugin_log_without_fields_forwards_none() {
+    let log = LogMessage {
+        level: "info".to_owned(),
+        message: "Turn ended.".to_owned(),
+        fields: Map::new(),
+    };
+
+    assert_eq!(log_fields(&log), None);
+}

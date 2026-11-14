@@ -67,6 +67,14 @@ impl Level {
     pub(crate) const ERROR: Self = Self("error");
 }
 
+/// Build a log event's fields from `(name, value)` pairs.
+pub(crate) fn fields<const N: usize>(pairs: [(&str, Value); N]) -> Map<String, Value> {
+    pairs
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
+}
+
 /// Host operations used by the bridge.
 pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// Create a new conversation and start its first turn.
@@ -110,7 +118,17 @@ pub(crate) trait Host: Clone + Send + Sync + 'static {
     /// names.
     fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send;
 
-    fn log(&self, level: Level, message: &str);
+    /// Log an event.
+    ///
+    /// `message` names the event and is the same for every occurrence, which
+    /// `&'static str` enforces.
+    /// Everything that varies between occurrences goes in `fields`.
+    fn log_with(&self, level: Level, message: &'static str, fields: Map<String, Value>);
+
+    /// Log an event that has no fields.
+    fn log(&self, level: Level, message: &'static str) {
+        self.log_with(level, message, Map::new());
+    }
 
     /// Print a line to the user's terminal regardless of log level.
     fn print(&self, text: &str);
@@ -419,11 +437,11 @@ impl Host for HostClient {
         }
     }
 
-    fn log(&self, level: Level, message: &str) {
+    fn log_with(&self, level: Level, message: &'static str, fields: Map<String, Value>) {
         drop(self.send(&PluginToHost::Log(LogMessage {
             level: level.0.to_owned(),
             message: message.to_owned(),
-            fields: Map::new(),
+            fields,
         })));
     }
 

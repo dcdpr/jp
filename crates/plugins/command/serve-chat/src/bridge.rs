@@ -23,24 +23,30 @@
 //! inspected when the turn ends.
 //! If a turn modifies or creates any file outside the configured writable
 //! directories, the bridge pauses until the working tree is clean again.
+//!
+//! Each decision and each turn the host accepted is logged with how long it
+//! took.
 
 use std::{sync::Arc, time::Duration};
 
-use chrono::NaiveDate;
 use jp_plugin::message::{Compaction, StoredCompaction, SummarySource, ToolCallsMode};
 use serde_json::{Map, Value, json};
-use tokio::sync::{mpsc, watch};
+use tokio::{
+    sync::{mpsc, watch},
+    time::Instant,
+};
 
 use crate::{
     answer::last_answer,
     checkout::Checkout,
     decide::{Action, Decide, Verdict},
-    host::{Host, Level, NewTurn, ReplyError},
+    host::{Host, Level, ReplyError, fields},
     inbox::{Inbox, Incoming, Next},
-    options::{Options, Rollover},
+    options::Options,
     queue::{Queue, Waiting},
     state::{Conversations, State},
     transport::{Attachment, Chat, Inbound, Outbox},
+    turn::{TurnRequest, cfg, run_turn, title},
 };
 
 /// How often the typing indicator is renewed while a turn runs.
@@ -76,23 +82,38 @@ struct Running {
 
     /// Conversation ID, or `None` until the host has the turn's request.
     conversation: Option<String>,
+
+    /// When the turn's messages left the queue, before the checkout was locked
+    /// and pulled.
+    picked: Instant,
+
+    /// When the checkout was ready and the turn's request went to the host.
+    prepared: Instant,
+
+    /// When the host accepted the request, and how long reading the configured
+    /// tools took before that.
+    accepted: Option<(Instant, Duration)>,
 }
 
 /// Completion event from a spawned host task.
 #[derive(Debug)]
 pub(crate) enum Event {
-    /// The host accepted the active turn's request on `conversation`.
+    /// The host accepted the active turn's request on `conversation`, after
+    /// spending `tools` reading the configured tools.
     Started {
         conversation: String,
+        tools: Duration,
     },
 
     Ended {
         result: Result<(), String>,
     },
 
-    /// Classification result for the front message in the inbox.
+    /// Classification result for the front message in the inbox, which the
+    /// decide API took `took` to answer.
     Decided {
         result: Result<Verdict, String>,
+        took: Duration,
     },
 
     /// Compaction of `chat`'s conversation completed.
@@ -173,7 +194,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         match self.checkout.stray() {
             Ok(stray) if stray.is_empty() => {}
             Ok(stray) => self.pause(&stray),
-            Err(error) => self.host.log(Level::ERROR, &check_failed(&error)),
+            Err(error) => self.log_check_failed(&error),
         }
 
         let mut typing = tokio::time::interval(TYPING_INTERVAL);
@@ -214,10 +235,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     pub(crate) async fn finish(&mut self, stop: bool) {
         self.queue.close();
         if self.running.is_some() {
-            self.host.log(
-                Level::INFO,
-                "Waiting for the running turn to end before exiting.",
-            );
+            self.host
+                .log(Level::INFO, "Waiting for the running turn to end.");
         }
 
         let mut stopping = false;
@@ -231,9 +250,10 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 let host = self.host.clone();
                 tokio::spawn(async move {
                     if let Err(error) = request.await {
-                        host.log(
+                        host.log_with(
                             Level::WARN,
-                            &format!("Failed to stop the running turn: {error}"),
+                            "Failed to stop the running turn.",
+                            fields([("error", error.into())]),
                         );
                     }
                 });
@@ -249,13 +269,13 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     pub(crate) fn receive(&mut self, message: Inbound) {
         let Some((key, person)) = self.options.signal_person(&message.sender) else {
             // Omit the message body from the log to avoid recording untrusted or private text.
-            self.host.log(
+            self.host.log_with(
                 Level::WARN,
-                &format!(
-                    "Dropped a message from {} in {}: not one of the configured people.",
-                    message.sender.join(" / "),
-                    message.chat
-                ),
+                "Dropped message from unconfigured sender.",
+                fields([
+                    ("chat", message.chat.to_string().into()),
+                    ("sender", json!(message.sender)),
+                ]),
             );
             if let Some(id) = message.sender.first()
                 && self.inbox.first_sighting(id)
@@ -285,8 +305,11 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 Next::Decide(decision) => {
                     let events = self.events_tx.clone();
                     tokio::spawn(async move {
+                        let asked = Instant::now();
+                        let result = decision.await;
                         drop(events.send(Event::Decided {
-                            result: decision.await,
+                            result,
+                            took: asked.elapsed(),
                         }));
                     });
                 }
@@ -294,14 +317,34 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
-    /// Apply the decision for the front inbox message and advance the inbox.
-    fn decided(&mut self, result: Result<Verdict, String>) {
-        if let Err(error) = &result {
-            self.host.log(
+    /// Log the decide API's answer for a message in `chat`, and how long it
+    /// took.
+    fn log_decision(&self, result: &Result<Verdict, String>, chat: &Chat, took: Duration) {
+        match result {
+            Ok(verdict) => self.host.log_with(
+                Level::INFO,
+                "Message classified.",
+                fields([
+                    ("chat", chat.to_string().into()),
+                    ("action", verdict.action.key().into()),
+                    ("probability", verdict.probability.into()),
+                    ("took_ms", millis(took)),
+                ]),
+            ),
+            Err(error) => self.host.log_with(
                 Level::WARN,
-                &format!("The decide API failed, so the message is answered: {error}"),
-            );
+                "Decide failed, answering.",
+                fields([
+                    ("chat", chat.to_string().into()),
+                    ("error", error.as_str().into()),
+                    ("took_ms", millis(took)),
+                ]),
+            ),
         }
+    }
+
+    /// Apply the decision for the front inbox message and advance the inbox.
+    fn decided(&mut self, result: Result<Verdict, String>, took: Duration) {
         let threshold = self
             .options
             .decide
@@ -309,15 +352,24 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             .map_or(0.0, |decide| decide.threshold);
 
         if let Some(incoming) = self.inbox.decided() {
+            self.log_decision(&result, &incoming.chat, took);
             match action(result.ok(), threshold) {
                 Action::Answer => self.route(incoming),
-                Action::Ignore => self.host.log(
+                Action::Ignore => self.host.log_with(
                     Level::INFO,
-                    &format!("A message in {} isn't for the assistant.", incoming.chat),
+                    "Message ignored.",
+                    fields([("chat", incoming.chat.to_string().into())]),
                 ),
                 Action::NewConversation => {
                     if let Err(error) = self.conversations.forget(&incoming.chat) {
-                        self.host.log(Level::ERROR, &error);
+                        self.host.log_with(
+                            Level::ERROR,
+                            "Failed to forget the conversation.",
+                            fields([
+                                ("chat", incoming.chat.to_string().into()),
+                                ("error", error.into()),
+                            ]),
+                        );
                     }
                     self.outbox.send(&incoming.chat, NEW_CONVERSATION);
                 }
@@ -417,32 +469,34 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
     pub(crate) async fn handle(&mut self, event: Event) {
         match event {
-            Event::Started { conversation } => {
+            Event::Started {
+                conversation,
+                tools,
+            } => {
                 let Some(running) = &mut self.running else {
                     return;
                 };
                 running.conversation = Some(conversation.clone());
+                running.accepted = Some((Instant::now(), tools));
                 let chat = running.chat.clone();
 
                 if let Err(error) = self.conversations.record(&chat, &conversation) {
-                    self.host.log(Level::ERROR, &error);
+                    self.host.log_with(
+                        Level::ERROR,
+                        "Failed to record the conversation.",
+                        fields([
+                            ("chat", chat.to_string().into()),
+                            ("conversation", conversation.into()),
+                            ("error", error.into()),
+                        ]),
+                    );
                 }
                 self.hand_over();
             }
 
-            Event::Ended { result } => {
-                let Some(running) = self.running.take() else {
-                    return;
-                };
-                self.outbox.typing(&running.chat, false);
-                if let Some(sent) = self.answer(&running, result).await {
-                    self.inbox
-                        .remember(&running.chat, &format!("Assistant: {sent}"));
-                }
-                self.after_turn();
-            }
+            Event::Ended { result } => self.ended(result).await,
 
-            Event::Decided { result } => self.decided(result),
+            Event::Decided { result, took } => self.decided(result, took),
 
             Event::Compacted { chat, result } => self.compacted(&chat, result),
 
@@ -459,9 +513,10 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                     // the front of the chat's queue.
                     Err(ReplyError::Refused(_)) => self.queue.push_first(chat, person, text),
                     Err(ReplyError::Broken(error)) => {
-                        self.host.log(
+                        self.host.log_with(
                             Level::ERROR,
-                            &format!("Failed to hand over a reply: {error}"),
+                            "Failed to hand over a reply.",
+                            fields([("chat", chat.to_string().into()), ("error", error.into())]),
                         );
                         self.queue.push_first(chat, person, text);
                     }
@@ -470,15 +525,37 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         }
     }
 
+    /// Send the running turn's answer to its chat, log how long the turn's
+    /// phases took, and check the checkout.
+    async fn ended(&mut self, result: Result<(), String>) {
+        let Some(running) = self.running.take() else {
+            return;
+        };
+        let ended = Instant::now();
+        self.outbox.typing(&running.chat, false);
+        if let Some(sent) = self.answer(&running, result).await {
+            self.inbox
+                .remember(&running.chat, &format!("Assistant: {sent}"));
+        }
+        if let Some(phases) = phases(&running, ended, Instant::now()) {
+            self.host.log_with(Level::INFO, "Turn ended.", phases);
+        }
+        self.after_turn();
+    }
+
     /// Release the queue hold after compaction and report the result to `chat`.
     fn compacted(&mut self, chat: &Chat, result: Result<Vec<StoredCompaction>, String>) {
         self.queue.release();
         let reply = match result {
             Ok(stored) => describe_compactions(&stored),
             Err(error) => {
-                self.host.log(
+                self.host.log_with(
                     Level::ERROR,
-                    &format!("Compacting the conversation in {chat} failed: {error}"),
+                    "Compaction failed.",
+                    fields([
+                        ("chat", chat.to_string().into()),
+                        ("error", error.as_str().into()),
+                    ]),
                 );
                 format!("I couldn't compact this conversation: {error}")
             }
@@ -490,9 +567,13 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     /// the chat, returning what the assistant said, if anything.
     async fn answer(&self, running: &Running, result: Result<(), String>) -> Option<String> {
         if let Err(error) = result {
-            self.host.log(
+            self.host.log_with(
                 Level::ERROR,
-                &format!("A turn for {} failed: {error}", running.chat),
+                "Turn failed.",
+                fields([
+                    ("chat", running.chat.to_string().into()),
+                    ("error", error.into()),
+                ]),
             );
             self.outbox.send(&running.chat, FAILED);
             return None;
@@ -502,9 +583,10 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         match self.host.events(conversation).await {
             Ok(events) => match last_answer(&events) {
                 Some(answer) if is_silent(&answer) => {
-                    self.host.log(
+                    self.host.log_with(
                         Level::INFO,
-                        &format!("The turn for {} chose not to answer.", running.chat),
+                        "Turn chose not to answer.",
+                        fields([("chat", running.chat.to_string().into())]),
                     );
                     None
                 }
@@ -515,9 +597,14 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 }
             },
             Err(error) => {
-                self.host.log(
+                self.host.log_with(
                     Level::ERROR,
-                    &format!("Failed to read conversation {conversation}: {error}"),
+                    "Failed to read the conversation.",
+                    fields([
+                        ("chat", running.chat.to_string().into()),
+                        ("conversation", conversation.as_str().into()),
+                        ("error", error.into()),
+                    ]),
                 );
                 self.outbox.send(&running.chat, FAILED);
                 None
@@ -532,14 +619,27 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             Ok(stray) if stray.is_empty() => {}
             Ok(stray) => self.pause(&stray),
             Err(error) => {
-                self.host.log(Level::ERROR, &check_failed(&error));
+                self.log_check_failed(&error);
                 self.pause(&[format!("(the check failed: {error})")]);
             }
         }
     }
 
+    fn log_check_failed(&self, error: &str) {
+        self.host.log_with(
+            Level::ERROR,
+            "Checkout check failed.",
+            fields([("error", error.into())]),
+        );
+    }
+
     /// Pause turn execution and alert the admin with the out-of-scope paths.
     fn pause(&mut self, stray: &[String]) {
+        self.host.log_with(
+            Level::WARN,
+            "Bridge paused.",
+            fields([("stray", json!(stray))]),
+        );
         self.alert(&format!(
             "The bridge is paused: these changes are outside the writable directories, so take or \
              discard them before it starts another turn:\n{}",
@@ -562,11 +662,12 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             match self.checkout.is_clean() {
                 Ok(true) => {
                     self.paused = None;
+                    self.host.log(Level::WARN, "Bridge resumed.");
                     self.alert("The tree is clean again; the bridge has resumed.");
                 }
                 Ok(false) => return,
                 Err(error) => {
-                    self.host.log(Level::ERROR, &check_failed(&error));
+                    self.log_check_failed(&error);
                     return;
                 }
             }
@@ -575,22 +676,30 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         let Some(waiting) = self.queue.next_turn() else {
             return;
         };
+        let picked = Instant::now();
         match self.checkout.begin() {
             Ok(None) => {}
-            Ok(Some(warning)) => self.host.log(Level::WARN, &warning),
+            Ok(Some(warning)) => self.log_pull_failed(warning),
             Err(error) => {
+                self.host.log_with(
+                    Level::WARN,
+                    "Turn not started.",
+                    fields([("error", error.as_str().into())]),
+                );
                 self.alert(&format!("A turn couldn't start: {error}"));
                 self.queue.restore(waiting);
                 return;
             }
         }
 
-        self.start(waiting);
+        self.start(waiting, picked);
     }
 
     /// Spawn a turn on the current conversation for `waiting.chat`, creating
     /// the conversation if needed.
-    fn start(&mut self, waiting: Waiting) {
+    ///
+    /// `picked` is when `waiting` left the queue.
+    fn start(&mut self, waiting: Waiting, picked: Instant) {
         let conversation = self
             .conversations
             .current(&waiting.chat)
@@ -614,6 +723,9 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             chat: waiting.chat,
             person: waiting.person,
             conversation: None,
+            picked,
+            prepared: Instant::now(),
+            accepted: None,
         });
 
         tokio::spawn(async move {
@@ -627,13 +739,20 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         }
         if let Some(warning) = self.checkout.idle() {
-            self.host.log(Level::WARN, &warning);
+            self.log_pull_failed(warning);
         }
     }
 
-    /// Log `text`, print it to the host, and DM the configured admin.
+    fn log_pull_failed(&self, error: String) {
+        self.host.log_with(
+            Level::WARN,
+            "Pull failed.",
+            fields([("error", error.into())]),
+        );
+    }
+
+    /// Print `text` to the host and DM the configured admin.
     fn alert(&self, text: &str) {
-        self.host.log(Level::WARN, text);
         self.host.print(text);
 
         let account = self
@@ -646,6 +765,41 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             self.outbox.send(&Chat::Direct(account), text);
         }
     }
+}
+
+/// `duration` as a log field, in whole milliseconds.
+fn millis(duration: Duration) -> Value {
+    u64::try_from(duration.as_millis())
+        .unwrap_or(u64::MAX)
+        .into()
+}
+
+/// The log fields for a finished turn: its chat, its conversation, and how long
+/// each phase took in milliseconds.
+///
+/// The turn ran until `ended`, and its answer was read and handed to the
+/// transport by `answered`.
+/// Returns `None` for a turn the host never accepted.
+fn phases(running: &Running, ended: Instant, answered: Instant) -> Option<Map<String, Value>> {
+    let (accepted, tools) = running.accepted?;
+    let conversation = running.conversation.as_deref()?;
+    let opening = accepted
+        .duration_since(running.prepared)
+        .saturating_sub(tools);
+
+    Some(fields([
+        ("chat", running.chat.to_string().into()),
+        ("conversation", conversation.into()),
+        ("total_ms", millis(answered.duration_since(running.picked))),
+        (
+            "checkout_ms",
+            millis(running.prepared.duration_since(running.picked)),
+        ),
+        ("tools_ms", millis(tools)),
+        ("open_ms", millis(opening)),
+        ("run_ms", millis(ended.duration_since(accepted))),
+        ("answer_ms", millis(answered.duration_since(ended))),
+    ]))
 }
 
 /// Resolve the action to take from the decider's `verdict`.
@@ -749,138 +903,6 @@ fn describe(attachment: &Attachment) -> String {
         Some(path) => format!("[Attached {what}, saved on the bridge's machine at {path}]"),
         None => format!("[Attached {what}, which the bridge couldn't save]"),
     }
-}
-
-fn check_failed(error: &str) -> String {
-    format!("Failed to check the checkout: {error}")
-}
-
-/// Build the `--cfg` arguments for a turn triggered by `person`.
-///
-/// Applies the configured persona, sets `user.name` and the plugin `assistant`
-/// attribution to `<Name> via jp`, and forces `conversation.start_local = true`
-/// so conversation files are stored outside the workspace checkout.
-pub(crate) fn cfg(options: &Options, person: &str) -> Vec<String> {
-    let name = options
-        .people
-        .get(person)
-        .map_or(person, |person| person.name.as_str());
-    let author = format!("{name} via jp");
-
-    let mut cfg: Vec<String> = options.persona.iter().cloned().collect();
-    cfg.extend(options.cfg.iter().cloned());
-    // Pass each plugin option as a dotted key=value assignment so merging
-    // preserves the plugin's `run` policy from the workspace config.
-    cfg.extend([
-        format!("user.name={name}"),
-        "conversation.start_local=true".to_owned(),
-        format!("plugins.command.ticket.options.assistant={author}"),
-        format!("plugins.command.rfd.options.assistant={author}"),
-        format!("plugins.command.wiki.options.assistant={author}"),
-    ]);
-
-    cfg
-}
-
-/// Format the conversation title for `waiting` in the rollover period starting
-/// on `period`.
-fn title(options: &Options, rollover: Rollover, waiting: &Waiting, period: NaiveDate) -> String {
-    let when = match rollover {
-        Rollover::Daily => period.to_string(),
-        Rollover::Weekly(_) => format!("week of {period}"),
-    };
-
-    match waiting.chat {
-        Chat::Direct(_) => {
-            let name = options
-                .people
-                .get(&waiting.person)
-                .map_or(waiting.person.as_str(), |person| person.name.as_str());
-            format!("Chat with {name}, {when}")
-        }
-        Chat::Group(_) => format!("Group chat, {when}"),
-    }
-}
-
-/// Parameters for running a turn on the host.
-struct TurnRequest {
-    content: String,
-    title: String,
-
-    /// [`cfg()`], before [`turn_cfg`] prepends the tool-disabling override.
-    cfg: Vec<String>,
-
-    expires_in: String,
-}
-
-/// Run a turn on `conversation` (or create a new conversation when `None`) and
-/// await its completion.
-///
-/// Emits [`Event::Started`] once the host accepts the request.
-/// Fails before starting the turn if the configured tool list cannot be read,
-/// so a turn never runs without first disabling unapproved tools.
-async fn run_turn<H: Host>(
-    host: &H,
-    conversation: Option<String>,
-    request: TurnRequest,
-    events: &mpsc::UnboundedSender<Event>,
-) -> Result<(), String> {
-    let tools = host
-        .tools()
-        .await
-        .map_err(|error| format!("couldn't read the configured tools: {error}"))?;
-    let cfg = turn_cfg(&tools, request.cfg)?;
-
-    let (conversation, turn) = match conversation {
-        Some(conversation) => {
-            let turn = host.query(&conversation, &request.content, cfg);
-            (conversation, turn)
-        }
-        None => {
-            host.start(NewTurn {
-                content: request.content,
-                title: request.title,
-                cfg,
-                expires_in: request.expires_in,
-            })
-            .await?
-        }
-    };
-    drop(events.send(Event::Started { conversation }));
-
-    turn.await
-}
-
-/// Prepend a `--cfg` JSON override that disables every tool in `tools` before
-/// applying `cfg`.
-///
-/// Because per-tool `enable = true` settings in user or workspace configs take
-/// precedence over `conversation.tools.'*'` defaults and merge key-by-key,
-/// explicitly disabling every configured tool first ensures that only the tools
-/// re-enabled by `cfg` (the persona) remain active.
-///
-/// # Errors
-///
-/// Returns an error if any tool name contains `.`, which would be split as a
-/// path separator by `--cfg` assignment.
-pub(crate) fn turn_cfg(tools: &[String], cfg: Vec<String>) -> Result<Vec<String>, String> {
-    if let Some(name) = tools.iter().find(|name| name.contains('.')) {
-        return Err(format!(
-            "the tool `{name}` can't be disabled, because a `.` in its name splits a `--cfg` key"
-        ));
-    }
-
-    let mut out = vec![];
-    if !tools.is_empty() {
-        let disabled: Map<String, Value> = tools
-            .iter()
-            .map(|name| (name.clone(), json!({ "enable": false })))
-            .collect();
-        out.push(json!({ "conversation": { "tools": disabled } }).to_string());
-    }
-    out.extend(cfg);
-
-    Ok(out)
 }
 
 /// Return whether `answer` matches the [`SILENT`] (`NO_REPLY`) sentinel.

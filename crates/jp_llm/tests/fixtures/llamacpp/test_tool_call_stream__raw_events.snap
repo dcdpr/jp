@@ -1,6 +1,5 @@
 ---
 source: crates/jp_test/src/mock.rs
-assertion_line: 134
 expression: v
 ---
 [
@@ -13,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "FpyxzrUobenAo9FIhFP3Z8FnxbvMV4L9",
+                    id: "5xvrFtGYAKPauN8T1Kb0Kcob3gXiVUi1",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -50,7 +49,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "bar",
+                    "test",
                 ),
             ),
             metadata: {},
@@ -168,133 +167,196 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "he t",
+                "he tool e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ool ran succe",
+                "xecuted succe",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s",
+                "ssful",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "sfu",
+                "ly w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lly! It e",
+                "ith the p",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "xecut",
+                "rovided ar",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ed w",
+                "g",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ith the ar",
+                "ume",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "gu",
+                "nts. It r",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "men",
+                "ec",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ts",
+                "eived a",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " `f",
+                " simple",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "oo",
+                " st",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "=\"ba",
+                "ring",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "r\"",
+                " `",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "` a",
+                "\"tes",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "nd ",
+                "t\"` ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "`ba",
+                "fo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "r=",
+                "r t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "h",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "e `foo` pa",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "rame",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "te",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "r and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " l",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ist",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
             ),
             metadata: {},
         },
@@ -322,77 +384,154 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " \"",
+                " ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "bar\"]`, re",
+                "\"bar",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "turn",
+                "\"]` ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ing the",
+                "fo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " o",
+                "r t",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "utput `",
+                "h",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "w",
+                "e `bar` pa",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "or",
+                "r",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "king",
+                "amet",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "!`.",
+                "er,",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " Let ",
+                " and it re",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "spond",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " with a confi",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "rmation ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "m",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "es",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "sage: \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "wor",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "king!",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\".\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\nLet ",
             ),
             metadata: {},
         },
@@ -441,70 +580,56 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " to try ",
+                " to try di",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "anot",
+                "fferent",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "her",
+                " in",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " set of ar",
+                "puts or ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "gum",
+                "explor",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ents or ",
+                "e other functi",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "explore di",
+                "o",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "fferen",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "t",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " tools!",
+                "nality!",
             ),
             metadata: {},
         },

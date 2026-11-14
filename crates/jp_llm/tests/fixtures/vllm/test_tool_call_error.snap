@@ -1,0 +1,45 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "chatcmpl-tool-96198643f8d5a8f6",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("foo"),
+                            "bar": Array [
+                                String("foo"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool call failed because the disk is full. There isn't anything I can do about that from here — the underlying storage for this environment is at capacity.\n\nIf you'd like, you can:\n1. Free up space on the host and retry.\n2. Let me know if there's a different task I can help with that doesn't require running this tool.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

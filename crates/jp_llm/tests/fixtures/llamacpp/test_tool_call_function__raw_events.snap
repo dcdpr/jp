@@ -1,6 +1,5 @@
 ---
 source: crates/jp_test/src/mock.rs
-assertion_line: 134
 expression: v
 ---
 [
@@ -13,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
+                    id: "4SerJg0AObmf3vEKyozs1Bpt3bmmiEow",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -50,7 +49,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "hello",
+                    "test",
                 ),
             ),
             metadata: {},
@@ -168,21 +167,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "he t",
+                "he tool e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ool ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "has run succe",
+                "xecuted succe",
             ),
             metadata: {},
         },
@@ -224,91 +216,63 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "umen",
+                "uments.\n",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ts. The",
+                "\n",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " output in",
+                "Ou",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "dicat",
+                "tput: `",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "es that eve",
+                "w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ryt",
+                "o",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "hing is ",
+                "rking",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "wor",
+                "!`\n",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "king as e",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "x",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "pect",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ed.",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " Let ",
+                "\nLet ",
             ),
             metadata: {},
         },
@@ -357,56 +321,56 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " to try di",
+                " to try ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "fferent ar",
+                "another ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "gum",
+                "exa",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ents or ",
+                "mple or",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "explor",
+                " adj",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "e othe",
+                "ust the par",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "r",
+                "a",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " tools!",
+                "meters!",
             ),
             metadata: {},
         },

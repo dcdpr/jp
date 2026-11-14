@@ -62,7 +62,7 @@ impl Action {
     }
 
     /// Wire key for this action in the decide API request and response.
-    fn key(self) -> &'static str {
+    pub(crate) fn key(self) -> &'static str {
         match self {
             Self::Ignore => "ignore",
             Self::Answer => "answer",

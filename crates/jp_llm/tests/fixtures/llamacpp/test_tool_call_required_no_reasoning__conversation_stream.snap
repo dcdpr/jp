@@ -259,24 +259,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "YVmI1CdVad59bsgXRfMOXYcxpo9gAv88",
+      "id": "ZW1MdWVmgv8OKwLkD32GuBJYjfiTk99G",
       "name": "run_me",
       "arguments": {
-        "foo": "aGVsbG8=",
+        "foo": "YmFy",
         "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "YVmI1CdVad59bsgXRfMOXYcxpo9gAv88",
+      "id": "ZW1MdWVmgv8OKwLkD32GuBJYjfiTk99G",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool executed successfully with the arguments you specified! If you'd like to try something else or need help with a specific task, let me know. 😊"
+      "message": "The tool has been executed successfully! It returned `working!` with the arguments:\n- `foo`: \"bar\"\n- `bar`: [\"foo\", \"bar\"]\n\nWould you like me to run it again with different arguments or explore other functionality? 😊"
     }
   ]
 }

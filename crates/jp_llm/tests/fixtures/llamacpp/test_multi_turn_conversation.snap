@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! How can I assist you today?",
+                        message: "Hello! This is a test message from me. How can I assist you today? 😊",
                     },
                 ),
                 metadata: {},
@@ -25,7 +25,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Repeat my previous message\".\n2.  **Identify the Previous Message:** Looking at the conversation history, the user's first message was \"Test message\", and the second message (which is the current request) is \"Repeat my previous message\".\n3.  **Determine the \"Previous Message\":** The message immediately preceding the current one is \"Test message\".\n4.  **Formulate the Response:** I need to output the text \"Test message\".\n5.  **Check Constraints:** There are no special constraints (like \"don't repeat it\" or \"only repeat if...\"). Just a direct command.\n6.  **Final Output:** \"Test message\".\n\n*Self-Correction/Refinement:* Wait, let me double-check the conversation flow.\n- User Turn 1: \"Test message\"\n- Model Turn 1: \"Hello! How can I assist you today?\"\n- User Turn 2: \"Repeat my previous message\"\n\nThe \"previous message\" from the user's perspective is Turn 1 (\"Test message\").\nSo I should repeat \"Test message\".\n\n*Action:* Output \"Test message\".\n",
+                        reasoning: "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Repeat my previous message\".\n2.  **Identify the Previous Message:** Looking at the conversation history, the user's first message was \"Test message\", and the user's second message (the current one) is \"Repeat my previous message\".\n3.  **Determine the \"Previous Message\":** The message immediately preceding the current one is \"Test message\".\n4.  **Formulate the Response:** I need to output the text \"Test message\".\n5.  **Check for Constraints:** There are no specific constraints on formatting, but I should be accurate.\n6.  **Final Output:** \"Test message\".\n\n*Self-Correction/Refinement:* Wait, I need to make sure I'm referencing the correct message.\n- User Turn 1: \"Test message\"\n- Model Turn 1: \"Hello! This is a test message from me. How can I assist you today? 😊\"\n- User Turn 2: \"Repeat my previous message\"\n\nThe \"previous message\" from the user is \"Test message\".\nSo I should repeat \"Test message\".\n\nLet's double-check if there's any ambiguity. Sometimes \"previous message\" could mean the last thing *said* in the conversation (which would be the model's response), but in the context of \"my previous message\", it implies the user's prior input.\nSo, the target string is \"Test message\".\n\nI will output exactly that.cw",
                     },
                 ),
                 metadata: {},
@@ -50,13 +50,24 @@ expression: v
         Flushed(
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I'll run the `run_me` tool with some default arguments to test it.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "3025kzfSjn1Q76fmpkjrrvhmMOFjumOt",
+                        id: "DNejGLanzpCOy7W950bqtnLXjn57jVtk",
                         name: "run_me",
                         arguments: {
                             "foo": String("test"),
-                            "bar": String("[\"foo\", \"bar\"]"),
+                            "bar": String("[\"foo\"]"),
                         },
                     },
                 ),
@@ -73,7 +84,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The secret code is: 42",
+                        message: "The tool has executed successfully! The secret code is **42**.",
                     },
                 ),
                 metadata: {},
@@ -89,7 +100,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking about the result of the previous tool call. Looking at the conversation history, I can see that I previously ran a tool using the `<function=run_me>` block, and the result was:\n\n\"The secret code is: 42\"\n\nI should provide this information clearly to the user.\n",
+                        reasoning: "The user is asking about the result of the previous tool call. Looking at the conversation history, I can see that I called the `run_me` tool which returned:\n\n\"The secret code is: 42\"\n\nSo I should inform the user about this result.",
                     },
                 ),
                 metadata: {},
@@ -100,7 +111,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The result of the previous tool call was:\n\n**The secret code is: 42**",
+                        message: "The previous tool call to `run_me` returned the following result:\n\n```\nThe secret code is: 42\n```\n\nLet me know if you need any further assistance! 😊",
                     },
                 ),
                 metadata: {},

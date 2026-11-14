@@ -230,6 +230,7 @@ configured or not.
 
    Add `-vv` to see the bridge's log; dropped messages, failed turns, and failed
    pulls are logged there.
+   Each `decide` call and each turn is logged with its timings, as fields.
 
 5. Pull uncommitted changes from the bridge into a local review worktree:
 

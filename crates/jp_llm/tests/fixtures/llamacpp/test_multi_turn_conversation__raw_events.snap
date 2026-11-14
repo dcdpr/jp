@@ -1,6 +1,5 @@
 ---
 source: crates/jp_test/src/mock.rs
-assertion_line: 134
 expression: v
 ---
 [
@@ -8,14 +7,70 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Hel",
+                "Hell",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lo! ",
+                "o! ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Th",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "is is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " a test ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "messa",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ge ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "f",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "rom ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "me. ",
             ),
             metadata: {},
         },
@@ -57,7 +112,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " today?",
+                " toda",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "y? 😊",
             ),
             metadata: {},
         },
@@ -98,14 +160,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "1",
+                "\n\n1",
             ),
             metadata: {},
         },
@@ -119,14 +174,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " **",
+                "  **",
             ),
             metadata: {},
         },
@@ -252,14 +300,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "2",
+                "\n2",
             ),
             metadata: {},
         },
@@ -273,14 +314,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " **",
+                "  **",
             ),
             metadata: {},
         },
@@ -455,6 +489,20 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
+                " user",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
                 " second",
             ),
             metadata: {},
@@ -476,21 +524,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "which",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
+                "the",
             ),
             metadata: {},
         },
@@ -504,7 +538,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " request",
+                " one",
             ),
             metadata: {},
         },
@@ -567,14 +601,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "3",
+                "\n3",
             ),
             metadata: {},
         },
@@ -588,14 +615,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " **",
+                "  **",
             ),
             metadata: {},
         },
@@ -742,14 +762,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "4",
+                "\n4",
             ),
             metadata: {},
         },
@@ -763,14 +776,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " **",
+                "  **",
             ),
             metadata: {},
         },
@@ -882,14 +888,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "5",
+                "\n5",
             ),
             metadata: {},
         },
@@ -903,14 +902,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " **",
+                "  **",
             ),
             metadata: {},
         },
@@ -918,6 +910,13 @@ expression: v
             index: 0,
             part: Reasoning(
                 "Check",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " for",
             ),
             metadata: {},
         },
@@ -959,7 +958,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " special",
+                " specific",
             ),
             metadata: {},
         },
@@ -973,133 +972,56 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " (",
+                " on",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "like",
+                " formatting",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"",
+                ",",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "don",
+                " but",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "'t",
+                " I",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " repeat",
+                " should",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " it",
+                " be",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "only",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " repeat",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " if",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "...",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\").",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Just",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " direct",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " command",
+                " accurate",
             ),
             metadata: {},
         },
@@ -1113,14 +1035,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "6",
+                "\n6",
             ),
             metadata: {},
         },
@@ -1134,14 +1049,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " **",
+                "  **",
             ),
             metadata: {},
         },
@@ -1197,14 +1105,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "*",
+                "\n\n*",
             ),
             metadata: {},
         },
@@ -1281,28 +1182,56 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " let",
+                " I",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " me",
+                " need",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " double",
+                " to",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "-check",
+                " make",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " sure",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'m",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " referencing",
             ),
             metadata: {},
         },
@@ -1316,14 +1245,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " conversation",
+                " correct",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " flow",
+                " message",
             ),
             metadata: {},
         },
@@ -1337,14 +1266,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "-",
+                "\n-",
             ),
             metadata: {},
         },
@@ -1365,14 +1287,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "1",
+                " 1",
             ),
             metadata: {},
         },
@@ -1414,14 +1329,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "-",
+                "\n-",
             ),
             metadata: {},
         },
@@ -1442,14 +1350,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "1",
+                " 1",
             ),
             metadata: {},
         },
@@ -1478,6 +1379,62 @@ expression: v
             index: 0,
             part: Reasoning(
                 "!",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " This",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " message",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " from",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
             ),
             metadata: {},
         },
@@ -1526,21 +1483,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "?\"",
+                "?",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                " 😊",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "-",
+                "\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n-",
             ),
             metadata: {},
         },
@@ -1561,14 +1525,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "2",
+                " 2",
             ),
             metadata: {},
         },
@@ -1624,14 +1581,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "The",
+                "\n\nThe",
             ),
             metadata: {},
         },
@@ -1687,20 +1637,6 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "'s",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " perspective",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
                 " is",
             ),
             metadata: {},
@@ -1708,28 +1644,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " Turn",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "1",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " (\"",
+                " \"",
             ),
             metadata: {},
         },
@@ -1750,21 +1665,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\").",
+                "\".",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "So",
+                "\nSo",
             ),
             metadata: {},
         },
@@ -1820,7 +1728,154 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n\n",
+                "\n\nLet",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " double",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "-check",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " if",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " there",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " any",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " ambiguity",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Sometimes",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "previous",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " message",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " could",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " mean",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " last",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " thing",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " *",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "said",
             ),
             metadata: {},
         },
@@ -1834,21 +1889,252 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "Action",
+                " in",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ":*",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " Output",
+                " conversation",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "which",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " would",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " be",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " model",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " response",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "),",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " but",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " in",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " context",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "my",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " previous",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " message",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " implies",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " user",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " prior",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " input",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\nSo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " target",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " string",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is",
             ),
             metadata: {},
         },
@@ -1883,7 +2169,49 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                "\n\nI",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " will",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " output",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " exactly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".c",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "w",
             ),
             metadata: {},
         },
@@ -1914,6 +2242,118 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 1,
+            part: Message(
+                "I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "'ll ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ru",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "n t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "he ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "run_m",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "e` to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ol wi",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "th some ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "default ar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "gum",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ents ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "to ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "est it.",
+            ),
+            metadata: {},
+        },
         Flush {
             index: 0,
             metadata: {},
@@ -1922,7 +2362,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "3025kzfSjn1Q76fmpkjrrvhmMOFjumOt",
+                    id: "DNejGLanzpCOy7W950bqtnLXjn57jVtk",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -2004,33 +2444,6 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\\\",",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    " \\\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    "bar",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
                     "\\\"]",
                 ),
             ),
@@ -2070,7 +2483,49 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "The",
+                "T",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "he t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ool has e",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "xecuted succe",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "sful",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ly! The",
             ),
             metadata: {},
         },
@@ -2091,21 +2546,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "c",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "o",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "d",
+                "cod",
             ),
             metadata: {},
         },
@@ -2119,7 +2560,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " is: 42",
+                " ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "is ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "**42**.",
             ),
             metadata: {},
         },
@@ -2307,35 +2762,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " previously",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " ran",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " using",
+                " called",
             ),
             metadata: {},
         },
@@ -2356,20 +2783,6 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "<function",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "=",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
                 "run",
             ),
             metadata: {},
@@ -2384,49 +2797,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                ">`",
+                "`",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " block",
+                " tool",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ",",
+                " which",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " result",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " was",
+                " returned",
             ),
             metadata: {},
         },
@@ -2440,14 +2832,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\"The",
+                "\n\n\"The",
             ),
             metadata: {},
         },
@@ -2482,14 +2867,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "4",
+                " 4",
             ),
             metadata: {},
         },
@@ -2510,14 +2888,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n\n",
+                "\n\nSo",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "I",
+                " I",
             ),
             metadata: {},
         },
@@ -2531,35 +2909,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " provide",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " this",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " information",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " clearly",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
+                " inform",
             ),
             metadata: {},
         },
@@ -2580,14 +2930,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                ".",
+                " about",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                " this",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " result",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
             ),
             metadata: {},
         },
@@ -2599,27 +2963,6 @@ expression: v
             index: 1,
             part: Message(
                 "The",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " result",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " of",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " the",
             ),
             metadata: {},
         },
@@ -2647,7 +2990,63 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " was",
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "run",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "_me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " following",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " result",
             ),
             metadata: {},
         },
@@ -2661,21 +3060,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "\n\n",
+                "\n\n```",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "**",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "The",
+                "\nThe",
             ),
             metadata: {},
         },
@@ -2710,14 +3102,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "4",
+                " 4",
             ),
             metadata: {},
         },
@@ -2731,7 +3116,84 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "**",
+                "\n```",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\n\nLet",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " know",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " if",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " you",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " need",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " any",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " further",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " assistance",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "!",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " 😊",
             ),
             metadata: {},
         },

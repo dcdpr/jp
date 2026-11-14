@@ -1,6 +1,5 @@
 ---
 source: crates/jp_test/src/mock.rs
-assertion_line: 134
 expression: v
 ---
 [
@@ -71,70 +70,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                ",",
+                " with",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " but",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " they",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " haven",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "'t",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " specified",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " which",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " what",
+                " whatever",
             ),
             metadata: {},
         },
@@ -148,7 +91,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " they",
+                " I",
             ),
             metadata: {},
         },
@@ -225,7 +168,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " \"",
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " `",
             ),
             metadata: {},
         },
@@ -246,21 +196,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\"",
+                "`",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " which",
+                " function",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " takes",
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " requires",
             ),
             metadata: {},
         },
@@ -268,13 +225,6 @@ expression: v
             index: 0,
             part: Reasoning(
                 " two",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " required",
             ),
             metadata: {},
         },
@@ -295,28 +245,35 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                "\n-",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "-",
+                " `",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " foo",
+                "foo",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ":",
+                "`:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " a",
             ),
             metadata: {},
         },
@@ -344,21 +301,21 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " (",
+                ",",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "default",
+                " default",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ":",
+                " is",
             ),
             metadata: {},
         },
@@ -379,35 +336,42 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\")",
+                "\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                "\n-",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "-",
+                " `",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " bar",
+                "bar",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ":",
+                "`:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " a",
             ),
             metadata: {},
         },
@@ -442,21 +406,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " must",
+                " with",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " be",
+                " enum",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"",
+                " values",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " [\"",
             ),
             metadata: {},
         },
@@ -470,14 +441,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " or",
+                "\",",
             ),
             metadata: {},
         },
@@ -498,42 +462,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "\"",
+                "\"]",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " (",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "enum",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ")",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "Since",
+                "\n\nSince",
             ),
             metadata: {},
         },
@@ -610,7 +546,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " can",
+                "'ll",
             ),
             metadata: {},
         },
@@ -618,62 +554,6 @@ expression: v
             index: 0,
             part: Reasoning(
                 " choose",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " any",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " valid",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " combination",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Let",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " pick",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " some",
             ),
             metadata: {},
         },
@@ -694,35 +574,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                ":",
+                " for",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                " these",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "-",
+                " parameters",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ":",
+                ".",
             ),
             metadata: {},
         },
@@ -744,223 +617,6 @@ expression: v
             index: 0,
             part: Reasoning(
                 " use",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "test",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " as",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " string",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " value",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ":",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "'ll",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " use",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " [\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\"]",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " as",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " an",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " array",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " valid",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " enum",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " values",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "This",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " should",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " satisfy",
             ),
             metadata: {},
         },
@@ -974,21 +630,147 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " requirements",
+                " default",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " while",
+                " value",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " demonstrating",
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\")",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " one",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " allowed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " values",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\").",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n\nLet",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " make",
             ),
             metadata: {},
         },
@@ -1009,7 +791,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " works",
+                " call",
             ),
             metadata: {},
         },
@@ -1017,13 +799,6 @@ expression: v
             index: 0,
             part: Reasoning(
                 ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n",
             ),
             metadata: {},
         },
@@ -1035,7 +810,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "n19Zg7uRIClo8uT6BobGdBU6pPoBmbMu",
+                    id: "AAQH0fOCOKOQ7FEc1rUn0FBCOS4b7S47",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -1072,7 +847,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "test",
+                    "foo",
                 ),
             ),
             metadata: {},
@@ -1099,52 +874,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "[\\\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
                     "foo",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    "\\\",",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    " \\\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    "bar",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    "\\\"]",
                 ),
             ),
             metadata: {},
@@ -1190,42 +920,105 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "he t",
+                "he tool e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ool ran succe",
+                "xecuted succe",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ssful",
+                "s",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ly w",
+                "sful",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ith the p",
+                "ly! The f",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "rovided ar",
+                "unction r",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "et",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "urned `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "w",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "king",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "!`. \n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "I ch",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ose the fo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "llowing ar",
             ),
             metadata: {},
         },
@@ -1239,133 +1032,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "umen",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ts. The",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " result in",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "dica",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "tes the op",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "eration co",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "mpleted ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "without",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "er",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ro",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "rs.\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\nI",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "f you",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "'d ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "like",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " to try di",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "fferent ar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "gum",
+                "um",
             ),
             metadata: {},
         },
@@ -1379,49 +1046,168 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "ts or a s",
+                "ts:",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "pecif",
+                "\n-",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "i",
+                " `",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "c too",
+                "foo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "l, fe",
+                "`",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "el ",
+                ": ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "free",
+                "\"fo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "o\" (the ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "defaul",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " v",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "al",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ue)",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\n-",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ": ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"fo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "o\" ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "(one",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " of the ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "allow",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ed enum",
             ),
             metadata: {},
         },
@@ -1435,7 +1221,105 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "to ask!",
+                "valu",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "es)\n\nI",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "s there a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "nything s",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "peci",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "fi",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "c you",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "'d ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "lik",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "e me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " to t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ry with di",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "fferent ar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "g",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "uments?",
             ),
             metadata: {},
         },

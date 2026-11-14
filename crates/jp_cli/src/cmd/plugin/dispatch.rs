@@ -2610,15 +2610,25 @@ fn handle_read_config(
     })
 }
 
+/// A plugin log's structured fields as compact JSON, or `None` without any.
+fn log_fields(log: &LogMessage) -> Option<String> {
+    (!log.fields.is_empty()).then(|| Value::Object(log.fields.clone()).to_string())
+}
+
 fn emit_log(log: &LogMessage) {
+    // `tracing` fixes an event's field names at compile time, so the plugin's
+    // own field names travel as one `fields` value.
+    let fields = log_fields(log);
+    let fields = fields.as_deref().map(tracing::field::display);
+
     match log.level.as_str() {
-        "trace" => trace!(target: "plugin", message = %log.message),
-        "debug" => debug!(target: "plugin", message = %log.message),
-        "info" => tracing::info!(target: "plugin", message = %log.message),
-        "warn" => warn!(target: "plugin", message = %log.message),
-        "error" => error!(target: "plugin", message = %log.message),
+        "trace" => trace!(target: "plugin", fields, message = %log.message),
+        "debug" => debug!(target: "plugin", fields, message = %log.message),
+        "info" => tracing::info!(target: "plugin", fields, message = %log.message),
+        "warn" => warn!(target: "plugin", fields, message = %log.message),
+        "error" => error!(target: "plugin", fields, message = %log.message),
         _ => {
-            warn!(target: "plugin", level = %log.level, message = %log.message, "unknown log level");
+            warn!(target: "plugin", level = %log.level, fields, message = %log.message, "unknown log level");
         }
     }
 }

@@ -258,25 +258,30 @@ expression: v
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I will run the tool with a default string argument and a single element array argument."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "XKlv3S6qUhMOu2TFBjOi50mehedlfHVg",
+      "id": "n2iYkI6xKzeWiU0luNlVTNzERwnlToiI",
       "name": "run_me",
       "arguments": {
         "foo": "SGVsbG8gV29ybGQ=",
-        "bar": "WyJmb28iLCAiZm9vIl0="
+        "bar": "WyJmb28iXQ=="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "XKlv3S6qUhMOu2TFBjOi50mehedlfHVg",
+      "id": "n2iYkI6xKzeWiU0luNlVTNzERwnlToiI",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool executed successfully with the arguments `foo=\"Hello World\"` and `bar=[\"foo\", \"foo\"]`. The output indicates: **working!**"
+      "message": "The tool executed successfully."
     }
   ]
 }

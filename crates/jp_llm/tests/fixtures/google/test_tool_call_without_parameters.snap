@@ -1,0 +1,31 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "ping_0",
+                        name: "ping",
+                        arguments: {},
+                    },
+                ),
+                metadata: {
+                    "google_thought_signature": String("CiQBaRR9EzDvWm5RRD5ytL1elN7W6rtNh2cdXi0V84dCcp3LV24KWgFpFH0TW6QigqroIZQEhud5uFEG+M93uyhmYnSQ9849Rp7Qt8UXUILExlsqgs/WCJLfHWD8+l9506uGPLnOR31G9NU9prlw9+eWhXyHkeKCnsPLjJ76m/1mmQq/AQFpFH0TrvvNdrW47C/4LvJ2Pmml2FTgu1qDEl2CL3ywC+O/6Y6j/CCO27OIgIyDgCzIEJF9WrCiC2TY7gUSZudyBR2uWkXoFRtp/oovp1xpe/AhYWKJpBkkPmStV+PbCMw8+zE7dWQ7zclBI0yDzeTcGxtpdtGrISzy0r+z5nmQp5FPmiojoj9xBHm0jOc7Mre3TGddxpDmtm/E0YAd/kPuOg6kNKFVRFFtP2XDMjp6RUE1TgLhuLgPI8LJeY6z"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Finished(
+            Completed,
+        ),
+    ],
+]

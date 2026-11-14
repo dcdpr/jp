@@ -1,0 +1,46 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "run_me_0",
+                    name: "run_me",
+                    decoding: None,
+                },
+            ),
+            metadata: {
+                "google_thought_signature": String("CiQBaRR9E6XwxNy8HHIPFaYYMjYvepEX0xYw6uULj373zWi+43EKZAFpFH0T6Lyi1CvnpDjW13EpzvYFLmiWH75KWIy2/5k/hRzEvJwOfEd0ZnhIh30dwxtdUmNB8wsJxAUaX70979F7rI1XcLT2QOVDz17lDtL93PJ3b/E0LGt31BjJ2joh2BPaz5QK0QEBaRR9EyPuGR+WRFXraajy85cJE9YnHx8Zs6Y3CV9La5/vrj1GgNReyxwlp6FhFaSLcpoqa9noWUSlCLA3DUy6g8QG+RkmC5iaLmXV/lZVQMG9UcT94qwFAFmRBlYVIoUiJuN9q4Z8sts36yxcexlXdTLJEeoSNEEhOoWmd+5bVcTxUa5p1wX5jNq7grM839qo8ZkDQyl/lu2e8xix4Hegp8uNny8CpWGqg4Pkxum6POS34oU/Kh0BrPc02IAzqPkzr1z9bSVm+PPTKhPbJ/tKkgq7AQFpFH0T4bYkPZB0U9aSNCuBx0UuUWNHNArItHnFSAG6Jt0SdhRimt/whDvtAySQlqa/+G4SBGvQnvzz4Aik+W7XxEiWz8QTn3DXprw+OFygOK4a18dom7DOuG67mtiV/HeFG4miiZOiYfRp/KMGS+rOVumFbSaiMDGiZ4oWFXDgByDJk3oHdN0x+kJ8lEgPZF76PMV0X6jNKAtCmEuJLegWFiCY4Zu2l2Fo40rAMNUU/xUA+Y+qqGz7uBwKsQEBaRR9E+1tmwdz4R9p7ALcgWdPSg7iKgc6+NLiitJUK9WVyHVQiuIPMuTp6d/f0nFbVo7w58v9rXxvYioLq5qg/hAdqugqMJ5DgRJvbVFv/7UoI+BIX/f82mbK2OQ0wXyCSyayf94MeO6ZKzsPO4128p6wZrsbKFS59bz8sHeqm5YAGRR3OOcxR9CVG8BnnL+350j+K9goceQ9STjrnjFoK4MR7rcTEZ1xT/DIYq4/RhcKdAFpFH0TG7wwDTfedfSNSkHqOhZOe2+rsWVqV6UD6UE66hmQdAGusT4iPJb+G9gCEdyeSO84xiJ/mFST1aQMVCBHn0tZAlDn094zazhUnqivEya4tb/rIpwNMrSZ3g1zaBbszanDq/6QzaFnivRQ/5nh6aZk"),
+            },
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"foo\":\"bar\",\"bar\":\"foo\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

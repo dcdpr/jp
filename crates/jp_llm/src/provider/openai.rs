@@ -1,5 +1,6 @@
 // qual:allow(srp, file_length=2900) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4k"
 use std::{
+    collections::HashMap,
     sync::{Arc, LazyLock, Mutex, PoisonError},
     time::Duration,
 };
@@ -741,6 +742,7 @@ async fn start_streaming(
     model: &str,
 ) -> std::result::Result<EventStream, StreamError> {
     let mut reasoning = ReasoningState::default();
+    let mut arguments = StreamedArguments::default();
     let model = model.to_owned();
     let stream = client
         .stream(request)
@@ -752,6 +754,7 @@ async fn start_streaming(
                 is_structured,
                 reasoning_enabled,
                 &mut reasoning,
+                &mut arguments,
             ))
         })
         .try_flatten()
@@ -954,12 +957,21 @@ fn map_non_streaming_response(
 ) -> Result<Vec<Event>> {
     let incomplete_reason = response.incomplete_details.map(|details| details.reason);
     let mut reasoning = ReasoningState::default();
+    let mut arguments = StreamedArguments::default();
     let mut events = response
         .output
         .into_iter()
         .enumerate()
         .flat_map(|(index, item)| synthesize_non_streaming_output_item_events(index, item))
-        .flat_map(|event| map_event(event, is_structured, reasoning_enabled, &mut reasoning))
+        .flat_map(|event| {
+            map_event(
+                event,
+                is_structured,
+                reasoning_enabled,
+                &mut reasoning,
+                &mut arguments,
+            )
+        })
         .collect::<std::result::Result<Vec<_>, StreamError>>()?;
 
     events.push(map_non_streaming_finish_reason(
@@ -2571,6 +2583,62 @@ impl ReasoningState {
     }
 }
 
+/// Argument text the `function_call_arguments.delta` events have delivered for
+/// each unfinished function call, keyed by output index.
+///
+/// A finished function call item repeats its complete arguments.
+/// [`map_event`] compares the two to emit the arguments the deltas did not
+/// deliver.
+#[derive(Default)]
+struct StreamedArguments(HashMap<usize, String>);
+
+impl StreamedArguments {
+    fn record(&mut self, index: usize, delta: &str) {
+        self.0.entry(index).or_default().push_str(delta);
+    }
+
+    /// Return the arguments of the finished function call `item` that its
+    /// deltas did not deliver.
+    ///
+    /// Returns `None` when the deltas delivered all of them, and for an item
+    /// that is not a function call.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the item's arguments do not start with the streamed deltas.
+    /// Chunks already emitted cannot be taken back, and the call must not run
+    /// with arguments the model did not send.
+    fn finish(
+        &mut self,
+        index: usize,
+        item: &types::OutputItem,
+    ) -> std::result::Result<Option<String>, StreamError> {
+        let types::OutputItem::FunctionCall(call) = item else {
+            return Ok(None);
+        };
+
+        let streamed = self.0.remove(&index).unwrap_or_default();
+        let Some(missing) = call.arguments.strip_prefix(streamed.as_str()) else {
+            return Err(StreamError::other(format!(
+                "OpenAI's finished `{}` call contradicts its streamed arguments.",
+                call.name
+            )));
+        };
+        if missing.is_empty() {
+            return Ok(None);
+        }
+
+        debug!(
+            index,
+            name = call.name,
+            streamed_size = streamed.len(),
+            finished_size = call.arguments.len(),
+            "Completing unstreamed function call arguments."
+        );
+        Ok(Some(missing.to_owned()))
+    }
+}
+
 /// Map an Openai [`types::Event`] into one or more [`Event`]s.
 ///
 /// This is the only place where OpenAI wire events become JP events.
@@ -2583,6 +2651,7 @@ fn map_event(
     is_structured: bool,
     reasoning_enabled: bool,
     reasoning: &mut ReasoningState,
+    arguments: &mut StreamedArguments,
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
@@ -2683,7 +2752,11 @@ fn map_event(
             delta,
             output_index,
             ..
-        } => vec![Ok(Event::tool_call_args(output_index as usize, delta))],
+        } => {
+            let index = output_index as usize;
+            arguments.record(index, &delta);
+            vec![Ok(Event::tool_call_args(index, delta))]
+        }
 
         OutputItemDone { item, output_index } => {
             let index = output_index as usize;
@@ -2719,8 +2792,18 @@ fn map_event(
             };
 
             // A function call's start and argument chunks are emitted from the
-            // `OutputItemAdded` and `FunctionCallArgumentsDelta` events; only
-            // the flush remains to be emitted here.
+            // `OutputItemAdded` and `FunctionCallArgumentsDelta` events. The
+            // finished item repeats the complete arguments, and it is the only
+            // place the subscription host's own client (Codex) reads them
+            // from: the subscription host sends parallel calls without any
+            // deltas. Emit what the deltas did not deliver, or a call flushed
+            // without its arguments runs with an empty argument map.
+            match arguments.finish(index, &item) {
+                Ok(missing) => {
+                    events.extend(missing.map(|missing| Ok(Event::tool_call_args(index, missing))));
+                }
+                Err(error) => return vec![Err(error)],
+            }
             events.push(Ok(Event::flush_with_metadata(index, metadata)));
             events
         }

@@ -1,0 +1,129 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Call the `ping` tool."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "ping",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "ANY",
+          "allowedFunctionNames": [
+            "ping"
+          ]
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "ping","args": {}},"thoughtSignature": "CiQBaRR9EzDvWm5RRD5ytL1elN7W6rtNh2cdXi0V84dCcp3LV24KWgFpFH0TW6QigqroIZQEhud5uFEG+M93uyhmYnSQ9849Rp7Qt8UXUILExlsqgs/WCJLfHWD8+l9506uGPLnOR31G9NU9prlw9+eWhXyHkeKCnsPLjJ76m/1mmQq/AQFpFH0TrvvNdrW47C/4LvJ2Pmml2FTgu1qDEl2CL3ywC+O/6Y6j/CCO27OIgIyDgCzIEJF9WrCiC2TY7gUSZudyBR2uWkXoFRtp/oovp1xpe/AhYWKJpBkkPmStV+PbCMw8+zE7dWQ7zclBI0yDzeTcGxtpdtGrISzy0r+z5nmQp5FPmiojoj9xBHm0jOc7Mre3TGddxpDmtm/E0YAd/kPuOg6kNKFVRFFtP2XDMjp6RUE1TgLhuLgPI8LJeY6z"}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 27,"candidatesTokenCount": 8,"totalTokenCount": 91,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 27}],"thoughtsTokenCount": 56,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "YSP3avOoO9Ltxs0P9tG4sQY"}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Call the `ping` tool."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "ping_0",
+                "name": "ping",
+                "args": {}
+              },
+              "thoughtSignature": "CiQBaRR9EzDvWm5RRD5ytL1elN7W6rtNh2cdXi0V84dCcp3LV24KWgFpFH0TW6QigqroIZQEhud5uFEG+M93uyhmYnSQ9849Rp7Qt8UXUILExlsqgs/WCJLfHWD8+l9506uGPLnOR31G9NU9prlw9+eWhXyHkeKCnsPLjJ76m/1mmQq/AQFpFH0TrvvNdrW47C/4LvJ2Pmml2FTgu1qDEl2CL3ywC+O/6Y6j/CCO27OIgIyDgCzIEJF9WrCiC2TY7gUSZudyBR2uWkXoFRtp/oovp1xpe/AhYWKJpBkkPmStV+PbCMw8+zE7dWQ7zclBI0yDzeTcGxtpdtGrISzy0r+z5nmQp5FPmiojoj9xBHm0jOc7Mre3TGddxpDmtm/E0YAd/kPuOg6kNKFVRFFtP2XDMjp6RUE1TgLhuLgPI8LJeY6z"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "ping_0",
+                "name": "ping",
+                "response": {
+                  "content": "pong"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 85,"totalTokenCount": 85,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 85}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "YiP3asO7KaX8xN8P9_3jiAY"}
+    

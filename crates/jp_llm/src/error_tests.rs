@@ -165,6 +165,24 @@ async fn a_subscription_400_model_not_found_is_an_unknown_model() {
     assert_eq!(err.kind, StreamErrorKind::UnknownModel);
 }
 
+/// A gateway routing to several vLLM servers answers in its own envelope, and
+/// names the models it does serve.
+#[tokio::test]
+async fn a_gateway_404_for_an_unknown_model_is_an_unknown_model() {
+    let err = StreamError::from_eventsource(invalid_status(
+        404,
+        r#"{"detail":"unknown model: Qwen/Qwen3.8-Flash-Next-NVFP4 (valid models: GLM-5.3-Flash-NVFP4-Spark, Qwen/Qwen3.8-27B-FP8)"}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::UnknownModel);
+    assert_eq!(
+        err.message(),
+        "unknown model: Qwen/Qwen3.8-Flash-Next-NVFP4 (valid models: GLM-5.3-Flash-NVFP4-Spark, \
+         Qwen/Qwen3.8-27B-FP8) (HTTP 404 Not Found)"
+    );
+}
+
 #[tokio::test]
 async fn a_404_for_an_unknown_route_is_not_an_unknown_model() {
     let err = StreamError::from_eventsource(invalid_status(404, r#"{"detail":"Not Found"}"#)).await;
@@ -221,11 +239,37 @@ fn extract_api_error_body_prefers_the_nested_envelope() {
     );
 }
 
+/// FastAPI-style servers, such as a gateway in front of vLLM, put their
+/// explanation in `detail`.
+#[test]
+fn extract_api_error_body_reads_a_detail_envelope() {
+    assert_eq!(
+        extract_api_error_body(r#"{"detail":"upstream timed out"}"#),
+        Some("upstream timed out".to_owned())
+    );
+}
+
+#[test]
+fn extract_api_error_body_prefers_a_message_over_detail() {
+    assert_eq!(
+        extract_api_error_body(r#"{"detail":"outer","error":{"message":"nested"}}"#),
+        Some("nested".to_owned())
+    );
+    assert_eq!(
+        extract_api_error_body(r#"{"detail":"outer","message":"flat"}"#),
+        Some("flat".to_owned())
+    );
+}
+
 #[test]
 fn extract_api_error_body_ignores_bodies_without_a_message() {
     assert_eq!(extract_api_error_body("not json at all"), None);
-    assert_eq!(extract_api_error_body(r#"{"detail":"nope"}"#), None);
     assert_eq!(extract_api_error_body(r#"{"message":42}"#), None);
+    // FastAPI's validation errors are a list of objects, not a sentence.
+    assert_eq!(
+        extract_api_error_body(r#"{"detail":[{"loc":["body"],"msg":"field required"}]}"#),
+        None
+    );
 }
 
 /// As [`invalid_status`], with a `Retry-After` header attached.

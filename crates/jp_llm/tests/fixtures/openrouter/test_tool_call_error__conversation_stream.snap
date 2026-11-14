@@ -1,0 +1,312 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": []
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "allow",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "joins_reasoning": true,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "sanitize": "strip",
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "subscription_flow": "acp",
+          "acp_config_dirs": {},
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
+        }
+      }
+    },
+    "plugins": {
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnE5eU9rWGRfN1JCY0txUG9aQzh5aXBNWGNpV0xkeUJEcWVYQnE5dEh1amw4VnZTTmtnajJqSUd2WlpLN2k2RXZDNHh1VEdkSEtmUk5hd3R3QjBGLUR0RWhDSHZNaW95MnduVjJ3Q2JVcVdRNDdwX2dSQmhzSDE2cV9zQ3RLaEViRllIRW54S2pNQnZKaGZYYnNIeG1JRURELXdqdXE4aUFydlV1ZG1sWXdGZWJNVExqVldJLWdodms1dnVpX1AzSTZkME9aNnRqZUVfQXF2c1Z2QzZUczQ2eUdzbW9BQ2NONnNRSThRRmlxUXZKYUFIX1pVbWk5Z09FR21ET08wLWpvZFowMHBhbGpsd0w5VXczUEYtbGtKc1VFMUpxN1FtMXVGVEZCN2w3V3Z4aTQzTlVWNElCX3pqakd3Sjh6Y2NLMzZEZ3JrLXNVYl8td0hHS2lkWm1VNHBJbUl1X0ZLOFVmcTJzbFRtR3JIS2l0di1NYnVsZnZUUHRqdDlRdXlwRFZQc3RrcTlsZ1plT2ZGbkNrbnp3SEs4QVJraWhHc2VMVXNuTkloZTBCcVhaOVhlWWJWMkR3NEs4RkJqbnRKOTFHZkd5bm54eTE3bXd6dXZzaUpEdDhSRDJnS1F1cTl0enFZTVpzZW5jSS1QdFgwblc2TXBWQTZTWDV2Vnl4eHVpMWhsT3FRYUNwUU9Qcm91d3pNQk1fWmZmTndRaWNXNkRHM2pmeHl2N0x4cTBIcHdXbFZTMTZLa0ZBLVVuMk1Fb05EeE9QVWVVVGQ0bWN4a1dnVFBQOFBkVHFrMjJHVTVaVmo1SFE3RTJUM29nbi1vejJTbVplNk81LWh5aWF3emxfMEtYVjBndktuWDV5cDFMXzBra016d0F1MGRsbVl1clRMcDB6Q05udXhCbWYzTUVadE1XM2h6LUVvRWNFZDdDMUlSdTVMUkxKMG5uaTZTQ09vU011dE5CNkN2emxWcmZyZ0Y1TzZCMmJCSUVGZlpBSTBDTVE2ODYwaDlXSW5WRjFXYkdIWElMd0dxd2NtVEFkaXFTZ0hMeDJ6R3hkSmVITHJHNVVydy1KVXZXVnRBTXZHYjhnVkxwc2hsUXFaU25UcF9ZOFN6QU9DR3ZiRmFNcDRkRXBuNG5hSVlWLUpWREt5Ny1KYWFxcUM5aFpWY2J6N2FLcmI5azJKSnQzYnJLdTYzcmJWTkptb2F0NmdhSzk5M1k1aXlSaGtaQWx3SW5qWXQycmdFMXhLUFlaeFY5UzNaS1E1Q3BjX0NoQUJvWllHSHpRdERYb29zRFAtTncydTVFNXc2RF9makFKZVBhc1E2c3Q1Si1KQ0ZsMDZyMWtGczVnX3E0bi1qdXpsbW1zeFhBLW4zVUNlaWtRaGF1Q0RadU5GQnNhSVBDZThPM2N3Z21JRXQ4V3dkSFA4MWU0eTd4WjNjVHgzOC05YUFwaFVSWDhuZUtlM1pteldRWks4c05mcElwb2NVN1dHdldNeE5keS16OGhybnYtWFZwUUpNc0g5bzY2bkw4dERDS2FrdHZveW1hWDgwZTB3OF9CWlU0bXV4eEV6b0dhSzJlUXN4X3hQLUlBS1c2OVJKenEwR2w2MGxDZm9tSzBHYkJXeFJpUXh0ZU1WT3JCTmxPV19kR3pMMEdYUnFnNVNnZ3RCc1piX3haQS1OY0pubV9ZdGJtcnBZRGxxUGZva0ViR1BlN3NSb0dKX3FzaTVueHE3Tnh6V2VFdmE1b2tSQmVETHVHejJNY3VTTjRXeS1OMUJzVGg5ck1EYlA4U1RYakZyaGt1V2NUOU9oTUJtOWw0Nkw1R0NzUDMxdmhxZU1DU1R4X2FpVU5MYXgwemdPbDVvbjFCSjRIUXZzai1hcWUtV1lJUTRFSGNvakRlaVNIY2dycXpTUFdNM1JWd3V5cWtLOFR1QjYzaVRDT2NKdnlzdUlGN0ViempIdjQ2Vkx6eFdYQnB6c2VzdUFYM3BiZWN6Q0Fjc1RLMU1mZW43SXVtV1RYOHpOb00xYkJzMlZVQ1IwSU9kc0Y3SmMxVGp0M245MEtiQVN2SlFXRExZM0x0UjRMTVpNZThFeFdzOWtvVnVUekdpbmNXZDMwU2d2MWpvcVRzRGJDSzgwVEhlUTgzaVhZUE9SRGJXa3BCcTFZSVN5ZjhpSkwtTERUcW9ZU0F2VWFEY2ZLcGpKTXNDdjVsbXVYYXhZTFB5cVNrUUp5LV9nOVdqS2d0c05HWi0teTRnU3h4REtDZ2EzdjNZUUI4ZU9wNlpMdkF0U0dRVlVJZVBEWl95NGIzVVNfYUF2RThuMXdUcmJJd0RKYUd6X3BrcW15SkpOVlpVajhodFZwaVNUc2Z4Z1U2WW5pbFZ5RF95Qk52dDMyMU5oQklLeGg2dVlpZGJjNm9ZU3pmMWw2UTZTOTRGeG55UGwzSlp4RjhpMmt2MUpZZWFJZ3EtN3RvWWwzR3N4V2pmWU84QklqT2hNN0k0VktSNmNoZGZpNy1ucHFqQVVobzVDdVpEaGc4Um1QX0hrZ0FwQ3ZSNGVRY2E0RFRFX2tKdXlTN2JWTlJSc1J2TDFPR3JiWm1VQ1A5dHFUYmNCR01qSl9YTUNnQ0hzdzdTOGxqU0tuMlNPM3lIVjI2TTduQXdCVE9hcFlZcDBSUUpCX0p0OFA0NGdHd25VRFZLRUtfM3liazdtTWxoYmhWMDBSUXJCT1Uwdm89LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGNmZDQ0ZmEzMjY3ZGM4YTAxNmFmNzIzYTQ5ZjYwODdkMTk5MDY5NDM5ZjllOTdkZjA=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_1p6ZKiPNgMCG2fzKhP4918x9",
+      "name": "run_me",
+      "arguments": {
+        "foo": "ZXhhbXBsZQ==",
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_1p6ZKiPNgMCG2fzKhP4918x9",
+      "content": "YHJ1bl9tZWAgZmFpbGVkOiB0aGUgZGlzayBpcyBmdWxsLg==",
+      "is_error": true
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnE5eU9tMGhOaXVma1dzRUVsMUVySFhPa3dVZFBXWmo3eWl2SGtjcmpnM3JXa1dzdElSMnBTMXktZ1ktOEZxUS0zSDhFYkVCZ3RQc1hHVlNxVGdPdFhRcFp5WnBKOXktczdpSlNEVWx0TExHTmRwVFdCclBkNzAzYUNQRFdSMUtuM1g5dE1jMWxPWWMxTkJTc3kyVHdnLWVsTXB2RmJXVGwxZnFfZk1KZzNVYnJ5aXo0a0ZmX1RGeHkzcDh0YXJ0Y2p6MHNBdmI4ckE3Nk9qdUFUZU5fOWQxTW9hXzBJZ2tOWGtMTEFDdDF0WU92LTMybHZTVl9VdDM1YTFlbWp6Q0VzTW5kZk5oRlVkUi1vM1c5bjY2bmxHZDhsdjN6V0E3Z3prbFhjX3pxU2s5MVNlaWpnci1Gb0JvcC1LOHJ4REczYWR3Z1docVlXSEY0bTFveDV6UGhyMUY2OHM0RGROZExyS3M0QzFEVVR3MTRnQUUwTlBJOEV4a1pyNE1hRURETV90b2VNaUpzUVRsNjV5OU1rdU1VVWFiNnhGa1dZVFBNTG1DNXd3MEEzNV8tX2FBX1htcHFIUmxLMnZveXhhT3RHU2JqTmQtQ2JqNDY0YVVwcm9jWXRDQm5wYVo1RzY1b3NEb291ODNBc1ptSDFib19wNVhQMW9zTjVEeWVpckRMMWpSaGh0TWl3WW5wVWI4aEhnUmhUQzVlTjVKVUgxODdYR3k3U0REeDFCWTktM01wVkk2Vlp5MTh0ZHljMk95ZzVDMVNHZHVNbTdqLWhqUUZ4Z3AtV2Vid2hxMXBMVjN3YTZLZW5fYmVGMEtZZVkxTFZ0dHdYQld6WU8wQnhzemtObmpBbVAwVU1IeVJ5TDZxXzNCaVVob1pXdkJUWUNFXzU3LW00NDVtN2N3RzRKVlNVbUxmZ0dnTGdmN3IzTVJkU3I2QXlIYzhhWXJQQ0V3MTZpS3hET3owN1dlVDAyRkJwSGR3SFk0V3pwMkJsNXR4NDFIbjVvTjVFSnZNQUhiQXZsTXFuSWlZSUc1bXVEWFRFZl9sN2xqdHVwLV93OHVwSlRqYjJueHR3OWVHNFZXQ010UGMzWDF5cU1reS1DU19Va00wLVpGYXBJdl9fWnFGZmdkblR6ZGhCc3pWV1NRckFxcS1YRlJUbjBydUFKUUNkZ1dDdUhfRWV2NHFuNDBjUzBjMWZxem1fOXc3SGFpUW9NQzFsTGNQSHRlUkJqcFlncmlJQ2lBbU1tSkJZYWhtY1J1SzFKMUZpQjJ6TkJHc2NvczhBcFFucjdoTUxpYlo4QWYwWVU4YVNOVllBYnBuaW5KTUpPaHR0UFFucWVHOV9JczlrR3NYcVRKYnBQTmRoUGFsN2NfUS14aC05OTV0ejlxMWFXMnhUeUhkbGtmbFA1TGZZVW9pczV3d1ViRXU3MDNuYVQ5QUVJMFRuT1pKRzMtOEN3M0o1MFFhRS0weEpoYXE5TDFLTDd6LVpMMFRFLW11Z3lvWWFkc1JacVRXOG11THZFQ05JY0FYU3UwZWVfRjltUWM5TG8ydVVEbXpzRkN2QVZxYlRsM0pmcy1WTHoxWklxM19ZVlFpQVRUZUxXX05ydW1UQUJEOGVodFd1ODFfOGJDcVNaTF9wTmhtcEV3YUhLUkJxWUpLaEd1U1hfMm95dzlPeWpEaWRRZE11S3BqZExJR0hibktGYUVIbHpXMnF2VEdFMDZRWlpvMW14OVpyOEJkMDBzTDZjN28xYjVBcU5xY1FQeHl4NTRtYVFsNFJkd0Nocm43eHFabWswMVZNVl9nQnJhWi1DUlU2eHI1bzdLblFxck85bGRIV1FGdlBCeU1uaG9KSVJUY0xKZmlWWVc3ZXE4QmtVbmgyMHBlN2t2cU95elhsWG50NFJOeHpZT3psZXpKV25HU0JZUE5wNUFTaXN2eVlOQmhTMTQzOUpiZzNGa3FtMEc1M1B6RFFqT0JkRGs5bFRxeXZQMHdscFhMbWtxME9aaGdfRk1hcGplX0xIMUQtck8xMG1pQUlSLUk2SjNyWXg0RDhwaDVieHJIVDhiOUZPdFBQUWE2MHpUUG0tN2pDVWMtUnBCbVZYMEJTUjFnclFUS0RldzZmekZWU3I0RFJ6SklmQjREaXlwc3pnUlhuZktUWFJZclY0MGZfajRPclAwU25NWk9DR1NqcDc0cVh1aXd6eHVXdHpRdHo2T2l3Wkl5WlFpVno3ZTFlTVNsc0xxOTdSY3Ytb2c5OHo0RHVwWEd3OUJHemdUM3YySVQ4akVHSTFkdy1jNExET0FUM0FCX1R3MEVQVE1PRlU3cTV6S2FFSjlxXy1TZk9ERVUyMHI2SFdKU1ZPMGxOVFVYM1d0eHh2X2J1aXVycDc1RC1QY2loRUk0TVZRMTcyVThlR3J4Z3E3R2h6SnB3Vk8tU2dhVHRETk5GVlNPdlpjdGJSckVyN1BNdHJDSkNMbjRrZE5vdFlfdTIySldLaUV0QmNWMDJ1QnVjbV9lb3N2TWhwX3BETTZxU2wxcl9xbG44N3hONXlXbHdoZmU3blljUXEyY0FHQ3FDVG16WDcxdVd2Nm9QVDk4TzUxRDN4OWVRSVZ6Ump1Rl9hYUxpVnYxQW9SR1JlWURGTjRBZFhDMEhuQWtkZU55Tm1XOVIzT1JUS05wTEZHVDExVWQtZnMyRkhxVVFULV9BenJpMzJXMTlZS2c9LmV5SmxibVJ3YjJsdWRGOXpiSFZuSWpvaWIzQmxibUZwTDJkd2RDMDFMVzFwYm1rdE1qQXlOUzB3T0Mwd04zeHZjR1Z1WVdraWZR",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMDkxOTc1MGNjODlhNjYyOTAxNmFmNzIzYTVjMDc0ODdkMTg3NWVjZWNjNjkxMmE5MTA=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I attempted to run the tool with arguments {\"foo\":\"example\",\"bar\":\"foo\"}, but the run failed with the error: \"the disk is full.\"\n\nNext steps I can take (pick any):\n- Retry running the tool now (same or different arguments).\n- Free up disk space first (I can suggest commands or perform cleanup steps if you want me to run them).\n- Report/log the failure details or return the error to an external system.\n- Provide guidance on diagnosing and fixing the \"disk is full\" issue on your environment (commands for Linux/macOS/Windows, how to find large files, etc.).\n\nWhich would you like me to do?"
+    }
+  ]
+}

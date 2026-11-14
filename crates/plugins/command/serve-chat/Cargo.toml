@@ -37,6 +37,8 @@ camino-tempfile = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
 # Hashes a snapshot the way `just chat-take` does, in the `take.sh` tests.
 sha2 = { workspace = true }
+# A paused clock, for the durations the bridge logs.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

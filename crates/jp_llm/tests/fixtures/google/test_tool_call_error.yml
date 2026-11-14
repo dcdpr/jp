@@ -1,0 +1,156 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "run_me",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "foo": {
+                    "type": "string",
+                    "default": "foo"
+                  },
+                  "bar": {
+                    "type": [
+                      "string",
+                      "array"
+                    ],
+                    "enum": [
+                      "foo"
+                    ],
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "foo",
+                        "bar"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "bar"
+                ],
+                "additionalProperties": false
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "ANY",
+          "allowedFunctionNames": [
+            "run_me"
+          ]
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_me","args": {"foo": "bar","bar": "foo"}},"thoughtSignature": "CiQBaRR9E6XwxNy8HHIPFaYYMjYvepEX0xYw6uULj373zWi+43EKZAFpFH0T6Lyi1CvnpDjW13EpzvYFLmiWH75KWIy2/5k/hRzEvJwOfEd0ZnhIh30dwxtdUmNB8wsJxAUaX70979F7rI1XcLT2QOVDz17lDtL93PJ3b/E0LGt31BjJ2joh2BPaz5QK0QEBaRR9EyPuGR+WRFXraajy85cJE9YnHx8Zs6Y3CV9La5/vrj1GgNReyxwlp6FhFaSLcpoqa9noWUSlCLA3DUy6g8QG+RkmC5iaLmXV/lZVQMG9UcT94qwFAFmRBlYVIoUiJuN9q4Z8sts36yxcexlXdTLJEeoSNEEhOoWmd+5bVcTxUa5p1wX5jNq7grM839qo8ZkDQyl/lu2e8xix4Hegp8uNny8CpWGqg4Pkxum6POS34oU/Kh0BrPc02IAzqPkzr1z9bSVm+PPTKhPbJ/tKkgq7AQFpFH0T4bYkPZB0U9aSNCuBx0UuUWNHNArItHnFSAG6Jt0SdhRimt/whDvtAySQlqa/+G4SBGvQnvzz4Aik+W7XxEiWz8QTn3DXprw+OFygOK4a18dom7DOuG67mtiV/HeFG4miiZOiYfRp/KMGS+rOVumFbSaiMDGiZ4oWFXDgByDJk3oHdN0x+kJ8lEgPZF76PMV0X6jNKAtCmEuJLegWFiCY4Zu2l2Fo40rAMNUU/xUA+Y+qqGz7uBwKsQEBaRR9E+1tmwdz4R9p7ALcgWdPSg7iKgc6+NLiitJUK9WVyHVQiuIPMuTp6d/f0nFbVo7w58v9rXxvYioLq5qg/hAdqugqMJ5DgRJvbVFv/7UoI+BIX/f82mbK2OQ0wXyCSyayf94MeO6ZKzsPO4128p6wZrsbKFS59bz8sHeqm5YAGRR3OOcxR9CVG8BnnL+350j+K9goceQ9STjrnjFoK4MR7rcTEZ1xT/DIYq4/RhcKdAFpFH0TG7wwDTfedfSNSkHqOhZOe2+rsWVqV6UD6UE66hmQdAGusT4iPJb+G9gCEdyeSO84xiJ/mFST1aQMVCBHn0tZAlDn094zazhUnqivEya4tb/rIpwNMrSZ3g1zaBbszanDq/6QzaFnivRQ/5nh6aZk"}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 72,"candidatesTokenCount": 20,"totalTokenCount": 286,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 72}],"thoughtsTokenCount": 194,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "XSP3aoq1BLT4xN8P8bjmuAg"}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "args": {
+                  "foo": "bar",
+                  "bar": "foo"
+                }
+              },
+              "thoughtSignature": "CiQBaRR9E6XwxNy8HHIPFaYYMjYvepEX0xYw6uULj373zWi+43EKZAFpFH0T6Lyi1CvnpDjW13EpzvYFLmiWH75KWIy2/5k/hRzEvJwOfEd0ZnhIh30dwxtdUmNB8wsJxAUaX70979F7rI1XcLT2QOVDz17lDtL93PJ3b/E0LGt31BjJ2joh2BPaz5QK0QEBaRR9EyPuGR+WRFXraajy85cJE9YnHx8Zs6Y3CV9La5/vrj1GgNReyxwlp6FhFaSLcpoqa9noWUSlCLA3DUy6g8QG+RkmC5iaLmXV/lZVQMG9UcT94qwFAFmRBlYVIoUiJuN9q4Z8sts36yxcexlXdTLJEeoSNEEhOoWmd+5bVcTxUa5p1wX5jNq7grM839qo8ZkDQyl/lu2e8xix4Hegp8uNny8CpWGqg4Pkxum6POS34oU/Kh0BrPc02IAzqPkzr1z9bSVm+PPTKhPbJ/tKkgq7AQFpFH0T4bYkPZB0U9aSNCuBx0UuUWNHNArItHnFSAG6Jt0SdhRimt/whDvtAySQlqa/+G4SBGvQnvzz4Aik+W7XxEiWz8QTn3DXprw+OFygOK4a18dom7DOuG67mtiV/HeFG4miiZOiYfRp/KMGS+rOVumFbSaiMDGiZ4oWFXDgByDJk3oHdN0x+kJ8lEgPZF76PMV0X6jNKAtCmEuJLegWFiCY4Zu2l2Fo40rAMNUU/xUA+Y+qqGz7uBwKsQEBaRR9E+1tmwdz4R9p7ALcgWdPSg7iKgc6+NLiitJUK9WVyHVQiuIPMuTp6d/f0nFbVo7w58v9rXxvYioLq5qg/hAdqugqMJ5DgRJvbVFv/7UoI+BIX/f82mbK2OQ0wXyCSyayf94MeO6ZKzsPO4128p6wZrsbKFS59bz8sHeqm5YAGRR3OOcxR9CVG8BnnL+350j+K9goceQ9STjrnjFoK4MR7rcTEZ1xT/DIYq4/RhcKdAFpFH0TG7wwDTfedfSNSkHqOhZOe2+rsWVqV6UD6UE66hmQdAGusT4iPJb+G9gCEdyeSO84xiJ/mFST1aQMVCBHn0tZAlDn094zazhUnqivEya4tb/rIpwNMrSZ3g1zaBbszanDq/6QzaFnivRQ/5nh6aZk"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "response": {
+                  "content": "`run_me` failed: the disk is full."
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 251,"totalTokenCount": 251,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 251}],"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "XiP3atqnFe_7xN8P2vHk8AM"}
+    

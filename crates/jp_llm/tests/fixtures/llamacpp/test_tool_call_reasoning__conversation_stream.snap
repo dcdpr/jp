@@ -275,16 +275,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user is asking me to run the tool with whatever arguments I want. I need to use the run_me function. Let me check the parameters:\n\n- foo: required, type can be \"string\" or \"null\", default is \"foo\"\n- bar: required, type is \"array\", enum values are [\"foo\", \"bar\"], so each item must be \"foo\" or \"bar\"\n\nI should provide valid arguments. Let me use the default for foo (\"foo\") and provide a valid array for bar with at least one valid value (\"foo\").\n"
+      "reasoning": "The user is asking me to run the tool with whatever arguments I want. I need to use the run_me function. Let me check its parameters:\n\n- foo: required, type can be string or null, default is \"foo\"\n- bar: required, type can be string or array, enum values can be \"foo\" or \"bar\", items can be \"foo\" or \"bar\"\n\nSince the user said \"whatever arguments you want\", I should pick some reasonable values. I'll use:\n- foo: \"foo\" (using the default or a simple value)\n- bar: [\"foo\", \"bar\"] (an array with both enum values)\n\nThis should work fine."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "qCRtO6khmonFfDo1uuz8gSBVczLWJhCp",
+      "id": "qxmGNBFIVgEZbsjpqy2PYYHm20JWK6Bu",
       "name": "run_me",
       "arguments": {
         "foo": "Zm9v",
-        "bar": "WyJmb28iXQ=="
+        "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
@@ -303,14 +303,14 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "qCRtO6khmonFfDo1uuz8gSBVczLWJhCp",
+      "id": "qxmGNBFIVgEZbsjpqy2PYYHm20JWK6Bu",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully with the arguments provided! It returned `working!`. Is there anything specific you'd like to test or explore further?"
+      "message": "The tool executed successfully! 🎉\n\nIt returned `working!`, indicating that the function ran correctly with the provided arguments:\n- `foo`: \"foo\"\n- `bar`: [\"foo\", \"bar\"]\n\nIf you'd like to test it with different arguments or explore further, feel free to let me know!"
     }
   ]
 }

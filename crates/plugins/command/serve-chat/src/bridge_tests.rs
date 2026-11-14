@@ -6,7 +6,7 @@ use std::{
 };
 
 use camino::Utf8PathBuf;
-use chrono::Weekday;
+use chrono::{NaiveDate, Weekday};
 use jp_config::{
     AppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
@@ -18,8 +18,9 @@ use tokio::sync::oneshot;
 use super::*;
 use crate::{
     decide::{Action, Decision, Verdict},
-    host::{Turn, tool_names},
-    options::DecideOptions,
+    host::{NewTurn, Turn, tool_names},
+    options::{DecideOptions, Rollover},
+    turn::turn_cfg,
 };
 
 struct HostLog {
@@ -27,7 +28,9 @@ struct HostLog {
     turns: Vec<oneshot::Sender<Result<(), String>>>,
     conversations: u32,
     refuse_replies: bool,
-    logs: Vec<String>,
+
+    /// Each log event's message and fields.
+    logs: Vec<(String, Map<String, Value>)>,
     prints: Vec<String>,
 
     /// Custom response text returned instead of `"Answer from
@@ -35,6 +38,9 @@ struct HostLog {
     answer: Option<String>,
     cfgs: Vec<Vec<String>>,
     tools: Result<Vec<String>, String>,
+
+    /// How long reading the configured tools takes.
+    tools_delay: Duration,
     compactions: Vec<oneshot::Sender<Result<Vec<StoredCompaction>, String>>>,
     compacted: Vec<Vec<Compaction>>,
 }
@@ -51,6 +57,7 @@ impl Default for HostLog {
             answer: None,
             cfgs: vec![],
             tools: Ok(vec![]),
+            tools_delay: Duration::ZERO,
             compactions: vec![],
             compacted: vec![],
         }
@@ -67,8 +74,23 @@ impl FakeHost {
         self.0.lock().unwrap().calls.clone()
     }
 
+    /// The message of every log event, in order.
     fn logs(&self) -> Vec<String> {
-        self.0.lock().unwrap().logs.clone()
+        let log = self.0.lock().unwrap();
+        log.logs
+            .iter()
+            .map(|(message, _)| message.clone())
+            .collect()
+    }
+
+    /// The fields of every log event with `message`, in order.
+    fn logged(&self, message: &str) -> Vec<Value> {
+        let log = self.0.lock().unwrap();
+        log.logs
+            .iter()
+            .filter(|(logged, _)| logged == message)
+            .map(|(_, fields)| Value::Object(fields.clone()))
+            .collect()
     }
 
     fn end_turn(&self, result: Result<(), String>) {
@@ -86,6 +108,10 @@ impl FakeHost {
 
     fn set_tools(&self, tools: Result<Vec<String>, String>) {
         self.0.lock().unwrap().tools = tools;
+    }
+
+    fn delay_tools(&self, delay: Duration) {
+        self.0.lock().unwrap().tools_delay = delay;
     }
 
     fn turns_running(&self) -> usize {
@@ -182,7 +208,17 @@ impl Host for FakeHost {
     }
 
     fn tools(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send {
-        future::ready(self.0.lock().unwrap().tools.clone())
+        let (tools, delay) = {
+            let log = self.0.lock().unwrap();
+            (log.tools.clone(), log.tools_delay)
+        };
+
+        async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            tools
+        }
     }
 
     fn events(
@@ -203,8 +239,12 @@ impl Host for FakeHost {
         ]))
     }
 
-    fn log(&self, _level: Level, message: &str) {
-        self.0.lock().unwrap().logs.push(message.to_owned());
+    fn log_with(&self, _level: Level, message: &'static str, fields: Map<String, Value>) {
+        self.0
+            .lock()
+            .unwrap()
+            .logs
+            .push((message.to_owned(), fields));
     }
 
     fn print(&self, text: &str) {
@@ -508,9 +548,15 @@ async fn a_message_from_a_stranger_is_dropped() {
     assert!(f.host.calls().is_empty());
     assert!(f.outbox.take().is_empty());
     assert_eq!(f.host.logs(), vec![
-        "Dropped a message from +31699999999 in direct:+31699999999: not one of the configured \
-         people."
+        "Dropped message from unconfigured sender."
     ]);
+    assert_eq!(
+        f.host.logged("Dropped message from unconfigured sender."),
+        vec![json!({
+            "chat": "direct:+31699999999",
+            "sender": ["+31699999999"],
+        })]
+    );
 }
 
 #[tokio::test]
@@ -633,9 +679,70 @@ async fn a_failed_turn_says_so_and_logs_why() {
         f.outbox.take().last().unwrap(),
         &format!("send direct:+31611111111: {FAILED}")
     );
-    assert_eq!(f.host.logs(), vec![
-        "A turn for direct:+31611111111 failed: provider overloaded"
-    ]);
+    assert_eq!(f.host.logs(), vec!["Turn failed.", "Turn ended."]);
+    assert_eq!(f.host.logged("Turn failed."), vec![json!({
+        "chat": "direct:+31611111111",
+        "error": "provider overloaded",
+    })]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_turn_logs_how_long_reading_the_tools_and_running_took() {
+    let mut f = fixture();
+    f.host.delay_tools(Duration::from_millis(900));
+
+    f.receive(from(CLIENT, "What's next?"));
+    f.settle().await;
+    tokio::time::advance(Duration::from_millis(5200)).await;
+    f.end_turn().await;
+
+    assert_eq!(f.host.logs(), vec!["Turn ended."]);
+    assert_eq!(f.host.logged("Turn ended."), vec![json!({
+        "chat": "direct:+31611111111",
+        "conversation": "c1",
+        "total_ms": 6100,
+        "checkout_ms": 0,
+        "tools_ms": 900,
+        "open_ms": 0,
+        "run_ms": 5200,
+        "answer_ms": 0,
+    })]);
+}
+
+#[test]
+fn the_phases_of_a_turn_add_up_to_its_total() {
+    let picked = Instant::now();
+    let running = Running {
+        chat: Chat::Direct(CLIENT.to_owned()),
+        person: "client".to_owned(),
+        conversation: Some("c1".to_owned()),
+        picked,
+        prepared: picked + Duration::from_millis(300),
+        accepted: Some((
+            picked + Duration::from_millis(1300),
+            Duration::from_millis(900),
+        )),
+    };
+
+    let phases = phases(
+        &running,
+        picked + Duration::from_millis(6500),
+        picked + Duration::from_millis(6700),
+    );
+
+    assert_eq!(
+        phases.map(Value::Object),
+        Some(json!({
+            "chat": "direct:+31611111111",
+            "conversation": "c1",
+            "total_ms": 6700,
+            "checkout_ms": 300,
+            "tools_ms": 900,
+            "open_ms": 100,
+            "run_ms": 5200,
+            "answer_ms": 200,
+        }))
+    );
 }
 
 #[tokio::test]
@@ -666,6 +773,14 @@ async fn a_change_outside_the_writable_directories_pauses_until_taken() {
         "send direct:+31622222222: The tree is clean again; the bridge has resumed.",
         "typing direct:+31611111111 on",
     ]);
+    assert_eq!(f.host.logs(), vec![
+        "Turn ended.",
+        "Bridge paused.",
+        "Bridge resumed."
+    ]);
+    assert_eq!(f.host.logged("Bridge paused."), vec![json!({
+        "stray": ["README.md"],
+    })]);
 }
 
 #[tokio::test]
@@ -814,6 +929,9 @@ struct FakeDecider {
     answers: Mutex<Vec<Result<Verdict, String>>>,
     asked: Mutex<Vec<String>>,
     offered: Mutex<Vec<&'static [Action]>>,
+
+    /// How long each decision takes.
+    delay: Duration,
 }
 
 impl Decide for FakeDecider {
@@ -821,7 +939,14 @@ impl Decide for FakeDecider {
         self.asked.lock().unwrap().push(state);
         self.offered.lock().unwrap().push(actions);
         let answer = self.answers.lock().unwrap().remove(0);
-        Box::pin(future::ready(answer))
+        let delay = self.delay;
+
+        Box::pin(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            answer
+        })
     }
 }
 
@@ -841,9 +966,18 @@ fn verdict(action: Action, probability: f64) -> Verdict {
 }
 
 fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>) {
+    deciding_after(Duration::ZERO, answers)
+}
+
+/// A fixture whose decider takes `delay` to answer.
+fn deciding_after(
+    delay: Duration,
+    answers: Vec<Result<Verdict, String>>,
+) -> (Fixture, Arc<FakeDecider>) {
     let mut f = fixture();
     let decider = Arc::new(FakeDecider {
         answers: Mutex::new(answers),
+        delay,
         ..FakeDecider::default()
     });
     f.bridge.options.decide = Some(DecideOptions {
@@ -860,9 +994,12 @@ fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>
     (f, decider)
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_group_message_the_decider_ignores_gets_no_turn() {
-    let (mut f, decider) = deciding(vec![Ok(verdict(Action::Ignore, 0.9))]);
+    let (mut f, decider) = deciding_after(Duration::from_millis(400), vec![Ok(verdict(
+        Action::Ignore,
+        0.9,
+    ))]);
 
     f.receive(in_group(CLIENT, "Thanks!"));
     f.settle().await;
@@ -872,8 +1009,18 @@ async fn a_group_message_the_decider_ignores_gets_no_turn() {
         "Last message:\nAda Client: Thanks!".to_owned()
     ]);
     assert_eq!(f.host.logs(), vec![
-        "A message in group:Z3JvdXA= isn't for the assistant."
+        "Message classified.",
+        "Message ignored."
     ]);
+    assert_eq!(f.host.logged("Message ignored."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+    })]);
+    assert_eq!(f.host.logged("Message classified."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+        "action": "ignore",
+        "probability": 0.9,
+        "took_ms": 400,
+    })]);
 }
 
 #[tokio::test]
@@ -930,7 +1077,7 @@ async fn a_message_the_decider_ignores_gets_no_turn_even_when_it_names_the_assis
     assert!(f.host.calls().is_empty(), "{:?}", f.host.calls());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn an_unsure_or_failed_decision_answers_the_message() {
     let (mut f, _) = deciding(vec![
         Ok(verdict(Action::Ignore, 0.4)),
@@ -947,8 +1094,15 @@ async fn an_unsure_or_failed_decision_answers_the_message() {
 
     assert_eq!(f.host.calls().len(), 2, "{:?}", f.host.calls());
     assert_eq!(f.host.logs(), vec![
-        "The decide API failed, so the message is answered: the decide API answered 503"
+        "Message classified.",
+        "Turn ended.",
+        "Decide failed, answering.",
     ]);
+    assert_eq!(f.host.logged("Decide failed, answering."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+        "error": "the decide API answered 503",
+        "took_ms": 0,
+    })]);
 }
 
 #[tokio::test]
@@ -1287,10 +1441,11 @@ async fn a_turn_whose_tools_cant_be_read_does_not_start() {
         "typing direct:+31611111111 off".to_owned(),
         format!("send direct:+31611111111: {FAILED}"),
     ]);
-    assert_eq!(f.host.logs(), vec![
-        "A turn for direct:+31611111111 failed: couldn't read the configured tools: config path \
-         not found: conversation"
-    ]);
+    assert_eq!(f.host.logged("Turn failed."), vec![json!({
+        "chat": "direct:+31611111111",
+        "error": "couldn't read the configured tools: config path not found: conversation",
+    })]);
+    assert_eq!(f.host.logs(), vec!["Turn failed."]);
     assert_eq!(f.checkout.calls(), vec!["begin", "end"]);
 }
 

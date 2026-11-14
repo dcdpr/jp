@@ -7,23 +7,12 @@ expression: v
         Flushed(
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "I'll run the tool with some arguments:\n\n",
-                    },
-                ),
-                metadata: {},
-            },
-        ),
-        Flushed(
-            ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "chatcmpl-tool-9471b01d74e3a119",
+                        id: "chatcmpl-tool-a9c76e86f718fa78",
                         name: "run_me",
                         arguments: {
-                            "foo": String("Hello, world!"),
+                            "foo": String("foo"),
                             "bar": Array [
                                 String("foo"),
                             ],
@@ -43,7 +32,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully and returned \"working!\"",
+                        message: "The tool ran successfully and returned: `working!`\n\nIt looks like `run_me` is a simple utility that accepts:\n- **foo** (string): a required text argument\n- **bar** (array of strings): a required list of items\n\nIn this case, I passed `foo: \"foo\"` and `bar: [\"foo\"]`, and it confirmed it was working. Let me know if you'd like me to use this tool in a different way!",
                     },
                 ),
                 metadata: {},

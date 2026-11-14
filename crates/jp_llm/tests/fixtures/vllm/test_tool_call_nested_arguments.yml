@@ -1,0 +1,141 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "Qwen/Qwen3.8-27B-FP8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains."
+        }
+      ],
+      "stream": true,
+      "reasoning_effort": "none",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_files",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "ops": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "The files to read, one element per file.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "enum": [
+                          "a.txt",
+                          "b.txt"
+                        ]
+                      },
+                      "start_line": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "start_line"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "ops"
+              ],
+              "additionalProperties": false
+            },
+            "strict": true
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id": "chatcmpl-aadf9f02a36cb22e", "object": "chat.completion.chunk", "created": 1794649987, "model": "Qwen/Qwen3.8-27B-FP8", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "logprobs": null, "finish_reason": null}], "prompt_token_ids": null, "prompt_text": null, "service_tier": "default"}
+    
+    data: {"id":"chatcmpl-aadf9f02a36cb22e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-8fd95cdb4b0bfd22","type":"function","index":0,"function":{"name":"read_files"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-aadf9f02a36cb22e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"ops\": "}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-aadf9f02a36cb22e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"[{\"path\": \"a.txt\", \"start_line\": null}, {\"path\": \"b.txt\", \"start_line\": null}]}"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-aadf9f02a36cb22e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"tool_calls","stop_reason":null,"token_ids":null}]}
+    
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "Qwen/Qwen3.8-27B-FP8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains."
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "chatcmpl-tool-8fd95cdb4b0bfd22",
+              "type": "function",
+              "function": {
+                "name": "read_files",
+                "arguments": "{\"ops\":[{\"path\":\"a.txt\"},{\"path\":\"b.txt\"}]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "chatcmpl-tool-8fd95cdb4b0bfd22",
+          "content": "a.txt: alpha\nb.txt: beta"
+        }
+      ],
+      "stream": true,
+      "reasoning_effort": "none"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id": "chatcmpl-9adc6aa86c63622e", "object": "chat.completion.chunk", "created": 1794649987, "model": "Qwen/Qwen3.8-27B-FP8", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "logprobs": null, "finish_reason": null}], "prompt_token_ids": null, "prompt_text": null, "service_tier": "default"}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"-"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" **a"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":".txt** contains:"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":" `alpha`\n"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"- **b.txt"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"** contains: `"},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+    
+    data: {"id":"chatcmpl-9adc6aa86c63622e","object":"chat.completion.chunk","created":1794649987,"model":"Qwen/Qwen3.8-27B-FP8","choices":[{"index":0,"delta":{"content":"beta`"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null}]}
+    
+    
+    data: [DONE]
+    

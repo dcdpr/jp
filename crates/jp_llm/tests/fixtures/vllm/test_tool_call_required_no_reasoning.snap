@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I'll run the tool with some arguments:\n\n",
+                        message: "I'll invoke the `run_me` tool with arguments that satisfy its schema — setting `foo` to its allowed value and `bar` to an allowed value:\n\n",
                     },
                 ),
                 metadata: {},
@@ -20,13 +20,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "chatcmpl-tool-95b70da4d5404eab",
+                        id: "chatcmpl-tool-acf11067a57dc7fb",
                         name: "run_me",
                         arguments: {
-                            "foo": String("Hello, world!"),
-                            "bar": Array [
-                                String("foo"),
-                            ],
+                            "foo": String("foo"),
+                            "bar": String("foo"),
                         },
                     },
                 ),
@@ -43,7 +41,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool ran successfully and returned **\"working!\"** — it seems to have executed with the arguments I provided:\n\n- **foo**: `\"Hello, world!\"`\n- **bar**: `[\"foo\"]`",
+                        message: "The tool ran successfully and returned: `working!`",
                     },
                 ),
                 metadata: {},
