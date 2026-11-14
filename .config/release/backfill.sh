@@ -1163,4 +1163,7 @@ main() {
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   main "$@"
+  # Exit before reading further: `just backfill` runs this file from a checkout
+  # that can change while a command runs, and bash reads a script as it goes.
+  exit
 fi
