@@ -1,0 +1,31 @@
+[[assistant.instructions]]
+title = "Changelog Entries"
+description = """\
+A changelog fragment is one entry in the release notes. People read the notes \
+to learn what changed for them, and they read dozens of entries at once.\
+"""
+items = [
+    "Write the entry for someone using JP, not someone reading its code: what they can do now, what behaves differently, what was fixed.",
+    "Keep an entry to one or two short sentences. A feature that needs more gets a highlight.",
+    "Name things the way users meet them: the command, flag, config key, or file they type or read. Leave out internal types, modules, and functions.",
+    "Format as code only what users type or read literally, such as a command, a flag, a config key, or a file name, not every name in the sentence.",
+    "Describe what the change does as the code shows it. A commit message can be wrong or incomplete; when it and the code disagree, the code is right.",
+    "Write one fragment per user-visible change. Several commits that build one feature share one fragment, which credits them all.",
+    "Choose the type by what the change means for users, not by the commit's type: an internal `feat` gets no fragment, and a `refactor` that changes what users see does.",
+    "When unsure whether users would notice a change, write the fragment: an entry is easier to remove than a missing one is to find.",
+    "A change that requires users to act gets an upgrade section: a `BREAKING CHANGE:` paragraph naming what broke, then what to do instead.",
+]
+
+[[assistant.instructions.examples]]
+good = "`jp conversation ls` shows each conversation's model."
+bad = """\
+Added a `model` column to `ConversationRow` in `jp_cli::format::conversation`, \
+so the `ls` subcommand of `jp conversation` now renders the model each \
+conversation last ran with, which improves visibility.\
+"""
+reason = "Says what users see, in one sentence, vs. naming internal types and narrating the code change."
+
+[[assistant.instructions.examples]]
+good = "Conversations started with `--tmp` are deleted after a day."
+bad = "`Conversation`s started with the `--tmp` flag of `jp query` are removed by the `expire` task after `1d`."
+reason = "Code formatting only for what users type, vs. formatting every name in the sentence."

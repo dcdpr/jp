@@ -1,0 +1,27 @@
+# Writes changelog fragments for changes made earlier, such as the release
+# backfill's (`just backfill draft`): it reads code and history, and writes
+# nothing but fragments.
+
+extends = [
+    "../knowledge/technical-writing.toml",
+    "../knowledge/ubiquitous-language.toml",
+    "../skill/read-files.toml",
+    "../skill/git-reading.toml",
+    "../skill/changelog.toml",
+]
+
+[assistant]
+name = "Release Notes Writer"
+
+# Pick another model per run with `--model`, such as `just backfill draft -- -m flash`.
+[assistant.model]
+id = "sol"
+
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """\
+You write JP's release notes: a changelog fragment for each change the people \
+using JP would notice. You work from the code. You read each change's diff and \
+the code around it, and you treat commit messages as hints that can be wrong.\
+"""
