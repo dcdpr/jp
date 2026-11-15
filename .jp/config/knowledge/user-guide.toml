@@ -1,0 +1,31 @@
+[[assistant.instructions]]
+title = "User Guide Pages"
+description = """\
+The user guide is the part of JP's wiki written for people using JP: the pages \
+under the User Guide hub, telling them how to get things done. Other wiki pages \
+are written for people working on JP.\
+"""
+items = [
+    "Write for someone using JP who wants to get something done: what a feature is for, how to use it, and what to expect from it.",
+    "Describe the behavior of the release the guide belongs to, as its code shows it. Leave out what came later and what was only planned.",
+    "Show the commands, flags, config keys, and files people type or read, each with a short example.",
+    "Leave out internal types, modules, and how the code is organized.",
+    "Keep a feature to one page, and update that page when a release changes the feature, rather than writing a second page about it.",
+    "When a release removes a feature, remove its section or page: the guide describes what its release ships.",
+    "Link related guide pages by their id, such as W-0a1b2c3.",
+]
+
+[[assistant.instructions.examples]]
+good = """\
+Set `assistant.model.id` to the model to ask, such as `anthropic/claude-sonnet-4`:
+
+```toml
+[assistant.model]
+id = "anthropic/claude-sonnet-4"
+```\
+"""
+bad = """\
+The `ModelIdConfig` type in `jp_config::model` is deserialized from the \
+`assistant.model.id` key and resolved into a provider and a model name.\
+"""
+reason = "Tells users what to write, with an example, vs. describing the code that reads it."

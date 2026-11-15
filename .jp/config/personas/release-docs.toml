@@ -1,0 +1,73 @@
+# Writes the user guide and the highlights of a release of JP's history, in the
+# release backfill (`just backfill docs` and `just backfill highlight`): it reads
+# the release's code and history, writes guide pages, and changes nothing but
+# the guide and the release's notes.
+
+extends = [
+    "../knowledge/technical-writing.toml",
+    "../knowledge/ubiquitous-language.toml",
+    "../knowledge/user-guide.toml",
+    "../skill/read-files.toml",
+    "../skill/git-reading.toml",
+    "../skill/wiki.toml",
+]
+
+[assistant]
+name = "User Guide Writer"
+
+# Pick another model per run with `--model`, such as `just backfill docs -- -m flash`.
+[assistant.model]
+id = "sol"
+
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """\
+You write JP's user guide, and the highlights of its release notes, for people \
+using JP. You work from the code. You read each change's diff and the code \
+around it, and you treat commit messages and release notes as hints that can \
+be wrong.\
+"""
+
+# Every page written and every file changed is shown for approval first.
+[conversation.tools]
+wiki_create = { run = "ask" }
+wiki_edit = { run = "ask" }
+
+# Outside the guide, the release's notes are the only files it may change: a
+# fragment gets a link to its guide page, and a highlight is a new file. The
+# rules replace the tools' own, which let them write anywhere.
+[conversation.tools.fs_modify_file]
+enable = true
+run = "ask"
+result = "allow"
+
+[conversation.tools.fs_modify_file.access.fs]
+strategy = "replace"
+
+[[conversation.tools.fs_modify_file.access.fs.value]]
+path = "."
+read = true
+
+[[conversation.tools.fs_modify_file.access.fs.value]]
+path = "changelog.d"
+read = true
+update = true
+
+[conversation.tools.fs_create_file]
+enable = true
+run = "ask"
+result = "allow"
+
+[conversation.tools.fs_create_file.access.fs]
+strategy = "replace"
+
+[[conversation.tools.fs_create_file.access.fs.value]]
+path = "."
+read = true
+
+[[conversation.tools.fs_create_file.access.fs.value]]
+path = "changelog.d"
+read = true
+create = true
+update = true
