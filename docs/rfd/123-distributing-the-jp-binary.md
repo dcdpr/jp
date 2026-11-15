@@ -230,8 +230,26 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
   <commit>` with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the period's
   last day, runs `jp release build --quick` for the host Mac to verify the
   commit compiles, and checks out the notes branch.
-- The maintainer reviews and edits the notes on the notes branch, previewing
-  them with `jp release render` or `just develop-docs`.
+- `just backfill docs` writes the release's user guide in the release's own
+  tree.
+  The worktree beside the clone checks out the release branch, and the guide
+  written for the previous release is brought in with a three-way apply; the
+  first release's wiki starts with `main`'s `.epoch`, so the ids of its pages
+  cannot collide with `main`'s.
+  An interactive `jp query` with the `release-docs` persona runs for each entry
+  of type `added`, `changed`, `deprecated`, or `removed`, and one more for the
+  changes without entries.
+  It reads the changes' diffs and the release's code, writes guide pages through
+  the wiki tools, which `jp query --mount` gives write access to the release's
+  wiki only, shows each page for approval, and links the entry to its page.
+  The script commits the guide on the release branch, dated at the release's
+  last day, with the `Date` of each new page set to that day.
+- `just backfill highlight <entry>` writes a highlight about one entry, in a
+  conversation that reads the change's diffs, the release's code, and its guide
+  page.
+- The maintainer reviews and edits the notes on the notes branch, adds an
+  `overview.md`, and previews them with `jp release render` or `just
+  develop-docs`.
 - `just backfill proceed` merges the notes branch into `main`, runs `jp release
   finalize` and `jp release build` (full five-target release profile), pushes to
   the local bare `origin`, and starts the next period.
@@ -239,12 +257,27 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
   `origin`, runs `jp release abandon` from newest to oldest ([RFD 122]), and
   removes their build directories so `next` can re-cut `0.5.0` while preserving
   any edited fragments.
+  Each release's guide is kept under `refs/backfill/guide/<version>/`, and
+  `docs` brings it back after the re-cut.
 - `just backfill publish` finishes the backfill: it deletes the old test tag
   `v0.1.0` on GitHub, pushes all `release/*` branches and `v*` tags to GitHub in
   a single push (pushing more than three tags at once suppresses GitHub Actions
   tag-push workflows for historical commits), runs `jp release github publish`
-  for each version from oldest to newest, and pushes the backfilled
-  `changelog.d` history as a branch to open a pull request against `main`.
+  for each version from oldest to newest, brings the last release's guide into
+  `main`, and pushes the backfilled `changelog.d` history as a branch to open a
+  pull request against `main`.
+
+The guide's commits are the only commits on a release branch that do not come
+from `jp release`, and the only exception to [RFD 122]'s rule that every change
+reaches a release branch through `main`.
+A backfilled release's guide describes that release's code, while the guide on
+`main` describes JP today, so it cannot land on `main` first.
+`jp release` accepts these commits: `finalize` tags the branch's tip, and
+`build` builds it.
+Each tag then holds the wiki as it was at its cut point, plus the guide written
+for its release, which T-1k4twkf builds into that release's site.
+Entries link their guide pages there, as
+`https://jp.computer/vX.Y.Z/wiki/<page>`.
 
 ## Drawbacks
 
@@ -328,6 +361,14 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
 - **Xcode SDK / linker incompatibilities on older toolchains.** Newer macOS SDKs
   can fail to link with older Command Line Tools linkers; `build.sh` probes
   installed developer directories and selects one whose linker and SDK match.
+- **Guide links that serve nothing yet.** Backfilled entries link guide pages
+  under `/vX.Y.Z/`, which serve nothing until T-1k4twkf builds and hosts each
+  release's site.
+- **One wiki merged by hand.** The wiki entered JP's history on 2026-11-01
+  (#1264), so the release whose period includes that day has a wiki of its own.
+  Bringing the previous release's guide into it conflicts in
+  `docs/wiki/.order.json`, which both trees hold; `just backfill docs` stops
+  there, and the maintainer merges the two order files once.
 
 ## Implementation Plan
 
@@ -360,8 +401,10 @@ Depends on Phases 1 and 2.
 ### Phase 4: JP's history
 
 Add `.config/release/backfill.sh` (`just backfill`) with `init`, `next`,
-`proceed`, `revert`, `publish`, and `draft`, and execute the backfill trial to
-publish JP's historical releases.
+`draft`, `changes`, `cut`, `docs`, `highlight`, `proceed`, `revert`, and
+`publish`, the `release-notes` and `release-docs` personas with the changelog
+and user guide rules, and execute the backfill trial to publish JP's historical
+releases.
 Depends on Phase 3 and [RFD 122] Phases 5 to 7.
 
 ### Repository settings
