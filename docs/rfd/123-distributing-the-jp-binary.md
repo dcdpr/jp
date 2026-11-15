@@ -1,396 +1,398 @@
 # RFD 123: Distributing the jp Binary
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-14
-- **Requires**: [RFD 122]
-- **Summary**: Release tags publish prebuilt, attested `jp` binaries and install
-  scripts to GitHub Releases, built with dist.
+- **Summary**: Builds release binaries for five targets on macOS and publishes
+  them to GitHub Releases via `jp release github`.
 
 ## Summary
 
-Pushing a release tag publishes prebuilt `jp` binaries for Linux, macOS, and
-Windows to a GitHub Release, alongside SHA-256 checksums, GitHub artifact
-attestations, install scripts, and the rendered release notes.
-[dist] (the `cargo-dist` crate) builds the binaries, generates the installers,
-and uploads the release assets.
-This RFD covers only the `jp` binary; command plugins, the macOS app, the web
-client, and macOS notarization are out of scope.
+JP's releases ship prebuilt `jp` binaries for Linux, macOS, and Windows.
+[RFD 122]'s `jp release build` runs `.config/release/build.sh`, which compiles
+all five target triples on macOS using a pinned toolchain and a size-optimized
+release profile, producing archives, `checksums.txt`, and `manifest.json`.
+A new command plugin, `jp release github`, publishes a verified build to GitHub
+Releases: it sets the release description to the rendered release notes, uploads
+the archives, checksums, manifest, and install scripts as release assets, and
+updates release descriptions when notes change on `main`.
+Because building does not depend on GitHub, future publishers (such as hosting
+releases directly on `jp.computer`) can consume the same build directory.
+Finally, `just backfill` uses these commands to cut, build, and publish
+historical releases across JP's commit history in an isolated rehearsal clone
+before pushing to GitHub.
 
 ## Motivation
 
-Installing JP with `cargo install --git` requires a Rust toolchain and several
-minutes of compilation.
-[RFD 122] cuts and tags a release every two weeks, but a tag alone gives users
-nothing to download.
-The first official release needs prebuilt binaries.
+Installing JP from source (`cargo install --git`) requires a Rust toolchain and
+several minutes of compilation.
+[RFD 122] ends a release with a pushed tag and a validated build directory on
+the releasing machine; this RFD defines how JP builds its release archives and
+publishes them to GitHub.
 
-Cross-platform binary releases are a solved problem, and JP should use an
-existing tool rather than maintain a custom workflow.
-`plugins.yml` shows the cost of a hand-rolled workflow: maintaining a runner
-matrix, renaming binaries, computing checksums in shell scripts, and uploading
-assets one by one.
-Using a dedicated release tool also provides standard checksum files, build
-provenance attestations, and platform-detecting install scripts.
+Although GitHub hosts the repository today, the release build itself should not
+depend on GitHub Actions so JP can publish releases to its own website or
+migrate to another forge by swapping the publisher plugin.
+Binaries are therefore built by `.config/release/build.sh` on the releasing Mac
+for now; a remote builder ([RFD 122]) can later move compilation to dedicated
+build hardware that attests its output.
 
-This RFD scopes distribution to the `jp` binary.
-Command plugins will be distributed in a later RFD, and the macOS app and web
-client remain unreleased prototypes.
+JP also has 21 months of commit history prior to its first official release.
+Backfilling that history in roughly six-week intervals produces release notes
+and prebuilt binaries for each period while exercising the entire release
+pipeline in a local clone before anything is pushed to GitHub.
 
 ## Design
 
-### Release Assets
+### What a release ships
 
-When a maintainer pushes a release tag with `jp release finalize` ([RFD 122]),
-the workflow publishes a GitHub Release with the following assets:
+| File                                  | Contents                                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `jp-aarch64-apple-darwin.tar.xz`      | `jp` binary, `README.md`, and `LICENSE` for each target                            |
+| `jp-x86_64-apple-darwin.tar.xz`       |                                                                                    |
+| `jp-x86_64-unknown-linux-gnu.tar.xz`  |                                                                                    |
+| `jp-aarch64-unknown-linux-gnu.tar.xz` |                                                                                    |
+| `jp-x86_64-pc-windows-msvc.zip`       |                                                                                    |
+| `checksums.txt`                       | SHA-256 digests for each archive in `sha256sum` format                             |
+| `manifest.json`                       | Version, commit, build profile, and target triple per artifact ([RFD 122])     |
+| `install.sh`, `install.ps1`           | Platform install scripts attached by the publisher ([Installation](#installation)) |
 
-| Asset                                 | Description                                                     |
-| ------------------------------------- | --------------------------------------------------------------- |
-| `jp-x86_64-unknown-linux-gnu.tar.xz`  | Target archive containing the `jp` binary, README, and license  |
-| `jp-aarch64-unknown-linux-gnu.tar.xz` |                                                                 |
-| `jp-aarch64-apple-darwin.tar.xz`      |                                                                 |
-| `jp-x86_64-apple-darwin.tar.xz`       |                                                                 |
-| `jp-x86_64-pc-windows-msvc.zip`       |                                                                 |
-| `*.sha256`, `sha256.sum`              | Per-archive SHA-256 checksum files and a combined checksum file |
-| `jp-installer.sh`, `jp-installer.ps1` | Install scripts for Unix shells and PowerShell                  |
-| `dist-manifest.json`                  | Machine-readable manifest of the release assets                 |
+Archive filenames omit the version number so download URLs have a predictable
+name across releases.
+Each archive extracts into a directory of the same stem (e.g.
+`jp-aarch64-apple-darwin/`) containing `jp` (or `jp.exe` on Windows) alongside
+the `README.md` and `LICENSE` from the built commit (commits before [#77], which
+added `LICENSE`, omit it).
+Historical releases prior to [#428] (when Windows CI support landed) omit the
+Windows archive.
 
-Asset filenames omit the version number, so
-`releases/latest/download/jp-installer.sh` always resolves to the newest
-release.
-Each archive also receives a GitHub artifact attestation: a Sigstore-signed
-record of the workflow run and commit that built it, stored by GitHub rather
-than uploaded as a release asset.
+### Building
 
-The GitHub Release description contains the release notes rendered from the
-release's directory on `main` (see [Release Notes](#release-notes)), placed
-above the install instructions.
+JP's `build` command runs `.config/release/build.sh` on macOS:
 
-The target list matches the four targets built by `plugins.yml`, plus
-`aarch64-unknown-linux-gnu` for ARM64 servers and Linux containers on Apple
-Silicon.
+```toml
+[plugins.command.release.options]
+build = "bash .config/release/build.sh {version} {source} {out} {profile}"
+```
+
+The script compiles the `jp` binary (`jp_cli`) from `{source}` for five targets:
+
+- **macOS** (`aarch64-apple-darwin`, `x86_64-apple-darwin`), selecting the first
+  Xcode developer directory whose linker supports its bundled macOS SDK (an
+  older Command Line Tools linker can fail to parse a newer Xcode SDK; see
+  [rust-lang/rust#162928]).
+- **Linux** (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`), using
+  [cargo-zigbuild] targeting glibc 2.28 (compatible with Debian 10+, Ubuntu
+  20.04+, RHEL 8+, and newer distributions).
+- **Windows** (`x86_64-pc-windows-msvc`), using [cargo-xwin] with the CRT
+  statically linked (`+crt-static`) so users do not need the Visual C++
+  Redistributable installed.
+
+The script reads the target commit's release toolchain from `Cargo.toml`:
+
+```toml
+[workspace.metadata.release]
+toolchain = "1.99.1"
+```
+
+Commits that predate `[workspace.metadata.release]` build with the nightly
+toolchain pinned in their `rust-toolchain.toml`.
+
+The `release` profile optimizes for binary size (`opt-level = "s"`, fat LTO,
+`codegen-units = 1`, `strip = "symbols"`).
+On macOS arm64, this reduces `jp` to 32 MB, compared to 49 MB at `opt-level = 3`
+and 88 MB with Cargo's default release profile, while `jp config show`, `jp
+conversation ls`, and `jp conversation grep` benchmark within 4% of `opt-level =
+3`.
+Panics still unwind (`panic = "unwind"`) so a panic inside a spawned task (such
+as a tool execution task) is caught and reported as a turn error rather than
+aborting the process.
+The `quick` profile uses Cargo's default release settings for fast pipeline
+testing.
+
+The build script sets profile flags via `CARGO_PROFILE_RELEASE_*` environment
+variables, ignores user Cargo config `rustflags`, and remaps local cargo and
+rustup paths out of embedded panic strings.
+It also sets `SOURCE_DATE_EPOCH` to the commit timestamp so `jp --version`
+embeds the commit date rather than the wall-clock build date.
+
+For historical commits using Rust toolchains older than 1.89
+([rust-lang/rust#140872]), where `linkme` distributed-slice sections were not
+marked `SHF_GNU_RETAIN` on ELF targets, the script disables linker garbage
+collection (`--no-gc-sections`) on Linux so Zig's linker does not strip
+registered attachment handlers.
 
 ### Installation
 
 ```sh
 # Linux and macOS
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dcdpr/jp/releases/latest/download/jp-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dcdpr/jp/releases/latest/download/install.sh | sh
 ```
 
 ```powershell
 # Windows
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/dcdpr/jp/releases/latest/download/jp-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/dcdpr/jp/releases/latest/download/install.ps1 | iex"
 ```
 
-The install scripts detect the host platform, download the matching archive, and
-install `jp` into Cargo's bin directory (`~/.cargo/bin`), matching `cargo
-install`.
-Users can also download an archive manually, verify its checksum with `sha256sum
--c sha256.sum`, and verify which workflow built it with `gh attestation verify`.
-Building from source with `cargo install --git` remains supported.
+Both scripts detect the OS and CPU architecture, download the matching archive
+and `checksums.txt`, verify the archive's SHA-256 checksum, and install `jp`
+into `~/.cargo/bin`.
+The scripts live in `.config/release/` and contain a `{download}` placeholder
+for the release asset base URL (e.g.
+`https://github.com/dcdpr/jp/releases/download/v0.3.0`), which the publisher
+substitutes before uploading.
+Setting `JP_DOWNLOAD` overrides that URL (for example, pointing to a `file://`
+build directory to test the installer locally before publishing).
+Users can also verify downloaded archives manually with `sha256sum -c
+--ignore-missing checksums.txt` or build from source with `cargo install --git
+https://github.com/dcdpr/jp.git --tag v0.3.0 jp_cli`.
 
-macOS binaries are not notarized.
-Gatekeeper enforces notarization only on files carrying the
-`com.apple.quarantine` extended attribute, which web browsers set on downloads
-but `curl` and the install script do not.
-Only binaries downloaded through a browser are blocked, and running `xattr -d
-com.apple.quarantine jp` allows them to run.
-The installation guide documents this step, and a later RFD will add Developer
-ID signing and notarization.
+Because macOS binaries are not notarized, archives downloaded through a web
+browser receive the `com.apple.quarantine` extended attribute and are blocked by
+Gatekeeper (`curl` and `install.sh` do not set this attribute).
+Running `xattr -d com.apple.quarantine jp` removes the attribute.
 
-### Packaging with `dist`
+### Publishing to GitHub
 
-[dist] (the `cargo-dist` crate) builds a Cargo workspace's binaries on GitHub
-Actions runners and publishes them to a GitHub Release.
-JP configures it in `dist-workspace.toml`:
+`jp release github` is a standalone command plugin (`jp-release-github`), routed
+by longest command prefix ([RFD 072]):
+
+- `jp release github publish 0.3.0` validates the stored `release`-profile build
+  for `0.3.0` ([RFD 122]), creates or updates the GitHub Release for `v0.3.0`
+  (titled `Release 0.3.0`), uploads the archives, `checksums.txt`,
+  `manifest.json`, and any configured `assets` (substituting `{download}` in
+  UTF-8 files), and marks the highest published version as `latest`.
+  It verifies that tag `v0.3.0` already exists on GitHub at the commit recorded
+  in `manifest.json` so creating the release never implicitly creates a tag at
+  the tip of `main`.
+- `jp release github sync` compares existing GitHub Release descriptions against
+  the release notes rendered from the current checkout and updates any that
+  differ.
+  JP's `.github/workflows/release-notes.yml` runs `sync` on pushes to `main`
+  that touch `changelog.d/*/**`.
+
+Because the install scripts and release footer are specific to JP, they are
+configured in `.jp/config.toml` rather than hardcoded in the plugin:
 
 ```toml
-[workspace]
-members = ["cargo:."]
-
-[dist]
-cargo-dist-version = "0.33.0"
-ci = ["github"]
-packages = ["jp"]
-display-name = "JP CLI"
-precise-builds = true
-targets = [
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-pc-windows-msvc",
-]
-installers = ["shell", "powershell"]
-github-attestations = true
-source-tarball = false
-pr-run-mode = "skip"
-post-announce-jobs = ["./release-notes"]
-github-build-setup = "build-setup.yml" # steps that select the release toolchain
-
-[dist.github-custom-runners]
-aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
-
-[dist.github-action-commits]
-# Every action pinned to a commit, as JP's other workflows are.
+[plugins.command.release-github.options]
+assets = [".config/release/install.sh", ".config/release/install.ps1"]
+upgrade_guide = "https://jp.computer/releases/{version}/upgrade"
+footer = ".config/release/github.md"
 ```
 
-- `packages = ["jp"]` restricts builds to the `jp` package, ignoring all other
-  workspace crates (including plugins) regardless of their `publish` setting.
-- `display-name = "JP CLI"` sets the heading in the install section that `dist`
-  writes on the release page ("Install JP CLI 0.3.0"), while asset filenames
-  keep the `jp-` prefix.
-- `precise-builds = true` builds only the `jp` package (`cargo build -p jp`),
-  matching `cargo install`, instead of `dist`'s default of building the entire
-  workspace with unified Cargo features.
-- `source-tarball = false` omits `dist`'s `source.tar.gz` asset; GitHub
-  automatically attaches source archives to every release, keeping the release
-  assets limited to the binaries, installers, and checksums.
-- `pr-run-mode = "skip"` disables `dist` on pull requests; the [release-branch
-  check](#release-branch-build-check) validates release builds instead.
-- `github-action-commits` pins every GitHub Action in `dist`'s generated
-  workflow to a commit SHA.
+Each GitHub Release description consists of the release notes rendered from the
+current checkout, followed by the contents of `footer` (with `{version}` and
+`{download}` substituted).
+When `upgrade_guide` is configured (as a URL template containing `{version}`),
+breaking entries link to that external URL because GitHub Release descriptions
+do not generate heading anchors ([GitHub discussion 48311]).
+When `upgrade_guide` is unset, the upgrade guide is appended inline after the
+release notes.
 
-`dist` owns the workflow it generates at `.github/workflows/release.yml`.
-`dist generate` writes the file from `dist-workspace.toml`, and `dist plan`
-fails if the workflow is out of sync with the configuration, so
-`dist-workspace.toml` is the source of truth and `release.yml` is never edited
-manually.
-The workflow runs when a version tag is pushed: `dist` builds the packages whose
-version matches the tag (`jp`, updated on the release branch by [RFD 122]'s
-`bump` command), compiles each target on a native runner, generates
-attestations, uploads the archives, and publishes the GitHub Release.
+Because publishing a patch release on an older line would otherwise cause GitHub
+to mark that patch as the repository's `latest` release, `publish` explicitly
+sets `make_latest` on the highest non-prerelease version across all published
+releases.
 
-Because a maintainer pushes the tag directly rather than from a workflow, the
-release workflow starts automatically without manual approval (see [RFD 122]'s
-JP's CI section).
+`publish` authenticates via `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` using
+`jp_github`.
+New releases are created as drafts, populated with assets, and then undrafted so
+a release never appears with missing files; re-publishing an existing release
+updates its title, description, and matching assets in place while preserving
+any other attached files.
 
-### Renaming the `jp_cli` Package to `jp`
+### JP's history
 
-`dist` names archives and install scripts after the Cargo package.
-Because the `jp` binary is built by the `jp_cli` package, `dist` would publish
-`jp_cli-installer.sh`.
-To avoid baking `jp_cli` into public install commands and scripts, the Cargo
-package is renamed to `jp` before the first release, while `[lib] name =
-"jp_cli"` preserves the library crate name.
-Only references to the Cargo package name need updating:
+JP's commit history begins in February 2025, with a single test tag (`v0.1.0`)
+that was never published as a release.
+`just backfill` (`.config/release/backfill.sh`) releases that history in
+six-week periods inside an isolated clone whose `origin` points to a local bare
+repository, so nothing reaches GitHub until the entire backfill is reviewed:
 
-- `crates/jp_cli/Cargo.toml` and its entry in `Cargo.lock`.
-- `--package jp_cli` in the justfile's `run` and `serve-web` recipes.
-- The `debug_jp` tools in `.config/jp/tools`, which build with `-p jp_cli`.
-- The `cargo install` command in `README.md` and `docs/installation.md`.
-- The example in the `cargo_check` tool's description.
-- [RFD 122]'s `bump` command, which becomes `--package jp`.
-
-References to the library crate or directory are unchanged: the `crates/jp_cli/`
-directory, `jp_cli::` Rust paths, tracing targets and `RUST_LOG` filters, insta
-snapshot names, and file paths in personas and tool documentation.
-The `jp` binary and its `--help` and `--version` output are also unchanged
-because clap's command name is set to `jp` explicitly rather than derived from
-the package name.
-The ticket label `package=jp_cli` keeps its value as well; it identifies code
-under `crates/jp_cli` and is not checked against Cargo metadata.
-
-Cargo records which package owns each installed binary in `~/.cargo/bin/jp`.
-On machines where `jp` was installed from `jp_cli` with `cargo install`
-(including contributor machines via `just install`), installing the `jp` package
-fails until `jp_cli` is uninstalled.
-The justfile's `install` recipe runs `cargo uninstall jp_cli` whenever `jp_cli`
-is still listed as installed, and the installation guide instructs users who
-built from source to do the same.
-
-### Release Toolchain
-
-`rust-toolchain.toml` pins a nightly compiler for development while specifying
-that release binaries are built with stable Rust.
-The release workflow sets `RUSTUP_TOOLCHAIN` to a stable version via `dist`'s
-`github-build-setup` steps; that version is defined in one place in the justfile
-alongside the other pinned tool versions.
-Because regular CI builds use nightly, stable-compiler breakages would otherwise
-go unnoticed until a release is tagged; the release-branch build check catches
-them when the release branch is cut.
-
-### Release-Branch Build Check
-
-`just release-build` runs `dist build` for the host target with the release
-toolchain, exercising the same tool, configuration, and compiler as a tagged
-release build on a single machine.
-JP's CI runs `just release-build` on each target's runner on every push to a
-`release/*` branch, and contributors can run it locally without GitHub.
-If a release branch fails to compile or package for any platform, CI fails
-before `jp release finalize` ([RFD 122]) tags the release.
-
-### Release Notes
-
-The GitHub Release description contains the release notes that [RFD 122] renders
-from `changelog.d/<version>/` on `main`, followed by a link to the upgrade guide
-when present, and then `dist`'s install instructions.
-
-A reusable workflow, `release-notes.yml`, writes the description.
-`dist` calls `release-notes.yml` after publishing the release
-(`post-announce-jobs`), and the workflow also runs on every push to `main` that
-modifies a version's directory, updating the description of each existing GitHub
-Release affected by the change.
-Edits to an older release's notes on `main` therefore propagate to its GitHub
-Release.
-Like the docs build ([RFD 122]'s On the site section), the workflow renders
-notes with the `changelog` binary using the forge and headings from the settings
-snapshot, compiling only that small crate rather than `jp`.
-It preserves the install instructions `dist` wrote below a marker and replaces
-everything above it.
-
-`release-notes.yml` also marks the release with the highest version as GitHub's
-`latest` release, which controls what `releases/latest/download/` serves.
-`dist` publishes releases with `gh release create` without `--latest`, omitting
-the `make_latest` parameter.
-GitHub's API documentation states that `make_latest` defaults to marking each
-newly published release as `latest`, whereas `gh` describes the default as
-"automatic based on date and version".
-Because a patch release on an older line (such as 0.3.1) can be published after
-a newer release (0.4.0; see [RFD 122]'s Releases in parallel section), relying
-on the API default would mark 0.3.1 as `latest` and cause the install command to
-install 0.3.1 instead of 0.4.0.
-Explicitly marking the highest version as `latest` is correct under either
-behavior.
-
-If a release is tagged before its cut's change request merges, its
-`changelog.d/<version>/` directory does not exist on `main` yet.
-Until that change request merges and triggers `release-notes.yml`, the release
-description shows a placeholder note with a link to the release page on the
-site.
+- `just backfill init` creates a bare mirror of GitHub's `main` (without tags)
+  and a working clone whose `origin` points to that bare repository, merges the
+  release-tooling branch into the clone's `main`, and assigns a distinct
+  workspace ID so backfill conversations and builds stay isolated.
+- `just backfill next` proposes a cut date roughly six weeks after the previous
+  release (prompting for an optional override), drafts changelog fragments from
+  the period's commits using the `prose` persona with explicit `Credits` ([RFD
+  121]), commits the fragments to `main`, runs `jp release cut --at <commit>`
+  with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the cut date, runs `jp
+  release build --quick` for the host Mac to verify the commit compiles before
+  editing notes, and checks out the notes branch.
+- The maintainer reviews and edits the notes on the notes branch, previewing
+  them with `jp release render` or `just develop-docs`.
+- `just backfill proceed` merges the notes branch into `main`, runs `jp release
+  finalize` and `jp release build` (full five-target release profile), pushes to
+  the local bare `origin`, and starts the next period.
+- `just backfill revert 0.5.0` deletes tags `v0.5.0` and later from the bare
+  `origin`, runs `jp release abandon` from newest to oldest ([RFD 122]), and
+  removes their build directories so `next` can re-cut `0.5.0` while preserving
+  any edited fragments.
+- `just backfill publish` finishes the backfill: it deletes the old test tag
+  `v0.1.0` on GitHub, pushes all `release/*` branches and `v*` tags to GitHub in
+  a single push (pushing more than three tags at once suppresses GitHub Actions
+  tag-push workflows for historical commits), runs `jp release github publish`
+  for each version from oldest to newest, and pushes the backfilled
+  `changelog.d` history as a branch to open a pull request against `main`.
 
 ## Drawbacks
 
-- **Generated workflow.** `release.yml` is generated by `dist` rather than
-  written by hand, and its steps invoke `dist` directly instead of running
-  `just` recipes.
-  `just release-build` reproduces the build locally.
-- **Additional tool to maintain.** `cargo-dist-version` pins `dist`, and
-  upgrading it requires regenerating `release.yml` and reviewing the diff.
-- **Experimental features.** `github-attestations` and `github-build-setup` are
-  marked experimental in `dist`.
-- **Attestation verification requires GitHub's CLI.** Checksums require only
-  `sha256sum`, whereas verifying artifact attestations requires `gh`.
-  Forge-independent signatures are deferred to future work.
-- **Package rename migration.** Renaming `jp_cli` to `jp` updates several
-  package references and requires everyone who installed `jp` via `cargo
-  install` to uninstall `jp_cli` once.
-- **Unsigned binaries.** Windows may warn when running an unsigned binary
-  downloaded through a browser, and macOS blocks a browser-downloaded binary
-  until its quarantine attribute is removed.
+- **Release builds require a Mac.** Cross-compiling macOS targets requires the
+  macOS SDK and Apple linker, and the build depends on local installations of
+  Xcode, Zig, `cargo-zigbuild`, and `cargo-xwin`.
+- **Cross-compiled Linux and Windows release archives are not smoke-tested on
+  target OSes before upload.** CI tests every commit on Linux and Windows, and
+  Linux binaries can be run under Docker on macOS, but Windows archives are not
+  executed during `jp release build`.
+- **No build provenance attestation.** Checksums verify archive integrity
+  against tampering after the build, but do not prove how the binary was built
+  until a remote CI builder with artifact attestation is added.
+- **Slow full release builds.** Fat LTO with a single codegen unit roughly
+  doubles compile time compared to `--quick`.
+- **In-tree build and install scripts.** JP maintains
+  `.config/release/build.sh`, `install.sh`, and `install.ps1` directly rather
+  than delegating to an external release manager.
+- **Unsigned binaries.** macOS Gatekeeper blocks archives downloaded via a web
+  browser until `com.apple.quarantine` is cleared, and Windows SmartScreen may
+  warn on `jp.exe`.
+- **Historical commits build against modern cross-linkers.** Backfilled releases
+  use their original Rust compiler version alongside current Zig and Windows SDK
+  linkers.
 
 ## Alternatives
 
-- **[upload-rust-binary-action] with [create-gh-release-action].** These
-  well-maintained GitHub Actions build one binary per matrix job and upload it
-  with checksums, leaving JP to write and maintain the surrounding workflow: the
-  runner matrix, attestations, release notes, and install scripts.
-  They also run only inside GitHub Actions.
-  This is the preferred fallback if `dist`'s generated workflow becomes a
-  burden.
-- **[GoReleaser]'s Rust builder.** GoReleaser builds every target from a single
-  machine and runs locally, cross-compiling with `cargo-zigbuild`.
-  Cross-compilation is least reliable for macOS and Windows MSVC, where JP's
-  dependencies use platform-specific APIs, and JP's CI already builds natively
-  on all three platforms.
-  It would also add a Go tool to a Rust release pipeline.
-- **Extending `plugins.yml`'s hand-written workflow to `jp`.** Every feature
-  provided by `dist` (checksums, attestations, and install scripts) would have
-  to be written and maintained in-house.
-- **Keeping the `jp_cli` package name.** Avoiding the package rename would
-  permanently expose `jp_cli-installer.sh` in user-facing install commands.
-- **Building releases with the pinned nightly toolchain.** Regular CI tests run
-  on nightly, but `rust-toolchain.toml` specifies stable for releases, and
-  shipping binaries built with a nightly compiler is an unnecessary risk for
-  users.
+- **[dist] (`cargo-dist`) on GitHub Actions.** Coupling builds to GitHub Actions
+  tag-push workflows prevents local release rehearsal, cannot build historical
+  commits that predate the `dist` configuration, and names archives after the
+  Cargo package (`jp_cli`) unless the package is renamed.
+- **[GoReleaser]'s Rust builder.** GoReleaser cross-compiles with
+  `cargo-zigbuild`, but defaults to `windows-gnu` rather than `windows-msvc`,
+  has incomplete Cargo workspace support, and gates split build/publish
+  workflows behind the proprietary [GoReleaser Pro].
+- **[upload-rust-binary-action] and [create-gh-release-action].** Both run only
+  inside GitHub Actions workflows.
+- **Building releases with the pinned nightly toolchain.** CI runs on nightly,
+  but official releases should be compiled with a stable Rust toolchain
+  (`[workspace.metadata.release].toolchain`).
+- **`panic = "abort"`.** Saves binary size, but a panic in any spawned tokio
+  task would terminate the entire `jp` process instead of failing only the
+  affected tool call.
+- **`opt-level = 3` (Cargo's default release optimization level).** Produces a
+  53% larger binary on macOS arm64 (49 MB vs 32 MB) and takes twice as long to
+  link for at most a 4% speedup in CLI benchmarks.
+- **`opt-level = "z"`.** Disables loop vectorization; not benchmarked.
+- **Publishing each backfilled release immediately as it is cut.** Because
+  published releases cannot be abandoned, any mistake discovered in a later
+  period would be irreversible.
 
 ## Non-Goals
 
-- **Command plugins.** A later RFD will distribute the command plugins that are
-  ready to ship (`jp-release` among them); `plugins.yml` continues publishing
-  its rolling release until then.
-- **The macOS app and web client.** Both are prototypes and are not distributed.
-- **Notarization and code signing.** macOS Developer ID signing and
-  notarization, as well as Windows code signing (all supported by `dist`), are
-  deferred to later RFDs.
-- **Checksum verification in the install scripts.** `dist`'s shell and
-  PowerShell installers do not verify checksums yet (listed as work in progress
-  upstream); JP will adopt it once `dist` ships support.
-- **Package managers.** Homebrew, npm, MSI installers, and `cargo binstall`
-  (which requires publishing JP to crates.io or explicit package metadata) are
-  deferred to later work.
-- **Self-update.** `dist`'s updater could back a `jp self update` command, which
-  belongs in its own RFD.
-- **Forge-independent signatures.** Signing releases with tools such as
-  minisign, which `cargo binstall --only-signed` verifies, is deferred.
+- **Distributing command plugins.** A future RFD will cover versioned plugin
+  distribution (including `jp-release`); `plugins.yml` continues publishing the
+  rolling `plugins` release in the meantime.
+- **Distributing the macOS app or web client.** Both remain prototypes.
+- **Code signing and notarization.** Apple Developer ID notarization and Windows
+  Authenticode signing are deferred to future RFDs.
+- **Forge-independent cryptographic signatures** (such as `minisign`).
+- **Additional publishers.** Publishing to `jp.computer` or object storage can
+  be added as separate plugins consuming the same build directory.
+- **A remote builder for JP.** [RFD 122] defines the `builders.<name>` hook; JP
+  builds locally until dedicated build hardware is set up.
+- **Package manager formulas** (Homebrew, Scoop, Winget, `cargo binstall`).
+- **Self-update (`jp self update`).**
 
 ## Risks and Open Questions
 
-- **Stable compiler compatibility.** If JP fails to compile with stable Rust,
-  the first release-branch build check will catch the failure so it can be fixed
-  before tagging.
-- **`dist`'s maintenance.** `dist` has released steadily since 2023, and
-  Astral's fork was merged back upstream in 0.29.0.
-  If upstream development stalls, `release.yml` continues working at its pinned
-  version, and setting `allow-dirty = ["ci"]` lets JP maintain the workflow YAML
-  directly.
-- **Linux on ARM64 is not tested in CI.** JP's CI runs tests on Linux and
-  Windows `x86_64`; the `aarch64-unknown-linux-gnu` binary is compiled by the
-  release-branch check, but the test suite is not executed on ARM64 in CI.
-- **Minimum supported `glibc`.** Linux binaries require at least the `glibc`
-  version shipped by `ubuntu-22.04`.
-  Statically linked `musl` builds would support older distributions if needed
-  later.
+- **Stable toolchain compatibility.** A commit that uses an accidental nightly
+  feature or a dependency requiring a newer MSRV would fail at `jp release
+  build` time; T-1g695nz adds a CI check with a stable compiler to catch this on
+  pull requests.
+- **Linux ARM64 test coverage.** CI runs tests on Linux and Windows `x86_64`, so
+  `aarch64-unknown-linux-gnu` is only verified by compilation (and optional
+  local Docker runs).
+- **Historical cut points that fail to compile.** `just backfill next` runs a
+  host `--quick` build immediately after cutting so broken cut points are caught
+  before drafting release notes, and `just backfill revert` can move the cut
+  point to an adjacent commit.
+- **Xcode SDK / linker incompatibilities on older toolchains.** Newer macOS SDKs
+  can fail to link with older Command Line Tools linkers; `build.sh` probes
+  installed developer directories and selects one whose linker and SDK match.
 
 ## Implementation Plan
 
-### Phase 1: Rename and Stable Builds
+### Phase 1: Build script
 
-Rename the `jp_cli` package to `jp`, keeping its library name, and update all
-references to the package name (see [Renaming the `jp_cli` Package to
-`jp`](#renaming-the-jp-cli-package-to-jp)), including the one-time `cargo
-uninstall jp_cli` step in the justfile's `install` recipe.
-Add the release toolchain and `just release-build` to the justfile, and run
-`just release-build` in CI on pushes to `release/*` for each target.
-This phase can merge on its own before the first release cut.
+Add `.config/release/build.sh` supporting all five targets,
+`[workspace.metadata.release].toolchain`, the `release` and `quick` profiles,
+archive packaging, `checksums.txt`, and `manifest.json`.
+Configure `plugins.command.release.options.build` and the release toolchain in
+`Cargo.toml`, and update `crates/jp_cli/build.rs` to read `SOURCE_DATE_EPOCH`.
+Depends on [RFD 122] Phase 6.
 
-### Phase 2: `dist` and the Release Workflow
+### Phase 2: Install scripts
 
-Add `dist-workspace.toml` and the `dist` Cargo profile, generate `release.yml`,
-pin its actions, and configure the release toolchain through
-`github-build-setup`.
-Depends on Phase 1 and on [RFD 122] Phase 2, which tags releases.
+Add `.config/release/install.sh` and `.config/release/install.ps1` with the
+`{download}` placeholder and `JP_DOWNLOAD` override, and update
+`docs/installation.md` with install script instructions, manual download and
+checksum verification, the macOS quarantine note, and building from source.
+Depends on Phase 1.
 
-### Phase 3: Release Notes
+### Phase 3: `jp release github`
 
-Add `release-notes.yml`, triggered after each release is published and on pushes
-to `main` that modify a version's directory, to write the GitHub Release
-description and mark the highest version as the `latest` release.
-Depends on Phase 2 and on [RFD 122] Phase 1, which renders release notes.
+Create `crates/plugins/command/release-github` with `publish` (supporting
+`assets`, `upgrade_guide`, and `footer`) and `sync`, add the GitHub Releases API
+endpoints to `jp_github`, configure `release-github` in `.jp/config.toml`, and
+add `.github/workflows/release-notes.yml` to run `sync` when `changelog.d/*/**`
+changes on `main`.
+Depends on Phases 1 and 2.
 
-### Phase 4: Installation Guide
+### Phase 4: JP's history
 
-Replace the "no binaries" warning in `docs/installation.md` with instructions
-for the install scripts, manual archive download and checksum verification,
-attestation verification, clearing the macOS quarantine attribute, and building
-from source.
-Depends on Phase 2.
+Add `.config/release/backfill.sh` (`just backfill`) with `init`, `next`,
+`proceed`, `revert`, `publish`, and `draft`, and execute the backfill trial to
+publish JP's historical releases.
+Depends on Phase 3 and [RFD 122] Phases 5 to 7.
+
+### Repository settings
+
+Before running `just backfill publish`, a repository administrator restricts the
+`documentation` GitHub Actions environment to `main` so historical tag pushes
+cannot trigger site deployments.
+After `publish` replaces the old `v0.1.0` tag, the administrator applies the tag
+and branch protection rulesets in T-1f2jmb7.
 
 ## References
 
-- [RFD 122: Release Pipeline][RFD 122], which tags releases and renders their
-  notes.
-- [dist], its [configuration reference][dist-config], and [GitHub artifact
-  attestations][dist-attestations] in `dist`.
-- [upload-rust-binary-action] and [create-gh-release-action], the alternative
-  built from GitHub Actions.
-- [GoReleaser]'s Rust builder.
+- [RFD 072: Command Plugin System][RFD 072]: longest-prefix command routing used
+  by `jp release github`.
+- [RFD 121: Changelog Fragments and Validation][RFD 121]: `Credits` metadata
+  used when backfilling historical fragments.
+- [RFD 122: Release Pipeline][RFD 122]: `cut`, `pick`, `finalize`, `abandon`,
+  and `build`.
+- [GitHub discussion 48311]: why GitHub Release descriptions lack heading
+  anchors.
+- [rust-lang/rust#162928] and [rust-lang/rust#140872]: linker issues handled by
+  `.config/release/build.sh`.
+- [cargo-zigbuild] and [cargo-xwin]: cross-compilation wrappers for Linux and
+  Windows targets.
+- [dist], [GoReleaser], [upload-rust-binary-action], and
+  [create-gh-release-action]: release tools evaluated in Alternatives.
 
+[#428]: https://github.com/dcdpr/jp/pull/428
+[#77]: https://github.com/dcdpr/jp/pull/77
+[GitHub discussion 48311]: https://github.com/orgs/community/discussions/48311
 [GoReleaser]: https://goreleaser.com/customization/builds/builders/rust/
+[GoReleaser Pro]: https://goreleaser.com/pro/
+[RFD 072]: 072-command-plugin-system.md
+[RFD 121]: 121-changelog-fragments-and-validation.md
 [RFD 122]: 122-release-pipeline.md
+[cargo-xwin]: https://github.com/rust-cross/cargo-xwin
+[cargo-zigbuild]: https://github.com/rust-cross/cargo-zigbuild
 [create-gh-release-action]: https://github.com/taiki-e/create-gh-release-action
 [dist]: https://axodotdev.github.io/cargo-dist/book/
-[dist-attestations]: https://axodotdev.github.io/cargo-dist/book/supplychain-security/attestations/github.html
-[dist-config]: https://axodotdev.github.io/cargo-dist/book/reference/config.html
+[rust-lang/rust#140872]: https://github.com/rust-lang/rust/pull/140872
+[rust-lang/rust#162928]: https://github.com/rust-lang/rust/issues/162928
 [upload-rust-binary-action]: https://github.com/taiki-e/upload-rust-binary-action

@@ -136,6 +136,28 @@ fn serve_passes_its_arguments_to_vitepress() {
     }
 }
 
+/// The `package.json` `jp vite init` writes runs `jp vite serve --` and `jp
+/// vite build --`, and a package manager appends whatever follows `npm run dev
+/// --`.
+#[test]
+fn the_scripts_init_writes_pass_their_arguments_on() {
+    for (args, expected) in [
+        (["serve", "--"].as_slice(), [].as_slice()),
+        (["build", "--"].as_slice(), [].as_slice()),
+        (["serve", "--", "--open"].as_slice(), ["--open"].as_slice()),
+        (
+            ["build", "--", "--outDir", "dist"].as_slice(),
+            ["--outDir", "dist"].as_slice(),
+        ),
+    ] {
+        let vitepress = match parse(args).unwrap().command {
+            Command::Serve { vitepress } | Command::Build { vitepress } => vitepress,
+            other => panic!("expected serve or build, got {other:?}"),
+        };
+        assert_eq!(vitepress, expected, "{args:?}");
+    }
+}
+
 /// `--check` writes nothing, so there is nothing to force or confirm.
 #[test]
 fn check_takes_neither_force_nor_yes() {
@@ -632,10 +654,26 @@ fn jp_root() -> Utf8PathBuf {
 /// Run `jp vite sync` to fix it, or, without the plugins installed,
 /// `JP_VITE_BLESS=1 cargo test -p jp-vite jp_site_is_synced`, which writes what
 /// the test expects.
+///
+/// A release branch has no fragments directory, since its notes live on `main`,
+/// so its snapshot leaves the releases out and can't match the copy synced on
+/// `main`.
+/// The site is synced and built from `main`, and the check is made there.
 #[test]
 fn jp_site_is_synced() {
     let root = jp_root();
     let config = jp_config(&root);
+    if !root
+        .join(
+            release_options::Notes::from_config(&config)
+                .unwrap()
+                .fragments_dir,
+        )
+        .is_dir()
+    {
+        return;
+    }
+
     let options = Options::from_config(&config).unwrap();
     // Not the checkout's git remote: JP pins what it would give, and a CI clone
     // has no `origin/HEAD` to read.

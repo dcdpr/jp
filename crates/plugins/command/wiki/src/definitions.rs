@@ -22,7 +22,7 @@ pub(crate) const DEFINITIONS: Definitions = Definitions {
         ("list.toml", include_str!("../tools/list.toml")),
         ("show.toml", include_str!("../tools/show.toml")),
     ],
-    offers: "labels",
+    offers: Some("labels"),
 };
 
 /// What a synced file says about itself, below its header.

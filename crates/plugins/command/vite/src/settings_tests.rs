@@ -98,6 +98,7 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
             ]),
         }),
         wiki: None,
+        release: None,
         redirects: BTreeMap::new(),
     });
 }
@@ -338,6 +339,10 @@ fn a_configured_branch_wins_over_origins() {
 
 /// The snapshot is committed, so the same settings always write the same text.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one fixture and the whole text it renders to"
+)]
 fn the_snapshot_renders_in_a_fixed_shape() {
     let settings = Settings {
         revision: "0123456789abcdef".to_owned(),
@@ -389,6 +394,7 @@ fn the_snapshot_renders_in_a_fixed_shape() {
             ]),
         }),
         wiki: None,
+        release: None,
         redirects: BTreeMap::new(),
     };
 
@@ -435,7 +441,8 @@ fn the_snapshot_renders_in_a_fixed_shape() {
       }
     }
   },
-  "wiki": null
+  "wiki": null,
+  "release": null
 }
 "#
     );
@@ -466,10 +473,10 @@ fn a_typed_key_renders_its_type() {
     );
 }
 
-/// The wiki follows the other workflows, and the redirects come last, left out
-/// when no page moved.
+/// The wiki and the releases follow the other workflows, and the redirects come
+/// last, left out when no page moved.
 #[test]
-fn the_wiki_and_the_redirects_render_last() {
+fn the_wiki_the_releases_and_the_redirects_render_last() {
     let settings = Settings {
         revision: "0123456789abcdef".to_owned(),
         site: "docs".to_owned(),
@@ -481,6 +488,13 @@ fn the_wiki_and_the_redirects_render_last() {
             dir: "docs/wiki".to_owned(),
             route: "wiki".to_owned(),
             relevant_key: "relevant-rfd".to_owned(),
+        }),
+        release: Some(ReleaseSettings {
+            dir: "changelog.d".to_owned(),
+            route: "releases".to_owned(),
+            forge: None,
+            repository: Some("https://github.com/dcdpr/jp".to_owned()),
+            headings: BTreeMap::from([("fixed".to_owned(), "Bug fixes".to_owned())]),
         }),
         redirects: BTreeMap::from([("/architecture/glossary".to_owned(), "W-0a1b2c3".to_owned())]),
     };
@@ -499,6 +513,15 @@ fn the_wiki_and_the_redirects_render_last() {
     "route": "wiki",
     "relevantKey": "relevant-rfd"
   },
+  "release": {
+    "dir": "changelog.d",
+    "route": "releases",
+    "forge": null,
+    "repository": "https://github.com/dcdpr/jp",
+    "headings": {
+      "fixed": "Bug fixes"
+    }
+  },
   "redirects": {
     "/architecture/glossary": "W-0a1b2c3"
   }
@@ -511,6 +534,96 @@ fn the_wiki_and_the_redirects_render_last() {
         ..settings
     };
     assert!(!unmoved.render().contains("redirects"));
+}
+
+/// The fragments sit wherever `jp release` keeps them, outside the source
+/// directory too, and the site serves the releases under `releases/`.
+#[test]
+fn the_releases_are_read_where_jp_release_keeps_its_fragments() {
+    let root = workspace();
+    fs::create_dir_all(root.path().join("notes/changes")).unwrap();
+    let config = json!({
+        "plugins": { "command": { "release": { "options": {
+            "fragments_dir": "notes/changes",
+            "forge": "gitlab",
+            "repository": "https://gitlab.example.com/group/jp",
+            "headings": { "fixed": " Bug fixes ", "added": "New features" },
+            "cadence": "2w"
+        } } } }
+    });
+
+    let settings = snapshot(root.path(), &options("docs"), &config, &Remote::default()).unwrap();
+
+    assert_eq!(
+        settings.release,
+        Some(ReleaseSettings {
+            dir: "notes/changes".to_owned(),
+            route: "releases".to_owned(),
+            forge: Some("gitlab".to_owned()),
+            repository: Some("https://gitlab.example.com/group/jp".to_owned()),
+            headings: BTreeMap::from([
+                ("added".to_owned(), "New features".to_owned()),
+                ("fixed".to_owned(), "Bug fixes".to_owned()),
+            ]),
+        })
+    );
+}
+
+/// Without `fragments_dir`, the fragments are where `jp release` keeps them by
+/// default; without that directory, the project keeps no release notes.
+#[test]
+fn the_releases_need_their_fragments_directory() {
+    let root = workspace();
+
+    let without = snapshot(
+        root.path(),
+        &options("docs"),
+        &json!({}),
+        &Remote::default(),
+    )
+    .unwrap();
+    fs::create_dir_all(root.path().join("changelog.d")).unwrap();
+    let with = snapshot(
+        root.path(),
+        &options("docs"),
+        &json!({}),
+        &Remote::default(),
+    )
+    .unwrap();
+
+    assert_eq!(without.release, None);
+    assert_eq!(
+        with.release,
+        Some(ReleaseSettings {
+            dir: "changelog.d".to_owned(),
+            route: "releases".to_owned(),
+            forge: None,
+            repository: None,
+            headings: BTreeMap::new(),
+        })
+    );
+}
+
+#[test]
+fn a_fragments_directory_outside_the_workspace_is_refused() {
+    let root = workspace();
+    let elsewhere = Utf8TempDir::new().unwrap();
+    let config = json!({
+        "plugins": { "command": { "release": { "options": {
+            "fragments_dir": elsewhere.path().as_str()
+        } } } }
+    });
+
+    let error = snapshot(root.path(), &options("docs"), &config, &Remote::default()).unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "`plugins.command.release.options.fragments_dir` ({}) is outside the workspace, so \
+             the site can't render the releases from it.",
+            elsewhere.path()
+        )
+    );
 }
 
 #[test]

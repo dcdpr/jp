@@ -1,0 +1,51 @@
+[package]
+name = "jp-release-github"
+description = "Publish a release's notes and build as its GitHub Release."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# No `[package.metadata.jp-registry]`: like `jp-release`, a project installs
+# this plugin with `cargo install`, from a checkout or from JP's repository at a
+# pinned revision, and `jp` finds it on `$PATH`.
+
+[dependencies]
+changelog = { workspace = true }
+doc = { workspace = true }
+jp_github = { workspace = true }
+jp_plugin = { workspace = true }
+release-build = { workspace = true }
+release-options = { workspace = true }
+
+camino = { workspace = true, features = ["serde1"] }
+clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+semver = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+indoc = { workspace = true }
+jp_test = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+name = "jp_release_github"
+path = "src/lib.rs"
+doctest = false
+
+# The binary is a shell around the library, and carries no tests of its own.
+[[bin]]
+name = "jp-release-github"
+path = "src/main.rs"
+test = false

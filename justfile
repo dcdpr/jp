@@ -5,9 +5,9 @@ bacon_version        := "3.25.0"
 binstall_version     := "1.22.0"
 cbindgen_version     := "0.29.4"
 deny_version         := "0.20.2"
+edit_version         := "0.13.14"
 expand_version       := "1.0.126"
 insta_version        := "1.48.0"
-jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.7"
 nextest_version      := "0.9.143"
 rustqual_version     := "1.8.2"
@@ -37,7 +37,6 @@ alias i := install
 alias c := check
 alias t := test
 
-alias bc := build-changelog
 alias co := commit
 alias st := stage
 alias sc := stage-and-commit
@@ -555,11 +554,6 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
     fi
 
     printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
-
-# Generate changelog for the project.
-[group('build')]
-build-changelog: (_install "jilu@" + jilu_version)
-    @jilu
 
 # Build the static library and C header that the macOS app links against, and
 # stage both where the Xcode project expects them.
@@ -1664,7 +1658,7 @@ rfd-triage NNN *ARGS: _install-jp _install-rfd
 # `rfd/<id>/implement` and attaches them.
 [group('rfd')]
 [positional-arguments]
-rfd-implement NNN *ARGS: _install-jp _install-rfd
+rfd-implement NNN *ARGS: _install-jp _install-rfd _install-release
     #!/usr/bin/env sh
     set -eu
 
@@ -1990,12 +1984,106 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
 
     echo "Taken into {{WORKTREE}} on $branch, staged. The bridge's checkout is clean again."
 
+# Run `jp release` with `ARGS`, the way JP's own releases are made:
+#
+#   just release status
+#   just release cut
+#   just release pick 0.3.1 4e1f0a2
+#   just release finalize 0.3.0
+#   just release github publish 0.3.0
+#
+# Runs the `jp` this checkout builds, from the target directory, and installs
+# this checkout's `jp-release` and `jp-release-github`, as `release-due` and
+# `release-sync` do: `jp` refuses a command two plugin binaries claim, so each
+# plugin replaces any other installed copy rather than sitting beside it on
+# `PATH`. Also installs `cargo set-version` from cargo-edit, which `cut` and
+# `pick` run to write the new version.
+#
+# Cargo is asked where the target directory is: a Cargo configuration file can
+# move it, and `CARGO_TARGET_DIR` doesn't say so.
+[group('release')]
+[positional-arguments]
+release *ARGS: (_install "cargo-edit@" + edit_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    JP_INSTALL=1 just _install-release
+    JP_INSTALL=1 just _install-release-github
+    cargo build {{quiet_flag}} --locked --package jp_cli
+    target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
+    exec "$target/debug/jp" release "$@"
+
+# Ask whether the next release should be cut, as JP's daily workflow does.
+#
+# Exits 0 when it should and 1 when it shouldn't. A failure exits non-zero too,
+# often with 1, so a script that has to tell them apart reads the answer from
+# the JSON that `--format json` prints:
+#
+#   just release-due
+#   just release-due --format json
+#
+# Runs the `jp` this checkout builds and installs its `jp-release`, as `release`
+# does, since no release publishes them yet, and an installed `jp` or plugin
+# may be another build.
+[group('release')]
+[positional-arguments]
+release-due *FLAGS:
+    #!/usr/bin/env sh
+    set -eu
+
+    JP_INSTALL=1 just _install-release
+    cargo build {{quiet_flag}} --locked --package jp_cli
+    target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
+    exec "$target/debug/jp" "$@" release due
+
+# Rewrite the description of each GitHub Release whose notes changed, as JP's
+# workflow does when a released version's notes change on `main`:
+#
+#   just release-sync
+#
+# Needs a token that can write the repository's contents, in `JP_GITHUB_TOKEN`
+# or `GITHUB_TOKEN`. Runs the `jp` this checkout builds and installs its
+# `jp-release-github`, as `release` does.
+[group('release')]
+release-sync:
+    #!/usr/bin/env sh
+    set -eu
+
+    JP_INSTALL=1 just _install-release-github
+    cargo build {{quiet_flag}} --locked --package jp_cli
+    target=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
+    exec "$target/debug/jp" release github sync
+
+# Release JP's history after the fact, in a trial from which nothing reaches
+# GitHub until `publish` (RFD 123, "JP's history"):
+#
+#   just backfill init           in this checkout: make the trial
+#   just backfill next           in the trial's clone: cut the next period
+#   just backfill proceed        finalize it, build it, and cut the next
+#   just backfill revert 0.5.0   take back 0.5.0 and every later release
+#   just backfill publish        put every release on GitHub
+#   just backfill draft 1a2b3c4  draft fragments for the changes after 1a2b3c4
+#
+# In the trial's clone, runs the script of the checkout `init` ran in, which
+# also builds `jp` and its plugins, so a fix made there applies at the next
+# command. Installs `cargo set-version` from cargo-edit, which `jp release cut`
+# runs to write each release's version.
+[group('release')]
+[positional-arguments]
+backfill *ARGS: (_install "cargo-edit@" + edit_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    source=$(git config --get jp-backfill.source || pwd)
+    exec bash "$source/.config/release/backfill.sh" "$@"
+
 # Locally develop the documentation, with hot-reloading.
 #
 # Runs through `jp vite serve`, which keeps the site's settings in step with the
 # configuration and is the only dev server the RFD, ticket, and wiki pages
 # accept edits from. It checks `jp ticket`, `jp rfd`, and `jp wiki` were built
-# from the same site files as `jp vite`, so all four are installed first.
+# from the same site files as `jp vite`, so all four are installed first. `jp
+# vite` renders the release pages itself.
 [group('docs')]
 develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
     jp vite serve -- {{FLAGS}}
@@ -2025,8 +2113,12 @@ test-docs *FLAGS:
     node --test {{FLAGS}} 'crates/plugins/command/vite/js-tests/**/*.test.mjs'
 
 # Build the statically built documentation.
+#
+# Runs `vitepress build` itself, as JP's docs workflow does, which needs no `jp`:
+# the release pages are then rendered by the `changelog` binary, so it is
+# installed first. `jp vite build` would render them without it.
 [group('docs')]
-build-docs: (_docs "build")
+build-docs: _install-changelog (_docs "build")
 
 # Preview the statically built documentation.
 [group('docs')]
@@ -2488,6 +2580,14 @@ affected-crates BASE="origin/main":
 site-ci:
     cargo test --locked -p jp-vite
 
+# Check the changelog fragments and highlights on CI, released ones included.
+#
+# Builds the `changelog` crate alone: a fragment's types are fixed, so checking
+# reads no configuration and needs no `jp`.
+[group('ci')]
+changelog-ci: _install_ci_matchers
+    cargo run {{quiet_flag}} --locked --package changelog -- check changelog.d
+
 # Generate documentation on CI.
 [group('ci')]
 docs-ci: _install_ci_matchers
@@ -2638,6 +2738,44 @@ _install-wiki *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/wiki --debug {{args}}
+
+# Build and install the `jp-release` command plugin that backs `jp release`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.release.run` in `.jp/config.toml` approves it).
+_install-release *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-release >/dev/null 2>&1; then
+        echo "Skipping jp-release rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/release --debug {{args}}
+
+# Build and install the `jp-release-github` command plugin that backs `jp
+# release github`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.release-github.run` in `.jp/config.toml` approves it).
+_install-release-github *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-release-github >/dev/null 2>&1; then
+        echo "Skipping jp-release-github rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/release-github --debug {{args}}
+
+# Build and install the `changelog` binary the site's release pages are
+# rendered with by a `vitepress build` started without `jp vite`, from this
+# checkout: no release publishes it.
+#
+# Always rebuilt, unlike the other tools: the site renders this checkout's
+# fragments, which a `changelog` built from another revision may not read. A
+# `--path` install builds in the workspace's `target` directory, so a rebuild
+# that changes nothing takes seconds.
+_install-changelog *args:
+    cargo install {{quiet_flag}} --locked --path crates/internal/changelog --debug {{args}}
 
 # Build and install the `jp-serve-chat` command plugin that backs `jp serve
 # chat`.

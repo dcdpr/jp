@@ -15,6 +15,7 @@ extends = [
     "../skill/project-discourse.toml",
     "../skill/unix.toml",
     "../skill/coding.toml",
+    "../skill/changelog.toml",
 ]
 
 [style]

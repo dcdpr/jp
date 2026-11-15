@@ -1029,6 +1029,22 @@ impl ReposHandler {
         }
     }
 
+    /// Resolve `reference` (a commit SHA, `heads/<branch>`, or `tags/<tag>`) to
+    /// its commit SHA, peeling annotated tags to their target commit.
+    ///
+    /// Returns a 404 or 422 [`Error::GitHub`] if `reference` does not exist.
+    pub async fn commit_sha(&self, reference: &str) -> Result<String> {
+        let sha = self
+            .client
+            .get_with_accept(
+                &format!("/repos/{}/{}/commits/{reference}", self.owner, self.repo),
+                "application/vnd.github.sha",
+            )
+            .await?;
+
+        Ok(sha.trim().to_owned())
+    }
+
     #[must_use]
     pub fn list_collaborators(&self) -> RepoCollaboratorListBuilder {
         RepoCollaboratorListBuilder {
@@ -1037,6 +1053,79 @@ impl ReposHandler {
             repo: self.repo.clone(),
             per_page: 100,
         }
+    }
+}
+
+const MAX_PER_PAGE: u8 = 100;
+
+/// Handler for GitHub Releases and release assets.
+pub struct ReleasesHandler {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+}
+
+impl ReleasesHandler {
+    /// List all releases in the repository, newest first (including draft
+    /// releases when authenticated with push access).
+    pub async fn list(&self) -> Result<Vec<models::releases::Release>> {
+        self.client
+            .get_paginated(
+                &format!("/repos/{}/{}/releases", self.owner, self.repo),
+                vec![],
+                MAX_PER_PAGE,
+            )
+            .await
+    }
+
+    pub async fn create(&self, release: &params::NewRelease) -> Result<models::releases::Release> {
+        self.client
+            .post_json(
+                &format!("/repos/{}/{}/releases", self.owner, self.repo),
+                release,
+            )
+            .await
+    }
+
+    pub async fn update(
+        &self,
+        id: u64,
+        update: &params::ReleaseUpdate,
+    ) -> Result<models::releases::Release> {
+        self.client
+            .patch_json(
+                &format!("/repos/{}/{}/releases/{id}", self.owner, self.repo),
+                update,
+            )
+            .await
+    }
+
+    /// Upload `contents` as an asset named `name` on `release`.
+    ///
+    /// GitHub rejects duplicate asset names; delete any existing asset with the
+    /// same name via [`Self::delete_asset`] first.
+    pub async fn upload_asset(
+        &self,
+        release: &models::releases::Release,
+        name: &str,
+        contents: Vec<u8>,
+    ) -> Result<models::releases::Asset> {
+        let url = release
+            .upload_url
+            .split('{')
+            .next()
+            .unwrap_or(&release.upload_url);
+
+        self.client.upload(url, name, contents).await
+    }
+
+    pub async fn delete_asset(&self, id: u64) -> Result<()> {
+        self.client
+            .delete_no_content(&format!(
+                "/repos/{}/{}/releases/assets/{id}",
+                self.owner, self.repo
+            ))
+            .await
     }
 }
 

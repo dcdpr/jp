@@ -86,7 +86,7 @@ export default defineConfig(withJpVite({
         nav: [
             { text: 'Home', link: '/' },
             { text: 'Installation', link: '/installation' },
-            { text: 'Change Log', link: '/change-log' },
+            { text: 'Releases', link: '/releases/' },
             { text: 'RFDs', link: '/rfd/' },
             { text: 'Tickets', link: '/ticket/' },
             { text: 'Wiki', link: '/wiki/' },

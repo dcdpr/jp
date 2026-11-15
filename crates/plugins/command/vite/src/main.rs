@@ -1,16 +1,26 @@
-//! The `jp-vite` executable: a thin shell around [`jp_vite`].
+//! Entry point for the `jp-vite` command plugin binary.
 //!
-//! Everything the plugin does lives in the library, so it can be tested without
-//! spawning a process.
+//! When invoked as `jp-vite changelog ...`, dispatches directly to
+//! [`changelog::cli::run`] so VitePress release data loaders can render release
+//! pages under `jp vite serve` and `jp vite build` without a separate
+//! `changelog` binary on `PATH`.
 
 use std::{
+    env,
+    ffi::OsString,
     io::{self, BufReader, IsTerminal as _, Write},
-    process,
+    iter,
+    process::ExitCode,
 };
 
 use jp_vite::{help_text, run};
 
-fn main() {
+fn main() -> ExitCode {
+    let mut args = env::args_os().skip(1);
+    if args.next().is_some_and(|first| first == "changelog") {
+        return changelog::cli::run(iter::once(OsString::from("changelog")).chain(args));
+    }
+
     // A human running the binary directly gets the help text rather than a
     // hung read on a protocol that is never going to speak.
     if io::stdin().is_terminal() {
@@ -21,17 +31,15 @@ fn main() {
             err,
             "Note: this binary is a JP plugin. Run it via `jp vite`."
         ));
-        process::exit(0);
+        return ExitCode::SUCCESS;
     }
 
-    let code = match run(BufReader::new(io::stdin()), io::stdout()) {
-        Ok(()) => 0,
+    match run(BufReader::new(io::stdin()), io::stdout()) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let mut err = io::stderr().lock();
             drop(writeln!(err, "Fatal: {error}"));
-            1
+            ExitCode::FAILURE
         }
-    };
-
-    process::exit(code);
+    }
 }

@@ -1,5 +1,5 @@
 //! The plugin's settings, read from `plugins.command.vite.options`, and what it
-//! reads of `jp rfd`'s, `jp ticket`'s, and `jp wiki`'s.
+//! reads of `jp rfd`'s, `jp ticket`'s, `jp wiki`'s, and `jp release`'s.
 //!
 //! ```toml
 //! [plugins.command.vite.options]
@@ -26,10 +26,13 @@
 //!
 //! Each setting has one owner.
 //! The document directories, the RFD categories, the label keys a ticket or a
-//! wiki page names an RFD under, the ticket vocabulary, and how much of the
-//! Done column the board shows belong to `jp rfd`, `jp ticket`, and `jp wiki`,
-//! and are read here from the whole configuration ([`rfd_options`],
-//! [`ticket_options`], [`wiki_options`]), with the defaults those plugins use.
+//! wiki page names an RFD under, the ticket vocabulary, how much of the Done
+//! column the board shows, and the fragments directory, forge, web address, and
+//! headings the release notes are rendered with belong to `jp rfd`, `jp
+//! ticket`, `jp wiki`, and `jp release`, and are read from the whole
+//! configuration ([`rfd_options`], [`ticket_options`], [`wiki_options`], and
+//! `release_options::Notes` for `jp release`'s), with the defaults those
+//! plugins use.
 
 use std::collections::{BTreeMap, BTreeSet};
 

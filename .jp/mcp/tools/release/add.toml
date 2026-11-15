@@ -1,0 +1,76 @@
+[conversation.tools.changelog_add]
+source = "plugin.command.release.add"
+summary = "Record a change users notice as a changelog fragment."
+description = """
+Write a changelog fragment: one entry in the release notes, telling the people
+using the software what changed for them. Write one for each change they will
+notice; a change they won't, such as a refactor, a test, or a CI change, gets
+none.
+
+Write the entry for someone using the software, not for someone reading its
+code: what they can do now, what behaves differently, what was fixed. A change
+that requires users to act ends with its section of the upgrade guide: a
+paragraph starting with `BREAKING CHANGE:` that names what broke, then the
+paragraphs saying what changed and how to upgrade.
+
+The fragment is checked against the format before it is written, so a call that
+would break it is refused with the reason.
+"""
+
+examples = '''
+Record a fix:
+```json
+{"type": "fixed", "body": "A turn that stalls while idle is retried instead of failing."}
+```
+
+Record a breaking change, with its section of the upgrade guide, under a name of your choosing:
+```json
+{"type": "removed", "slug": "legacy-flag", "body": "`jp query --legacy` is gone.\n\nBREAKING CHANGE: `jp query --legacy` is no longer accepted\n\nDrop the flag: what it chose is the default now."}
+```
+'''
+
+# Allow `FormatArguments` without prompting so the user sees a preview of the
+# planned fragment before approving the tool call.
+format = "allow"
+
+[conversation.tools.changelog_add.style]
+parameters = "tool"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.changelog_add.parameters.type]
+type = "string"
+required = true
+enum = ["added", "changed", "deprecated", "removed", "fixed", "security", "performance"]
+summary = "What the change means for users."
+description = """
+- `added`: A new capability the user can now reach.
+- `changed`: A change to existing behavior.
+- `deprecated`: Something still working but slated for removal.
+- `removed`: Something taken away.
+- `fixed`: A bug fix the user would notice.
+- `security`: A fix with security relevance.
+- `performance`: A user-visible performance improvement.
+
+It is not the conventional-commit type of the change: an internal `feat` gets
+no fragment, and a `refactor` that changes what users see does.
+"""
+
+[conversation.tools.changelog_add.parameters.body]
+type = "string"
+required = true
+summary = "The entry, as Markdown: what changed for the people using the software."
+description = """
+A paragraph starting with `BREAKING CHANGE:` begins the change's section of the
+upgrade guide: the rest of that paragraph names what broke, and the paragraphs
+after it say what changed and how to upgrade. Everything before it is the
+entry.
+
+A line starting with the token anywhere else, such as in a code block, is
+refused; indent the line or put the token in inline code to show it.
+"""
+
+[conversation.tools.changelog_add.parameters.slug]
+type = "string"
+required = false
+summary = "A short name for the file, such as `retry-idle-turns`; derived from the entry's first words when omitted."

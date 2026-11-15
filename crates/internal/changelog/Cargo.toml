@@ -1,0 +1,40 @@
+[package]
+description = "Changelog fragments: the entries a project records for the users of each change, the rules that hold them to their format, and the release notes rendered from them."
+name = "changelog"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+doc = { workspace = true }
+
+camino = { workspace = true }
+clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+comrak = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+indoc = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
+[[bin]]
+name = "changelog"
+path = "src/main.rs"
+test = false

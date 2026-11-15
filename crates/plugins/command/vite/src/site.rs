@@ -8,6 +8,9 @@
 //! `pages/rfd/` goes to the RFD directory, `pages/ticket/` to the ticket
 //! directory, and `pages/wiki/` to the wiki directory, for the workflows the
 //! project has.
+//! `pages/release/` goes to the directory the site serves the releases from,
+//! below the source directory: the index, and the templates VitePress renders
+//! each release's pages from, whose paths loaders defer to `jp-vite/`.
 //! A page is written only where there is none, and is the project's from then
 //! on: it renders its list with one tag, such as `<RfdIndex />`, which the
 //! theme entry registers.
@@ -97,12 +100,14 @@ pub(crate) fn pages(settings: &Settings) -> Vec<Owned> {
         .iter()
         .filter_map(|(path, contents)| {
             let (dir, rest) = if let Some(rest) = path.strip_prefix("pages/rfd/") {
-                (&settings.rfd.as_ref()?.dir, rest)
+                (settings.rfd.as_ref()?.dir.clone(), rest)
             } else if let Some(rest) = path.strip_prefix("pages/ticket/") {
-                (&settings.ticket.as_ref()?.dir, rest)
+                (settings.ticket.as_ref()?.dir.clone(), rest)
+            } else if let Some(rest) = path.strip_prefix("pages/release/") {
+                (release_dir(settings)?, rest)
             } else {
                 (
-                    &settings.wiki.as_ref()?.dir,
+                    settings.wiki.as_ref()?.dir.clone(),
                     path.strip_prefix("pages/wiki/")?,
                 )
             };
@@ -116,6 +121,18 @@ pub(crate) fn pages(settings: &Settings) -> Vec<Owned> {
     pages.sort_by(|a, b| a.path.cmp(&b.path));
 
     pages
+}
+
+/// The directory the site serves the releases from, relative to the workspace
+/// root, when the project keeps release notes.
+fn release_dir(settings: &Settings) -> Option<String> {
+    let route = &settings.release.as_ref()?.route;
+
+    Some(if settings.site == "." {
+        route.clone()
+    } else {
+        join(&settings.site, route).into_string()
+    })
 }
 
 #[cfg(test)]

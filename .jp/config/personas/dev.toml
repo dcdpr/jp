@@ -18,6 +18,7 @@ extends = [
     "../skill/coding.toml",
     "../skill/ticket.toml",
     "../skill/wiki.toml",
+    "../skill/changelog.toml",
 ]
 
 [style]

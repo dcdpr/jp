@@ -2,7 +2,7 @@
 //!
 //! Each command plugin that provides tools ships a default TOML definition per
 //! tool under `conversation.tools`, with `source` pointing to the plugin.
-//! [`Definitions`] implements the two commands shared by these plugins:
+//! [`Definitions`] implements the commands these plugins offer:
 //!
 //! - `jp <plugin> tools init PATH` writes the default definitions into `PATH`,
 //!   one file per tool, for the project to load and customize.
@@ -11,6 +11,7 @@
 //!   [`SYNCED_FILE`].
 //!   Because it rewrites only [`SYNCED_FILE`], hand edits to the tool
 //!   definition files are preserved.
+//!   Plugins whose definitions mirror no configuration have no `tools sync`.
 //!
 //! Both commands overwrite an existing file with different contents only when
 //! git can restore it or when `--force` is passed (see [`overwrite`]).
@@ -47,7 +48,10 @@ pub struct Definitions {
 
     /// Plural noun for the synced values in status output (e.g. `"categories"`,
     /// `"labels"`).
-    pub offers: &'static str,
+    ///
+    /// `None` if the definitions mirror no configuration; the plugin then has
+    /// no `tools sync`.
+    pub offers: Option<&'static str>,
 }
 
 /// A tool parameter whose schema values are derived from workspace
@@ -195,11 +199,16 @@ impl Definitions {
             text.push_str(&format!("{verb} {path}\n"));
         }
 
-        text.push_str(&format!(
-            "Load the directory from the workspace configuration, then run `jp {} tools sync \
-             {dir}` to offer the {}.\n",
-            self.plugin, self.offers
-        ));
+        match self.offers {
+            Some(offers) => text.push_str(&format!(
+                "Load the directory from the workspace configuration, then run `jp {} tools sync \
+                 {dir}` to offer the {offers}.\n",
+                self.plugin
+            )),
+            None => text.push_str(
+                "Load the directory from the workspace configuration for the tools to appear.\n",
+            ),
+        }
 
         Ok(text)
     }
@@ -250,6 +259,9 @@ impl Definitions {
     /// or when `force` is true.
     /// A file missing [`Definitions::header`] (written by another plugin or by
     /// hand) requires `force` even if tracked by git.
+    ///
+    /// Returns an error if `offers` is `None`: such definitions have no
+    /// [`SYNCED_FILE`].
     pub fn sync<'a>(
         &self,
         dir: &Utf8Path,
@@ -258,6 +270,13 @@ impl Definitions {
         mirrors: impl Fn(&str) -> Vec<Mirror<'a>>,
         force: bool,
     ) -> Result<String, String> {
+        let Some(offers) = self.offers else {
+            return Err(format!(
+                "`jp {}` has no `tools sync`: its tool definitions mirror nothing from the \
+                 configuration.",
+                self.plugin
+            ));
+        };
         if !dir.is_dir() {
             return Err(format!("{dir} is not a directory."));
         }
@@ -278,7 +297,7 @@ impl Definitions {
                 .map_err(|error| format!("failed to write {path}: {error}"))?;
         }
 
-        Ok(self.sync_summary(&path, unchanged, &synced))
+        Ok(self.sync_summary(&path, offers, unchanged, &synced))
     }
 
     /// Read [`SYNCED_FILE`] at `path`, returning `Ok(None)` if it does not
@@ -340,17 +359,22 @@ impl Definitions {
         synced
     }
 
-    fn sync_summary(&self, path: &Utf8Path, unchanged: bool, synced: &Synced) -> String {
+    fn sync_summary(
+        &self,
+        path: &Utf8Path,
+        offers: &str,
+        unchanged: bool,
+        synced: &Synced,
+    ) -> String {
         let verb = if unchanged { "Unchanged" } else { "Wrote" };
         let mut text = if synced.covered.is_empty() {
             format!(
-                "{verb} {path}; no configured tool takes {} from `jp {}`.\n",
-                self.offers, self.plugin
+                "{verb} {path}; no configured tool takes {offers} from `jp {}`.\n",
+                self.plugin
             )
         } else {
             format!(
-                "{verb} {path}, with {} for {}\n",
-                self.offers,
+                "{verb} {path}, with {offers} for {}\n",
                 synced.covered.join(", ")
             )
         };
