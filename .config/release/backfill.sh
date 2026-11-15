@@ -226,8 +226,11 @@ preparing() {
 # The commit that starts release $1 on its release branch: the one whose
 # trailers git reads as `Starts-Release: $1`.
 start_of() {
+  # awk reads to the end: exiting at the match would kill `git log` with SIGPIPE
+  # once the history outgrows the pipe's buffer, and `pipefail` would make that
+  # the function's status.
   git log --format='%H %(trailers:key=Starts-Release,valueonly)' "refs/heads/release/${1%.*}" |
-    awk -v version="$1" '$2 == version { print $1; exit }'
+    awk -v version="$1" '$2 == version && !found { print $1; found = 1 }'
 }
 
 # The version the next period's release takes: the minor release after the
@@ -960,7 +963,7 @@ guide_to_main() {
 }
 
 # Whether the guide for $1, `<version>/<item>`, is written or needs none.
-documented() { git config --get-all jp-backfill.documented 2>/dev/null | grep -qxF "$1"; }
+documented() { git config --get-all jp-backfill.documented 2>/dev/null | grep -xF "$1" >/dev/null; }
 
 mark_documented() { documented "$1" || git config --add jp-backfill.documented "$1"; }
 
@@ -1678,7 +1681,7 @@ cmd_revert() {
       printf '%s\n' "$version"
     fi
   done)
-  printf '%s\n' "$reverting" | grep -qxF "$target" ||
+  printf '%s\n' "$reverting" | grep -xF "$target" >/dev/null ||
     die "$target hasn't been cut, so there is nothing to take back."
   tools
 
