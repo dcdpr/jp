@@ -81,7 +81,8 @@ max = 1
 unique = "key-value"
 
 # Target date for the work (`YYYY-MM-DD`, e.g. `2026-11-25`). Supports
-# comparison filters such as `due<2026-12-01`.
+# comparison filters such as `due<2026-12-01`, and, being one date per
+# ticket, ordering with `jp ticket list --order due`.
 [plugins.command.ticket.options.labels.due]
 description = "When the work is wanted, as a date: YYYY-MM-DD."
 values = []

@@ -215,16 +215,73 @@ fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
 
 /// File a ticket under `id`, so a test can lay several out in a known order.
 fn write_ticket_as(dir: &Utf8TempDir, id: &str, title: &str) -> TicketId {
+    write_ticket_filed(dir, id, title, DATE)
+}
+
+/// File a ticket under `id`, filed on `date`.
+fn write_ticket_filed(dir: &Utf8TempDir, id: &str, title: &str, date: &str) -> TicketId {
+    write_labelled(dir, id, title, date, &[])
+}
+
+/// File a ticket under `id`, filed on `date`, carrying `labels`.
+fn write_labelled(
+    dir: &Utf8TempDir,
+    id: &str,
+    title: &str,
+    date: &str,
+    labels: &[&str],
+) -> TicketId {
     let id: TicketId = id.parse().unwrap();
+    let labels = Labels::from_tokens(labels).unwrap();
     let tickets = dir.path().join(store::DEFAULT_DIR);
     fs::create_dir_all(&tickets).unwrap();
     fs::write(
         tickets.join(format!("{}slug.md", id.file_prefix())),
-        render::ticket(&draft(title, &Labels::default())),
+        render::ticket(&NewTicket {
+            date,
+            ..draft(title, &labels)
+        }),
     )
     .unwrap();
 
     id
+}
+
+/// The plugin's settings for a board with keys to sort by: a `due` date, and a
+/// `priority` listed in the order it ranks.
+fn sortable_options() -> Options {
+    let Value::Object(options) = json!({
+        "assistant": "jp",
+        "labels": {
+            "due": { "description": "When.", "values": [], "max": 1, "type": "date" },
+            "priority": {
+                "description": "How soon.",
+                "values": ["high", "low"],
+                "max": 1,
+                "ordered": true
+            },
+            "client": { "description": "The client.", "values": ["cli"] }
+        }
+    }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// Run `list` on a board with keys to sort by; see [`sortable_options`].
+fn list_sortable(dir: &Utf8TempDir, args: Value) -> Outcome {
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: "list".to_owned(),
+        arguments: object(args),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+
+    run(&init(dir), &call, &sortable_options())
 }
 
 /// A description holding a checklist of three items, one of them checked.
@@ -253,6 +310,16 @@ fn description(dir: &Utf8TempDir) -> String {
     parse::document(&fs::read_to_string(path).unwrap())
         .unwrap()
         .description
+}
+
+/// The date the ticket under `id` was filed, as its metadata records it.
+fn filed_on(dir: &Utf8TempDir, id: TicketId) -> String {
+    let path = store::locate_ticket(&tickets(dir).dir, id).unwrap();
+
+    parse::document(&fs::read_to_string(path).unwrap())
+        .unwrap()
+        .metadata
+        .date
 }
 
 /// Ids are generated, so tests follow the ones that were handed out.
@@ -1404,25 +1471,23 @@ fn only_a_new_title_needs_to_move_files() {
 #[test]
 fn list_shows_one_line_per_ticket_and_filters() {
     let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Still open");
-    create_ticket(&dir, "Finished");
-    let [open, finished] = ids(&dir)[..] else {
-        panic!("expected two tickets")
-    };
+    write_ticket_as(&dir, "T-02wt0k1", "Still open");
+    write_ticket_as(&dir, "T-02wt0k2", "Finished");
     content(run_tool(
         &dir,
         "edit",
-        json!({ "id": finished.to_string(), "status": "done" }),
+        json!({ "id": "T-02wt0k2", "status": "done" }),
     ));
 
     let all = content(run_tool(&dir, "list", json!({})));
     assert_eq!(
         all,
-        format!("{open} Todo         Still open\n{finished} Done         Finished\n")
+        "T-02wt0k1 Todo         2026-08-05 Still open\nT-02wt0k2 Done         2026-08-05 \
+         Finished\n"
     );
 
     let todo = content(run_tool(&dir, "list", json!({ "status": "todo" })));
-    assert_eq!(todo, format!("{open} Todo         Still open\n"));
+    assert_eq!(todo, "T-02wt0k1 Todo         2026-08-05 Still open\n");
 }
 
 /// The first Todo line is the next thing to work on: each column comes in the
@@ -1447,9 +1512,158 @@ fn list_follows_the_board_order() {
 
     assert_eq!(
         out,
-        "T-02wt0k2 Todo         Filed second\nT-02wt0k1 Todo         Filed first\nT-02wt0k3 In \
-         Progress  Started\n"
+        "T-02wt0k2 Todo         2026-08-05 Filed second\nT-02wt0k1 Todo         2026-08-05 Filed \
+         first\nT-02wt0k3 In Progress  2026-08-05 Started\n"
     );
+}
+
+/// `filed` orders by the date a ticket was filed, across every status and
+/// whatever the board ranks first.
+/// Tickets filed on one day follow their ids, which count up as tickets are
+/// filed.
+#[test]
+fn list_orders_by_the_date_tickets_were_filed() {
+    let dir = Utf8TempDir::new().unwrap();
+    let march = write_ticket_filed(&dir, "T-02wt0k1", "Filed in March", "2026-03-02");
+    let may = write_ticket_filed(&dir, "T-02wt0k2", "Filed in May", "2026-05-10");
+    write_ticket_filed(&dir, "T-02wt0k3", "Filed later in May", "2026-05-10");
+    // An imported issue: its id was allocated last, its date is GitHub's.
+    write_ticket_filed(&dir, "T-02wt0k4", "Filed in January", "2026-01-20");
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    store::set_status(&tickets, &Formatting::default(), may, Status::Done).unwrap();
+    board::rank(
+        &tickets,
+        march,
+        board::Place::Before,
+        "T-02wt0k3".parse().unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "filed:desc" }))),
+        "T-02wt0k3 Todo         2026-05-10 Filed later in May\nT-02wt0k2 Done         2026-05-10 \
+         Filed in May\nT-02wt0k1 Todo         2026-03-02 Filed in March\nT-02wt0k4 Todo         \
+         2026-01-20 Filed in January\n"
+    );
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "filed" }))),
+        "T-02wt0k4 Todo         2026-01-20 Filed in January\nT-02wt0k1 Todo         2026-03-02 \
+         Filed in March\nT-02wt0k2 Done         2026-05-10 Filed in May\nT-02wt0k3 Todo         \
+         2026-05-10 Filed later in May\n"
+    );
+    // The board's ranking still decides the default order.
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "board" }))),
+        content(run_tool(&dir, "list", json!({}))),
+    );
+    assert!(
+        content(run_tool(&dir, "list", json!({})))
+            .starts_with("T-02wt0k1 Todo         2026-03-02 Filed in March\nT-02wt0k3 Todo"),
+    );
+}
+
+/// The filters and paging apply to a date order as they do to the board's.
+#[test]
+fn a_date_order_is_filtered_and_paged() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_filed(&dir, "T-02wt0k1", "Oldest", "2026-01-01");
+    write_ticket_filed(&dir, "T-02wt0k2", "Middle", "2026-02-01");
+    write_ticket_filed(&dir, "T-02wt0k3", "Newest", "2026-03-01");
+
+    assert_eq!(
+        content(run_tool_with_options(
+            &dir,
+            "list",
+            json!({ "order": "filed:desc", "status": "todo", "page": 2 }),
+            json!({ "page_size": 2 }),
+        )),
+        "T-02wt0k1 Todo         2026-01-01 Oldest\n\nPage 2 of 2 (3 tickets).\n"
+    );
+}
+
+/// A date order doesn't read the board's order file, so an unreadable one goes
+/// unmentioned.
+#[test]
+fn a_date_order_ignores_an_unreadable_board_order() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_as(&dir, "T-02wt0k1", "Filed first");
+    fs::write(dir.path().join("docs/ticket/.board.json"), "not an order").unwrap();
+
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "filed" }))),
+        "T-02wt0k1 Todo         2026-08-05 Filed first\n"
+    );
+}
+
+/// A date label orders by its date, and a ticket without one comes last in both
+/// directions, so the first rows are the ones that are due.
+/// Tickets due on one day follow their ids.
+#[test]
+fn list_orders_by_a_date_label_with_undated_tickets_last() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_labelled(&dir, "T-02wt0k1", "Whenever", "2026-08-05", &[]);
+    write_labelled(&dir, "T-02wt0k2", "December", "2026-08-05", &[
+        "due=2026-12-01",
+    ]);
+    write_labelled(&dir, "T-02wt0k3", "November", "2026-08-05", &[
+        "due=2026-11-20",
+    ]);
+    write_labelled(&dir, "T-02wt0k4", "Also November", "2026-08-05", &[
+        "due=2026-11-20",
+    ]);
+
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due" }))),
+        "T-02wt0k3 Todo         2026-08-05 November [due=2026-11-20]\nT-02wt0k4 Todo         \
+         2026-08-05 Also November [due=2026-11-20]\nT-02wt0k2 Todo         2026-08-05 December \
+         [due=2026-12-01]\nT-02wt0k1 Todo         2026-08-05 Whenever\n"
+    );
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due:desc" }))),
+        "T-02wt0k2 Todo         2026-08-05 December [due=2026-12-01]\nT-02wt0k3 Todo         \
+         2026-08-05 November [due=2026-11-20]\nT-02wt0k4 Todo         2026-08-05 Also November \
+         [due=2026-11-20]\nT-02wt0k1 Todo         2026-08-05 Whenever\n"
+    );
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due:asc" }))),
+        content(list_sortable(&dir, json!({ "order": "due" }))),
+    );
+}
+
+/// An `ordered` label ranks its values as the board lists them, not
+/// alphabetically.
+#[test]
+fn list_orders_by_an_ordered_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_labelled(&dir, "T-02wt0k1", "Low", "2026-08-05", &["priority=low"]);
+    write_labelled(&dir, "T-02wt0k2", "High", "2026-08-05", &["priority=high"]);
+
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "priority" }))),
+        "T-02wt0k2 Todo         2026-08-05 High [priority=high]\nT-02wt0k1 Todo         \
+         2026-08-05 Low [priority=low]\n"
+    );
+}
+
+/// The refusal names every order the board makes possible, so the next call can
+/// pick one.
+#[test]
+fn an_unknown_order_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(run_tool(&dir, "list", json!({ "order": "due" }))),
+        "`order` must be one of: board, filed, filed:desc."
+    );
+    // `client` is a label, but one a ticket can carry several of, in no order.
+    for order in ["client", "due:sideways", "board:desc", "newest"] {
+        assert_eq!(
+            error_message(list_sortable(&dir, json!({ "order": order }))),
+            "`order` must be one of: board, filed, filed:desc, due, due:desc, priority, \
+             priority:desc.",
+            "{order}"
+        );
+    }
 }
 
 /// A query matches the title, the description, or a comment, whatever its case,
@@ -1476,8 +1690,8 @@ fn list_finds_a_query_in_the_title_description_and_comments() {
 
     assert_eq!(
         out,
-        "T-02wt0k1 Todo         Wrap is off by one\nT-02wt0k2 Todo         Header \
-         misaligned\nT-02wt0k3 Todo         Colour is wrong (1 comment)\n"
+        "T-02wt0k1 Todo         2026-08-05 Wrap is off by one\nT-02wt0k2 Todo         2026-08-05 \
+         Header misaligned\nT-02wt0k3 Todo         2026-08-05 Colour is wrong (1 comment)\n"
     );
 }
 
@@ -1500,12 +1714,12 @@ fn list_pages_through_a_long_listing() {
 
     assert_eq!(
         content(page(1)),
-        "T-02wt0k1 Todo         First\nT-02wt0k2 Todo         Second\n\nPage 1 of 2 (3 tickets). \
-         Pass `page: 2` for more.\n"
+        "T-02wt0k1 Todo         2026-08-05 First\nT-02wt0k2 Todo         2026-08-05 \
+         Second\n\nPage 1 of 2 (3 tickets). Pass `page: 2` for more.\n"
     );
     assert_eq!(
         content(page(2)),
-        "T-02wt0k3 Todo         Third\n\nPage 2 of 2 (3 tickets).\n"
+        "T-02wt0k3 Todo         2026-08-05 Third\n\nPage 2 of 2 (3 tickets).\n"
     );
     assert_eq!(error_message(page(3)), "Page 3 is past the last page, 2.");
 }
@@ -1532,8 +1746,8 @@ fn an_unreadable_board_order_lists_each_column_by_id() {
 
     assert!(
         out.starts_with(
-            "T-02wt0k1 Todo         Filed first\nT-02wt0k2 Todo         Filed second\n\nCould not \
-             read:\n- docs/ticket/.board.json: "
+            "T-02wt0k1 Todo         2026-08-05 Filed first\nT-02wt0k2 Todo         2026-08-05 \
+             Filed second\n\nCould not read:\n- docs/ticket/.board.json: "
         ),
         "{out}"
     );
@@ -1864,7 +2078,8 @@ fn list_under_a_parent_shows_only_its_children() {
 
     assert_eq!(
         content(run_tool(&dir, "list", json!({ "under": FIXED_ID }))),
-        "T-02wt0m0 Todo         Bound tool output\nT-02wt0m1 Done         Record token usage\n"
+        "T-02wt0m0 Todo         2026-08-05 Bound tool output\nT-02wt0m1 Done         2026-08-05 \
+         Record token usage\n"
     );
 }
 
@@ -1945,12 +2160,15 @@ fn create_writes_labels_and_list_shows_them() {
     ));
 
     let id = ids(&dir)[0];
+    // `create` files the ticket today; the listing shows the date it wrote.
+    let filed = filed_on(&dir, id);
     let listed = content(run_tool(&dir, "list", json!({})));
 
     assert_eq!(
         listed,
         format!(
-            "{id} Todo         Flag parsing drops the last value [client=cli, package=jp_config]\n"
+            "{id} Todo         {filed} Flag parsing drops the last value [client=cli, \
+             package=jp_config]\n"
         )
     );
 }
@@ -2438,8 +2656,8 @@ fn list_counts_the_checklist() {
 
     assert_eq!(
         out,
-        "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\nT-02wt0kz Todo         \
-         No checklist here\n"
+        "T-02wt0kx Todo         2026-08-05 Exercise recorded tool rounds (1 of 3 \
+         checked)\nT-02wt0kz Todo         2026-08-05 No checklist here\n"
     );
 }
 
@@ -2503,8 +2721,8 @@ fn move_places_a_ticket_before_or_after_another() {
     );
     assert_eq!(
         content(run_tool(&dir, "list", json!({}))),
-        "T-02wt0k3 Todo         Third\nT-02wt0k2 Todo         Second\nT-02wt0k1 Todo         \
-         First\n"
+        "T-02wt0k3 Todo         2026-08-05 Third\nT-02wt0k2 Todo         2026-08-05 \
+         Second\nT-02wt0k1 Todo         2026-08-05 First\n"
     );
 }
 

@@ -285,10 +285,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         };
 
-        // Commands require a leading @mention in group chats; in direct chats
-        // every message is eligible.
-        let commands = message.leading_mention || matches!(message.chat, Chat::Direct(_));
-        self.inbox.push(message.chat, key, text, commands);
+        self.inbox.push(message.chat, key, text);
         self.pump();
     }
 

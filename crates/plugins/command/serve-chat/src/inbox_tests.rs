@@ -25,12 +25,11 @@ fn group() -> Chat {
     Chat::Group("Z3JvdXA=".to_owned())
 }
 
-fn incoming(text: &str, commands: bool, context: Option<&str>) -> Incoming {
+fn incoming(text: &str, context: Option<&str>) -> Incoming {
     Incoming {
         chat: group(),
         person: "ada".to_owned(),
         text: text.to_owned(),
-        commands,
         context: context.map(ToOwned::to_owned),
     }
 }
@@ -52,16 +51,11 @@ fn take(inbox: &mut Inbox) -> Option<Incoming> {
 #[test]
 fn without_a_decider_a_message_is_taken_at_once() {
     let mut inbox = Inbox::default();
-    inbox.push(
-        group(),
-        "ada".to_owned(),
-        "Ada Client: thanks!".to_owned(),
-        false,
-    );
+    inbox.push(group(), "ada".to_owned(), "Ada Client: thanks!".to_owned());
 
     assert_eq!(
         take(&mut inbox),
-        Some(incoming("Ada Client: thanks!", false, None))
+        Some(incoming("Ada Client: thanks!", None))
     );
 }
 
@@ -72,13 +66,11 @@ fn a_message_waits_behind_one_being_decided() {
         group(),
         "ada".to_owned(),
         "Ada Client: rank it first".to_owned(),
-        false,
     );
     inbox.push(
         group(),
         "ada".to_owned(),
         "Ada Client (to you): actually second".to_owned(),
-        true,
     );
 
     assert!(matches!(inbox.next(), Some(Next::Decide(_))));
@@ -89,7 +81,6 @@ fn a_message_waits_behind_one_being_decided() {
         inbox.decided(),
         Some(incoming(
             "Ada Client: rank it first",
-            false,
             Some("Last message:\nAda Client: rank it first")
         ))
     );
@@ -101,17 +92,11 @@ fn a_message_waits_behind_one_being_decided() {
 fn a_decision_reads_the_lines_before_its_message() {
     let (mut inbox, recorder) = inbox();
     inbox.remember(&group(), "Assistant: Filed T-1 for review.");
-    inbox.push(
-        group(),
-        "ada".to_owned(),
-        "Ada Client: thanks!".to_owned(),
-        false,
-    );
+    inbox.push(group(), "ada".to_owned(), "Ada Client: thanks!".to_owned());
     inbox.push(
         group(),
         "max".to_owned(),
         "Max Maintainer: lunch?".to_owned(),
-        false,
     );
 
     drop(inbox.next());
@@ -129,12 +114,7 @@ fn a_chat_keeps_only_its_last_lines() {
     for index in 0..10 {
         inbox.remember(&group(), &format!("Ada Client: {index}"));
     }
-    inbox.push(
-        group(),
-        "ada".to_owned(),
-        "Ada Client: last".to_owned(),
-        false,
-    );
+    inbox.push(group(), "ada".to_owned(), "Ada Client: last".to_owned());
 
     drop(inbox.next());
 

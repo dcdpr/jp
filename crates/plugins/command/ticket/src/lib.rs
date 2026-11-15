@@ -23,6 +23,7 @@ mod definitions;
 mod edit;
 mod label;
 mod options;
+mod order;
 mod tool;
 
 use std::io::{self, BufRead, Write};
@@ -48,7 +49,11 @@ use ticket::{
     store,
 };
 
-use crate::options::{BoardOptions, LABELS_KEY, Options, leftover_labels_file};
+use crate::{
+    options::{BoardOptions, LABELS_KEY, Options, leftover_labels_file},
+    order::ListOrder,
+    tool::in_board_order,
+};
 
 /// The name the plugin is configured under, `plugins.command.ticket`.
 pub(crate) const PLUGIN: &str = "ticket";
@@ -354,10 +359,18 @@ enum Command {
         labels: Vec<String>,
     },
 
-    /// List tickets, ordered by id.
+    /// List tickets, ordered by id unless `--order` names another order.
     ///
     /// With `jp -F json`, the tickets are printed as JSON.
     List {
+        /// How to order the tickets.
+        /// `board` lays them out as `jp ticket board` does, `filed` by the date
+        /// each was filed, and a label key the board can sort by, such as a
+        /// date key, by its value, tickets without one last.
+        /// Add `:desc` to `filed` or a key to reverse it.
+        #[arg(long)]
+        order: Option<String>,
+
         /// Only tickets at this status: `todo`, `in progress`, or `done`.
         #[arg(long)]
         status: Option<Status>,
@@ -1601,20 +1614,17 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
         } => import_all(dir, formatting, ctx.options, &numbers, &repo, &labels),
 
         Command::List {
+            order,
             status,
             labels,
             query,
             under,
-        } => list(
-            dir,
-            &Filter {
-                status,
-                labels: &labels,
-                query: query.as_deref(),
-                under,
-            },
-            ctx.format.is_json(),
-        ),
+        } => list(ctx, order.as_deref(), &Filter {
+            status,
+            labels: &labels,
+            query: query.as_deref(),
+            under,
+        }),
 
         Command::Check => check(dir, ctx.options, ctx.format.is_json()),
 
@@ -1796,7 +1806,9 @@ fn show_board(
     })
 }
 
-/// One line of a board column: the status is the column's, so it is left out.
+/// One line of a board column: the id, the date the ticket was filed, and the
+/// title.
+/// The status is the column's, so it is left out.
 fn board_row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let labels = if ticket.metadata.labels.is_empty() {
@@ -1805,7 +1817,12 @@ fn board_row(id: TicketId, ticket: &Ticket) -> String {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {}{labels}{}\n", ticket.title, progress(ticket))
+    format!(
+        "{id:<9} {} {}{labels}{}\n",
+        ticket.metadata.date,
+        ticket.title,
+        progress(ticket)
+    )
 }
 
 /// A ticket's checklist progress as a listing appends it, ` (2 of 5 checked)`,
@@ -2548,12 +2565,26 @@ struct Filter<'a> {
     under: Option<TicketId>,
 }
 
-/// List tickets, filtered by whatever the caller named.
+/// List tickets, filtered by whatever the caller named, in id order or in
+/// `order`.
 ///
 /// Labels are matched as written on the ticket rather than through the
 /// vocabulary, so a ticket carrying a label the board has since dropped can
 /// still be found and fixed.
-fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, String> {
+fn list(ctx: &Context<'_>, order: Option<&str>, filter: &Filter<'_>) -> Result<Output, String> {
+    let (dir, json) = (ctx.dir.as_path(), ctx.format.is_json());
+    // Id order needs no vocabulary, so a board whose labels don't parse can
+    // still be listed.
+    let vocabulary = match order {
+        Some(_) => ctx.options.vocabulary()?,
+        None => Vocabulary::default(),
+    };
+    let order = order
+        .map(|text| {
+            ListOrder::parse(text, &vocabulary)
+                .ok_or_else(|| order::refusal("--order", &vocabulary))
+        })
+        .transpose()?;
     let query = filter
         .query
         .map(str::trim)
@@ -2579,40 +2610,76 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
                 .under
                 .is_none_or(|under| ticket.metadata.parent == Some(under))
     });
-
-    let text = if json {
-        let rows: Vec<Row<'_>> = tickets
-            .iter()
-            .map(|(id, ticket, path)| Row {
-                id: *id,
-                title: &ticket.title,
-                metadata: &ticket.metadata,
-                comments: ticket.comments.len(),
-                path,
-                checklist: ticket.checklist(),
-            })
-            .collect();
-
-        let json = serde_json::to_string_pretty(&rows)
-            .map_err(|error| format!("failed to serialize tickets: {error}"))?;
-
-        format!("{json}\n")
-    } else {
-        tickets
-            .iter()
-            .map(|(id, ticket, _)| row(*id, ticket))
-            .collect()
-    };
+    if let Some(order) = &order {
+        arrange(dir, &mut tickets, order, &mut warnings);
+    }
 
     Ok(Output {
-        text,
+        text: render_listing(&tickets, json)?,
         json,
         warnings,
         ..Output::default()
     })
 }
 
-/// One line of the human-readable listing.
+/// `tickets`, each with its path, as one JSON array, or one [`row`] each.
+fn render_listing(tickets: &[(TicketId, &Ticket, &str)], json: bool) -> Result<String, String> {
+    if !json {
+        return Ok(tickets
+            .iter()
+            .map(|(id, ticket, _)| row(*id, ticket))
+            .collect());
+    }
+
+    let rows: Vec<Row<'_>> = tickets
+        .iter()
+        .map(|(id, ticket, path)| Row {
+            id: *id,
+            title: &ticket.title,
+            metadata: &ticket.metadata,
+            comments: ticket.comments.len(),
+            path,
+            checklist: ticket.checklist(),
+        })
+        .collect();
+    let json = serde_json::to_string_pretty(&rows)
+        .map_err(|error| format!("failed to serialize tickets: {error}"))?;
+
+    Ok(format!("{json}\n"))
+}
+
+/// Put `tickets`, each with its path, into `order`.
+///
+/// An order file that can't be read leaves each column in id order, and adds a
+/// warning saying why.
+fn arrange(
+    dir: &Utf8Path,
+    tickets: &mut [(TicketId, &Ticket, &str)],
+    order: &ListOrder<'_>,
+    warnings: &mut Vec<String>,
+) {
+    let ListOrder::Sorted(sort) = order else {
+        let board = board::read(dir).unwrap_or_else(|error| {
+            warnings.push(format!("{error} (columns are listed by id)"));
+            board::Order::default()
+        });
+        let found: Vec<(TicketId, &Ticket)> = tickets
+            .iter()
+            .map(|(id, ticket, _)| (*id, *ticket))
+            .collect();
+        let laid_out: Vec<TicketId> = in_board_order(&found, &board)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        tickets.sort_by_key(|(id, ..)| laid_out.iter().position(|other| other == id));
+        return;
+    };
+
+    tickets.sort_by(|(a_id, a, _), (b_id, b, _)| sort.compare((*a_id, *a), (*b_id, *b)));
+}
+
+/// One line of the human-readable listing: id, status, the date the ticket was
+/// filed, and title.
 fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let status = ticket.metadata.status.to_string();
@@ -2623,7 +2690,8 @@ fn row(id: TicketId, ticket: &Ticket) -> String {
     };
 
     format!(
-        "{id:<9} {status:<12} {}{labels}{}\n",
+        "{id:<9} {status:<12} {} {}{labels}{}\n",
+        ticket.metadata.date,
         ticket.title,
         progress(ticket)
     )

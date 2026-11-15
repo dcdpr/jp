@@ -393,7 +393,6 @@ fn from(sender: &str, text: &str) -> Inbound {
         sender: vec![sender.to_owned()],
         name: None,
         addressed: false,
-        leading_mention: false,
         text: text.to_owned(),
         attachments: vec![],
     }
@@ -564,7 +563,6 @@ async fn a_group_message_names_its_sender() {
         sender: vec![CLIENT.to_owned()],
         name: Some("Ada".to_owned()),
         addressed: false,
-        leading_mention: false,
         text: "Is anything planned for search?".to_owned(),
         attachments: vec![],
     });
@@ -593,7 +591,6 @@ async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
         ],
         name: Some("José O'Brien".to_owned()),
         addressed: false,
-        leading_mention: false,
         text: "Hello?".to_owned(),
         attachments: vec![],
     };
@@ -838,7 +835,6 @@ async fn an_addressed_group_message_says_it_is_to_the_assistant() {
         sender: vec![CLIENT.to_owned()],
         name: Some("Ada".to_owned()),
         addressed: true,
-        leading_mention: false,
         text: " what's next?".to_owned(),
         attachments: vec![],
     });
@@ -861,7 +857,6 @@ async fn a_silent_answer_sends_nothing() {
         sender: vec![CLIENT.to_owned()],
         name: Some("Ada".to_owned()),
         addressed: false,
-        leading_mention: false,
         text: "Lunch at one?".to_owned(),
         attachments: vec![],
     });
@@ -947,7 +942,6 @@ impl Decide for FakeDecider {
 fn command(sender: &str, text: &str) -> Inbound {
     Inbound {
         addressed: true,
-        leading_mention: true,
         ..in_group(sender, text)
     }
 }
@@ -1031,8 +1025,10 @@ async fn a_group_message_the_decider_answers_starts_a_turn() {
     );
 }
 
+/// The decider judges whether a message is a command; nothing about how the
+/// message is addressed keeps the commands from it.
 #[tokio::test]
-async fn only_a_message_that_may_give_a_command_is_offered_the_commands() {
+async fn every_message_is_offered_the_commands() {
     let (mut f, decider) = deciding(vec![
         Ok(verdict(Action::Ignore, 0.9)),
         Ok(verdict(Action::Ignore, 0.9)),
@@ -1047,17 +1043,12 @@ async fn only_a_message_that_may_give_a_command_is_offered_the_commands() {
         ..in_group(CLIENT, "so, compact please?")
     });
     f.settle().await;
-    f.receive(in_group(CLIENT, "compact please"));
+    f.receive(in_group(CLIENT, "start a new conversation"));
     f.settle().await;
     f.receive(from(CLIENT, "compact please"));
     f.settle().await;
 
-    assert_eq!(*decider.offered.lock().unwrap(), [
-        Action::offered(true),
-        Action::offered(false),
-        Action::offered(false),
-        Action::offered(true),
-    ]);
+    assert_eq!(*decider.offered.lock().unwrap(), [Action::ALL; 4]);
 }
 
 #[tokio::test]

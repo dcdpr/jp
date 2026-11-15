@@ -170,6 +170,16 @@ fn assert_advertised_values_match_the_parser(routed: &[(String, String, toml::Va
             .filter(|status| values.iter().any(|value| value.parse() == Ok(*status)))
             .count();
         assert_eq!(count, 3, "{key} hides an accepted `status`");
+
+        // The orders a board without labels makes possible; `sync` replaces
+        // the list with the board's own.
+        if name == "list" {
+            assert_eq!(
+                enum_values(tool, "order"),
+                order::names(&Vocabulary::default()),
+                "{key} advertises other orders than `list` accepts"
+            );
+        }
     }
 }
 
@@ -209,6 +219,15 @@ fn declaring(source: &str, parameter: &str) -> Value {
     json!({ "source": source, "parameters": { parameter: { "type": "array" } } })
 }
 
+/// A `list` definition declaring both parameters `sync` writes into: `labels`
+/// and `order`.
+fn listing(source: &str) -> Value {
+    json!({ "source": source, "parameters": {
+        "labels": { "type": "array" },
+        "order": { "type": "string" }
+    }})
+}
+
 /// Tools are found by their source, so a project that exposes `create` under a
 /// name of its own gets the labels under that name too.
 /// `create` and `edit` are offered what they may add, `edit` in its
@@ -223,7 +242,7 @@ fn sync_offers_each_tool_its_labels_found_by_source() {
                 "ticket_create": labelled("plugin.command.ticket.create"),
                 "track": labelled("plugin.command.ticket.create"),
                 "ticket_edit": declaring("plugin.command.ticket.edit", "add_labels"),
-                "list": labelled("plugin.command.ticket"),
+                "list": listing("plugin.command.ticket"),
                 "ticket_show": { "source": "plugin.command.ticket.show" },
                 "fs_read_file": { "source": "local" },
                 "rfd_list": { "source": "plugin.command.rfd.list" }
@@ -248,6 +267,13 @@ enum = [
   "package=jp_cli",
   "package=jp_legacy",
   "triaged",
+]
+
+[conversation.tools.list.parameters.order]
+enum = [
+  "board",
+  "filed",
+  "filed:desc",
 ]
 
 [conversation.tools.ticket_create.parameters.labels.items]
@@ -302,8 +328,8 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
         output.text,
         format!(
             "Wrote {path}, with labels for ticket_create\nLeft out ticket_edit (no `add_labels` \
-             parameter), ticket_list (no `labels` parameter): the values go into that parameter, \
-             which their definitions don't declare.\n"
+             parameter), ticket_list (no `labels` parameter), ticket_list (no `order` parameter): \
+             the values go into that parameter, which their definitions don't declare.\n"
         )
     );
     let synced = fs::read_to_string(&path).unwrap();
@@ -363,6 +389,55 @@ enum = [
     );
 }
 
+/// `list` is offered every order the board makes possible: the built-in ones,
+/// then each key a ticket can be sorted by, which leaves out a key a ticket can
+/// carry several of.
+#[test]
+fn sync_offers_list_the_orders_the_board_can_sort_by() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({ "conversation": { "tools": {
+        "ticket_list": listing("plugin.command.ticket.list")
+    }}});
+    let vocabulary = Vocabulary::parse(
+        r#"{
+            "client": {"values": ["cli"]},
+            "priority": {"values": ["high", "low"], "max": 1, "ordered": true}
+        }"#,
+    )
+    .unwrap();
+
+    let output = sync(dir.path(), &config, &vocabulary, false).unwrap();
+
+    let path = dir.path().join(SYNCED_FILE);
+    assert_eq!(
+        output.text,
+        format!("Wrote {path}, with labels for ticket_list\n")
+    );
+    let lists = r#"
+[conversation.tools.ticket_list.parameters.labels.items]
+enum = [
+  "client",
+  "client=cli",
+  "priority",
+  "priority=high",
+  "priority=low",
+]
+
+[conversation.tools.ticket_list.parameters.order]
+enum = [
+  "board",
+  "filed",
+  "filed:desc",
+  "priority",
+  "priority:desc",
+]
+"#;
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        format!("{}\n{SYNCED_NOTES}{lists}", DEFINITIONS.header())
+    );
+}
+
 /// An empty `enum` accepts nothing, which some providers refuse outright, so a
 /// board without labels writes no lists at all, and says why.
 #[test]
@@ -383,13 +458,14 @@ fn sync_with_an_empty_vocabulary_offers_no_lists() {
     );
 }
 
-/// JP's definitions declare the parameter in every tool `sync` writes labels
-/// into, so none of them is left out.
+/// JP's definitions declare every parameter `sync` writes into, so none of them
+/// is left out.
 #[test]
-fn jp_definitions_declare_the_labels_parameter() {
+fn jp_definitions_declare_every_synced_parameter() {
     let vocabulary = Vocabulary::default();
+    let orders = order::names(&vocabulary);
     for (name, key, tool) in routed(&read_definitions(&jp_definitions())) {
-        for mirror in mirrors(&name, &vocabulary) {
+        for mirror in mirrors(&name, &vocabulary, &orders) {
             assert!(
                 tool["parameters"][mirror.parameter].get("type").is_some(),
                 "{key} declares no `{}` parameter",

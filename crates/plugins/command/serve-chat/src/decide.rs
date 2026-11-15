@@ -5,9 +5,9 @@
 //! The bridge applies the action when its probability meets `decide.threshold`,
 //! and falls back to [`Action::Answer`] otherwise.
 //!
-//! Command actions (`new_conversation`, `compact`) are offered only when the
-//! message is eligible to issue commands (direct chats, or group messages that
-//! start with a mention of the bot).
+//! Every message is offered every action, including the commands
+//! (`new_conversation`, `compact`): the decide model judges whether a message
+//! asks for one.
 
 use std::{future::Future, pin::Pin, time::Duration};
 
@@ -41,25 +41,13 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    /// Actions offered for ordinary group messages.
-    const MESSAGE: &[Self] = &[Self::Ignore, Self::Answer];
-
-    /// Actions offered when the message can issue a command.
-    const COMMAND: &[Self] = &[
+    /// The actions offered for every message.
+    pub(crate) const ALL: &[Self] = &[
         Self::Ignore,
         Self::Answer,
         Self::NewConversation,
         Self::Compact,
     ];
-
-    /// Return the candidate actions for a message.
-    pub(crate) fn offered(commands: bool) -> &'static [Self] {
-        if commands {
-            Self::COMMAND
-        } else {
-            Self::MESSAGE
-        }
-    }
 
     /// Wire key for this action in the decide API request and response.
     pub(crate) fn key(self) -> &'static str {
