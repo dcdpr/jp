@@ -15,7 +15,8 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, EventKind, InquiryResponse},
+    event::{ChatResponse, EventKind},
+    stream::ConversationEventWithConfigRef,
 };
 use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
 use jp_printer::Printer;
@@ -320,7 +321,7 @@ pub(crate) fn edit_query(
         doc.meta.config.error = Some(error);
     }
 
-    let history_value = build_history_text(stream);
+    let history_value = build_history_text(stream, *Local::now().offset());
     doc.meta.history.value = &history_value;
 
     let options = Options::new()
@@ -459,114 +460,81 @@ fn refresh_untouched(
     block
 }
 
-fn build_history_text(history: &ConversationStream) -> String {
+fn build_history_text(history: &ConversationStream, local_offset: FixedOffset) -> String {
     let mut text = String::new();
 
     if !history.is_empty() {
         text.push_str("\n# Conversation History (last 10 entries)");
     }
 
-    let local_offset: FixedOffset = *Local::now().offset();
-    let format = "%Y-%m-%d %H:%M:%S";
-
-    let mut messages = vec![];
-    for event in history.iter().rev().take(10) {
-        let mut buf = String::new();
-        let timestamp = event
-            .timestamp
-            .with_timezone(&local_offset)
-            .format(format)
-            .to_string();
-
-        let options = comrak::Options {
-            render: comrak::options::Render {
-                width: 80,
-                r#unsafe: true,
-                prefer_fenced: true,
-                experimental_minimize_commonmark: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        match &event.kind {
-            EventKind::ChatRequest(request) => {
-                buf.push_str(&format!("## You on {timestamp}\n\n"));
-                buf.push_str(comrak::markdown_to_commonmark(&request.content, &options).trim());
-            }
-            EventKind::ChatResponse(response) => match response {
-                ChatResponse::Message { message } => {
-                    buf.push_str("\n\n## Assistant");
-                    buf.push_str(&format!(" ({})", event.config.assistant.model.id));
-                    buf.push_str(&format!(" on {timestamp}\n\n"));
-                    buf.push_str(comrak::markdown_to_commonmark(message, &options).trim());
-                }
-                ChatResponse::Reasoning { reasoning, .. } => {
-                    buf.push_str("\n\n## Assistant (reasoning)");
-                    buf.push_str(&format!(" ({})", event.config.assistant.model.id));
-                    buf.push_str(&format!(" on {timestamp}\n\n"));
-                    buf.push_str(comrak::markdown_to_commonmark(reasoning, &options).trim());
-                }
-                ChatResponse::Structured { data } => {
-                    buf.push_str("\n\n## Assistant (structured)");
-                    buf.push_str(&format!(" ({})", event.config.assistant.model.id));
-                    buf.push_str(&format!(" on {timestamp}\n\n"));
-                    buf.push_str("```json\n");
-                    if let Ok(pretty) = serde_json::to_string_pretty(data) {
-                        buf.push_str(&pretty);
-                    } else {
-                        buf.push_str(&data.to_string());
-                    }
-                    buf.push_str("\n```");
-                }
-            },
-            EventKind::ToolCallRequest(request) => {
-                if let Ok(json) = serde_json::to_string_pretty(request) {
-                    buf.push_str(&format!("\n\n## Tool Call Request on {timestamp}\n\n"));
-                    buf.push_str("```json\n");
-                    buf.push_str(&json);
-                    buf.push_str("\n```");
-                }
-            }
-            EventKind::ToolCallResponse(response) => {
-                if response.result.is_ok() {
-                    buf.push_str(&format!("\n\n## Tool Call Result on {timestamp}\n\n"));
-                } else {
-                    buf.push_str(&format!("\n\n## Tool Call **Error** on {timestamp}\n\n"));
-                }
-                buf.push_str("```\n");
-                buf.push_str(&response.result.clone().unwrap_or_else(|err| err));
-                buf.push_str("\n```");
-            }
-            EventKind::InquiryRequest(request) => {
-                buf.push_str(&format!(
-                    "\n\n## Inquiry Request ({:?}) on {timestamp}\n\n",
-                    request.source
-                ));
-                buf.push_str(&request.question.text);
-            }
-            EventKind::InquiryResponse(response) => {
-                buf.push_str(&format!("\n\n## Inquiry Response on {timestamp}\n\n"));
-                buf.push_str(&inquiry_answer_line(response));
-            }
-            EventKind::TurnStart(_) => {}
-        }
-
-        buf.push_str("\n\n");
-        messages.push(buf);
-    }
+    // Only chat requests and responses are shown; reasoning, tool calls,
+    // inquiries and turn boundaries are skipped before the limit is applied,
+    // so a tool-heavy turn does not crowd out the messages around it.
+    let messages = history
+        .iter()
+        .rev()
+        .filter_map(|event| history_entry(&event, local_offset))
+        .take(10);
 
     text.extend(messages);
     text
 }
 
-/// Render the answer line for an inquiry response in the history export.
-fn inquiry_answer_line(response: &InquiryResponse) -> String {
-    match response {
-        InquiryResponse::Answered { answer, .. } => format!("Answer: {answer}"),
-        InquiryResponse::Redacted { .. } => "Answer: <redacted>".to_string(),
-        InquiryResponse::Cancelled { reason, .. } => format!("Cancelled ({})", reason.as_str()),
+/// Column at which history entries are wrapped.
+const HISTORY_WRAP_WIDTH: usize = 80;
+
+/// Render one chat request or response for the editor history.
+///
+/// Returns `None` for every other kind of event.
+fn history_entry(
+    event: &ConversationEventWithConfigRef<'_>,
+    local_offset: FixedOffset,
+) -> Option<String> {
+    let timestamp = event
+        .event
+        .timestamp
+        .with_timezone(&local_offset)
+        .format("%Y-%m-%d %H:%M:%S");
+
+    let options = comrak::Options {
+        render: comrak::options::Render {
+            width: HISTORY_WRAP_WIDTH,
+            r#unsafe: true,
+            prefer_fenced: true,
+            experimental_minimize_commonmark: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let model = &event.config.assistant.model.id;
+    let mut buf = String::new();
+    match &event.event.kind {
+        EventKind::ChatRequest(request) => {
+            buf.push_str(&format!("## You on {timestamp}\n\n"));
+            buf.push_str(comrak::markdown_to_commonmark(&request.content, &options).trim());
+        }
+        EventKind::ChatResponse(ChatResponse::Message { message }) => {
+            buf.push_str(&format!("\n\n## Assistant ({model}) on {timestamp}\n\n"));
+            buf.push_str(comrak::markdown_to_commonmark(message, &options).trim());
+        }
+        EventKind::ChatResponse(ChatResponse::Structured { data }) => {
+            buf.push_str(&format!(
+                "\n\n## Assistant (structured) ({model}) on {timestamp}\n\n"
+            ));
+            buf.push_str("```json\n");
+            if let Ok(pretty) = serde_json::to_string_pretty(data) {
+                buf.push_str(&pretty);
+            } else {
+                buf.push_str(&data.to_string());
+            }
+            buf.push_str("\n```");
+        }
+        _ => return None,
     }
+
+    buf.push_str("\n\n");
+    Some(buf)
 }
 
 #[cfg(test)]
@@ -576,3 +544,7 @@ mod tests;
 #[cfg(test)]
 #[path = "editor_draft_tests.rs"]
 mod draft_tests;
+
+#[cfg(test)]
+#[path = "editor_history_tests.rs"]
+mod history_tests;
