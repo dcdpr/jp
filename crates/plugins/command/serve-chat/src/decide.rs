@@ -5,9 +5,9 @@
 //! The bridge applies the action when its probability meets `decide.threshold`,
 //! and falls back to [`Action::Answer`] otherwise.
 //!
-//! Every message is offered every action, including the commands
-//! (`new_conversation`, `compact`): the decide model judges whether a message
-//! asks for one.
+//! Every message is offered all actions, including the commands
+//! (`new_conversation`, `compact`); the decide model determines whether a
+//! message requests one.
 
 use std::{future::Future, pin::Pin, time::Duration};
 

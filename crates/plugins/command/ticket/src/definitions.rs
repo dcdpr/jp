@@ -1,11 +1,11 @@
 //! Definitions for the tools this plugin serves.
 //!
-//! `jp ticket tools init` writes a starting set, one file per tool, and `jp
-//! ticket tools sync` writes the one part that mirrors configuration: the
-//! board's labels, offered in the schemas of the tools that take them, and the
-//! orders `list` accepts, which include the label keys the board can sort by.
-//! `tool_definitions` runs both; this module says which files there are and
-//! which tools take labels.
+//! `jp ticket tools init` writes the default tool definitions (one file per
+//! tool), and `jp ticket tools sync` generates the config-dependent schema
+//! overrides: the board's label vocabulary on tools that accept labels, and the
+//! valid `order` values on `list` (including sortable label keys).
+//! `tool_definitions` implements both commands; this module declares the
+//! template files and parameter mappings.
 
 use camino::Utf8Path;
 use serde_json::Value;
@@ -93,8 +93,8 @@ pub(crate) fn sync(
         .map(Output::from)
 }
 
-/// The parameters of `tool` that take their values from the configuration:
-/// labels from `vocabulary`, and for `list`, `orders`.
+/// Config-mirrored parameter schemas for `tool`: label lists from `vocabulary`,
+/// plus `orders` when `tool` is `"list"`.
 fn mirrors<'a>(tool: &str, vocabulary: &'a Vocabulary, orders: &'a [String]) -> Vec<Mirror<'a>> {
     match tool {
         "create" => vec![Mirror::labels("labels", vocabulary, "ticket", Role::Create)],

@@ -359,15 +359,14 @@ enum Command {
         labels: Vec<String>,
     },
 
-    /// List tickets, ordered by id unless `--order` names another order.
+    /// List tickets, ordered by id unless `--order` is set.
     ///
     /// With `jp -F json`, the tickets are printed as JSON.
     List {
-        /// How to order the tickets.
-        /// `board` lays them out as `jp ticket board` does, `filed` by the date
-        /// each was filed, and a label key the board can sort by, such as a
-        /// date key, by its value, tickets without one last.
-        /// Add `:desc` to `filed` or a key to reverse it.
+        /// Sort order: `board` (by status and board rank), `filed` (by filing
+        /// date), or a sortable label key such as `due` (tickets without the
+        /// label sort last).
+        /// Append `:desc` to `filed` or a label key to reverse the order.
         #[arg(long)]
         order: Option<String>,
 
@@ -1806,9 +1805,8 @@ fn show_board(
     })
 }
 
-/// One line of a board column: the id, the date the ticket was filed, and the
-/// title.
-/// The status is the column's, so it is left out.
+/// Format a single row in a board column (ID, filing date, title, labels, and
+/// checklist progress; status is omitted because the column heading names it).
 fn board_row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let labels = if ticket.metadata.labels.is_empty() {
@@ -2565,16 +2563,15 @@ struct Filter<'a> {
     under: Option<TicketId>,
 }
 
-/// List tickets, filtered by whatever the caller named, in id order or in
-/// `order`.
+/// List tickets matching `filter`, sorted by ID or by `order`.
 ///
-/// Labels are matched as written on the ticket rather than through the
-/// vocabulary, so a ticket carrying a label the board has since dropped can
-/// still be found and fixed.
+/// Labels are matched against the ticket's raw metadata rather than resolved
+/// through the vocabulary, so tickets carrying removed labels can still be
+/// found and updated.
 fn list(ctx: &Context<'_>, order: Option<&str>, filter: &Filter<'_>) -> Result<Output, String> {
     let (dir, json) = (ctx.dir.as_path(), ctx.format.is_json());
-    // Id order needs no vocabulary, so a board whose labels don't parse can
-    // still be listed.
+    // Default ID order does not use the vocabulary, so listing still works when
+    // the label configuration is invalid.
     let vocabulary = match order {
         Some(_) => ctx.options.vocabulary()?,
         None => Vocabulary::default(),
@@ -2622,7 +2619,8 @@ fn list(ctx: &Context<'_>, order: Option<&str>, filter: &Filter<'_>) -> Result<O
     })
 }
 
-/// `tickets`, each with its path, as one JSON array, or one [`row`] each.
+/// Render `tickets` as a JSON array when `json` is `true`, or as one [`row`]
+/// per line.
 fn render_listing(tickets: &[(TicketId, &Ticket, &str)], json: bool) -> Result<String, String> {
     if !json {
         return Ok(tickets
@@ -2648,10 +2646,10 @@ fn render_listing(tickets: &[(TicketId, &Ticket, &str)], json: bool) -> Result<S
     Ok(format!("{json}\n"))
 }
 
-/// Put `tickets`, each with its path, into `order`.
+/// Sort `tickets` in place according to `order`.
 ///
-/// An order file that can't be read leaves each column in id order, and adds a
-/// warning saying why.
+/// If `.board.json` cannot be read in board order, each status column falls
+/// back to ID order and a warning is appended to `warnings`.
 fn arrange(
     dir: &Utf8Path,
     tickets: &mut [(TicketId, &Ticket, &str)],
@@ -2678,8 +2676,8 @@ fn arrange(
     tickets.sort_by(|(a_id, a, _), (b_id, b, _)| sort.compare((*a_id, *a), (*b_id, *b)));
 }
 
-/// One line of the human-readable listing: id, status, the date the ticket was
-/// filed, and title.
+/// Format a single ticket line for human-readable listings (ID, status, filing
+/// date, title, labels, and checklist progress).
 fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let status = ticket.metadata.status.to_string();

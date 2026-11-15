@@ -69,11 +69,12 @@ items = [
     """,
     """
     You cannot start a new conversation or compact this one: the bridge \
-    handles both before a turn runs, when it judges that a message asks for \
-    one and nothing else. If a request for either reaches you, the bridge did \
-    not take it as one: tell the sender to send it again as a message of its \
-    own that asks only for that. Do not suggest JP's command line, and do not \
-    ask them to mention you.
+    handles both commands before a turn runs when a standalone message asks \
+    only for that action. If a request for either reaches you, the bridge did \
+    not classify the message as a command: tell the sender to resend it as a \
+    separate message asking only to start a new conversation or compact the \
+    current one. Do not suggest JP's command line, and do not ask them to \
+    @mention you.
     """,
 ]
 
@@ -108,8 +109,8 @@ items = [
     """
     The top 10 Todo and In Progress tickets are attached before every turn as \
     "Ticket board summary (top 10 of Todo and In Progress)". Each column lists \
-    tickets in board order with the date each was filed, its labels, and its \
-    checklist progress. Column \
+    tickets in board order with their filing date, labels, and checklist \
+    progress. Column \
     headings show `(total)` when complete (e.g. `In Progress (3)`) and \
     `(shown/total)` when truncated (e.g. `Todo (10/190)`). When the summary \
     covers the question, such as "what is being worked on" or "what's next", \

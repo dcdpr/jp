@@ -218,12 +218,10 @@ fn write_ticket_as(dir: &Utf8TempDir, id: &str, title: &str) -> TicketId {
     write_ticket_filed(dir, id, title, DATE)
 }
 
-/// File a ticket under `id`, filed on `date`.
 fn write_ticket_filed(dir: &Utf8TempDir, id: &str, title: &str, date: &str) -> TicketId {
     write_labelled(dir, id, title, date, &[])
 }
 
-/// File a ticket under `id`, filed on `date`, carrying `labels`.
 fn write_labelled(
     dir: &Utf8TempDir,
     id: &str,
@@ -247,8 +245,6 @@ fn write_labelled(
     id
 }
 
-/// The plugin's settings for a board with keys to sort by: a `due` date, and a
-/// `priority` listed in the order it ranks.
 fn sortable_options() -> Options {
     let Value::Object(options) = json!({
         "assistant": "jp",
@@ -269,7 +265,6 @@ fn sortable_options() -> Options {
     Options::read(&options).unwrap()
 }
 
-/// Run `list` on a board with keys to sort by; see [`sortable_options`].
 fn list_sortable(dir: &Utf8TempDir, args: Value) -> Outcome {
     let call = ToolCall {
         action: ToolAction::Run,
@@ -312,7 +307,6 @@ fn description(dir: &Utf8TempDir) -> String {
         .description
 }
 
-/// The date the ticket under `id` was filed, as its metadata records it.
 fn filed_on(dir: &Utf8TempDir, id: TicketId) -> String {
     let path = store::locate_ticket(&tickets(dir).dir, id).unwrap();
 
@@ -1517,17 +1511,13 @@ fn list_follows_the_board_order() {
     );
 }
 
-/// `filed` orders by the date a ticket was filed, across every status and
-/// whatever the board ranks first.
-/// Tickets filed on one day follow their ids, which count up as tickets are
-/// filed.
 #[test]
 fn list_orders_by_the_date_tickets_were_filed() {
     let dir = Utf8TempDir::new().unwrap();
     let march = write_ticket_filed(&dir, "T-02wt0k1", "Filed in March", "2026-03-02");
     let may = write_ticket_filed(&dir, "T-02wt0k2", "Filed in May", "2026-05-10");
     write_ticket_filed(&dir, "T-02wt0k3", "Filed later in May", "2026-05-10");
-    // An imported issue: its id was allocated last, its date is GitHub's.
+    // Simulates an imported GitHub issue whose ID was allocated after its original filing date.
     write_ticket_filed(&dir, "T-02wt0k4", "Filed in January", "2026-01-20");
     let tickets = dir.path().join(store::DEFAULT_DIR);
     store::set_status(&tickets, &Formatting::default(), may, Status::Done).unwrap();
@@ -1562,7 +1552,6 @@ fn list_orders_by_the_date_tickets_were_filed() {
     );
 }
 
-/// The filters and paging apply to a date order as they do to the board's.
 #[test]
 fn a_date_order_is_filtered_and_paged() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1581,8 +1570,6 @@ fn a_date_order_is_filtered_and_paged() {
     );
 }
 
-/// A date order doesn't read the board's order file, so an unreadable one goes
-/// unmentioned.
 #[test]
 fn a_date_order_ignores_an_unreadable_board_order() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1595,9 +1582,6 @@ fn a_date_order_ignores_an_unreadable_board_order() {
     );
 }
 
-/// A date label orders by its date, and a ticket without one comes last in both
-/// directions, so the first rows are the ones that are due.
-/// Tickets due on one day follow their ids.
 #[test]
 fn list_orders_by_a_date_label_with_undated_tickets_last() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1630,8 +1614,6 @@ fn list_orders_by_a_date_label_with_undated_tickets_last() {
     );
 }
 
-/// An `ordered` label ranks its values as the board lists them, not
-/// alphabetically.
 #[test]
 fn list_orders_by_an_ordered_label() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1645,8 +1627,6 @@ fn list_orders_by_an_ordered_label() {
     );
 }
 
-/// The refusal names every order the board makes possible, so the next call can
-/// pick one.
 #[test]
 fn an_unknown_order_is_refused() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1655,7 +1635,7 @@ fn an_unknown_order_is_refused() {
         error_message(run_tool(&dir, "list", json!({ "order": "due" }))),
         "`order` must be one of: board, filed, filed:desc."
     );
-    // `client` is a label, but one a ticket can carry several of, in no order.
+    // `client` is defined in the vocabulary, but is neither `ordered` nor `max = 1`.
     for order in ["client", "due:sideways", "board:desc", "newest"] {
         assert_eq!(
             error_message(list_sortable(&dir, json!({ "order": order }))),
@@ -2160,7 +2140,6 @@ fn create_writes_labels_and_list_shows_them() {
     ));
 
     let id = ids(&dir)[0];
-    // `create` files the ticket today; the listing shows the date it wrote.
     let filed = filed_on(&dir, id);
     let listed = content(run_tool(&dir, "list", json!({})));
 

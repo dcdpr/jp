@@ -621,9 +621,6 @@ fn a_type_on_a_key_not_taking_any_value_is_an_error() {
     );
 }
 
-/// `ordered` ranks the values a key lists, one per item, so a key taking any
-/// value, a key taking none, and a key an item can carry several of can't set
-/// it.
 #[test]
 fn ordered_needs_a_key_listing_its_values_with_max_one() {
     for source in [
@@ -654,8 +651,6 @@ fn ordered_needs_a_key_listing_its_values_with_max_one() {
     );
 }
 
-/// A value listed twice under `values` or `retired` is one value, not a
-/// duplicate to refuse.
 #[test]
 fn a_value_listed_twice_is_still_one_value() {
     let vocabulary = Vocabulary::parse(

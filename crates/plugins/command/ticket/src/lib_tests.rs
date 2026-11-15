@@ -103,10 +103,8 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
     body.parse().unwrap()
 }
 
-/// The date the ticket under `id` was filed, as its metadata records it.
-///
-/// `add` files a ticket today, so a test reads the date back rather than
-/// guessing it.
+/// Read `id`'s filing date from disk so tests that run `add` (which uses
+/// today's date) don't hardcode a date.
 fn filed_on(dir: &Utf8Path, id: TicketId) -> String {
     store::list(dir)
         .unwrap()
@@ -583,7 +581,6 @@ fn list_takes_an_order() {
     }
 }
 
-/// File a ticket under `body`, filed on `date`, carrying `labels`.
 fn write_dated(dir: &Utf8Path, body: &str, title: &str, date: &str, labels: &[&str]) {
     let document = ticket::render::ticket(&NewTicket {
         title,
@@ -597,8 +594,6 @@ fn write_dated(dir: &Utf8Path, body: &str, title: &str, date: &str, labels: &[&s
     std::fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
 }
 
-/// `--order` takes a label key the board can sort by, or `filed`, each with
-/// `:desc` to reverse it, and sorts across every status.
 #[test]
 fn list_orders_by_a_label_or_by_filing_date() {
     let dir = Utf8TempDir::new().unwrap();
@@ -636,8 +631,6 @@ fn list_orders_by_a_label_or_by_filing_date() {
     );
 }
 
-/// Without `--order` the listing runs by id; `--order board` lays it out the
-/// way `jp ticket board` does, each column in the board's order.
 #[test]
 fn list_follows_the_board_when_asked() {
     let dir = Utf8TempDir::new().unwrap();
@@ -674,7 +667,6 @@ fn list_follows_the_board_when_asked() {
     );
 }
 
-/// The refusal names every order the board makes possible.
 #[test]
 fn list_refuses_an_order_the_board_cannot_sort_by() {
     let dir = Utf8TempDir::new().unwrap();

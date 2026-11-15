@@ -1025,8 +1025,6 @@ async fn a_group_message_the_decider_answers_starts_a_turn() {
     );
 }
 
-/// The decider judges whether a message is a command; nothing about how the
-/// message is addressed keeps the commands from it.
 #[tokio::test]
 async fn every_message_is_offered_the_commands() {
     let (mut f, decider) = deciding(vec![

@@ -171,8 +171,7 @@ fn assert_advertised_values_match_the_parser(routed: &[(String, String, toml::Va
             .count();
         assert_eq!(count, 3, "{key} hides an accepted `status`");
 
-        // The orders a board without labels makes possible; `sync` replaces
-        // the list with the board's own.
+        // Default `order` enum before `sync` adds board-specific label keys.
         if name == "list" {
             assert_eq!(
                 enum_values(tool, "order"),
@@ -219,8 +218,6 @@ fn declaring(source: &str, parameter: &str) -> Value {
     json!({ "source": source, "parameters": { parameter: { "type": "array" } } })
 }
 
-/// A `list` definition declaring both parameters `sync` writes into: `labels`
-/// and `order`.
 fn listing(source: &str) -> Value {
     json!({ "source": source, "parameters": {
         "labels": { "type": "array" },
@@ -389,9 +386,6 @@ enum = [
     );
 }
 
-/// `list` is offered every order the board makes possible: the built-in ones,
-/// then each key a ticket can be sorted by, which leaves out a key a ticket can
-/// carry several of.
 #[test]
 fn sync_offers_list_the_orders_the_board_can_sort_by() {
     let dir = Utf8TempDir::new().unwrap();
@@ -458,8 +452,6 @@ fn sync_with_an_empty_vocabulary_offers_no_lists() {
     );
 }
 
-/// JP's definitions declare every parameter `sync` writes into, so none of them
-/// is left out.
 #[test]
 fn jp_definitions_declare_every_synced_parameter() {
     let vocabulary = Vocabulary::default();

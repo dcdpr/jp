@@ -25,9 +25,6 @@ fn labels(tokens: &[&str]) -> Labels {
     Labels::from_tokens(tokens).unwrap()
 }
 
-/// The names of `items`, sorted by `key` in `direction`.
-///
-/// The sort is stable, so items that compare equal keep the order given.
 fn sorted<'a>(
     key: &SortKey<'_>,
     direction: Direction,
@@ -39,8 +36,6 @@ fn sorted<'a>(
     items.into_iter().map(|(name, _)| name).collect()
 }
 
-/// A key sorts when an item carries one value of it and those values have an
-/// order: a date, or a list declared `ordered`.
 #[test]
 fn only_date_keys_and_ordered_keys_with_max_one_sort() {
     let vocabulary = vocabulary();
@@ -54,8 +49,6 @@ fn only_date_keys_and_ordered_keys_with_max_one_sort() {
     }
 }
 
-/// An item without a usable date comes last in both directions, so the first
-/// rows of either order are the ones that have one.
 #[test]
 fn a_date_key_sorts_by_date_and_puts_undated_items_last_both_ways() {
     let vocabulary = vocabulary();
@@ -63,7 +56,7 @@ fn a_date_key_sorts_by_date_and_puts_undated_items_last_both_ways() {
     let items = [
         ("undated", labels(&[])),
         ("december", labels(&["due=2026-12-01"])),
-        // A hand-edited value the key's type refuses has no place in the sort.
+        // Invalid date values on hand-edited items are treated as undated and sort last.
         ("friday", labels(&["due=friday"])),
         ("january", labels(&["due=2026-01-15"])),
     ];
@@ -76,8 +69,6 @@ fn a_date_key_sorts_by_date_and_puts_undated_items_last_both_ways() {
     ]);
 }
 
-/// The declaration's order is the sort order, rather than the alphabet's;
-/// retired values follow the active ones.
 #[test]
 fn an_ordered_key_sorts_by_the_declared_order() {
     let vocabulary = vocabulary();
@@ -98,8 +89,6 @@ fn an_ordered_key_sorts_by_the_declared_order() {
     ]);
 }
 
-/// Two items with the same value compare equal, so the caller's tie-break
-/// decides between them.
 #[test]
 fn the_same_value_compares_equal() {
     let vocabulary = vocabulary();
@@ -115,8 +104,6 @@ fn the_same_value_compares_equal() {
     );
 }
 
-/// `max = 1` keeps a second value off a write, but a hand-edited item can still
-/// carry two; it sorts by the earliest, whichever the direction.
 #[test]
 fn an_item_carrying_two_values_sorts_by_the_earliest() {
     let vocabulary = vocabulary();

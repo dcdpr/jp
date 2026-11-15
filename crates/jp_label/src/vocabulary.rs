@@ -59,9 +59,9 @@
 //! `date` is the only supported type: a calendar date in `YYYY-MM-DD` format,
 //! which a [`Selector`] can compare with `<`, `<=`, `>`, and `>=`.
 //!
-//! Items can be sorted by a key held to one value per item (`max = 1`) whose
-//! values have an order: a `date` key orders by date, and a key that lists its
-//! values orders them as listed when it sets `ordered`, retired values last:
+//! Items can be sorted by a single-valued key (`max = 1`) with ordered values:
+//! a `date` key sorts chronologically, and a closed key with `ordered = true`
+//! sorts values in declared order (with retired values after active ones):
 //!
 //! ```json
 //! {
@@ -74,7 +74,7 @@
 //! }
 //! ```
 //!
-//! [`Vocabulary::sort_key`] hands out the [`SortKey`] that compares two items.
+//! [`Vocabulary::sort_key`] returns a [`SortKey`] for comparing two items.
 //!
 //! A key can also be held to one item across a collection, with `unique`:
 //! `"key"` lets one item carry the key at all, and `"key-value"` lets one item
@@ -121,7 +121,7 @@ struct Entry {
     description: String,
     /// Absent for a key that takes no value, empty for one that takes any.
     ///
-    /// A list rather than a set: `ordered` ranks the values as declared.
+    /// Stored as a `Vec` to preserve declaration order for `ordered` keys.
     #[serde(default)]
     values: Option<Vec<String>>,
     #[serde(default)]
@@ -177,8 +177,8 @@ pub struct Facet {
     max: Option<usize>,
     unique: Option<Unique>,
     value_type: Option<ValueType>,
-    /// The active values in declared order, then the retired ones, for a key
-    /// declared `ordered`.
+    /// Active values followed by retired values in declaration order, when
+    /// `ordered` is set.
     ranked: Option<Vec<String>>,
 }
 
@@ -256,23 +256,23 @@ impl Facet {
         bound(self.min, self.max)
     }
 
-    /// Whether the declaration sets `ordered`, ranking the values as listed.
+    /// Whether `ordered` is set on this key, ranking its values in declaration
+    /// order.
     #[must_use]
     pub fn is_ordered(&self) -> bool {
         self.ranked.is_some()
     }
 
-    /// Whether items can be sorted by this key: it holds an item to one value
-    /// (`max = 1`), and its values have an order, by being dates or by the
-    /// declaration setting `ordered`.
+    /// Whether items can be sorted by this key (`max = 1` with either `type =
+    /// "date"` or `ordered = true`).
     #[must_use]
     pub fn is_sortable(&self) -> bool {
         self.max == Some(1) && (self.value_type == Some(ValueType::Date) || self.is_ordered())
     }
 
-    /// Where `value` falls in a sort by this key, or `None` when it has no
-    /// place: a value that isn't a date on a `date` key, or one an `ordered`
-    /// key doesn't declare.
+    /// Return the sort [`Rank`] of `value` under this key, or `None` if `value`
+    /// is not a valid `YYYY-MM-DD` date (for a `date` key) or is not declared
+    /// (for an `ordered` key).
     pub(crate) fn rank<'a>(&self, value: &'a str) -> Option<Rank<'a>> {
         if let Some(ranked) = &self.ranked {
             return ranked
@@ -301,8 +301,7 @@ fn bound(min: usize, max: Option<usize>) -> Option<String> {
     }
 }
 
-/// Check a facet asks for something an item, and a collection of them, can
-/// meet.
+/// Validate that a facet's constraints are internally satisfiable.
 fn check(facet: &Facet) -> Result<(), Unmeetable> {
     if facet.value_type.is_some() && !facet.open {
         return Err(Unmeetable::TypeOnClosedKey);
@@ -334,8 +333,6 @@ fn check(facet: &Facet) -> Result<(), Unmeetable> {
         return Err(Unmeetable::UniqueRequired { min });
     }
 
-    // `ordered` ranks listed values one per item, so it needs a list to rank
-    // and an item holding one of them.
     let listed = !facet.open && !facet.is_bare();
     if facet.is_ordered() && !(listed && facet.max == Some(1)) {
         return Err(Unmeetable::UnorderableKey);
@@ -344,7 +341,8 @@ fn check(facet: &Facet) -> Result<(), Unmeetable> {
     Ok(())
 }
 
-/// Check the values `key` lists, active and retired, can be named.
+/// Validate that all active and retired values for `key` are well-formed,
+/// non-empty, and case-insensitively unique.
 fn check_values(
     key: &str,
     values: &BTreeSet<String>,
@@ -359,8 +357,7 @@ fn check_values(
             });
         }
 
-        // Covers both within-list and active-versus-retired collisions: a
-        // value in both lists has no answer to "may this be added?".
+        // Reject duplicates within either list and across active and retired.
         if let Some(existing) = seen.insert(value.to_ascii_lowercase(), value.clone()) {
             return Err(Error::DuplicateValue {
                 key: key.to_owned(),
@@ -373,7 +370,8 @@ fn check_values(
     Ok(())
 }
 
-/// `values` then `retired`, as declared, each value once.
+/// Concatenate `values` and `retired` in declaration order, deduplicating
+/// repeated entries.
 fn declared_order(values: &[String], retired: &[String]) -> Vec<String> {
     let mut seen = BTreeSet::new();
 
@@ -496,15 +494,15 @@ impl Vocabulary {
         self.0.iter().map(|(key, facet)| (key.as_str(), facet))
     }
 
-    /// The keys items can be sorted by, in order; see [`Facet::is_sortable`].
+    /// Sortable keys in alphabetical order; see [`Facet::is_sortable`].
     pub fn sortable_keys(&self) -> impl Iterator<Item = &str> {
         self.facets()
             .filter(|(_, facet)| facet.is_sortable())
             .map(|(key, _)| key)
     }
 
-    /// The key `key`, to sort items by, or `None` when the vocabulary doesn't
-    /// define it or it can't be sorted by; see [`Facet::is_sortable`].
+    /// Return a [`SortKey`] for `key`, or `None` if `key` is undefined or not
+    /// sortable; see [`Facet::is_sortable`].
     #[must_use]
     pub fn sort_key(&self, key: &str) -> Option<SortKey<'_>> {
         let (key, facet) = self.0.get_key_value(key)?;
@@ -875,15 +873,16 @@ pub enum Error {
         first: String,
         second: String,
     },
-    /// A key's declaration asks for something no item, or no collection of
-    /// them, can meet.
+    /// A key's constraints cannot be satisfied.
     Unmeetable { key: String, problem: Unmeetable },
 }
 
-/// What makes a key's declaration [`Error::Unmeetable`].
+/// Reason a key's constraints cannot be satisfied ([`Error::Unmeetable`]).
 ///
-/// Displays as the rest of the sentence that starts "`<key>` in the label
-/// vocabulary".
+/// [`Display`] formats the predicate following `` `<key>` in the label
+/// vocabulary ``.
+///
+/// [`Display`]: fmt::Display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unmeetable {
     /// `min` or `max` on a key that takes no value.
@@ -900,8 +899,8 @@ pub enum Unmeetable {
     UniqueRequired { min: usize },
     /// `type` on a key that lists its values or takes none.
     TypeOnClosedKey,
-    /// `ordered` on a key that doesn't list its values, or that an item can
-    /// carry more than one of.
+    /// `ordered` on a key that does not list explicit values or does not set
+    /// `max = 1`.
     UnorderableKey,
 }
 

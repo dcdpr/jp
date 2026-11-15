@@ -3,13 +3,13 @@ enable = false
 source = "plugin.command.ticket.list"
 summary = "List the tickets in the repository, in board order, by filing date, or by a label."
 description = """
-One line per ticket: id, status, the date it was filed, title, labels, checklist
-progress, and comment count.
+One line per ticket: id, status, filing date, title, labels, checklist progress,
+and comment count.
 
 Tickets come in board order by default: Todo, In Progress, then Done, each
 column top first. The first Todo ticket is the next one to work on. Set `order`
-to list them across every column instead: by the date they were filed, or by a
-label the board can sort by, such as a due date.
+to sort across all columns instead, either by filing date (`filed`) or by a
+sortable label key such as `due`.
 
 Use it to find what is open before filing something new, and to resolve a title
 you half-remember into an id for `ticket_show`. Filter by status to read one
@@ -103,17 +103,16 @@ required = false
 enum = ["board", "filed", "filed:desc"]
 summary = "How to order the tickets. Defaults to `board`."
 description = """
-- `board`: Todo, In Progress, then Done, each column in the order it is
-  scheduled, top first.
-- `filed`: by the date each ticket was filed, oldest first, whatever its
-  status. `filed:desc` lists the newest first.
-- A label key, such as `due`: by the value each ticket carries under it,
-  whatever its status. Tickets without the label come last, also with `:desc`,
-  which reverses the order of the rest.
+- `board`: Todo, In Progress, then Done, each column in board order, top first.
+- `filed`: by filing date across all statuses, oldest first (`filed:desc` for
+  newest first).
+- A sortable label key, such as `due`: by that label's value across all
+  statuses (`<key>:desc` to reverse the order). Tickets without the label
+  always sort last.
 """
 
-# `jp ticket tools sync` adds the label keys the board can sort by to `enum`:
-# a `date` key, or one declared `ordered`, held to one value with `max = 1`.
+# `jp ticket tools sync` adds the board's sortable label keys (`max = 1` with
+# `type = "date"` or `ordered = true`) to `enum`.
 
 [conversation.tools.ticket_list.parameters.page]
 type = "integer"

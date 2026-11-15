@@ -1,8 +1,8 @@
-//! Sorting items by the value they carry under one key.
+//! Sorting items by a single label key.
 //!
-//! [`Vocabulary::sort_key`] hands out a [`SortKey`] for a key items can be
-//! sorted by, and [`SortKey::compare`] compares two items' labels.
-//! The comparison covers the key alone; a caller chains its own tie-break.
+//! [`Vocabulary::sort_key`] returns a [`SortKey`] for a sortable key, and
+//! [`SortKey::compare`] compares two items' label sets by that key.
+//! Comparison considers only that key; callers chain their own tie-breaker.
 //!
 //! [`Vocabulary::sort_key`]: crate::Vocabulary::sort_key
 
@@ -10,17 +10,17 @@ use std::cmp::Ordering;
 
 use crate::{Labels, vocabulary::Facet};
 
-/// Which end of a sort comes first.
+/// Sort direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
-    /// Earliest date, or first declared value, first.
+    /// Earliest date or first declared value first.
     Ascending,
 
-    /// Latest date, or last declared value, first.
+    /// Latest date or last declared value first.
     Descending,
 }
 
-/// A key items can be sorted by, from [`Vocabulary::sort_key`].
+/// A sortable label key obtained from [`Vocabulary::sort_key`].
 ///
 /// [`Vocabulary::sort_key`]: crate::Vocabulary::sort_key
 #[derive(Debug, Clone, Copy)]
@@ -30,22 +30,22 @@ pub struct SortKey<'a> {
 }
 
 impl<'a> SortKey<'a> {
-    /// The key, as the vocabulary spells it.
+    /// Canonical key name in the vocabulary.
     #[must_use]
     pub fn key(&self) -> &'a str {
         self.key
     }
 
-    /// Compare two items by the value each carries under this key.
+    /// Compare two label sets by their value under this key.
     ///
-    /// An item without a value to sort by comes after every item that has one,
-    /// in both directions: one that carries no value of the key, a value that
-    /// isn't a date on a `date` key, or a value an `ordered` key doesn't
-    /// declare.
-    /// Two such items, or two with the same value, compare equal.
+    /// Items without a sortable value (missing the key, carrying a non-date
+    /// value on a `date` key, or carrying an undeclared value on an `ordered`
+    /// key) sort after items with a valid value in both directions.
+    /// Two items without a sortable value, or two items with the same value,
+    /// compare equal.
     ///
-    /// An item carrying more than one value, which only a hand-edited item can,
-    /// sorts by the earliest in either direction.
+    /// If a hand-edited item carries multiple values for the key, its earliest
+    /// value (by `Rank`) is used in both directions.
     #[must_use]
     pub fn compare(&self, a: &Labels, b: &Labels, direction: Direction) -> Ordering {
         match (self.rank(a), self.rank(b)) {
@@ -59,7 +59,7 @@ impl<'a> SortKey<'a> {
         }
     }
 
-    /// The earliest rank among the values `labels` carries under this key.
+    /// Smallest rank among the values `labels` carries under this key.
     fn rank<'l>(&self, labels: &'l Labels) -> Option<Rank<'l>> {
         labels
             .values(self.key)
@@ -68,16 +68,19 @@ impl<'a> SortKey<'a> {
     }
 }
 
-/// Where one value falls in a sort by its key.
+/// Sort rank of a single label value.
 ///
-/// Every value of one key ranks as the same variant, so the variants never
-/// compare against each other.
+/// All values for a given key produce the same variant, so [`Date`] and
+/// [`Position`] are never compared against each other.
+///
+/// [`Date`]: Self::Date
+/// [`Position`]: Self::Position
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Rank<'a> {
-    /// A `YYYY-MM-DD` date, whose text order is its calendar order.
+    /// A `YYYY-MM-DD` date string, ordered lexicographically.
     Date(&'a str),
 
-    /// The value's position in an `ordered` key's declaration.
+    /// Zero-based index in an `ordered` key's declared value list.
     Position(usize),
 }
 
