@@ -89,10 +89,8 @@ The model answers one `choice` question, picking one of:
 | `compact`          | Compacts the conversation now, and replies with what changed |
 
 The last two are commands.
-They are offered only for a message that starts by mentioning the bot, such as
-"@JP compact please", or one in a direct chat.
-Any other message is answered or ignored, so two people talking about starting
-over don't reset the bot's conversation.
+Every message is offered all four, in group and direct chats alike, and the
+decide model judges whether a message asks for a command; no @mention is needed.
 
 `compact` sends the host the compaction rules configured in `options.compact`
 and replies with a summary of the compacted turns.
