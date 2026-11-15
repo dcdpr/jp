@@ -1,6 +1,5 @@
-# Writes the changelog fragments of a release prepared after the fact, such as
-# the release backfill's (`just backfill draft`): it reads code and history, and
-# writes, revises, and deletes nothing but fragments.
+# Persona for drafting changelog fragments for historical releases (`just
+# backfill draft`).
 
 extends = [
     "../knowledge/technical-writing.toml",
@@ -27,10 +26,8 @@ work from the code. You read each change's diff and the code around it, and you 
 treat commit messages as hints that can be wrong.\
 """
 
-# A fragment written already is revised, or deleted, when a later change turns
-# out to belong to it. Neither tool may change anything outside `changelog.d/`,
-# and every use is shown for approval first. The rules replace the tools' own,
-# which reach the whole workspace.
+# Allow revising or deleting previously drafted fragments within `changelog.d/`,
+# prompting for approval on every call.
 [conversation.tools.fs_modify_file]
 enable = true
 run = "ask"

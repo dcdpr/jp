@@ -301,10 +301,10 @@ Preparing release notes takes as long as needed without blocking `main`:
   Two entries for one change, such as a change and its follow-up, become one by
   editing one, deleting the other, and listing both change requests in the kept
   fragment's `Credits` fields.
-  The notes describe what changed since the previous release: a feature new in
-  the release keeps one `added` entry however it changed along the way, and only
-  a change that breaks what the previous release shipped carries an upgrade
-  section.
+  Release notes describe what changed relative to the previous release: a
+  feature introduced in the release is represented by a single `added` entry
+  regardless of intermediate reworks, and only changes that break behavior from
+  an earlier release include an upgrade section.
 - **The overview** opens the release notes.
   Without an `overview.md` in the release's directory, it is a summary generated
   at render: the version, how many entries of each type the release has, and its

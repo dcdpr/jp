@@ -215,87 +215,78 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
   and a working clone whose `origin` points to that bare repository, merges the
   release-tooling branch into the clone's `main`, and assigns a distinct
   workspace ID so backfill conversations and builds stay isolated.
-  The clone's `main` merges the branch without its own fragments, which describe
-  today's tooling rather than the history, so drafting, `cut`, and the site
-  never see them: it merges a commit on the branch that removes them, so a later
-  merge of the branch's newer commits cannot conflict over them.
-- `just backfill next` proposes the period's last day, roughly six weeks after
+  The clone merges the release-tooling branch via a commit that strips the
+  branch's own `changelog.d/` fragments (which describe current tooling rather
+  than historical releases), preventing them from appearing during backfill cuts
+  or conflicting on subsequent merges.
+- `just backfill next` proposes the period's end date, roughly six weeks after
   the previous release (prompting for an optional override), checks out the
-  period's last commit in a worktree beside the clone, and starts drafting.
-- `just backfill draft` drafts fragments in an interactive `jp query` with the
-  `release-notes` persona.
-  The prompt names the previous release, which the notes compare against.
-  The model groups the period's changes by feature, reads each group's diffs and
-  the release's code, which `jp query --mount` shows it read-only, and writes
-  one fragment per feature through `changelog_add`, describing it as the release
-  ships it.
-  Its `Credits` ([RFD 121]) name every change that built the feature.
-  When a later change belongs to a feature it has written, it revises that
-  fragment with `fs_modify_file`, or deletes one with `fs_delete_file`.
-  Each fragment written, revised, or deleted is shown for approval first.
-  The drafts stay uncommitted: `--only` drafts named changes, `--redo` replaces
-  named fragments, `--fresh` discards the period's drafts and its fragments
-  committed already, and `just backfill changes` lists the period's changes with
-  the fragments that credit them.
-- `just backfill cut` commits the fragments to `main`, runs `jp release cut --at
-  <commit>` with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the period's
-  last day, runs `jp release build --quick` for the host Mac to verify the
-  commit compiles, and checks out the notes branch.
-- `just backfill docs` writes the release's user guide in the release's own
-  tree.
-  The worktree beside the clone checks out the release branch, and the guide
-  written for the previous release is brought in with a three-way apply; the
-  first release's wiki starts with `main`'s `.epoch`, so the ids of its pages
-  cannot collide with `main`'s.
-  The guide is written one entry at a time: each entry of type `added`,
-  `changed`, `deprecated`, or `removed`, then the changes without entries.
-  `just backfill docs` starts an interactive `jp query` with the `release-docs`
-  persona about the next entry, or another about the entry in progress, and the
-  conversation can be continued with `jp query`, or the pages edited by hand.
-  The model reads the changes' diffs and the release's code, writes guide pages
-  through the wiki tools, which `jp query --mount` gives write access to the
-  release's wiki only, shows each page for approval, and links the entry to its
-  page.
-  `just backfill docs proceed` commits the entry's guide on the release branch,
-  dated at the release's last day, with the `Date` of each new page set to that
-  day, and starts the next entry; `docs skip` notes that the guide needs nothing
-  for the entry, `docs finish` that it needs nothing for the rest, and `docs
-  <entry>` reopens an entry.
-- `just backfill highlight <entry>` writes a highlight about one entry, in a
-  conversation that reads the change's diffs, the release's code, and its guide
-  page.
+  period's last commit in a sibling worktree, and starts drafting.
+- `just backfill draft` drafts fragments in an interactive `jp query` session
+  using the `release-notes` persona.
+  The prompt names the previous release as the baseline for comparison.
+  The model groups the period's commits by feature, inspects their diffs and the
+  read-only release worktree mounted via `jp query --mount`, and writes one
+  fragment per feature via `changelog_add` describing the feature as shipped in
+  that release, with `Credits` ([RFD 121]) listing every contributing change.
+  If a later commit belongs to an already-drafted feature, the model updates
+  that fragment with `fs_modify_file` or removes superseded fragments with
+  `fs_delete_file` (each requiring user approval).
+  Drafts remain uncommitted until `cut`: `--only` drafts specific changes,
+  `--redo` replaces specific fragments, `--fresh` discards the period's
+  uncommitted and committed fragments, and `just backfill changes` lists the
+  period's changes alongside the fragments that credit them.
+- `just backfill cut` commits the drafted fragments to `main`, runs `jp release
+  cut --at <commit>` with `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the
+  period's end date, runs `jp release build --quick` for the host Mac to verify
+  the commit compiles, and checks out the notes branch.
+- `just backfill docs` writes the release's user guide inside the release branch
+  worktree.
+  It carries forward the previous release's user guide via a three-way patch
+  apply (seeding the first release's wiki with `main`'s `.epoch` so page IDs do
+  not collide with `main`).
+  The guide is updated one entry at a time across `added`, `changed`,
+  `deprecated`, and `removed` entries, followed by any uncredited changes.
+  Each `just backfill docs` invocation starts or resumes an interactive `jp
+  query` session with the `release-docs` persona (which has write access to the
+  release worktree's wiki via `jp query --mount` and links the fragment to its
+  guide page).
+  `just backfill docs proceed` commits the entry's guide changes to the release
+  branch (dated at the release's end date) and advances to the next entry; `docs
+  skip` marks an entry as needing no guide changes, `docs finish` marks all
+  remaining entries as done, and `docs <entry>` reopens a specific entry.
+- `just backfill highlight <entry>` drafts a release highlight for `<entry>` in
+  a conversation that reads the change's diffs, the release's code, and its user
+  guide page.
 - The maintainer reviews and edits the notes on the notes branch, adds an
   `overview.md`, and previews them with `jp release render` or `just
   develop-docs`.
-- `just backfill proceed` refuses while parts of the guide are left, then merges
-  the notes branch into `main`, runs `jp release finalize` and `jp release
-  build` (full five-target release profile), pushes to the local bare `origin`,
-  and starts the next period.
+- `just backfill proceed` verifies that all user guide entries are complete,
+  merges the notes branch into `main`, runs `jp release finalize` and `jp
+  release build` (full five-target release profile), pushes to the local bare
+  `origin`, and starts the next period.
 - `just backfill revert 0.5.0` deletes tags `v0.5.0` and later from the bare
   `origin`, runs `jp release abandon` from newest to oldest ([RFD 122]), and
   removes their build directories so `next` can re-cut `0.5.0` while preserving
   any edited fragments.
-  Each release's guide is kept under `refs/backfill/guide/<version>/`, and
-  `docs` brings it back after the re-cut, then goes through the release's
-  entries again.
+  Each release's user guide is saved under `refs/backfill/guide/<version>/` and
+  restored by `docs` after re-cutting.
 - `just backfill publish` finishes the backfill: it deletes the old test tag
   `v0.1.0` on GitHub, pushes all `release/*` branches and `v*` tags to GitHub in
   a single push (pushing more than three tags at once suppresses GitHub Actions
   tag-push workflows for historical commits), runs `jp release github publish`
-  for each version from oldest to newest, brings the last release's guide and
-  the branch's own fragments into `main`, and pushes the backfilled
+  for each version from oldest to newest, merges the final release's user guide
+  and the branch's own fragments into `main`, and pushes the backfilled
   `changelog.d` history as a branch to open a pull request against `main`.
 
-The guide's commits are the only commits on a release branch that do not come
-from `jp release`, and the only exception to [RFD 122]'s rule that every change
-reaches a release branch through `main`.
-A backfilled release's guide describes that release's code, while the guide on
-`main` describes JP today, so it cannot land on `main` first.
-`jp release` accepts these commits: `finalize` tags the branch's tip, and
-`build` builds it.
-Each tag then holds the wiki as it was at its cut point, plus the guide written
-for its release, which T-1k4twkf builds into that release's site.
-Entries link their guide pages there, as
+The user guide commits are the only commits on a release branch not created by
+`jp release` itself, and the sole exception to [RFD 122]'s rule that all release
+branch commits originate on `main` (because a backfilled release's guide
+documents that historical release rather than current `main`).
+`jp release finalize` tags the release branch tip including those guide commits,
+and `jp release build` builds from that tag.
+Each release tag therefore contains the wiki as of its cut point plus the user
+guide written for that release, which T-1k4twkf builds and deploys under
 `https://jp.computer/vX.Y.Z/wiki/<page>`.
 
 ## Drawbacks
@@ -380,14 +371,15 @@ Entries link their guide pages there, as
 - **Xcode SDK / linker incompatibilities on older toolchains.** Newer macOS SDKs
   can fail to link with older Command Line Tools linkers; `build.sh` probes
   installed developer directories and selects one whose linker and SDK match.
-- **Guide links that serve nothing yet.** Backfilled entries link guide pages
-  under `/vX.Y.Z/`, which serve nothing until T-1k4twkf builds and hosts each
-  release's site.
-- **One wiki merged by hand.** The wiki entered JP's history on 2026-11-01
-  (#1264), so the release whose period includes that day has a wiki of its own.
-  Bringing the previous release's guide into it conflicts in
-  `docs/wiki/.order.json`, which both trees hold; `just backfill docs` stops
-  there, and the maintainer merges the two order files once.
+- **Unpublished per-release guide URLs.** Backfilled entries link to guide pages
+  under `/vX.Y.Z/`, which do not resolve until T-1k4twkf builds and deploys
+  per-release documentation sites.
+- **Manual `.order.json` merge when crossing the wiki introduction commit.** The
+  wiki landed in `main` on 2026-11-01 (#1264), so the backfill period spanning
+  that date already contains `docs/wiki/.order.json`.
+  Applying the previous release's guide onto that branch conflicts on
+  `docs/wiki/.order.json`; `just backfill docs` pauses so the maintainer can
+  merge the two `.order.json` files once.
 
 ## Implementation Plan
 

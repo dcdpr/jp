@@ -84,13 +84,12 @@ summary = "A short name for the file, such as `retry-idle-turns`; derived from t
 type = "array"
 items.type = "string"
 required = false
-summary = "The changes the fragment describes, such as `#1207` or a commit hash, when they were made earlier."
+summary = "Pull requests (`#1207`) or commit hashes attributed to the fragment when documenting earlier changes."
 description = """
-Each is a pull request (`#1207`, or `!1207` on GitLab) or a commit hash of 7 to
-64 characters, and is written as one of the fragment's `Credits` fields. Credits
-replace the ones read from git history, and decide which release the fragment
-belongs to: the first one that ships every change they name.
+Each entry is a change request (`#1207`, or `!1207` on GitLab) or a 7 to 64
+character hex commit hash, written as a `- **Credits**:` metadata field at the
+top of the fragment. Explicit `Credits` override git history attribution and
+assign the fragment to the first release that contains all referenced changes.
 
-Leave them out for a change made in the current branch, which the commit adding
-the fragment credits.
+Omit this parameter when documenting a change on the current branch.
 """

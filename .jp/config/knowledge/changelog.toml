@@ -5,9 +5,9 @@ A changelog fragment is one entry in the release notes. People read the notes \
 to learn what changed for them, and they read dozens of entries at once.\
 """
 items = [
-    "Write the entry for someone using JP, not someone reading its code: what they can do now, what behaves differently, what was fixed.",
+    "Write the entry for someone using JP, not someone reading its code: what they can do, what behaves differently, or what was fixed.",
     "Keep an entry to one or two short sentences. A feature that needs more gets a highlight.",
-    "Name things the way users meet them: the command, flag, config key, or file they type or read. Leave out internal types, modules, and functions.",
+    "Use user-facing names: the command, flag, config key, or file users type or read. Omit internal types, modules, and functions.",
     "Format as code only what users type or read literally, such as a command, a flag, a config key, or a file name, not every name in the sentence.",
     "Describe what the change does as the code shows it. A commit message can be wrong or incomplete; when it and the code disagree, the code is right.",
     "Write one fragment per user-visible change. Several commits that build one feature share one fragment, which credits them all.",
@@ -33,17 +33,17 @@ reason = "Code formatting only for what users type, vs. formatting every name in
 [[assistant.instructions]]
 title = "Preparing a Release's Notes"
 description = """\
-Preparing a release's notes, on its notes branch or when drafting them for a \
-release of JP's history, turns its fragments into what people upgrading from \
-the release before it read.\
+Preparing a release's notes (on its notes branch or when backfilling a \
+historical release) turns individual fragments into release notes for users \
+upgrading from the previous release.\
 """
 items = [
     "Describe what changed between the previous release and this one, not how the release was built: readers never ran the commits in between.",
     "Write one entry per feature, describing it as the release ships it, and credit every change that built it.",
     "A feature new in the release is `added`, however much it changed along the way: its fixes and reworks belong in its one entry, not in entries of their own.",
     "A feature added and removed again within the release gets no entry.",
-    "The other types describe a difference from what the previous release shipped: `changed`, `deprecated`, and `removed` behavior it had, and `fixed` bugs it had.",
-    "Give an entry an upgrade section only when it breaks what the previous release shipped. The first release has no previous one, so none of its entries has an upgrade section.",
+    "Use the remaining types only for changes relative to the previous release: `changed`, `deprecated`, and `removed` for behavior present in the previous release, and `fixed` for bugs present in the previous release.",
+    "Include an upgrade section only when a change breaks behavior from the previous release. The first release has no previous release, so none of its entries have an upgrade section.",
     "Combine two entries about one feature by editing one, deleting the other, and listing the credits of both in the one that stays.",
 ]
 

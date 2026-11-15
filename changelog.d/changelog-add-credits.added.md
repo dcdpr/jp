@@ -1,2 +1,3 @@
-The `changelog_add` tool takes `credits`, the pull requests or commits a
-fragment describes, so an assistant can write notes for changes made earlier.
+The `changelog_add` tool accepts a `credits` parameter listing the pull requests
+or commits a fragment describes, allowing the assistant to write fragments for
+earlier changes.

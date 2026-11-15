@@ -1,7 +1,5 @@
-# Writes the user guide and the highlights of a release of JP's history, in the
-# release backfill (`just backfill docs` and `just backfill highlight`): it reads
-# the release's code and history, writes guide pages, and changes nothing but
-# the guide and the release's notes.
+# Persona for writing user guide pages and release highlights during release
+# backfills (`just backfill docs` and `just backfill highlight`).
 
 extends = [
     "../knowledge/technical-writing.toml",
@@ -34,9 +32,8 @@ be wrong.\
 wiki_create = { run = "ask" }
 wiki_edit = { run = "ask" }
 
-# Outside the guide, the release's notes are the only files it may change: a
-# fragment gets a link to its guide page, and a highlight is a new file. The
-# rules replace the tools' own, which let them write anywhere.
+# Restrict filesystem writes outside the wiki to `changelog.d/` (linking a
+# fragment to its guide page or creating a highlight file).
 [conversation.tools.fs_modify_file]
 enable = true
 run = "ask"

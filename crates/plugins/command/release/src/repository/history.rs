@@ -56,9 +56,7 @@ impl<'a> History<'a> {
             .git(&["log", "--first-parent", "-z", "--format=%H%n%B", hash])
     }
 
-    /// Return `git log -z --format=%H%n%ct%n%(trailers)` for `from..to`: each
-    /// commit's hash, its commit time, and the trailers git reads from its
-    /// message.
+    /// Return `git log -z --format=%H%n%ct%n%(trailers)` for `from..to`.
     pub(crate) fn log_between(&self, from: &str, to: &str) -> Result<String, String> {
         let range = format!("{from}..{to}");
 

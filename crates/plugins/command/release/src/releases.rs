@@ -176,8 +176,7 @@ pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTree
 }
 
 /// Parse `Starts-Release` commits (oldest first) and cherry-picked commit
-/// hashes from `git log -z --format=%H%n%ct%n%(trailers)` output, which holds
-/// each commit's trailers as git reads them.
+/// hashes from `git log -z --format=%H%n%ct%n%(trailers)` output.
 pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), String> {
     const FIELDS: usize = 3;
 
@@ -223,11 +222,9 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
     Ok((started, picked))
 }
 
-/// Check that git reads what `jp release` wrote among the trailers of the
-/// commits it just made: `Starts-Release: <version>` when it started release
-/// `started`, and the `git cherry-pick -x` line of each commit in `picked`.
-///
-/// `log` is the [`parse_line`] input for those commits.
+/// Verify that git parsed the expected trailers from the newly created commits
+/// in `log` (`Starts-Release: <version>` for `started`, and `(cherry picked
+/// from commit <hash>)` for each commit in `picked`).
 pub(crate) fn check_written(
     log: &str,
     started: Option<&Version>,

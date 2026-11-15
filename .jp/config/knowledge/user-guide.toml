@@ -7,9 +7,9 @@ are written for people working on JP.\
 """
 items = [
     "Write for someone using JP who wants to get something done: what a feature is for, how to use it, and what to expect from it.",
-    "Describe the behavior of the release the guide belongs to, as its code shows it. Leave out what came later and what was only planned.",
+    "Describe the behavior of the target release as implemented in its code. Omit features added in later releases or unimplemented plans.",
     "Show the commands, flags, config keys, and files people type or read, each with a short example.",
-    "Leave out internal types, modules, and how the code is organized.",
+    "Omit internal types, modules, and code organization.",
     "Keep a feature to one page, and update that page when a release changes the feature, rather than writing a second page about it.",
     "When a release removes a feature, remove its section or page: the guide describes what its release ships.",
     "Link related guide pages by their id, such as W-0a1b2c3.",

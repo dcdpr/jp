@@ -15,11 +15,11 @@ than from commit messages. The following tool helps you with this:
 what changed, ending with a section of the upgrade guide when the change \
 requires them to act.
 
-Write each fragment by the Changelog Entries rules. In a pull request, a \
-follow-up to an earlier change adds a fragment of its own rather than extending \
-the earlier one, and an existing fragment is edited only to correct its \
-wording. Preparing a release's notes is when fragments are combined, by the \
-rules for Preparing a Release's Notes.
+Follow the Changelog Entries rules when writing fragments. In a pull request, a \
+follow-up to an earlier change adds a new fragment rather than extending the \
+existing one, and existing fragments are edited only to fix wording. Related \
+fragments are combined later when preparing the release notes (see Preparing a \
+Release's Notes).
 
 A change users won't notice, such as a refactor, a test, or a CI change, gets \
 no fragment; say so when you finish, since its pull request then needs the \

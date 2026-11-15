@@ -180,11 +180,10 @@ fragments do not require Conventional Commits to use it.
 Highlight notes cannot carry an upgrade section; the corresponding changelog
 fragment holds it.
 
-An upgrade section is for people upgrading from an earlier release, so breaking
-is measured against what a release has shipped.
-A change to a feature no release has shipped yet requires nothing of anyone, so
-its fragment has no upgrade section, even when it changes how that feature
-works.
+Upgrade sections are for users upgrading from an earlier release, so breaking
+changes are measured relative to the previous release.
+Modifying or removing a feature that has not yet shipped in any release does not
+require an upgrade section.
 
 #### Credits
 

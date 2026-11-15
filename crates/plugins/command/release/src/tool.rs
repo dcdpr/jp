@@ -138,8 +138,8 @@ fn check_access(init: &InitMessage, call: &ToolCall, dir: &Utf8Path) -> Result<(
     Ok(())
 }
 
-/// Parse the `credits` argument, each a pull request (`#1207`, or `!1207` on
-/// GitLab) or a commit hash, dropping repeats.
+/// Parse and deduplicate the `credits` argument (`#1207`, `!1207`, or a 7 to 64
+/// character hex commit hash).
 fn listed(values: &[String]) -> Result<Vec<ListedCredit>, String> {
     let mut credits = vec![];
     for value in values {

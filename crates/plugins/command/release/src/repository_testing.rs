@@ -13,8 +13,8 @@ use camino_tempfile::Utf8TempDir;
 
 use crate::shell::Shell;
 
-/// A `prepare-commit-msg` hook that adds a sign-off after a blank line, which
-/// leaves git reading only the sign-off among a message's trailers.
+/// `prepare-commit-msg` hook that appends a sign-off after a blank line,
+/// preventing git from parsing earlier lines as trailers.
 #[cfg(unix)]
 pub(crate) const SIGN_OFF_AFTER_A_BLANK_LINE: &str =
     "#!/bin/sh\nprintf '\\nSigned-off-by: Tester <tester@example.com>\\n' >> \"$1\"\n";
@@ -94,8 +94,6 @@ impl Fixture {
         fs::write(path, contents).unwrap();
     }
 
-    /// Install `script` as the repository's `name` hook, such as
-    /// `prepare-commit-msg`.
     #[cfg(unix)]
     pub(crate) fn hook(&self, name: &str, script: &str) {
         let path = self.root().join(".git/hooks").join(name);

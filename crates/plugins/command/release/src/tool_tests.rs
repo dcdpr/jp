@@ -172,8 +172,6 @@ fn add_names_the_file_by_the_slug_it_is_given() {
     );
 }
 
-/// The credits a fragment is given open it as its `Credits` fields, once each,
-/// and the file is named after the entry rather than the credits.
 #[test]
 fn add_writes_the_credits_it_is_given() {
     let root = workspace();

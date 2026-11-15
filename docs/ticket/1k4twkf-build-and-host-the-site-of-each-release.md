@@ -30,6 +30,6 @@ Nothing builds or hosts those sites yet: `jp.computer` shows `main` only.
 - [ ] `jp.computer` serves the latest stable release's site, and `main`'s moves
       to `jp.computer/unreleased/` or similar.
 
-Release notes live on `main`, so the release pages come from `main`'s build
-whichever site the root serves; where they're served from once it serves a
-release is still open.
+Because release notes live on `main`, `/releases/` pages are always built from
+`main`; how `/releases/` is routed once `jp.computer` serves the latest stable
+release at the root remains an open question.
