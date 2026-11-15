@@ -25,3 +25,11 @@ Nothing builds or hosts those sites yet: `jp.computer` shows `main` only.
 - [ ] CI builds every release's site and hosts it under `jp.computer/vX.Y.Z/`.
 - [ ] Until a release's site is hosted, its `/vX.Y.Z/` paths fall back to the
       current site, since release notes link guide pages there.
+- [ ] Every page of a release's site, except the latest stable release's, shows
+      a banner naming the release and linking the latest one.
+- [ ] `jp.computer` serves the latest stable release's site, and `main`'s moves
+      to `jp.computer/unreleased/` or similar.
+
+Release notes live on `main`, so the release pages come from `main`'s build
+whichever site the root serves; where they're served from once it serves a
+release is still open.
