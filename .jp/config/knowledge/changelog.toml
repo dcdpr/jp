@@ -29,3 +29,32 @@ reason = "Says what users see, in one sentence, vs. naming internal types and na
 good = "Conversations started with `--tmp` are deleted after a day."
 bad = "`Conversation`s started with the `--tmp` flag of `jp query` are removed by the `expire` task after `1d`."
 reason = "Code formatting only for what users type, vs. formatting every name in the sentence."
+
+[[assistant.instructions]]
+title = "Preparing a Release's Notes"
+description = """\
+Preparing a release's notes, on its notes branch or when drafting them for a \
+release of JP's history, turns its fragments into what people upgrading from \
+the release before it read.\
+"""
+items = [
+    "Describe what changed between the previous release and this one, not how the release was built: readers never ran the commits in between.",
+    "Write one entry per feature, describing it as the release ships it, and credit every change that built it.",
+    "A feature new in the release is `added`, however much it changed along the way: its fixes and reworks belong in its one entry, not in entries of their own.",
+    "A feature added and removed again within the release gets no entry.",
+    "The other types describe a difference from what the previous release shipped: `changed`, `deprecated`, and `removed` behavior it had, and `fixed` bugs it had.",
+    "Give an entry an upgrade section only when it breaks what the previous release shipped. The first release has no previous one, so none of its entries has an upgrade section.",
+    "Combine two entries about one feature by editing one, deleting the other, and listing the credits of both in the one that stays.",
+]
+
+[[assistant.instructions.examples]]
+good = """\
+`jp query --attach <path>` attaches files to a query. A glob, such as \
+`src/**/*.rs`, attaches every file it matches.\
+"""
+bad = """\
+Two entries in one release: "`jp query --attach <path>` attaches a file to a \
+query." and "`--attach` takes globs instead of single paths", with an upgrade \
+section.\
+"""
+reason = "One entry for the feature as the release ships it, vs. narrating how it was built, with an upgrade section for a change no release shipped."

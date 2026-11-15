@@ -49,6 +49,9 @@ and one slug can name a fragment of each type.
 A follow-up to an earlier change adds a fragment of its own, saying what it
 adds, whether or not the earlier one has been released.
 Edit an existing fragment only to correct its wording.
+A release's fragments are combined when its notes are prepared: each feature
+gets one entry, describing it as the release ships it and crediting every change
+that built it.
 
 ## Breaking changes
 
@@ -84,6 +87,10 @@ All three parts are required, and a fragment has at most one upgrade section.
 A line that starts with either token anywhere else, inside a code block or
 partway through a paragraph, is an error.
 To show the token instead, indent its line or put it in inline code.
+
+An upgrade section is for people upgrading from an earlier release.
+A change to a feature no release has shipped yet requires nothing of them, so
+its fragment has none, even when it changes how that feature works.
 
 ## Credits
 

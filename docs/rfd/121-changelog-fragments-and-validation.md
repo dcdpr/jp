@@ -180,6 +180,12 @@ fragments do not require Conventional Commits to use it.
 Highlight notes cannot carry an upgrade section; the corresponding changelog
 fragment holds it.
 
+An upgrade section is for people upgrading from an earlier release, so breaking
+is measured against what a release has shipped.
+A change to a feature no release has shipped yet requires nothing of anyone, so
+its fragment has no upgrade section, even when it changes how that feature
+works.
+
 #### Credits
 
 Fragments do not record change request numbers by default (where a *change
@@ -227,6 +233,9 @@ release.
 A feature built across several pull requests adds a fragment for each
 user-visible change they make, and each of them edits the shared highlight,
 which credits all of them.
+Preparing a release's notes combines them: each feature gets one entry,
+describing it as the release ships it and crediting every change that built it
+([RFD 122]).
 
 ### Highlight note
 

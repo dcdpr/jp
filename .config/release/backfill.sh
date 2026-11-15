@@ -11,22 +11,27 @@
 #                  merges the branch.
 #   next           In the clone: choose the last day of the next period, check
 #                  out its code beside the clone, and draft its fragments.
+#                  --fresh discards the period's notes first.
 #   draft          Draft fragments for the period's changes that have none.
-#                  --fresh discards the uncommitted drafts first; --only
-#                  CHANGE... drafts the changes named, by pull request number
-#                  or commit hash; --redo FRAGMENT... sets the fragments named
-#                  aside and drafts their changes again; --why TEXT tells the
-#                  model why. --after COMMIT drafts the changes after COMMIT on
-#                  HEAD's first-parent line instead, outside a trial.
+#                  --fresh discards the period's notes first: its drafts, and
+#                  its fragments committed already; --only CHANGE... drafts the
+#                  changes named, by pull request number or commit hash; --redo
+#                  FRAGMENT... sets the fragments named aside and drafts their
+#                  changes again; --why TEXT tells the model why. --after
+#                  COMMIT drafts the changes after COMMIT on HEAD's
+#                  first-parent line instead, outside a trial.
 #   changes        List the period's changes and the fragments that credit
 #                  them.
 #   cut            Commit the drafts, cut the period's release, build it for
 #                  this Mac, and check out its notes branch.
-#   docs           Write the user guide for the release in preparation, in its
-#                  own tree: a conversation for each entry of its notes that
-#                  changes what users do, then one for its changes without
-#                  notes. ENTRY... writes it for those entries only, again if
-#                  need be; --rest covers only the changes without notes.
+#   docs           Write the user guide of the release in preparation, in its
+#                  own tree, one entry of its notes at a time: start a
+#                  conversation about the next entry that changes what users
+#                  do, or another about the entry in progress. `docs proceed`
+#                  commits the entry's guide and starts the next, `docs skip`
+#                  notes that it needs none, `docs finish` commits it and notes
+#                  that the rest need none, and `docs ENTRY` reopens ENTRY, or
+#                  `docs rest` the changes without notes.
 #   highlight ENTRY
 #                  Write a highlight about ENTRY, an entry of the notes of the
 #                  release in preparation.
@@ -42,7 +47,10 @@
 #
 # The history runs to GitHub's `main` as `init` found it. The branch's own
 # fragments, and whatever reaches GitHub's `main` during the trial, ship in the
-# first release cut after the trial's pull request merges.
+# first release cut after the trial's pull request merges. The clone's `main`
+# merges the branch without its own fragments, which describe today's tooling
+# rather than the history, so drafting, `cut`, and the site never see them;
+# `publish` brings them back.
 #
 # The clone is a JP workspace of its own, with a workspace ID only it knows, so
 # its conversations and builds stay apart from the checkout's. `jp`, `jp
@@ -320,7 +328,41 @@ clean_outside_fragments() {
     die "Commit or discard the changes outside $FRAGMENTS/ first."
 }
 
-# Merge the commits the branch the trial runs from has gained into `main`.
+# The branch's own fragments and highlights in the tree of commit $1: the files
+# at the top of the fragments directory, other than its README, and in its
+# `highlights/`.
+own_fragments() {
+  git ls-tree -r --name-only "$1" -- "$FRAGMENTS" |
+    awk -v dir="$FRAGMENTS/" '
+      index($0, dir) != 1 { next }
+      { rest = substr($0, length(dir) + 1) }
+      rest == "README.md" { next }
+      rest !~ /\// || rest ~ /^highlights\/[^\/]+$/ { print }'
+}
+
+# Point refs/backfill/trimmed at a commit on top of refs/backfill/source, the
+# branch $1, that removes the branch's own fragments. The clone's `main` merges
+# that commit instead of the branch, so it never holds them, and a later merge
+# can't conflict over them: both sides have removed them.
+trim_source() {
+  local files work tree commit
+  files=$(own_fragments refs/backfill/source)
+  if [ -z "$files" ]; then
+    git update-ref refs/backfill/trimmed "$(git rev-parse refs/backfill/source)"
+    return
+  fi
+  work=$(mktemp -d)
+  GIT_INDEX_FILE=$work/index git read-tree refs/backfill/source
+  printf '%s\n' "$files" | GIT_INDEX_FILE=$work/index git update-index --force-remove --stdin
+  tree=$(GIT_INDEX_FILE=$work/index git write-tree)
+  rm -rf "$work"
+  commit=$(git commit-tree "$tree" -p refs/backfill/source \
+    -m "chore: Set aside the fragments of \`$1\` during the trial")
+  git update-ref refs/backfill/trimmed "$commit"
+}
+
+# Merge the commits the branch the trial runs from has gained into `main`,
+# without the branch's own fragments.
 refresh() {
   local branch
   branch=$(setting branch)
@@ -329,13 +371,30 @@ refresh() {
     return
   fi
 
-  say "Merging the newer commits of $branch into main."
+  say "Merging the newer commits of $branch into main, without its own fragments."
+  trim_source "$branch"
   if ! git merge --quiet --no-ff --no-edit \
-    -m "chore: Merge \`$branch\` into the history to release" refs/backfill/source; then
+    -m "chore: Merge \`$branch\` into the history to release" refs/backfill/trimmed; then
     git merge --abort
-    die "Merging $branch into main conflicts; merge it by hand with \`git merge refs/backfill/source\`, commit, and run this again."
+    die "Merging $branch into main conflicts; merge it by hand with \`git merge refs/backfill/trimmed\`, which is $branch without its own fragments, commit, and run this again."
   fi
   push_main
+}
+
+# Bring back the branch's own fragments as its tip holds them, for the pull
+# request that brings the branch into GitHub's `main` with the history.
+restore_own() {
+  local files file paths=()
+  files=$(own_fragments refs/backfill/source)
+  [ -n "$files" ] || return 0
+  while IFS= read -r file; do
+    paths+=("$file")
+  done <<<"$files"
+  git checkout refs/backfill/source -- "${paths[@]}"
+  if ! git diff --cached --quiet; then
+    git commit --quiet -m "chore: Bring back the fragments of \`$(setting branch)\`"
+    push_main
+  fi
 }
 
 # Lay out the fragments directory as CI checks it, and check it.
@@ -434,6 +493,7 @@ credited() {
 #   the file $5 names when it's given, with its message and the files it
 #   changed, and writes their credits to the file $4, one per line.
 # - `authors` prints, once each, the authors of the changes the file $5 names.
+# - `files` prints, once each, the fragments that credit any of the changes.
 changes() {
   local mode=$1 range=$2 noted=$3 credits=${4:-/dev/null} wanted=${5:-}
   git log --first-parent --diff-merges=first-parent --reverse --numstat \
@@ -493,6 +553,16 @@ changes() {
           r = "#" substr(subject, RSTART + 20, RLENGTH - 20)
         credit = r != "" ? r : substr(h, 1, 12)
         found = crediting(h, r)
+
+        if (mode == "files") {
+          count = split(found, file, "\n")
+          for (i = 1; i <= count; i++)
+            if (file[i] != "" && !(file[i] in seen)) {
+              seen[file[i]] = 1
+              print file[i]
+            }
+          next
+        }
 
         if (mode == "authors") {
           if (is_wanted(h, r) && !(author in authors)) {
@@ -558,7 +628,7 @@ code_paragraph() {
 draft() {
   local version=$1 range=$2 from=$3 until=$4 wanted=$5 extra=$6 code=$7 title=$8
   shift 8
-  local work count paragraph hint='' noun=changes
+  local work count paragraph hint='' noun=changes previous since
   work=$(mktemp -d)
   noted >"$work/noted"
   : >"$work/credits"
@@ -580,9 +650,16 @@ draft() {
   else
     paragraph="The code of $version is this workspace's."
   fi
+  # What the notes compare against: the newest release before them.
+  previous=$(latest)
+  if [ -n "$previous" ]; then
+    since="The notes describe what changed since JP $previous, the release before them. A feature new in $version is \`added\`, however it changed along the way, and only a change that breaks what $previous shipped gets an upgrade section."
+  else
+    since="$version is JP's first release, so every fragment is \`added\`, and none has an upgrade section: nothing in it breaks an earlier release."
+  fi
   {
     sed -e "s/{version}/$version/g" -e "s/{from}/$from/g" -e "s/{until}/$until/g" \
-      -e "s|^{code}\$|$paragraph|" "$HERE/backfill.md"
+      -e "s|^{code}\$|$paragraph|" -e "s|^{previous}\$|$since|" "$HERE/backfill.md"
     if [ -n "$extra" ]; then
       printf '\n'
       cat "$extra"
@@ -592,12 +669,41 @@ draft() {
   } >"$work/prompt.md"
 
   [ "$count" -ne 1 ] || noun=change
-  say "Drafting fragments for $count $noun of $version. Each is shown before it's written: y writes it, e edits it first, r skips it with a reply for the model. ^C stops, and the fragments written stay."
+  say "Drafting fragments for $count $noun of $version. Each fragment written, revised, or deleted is shown first: y does it, e edits it first, r skips it with a reply for the model. ^C stops, and the fragments written stay."
   if ! jp --cfg "$(persona release-notes)" query --new --local --no-edit --title "$title" \
     ${code:+--mount "$CODE_MOUNT=$code"} ${1+"$@"} "@$work/prompt.md"; then
     say "Drafting stopped."
   fi
   rm -rf "$work"
+}
+
+# Discard the period's notes: its uncommitted drafts, and the fragments at the
+# top of the fragments directory that credit one of its changes, such as the
+# ones `revert` brings back. Highlights, and the fragments set aside for
+# `--redo`, stay.
+discard_period() {
+  local work file paths=()
+  git restore --source=HEAD --staged --worktree -- "$FRAGMENTS"
+  git clean -fdq -- "$FRAGMENTS"
+  work=$(mktemp -d)
+  noted >"$work/noted"
+  changes files "$(setting period.range)" "$work/noted" >"$work/files"
+  while IFS= read -r file; do
+    if [ "$(dirname "$file")" = "$FRAGMENTS" ]; then
+      paths+=("$file")
+    fi
+  done <"$work/files"
+  rm -rf "$work"
+  if [ ${#paths[@]} -eq 0 ]; then
+    say "Discarded the drafts of $(setting period.version)."
+    return
+  fi
+  git rm --quiet -- "${paths[@]}"
+  if [ ${#paths[@]} -eq 1 ]; then
+    say "Discarded the drafts of $(setting period.version), and its fragment committed already."
+  else
+    say "Discarded the drafts of $(setting period.version), and its ${#paths[@]} fragments committed already."
+  fi
 }
 
 # Set aside the fragments the lines of $3 name, to be drafted again: move them
@@ -853,33 +959,108 @@ guide_to_main() {
   push_main
 }
 
-# Whether the guide for $1, `<version>/<entry>`, is written or needs none.
+# Whether the guide for $1, `<version>/<item>`, is written or needs none.
 documented() { git config --get-all jp-backfill.documented 2>/dev/null | grep -qxF "$1"; }
 
 mark_documented() { documented "$1" || git config --add jp-backfill.documented "$1"; }
 
-# Ask whether the guide for $1 is done, once its conversation has ended: `jp
-# query` ends the same way whether the conversation finished or was stopped.
-finished() {
-  local answer
-  printf 'Is the guide for %s done? Enter says it is, n leaves it for the next run: ' "$1"
-  IFS= read -r answer || answer=n
-  [ -z "$answer" ]
+# Keep the `documented` records the awk program $1 prints, which reads $2 as
+# `value`.
+keep_documented() {
+  local kept record
+  kept=$(git config --get-all jp-backfill.documented 2>/dev/null | awk -v value="$2" "$1" || true)
+  git config --unset-all jp-backfill.documented 2>/dev/null || true
+  while IFS= read -r record; do
+    if [ -n "$record" ]; then
+      git config --add jp-backfill.documented "$record"
+    fi
+  done <<<"$kept"
 }
 
-# Ask whether to write the guide for $1: returns 0 to write it, 1 when it needs
-# none, 2 to skip it for now, and 3 to stop.
-ask() {
-  local answer
-  printf 'Guide for %s? Enter writes it, n says none is needed, s skips it for now, q stops: ' "$1"
-  IFS= read -r answer || answer=q
-  case $answer in
-  '') return 0 ;;
-  n | N) return 1 ;;
-  s | S) return 2 ;;
-  *) return 3 ;;
+# shellcheck disable=SC2016 # The `$0` belongs to the awk program.
+unmark_documented() { keep_documented '$0 != value' "$1"; }
+
+# The item of release $1's guide in progress, if any.
+current_item() {
+  local current
+  current=$(setting docs.current)
+  case $current in
+  "$1"/*) printf '%s\n' "${current#"$1"/}" ;;
   esac
 }
+
+clear_current() { git config --unset jp-backfill.docs.current 2>/dev/null || true; }
+
+# Forget which parts of release $1's guide are written, for a release being
+# taken back: a new cut can change its entries, and the code they describe.
+forget_docs() {
+  # shellcheck disable=SC2016 # The `$0` belongs to the awk program.
+  keep_documented 'index($0, value) != 1' "$1/"
+  if [ -n "$(current_item "$1")" ]; then
+    clear_current
+  fi
+}
+
+# How many of the period's changes no entry credits.
+unnoted() {
+  local work count
+  work=$(mktemp -d)
+  noted >"$work/noted"
+  count=$(changes list "$(setting period.range)" "$work/noted" | grep -c ' no fragment$' || true)
+  rm -rf "$work"
+  printf '%s\n' "$count"
+}
+
+# The items of release $1's guide, in order: the entries of its notes whose
+# changes can change what users do, by file name, then `rest`, its changes
+# without notes, when it has any.
+guide_items() {
+  local file name type
+  for file in "$FRAGMENTS/$1"/*.md; do
+    [ -e "$file" ] || continue
+    name=$(basename "$file")
+    type=${name%.md}
+    type=${type##*.}
+    case " $GUIDED " in
+    *" $type "*) printf '%s\n' "$name" ;;
+    esac
+  done
+  if [ "$(unnoted)" -gt 0 ]; then
+    printf '%s\n' rest
+  fi
+}
+
+# The items of release $1's guide not written yet, in order.
+pending_items() {
+  local item
+  guide_items "$1" | while IFS= read -r item; do
+    if ! documented "$1/$item"; then
+      printf '%s\n' "$item"
+    fi
+  done
+}
+
+# The item $1 as a sentence names it.
+item_label() {
+  if [ "$1" = rest ]; then
+    say "the changes without notes"
+  else
+    say "$1"
+  fi
+}
+
+# The items read from standard input, as a sentence lists them.
+item_labels() {
+  local item labels=''
+  while IFS= read -r item; do
+    [ -n "$item" ] || continue
+    labels="$labels${labels:+, }$(item_label "$item")"
+  done
+  printf '%s\n' "$labels"
+}
+
+# Whether the worktree holds changes to the guide not committed yet.
+guide_changed() { [ -n "$(git -C "$(code_dir)" status --porcelain -- "$WIKI")" ]; }
 
 # Run a conversation of the docs or highlight step, titled $2, with the prompt
 # in the file $3. The wiki tools read the guide of the release in preparation,
@@ -906,11 +1087,23 @@ guide_conversation() {
     "@$prompt" || say "The conversation stopped."
 }
 
-# Write the guide for the entry $2 of release $1's notes in a conversation, and
-# commit what it wrote. The other arguments go to `jp query`.
+# What a prompt says when a conversation about the same part of the guide has
+# run before, when $1 is set.
+again_paragraph() {
+  [ -n "$1" ] || return 0
+  cat <<EOF
+
+An earlier conversation about this may have written guide pages for it
+already: read them before writing, and carry on from them.
+EOF
+}
+
+# Write the guide for the entry $2 of release $1's notes in a conversation. $3
+# is set when a conversation about it has run before. The other arguments go to
+# `jp query`.
 document_entry() {
-  local version=$1 file=$2 work
-  shift 2
+  local version=$1 file=$2 again=$3 work
+  shift 3
   work=$(mktemp -d)
   credits_of "$file" >"$work/wanted"
   {
@@ -929,30 +1122,24 @@ When a guide page covers this change, end the first paragraph of the entry with
 a link to the page, \` ([guide]($SITE/v$version/wiki/<page>))\`, where \`<page>\` is
 the page's file name without \`.md\`; change the entry with \`fs_modify_file\`.
 When the change needs no page, say why, and change nothing.
-
-The changes the entry credits, oldest first:
-
 EOF
+    again_paragraph "$again"
+    printf '\nThe changes the entry credits, oldest first:\n\n'
     changes draft "$(setting period.range)" /dev/null /dev/null "$work/wanted"
   } >"$work/prompt.md"
   guide_conversation write "$version: guide for $(basename "$file")" "$work/prompt.md" ${1+"$@"}
   rm -rf "$work"
-  save_guide "$version" "docs(wiki): Write the guide for $(basename "$file" .md)"
 }
 
 # Look for guide pages that release $1's changes without notes change, in a
-# conversation, and commit what it wrote. The other arguments go to `jp query`.
+# conversation. $2 is set when a conversation about them has run before. The
+# other arguments go to `jp query`.
 document_rest() {
-  local version=$1 work
-  shift
+  local version=$1 again=$2 work
+  shift 2
   work=$(mktemp -d)
   noted >"$work/noted"
   changes draft "$(setting period.range)" "$work/noted" /dev/null '' >"$work/changes.md"
-  if [ ! -s "$work/changes.md" ]; then
-    rm -rf "$work"
-    say "Every change of $version has an entry in its notes."
-    return
-  fi
   {
     template docs.md "$version" "$(setting period.from)" "$(setting period.until)"
     cat <<EOF
@@ -963,92 +1150,185 @@ These changes have no entry in the release notes of $version, so people using JP
 weren't expected to notice them. Check whether any of them still changes what a
 guide page says, and update the page if so; most need nothing. Name the changes
 that did.
-
 EOF
+    again_paragraph "$again"
+    printf '\n'
     cat "$work/changes.md"
   } >"$work/prompt.md"
   guide_conversation write "$version: guide for the changes without notes" "$work/prompt.md" ${1+"$@"}
   rm -rf "$work"
-  save_guide "$version" "docs(wiki): Write the guide for the changes of $version without notes"
+}
+
+# Say what can follow a conversation about the item $1 of the guide.
+after_conversation() {
+  local name
+  name=$(item_label "$1")
+  cat <<EOF
+
+The changes to the guide for $name stay uncommitted in $(code_dir)/$WIKI
+until you go on. From here:
+
+  - \`jp query\` continues the conversation, and \`just backfill docs\` starts
+    another about $name
+  - edit the guide's pages there yourself, if you like
+  - \`just backfill docs proceed\` commits the guide for $name, and starts
+    the next entry
+  - \`just backfill docs skip\` notes that the guide needs nothing for $name,
+    and starts the next
+  - \`just backfill docs finish\` commits it, and notes that the rest need none
+EOF
+}
+
+# Start a conversation about the item $2 of release $1's guide, and make it the
+# one in progress. $3 is set when a conversation about it has run before. The
+# other arguments go to `jp query`.
+start_item() {
+  local version=$1 item=$2 again=$3 left
+  shift 3
+  if [ "$item" = rest ] && [ "$(unnoted)" -eq 0 ]; then
+    clear_current
+    say "Every change of $version has an entry in its notes, so there are no changes without notes for the guide."
+    return
+  fi
+  git config jp-backfill.docs.current "$version/$item"
+  left=$(pending_items "$version" | grep -vxF "$item" | item_labels || true)
+  if [ -n "$left" ]; then
+    say "Writing the guide for $(item_label "$item"); left after it: $left."
+  else
+    say "Writing the guide for $(item_label "$item"), the last part of $version's guide."
+  fi
+  if [ "$item" = rest ]; then
+    document_rest "$version" "$again" ${1+"$@"}
+  else
+    document_entry "$version" "$FRAGMENTS/$version/$item" "$again" ${1+"$@"}
+  fi
+  after_conversation "$item"
+}
+
+# Start the conversation about the next item of release $1's guide not written
+# yet, or say the guide is done. The other arguments go to `jp query`.
+next_item() {
+  local version=$1 item
+  shift
+  item=$(pending_items "$version" | sed -n 1p)
+  if [ -z "$item" ]; then
+    say "The guide of $version is done, and committed on release/${version%.*}. \`just backfill highlight <entry>\` writes a highlight, and \`just backfill proceed\` finalizes $version."
+    return
+  fi
+  start_item "$version" "$item" '' ${1+"$@"}
+}
+
+# Commit the guide written for the item $2 of release $1, and note that it's
+# written.
+commit_item() {
+  local version=$1 item=$2 changed=''
+  if guide_changed; then
+    changed=1
+  fi
+  if [ "$item" = rest ]; then
+    save_guide "$version" "docs(wiki): Write the guide for the changes of $version without notes"
+  else
+    save_guide "$version" "docs(wiki): Write the guide for ${item%.md}"
+  fi
+  mark_documented "$version/$item"
+  clear_current
+  if [ -n "$changed" ]; then
+    say "Committed the guide for $(item_label "$item")."
+  else
+    say "The guide needed no change for $(item_label "$item")."
+  fi
 }
 
 cmd_docs() {
   need_clone docs
   need_period
-  local version named='' rest='' file name type choice stopped=''
-  while [ $# -gt 0 ]; do
-    case $1 in
-    --)
-      shift
-      break
-      ;;
-    --rest) rest=1 ;;
-    # The rest is for `jp query`, which refuses a flag it doesn't take either.
-    -*) break ;;
-    *) named="$named$(basename "$1")"$'\n' ;;
-    esac
+  local action=start item='' version current again='' left
+  case ${1:-} in
+  proceed | skip | finish)
+    action=$1
     shift
-  done
-  [ -z "$named" ] || [ -z "$rest" ] || die "Name entries, or give --rest, in separate runs."
+    ;;
+  '' | -*) ;;
+  *)
+    action=open
+    item=$(basename "$1")
+    shift
+    case $item in
+    rest | *.md) ;;
+    *) item=$item.md ;;
+    esac
+    ;;
+  esac
+  [ "${1:-}" != -- ] || shift
   version=$(guided_release)
   tools docs
   guide_tree "$version"
   carry_guide "$version"
   restore_guide "$version"
-  # What a stopped conversation left behind.
-  save_guide "$version" "docs(wiki): Write the guide of $version"
 
-  if [ -z "$rest" ]; then
-    for file in "$FRAGMENTS/$version"/*.md; do
-      [ -e "$file" ] || continue
-      name=$(basename "$file")
-      type=${name%.md}
-      type=${type##*.}
-      case " $GUIDED " in
-      *" $type "*) ;;
-      *) continue ;;
-      esac
-      if [ -n "$named" ]; then
-        printf '%s' "$named" | grep -qxF "$name" || continue
-      elif documented "$version/$name"; then
-        continue
-      else
-        choice=0
-        ask "$name" || choice=$?
-        case $choice in
-        1)
-          mark_documented "$version/$name"
-          continue
-          ;;
-        2) continue ;;
-        3)
-          stopped=1
-          break
-          ;;
-        esac
-      fi
-      document_entry "$version" "$file" ${1+"$@"}
-      if finished "$name"; then
-        mark_documented "$version/$name"
-      fi
-    done
+  current=$(current_item "$version")
+  if [ -n "$current" ] && [ "$current" != rest ] && [ ! -f "$FRAGMENTS/$version/$current" ]; then
+    say "$current is no entry of $version's notes any more, so its guide is no longer in progress."
+    clear_current
+    current=''
+  fi
+  # Without an entry in progress, changes to the guide, such as edits made by
+  # hand, are committed apart from any entry's.
+  if [ -z "$current" ]; then
+    save_guide "$version" "docs(wiki): Edit the guide of $version"
   fi
 
-  if [ -z "$stopped" ] && [ -z "$named" ] && { [ -n "$rest" ] || ! documented "$version/:rest"; }; then
-    choice=0
-    [ -n "$rest" ] || ask "the changes without notes" || choice=$?
-    case $choice in
-    0)
-      document_rest "$version" ${1+"$@"}
-      if finished "the changes without notes"; then
-        mark_documented "$version/:rest"
-      fi
-      ;;
-    1) mark_documented "$version/:rest" ;;
-    esac
-  fi
-
-  say "The guide of $version is committed on release/${version%.*}, and checked out in $(code_dir). \`just backfill highlight <entry>\` writes a highlight, and \`just backfill proceed\` finalizes $version."
+  case $action in
+  start)
+    if [ -n "$current" ]; then
+      start_item "$version" "$current" again ${1+"$@"}
+    else
+      next_item "$version" ${1+"$@"}
+    fi
+    ;;
+  open)
+    if [ "$item" != rest ] && [ ! -f "$FRAGMENTS/$version/$item" ]; then
+      die "$item is no entry of $version's notes."
+    fi
+    if [ -n "$current" ] && [ "$current" != "$item" ]; then
+      die "The guide for $(item_label "$current") is in progress: \`just backfill docs proceed\` commits it, and \`just backfill docs skip\` notes that the guide needs nothing for it."
+    fi
+    if [ "$current" = "$item" ] || documented "$version/$item"; then
+      again=again
+    fi
+    unmark_documented "$version/$item"
+    start_item "$version" "$item" "$again" ${1+"$@"}
+    ;;
+  proceed)
+    if [ -n "$current" ]; then
+      commit_item "$version" "$current"
+    fi
+    next_item "$version" ${1+"$@"}
+    ;;
+  skip)
+    [ -n "$current" ] || die "No entry's guide is in progress; \`just backfill docs\` starts the next."
+    if guide_changed; then
+      die "$(code_dir)/$WIKI holds changes to the guide for $(item_label "$current"): \`just backfill docs proceed\` commits them, or discard them there to skip it."
+    fi
+    mark_documented "$version/$current"
+    clear_current
+    say "Noted that the guide needs nothing for $(item_label "$current")."
+    next_item "$version" ${1+"$@"}
+    ;;
+  finish)
+    if [ -n "$current" ]; then
+      commit_item "$version" "$current"
+    fi
+    left=$(pending_items "$version")
+    if [ -n "$left" ]; then
+      while IFS= read -r item; do
+        mark_documented "$version/$item"
+      done <<<"$left"
+      say "Noted that the rest of $version's guide needs no change: $(printf '%s\n' "$left" | item_labels)."
+    fi
+    say "The guide of $version is done, and committed on release/${version%.*}. \`just backfill highlight <entry>\` writes a highlight, and \`just backfill proceed\` finalizes $version."
+    ;;
+  esac
 }
 
 cmd_highlight() {
@@ -1124,8 +1404,9 @@ cmd_init() {
   (
     cd "$clone"
     git fetch --quiet --no-tags "$common" "+refs/heads/$branch:refs/backfill/source"
+    trim_source "$branch"
     git merge --quiet --no-ff --no-edit \
-      -m "chore: Merge \`$branch\` into the history to release" refs/backfill/source
+      -m "chore: Merge \`$branch\` into the history to release" refs/backfill/trimmed
     printf '%s\n%s\n' "$ID_PREAMBLE" "$id" >.jp/.id
     git update-index --skip-worktree .jp/.id
     git config jp-backfill.source "$root"
@@ -1141,7 +1422,7 @@ cmd_init() {
 Made the trial in $dir:
 
   origin.git  stands in for GitHub, with GitHub's main as of $(short "$main") ($day)
-  jp          a clone of it, whose main merges $branch
+  jp          a clone of it, whose main merges $branch without its own fragments
 
 The history to release runs to $(short "$main"). Release it a period at a time,
 in the clone:
@@ -1159,6 +1440,11 @@ EOF
 
 cmd_next() {
   need_clone next
+  local fresh=''
+  if [ "${1:-}" = --fresh ]; then
+    fresh=1
+    shift
+  fi
   [ "${1:-}" != -- ] || shift
   local preparing history history_day latest start prev_end='' prev_day='' version suggested
   local day end range eof='' count from
@@ -1192,7 +1478,11 @@ cmd_next() {
   fi
   if [ "$(setting period.version)" = "$version" ]; then
     suggested=$(setting period.until)
-    say "$version is in drafting, ending on $suggested; its drafts stay."
+    if [ -n "$fresh" ]; then
+      say "$version is in drafting, ending on $suggested."
+    else
+      say "$version is in drafting, ending on $suggested; its drafts stay."
+    fi
   fi
   if [[ $suggested > $history_day ]]; then
     suggested=$history_day
@@ -1237,6 +1527,9 @@ cmd_next() {
   say "$version ends at $(short "$end"), $(git show -s --format='%cs: %s' "$end"), with $count changes."
 
   prepare_code "$end"
+  if [ -n "$fresh" ]; then
+    discard_period
+  fi
   draft "$version" "$range" "$from" "$day" '' '' "$(code_dir)" "$version: draft notes" ${1+"$@"}
   period_summary
 }
@@ -1289,8 +1582,7 @@ cmd_cut() {
 $version is cut at $(short "$end"), dated $day, and builds on this Mac. Its notes
 are on release-notes/v$version, which is checked out:
 
-  - write its user guide with \`just backfill docs\`, a conversation for each
-    entry that changes what users do
+  - write its user guide with \`just backfill docs\`, one entry at a time
   - refine its notes in $FRAGMENTS/$version/, where an overview.md goes too, and
     write a highlight about an entry with \`just backfill highlight <entry>\`
   - read the notes with \`jp release render $version\`, or as a draft page under
@@ -1327,8 +1619,8 @@ finish() {
   # with `main`.
   mirror
 
-  # Changes a stopped docs conversation left to the guide ship with the release.
-  save_guide "$version" "docs(wiki): Write the guide of $version"
+  # Edits made to the guide by hand after the last entry ship with the release.
+  save_guide "$version" "docs(wiki): Edit the guide of $version"
   day=$(git show -s --format=%cs "$(start_of "$version")")
   say "Finalizing $version, dated $day."
   dated_jp "$day" release finalize "$version" >/dev/null ||
@@ -1354,7 +1646,7 @@ build_latest() {
 
 cmd_proceed() {
   need_clone proceed
-  local version
+  local version left
   version=$(preparing)
   [ "$(count_of "$version")" -le 1 ] ||
     die "More than one release is in preparation: $(joined "$version")."
@@ -1363,6 +1655,10 @@ cmd_proceed() {
   fi
   tools
   if [ -n "$version" ]; then
+    version=$(guided_release)
+    left=$(pending_items "$version" | item_labels)
+    [ -z "$left" ] ||
+      die "The guide of $version has parts left: $left. \`just backfill docs proceed\` commits the one in progress, \`just backfill docs\` writes the rest, and \`just backfill docs finish\` notes that they need none."
     finish "$version"
   fi
   build_latest
@@ -1399,6 +1695,7 @@ cmd_revert() {
     say "Taking back $version."
     save_guide "$version" "docs(wiki): Write the guide of $version"
     keep_guide "$version"
+    forget_docs "$version"
     # `abandon` refuses a release `origin` has tagged, which here is only the
     # stand-in.
     if git ls-remote --exit-code origin "refs/tags/v$version" >/dev/null 2>&1; then
@@ -1416,7 +1713,7 @@ cmd_revert() {
   done
 
   clear_period
-  say "Took back $(joined "$reverting") and their builds; \`just backfill next\` starts $target's period again, with the notes as you left them, and \`just backfill docs\` brings back each release's guide."
+  say "Took back $(joined "$reverting") and their builds; \`just backfill next\` starts $target's period again, with the notes as you left them, and \`just backfill docs\` brings back each release's guide and goes through its entries again."
 }
 
 cmd_draft() {
@@ -1484,10 +1781,12 @@ cmd_draft() {
   tools
 
   work=$(mktemp -d)
-  if [ -n "$fresh" ]; then
+  if [ -n "$fresh" ] && [ -n "$after" ]; then
     git restore --source=HEAD --staged --worktree -- "$FRAGMENTS"
     git clean -fdq -- "$FRAGMENTS"
     say "Discarded the uncommitted drafts in $FRAGMENTS/."
+  elif [ -n "$fresh" ]; then
+    discard_period
   fi
   if [ -n "$only" ]; then
     printf '%s' "$only" >"$work/wanted"
@@ -1537,6 +1836,7 @@ cmd_publish() {
   on_main
   [ -z "$(git status --porcelain)" ] || die "Commit or discard the changes on main first."
   tools github
+  refresh
 
   versions=$(tagged)
   [ -n "$versions" ] || die "No release is finalized yet, so there is nothing to publish."
@@ -1560,7 +1860,8 @@ cmd_publish() {
 
 This publishes $(count_of "$versions") releases, $first to $last, to $github. It:
 
-  1. merges GitHub's main into the trial's, and brings $last's user guide into it
+  1. merges GitHub's main into the trial's, brings $last's user guide into it,
+     and brings back the fragments of $(setting branch)
   2. deletes GitHub's old v0.1.0, when it names another commit than this one's
   3. pushes every release branch and tag in one push
   4. runs \`jp release github publish\` for each release, oldest first
@@ -1588,6 +1889,7 @@ EOF
   fi
   push_main
   guide_to_main "$last"
+  restore_own
 
   if [ -n "$theirs" ] && [ "$theirs" != "$ours" ]; then
     say "Deleting GitHub's old v0.1.0."

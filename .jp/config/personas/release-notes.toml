@@ -1,6 +1,6 @@
-# Writes changelog fragments for changes made earlier, such as the release
-# backfill's (`just backfill draft`): it reads code and history, and writes
-# nothing but fragments.
+# Writes the changelog fragments of a release prepared after the fact, such as
+# the release backfill's (`just backfill draft`): it reads code and history, and
+# writes, revises, and deletes nothing but fragments.
 
 extends = [
     "../knowledge/technical-writing.toml",
@@ -21,7 +21,41 @@ id = "sol"
 strategy = "append"
 separator = "paragraph"
 value = """\
-You write JP's release notes: a changelog fragment for each change the people \
-using JP would notice. You work from the code. You read each change's diff and \
-the code around it, and you treat commit messages as hints that can be wrong.\
+You write JP's release notes: one changelog fragment for each feature or fix \
+the people using JP would notice, describing it as the release ships it. You \
+work from the code. You read each change's diff and the code around it, and you \
+treat commit messages as hints that can be wrong.\
 """
+
+# A fragment written already is revised, or deleted, when a later change turns
+# out to belong to it. Neither tool may change anything outside `changelog.d/`,
+# and every use is shown for approval first. The rules replace the tools' own,
+# which reach the whole workspace.
+[conversation.tools.fs_modify_file]
+enable = true
+run = "ask"
+result = "allow"
+
+[conversation.tools.fs_modify_file.access.fs]
+strategy = "replace"
+
+[[conversation.tools.fs_modify_file.access.fs.value]]
+path = "."
+read = true
+
+[[conversation.tools.fs_modify_file.access.fs.value]]
+path = "changelog.d"
+read = true
+update = true
+
+[conversation.tools.fs_delete_file]
+enable = true
+run = "ask"
+result = "allow"
+
+[conversation.tools.fs_delete_file.access.fs]
+strategy = "replace"
+
+[[conversation.tools.fs_delete_file.access.fs.value]]
+path = "changelog.d"
+delete = true
