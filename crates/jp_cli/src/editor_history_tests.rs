@@ -11,11 +11,9 @@ fn at(secs: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, secs).unwrap()
 }
 
-/// The history shows the chat requests and responses of the last turns, newest
-/// first.
-/// Reasoning and tool calls are omitted, and do not count toward the ten-entry
-/// limit: the first turn's ten tool call events would otherwise push its
-/// request out of the history.
+/// Render chat requests and responses newest first, omitting reasoning and tool
+/// calls before applying the 10-entry limit so the first turn's 10 tool events
+/// do not push its request out of the history.
 #[test]
 fn history_omits_reasoning_and_tool_calls() {
     let mut stream = ConversationStream::new_test();

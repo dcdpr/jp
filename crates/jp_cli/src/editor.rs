@@ -467,9 +467,8 @@ fn build_history_text(history: &ConversationStream, local_offset: FixedOffset) -
         text.push_str("\n# Conversation History (last 10 entries)");
     }
 
-    // Only chat requests and responses are shown; reasoning, tool calls,
-    // inquiries and turn boundaries are skipped before the limit is applied,
-    // so a tool-heavy turn does not crowd out the messages around it.
+    // Filter before `take(10)` so a tool-heavy turn does not crowd out
+    // surrounding messages.
     let messages = history
         .iter()
         .rev()
@@ -480,12 +479,12 @@ fn build_history_text(history: &ConversationStream, local_offset: FixedOffset) -
     text
 }
 
-/// Column at which history entries are wrapped.
 const HISTORY_WRAP_WIDTH: usize = 80;
 
-/// Render one chat request or response for the editor history.
+/// Render a `ChatRequest` or non-reasoning `ChatResponse` for the editor
+/// history.
 ///
-/// Returns `None` for every other kind of event.
+/// Reasoning, tool calls, inquiries, and turn boundaries return `None`.
 fn history_entry(
     event: &ConversationEventWithConfigRef<'_>,
     local_offset: FixedOffset,
