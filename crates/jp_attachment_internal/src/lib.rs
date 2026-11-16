@@ -502,7 +502,7 @@ fn collect_selected_events(
         .collect()
 }
 
-/// The events of the turns in `start..end`, one `Vec` per turn, in order.
+/// Group the events of turns in `start..end` into one `Vec` per turn.
 fn turns_in(stream: &ConversationStream, start: usize, end: usize) -> Vec<Vec<&ConversationEvent>> {
     let mut turns = vec![Vec::new(); end.saturating_sub(start)];
     for event in stream.iter_events_by_turn() {

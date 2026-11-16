@@ -80,8 +80,6 @@ fn events_by_turn_is_empty_for_an_empty_stream() {
     assert_eq!(stream.turn_count(), 0);
 }
 
-/// The last turn's events according to `iter_turns`, paired with the same
-/// according to the config-free `last_turn_events`.
 fn last_turns(stream: &ConversationStream) -> (Vec<&ConversationEvent>, Vec<&ConversationEvent>) {
     let via_turns = stream
         .iter_turns()
@@ -93,14 +91,13 @@ fn last_turns(stream: &ConversationStream) -> (Vec<&ConversationEvent>, Vec<&Con
     (via_turns, direct)
 }
 
-/// A delta that changes something, so `add_config_delta` records it.
+/// Non-empty config delta (`add_config_delta` ignores empty partials).
 fn color_delta() -> PartialAppConfig {
     let mut partial = PartialAppConfig::empty();
     partial.style.code.color = Some(false);
     partial
 }
 
-/// The `ChatRequest` contents of `events`, in order.
 fn requests<'a>(events: &[&'a ConversationEvent]) -> Vec<&'a str> {
     events
         .iter()

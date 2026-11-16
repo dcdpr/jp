@@ -1292,13 +1292,13 @@ impl ConversationStream {
         })
     }
 
-    /// The events of the last turn, in stream order.
+    /// Iterate over the events of the last turn in stream order.
     ///
-    /// The same events as the last [`Turn`] from [`Self::iter_turns`]: from the
-    /// last [`TurnStart`] onwards, or the whole stream when it holds no
-    /// `TurnStart`.
-    /// Empty for a stream with no events.
-    /// Resolves no per-event configuration and allocates nothing.
+    /// Yields the same events as the last [`Turn`] from [`Self::iter_turns`]:
+    /// every event from the last [`TurnStart`] onward, or the entire stream if
+    /// there is no `TurnStart` (and nothing if the stream is empty).
+    /// Unlike `iter_turns`, this does not resolve per-event configuration or
+    /// allocate.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn last_turn_events(&self) -> impl DoubleEndedIterator<Item = &ConversationEvent> {

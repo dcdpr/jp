@@ -1,29 +1,24 @@
-//! Walking a conversation stream with each event's configuration, and what one
-//! step of that walk yields.
+//! Config-resolving iterators and item types for [`ConversationStream`].
 //!
-//! Every iterator here resolves the configuration each event was recorded
-//! under, and yields a `…WithConfig` view carrying it.
-//! [`ConversationStream::iter`] and [`ConversationStream::iter_mut`] walk the
-//! events alone, without any of this.
-//! A stream stores config as a base plus a series of deltas, so an event's
-//! config is the base with every delta *before it* folded in: a forward walk
-//! carries that state as it goes, and a reverse walk resolves the config after
-//! each remaining delta once, when it starts, and steps back through them.
+//! [`ConversationStream::iter_with_config`] (borrowed, [`Iter`]) and
+//! [`ConversationStream::into_iter`] (owned, [`IntoIter`]) walk the stream from
+//! either end, yielding each [`ConversationEvent`] with its [`EventId`] and the
+//! [`PartialAppConfig`] in effect when it was recorded.
+//! For event-only iteration without config resolution, use
+//! [`ConversationStream::iter`] or [`ConversationStream::iter_mut`].
 //!
-//! Entries that are not conversation events are stepped over: a config delta is
-//! folded into the running state, and compactions, patch overlays, and entries
-//! this build does not recognize are skipped entirely.
+//! A stream stores a base config plus inline [`ConfigDelta`] entries.
+//! Forward iteration folds deltas into the running config as it advances;
+//! backward iteration precomputes the config after each remaining delta on the
+//! first [`next_back`] call and pops them as it steps back over deltas.
+//! Consecutive events with no config delta between them share a single
+//! `Arc<PartialAppConfig>` in both directions.
 //!
-//! Two iterators, by what the caller may do with what it gets:
+//! Non-event entries (config deltas, compactions, overlays, and unrecognized
+//! entries) are not yielded.
 //!
-//! - [`Iter`] borrows, and walks from either end.
-//! - [`IntoIter`] takes ownership, and walks from either end.
-//!
-//! In either direction, both share one config between every event they yield
-//! until a delta changes it, so a walk copies the config once per delta rather
-//! than once per event.
-//!
-//! Each yields an event's entry ID alongside it.
+//! [`ConfigDelta`]: super::ConfigDelta
+//! [`next_back`]: DoubleEndedIterator::next_back
 
 use std::sync::Arc;
 
@@ -63,8 +58,8 @@ impl Extend<ConversationEventWithConfig> for ConversationStream {
                 config,
             } = v;
 
-            // Events from the same source share a config until a delta changes
-            // it, and a delta from a config to itself changes nothing.
+            // Consecutive events with no config delta between them share the
+            // same `Arc`, so skip diffing when the pointer has not changed.
             if !Arc::ptr_eq(&tail, &config) {
                 let config_delta = tail.delta((*config).clone());
                 if !config_delta.is_empty() {
@@ -106,19 +101,17 @@ impl IntoIterator for ConversationStream {
     }
 }
 
-/// An owned iterator over the events in a conversation stream.
+/// An owned iterator over the events and configs in a [`ConversationStream`].
 pub struct IntoIter {
-    /// The configuration state for the next event in the iterator.
-    ///
-    /// Shared with every event yielded since the last delta; folding a delta
-    /// copies it only while a yielded event still holds it.
+    /// Running config for forward iteration, shared across events until the
+    /// next config delta.
     current_config: Arc<PartialAppConfig>,
 
-    /// The configs a backward walk steps through, resolved by the first
-    /// `next_back`.
+    /// Precomputed configs for backward iteration, initialized on the first
+    /// `next_back` call.
     back_configs: Option<BackConfigs>,
 
-    /// The iterator over the events in the stream.
+    /// Remaining stream entries to iterate over.
     inner_iter: std::vec::IntoIter<InternalEvent>,
 }
 
@@ -177,26 +170,27 @@ impl DoubleEndedIterator for IntoIter {
     }
 }
 
-/// The configs a backward walk steps through.
+/// Precomputed config snapshots for backward iteration.
 ///
-/// Resolved once, when the walk starts: the config in effect at the front of
-/// the remaining entries, then the config after each config delta among them,
-/// in stream order.
-/// The last is the config of the event at the back; stepping back over a delta
-/// drops the config it produced.
-/// What the front of the walk folds afterwards does not change these, since an
-/// event's config depends only on the deltas before it.
+/// Built once on the first `next_back` call from `front` (the config in effect
+/// before the remaining slice) and the config after each remaining
+/// [`ConfigDelta`] in stream order.
+/// Advancing the front of the iterator afterwards does not invalidate these
+/// snapshots, because an event's config depends only on the deltas that precede
+/// it.
+///
+/// [`ConfigDelta`]: super::ConfigDelta
 pub(super) struct BackConfigs {
-    /// The config in effect before the first remaining delta.
+    /// Config in effect before the first remaining delta.
     front: Arc<PartialAppConfig>,
 
-    /// The config after each remaining delta, in stream order.
+    /// Config after each remaining delta, in stream order.
     after_deltas: Vec<Arc<PartialAppConfig>>,
 }
 
 impl BackConfigs {
-    /// Resolve the configs for a backward walk over `entries`, where `front` is
-    /// the config in effect before the first of them.
+    /// Precompute the config after each [`ConfigDelta`] in `entries`, starting
+    /// from `front`.
     fn new(front: &Arc<PartialAppConfig>, entries: &[InternalEvent]) -> Self {
         let mut after_deltas: Vec<Arc<PartialAppConfig>> = Vec::new();
         for entry in entries {
@@ -208,8 +202,8 @@ impl BackConfigs {
             if let Err(error) = config_delta::fold(&mut config, delta.clone()) {
                 error!(%error, "Failed to merge config delta.");
             }
-            // Pushed even when the fold fails, so each delta the walk steps
-            // back over still has exactly one entry to drop.
+            // Push even if folding fails so `after_deltas` stays 1:1 with
+            // `ConfigDelta` entries when popping in `step_over_delta`.
             after_deltas.push(Arc::new(config));
         }
 
@@ -219,36 +213,35 @@ impl BackConfigs {
         }
     }
 
-    /// The config of the next event a backward walk reaches.
+    /// Return the config in effect at the current back position.
     fn current(&self) -> Arc<PartialAppConfig> {
         Arc::clone(self.after_deltas.last().unwrap_or(&self.front))
     }
 
-    /// Step back over a config delta.
+    /// Pop the latest delta's config when stepping backward over a
+    /// [`ConfigDelta`].
     fn step_over_delta(&mut self) {
         self.after_deltas.pop();
     }
 }
 
-/// An iterator over the borrowed events in a conversation stream.
+/// A borrowed iterator over the events and configs in a [`ConversationStream`].
 pub(super) struct Iter<'a> {
     /// The stream being iterated over.
     pub(super) stream: &'a ConversationStream,
 
-    /// The configuration state for the first, next event in the iterator.
-    ///
-    /// Shared with every event yielded since the last delta; folding a delta
-    /// copies it only while a yielded event still holds it.
+    /// Running config for forward iteration, shared across events until the
+    /// next config delta.
     pub(super) front_config: Arc<PartialAppConfig>,
 
-    /// The configs a backward walk steps through, resolved by the first
-    /// `next_back`.
+    /// Precomputed configs for backward iteration, initialized on the first
+    /// `next_back` call.
     pub(super) back_configs: Option<BackConfigs>,
 
-    /// The index of the `next` event in the iterator.
+    /// Start of the unyielded slice (`stream.events[front..back]`).
     pub(super) front: usize,
 
-    /// The index of the `next_back` event in the iterator.
+    /// End of the unyielded slice (`stream.events[front..back]`).
     pub(super) back: usize,
 }
 

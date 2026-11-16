@@ -3635,8 +3635,6 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
     assert_eq!(source_events, dest_events);
 }
 
-/// Events between two config deltas share one config, so walking a stream costs
-/// a config copy per delta rather than per event.
 #[test]
 fn iter_shares_config_between_deltas() {
     let stream = two_configs();
@@ -3655,8 +3653,6 @@ fn iter_shares_config_between_deltas() {
     );
 }
 
-/// An owned walk shares one config between events the same way a borrowed one
-/// does, so consuming a stream costs a config copy per delta, not per event.
 #[test]
 fn into_iter_shares_config_between_deltas() {
     let stream = two_configs();
@@ -3675,7 +3671,6 @@ fn into_iter_shares_config_between_deltas() {
     );
 }
 
-/// Two events, a delta, and a third event; the first two share a config.
 fn two_configs() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.push(ChatRequest::from("first"));
@@ -3688,8 +3683,6 @@ fn two_configs() -> ConversationStream {
     stream
 }
 
-/// Deltas before the first event, between events, a reset, and after the last
-/// event.
 fn layered_configs() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
 
@@ -3723,8 +3716,8 @@ fn layered_configs() -> ConversationStream {
     stream
 }
 
-/// Walk `iter` alternately from the back and the front, and return what it
-/// yielded in stream order.
+/// Drain `iter` by alternating `next_back` and `next`, returning items in
+/// stream order.
 fn walk_from_both_ends<I: DoubleEndedIterator>(mut iter: I) -> Vec<I::Item> {
     let mut front = Vec::new();
     let mut back = Vec::new();
@@ -3738,8 +3731,6 @@ fn walk_from_both_ends<I: DoubleEndedIterator>(mut iter: I) -> Vec<I::Item> {
     front
 }
 
-/// A backward walk shares configs the same way a forward one does, so adding
-/// `.rev()` does not change what a walk costs.
 #[test]
 fn iter_with_config_rev_shares_config_between_deltas() {
     let stream = two_configs();
@@ -3800,8 +3791,8 @@ fn into_iter_resolves_the_same_configs_in_both_directions() {
     assert_eq!(forward, backward);
 }
 
-/// The front of a walk folding deltas the back has already accounted for does
-/// not shift the configs the back resolves.
+/// Advancing the front of the iterator past deltas does not affect the configs
+/// yielded from the back.
 #[test]
 fn iter_with_config_resolves_the_same_configs_from_both_ends() {
     let stream = layered_configs();
@@ -3822,8 +3813,6 @@ fn into_iter_resolves_the_same_configs_from_both_ends() {
     assert_eq!(forward, mixed);
 }
 
-/// Folding a delta into the walk's config leaves configs already yielded
-/// unchanged.
 #[test]
 fn iter_delta_does_not_change_earlier_events_config() {
     let mut stream = ConversationStream::new_test();
