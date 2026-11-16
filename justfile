@@ -2149,7 +2149,7 @@ serve-bookworm: _install-bookworm
 
 # Build all command plugin binaries for a target (defaults to host).
 [group('plugins')]
-plugin-build TARGET="":
+plugin-build $TARGET="":
     #!/usr/bin/env sh
     set -eu
     target="${TARGET:-$(rustc -vV | sed -n 's/host: //p')}"
