@@ -1,11 +1,11 @@
-//! Context the bridge looks up and appends to a message before its turn runs.
+//! Pre-turn context lookups appended to a message before its turn runs.
 //!
-//! [`Injector::lookups`] decides what to look up for a message: a command for
-//! each id it names that matches an `inject.references` pattern, then the
-//! `inject.packs` entry the decide model picked, if its probability meets
-//! `inject.threshold`.
-//! [`Injector::inject`] runs those commands concurrently in the workspace, and
-//! [`render`] appends their output to the message under [`HEADING`].
+//! [`Injector::lookups`] collects the commands to run for a message: one for
+//! each distinct match of an `inject.references` pattern (up to
+//! [`MAX_REFERENCES`]), followed by the `inject.packs` entry selected by the
+//! decide model when its probability meets `inject.threshold`.
+//! [`Injector::inject`] runs those commands concurrently in the workspace root,
+//! and [`render`] appends their output to the message under [`HEADING`].
 
 use std::{
     collections::BTreeSet, future::Future, pin::Pin, process::Stdio, sync::Arc, time::Duration,
@@ -25,22 +25,20 @@ use crate::{decide::Pick, options::InjectOptions};
 /// Heading of the section appended to a message.
 pub(crate) const HEADING: &str = "# Auto-Injected Context";
 
-/// The most ids one message has looked up, in the order it names them.
+/// Maximum number of reference lookups per message, in match order.
 const MAX_REFERENCES: usize = 5;
 
-/// How long one lookup may run before it is abandoned.
+/// Per-command execution timeout before the child process is killed.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A lookup's output, or why it failed.
 pub(crate) type Output = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
 
-/// Runs a lookup's command.
 pub(crate) trait Run: Send + Sync {
-    /// Run `command` (program, then arguments) and return its standard output.
+    /// Run `command` (program and arguments) and return its standard output.
     fn run(&self, command: &[String]) -> Output;
 }
 
-/// [`Run`] as child processes in the workspace root.
+/// [`Run`] implementation that spawns child processes in the workspace root.
 pub(crate) struct Process {
     root: Utf8PathBuf,
 }
@@ -80,32 +78,29 @@ impl Run for Process {
     }
 }
 
-/// One command to run for a message, and the heading of its output.
+/// A context lookup command and the markdown heading for its output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Lookup {
     pub title: String,
     pub command: Vec<String>,
 }
 
-/// A lookup that produced output.
+/// Completed lookup and its captured standard output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Section {
     pub lookup: Lookup,
     pub output: String,
 }
 
-/// What the lookups for one message produced.
+/// Results of running all context lookups for a single message.
 #[derive(Debug)]
 pub(crate) struct Injected {
     pub sections: Vec<Section>,
-
-    /// Lookups that failed, each with its error.
     pub failures: Vec<(Lookup, String)>,
-
     pub took: Duration,
 }
 
-/// Looks up context for messages, as `inject` configures.
+/// Builds and runs pre-turn context lookups configured under `inject`.
 pub(crate) struct Injector {
     options: InjectOptions,
     runner: Arc<dyn Run>,
@@ -116,14 +111,14 @@ impl Injector {
         Self { options, runner }
     }
 
-    /// Characters of one lookup's output kept by [`render`].
+    /// Maximum characters retained per lookup output by [`render`].
     pub(crate) fn max_chars(&self) -> usize {
         self.options.max_chars
     }
 
-    /// What to look up for `text`: each distinct reference match, in the order
-    /// `text` names them, up to [`MAX_REFERENCES`], then `pick`'s pack when its
-    /// probability meets the threshold.
+    /// Collect the lookups for `text`: up to [`MAX_REFERENCES`] distinct
+    /// reference matches in order of appearance, followed by the pack in `pick`
+    /// if its probability meets `options.threshold`.
     pub(crate) fn lookups(&self, text: &str, pick: Option<&Pick>) -> Vec<Lookup> {
         let mut seen = BTreeSet::new();
         let mut lookups = vec![];
@@ -154,7 +149,7 @@ impl Injector {
         lookups
     }
 
-    /// Run `lookups` concurrently, keeping their order.
+    /// Run `lookups` concurrently and return results in input order.
     pub(crate) async fn inject(&self, lookups: Vec<Lookup>) -> Injected {
         let started = Instant::now();
         let mut running = JoinSet::new();
@@ -183,8 +178,9 @@ impl Injector {
     }
 }
 
-/// `command` with `{0}` replaced by the whole match in `captures`, and `{1}`
-/// onwards by its groups; a group that didn't match becomes empty.
+/// Replace `{0}` in each argument of `command` with the full regex match and
+/// `{1}`, `{2}`, ... with capture groups (or `""` for unmatched optional
+/// groups).
 fn substitute(command: &[String], captures: &Captures<'_>) -> Vec<String> {
     command
         .iter()
@@ -197,11 +193,11 @@ fn substitute(command: &[String], captures: &Captures<'_>) -> Vec<String> {
         .collect()
 }
 
-/// `text` with `sections` appended under [`HEADING`], each section's output
-/// truncated to `max_chars` characters.
+/// Append `sections` to `text` under [`HEADING`], truncating each section's
+/// output to `max_chars` characters.
 ///
-/// `today` dates the section, so the assistant reads it as a snapshot on a
-/// later turn.
+/// Includes `today` in the section header so later turns treat the output as a
+/// snapshot from that date.
 pub(crate) fn render(
     text: &str,
     today: NaiveDate,
@@ -225,7 +221,8 @@ pub(crate) fn render(
     out
 }
 
-/// `output` cut to `max_chars` characters, saying so when it was cut.
+/// Truncate `output` to `max_chars` characters, appending a truncation notice
+/// when shortened.
 fn truncate(output: &str, max_chars: usize) -> String {
     match output.char_indices().nth(max_chars) {
         None => output.to_owned(),
@@ -233,8 +230,8 @@ fn truncate(output: &str, max_chars: usize) -> String {
     }
 }
 
-/// A code fence longer than any run of backticks in `output`, so a fence inside
-/// the output can't close it.
+/// Return a backtick code fence longer than any run of backticks in `output`
+/// (minimum 3) so embedded fences cannot close the block early.
 fn fence(output: &str) -> String {
     let longest = output.split(|c| c != '`').map(str::len).max().unwrap_or(0);
 

@@ -9,8 +9,9 @@
 //!   over `signal-cli` in JSON-RPC mode.
 //! - `bridge` routes messages from allowed senders to conversations and
 //!   schedules turns, with `inbox` buffering messages awaiting a `decide`
-//!   verdict and `queue` batching messages awaiting a turn; `turn` builds each
-//!   turn's request and runs it on the host.
+//!   verdict, `inject` running pre-turn context lookups, and `queue` batching
+//!   messages awaiting a turn; `turn` builds each turn's request and runs it on
+//!   the host.
 //! - `checkout` locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable
 //!   directories.

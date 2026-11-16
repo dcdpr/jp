@@ -26,10 +26,11 @@
 //! tool_calls = { mode = "strip" }
 //! ```
 //!
-//! `inject` appends looked-up context to a message before its turn runs: the
-//! output of a command for each id the message names (`references`), and of the
-//! one `packs` entry the decide model picks for it.
-//! It needs `decide`:
+//! `inject` runs pre-turn context lookups and appends their output to the
+//! message before its turn runs: a command for each regex match in the message
+//! (`references`) and a command for the context pack selected by the decide
+//! model (`packs`).
+//! Requires `decide`:
 //!
 //! ```toml
 //! [[plugins.command.serve-chat.options.inject.references]]
@@ -91,11 +92,12 @@ pub(crate) const DEFAULT_INJECT_INSTRUCTIONS: &str =
 
 const DEFAULT_INJECT_MAX_CHARS: usize = 8000;
 
-/// The pack choice meaning "look nothing up", which no pack may be named.
+/// Reserved choice key meaning no context pack is needed; user-defined packs
+/// cannot use this name.
 pub(crate) const NO_PACK: &str = "none";
 
-/// The most packs one question can offer: System One allows 255 choices, and
-/// [`NO_PACK`] takes one.
+/// Maximum number of user-defined packs: System One allows 255 choices per
+/// question, and [`NO_PACK`] reserves one.
 const MAX_PACKS: usize = 254;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,49 +131,50 @@ pub(crate) struct Options {
     /// Compaction rules sent to the host when a user requests compaction.
     pub compact: Vec<Compaction>,
 
-    /// Context looked up and appended to messages before their turns.
+    /// Pre-turn context lookup configuration.
     pub inject: Option<InjectOptions>,
 }
 
-/// What the bridge looks up and appends to a message before its turn.
+/// Configuration for pre-turn context lookups.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InjectOptions {
-    /// Minimum probability for the decide model's pack pick to be looked up.
+    /// Minimum probability required to run the pack selected by the decide
+    /// model.
     pub threshold: f64,
 
-    /// Question prompt for picking a pack.
+    /// Question prompt sent to the decide model for pack selection.
     pub instructions: String,
 
-    /// Characters of one lookup's output kept; the rest is truncated.
+    /// Maximum characters retained per lookup output before truncation.
     pub max_chars: usize,
 
-    /// Context packs the decide model picks from, by name.
+    /// Named context packs offered to the decide model.
     pub packs: BTreeMap<String, Pack>,
 
-    /// Patterns whose matches in a message are looked up.
+    /// Regex patterns matched against incoming messages to trigger lookups.
     pub references: Vec<Reference>,
 }
 
-/// A context pack the decide model can pick for a message.
+/// A context pack the decide model can select for a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Pack {
-    /// When to pick it, as the criterion the decide model reads.
+    /// Criterion description sent to the decide model for selecting this pack.
     pub when: String,
 
-    /// Heading of its section; defaults to the pack's name.
+    /// Section heading in the injected context block; defaults to the pack key.
     pub title: String,
 
-    /// Program and arguments whose output is the pack's content.
+    /// Command (program and arguments) executed to produce the pack's output.
     pub command: Vec<String>,
 }
 
-/// A pattern whose matches in a message are looked up with `command`.
+/// A regex pattern that triggers a command lookup for each match in a message.
 #[derive(Debug, Clone)]
 pub(crate) struct Reference {
     pub pattern: Regex,
 
-    /// Program and arguments, with `{0}` replaced by the whole match and `{1}`
-    /// onwards by its capture groups.
+    /// Command (program and arguments) to run, with `{0}` replaced by the full
+    /// match and `{1}`, `{2}`, ... by capture groups.
     pub command: Vec<String>,
 }
 
@@ -565,7 +568,7 @@ fn reference_entry(index: usize, raw: RawReference) -> Result<Reference, String>
     })
 }
 
-/// Check `command` at `key` names a program to run.
+/// Validate that `command` at config path `key` has a non-empty program name.
 fn command(key: &str, command: &[String]) -> Result<(), String> {
     match command.first() {
         Some(program) if !program.trim().is_empty() => Ok(()),

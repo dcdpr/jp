@@ -131,8 +131,6 @@ fn packs() -> PackQuestion {
     }
 }
 
-/// With packs configured, the same request asks which one the assistant needs,
-/// offering `none` beside them.
 #[test]
 fn the_request_asks_which_pack_the_assistant_needs() {
     let body = request_body(&options(), "Last message:\nhi", Action::ALL, Some(&packs()));
@@ -178,8 +176,6 @@ fn the_verdict_carries_the_picked_pack() {
     );
 }
 
-/// `none`, an unknown pack, or a malformed pack answer picks no pack, and still
-/// leaves the action to act on.
 #[test]
 fn an_unusable_pack_answer_picks_none_and_keeps_the_action() {
     for pack in [

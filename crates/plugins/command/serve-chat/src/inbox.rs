@@ -41,8 +41,8 @@ pub(crate) enum Next {
     /// Route the message immediately.
     Take(Incoming),
 
-    /// Await this decision for the front message, whose text it carries, then
-    /// call [`Inbox::decided`].
+    /// Await the decision for the front message (paired with the message text),
+    /// then call [`Inbox::decided`].
     Decide(Decision, String),
 }
 

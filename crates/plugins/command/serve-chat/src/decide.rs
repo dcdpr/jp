@@ -99,29 +99,30 @@ pub(crate) struct Verdict {
     pub action: Action,
     pub probability: f64,
 
-    /// The context pack picked for the message, if a pack question was asked
-    /// and a pack other than [`NO_PACK`] was picked.
+    /// Context pack selected for the message, if a pack question was asked and
+    /// a pack other than [`NO_PACK`] was chosen.
     pub pack: Option<Pick>,
 }
 
-/// A context pack picked by the decide model, and its probability.
+/// Context pack selected by the decide model and its probability.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Pick {
     pub name: String,
     pub probability: f64,
 }
 
-/// The question asking which context pack the assistant needs.
+/// System One `choice` question for selecting a context pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PackQuestion {
     instructions: String,
 
-    /// Each pack's name and when to pick it.
+    /// Configured `(name, when)` pairs in deterministic order.
     packs: Vec<(String, String)>,
 }
 
 impl PackQuestion {
-    /// The pack question for `inject`, or `None` when it defines no packs.
+    /// Build the pack question from `inject`, or return `None` if no packs are
+    /// configured.
     pub(crate) fn new(inject: &InjectOptions) -> Option<Self> {
         if inject.packs.is_empty() {
             return None;
@@ -137,7 +138,7 @@ impl PackQuestion {
         })
     }
 
-    /// The question as System One takes it.
+    /// Serialize this question as a System One `choice` definition.
     fn request(&self) -> Value {
         let mut criteria = Map::new();
         criteria.insert(NO_PACK.to_owned(), json!(NO_PACK_DESCRIPTION));
@@ -148,11 +149,12 @@ impl PackQuestion {
         json!({ "type": "choice", "instructions": self.instructions, "criteria": criteria })
     }
 
-    /// The pack picked in `body`, or `None` for [`NO_PACK`], or when the answer
-    /// is missing or names no pack.
+    /// Extract the selected pack from `body`, returning `None` if the model
+    /// chose [`NO_PACK`] or if the pack answer is missing, unknown, or
+    /// malformed.
     ///
-    /// An unusable pack answer costs the lookup, not the action, so it is not
-    /// an error.
+    /// Pack selection is best-effort: an invalid pack answer skips the pack
+    /// lookup without failing the action verdict.
     fn pick(&self, body: &Value) -> Option<Pick> {
         let answer = body.pointer(&format!("/answers/{PACK_QUESTION}"))?;
         let choice = answer.get("choice").and_then(Value::as_str)?;
@@ -237,8 +239,8 @@ impl Decide for SystemOne {
     }
 }
 
-/// Build the System One JSON request body for `state` and `actions`, and the
-/// pack question when `packs` is set.
+/// Build the System One JSON request body for `state`, `actions`, and the
+/// optional `packs` question.
 pub(crate) fn request_body(
     options: &DecideOptions,
     state: &str,
@@ -265,8 +267,8 @@ pub(crate) fn request_body(
     })
 }
 
-/// Parse the chosen [`Action`] and its probability from a System One response,
-/// and the picked pack when `packs` was asked.
+/// Parse the chosen [`Action`], its probability, and the optional pack [`Pick`]
+/// from a System One response.
 pub(crate) fn verdict(
     body: &Value,
     actions: &[Action],

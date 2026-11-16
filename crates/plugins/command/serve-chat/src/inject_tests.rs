@@ -96,9 +96,6 @@ fn lookup(title: &str, command: &str) -> Lookup {
     }
 }
 
-/// Each id is looked up once, in the order the message names it, with `{0}`
-/// standing for the whole match and `{1}` for its first group; the picked pack
-/// comes last.
 #[test]
 fn a_message_looks_up_each_id_it_names_then_the_picked_pack() {
     let (injector, _) = injector(FakeRunner::default());
@@ -137,7 +134,6 @@ fn a_message_looks_up_at_most_five_ids() {
     );
 }
 
-/// A pick below the threshold, or naming no configured pack, looks nothing up.
 #[test]
 fn only_a_confident_pick_of_a_configured_pack_is_looked_up() {
     let (injector, _) = injector(FakeRunner::default());
@@ -157,9 +153,6 @@ fn only_a_confident_pick_of_a_configured_pack_is_looked_up() {
     assert_eq!(injector.lookups("what's old?", None), []);
 }
 
-/// The lookups run at once, so the slowest decides how long they take, and
-/// their sections keep the lookups' order whichever finishes first.
-/// A failed lookup is reported, not rendered.
 #[tokio::test(start_paused = true)]
 async fn lookups_run_concurrently_and_keep_their_order() {
     let (injector, runner) = injector(
@@ -268,8 +261,6 @@ fn render_truncates_long_output_and_says_so() {
     );
 }
 
-/// Output holding a code fence (a ticket's description often does) is wrapped
-/// in a longer fence, so the inner one can't end the section early.
 #[test]
 fn render_fences_output_holding_a_fence_with_a_longer_one() {
     let rendered = render(

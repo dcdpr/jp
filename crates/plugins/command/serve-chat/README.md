@@ -147,20 +147,28 @@ because the turn holds the conversation lock.
   delivered as an in-turn reply.
 - The persona's `NO_REPLY` sentinel still applies to turns that run.
 
+Signal mentions may reference the bridge's account by UUID (ACI) instead of
+phone number.
+Set `signal.account_id` to the bridge account's UUID so those mentions are
+recognized (look for `sourceUuid` on messages from the bridge's number in
+`signal-cli -o json receive`).
+
 ### Injected context
 
-With `decide` set, the bridge can look things up for a message before its turn
-runs, and append them to the message under an `# Auto-Injected Context`
-heading, so the assistant has them without calling a tool:
+When `decide` is configured, the bridge can run pre-turn context lookups for a
+message and append the output under an `# Auto-Injected Context` heading, so the
+assistant has the context without calling a tool:
 
-- **References**: each id the message names that matches a pattern in
-  `inject.references` runs that reference's command, `{0}` standing for the
-  whole match and `{1}` onwards for its groups. At most five ids are looked up
-  per message.
-- **Packs**: the decide request asks a second question, which of
-  `inject.packs` (or none) the assistant needs, and runs the picked pack's
-  command when its probability is at least `inject.threshold`. Each pack's
-  `when` is the criterion the decide model reads.
+- **References**: for each distinct match of an `inject.references` regex in the
+  message (up to five per message), the bridge runs that reference's command
+  with `{0}` replaced by the full match and `{1}`, `{2}`, ... by capture groups.
+- **Packs**: the decide request includes a second `choice` question asking which
+  pack in `inject.packs` (or `none`) the assistant needs, and runs the selected
+  pack's command when its probability is at least `inject.threshold`.
+  Each pack's `when` field is the criterion description sent to the decide
+  model.
+
+<!-- end list -->
 
 ```toml
 [[plugins.command.serve-chat.options.inject.references]]
@@ -188,25 +196,19 @@ title = "Done"
 command = ["jp", "ticket", "board", "--status", "done", "--limit", "20"]
 ```
 
-Adding or removing a pack is a configuration change: the bridge offers the
-decide model whatever packs are configured when it starts.
+Packs are read from configuration at startup; adding or removing a pack requires
+no code change.
 
-- Commands run in the workspace root, concurrently, each for at most ten
-  seconds. Each output is truncated to `inject.max_chars` characters.
-- A failed lookup is logged (`Context lookup failed.`) and left out; the
-  message goes on without it.
-- Nothing is looked up for a message that isn't answered.
-- `Message classified.` logs the picked pack and its probability, and
-  `Context looked up.` logs what was looked up, which shows which packs are
-  used, and which questions might need a new one.
-- The context stays in the conversation, dated, so on a later turn the
-  assistant reads it as a snapshot.
-
-Signal mentions may reference the bridge's account by UUID (ACI) instead of
-phone number.
-Set `signal.account_id` to the bridge account's UUID so those mentions are
-recognized (look for `sourceUuid` on messages from the bridge's number in
-`signal-cli -o json receive`).
+- Commands run concurrently in the workspace root with a 10-second timeout per
+  command.
+  Each command's output is truncated to `inject.max_chars` characters.
+- Failed lookups are logged (`Context lookup failed.`) and omitted; the turn
+  still runs without them.
+- Lookups run only for messages classified as `answer`.
+- `Message classified.` logs the selected pack and its probability, and `Context
+  looked up.` logs the completed lookups, failure count, and duration.
+- The injected section stays in the conversation with the lookup date so later
+  turns treat it as a snapshot.
 
 ## The checkout
 
@@ -360,7 +362,7 @@ turn even within an existing conversation.
 | `decide.threshold`       | `0.5`                                  |
 | `decide.instructions`    | "What should the assistant do...?"     |
 | `inject.threshold`       | `0.5`                                  |
-| `inject.instructions`    | "Which of these would ... need...?"     |
+| `inject.instructions`    | "Which of these would ... need...?"    |
 | `inject.max_chars`       | `8000`                                 |
 | `inject.packs`           | none                                   |
 | `inject.references`      | none                                   |

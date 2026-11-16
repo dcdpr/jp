@@ -144,10 +144,7 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     paused: Option<Vec<Chat>>,
 
     inbox: Inbox,
-
-    /// Looks up context for messages to be answered, when `inject` is set.
     injector: Option<Arc<Injector>>,
-
     events_tx: mpsc::UnboundedSender<Event>,
     events_rx: mpsc::UnboundedReceiver<Event>,
 }
@@ -191,7 +188,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         self
     }
 
-    /// The probability a decided action needs to be acted on.
+    /// Minimum probability required to act on a [`Verdict`].
     fn threshold(&self) -> f64 {
         self.options
             .decide
@@ -436,8 +433,8 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         self.pump();
     }
 
-    /// Append the context `injected` produced to `incoming`'s text, and log the
-    /// lookups.
+    /// Log the lookup results in `injected` and append any rendered sections to
+    /// `incoming.text`.
     fn with_context(&self, mut incoming: Incoming, injected: &Injected) -> Incoming {
         let chat = incoming.chat.to_string();
         for (lookup, error) in &injected.failures {
@@ -894,8 +891,9 @@ fn action(verdict: Option<&Verdict>, threshold: f64) -> Action {
         .map_or(Action::Answer, |verdict| verdict.action)
 }
 
-/// Look up context for the message `text` when `verdict` says to answer it, or
-/// `None` when it isn't answered or nothing is to be looked up.
+/// Run context lookups for `text` when `verdict` resolves to
+/// [`Action::Answer`], returning `None` if the message is not answered or
+/// matches no lookups.
 async fn look_up(
     injector: &Injector,
     text: &str,

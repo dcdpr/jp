@@ -172,7 +172,6 @@ fn a_decide_threshold_is_a_probability() {
     );
 }
 
-/// [`minimal`], deciding with Jev and injecting `inject`.
 fn injecting(inject: Value) -> Value {
     let mut options = minimal();
     options["decide"] = json!({});
@@ -224,8 +223,6 @@ fn inject_reads_packs_and_references() {
     assert_eq!(inject.references[0].pattern.as_str(), r"\bT-[0-9a-z]{7}\b");
 }
 
-/// The decide model picks the pack, and the lookups run while a message is
-/// decided, so `inject` without `decide` would never run.
 #[test]
 fn inject_needs_decide() {
     let mut options = minimal();

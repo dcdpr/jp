@@ -966,7 +966,6 @@ fn verdict(action: Action, probability: f64) -> Verdict {
     }
 }
 
-/// [`verdict`], with `pack` picked at `pack_probability`.
 fn verdict_with_pack(action: Action, pack: &str, pack_probability: f64) -> Verdict {
     Verdict {
         pack: Some(Pick {
@@ -1002,7 +1001,6 @@ fn args(command: &str) -> Vec<String> {
     command.split(' ').map(ToOwned::to_owned).collect()
 }
 
-/// [`deciding`], with ticket ids and an `oldest` pack looked up by `runner`.
 fn injecting(
     answers: Vec<Result<Verdict, String>>,
     runner: CannedRunner,
@@ -1086,9 +1084,6 @@ async fn a_group_message_the_decider_ignores_gets_no_turn() {
     })]);
 }
 
-/// A message to answer carries what it names and what the decide model picked,
-/// looked up before its turn starts, so the assistant needn't call a tool for
-/// them.
 #[tokio::test(start_paused = true)]
 async fn a_message_to_answer_carries_the_context_looked_up_for_it() {
     let (mut f, runner) = injecting(
@@ -1156,8 +1151,6 @@ T-005zd00 Done         2026-08-06 Prepare ticket board
     })]);
 }
 
-/// Nothing is looked up for a message the bridge won't answer, whatever pack
-/// the decide model picked for it.
 #[tokio::test]
 async fn an_ignored_message_looks_nothing_up() {
     let (mut f, runner) = injecting(
@@ -1172,8 +1165,6 @@ async fn an_ignored_message_looks_nothing_up() {
     assert!(f.host.calls().is_empty(), "{:?}", f.host.calls());
 }
 
-/// A failed lookup costs its section, not the turn: it is logged and the
-/// message goes on without it.
 #[tokio::test]
 async fn a_failed_lookup_is_logged_and_left_out() {
     let (mut f, _) = injecting(
