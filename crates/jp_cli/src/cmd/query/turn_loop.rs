@@ -830,7 +830,7 @@ async fn drive_turn(
                                                 | StreamingInterruptResult::PromptFailed
                                                 | StreamingInterruptResult::Break => break,
                                                 StreamingInterruptResult::Abort => {
-                                                    return Ok(());
+                                                    return Ok(TurnEnding::Aborted);
                                                 }
                                                 StreamingInterruptResult::Escalate => {
                                                     signals.shutdown_token().cancel();

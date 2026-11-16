@@ -1016,6 +1016,137 @@ async fn a_client_abort_ends_the_turn_mid_stream() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
+/// A provider that streams part of an answer and then fails with a rate limit
+/// asking for a minute's wait, counting calls.
+#[derive(Debug, Default)]
+struct RateLimitedProvider {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for RateLimitedProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+
+        Ok(Box::pin(stream::iter([
+            Ok(Event::message(0, "Partial")),
+            Err(StreamError::rate_limit(Some(Duration::from_mins(1)))),
+        ])))
+    }
+}
+
+/// An abort from a client that lands while the turn waits out a retry backoff
+/// ends the turn there, and is reported as an abort.
+///
+/// The abort is sent only once the backoff has registered its own interrupt
+/// handler, so it cannot be taken by the streaming loop instead.
+/// The partial answer in the conversation shows the backoff path ran: it is
+/// committed before the wait, while an abort taken mid-stream drops it.
+/// The backoff asks for a minute, so a turn that ends within the timeout is one
+/// the abort cut short.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_abort_during_retry_backoff_ends_the_turn_as_aborted() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+
+        let config = AppConfig::new_test();
+        let mut workspace = Workspace::in_memory(root);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+
+        let provider = Arc::new(RateLimitedProvider::default());
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let router = detached_router();
+        let turn_interrupt = router.turn_interrupt();
+        let (interrupt_tx, interrupts) = TurnInterrupts::channel();
+
+        // One handler for the streaming loop, one for the backoff wait.
+        let backoff_started = router.handlers_registered() + 2;
+        let abort_handle = tokio::spawn({
+            let router = router.clone();
+            async move {
+                while router.handlers_registered() < backoff_started {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                interrupt_tx
+                    .try_send(InterruptAction::Abort)
+                    .expect("the turn is still running")
+                    .await
+                    .expect("the turn acts on the abort");
+            }
+        });
+
+        let result = run_turn_loop(
+            provider.clone() as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false, // interactive
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            Arc::new(Printer::sink()),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("What is 2+2?"),
+            PendingStreamTrim::default(),
+            turn_interrupt,
+            interrupts,
+        )
+        .await;
+
+        abort_handle.await.unwrap();
+        let ending = result.expect("an abort is not an error");
+        assert_eq!(ending, TurnEnding::Aborted);
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            1,
+            "an abort ends the turn, so the request is not retried"
+        );
+
+        let messages: Vec<String> = lock
+            .events()
+            .iter()
+            .filter_map(|event| match event.as_chat_response() {
+                Some(ChatResponse::Message { message }) => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            messages,
+            ["Partial"],
+            "the partial answer committed before the backoff wait is kept"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
 /// Choosing `[a] Abort` from the Ctrl-C menu mid-stream ends the turn, and is
 /// reported as an abort.
 #[tokio::test]

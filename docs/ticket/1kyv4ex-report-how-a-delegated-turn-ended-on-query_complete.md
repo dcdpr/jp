@@ -91,3 +91,17 @@ Not covered by a test of its own: the abort exit inside the stream-error backoff
 (`StreamErrorOutcome::Interrupted`).
 It goes through the same `apply_streaming_interrupt` → `TurnPhase::Aborted`
 path as the tested exits.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-16T14:34:18Z
+- **Re**: #1
+
+Rebasing onto `main` brought in #1349, which adds a client-interrupt exit inside
+the retry backoff (`StreamErrorOutcome::ClientInterrupt`).
+Its abort arm now returns `TurnEnding::Aborted`.
+`a_client_abort_during_retry_backoff_ends_the_turn_as_aborted` covers it and
+fails if the arm reports `Stopped`.
+The Ctrl-C abort during the backoff (`StreamErrorOutcome::Interrupted`) still
+has no test of its own.
