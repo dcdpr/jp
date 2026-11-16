@@ -117,8 +117,8 @@ pub(crate) struct Host<'a> {
     /// Answers a question routed to an assistant instead of the user.
     pub inquiry_backend: &'a Arc<dyn InquiryBackend>,
 
-    /// The conversation each inquiry is recorded on.
-    pub conv: &'a ConversationMut,
+    /// Active conversation for recording and flushing inquiry events.
+    pub conv: &'a mut ConversationMut,
 
     /// What the user asked to remember for the turn, and the inquiry counter.
     pub turn_state: &'a mut TurnState,
@@ -1564,6 +1564,7 @@ impl ToolCoordinator {
                             .remember_answer(tool_name, &question_id, answer.clone());
                     }
                 }
+                Self::persist_inquiry_response(host.conv);
                 self.answer(batch, call, question_id, answer);
             }
             ToolEvent::Unanswered {
@@ -1580,6 +1581,7 @@ impl ToolCoordinator {
                 // error.
                 let result = Self::cancelled_input_result(&reason);
                 Self::record_inquiry_cancelled(host.conv, &inquiry_id, reason);
+                Self::persist_inquiry_response(host.conv);
                 let id = batch.calls[call].tool_id.clone();
                 let response = ToolCallResponse { id, result };
                 self.settle(batch, call, Review::replaced(response), host);
@@ -1590,36 +1592,15 @@ impl ToolCoordinator {
                 question_id,
                 question_text,
                 result,
-            } => {
-                // A withdrawn question was already closed.
-                let open = batch.calls[call]
-                    .question
-                    .take_if(|open| open.inquiry_id == inquiry_id);
-                if open.is_none() {
-                    return;
-                }
-                match result {
-                    Ok(answer) => {
-                        Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
-                        self.answer(batch, call, question_id, answer);
-                    }
-                    Err(error) => {
-                        Self::record_inquiry_cancelled(
-                            host.conv,
-                            &inquiry_id,
-                            Self::cancellation_reason(&error),
-                        );
-                        let Call {
-                            tool_id, tool_name, ..
-                        } = &batch.calls[call];
-                        let response = ToolCallResponse {
-                            id: tool_id.clone(),
-                            result: Err(Self::inquiry_failure(tool_name, &question_text, &error)),
-                        };
-                        self.settle(batch, call, Review::replaced(response), host);
-                    }
-                }
-            }
+            } => self.on_inquired(
+                batch,
+                call,
+                &inquiry_id,
+                question_id,
+                &question_text,
+                result,
+                host,
+            ),
             ToolEvent::Reviewed { call, review } => {
                 batch.prompt_returned();
                 self.on_reviewed(batch, call, review, host);
@@ -1629,6 +1610,49 @@ impl ToolCoordinator {
                 review,
                 connection_lost,
             } => self.on_folded(batch, group, review, connection_lost, host),
+        }
+    }
+
+    /// Handle the inquiry backend's response or error for a tool question.
+    fn on_inquired(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        inquiry_id: &InquiryId,
+        question_id: String,
+        question_text: &str,
+        result: Result<Value, InquiryError>,
+        host: &mut Host<'_>,
+    ) {
+        // A withdrawn question was already closed.
+        let open = batch.calls[index]
+            .question
+            .take_if(|open| open.inquiry_id == *inquiry_id);
+        if open.is_none() {
+            return;
+        }
+        match result {
+            Ok(answer) => {
+                Self::record_inquiry_answer(host.conv, inquiry_id, &answer);
+                Self::persist_inquiry_response(host.conv);
+                self.answer(batch, index, question_id, answer);
+            }
+            Err(error) => {
+                Self::record_inquiry_cancelled(
+                    host.conv,
+                    inquiry_id,
+                    Self::cancellation_reason(&error),
+                );
+                Self::persist_inquiry_response(host.conv);
+                let Call {
+                    tool_id, tool_name, ..
+                } = &batch.calls[index];
+                let response = ToolCallResponse {
+                    id: tool_id.clone(),
+                    result: Err(Self::inquiry_failure(tool_name, question_text, &error)),
+                };
+                self.settle(batch, index, Review::replaced(response), host);
+            }
         }
     }
 
@@ -2013,6 +2037,13 @@ impl ToolCoordinator {
         );
 
         if host.interactive && target.is_user() {
+            // Flush before opening the prompt so external readers see an
+            // unanswered InquiryRequest while the conversation lock is held.
+            // Flush errors are non-fatal; the phase-end flush retries.
+            if let Err(error) = host.conv.flush() {
+                warn!(%error, "Failed to persist a question before asking it.");
+            }
+
             let call = &mut batch.calls[index];
             call.wait = Wait::Answer;
             call.question = Some(OpenQuestion {
@@ -2101,6 +2132,7 @@ impl ToolCoordinator {
                         .cloned()
                 {
                     Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
+                    Self::persist_inquiry_response(host.conv);
                     batch.calls[call].question = None;
                     self.answer(batch, call, question.id.to_string(), answer);
                     return;
@@ -2249,6 +2281,7 @@ impl ToolCoordinator {
                 inquiry.cancel();
             }
             Self::record_inquiry_cancelled(host.conv, &open.inquiry_id, reason);
+            Self::persist_inquiry_response(host.conv);
         }
         // An operation of a fanned-out call is not recorded on its own; the
         // execution service folds it into its call, once told how it ended.
@@ -2402,6 +2435,18 @@ impl ToolCoordinator {
                 .build()
                 .expect("Invalid ConversationStream state");
         });
+    }
+
+    /// Flush the conversation to disk after recording an inquiry response.
+    ///
+    /// External readers treat an unanswered `InquiryRequest` on a locked
+    /// conversation as waiting on user input, so responses must be flushed
+    /// before the remaining tools in the batch continue running.
+    /// Flush errors are non-fatal; the phase-end flush retries.
+    fn persist_inquiry_response(conv: &mut ConversationMut) {
+        if let Err(error) = conv.flush() {
+            warn!(%error, "Failed to persist an inquiry response.");
+        }
     }
 
     /// Map an inquiry-backend error to its persisted [`CancellationReason`].

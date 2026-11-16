@@ -57,7 +57,7 @@ use jp_mcp::{
     server::builtin::{BuiltinExecutors, BuiltinTool},
 };
 use jp_printer::{OutputFormat, Printer, TerminalCapability};
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{FsStorageBackend, LoadBackend as _};
 use jp_tool::{InvocationContext, Outcome, Question, ToolDocs};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
@@ -7006,6 +7006,196 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
+/// A prompt backend that reads the conversation from disk each time a prompt
+/// opens, recording whether it held an unanswered question at that moment.
+struct DiskObservingPromptBackend {
+    inner: MockPromptBackend,
+    fs: Arc<FsStorageBackend>,
+    id: jp_conversation::ConversationId,
+    seen: Mutex<Vec<bool>>,
+}
+
+impl DiskObservingPromptBackend {
+    fn observe(&self) {
+        self.seen
+            .lock()
+            .unwrap()
+            .push(pending_on_disk(&self.fs, &self.id));
+    }
+}
+
+fn pending_on_disk(fs: &FsStorageBackend, id: &jp_conversation::ConversationId) -> bool {
+    fs.load_conversation_stream(id, &PartialAppConfig::empty())
+        .is_ok_and(|stream| !stream.pending_inquiries().is_empty())
+}
+
+impl PromptBackend for DiskObservingPromptBackend {
+    fn inline_select(
+        &self,
+        message: &str,
+        options: Vec<InlineOption>,
+        default: Option<char>,
+        writer: &mut dyn Write,
+    ) -> Result<char, InquireError> {
+        self.observe();
+        self.inner.inline_select(message, options, default, writer)
+    }
+
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        editor_escape: bool,
+        help: Option<&str>,
+        output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        self.observe();
+        self.inner.inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
+    }
+
+    fn select(
+        &self,
+        message: &str,
+        options: Vec<String>,
+        default: Option<usize>,
+        writer: &mut dyn Write,
+    ) -> Result<usize, InquireError> {
+        self.observe();
+        self.inner.select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        self.observe();
+        self.inner.password(message, writer)
+    }
+}
+
+/// Verifies that a user-targeted `InquiryRequest` is flushed to disk before its
+/// prompt blocks, and its `InquiryResponse` is flushed before the tool finishes
+/// executing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = talking_tool_config(&[]);
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("which".to_owned(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: None,
+            });
+        config
+            .conversation
+            .tools
+            .insert("asking_tool".to_owned(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_ask", "asking_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let router = detached_router();
+
+        let prompts = Arc::new(DiskObservingPromptBackend {
+            inner: MockPromptBackend::new().with_inline_responses(['y']),
+            fs: Arc::clone(&fs),
+            id: lock.id(),
+            seen: Mutex::new(vec![]),
+        });
+        // Record the number of pending inquiries on disk when the tool resumes
+        // with its answer (`None` if the stream fails to load).
+        let pending_after_answer = Arc::new(Mutex::new(vec![]));
+        let observe: Arc<dyn Fn() + Send + Sync> = {
+            let fs = Arc::clone(&fs);
+            let id = lock.id();
+            let pending = Arc::clone(&pending_after_answer);
+            Arc::new(move || {
+                let count = fs
+                    .load_conversation_stream(&id, &PartialAppConfig::empty())
+                    .ok()
+                    .map(|stream| stream.pending_inquiries().len());
+                pending.lock().unwrap().push(count);
+            })
+        };
+        let executor_source = TestExecutorSource::new().with_executor("asking_tool", move |req| {
+            Box::new(
+                AskingTalkingExecutor::new(&req.id, &req.name)
+                    .with_after_answer(Arc::clone(&observe)),
+            )
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            true, // interactive: a user-targeted question needs a user
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::clone(&prompts) as Arc<dyn PromptBackend>,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Ask me"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*prompts.seen.lock().unwrap(), [true]);
+        assert_eq!(*pending_after_answer.lock().unwrap(), [Some(0)]);
+
+        let stream = fs
+            .load_conversation_stream(&lock.id(), &PartialAppConfig::empty())
+            .expect("the conversation is on disk");
+        assert!(stream.pending_inquiries().is_empty());
+        assert_eq!(
+            stream
+                .iter()
+                .filter(|event| event.is_inquiry_response())
+                .count(),
+            1
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
 /// An executor that pushes, asks one question, then pushes again once answered.
 ///
 /// The two pushes straddle the re-spawn, so a sink that only worked on the
@@ -7019,6 +7209,8 @@ struct AskingTalkingExecutor {
 
     /// Arguments, unused beyond satisfying the trait.
     arguments: Map<String, Value>,
+
+    after_answer: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl AskingTalkingExecutor {
@@ -7028,7 +7220,13 @@ impl AskingTalkingExecutor {
             tool_id: tool_id.to_owned(),
             tool_name: tool_name.to_owned(),
             arguments: Map::new(),
+            after_answer: None,
         }
+    }
+
+    fn with_after_answer(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.after_answer = Some(hook);
+        self
     }
 }
 
@@ -7061,6 +7259,9 @@ impl Executor for AskingTalkingExecutor {
         if answers.contains_key("which") {
             if let Some(sink) = stderr {
                 sink("after the answer");
+            }
+            if let Some(hook) = &self.after_answer {
+                hook();
             }
 
             return ExecutorResult::Completed(ToolCallResponse {

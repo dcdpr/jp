@@ -290,6 +290,18 @@ impl Session {
         session_storage_key(&self.id, &self.source)
     }
 
+    /// Return the Unix session-leader PID for a `Getsid` session.
+    ///
+    /// Returns `None` for other session sources or if the session ID is not a
+    /// valid PID.
+    #[must_use]
+    pub fn leader_pid(&self) -> Option<i32> {
+        match self.source {
+            SessionSource::Getsid => self.id.as_pid(),
+            SessionSource::Hwnd | SessionSource::Env { .. } => None,
+        }
+    }
+
     /// Build a `Getsid` session from a Unix session-leader PID.
     ///
     /// Owns the PID-to-id encoding so it stays the inverse of

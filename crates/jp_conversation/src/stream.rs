@@ -1062,6 +1062,26 @@ impl ConversationStream {
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_requests(&mut self) {
+        let unanswered = self.unanswered_inquiry_requests();
+
+        let mut position = 0;
+        self.events.retain(|_| {
+            let keep = !unanswered.contains(&position);
+            position += 1;
+            keep
+        });
+    }
+
+    /// Returns the stream indices of [`InquiryRequest`] events that have no
+    /// matching [`InquiryResponse`] in the same turn.
+    ///
+    /// Requests and responses are paired within each turn.
+    /// When an inquiry ID appears multiple times in a turn, each response pairs
+    /// with the earliest unmatched request sharing that ID.
+    ///
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
+    fn unanswered_inquiry_requests(&self) -> HashSet<usize> {
         let mut response_counts: HashMap<(usize, InquiryId), usize> = HashMap::new();
         let mut turn = 0;
         for event in self.events.iter().filter_map(InternalEvent::as_event) {
@@ -1075,25 +1095,61 @@ impl ConversationStream {
         }
 
         let mut turn = 0;
-        self.events.retain(|event| {
+        let mut unanswered = HashSet::new();
+        for (position, event) in self.events.iter().enumerate() {
             let Some(event) = event.as_event() else {
-                return true;
+                continue;
             };
             if event.is_turn_start() {
                 turn += 1;
-                return true;
+                continue;
             }
             let Some(request) = event.as_inquiry_request() else {
-                return true;
+                continue;
             };
             match response_counts.get_mut(&(turn, request.id.clone())) {
-                Some(remaining) if *remaining > 0 => {
-                    *remaining -= 1;
-                    true
+                Some(remaining) if *remaining > 0 => *remaining -= 1,
+                _ => {
+                    unanswered.insert(position);
                 }
-                _ => false,
             }
-        });
+        }
+
+        unanswered
+    }
+
+    /// Returns unanswered [`InquiryRequest`] events from the last turn, in
+    /// stream order.
+    ///
+    /// Requests and responses are paired within the turn by inquiry ID (and in
+    /// arrival order when an ID repeats).
+    /// Unanswered requests from earlier turns are omitted because completed
+    /// turns cannot receive new responses.
+    ///
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
+    #[must_use]
+    pub fn pending_inquiries(&self) -> Vec<&ConversationEvent> {
+        let last_turn = self
+            .events
+            .iter()
+            .rposition(|event| {
+                event
+                    .as_event()
+                    .is_some_and(ConversationEvent::is_turn_start)
+            })
+            .unwrap_or(0);
+
+        let mut unanswered: Vec<usize> = self
+            .unanswered_inquiry_requests()
+            .into_iter()
+            .filter(|position| *position >= last_turn)
+            .collect();
+        unanswered.sort_unstable();
+
+        unanswered
+            .into_iter()
+            .filter_map(|position| self.events[position].as_event())
+            .collect()
     }
 
     /// Ensures the stream has exactly one leading [`TurnStart`] and that all

@@ -8,7 +8,10 @@
 //!
 //! [`SessionBackend`]: jp_storage::backend::SessionBackend
 
-use std::{collections::HashSet, fs};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry},
+    fs,
+};
 
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
@@ -54,6 +57,20 @@ pub(crate) struct SessionHistoryEntry {
 
     /// When this conversation was activated in this session.
     pub activated_at: DateTime<Utc>,
+}
+
+/// Summary of a session's conversation history and active conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOverview {
+    pub session: Session,
+
+    /// Live conversations in the session's history, most recently activated
+    /// first.
+    pub conversations: Vec<ConversationId>,
+
+    /// Active conversation for the session, or `None` if no live conversation
+    /// precedes the most recently archived entry in the session's history.
+    pub active: Option<ConversationId>,
 }
 
 impl SessionMapping {
@@ -213,6 +230,75 @@ impl Workspace {
                     .copied()
             })
             .collect()
+    }
+
+    /// Return a [`SessionOverview`] for every readable session in the backing
+    /// store.
+    ///
+    /// Queries the backing store on each call rather than the in-memory
+    /// workspace index, so callers observe sessions and conversations created
+    /// by other processes after the workspace was opened.
+    /// Session mappings that cannot be read or parsed are skipped.
+    #[must_use]
+    pub fn session_overviews(&self) -> Vec<SessionOverview> {
+        let live: HashSet<_> = self
+            .loader
+            .load_conversation_ids(ConversationFilter::default())
+            .into_iter()
+            .collect();
+
+        self.listed_session_mappings()
+            .into_iter()
+            .map(|mapping| SessionOverview {
+                conversations: mapping
+                    .history
+                    .iter()
+                    .map(|entry| entry.id)
+                    .filter(|id| live.contains(id))
+                    .collect(),
+                active: self
+                    .resolvable_history(&mapping, |id| live.contains(id))
+                    .first()
+                    .copied(),
+                session: Session {
+                    id: mapping.id,
+                    source: mapping.source,
+                },
+            })
+            .collect()
+    }
+
+    /// Load every readable session mapping from the backing store, deduplicated
+    /// by session in backend listing order.
+    ///
+    /// If both a migrated source-prefixed file and a legacy bare-value file
+    /// exist for the same session, the canonical source-prefixed mapping wins
+    /// regardless of listing order.
+    fn listed_session_mappings(&self) -> Vec<SessionMapping> {
+        let mut mappings = Vec::new();
+        let mut slots = HashMap::new();
+
+        for key in self.sessions.list_session_keys() {
+            let Some(value) = self.sessions.load_session(&key).ok().flatten() else {
+                continue;
+            };
+            let Some(mapping) = mapping_from_value(value, &key) else {
+                continue;
+            };
+
+            let canonical_key = session_storage_key(&mapping.id, &mapping.source);
+            let is_canonical = key == canonical_key;
+            match slots.entry(canonical_key) {
+                Entry::Vacant(slot) => {
+                    slot.insert(mappings.len());
+                    mappings.push(mapping);
+                }
+                Entry::Occupied(slot) if is_canonical => mappings[*slot.get()] = mapping,
+                Entry::Occupied(_) => {}
+            }
+        }
+
+        mappings
     }
 
     /// Record that the given session activated a conversation.

@@ -567,7 +567,7 @@ async fn drive_turn(
                             let mut host = Host {
                                 prompter: &prompter,
                                 inquiry_backend: &inquiry_backend,
-                                conv: &conv,
+                                conv: &mut conv,
                                 turn_state: &mut turn_state,
                                 renderer: &mut tool_renderer,
                                 printer: &printer,
@@ -1012,7 +1012,7 @@ async fn drive_turn(
                                     let mut host = Host {
                                         prompter: &prompter,
                                         inquiry_backend: &inquiry_backend,
-                                        conv: &conv,
+                                        conv: &mut conv,
                                         turn_state: &mut turn_state,
                                         renderer: &mut tool_renderer,
                                         printer: &printer,
@@ -1075,7 +1075,7 @@ async fn drive_turn(
                 let mut host = Host {
                     prompter: &prompter,
                     inquiry_backend: &inquiry_backend,
-                    conv: &conv,
+                    conv: &mut conv,
                     turn_state: &mut turn_state,
                     renderer: &mut tool_renderer,
                     printer: &printer,
