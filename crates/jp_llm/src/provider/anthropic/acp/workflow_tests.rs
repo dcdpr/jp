@@ -129,24 +129,14 @@ fn compacted_view_is_encoded_without_mutating_raw_history() {
     ));
     compaction.timestamp = datetime!(2026-09-11 12:01:00 Z);
     query.thread.events.add_compaction(compaction);
-    let before = query
-        .thread
-        .events
-        .iter()
-        .map(|event| event.event.clone())
-        .collect::<Vec<_>>();
+    let before = query.thread.events.iter().cloned().collect::<Vec<_>>();
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query.clone()).unwrap();
     assert_eq!(prepared.prompt, "Continue.");
     assert_eq!(prepared.history.len(), 2);
     insta::assert_json_snapshot!("compacted_native_history", prepared.history);
     assert_eq!(
-        query
-            .thread
-            .events
-            .iter()
-            .map(|event| event.event.clone())
-            .collect::<Vec<_>>(),
+        query.thread.events.iter().cloned().collect::<Vec<_>>(),
         before
     );
 }
@@ -178,7 +168,7 @@ fn large_historical_tool_results_remain_complete() {
     let mut query = conversation();
     let content = "0123456789abcdef".repeat(15_000) + "END-OF-RESULT";
     for event in query.thread.events.iter_mut() {
-        if let EventKind::ToolCallResponse(response) = &mut event.event.kind {
+        if let EventKind::ToolCallResponse(response) = &mut event.kind {
             response.result = Ok(content.clone());
         }
     }
@@ -199,12 +189,12 @@ fn changed_instructions_schema_and_tool_result_reach_the_next_request() {
     query.thread.system_prompt = Some("Replacement instructions.".into());
     let schema = json!({"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}).as_object().unwrap().clone();
     for event in query.thread.events.iter_mut() {
-        if let EventKind::ToolCallResponse(response) = &mut event.event.kind {
+        if let EventKind::ToolCallResponse(response) = &mut event.kind {
             response.result = Ok("CEDAR".into());
         }
     }
     if let EventKind::ChatRequest(request) =
-        &mut query.thread.events.iter_mut().last().unwrap().event.kind
+        &mut query.thread.events.iter_mut().next_back().unwrap().kind
     {
         request.schema = Some(schema.clone());
     } else {

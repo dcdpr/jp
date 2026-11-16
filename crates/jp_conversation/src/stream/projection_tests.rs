@@ -112,8 +112,8 @@ fn message_turns(count: usize) -> ConversationStream {
 fn visible_events(stream: &ConversationStream) -> Vec<&EventKind> {
     stream
         .iter()
-        .filter(|e| e.event.kind.is_provider_visible())
-        .map(|e| &e.event.kind)
+        .filter(|e| e.kind.is_provider_visible())
+        .map(|e| &e.kind)
         .collect()
 }
 
@@ -285,7 +285,7 @@ fn strip_request_only_blanks_args_and_keeps_response() {
     // name and call ID survive — and there's no `[compacted]` marker to echo.
     let req = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_request().cloned())
+        .filter_map(|e| e.as_tool_call_request().cloned())
         .find(|r| r.id == "tc2")
         .expect("tc2 request present");
     assert!(
@@ -372,7 +372,7 @@ fn strip_tool_response_only() {
     // Requests keep original arguments.
     let req = stream
         .iter()
-        .find_map(|e| e.event.as_tool_call_request().cloned())
+        .find_map(|e| e.as_tool_call_request().cloned())
         .unwrap();
     assert!(
         req.arguments.contains_key("path"),
@@ -566,7 +566,7 @@ fn over_threshold_judges_each_half_on_its_own_size() {
 
     let request = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_request().cloned())
+        .filter_map(|e| e.as_tool_call_request().cloned())
         .find(|r| r.id == "big")
         .expect("big request present");
     assert_eq!(
@@ -630,7 +630,7 @@ fn over_threshold_on_omit_uses_the_pair_total() {
 
     let call_ids: Vec<String> = stream
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ToolCallRequest(r) => Some(r.id.clone()),
             EventKind::ToolCallResponse(r) => Some(r.id.clone()),
             _ => None,
@@ -675,7 +675,7 @@ fn over_threshold_strips_only_large_reasoning_blocks() {
 
     let reasoning: Vec<&str> = stream
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
                 Some(reasoning.as_str())
             }
@@ -758,11 +758,7 @@ fn reused_call_id_stream() -> ConversationStream {
 fn response_contents(stream: &ConversationStream) -> Vec<String> {
     stream
         .iter()
-        .filter_map(|e| {
-            e.event
-                .as_tool_call_response()
-                .map(|r| r.content().to_owned())
-        })
+        .filter_map(|e| e.as_tool_call_response().map(|r| r.content().to_owned()))
         .collect()
 }
 
@@ -804,7 +800,7 @@ fn over_threshold_on_omit_pairs_a_reused_call_id_by_occurrence() {
     assert_eq!(
         stream
             .iter()
-            .filter(|e| e.event.as_tool_call_request().is_some())
+            .filter(|e| e.as_tool_call_request().is_some())
             .count(),
         1,
         "only the small pair's request survives"
@@ -1137,7 +1133,7 @@ fn summary_is_injected_as_its_own_turn() {
 fn summary_marker_text(stream: &ConversationStream) -> String {
     stream
         .iter()
-        .find_map(|e| match &e.event.kind {
+        .find_map(|e| match &e.kind {
             EventKind::ChatRequest(r) if r.content.starts_with("[Summary") => {
                 Some(r.content.clone())
             }
@@ -1248,7 +1244,7 @@ fn distinct_adjacent_summaries_with_identical_text_stay_separate() {
     );
     let messages: Vec<String> = stream
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
             _ => None,
         })
@@ -1294,7 +1290,7 @@ fn contained_summary_reinjects_outer_summary_tail() {
 
     let messages: Vec<String> = stream
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
             _ => None,
         })
@@ -1646,19 +1642,14 @@ fn recompact_projected_stream_with_new_compaction() {
 
     // Reasoning is gone, tool calls remain.
     assert_eq!(stream.compactions().count(), 0);
-    let has_reasoning = stream.iter().any(|e| {
-        e.event
-            .as_chat_response()
-            .is_some_and(ChatResponse::is_reasoning)
-    });
+    let has_reasoning = stream
+        .iter()
+        .any(|e| e.as_chat_response().is_some_and(ChatResponse::is_reasoning));
     assert!(
         !has_reasoning,
         "Reasoning should be stripped after first projection"
     );
-    let tool_call_count = stream
-        .iter()
-        .filter(|e| e.event.is_tool_call_request())
-        .count();
+    let tool_call_count = stream.iter().filter(|e| e.is_tool_call_request()).count();
     assert_eq!(
         tool_call_count, 2,
         "Tool calls should survive first projection"
@@ -1680,7 +1671,7 @@ fn recompact_projected_stream_with_new_compaction() {
     // Turn 1 tool calls should remain (not covered by second compaction).
     let remaining_tool_names: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_request().map(|r| r.name.clone()))
+        .filter_map(|e| e.as_tool_call_request().map(|r| r.name.clone()))
         .collect();
     assert_eq!(
         remaining_tool_names,
@@ -1690,11 +1681,9 @@ fn recompact_projected_stream_with_new_compaction() {
 
     // Reasoning should still be gone — the first projection already removed
     // it, and no new reasoning-strip compaction was needed.
-    let has_reasoning = stream.iter().any(|e| {
-        e.event
-            .as_chat_response()
-            .is_some_and(ChatResponse::is_reasoning)
-    });
+    let has_reasoning = stream
+        .iter()
+        .any(|e| e.as_chat_response().is_some_and(ChatResponse::is_reasoning));
     assert!(
         !has_reasoning,
         "Reasoning should stay gone after re-compaction"
@@ -1854,10 +1843,10 @@ proptest! {
         // No orphaned tool responses: every response keeps a matching request.
         let request_ids: HashSet<String> = stream
             .iter()
-            .filter_map(|e| e.event.as_tool_call_request().map(|r| r.id.clone()))
+            .filter_map(|e| e.as_tool_call_request().map(|r| r.id.clone()))
             .collect();
         for e in stream.iter() {
-            if let Some(resp) = e.event.as_tool_call_response() {
+            if let Some(resp) = e.as_tool_call_response() {
                 prop_assert!(
                     request_ids.contains(&resp.id),
                     "orphaned tool response after projection: {}",
@@ -2030,20 +2019,20 @@ proptest! {
 
             let reasoning_here = stream.iter().any(|e| {
                 matches!(
-                    &e.event.kind,
+                    &e.kind,
                     EventKind::ChatResponse(ChatResponse::Reasoning { reasoning })
                         if reasoning == &reasoning_tag
                 )
             });
             let requests: Vec<_> = stream
                 .iter()
-                .filter_map(|e| e.event.as_tool_call_request())
+                .filter_map(|e| e.as_tool_call_request())
                 .filter(|r| r.id.starts_with(&id_prefix))
                 .cloned()
                 .collect();
             let responses: Vec<_> = stream
                 .iter()
-                .filter_map(|e| e.event.as_tool_call_response())
+                .filter_map(|e| e.as_tool_call_response())
                 .filter(|r| r.id.starts_with(&id_prefix))
                 .cloned()
                 .collect();
@@ -2143,7 +2132,7 @@ fn compaction_targets_correct_turn_with_implicit_leading_turn() {
 
     let reasonings: Vec<String> = stream
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
                 Some(reasoning.clone())
             }

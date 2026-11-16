@@ -488,7 +488,11 @@ fn extending_a_stream_reproduces_the_config_of_each_event() {
     });
 
     let mut rebuilt = ConversationStream::new(source.base_config());
-    rebuilt.extend(source.iter().map(ConversationEventWithConfig::from));
+    rebuilt.extend(
+        source
+            .iter_with_config()
+            .map(ConversationEventWithConfig::from),
+    );
 
     assert_eq!(
         resolved_access(&rebuilt),
@@ -637,17 +641,12 @@ fn test_sanitize_orphaned_tool_calls_injects_directly_after_request() {
     let events: Vec<_> = stream.iter().collect();
     let req_pos = events
         .iter()
-        .position(|e| {
-            e.event
-                .as_tool_call_request()
-                .is_some_and(|r| r.id == "orphan_1")
-        })
+        .position(|e| e.as_tool_call_request().is_some_and(|r| r.id == "orphan_1"))
         .unwrap();
     let resp_pos = events
         .iter()
         .position(|e| {
-            e.event
-                .as_tool_call_response()
+            e.as_tool_call_response()
                 .is_some_and(|r| r.id == "orphan_1")
         })
         .unwrap();
@@ -704,11 +703,11 @@ fn test_sanitize_orphaned_tool_calls_handles_partial_set() {
     let events: Vec<_> = stream.iter().collect();
     let req_b = events
         .iter()
-        .position(|e| e.event.as_tool_call_request().is_some_and(|r| r.id == "b"))
+        .position(|e| e.as_tool_call_request().is_some_and(|r| r.id == "b"))
         .unwrap();
     let resp_b = events
         .iter()
-        .position(|e| e.event.as_tool_call_response().is_some_and(|r| r.id == "b"))
+        .position(|e| e.as_tool_call_response().is_some_and(|r| r.id == "b"))
         .unwrap();
     assert_eq!(
         resp_b,
@@ -888,8 +887,8 @@ fn test_pop_while_removes_only_the_trailing_run() {
 
     assert_eq!(popped.len(), 2, "both trailing responses are popped");
     assert_eq!(stream.len(), 2, "TurnStart + ChatRequest remain");
-    assert!(stream.iter().all(|e| !e.event.is_chat_response()));
-    assert!(stream.iter().any(|e| e.event.is_chat_request()));
+    assert!(stream.iter().all(|e| !e.is_chat_response()));
+    assert!(stream.iter().any(ConversationEvent::is_chat_request));
 }
 
 #[test]
@@ -908,7 +907,7 @@ fn sanitize_removes_trailing_empty_turn_after_popped_chat_request() {
 
     // Re-adding a turn should produce exactly one TurnStart + ChatRequest.
     stream.start_turn("hello again");
-    let turn_starts = stream.iter().filter(|e| e.event.is_turn_start()).count();
+    let turn_starts = stream.iter().filter(|e| e.is_turn_start()).count();
     assert_eq!(turn_starts, 1, "Should have exactly one TurnStart");
 }
 
@@ -938,7 +937,7 @@ fn sanitize_removes_trailing_empty_turn_with_prior_turns() {
     // Sanitize should remove the trailing orphaned TurnStart.
     stream.sanitize();
 
-    let turn_starts = stream.iter().filter(|e| e.event.is_turn_start()).count();
+    let turn_starts = stream.iter().filter(|e| e.is_turn_start()).count();
     assert_eq!(
         turn_starts, 1,
         "Only the first turn's TurnStart should remain"
@@ -1034,7 +1033,7 @@ fn test_to_parts_base64_encodes_tool_call_fields() {
 
     let req = stream2
         .iter()
-        .find_map(|e| e.event.as_tool_call_request())
+        .find_map(ConversationEvent::as_tool_call_request)
         .unwrap();
     assert_eq!(req.arguments["path"], "src/main.rs");
 
@@ -1123,7 +1122,7 @@ fn test_sanitize_removes_orphaned_inquiry_response() {
 
     // TurnStart injected + ChatRequest + ChatResponse
     assert_eq!(stream.len(), 3);
-    let has_inquiry_response = stream.iter().any(|e| e.event.is_inquiry_response());
+    let has_inquiry_response = stream.iter().any(ConversationEvent::is_inquiry_response);
     assert!(
         !has_inquiry_response,
         "Orphaned InquiryResponse should be removed"
@@ -1155,7 +1154,7 @@ fn test_sanitize_removes_orphaned_inquiry_request() {
 
     // TurnStart injected + ChatRequest + ChatResponse
     assert_eq!(stream.len(), 3);
-    let has_inquiry_request = stream.iter().any(|e| e.event.is_inquiry_request());
+    let has_inquiry_request = stream.iter().any(ConversationEvent::is_inquiry_request);
     assert!(
         !has_inquiry_request,
         "Orphaned InquiryRequest should be removed"
@@ -1195,14 +1194,8 @@ fn test_sanitize_inquiry_orphan_repair_is_turn_scoped() {
 
     stream.sanitize();
 
-    let requests = stream
-        .iter()
-        .filter(|e| e.event.is_inquiry_request())
-        .count();
-    let responses = stream
-        .iter()
-        .filter(|e| e.event.is_inquiry_response())
-        .count();
+    let requests = stream.iter().filter(|e| e.is_inquiry_request()).count();
+    let responses = stream.iter().filter(|e| e.is_inquiry_response()).count();
     assert_eq!(requests, 1, "turn 1's orphan request should be removed");
     assert_eq!(responses, 1, "turn 2's paired response should survive");
 }
@@ -1238,14 +1231,8 @@ fn test_sanitize_legacy_duplicate_ids_pair_by_order() {
 
     stream.sanitize();
 
-    let requests = stream
-        .iter()
-        .filter(|e| e.event.is_inquiry_request())
-        .count();
-    let responses = stream
-        .iter()
-        .filter(|e| e.event.is_inquiry_response())
-        .count();
+    let requests = stream.iter().filter(|e| e.is_inquiry_request()).count();
+    let responses = stream.iter().filter(|e| e.is_inquiry_response()).count();
     assert_eq!(
         requests, 1,
         "the unpaired duplicate request should be removed"
@@ -1358,7 +1345,7 @@ fn test_sanitize_deduplicates_leading_turn_starts() {
 
     stream.sanitize();
 
-    let turn_count = stream.iter().filter(|e| e.event.is_turn_start()).count();
+    let turn_count = stream.iter().filter(|e| e.is_turn_start()).count();
     assert_eq!(turn_count, 1, "Should have exactly one TurnStart");
 }
 
@@ -1388,7 +1375,7 @@ fn test_sanitize_reindexes_turn_starts() {
 
     stream.sanitize();
 
-    let turn_count = stream.iter().filter(|e| e.event.is_turn_start()).count();
+    let turn_count = stream.iter().filter(|e| e.is_turn_start()).count();
     assert_eq!(turn_count, 2);
 }
 
@@ -1897,7 +1884,7 @@ fn test_iter_config_reflects_reset() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 4).unwrap(),
     ));
 
-    let events: Vec<_> = stream.iter().collect();
+    let events: Vec<_> = stream.iter_with_config().collect();
     assert_eq!(events.len(), 2);
 
     // Before the reset: dev's change plus the base config's fields.
@@ -2610,7 +2597,7 @@ fn test_compaction_skipped_by_iter() {
     assert!(
         events
             .iter()
-            .all(|e| !matches!(&e.event.kind, EventKind::TurnStart(_)) || e.event.is_turn_start()),
+            .all(|e| !matches!(&e.kind, EventKind::TurnStart(_)) || e.is_turn_start()),
         "Iterator should only yield ConversationEvents"
     );
 }
@@ -2712,7 +2699,7 @@ fn test_compaction_does_not_affect_config() {
     );
 }
 
-// --- turn_count, turn_at_time, resolve_compaction_range ---
+// --- turn_count, turn_index_at_time, resolve_compaction_range ---
 
 #[test]
 fn test_turn_count_empty() {
@@ -2733,7 +2720,7 @@ fn test_turn_count_two_turns() {
 }
 
 #[test]
-fn test_turn_at_time() {
+fn test_turn_index_at_time() {
     let mut stream = ConversationStream::new_test();
     stream.push(ConversationEvent::new(
         TurnStart::default(),
@@ -2752,7 +2739,7 @@ fn test_turn_at_time() {
         Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
     ));
 
-    let idx = |dt| stream.turn_at_time(dt).map(|t| t.index());
+    let idx = |dt| stream.turn_index_at_time(dt);
 
     // Before first turn.
     assert_eq!(
@@ -3609,15 +3596,27 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
     dest.extend(source.clone());
 
     // 1. The iter sequence must match between source and dest.
-    let source_view: Vec<_> = source.iter().map(|e| (e.event.clone(), e.config)).collect();
-    let dest_view: Vec<_> = dest.iter().map(|e| (e.event.clone(), e.config)).collect();
+    let source_view: Vec<_> = source
+        .iter_with_config()
+        .map(|e| (e.event.clone(), e.config))
+        .collect();
+    let dest_view: Vec<_> = dest
+        .iter_with_config()
+        .map(|e| (e.event.clone(), e.config))
+        .collect();
     assert_eq!(source_view, dest_view);
 
     // 2. Each conversation event keeps the ID it had in the source: identity
     //    is per-stream, so a destination that has handed out no IDs takes the
     //    source's verbatim.
-    let source_ids: Vec<_> = source.iter().map(|e| e.event_id.to_string()).collect();
-    let dest_ids: Vec<_> = dest.iter().map(|e| e.event_id.to_string()).collect();
+    let source_ids: Vec<_> = source
+        .iter_with_config()
+        .map(|e| e.event_id.to_string())
+        .collect();
+    let dest_ids: Vec<_> = dest
+        .iter_with_config()
+        .map(|e| e.event_id.to_string())
+        .collect();
     assert_eq!(source_ids, dest_ids);
 
     // 3. The serialized storage shape must match, apart from the config
@@ -3634,4 +3633,206 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
     }
     assert_eq!(source_base, dest_base);
     assert_eq!(source_events, dest_events);
+}
+
+#[test]
+fn iter_shares_config_between_deltas() {
+    let stream = two_configs();
+
+    let events: Vec<_> = stream.iter_with_config().collect();
+
+    assert!(Arc::ptr_eq(&events[0].config, &events[1].config));
+    assert!(!Arc::ptr_eq(&events[1].config, &events[2].config));
+    assert_eq!(
+        events[1].config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+    assert_eq!(
+        events[2].config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+}
+
+#[test]
+fn into_iter_shares_config_between_deltas() {
+    let stream = two_configs();
+
+    let events: Vec<_> = stream.into_iter().collect();
+
+    assert!(Arc::ptr_eq(&events[0].config, &events[1].config));
+    assert!(!Arc::ptr_eq(&events[1].config, &events[2].config));
+    assert_eq!(
+        events[1].config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+    assert_eq!(
+        events[2].config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+}
+
+fn two_configs() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ChatRequest::from("first"));
+    stream.push(ChatResponse::message("second"));
+
+    let mut partial = PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), partial));
+    stream.push(ChatRequest::from("third"));
+    stream
+}
+
+fn layered_configs() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+
+    let mut colorless = PartialAppConfig::empty();
+    colorless.style.code.color = Some(false);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), colorless));
+    stream.push(ChatRequest::from("one"));
+    stream.push(ChatResponse::message("two"));
+
+    let mut allow = PartialAppConfig::empty();
+    allow.conversation.tools.defaults.run = Some(RunMode::Allow);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), allow));
+    stream.push(ChatRequest::from("three"));
+
+    let mut fresh = PartialAppConfig::empty();
+    fresh.user.name = Some("fresh".to_owned());
+    stream.add_config_reset(
+        ResetDelta {
+            timestamp: delta_timestamp(),
+        },
+        [ApplyDelta::new(delta_timestamp(), fresh)],
+    );
+    stream.push(ChatRequest::from("four"));
+    stream.push(ChatResponse::message("five"));
+
+    let mut edit = PartialAppConfig::empty();
+    edit.conversation.tools.defaults.run = Some(RunMode::Edit);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), edit));
+
+    assert_eq!(stream.config_deltas().count(), 5);
+    stream
+}
+
+/// Drain `iter` by alternating `next_back` and `next`, returning items in
+/// stream order.
+fn walk_from_both_ends<I: DoubleEndedIterator>(mut iter: I) -> Vec<I::Item> {
+    let mut front = Vec::new();
+    let mut back = Vec::new();
+    loop {
+        let Some(item) = iter.next_back() else { break };
+        back.push(item);
+        let Some(item) = iter.next() else { break };
+        front.push(item);
+    }
+    front.extend(back.into_iter().rev());
+    front
+}
+
+#[test]
+fn iter_with_config_rev_shares_config_between_deltas() {
+    let stream = two_configs();
+
+    let events: Vec<_> = stream.iter_with_config().rev().collect();
+
+    assert!(Arc::ptr_eq(&events[1].config, &events[2].config));
+    assert!(!Arc::ptr_eq(&events[0].config, &events[1].config));
+    assert_eq!(
+        events[0].config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+    assert_eq!(
+        events[1].config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+}
+
+#[test]
+fn into_iter_rev_shares_config_between_deltas() {
+    let stream = two_configs();
+
+    let events: Vec<_> = stream.into_iter().rev().collect();
+
+    assert!(Arc::ptr_eq(&events[1].config, &events[2].config));
+    assert!(!Arc::ptr_eq(&events[0].config, &events[1].config));
+    assert_eq!(
+        events[0].config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+    assert_eq!(
+        events[1].config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+}
+
+#[test]
+fn iter_with_config_resolves_the_same_configs_in_both_directions() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.iter_with_config().collect();
+    let mut backward: Vec<_> = stream.iter_with_config().rev().collect();
+    backward.reverse();
+
+    assert_eq!(forward.len(), 5);
+    assert_eq!(forward, backward);
+}
+
+#[test]
+fn into_iter_resolves_the_same_configs_in_both_directions() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.clone().into_iter().collect();
+    let mut backward: Vec<_> = stream.into_iter().rev().collect();
+    backward.reverse();
+
+    assert_eq!(forward.len(), 5);
+    assert_eq!(forward, backward);
+}
+
+/// Advancing the front of the iterator past deltas does not affect the configs
+/// yielded from the back.
+#[test]
+fn iter_with_config_resolves_the_same_configs_from_both_ends() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.iter_with_config().collect();
+    let mixed = walk_from_both_ends(stream.iter_with_config());
+
+    assert_eq!(forward, mixed);
+}
+
+#[test]
+fn into_iter_resolves_the_same_configs_from_both_ends() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.clone().into_iter().collect();
+    let mixed = walk_from_both_ends(stream.into_iter());
+
+    assert_eq!(forward, mixed);
+}
+
+#[test]
+fn iter_delta_does_not_change_earlier_events_config() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ChatRequest::from("first"));
+
+    let mut partial = PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), partial));
+    stream.push(ChatRequest::from("second"));
+
+    let mut iter = stream.iter_with_config();
+    let first = iter.next().unwrap();
+    let second = iter.next().unwrap();
+
+    assert_eq!(
+        first.config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+    assert_eq!(
+        second.config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
 }

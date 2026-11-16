@@ -329,13 +329,12 @@ fn uri_to_entry(uri: &Url) -> Result<Entry, Box<dyn Error + Send + Sync>> {
 /// should treat that as a valid but empty attachment rather than an error, so
 /// the assistant can still see the source reference.
 fn render_stream(stream: &ConversationStream, selector: Selector) -> String {
-    let turns: Vec<_> = stream.iter_turns().collect();
-    let Some((start, end)) = selector.range.resolve(turns.len()) else {
+    let Some((start, end)) = selector.range.resolve(stream.turn_count()) else {
         return String::new();
     };
 
     let mut out = String::new();
-    for (idx, turn) in turns[start..end].iter().enumerate() {
+    for (idx, turn) in turns_in(stream, start, end).iter().enumerate() {
         let turn_number = start + idx + 1;
 
         // Pair tool call requests with their matching responses so they can be
@@ -345,7 +344,7 @@ fn render_stream(stream: &ConversationStream, selector: Selector) -> String {
         let mut turn_body = String::new();
 
         for event in turn {
-            match &event.event.kind {
+            match &event.kind {
                 EventKind::ChatRequest(req) if selector.content.user => {
                     write_section(&mut turn_body, "User", &req.content);
                 }
@@ -492,20 +491,26 @@ fn collect_selected_events(
     stream: &ConversationStream,
     selector: Selector,
 ) -> Vec<&ConversationEvent> {
-    let turns: Vec<_> = stream.iter_turns().collect();
-    let Some((start, end)) = selector.range.resolve(turns.len()) else {
+    let Some((start, end)) = selector.range.resolve(stream.turn_count()) else {
         return vec![];
     };
 
-    let mut out = vec![];
-    for turn in &turns[start..end] {
-        for event in turn {
-            if content_matches(&event.event.kind, selector.content) {
-                out.push(event.event);
-            }
+    stream
+        .iter_events_by_turn()
+        .filter(|e| (start..end).contains(&e.turn) && content_matches(&e.kind, selector.content))
+        .map(|e| e.event)
+        .collect()
+}
+
+/// Group the events of turns in `start..end` into one `Vec` per turn.
+fn turns_in(stream: &ConversationStream, start: usize, end: usize) -> Vec<Vec<&ConversationEvent>> {
+    let mut turns = vec![Vec::new(); end.saturating_sub(start)];
+    for event in stream.iter_events_by_turn() {
+        if (start..end).contains(&event.turn) {
+            turns[event.turn - start].push(event.event);
         }
     }
-    out
+    turns
 }
 
 /// Returns `true` if the event kind matches the content filter.

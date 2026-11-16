@@ -263,7 +263,7 @@ async fn generate_keeps_a_summary_when_the_window_is_unknown() {
         .thread
         .events
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
             _ => None,
         })

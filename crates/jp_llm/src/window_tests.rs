@@ -179,7 +179,7 @@ fn truncate_measures_the_projected_stream() {
 fn message_texts(events: &ConversationStream) -> Vec<String> {
     events
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
             _ => None,
         })

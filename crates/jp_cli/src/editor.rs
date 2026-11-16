@@ -470,7 +470,7 @@ fn build_history_text(history: &ConversationStream, local_offset: FixedOffset) -
     // Filter before `take(10)` so a tool-heavy turn does not crowd out
     // surrounding messages.
     let messages = history
-        .iter()
+        .iter_with_config()
         .rev()
         .filter_map(|event| history_entry(&event, local_offset))
         .take(10);

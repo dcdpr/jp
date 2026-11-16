@@ -749,7 +749,7 @@ pub async fn run_chat_completion_mode(
                     support.assert_rewrite_preserves_meaning(model, query.clone());
                 }
 
-                let config = match &request {
+                let config = Arc::new(match &request {
                     TestRequest::Chat { query, .. } | TestRequest::Refused { query, .. } => {
                         query.thread.events.config().unwrap().to_partial()
                     }
@@ -759,7 +759,7 @@ pub async fn run_chat_completion_mode(
                     TestRequest::ToolCallResponse { .. } | TestRequest::Func(_) => {
                         unreachable!("resolved at start of loop")
                     }
-                };
+                });
 
                 // 1. First, we append the new conversation events to the
                 //    history.
@@ -838,7 +838,7 @@ pub async fn run_chat_completion_mode(
                                         history.push(ConversationEventWithConfig {
                                             event_id: stream.push_event(event.clone()),
                                             event,
-                                            config: config.clone(),
+                                            config: Arc::clone(&config),
                                         });
                                     }
                                 }
@@ -857,7 +857,7 @@ pub async fn run_chat_completion_mode(
                                         history.push(ConversationEventWithConfig {
                                             event_id: stream.push_event(event.clone()),
                                             event,
-                                            config: config.clone(),
+                                            config: Arc::clone(&config),
                                         });
                                     }
 

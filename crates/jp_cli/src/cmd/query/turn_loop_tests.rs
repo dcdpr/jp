@@ -426,11 +426,11 @@ async fn run_rejected_turn(
     let events = stream
         .iter()
         .map(|e| {
-            if e.event.is_turn_start() {
+            if e.is_turn_start() {
                 "TurnStart"
-            } else if e.event.is_chat_request() {
+            } else if e.is_chat_request() {
                 "ChatRequest"
-            } else if e.event.as_chat_response().is_some() {
+            } else if e.as_chat_response().is_some() {
                 "ChatResponse"
             } else {
                 "other"
@@ -5227,10 +5227,7 @@ async fn test_turn_start_event_is_emitted() {
     .unwrap();
 
     let events = lock.events();
-    let turn_starts: Vec<&TurnStart> = events
-        .iter()
-        .filter_map(|e| e.event.as_turn_start())
-        .collect();
+    let turn_starts: Vec<&TurnStart> = events.iter().filter_map(|e| e.as_turn_start()).collect();
 
     assert_eq!(turn_starts.len(), 1, "Expected exactly one TurnStart event");
 }
@@ -5326,10 +5323,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     // Verify.
     let events = lock.events();
-    let turn_starts: Vec<&TurnStart> = events
-        .iter()
-        .filter_map(|e| e.event.as_turn_start())
-        .collect();
+    let turn_starts: Vec<&TurnStart> = events.iter().filter_map(|e| e.as_turn_start()).collect();
 
     assert_eq!(turn_starts.len(), 2, "Expected two TurnStart events");
 }
@@ -5933,7 +5927,7 @@ async fn fan_out_turn(tool: Value, arguments: &Value) -> FanOutTurn {
     let responses = lock
         .events()
         .iter()
-        .filter_map(|event| event.event.as_tool_call_response())
+        .filter_map(|event| event.as_tool_call_response())
         .filter(|response| response.id == "call_1")
         .cloned()
         .collect::<Vec<_>>();
@@ -9815,7 +9809,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
         let responses = events
             .iter()
-            .filter_map(|event| event.event.as_tool_call_response())
+            .filter_map(|event| event.as_tool_call_response())
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(responses, vec![ToolCallResponse {
@@ -9824,7 +9818,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
         }]);
         let answers = events
             .iter()
-            .filter_map(|event| event.event.as_inquiry_response())
+            .filter_map(|event| event.as_inquiry_response())
             .filter_map(|answer| match answer {
                 InquiryResponse::Answered { answer, .. } => Some(answer.clone()),
                 _ => None,
@@ -9937,7 +9931,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
             ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
         let responses = events
             .iter()
-            .filter_map(|event| event.event.as_tool_call_response())
+            .filter_map(|event| event.as_tool_call_response())
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(responses, vec![ToolCallResponse {
@@ -9947,14 +9941,14 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
         // Persisted, so a replay shows the call the way it was shown live.
         let rendered = events
             .iter()
-            .filter(|event| event.event.as_tool_call_request().is_some())
-            .map(|event| get_rendered_arguments(event.event))
+            .filter(|event| event.as_tool_call_request().is_some())
+            .map(get_rendered_arguments)
             .collect::<Vec<_>>();
         assert_eq!(rendered, vec![Some("confirm = true".to_owned())]);
         // The formatter's question is recorded like one the tool asks.
         let inquiries = events
             .iter()
-            .filter_map(|event| event.event.as_inquiry_response())
+            .filter_map(|event| event.as_inquiry_response())
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(inquiries, vec![InquiryResponse::answered(

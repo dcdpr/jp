@@ -1631,7 +1631,7 @@ async fn decide_with_assistant(
     let inquiries = conv
         .events()
         .iter()
-        .filter_map(|event| event.event.as_inquiry_response())
+        .filter_map(|event| event.as_inquiry_response())
         .cloned()
         .collect();
     let described = coordinator.drain_rendered_arguments().remove("call-1");
@@ -1985,7 +1985,6 @@ async fn a_remembered_no_while_a_later_call_asks(
     let asked = |conv: &ConversationMut| {
         conv.events().iter().any(|event| {
             event
-                .event
                 .as_inquiry_request()
                 .is_some_and(|request| request.id.as_str() == "call-2.confirm.1")
         })
@@ -2029,7 +2028,7 @@ async fn a_remembered_no_while_a_later_call_asks(
     let inquiries = conv
         .events()
         .iter()
-        .filter_map(|event| event.event.as_inquiry_response())
+        .filter_map(|event| event.as_inquiry_response())
         .cloned()
         .collect();
     printer.flush();

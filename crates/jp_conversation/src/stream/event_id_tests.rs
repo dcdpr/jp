@@ -305,11 +305,11 @@ fn filtering_the_stream_keeps_the_ids_of_survivors() {
 // per view, so a failure names the view that drifted.
 
 #[test]
-fn iter_reports_entry_ids() {
+fn iter_with_config_reports_entry_ids() {
     let stream = fixture();
 
     let seen: Vec<_> = stream
-        .iter()
+        .iter_with_config()
         .map(|event| event.event_id.to_string())
         .collect();
 
@@ -317,28 +317,16 @@ fn iter_reports_entry_ids() {
 }
 
 #[test]
-fn iter_reports_entry_ids_in_reverse() {
+fn iter_with_config_reports_entry_ids_in_reverse() {
     let stream = fixture();
 
     let seen: Vec<_> = stream
-        .iter()
+        .iter_with_config()
         .rev()
         .map(|event| event.event_id.to_string())
         .collect();
 
     assert_eq!(seen, ["reply01", "chat001", "turn001"]);
-}
-
-#[test]
-fn iter_mut_reports_entry_ids() {
-    let mut stream = fixture();
-
-    let seen: Vec<_> = stream
-        .iter_mut()
-        .map(|event| event.event_id.to_string())
-        .collect();
-
-    assert_eq!(seen, ["turn001", "chat001", "reply01"]);
 }
 
 #[test]
@@ -641,7 +629,7 @@ fn sanitize_keeps_the_ids_of_the_entries_it_did_not_add() {
     stream.sanitize();
 
     let seen: Vec<_> = stream
-        .iter()
+        .iter_with_config()
         .map(|event| event.event_id.to_string())
         .collect();
     assert_eq!(seen[1], "chat001");

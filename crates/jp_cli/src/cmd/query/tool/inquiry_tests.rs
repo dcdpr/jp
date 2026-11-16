@@ -249,7 +249,7 @@ async fn llm_backend_asks_for_only_the_answer() {
         .thread
         .events
         .iter()
-        .filter_map(|event| event.event.as_chat_request())
+        .filter_map(|event| event.as_chat_request())
         .next_back()
         .expect("the question was asked");
     assert_eq!(
@@ -298,7 +298,7 @@ async fn llm_backend_includes_the_preamble() {
         .thread
         .events
         .iter()
-        .filter_map(|event| event.event.as_chat_request())
+        .filter_map(|event| event.as_chat_request())
         .next_back()
         .expect("the question was asked");
     assert_eq!(
@@ -601,7 +601,7 @@ fn visible_index_two_visible_events() {
 
     let idx = second_last_visible_event_index(&events).unwrap();
     let event_at_idx = events.iter().nth(idx).unwrap();
-    assert!(matches!(event_at_idx.event.kind, EventKind::ChatRequest(_)));
+    assert!(matches!(event_at_idx.kind, EventKind::ChatRequest(_)));
 }
 
 /// Reproduces the bug: when an `InquiryRequest` sits between the last
@@ -635,10 +635,7 @@ fn visible_index_skips_inquiry_request() {
     let event_at_idx = events.iter().nth(idx).unwrap();
 
     // Must be the ToolCallRequest, NOT the InquiryRequest.
-    assert!(matches!(
-        event_at_idx.event.kind,
-        EventKind::ToolCallRequest(_)
-    ));
+    assert!(matches!(event_at_idx.kind, EventKind::ToolCallRequest(_)));
 }
 
 #[tokio::test]

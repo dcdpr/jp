@@ -1,24 +1,26 @@
-//! Walking a conversation stream, and what one step of that walk yields.
+//! Config-resolving iterators and item types for [`ConversationStream`].
 //!
-//! Every iterator here resolves the configuration each event was recorded
-//! under, and yields a `…WithConfig` view carrying it.
-//! A stream stores config as a base plus a series of deltas, so an event's
-//! config is the base with every delta *before it* folded in: a forward walk
-//! carries that state as it goes, and a reverse walk reconstructs it.
+//! [`ConversationStream::iter_with_config`] (borrowed, [`Iter`]) and
+//! [`ConversationStream::into_iter`] (owned, [`IntoIter`]) walk the stream from
+//! either end, yielding each [`ConversationEvent`] with its [`EventId`] and the
+//! [`PartialAppConfig`] in effect when it was recorded.
+//! For event-only iteration without config resolution, use
+//! [`ConversationStream::iter`] or [`ConversationStream::iter_mut`].
 //!
-//! Entries that are not conversation events are stepped over: a config delta is
-//! folded into the running state, and compactions, patch overlays, and entries
-//! this build does not recognize are skipped entirely.
+//! A stream stores a base config plus inline [`ConfigDelta`] entries.
+//! Forward iteration folds deltas into the running config as it advances;
+//! backward iteration precomputes the config after each remaining delta on the
+//! first [`next_back`] call and pops them as it steps back over deltas.
+//! Consecutive events with no config delta between them share a single
+//! `Arc<PartialAppConfig>` in both directions.
 //!
-//! Three iterators, by what the caller may do with what it gets:
+//! Non-event entries (config deltas, compactions, overlays, and unrecognized
+//! entries) are not yielded.
 //!
-//! - [`Iter`] borrows, and walks from either end.
-//! - [`IterMut`] borrows mutably, forwards only.
-//! - [`IntoIter`] takes ownership, and walks from either end.
-//!
-//! Each yields an event's entry ID alongside it.
-//! Editing an event through [`IterMut`] does not change its ID: identity
-//! belongs to the entry, not to its content.
+//! [`ConfigDelta`]: super::ConfigDelta
+//! [`next_back`]: DoubleEndedIterator::next_back
+
+use std::sync::Arc;
 
 use jp_config::{PartialAppConfig, PartialConfig as _};
 use tracing::error;
@@ -47,7 +49,7 @@ impl Extend<ConversationEventWithConfig> for ConversationStream {
         // time, which makes `extend(n)` quadratic.
         let mut tail = self
             .last()
-            .map_or_else(|| self.base_config().to_partial(), |v| v.config);
+            .map_or_else(|| Arc::new(self.base_config().to_partial()), |v| v.config);
 
         for v in iter {
             let ConversationEventWithConfig {
@@ -55,10 +57,14 @@ impl Extend<ConversationEventWithConfig> for ConversationStream {
                 event,
                 config,
             } = v;
-            let config_delta = tail.delta(config.clone());
 
-            if !config_delta.is_empty() {
-                self.add_config_delta(ApplyDelta::new(event.timestamp, config_delta));
+            // Consecutive events with no config delta between them share the
+            // same `Arc`, so skip diffing when the pointer has not changed.
+            if !Arc::ptr_eq(&tail, &config) {
+                let config_delta = tail.delta((*config).clone());
+                if !config_delta.is_empty() {
+                    self.add_config_delta(ApplyDelta::new(event.timestamp, config_delta));
+                }
             }
 
             tail = config;
@@ -88,18 +94,24 @@ impl IntoIterator for ConversationStream {
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            current_config: self.base_config().to_partial(),
+            current_config: Arc::new(self.base_config().to_partial()),
+            back_configs: None,
             inner_iter: self.events.into_iter(),
         }
     }
 }
 
-/// An owned iterator over the events in a conversation stream.
+/// An owned iterator over the events and configs in a [`ConversationStream`].
 pub struct IntoIter {
-    /// The configuration state for the next event in the iterator.
-    current_config: PartialAppConfig,
+    /// Running config for forward iteration, shared across events until the
+    /// next config delta.
+    current_config: Arc<PartialAppConfig>,
 
-    /// The iterator over the events in the stream.
+    /// Precomputed configs for backward iteration, initialized on the first
+    /// `next_back` call.
+    back_configs: Option<BackConfigs>,
+
+    /// Remaining stream entries to iterate over.
     inner_iter: std::vec::IntoIter<InternalEvent>,
 }
 
@@ -112,7 +124,8 @@ impl Iterator for IntoIter {
 
             match payload {
                 EventPayload::ConfigDelta(delta) => {
-                    if let Err(error) = config_delta::fold(&mut self.current_config, delta) {
+                    let config = Arc::make_mut(&mut self.current_config);
+                    if let Err(error) = config_delta::fold(config, delta) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -120,7 +133,7 @@ impl Iterator for IntoIter {
                     return Some(ConversationEventWithConfig {
                         event_id,
                         event: *event,
-                        config: self.current_config.clone(),
+                        config: Arc::clone(&self.current_config),
                     });
                 }
                 EventPayload::Compaction(_)
@@ -133,57 +146,102 @@ impl Iterator for IntoIter {
 
 impl DoubleEndedIterator for IntoIter {
     fn next_back(&mut self) -> Option<Self::Item> {
+        let back = self.back_configs.get_or_insert_with(|| {
+            BackConfigs::new(&self.current_config, self.inner_iter.as_slice())
+        });
+
         loop {
             let InternalEvent { event_id, payload } = self.inner_iter.next_back()?;
 
             match payload {
-                EventPayload::ConfigDelta(_)
-                | EventPayload::Compaction(_)
-                | EventPayload::Overlay(_)
-                | EventPayload::Unknown { .. } => {
-                    // A delta/compaction at the very end of the list affects
-                    // nothing that follows it, and it doesn't affect previous
-                    // items. We simply discard it.
-                    // event at the tail likewise yields no ConversationEvent.
-                }
+                EventPayload::ConfigDelta(_) => back.step_over_delta(),
                 EventPayload::Event(event) => {
-                    // Start with the state currently at the front of the line
-                    let mut config = self.current_config.clone();
-
-                    // Scan the remaining items in the middle (without consuming
-                    // them) to apply all pending deltas to our temporary
-                    // config.
-                    for internal_event in self.inner_iter.as_slice() {
-                        if let EventPayload::ConfigDelta(delta) = &internal_event.payload
-                            && let Err(error) = config_delta::fold(&mut config, delta.clone())
-                        {
-                            error!(%error, "Failed to merge config delta.");
-                        }
-                    }
-
                     return Some(ConversationEventWithConfig {
                         event_id,
                         event: *event,
-                        config,
+                        config: back.current(),
                     });
                 }
+                EventPayload::Compaction(_)
+                | EventPayload::Overlay(_)
+                | EventPayload::Unknown { .. } => {}
             }
         }
     }
 }
 
-/// An iterator over the borrowed events in a conversation stream.
+/// Precomputed config snapshots for backward iteration.
+///
+/// Built once on the first `next_back` call from `front` (the config in effect
+/// before the remaining slice) and the config after each remaining
+/// [`ConfigDelta`] in stream order.
+/// Advancing the front of the iterator afterwards does not invalidate these
+/// snapshots, because an event's config depends only on the deltas that precede
+/// it.
+///
+/// [`ConfigDelta`]: super::ConfigDelta
+pub(super) struct BackConfigs {
+    /// Config in effect before the first remaining delta.
+    front: Arc<PartialAppConfig>,
+
+    /// Config after each remaining delta, in stream order.
+    after_deltas: Vec<Arc<PartialAppConfig>>,
+}
+
+impl BackConfigs {
+    /// Precompute the config after each [`ConfigDelta`] in `entries`, starting
+    /// from `front`.
+    fn new(front: &Arc<PartialAppConfig>, entries: &[InternalEvent]) -> Self {
+        let mut after_deltas: Vec<Arc<PartialAppConfig>> = Vec::new();
+        for entry in entries {
+            let EventPayload::ConfigDelta(delta) = &entry.payload else {
+                continue;
+            };
+
+            let mut config = (**after_deltas.last().unwrap_or(front)).clone();
+            if let Err(error) = config_delta::fold(&mut config, delta.clone()) {
+                error!(%error, "Failed to merge config delta.");
+            }
+            // Push even if folding fails so `after_deltas` stays 1:1 with
+            // `ConfigDelta` entries when popping in `step_over_delta`.
+            after_deltas.push(Arc::new(config));
+        }
+
+        Self {
+            front: Arc::clone(front),
+            after_deltas,
+        }
+    }
+
+    /// Return the config in effect at the current back position.
+    fn current(&self) -> Arc<PartialAppConfig> {
+        Arc::clone(self.after_deltas.last().unwrap_or(&self.front))
+    }
+
+    /// Pop the latest delta's config when stepping backward over a
+    /// [`ConfigDelta`].
+    fn step_over_delta(&mut self) {
+        self.after_deltas.pop();
+    }
+}
+
+/// A borrowed iterator over the events and configs in a [`ConversationStream`].
 pub(super) struct Iter<'a> {
     /// The stream being iterated over.
     pub(super) stream: &'a ConversationStream,
 
-    /// The configuration state for the first, next event in the iterator.
-    pub(super) front_config: PartialAppConfig,
+    /// Running config for forward iteration, shared across events until the
+    /// next config delta.
+    pub(super) front_config: Arc<PartialAppConfig>,
 
-    /// The index of the `next` event in the iterator.
+    /// Precomputed configs for backward iteration, initialized on the first
+    /// `next_back` call.
+    pub(super) back_configs: Option<BackConfigs>,
+
+    /// Start of the unyielded slice (`stream.events[front..back]`).
     pub(super) front: usize,
 
-    /// The index of the `next_back` event in the iterator.
+    /// End of the unyielded slice (`stream.events[front..back]`).
     pub(super) back: usize,
 }
 
@@ -198,7 +256,8 @@ impl<'a> Iterator for Iter<'a> {
 
             match &internal.payload {
                 EventPayload::ConfigDelta(delta) => {
-                    if let Err(error) = config_delta::fold(&mut self.front_config, delta.clone()) {
+                    let config = Arc::make_mut(&mut self.front_config);
+                    if let Err(error) = config_delta::fold(config, delta.clone()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -206,7 +265,7 @@ impl<'a> Iterator for Iter<'a> {
                     return Some(ConversationEventWithConfigRef {
                         event_id,
                         event,
-                        config: self.front_config.clone(),
+                        config: Arc::clone(&self.front_config),
                     });
                 }
                 EventPayload::Compaction(_)
@@ -221,61 +280,23 @@ impl<'a> Iterator for Iter<'a> {
 
 impl DoubleEndedIterator for Iter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
+        let entries = &self.stream.events[self.front..self.back];
+        let back = self
+            .back_configs
+            .get_or_insert_with(|| BackConfigs::new(&self.front_config, entries));
+
         while self.back > self.front {
             self.back -= 1;
             let internal = &self.stream.events[self.back];
             let event_id = &internal.event_id;
 
-            let EventPayload::Event(event) = &internal.payload else {
-                continue;
-            };
-
-            let mut config = self.stream.base_config().to_partial();
-            for internal_event in &self.stream.events[..self.back] {
-                if let EventPayload::ConfigDelta(delta) = &internal_event.payload
-                    && let Err(error) = config_delta::fold(&mut config, delta.clone())
-                {
-                    error!(%error, "Failed to merge config delta.");
-                }
-            }
-
-            return Some(ConversationEventWithConfigRef {
-                event_id,
-                event,
-                config,
-            });
-        }
-
-        None
-    }
-}
-
-/// An iterator over the mutable events in a conversation stream.
-pub struct IterMut<'a> {
-    /// The configuration state for the first, next event in the iterator.
-    pub(super) front_config: PartialAppConfig,
-
-    /// The iterator over the events in the stream.
-    pub(super) iter: std::slice::IterMut<'a, InternalEvent>,
-}
-
-impl<'a> Iterator for IterMut<'a> {
-    type Item = ConversationEventWithConfigMut<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        for internal in self.iter.by_ref() {
-            let event_id = &internal.event_id;
-            match &mut internal.payload {
-                EventPayload::ConfigDelta(delta) => {
-                    if let Err(error) = config_delta::fold(&mut self.front_config, delta.clone()) {
-                        error!(%error, "Failed to merge config delta.");
-                    }
-                }
+            match &internal.payload {
+                EventPayload::ConfigDelta(_) => back.step_over_delta(),
                 EventPayload::Event(event) => {
-                    return Some(ConversationEventWithConfigMut {
+                    return Some(ConversationEventWithConfigRef {
                         event_id,
                         event,
-                        config: self.front_config.clone(),
+                        config: back.current(),
                     });
                 }
                 EventPayload::Compaction(_)
@@ -320,21 +341,10 @@ pub struct ConversationEventWithConfigRef<'a> {
     /// The event.
     pub event: &'a ConversationEvent,
 
-    /// The configuration.
-    pub config: PartialAppConfig,
-}
-
-/// A mutable reference to a [`ConversationEvent`] with its configuration.
-#[derive(Debug, PartialEq)]
-pub struct ConversationEventWithConfigMut<'a> {
-    /// The identity of this entry, unchanged by payload edits.
-    pub event_id: &'a EventId,
-
-    /// The event.
-    pub event: &'a mut ConversationEvent,
-
-    /// The configuration.
-    pub config: PartialAppConfig,
+    /// The configuration at the time the event was added.
+    ///
+    /// Events with no config delta between them share one allocation.
+    pub config: Arc<PartialAppConfig>,
 }
 
 /// A [`ConversationEvent`] with its configuration.
@@ -358,7 +368,9 @@ pub struct ConversationEventWithConfig {
     /// become available in the conversation stream until explicitly added using
     /// the CLI flag `--tool` or `--cfg`, while *NEW* conversations *WILL* get
     /// the new tool by default.
-    pub config: PartialAppConfig,
+    ///
+    /// Events with no config delta between them share one allocation.
+    pub config: Arc<PartialAppConfig>,
 }
 
 impl ConversationEventWithConfig {
@@ -401,7 +413,8 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream = ConversationStream::new(jp_config::util::build(config)?.into());
+        let config = jp_config::util::build(Arc::unwrap_or_clone(config))?;
+        let mut stream = ConversationStream::new(config.into());
         stream.adopt(InternalEvent {
             event_id: first_id,
             payload: EventPayload::Event(Box::new(first_event)),
@@ -424,20 +437,6 @@ impl std::ops::Deref for ConversationEventWithConfigRef<'_> {
     type Target = ConversationEvent;
 
     fn deref(&self) -> &Self::Target {
-        self.event
-    }
-}
-
-impl std::ops::Deref for ConversationEventWithConfigMut<'_> {
-    type Target = ConversationEvent;
-
-    fn deref(&self) -> &Self::Target {
-        self.event
-    }
-}
-
-impl std::ops::DerefMut for ConversationEventWithConfigMut<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
         self.event
     }
 }

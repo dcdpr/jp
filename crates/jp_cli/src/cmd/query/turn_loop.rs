@@ -1449,15 +1449,13 @@ async fn commit_tool_responses(
 
 /// Write a single rendered-arguments entry into event metadata.
 fn store_rendered_arguments(stream: &mut ConversationStream, tool_call_id: &str, content: &str) {
-    for event in stream.iter_mut() {
-        let is_match = event
-            .event
+    let request = stream.iter_mut().find(|event| {
+        event
             .as_tool_call_request()
-            .is_some_and(|r| r.id == tool_call_id);
-        if is_match {
-            set_rendered_arguments(event.event, content);
-            return;
-        }
+            .is_some_and(|r| r.id == tool_call_id)
+    });
+    if let Some(event) = request {
+        set_rendered_arguments(event, content);
     }
 }
 

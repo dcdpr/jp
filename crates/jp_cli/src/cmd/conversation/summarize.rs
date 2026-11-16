@@ -380,9 +380,9 @@ fn collect_range_events(
     range_to: usize,
 ) -> Vec<ConversationEvent> {
     events
-        .iter_turns()
-        .filter(|turn| turn.index() >= range_from && turn.index() <= range_to)
-        .flat_map(|turn| turn.into_iter().map(|e| e.event.clone()))
+        .iter_events_by_turn()
+        .filter(|e| (range_from..=range_to).contains(&e.turn))
+        .map(|e| e.event.clone())
         .collect()
 }
 

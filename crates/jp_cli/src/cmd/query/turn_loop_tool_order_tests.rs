@@ -701,12 +701,12 @@ impl<'a> Scenario<'a> {
             out: strip_ansi(&out.lock()),
             responses: events
                 .iter()
-                .filter_map(|event| event.event.as_tool_call_response())
+                .filter_map(|event| event.as_tool_call_response())
                 .cloned()
                 .collect(),
             inquiries: events
                 .iter()
-                .filter_map(|event| event.event.as_inquiry_response())
+                .filter_map(|event| event.as_inquiry_response())
                 .cloned()
                 .collect(),
             seen_while_open: prompts.seen_while_open.lock().unwrap().take(),

@@ -26,6 +26,7 @@ use std::{
         Arc, OnceLock,
         atomic::{self, AtomicBool},
     },
+    time::Instant,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -1213,6 +1214,7 @@ fn maybe_init_events(
         return;
     }
 
+    let started_at = Instant::now();
     let stream = match loader.load_conversation_stream(id, fallback) {
         Ok(stream) => stream,
         Err(error) => {
@@ -1220,6 +1222,12 @@ fn maybe_init_events(
             return;
         }
     };
+    debug!(
+        %id,
+        events = stream.len(),
+        elapsed_ms = %started_at.elapsed().as_millis(),
+        "Loaded conversation events."
+    );
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(stream))) {
         warn!(%id, ?error, "Failed to initialize conversation events. Skipping.");

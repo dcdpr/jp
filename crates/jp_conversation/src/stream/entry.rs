@@ -321,6 +321,18 @@ impl InternalEvent {
         }
     }
 
+    /// Get a mutable reference to [`EventPayload::Event`], if applicable.
+    #[must_use]
+    pub(super) fn as_event_mut(&mut self) -> Option<&mut ConversationEvent> {
+        match &mut self.payload {
+            EventPayload::Event(event) => Some(event),
+            EventPayload::ConfigDelta(_)
+            | EventPayload::Compaction(_)
+            | EventPayload::Overlay(_)
+            | EventPayload::Unknown { .. } => None,
+        }
+    }
+
     /// Classify the event as turn-scoped or global.
     /// See [`EventScope`].
     #[must_use]

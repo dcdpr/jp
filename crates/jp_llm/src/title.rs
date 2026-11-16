@@ -218,7 +218,7 @@ fn rebase_on_model(events: &ConversationStream, model: ModelConfig) -> Result<Co
     base.assistant.model = model;
 
     let mut rebased = ConversationStream::new(Arc::new(base)).with_created_at(events.created_at);
-    rebased.extend(events.iter().map(|e| e.event.clone()));
+    rebased.extend(events.iter().cloned());
 
     Ok(rebased)
 }

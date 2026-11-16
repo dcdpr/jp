@@ -43,7 +43,8 @@ fn events_by_turn_agrees_with_iter_turns() {
         ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
     ]);
-    stream.add_config_delta(PartialAppConfig::default());
+    stream.add_config_delta(color_delta());
+    assert_eq!(stream.config_deltas().count(), 1);
     stream.extend(vec![
         ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
@@ -77,6 +78,92 @@ fn events_by_turn_is_empty_for_an_empty_stream() {
     let stream = ConversationStream::new_test();
     assert_eq!(stream.iter_events_by_turn().count(), 0);
     assert_eq!(stream.turn_count(), 0);
+}
+
+fn last_turns(stream: &ConversationStream) -> (Vec<&ConversationEvent>, Vec<&ConversationEvent>) {
+    let via_turns = stream
+        .iter_turns()
+        .next_back()
+        .map(|turn| turn.into_iter().map(|e| e.event).collect())
+        .unwrap_or_default();
+    let direct = stream.last_turn_events().collect();
+
+    (via_turns, direct)
+}
+
+/// Non-empty config delta (`add_config_delta` ignores empty partials).
+fn color_delta() -> PartialAppConfig {
+    let mut partial = PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+    partial
+}
+
+fn requests<'a>(events: &[&'a ConversationEvent]) -> Vec<&'a str> {
+    events
+        .iter()
+        .filter_map(|event| event.as_chat_request())
+        .map(|request| request.content.as_str())
+        .collect()
+}
+
+#[test]
+fn last_turn_events_agrees_with_iter_turns() {
+    // The trailing config delta is not an event and must not end the turn.
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+        ConversationEvent::new(ChatResponse::message("A2"), ts(0, 1, 2)),
+    ]);
+    stream.add_config_delta(color_delta());
+    assert_eq!(stream.config_deltas().count(), 1);
+
+    let (via_turns, direct) = last_turns(&stream);
+    assert_eq!(via_turns, direct);
+    assert_eq!(direct.len(), 3);
+    assert!(direct[0].is_turn_start());
+    assert_eq!(requests(&direct), vec!["Q2"]);
+}
+
+#[test]
+fn last_turn_events_is_the_whole_stream_without_a_turn_start() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 0, 2)),
+    ]);
+
+    let (via_turns, direct) = last_turns(&stream);
+    assert_eq!(via_turns, direct);
+    assert_eq!(requests(&direct), vec!["Q1", "Q2"]);
+}
+
+#[test]
+fn last_turn_events_is_empty_for_an_empty_stream() {
+    let stream = ConversationStream::new_test();
+    assert_eq!(stream.last_turn_events().count(), 0);
+}
+
+#[test]
+fn iter_skips_config_deltas_in_both_directions() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![ConversationEvent::new(
+        ChatRequest::from("Q1"),
+        ts(0, 0, 1),
+    )]);
+    stream.add_config_delta(color_delta());
+    assert_eq!(stream.config_deltas().count(), 1);
+    stream.extend(vec![ConversationEvent::new(
+        ChatRequest::from("Q2"),
+        ts(0, 0, 2),
+    )]);
+
+    let forward: Vec<_> = stream.iter().collect();
+    let backward: Vec<_> = stream.iter().rev().collect();
+    assert_eq!(requests(&forward), vec!["Q1", "Q2"]);
+    assert_eq!(requests(&backward), vec!["Q2", "Q1"]);
 }
 
 #[test]
@@ -296,7 +383,7 @@ fn retain_turns_keeps_two_windows() {
 
     let requests: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_chat_request())
+        .filter_map(ConversationEvent::as_chat_request)
         .map(|r| r.content.clone())
         .collect();
     assert_eq!(requests, vec!["Q1", "Q3", "Q4"]);
@@ -340,7 +427,7 @@ fn retain_turns_numbers_an_implicit_leading_turn_like_iter_turns() {
     stream.retain_turns(|index| index == 0);
     let requests: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_chat_request())
+        .filter_map(ConversationEvent::as_chat_request)
         .map(|r| r.content.clone())
         .collect();
     assert_eq!(requests, vec!["A"], "turn 0 is the unmarked prefix");
@@ -351,7 +438,7 @@ fn retain_turns_numbers_an_implicit_leading_turn_like_iter_turns() {
     stream.retain_turns(|index| index == 1);
     let requests: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_chat_request())
+        .filter_map(ConversationEvent::as_chat_request)
         .map(|r| r.content.clone())
         .collect();
     assert_eq!(requests, vec!["B"], "turn 1 is the marked suffix");
