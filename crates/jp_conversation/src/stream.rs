@@ -1072,12 +1072,12 @@ impl ConversationStream {
         });
     }
 
-    /// Returns the stream indices of [`InquiryRequest`] events that have no
+    /// Return the stream indices of [`InquiryRequest`] events that have no
     /// matching [`InquiryResponse`] in the same turn.
     ///
     /// Requests and responses are paired within each turn.
-    /// When an inquiry ID appears multiple times in a turn, each response pairs
-    /// with the earliest unmatched request sharing that ID.
+    /// When an inquiry ID appears multiple times in the same turn, each
+    /// response pairs with the earliest unmatched request with that ID.
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
@@ -1118,13 +1118,13 @@ impl ConversationStream {
         unanswered
     }
 
-    /// Returns unanswered [`InquiryRequest`] events from the last turn, in
-    /// stream order.
+    /// Return unanswered [`InquiryRequest`] events from the last turn, ordered
+    /// from oldest to newest.
     ///
-    /// Requests and responses are paired within the turn by inquiry ID (and in
-    /// arrival order when an ID repeats).
-    /// Unanswered requests from earlier turns are omitted because completed
-    /// turns cannot receive new responses.
+    /// Requests and responses are paired within the turn using the same rules
+    /// as [`Self::sanitize`].
+    /// Unanswered requests from earlier turns are excluded because completed
+    /// turns no longer accept responses.
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     #[must_use]

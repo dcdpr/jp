@@ -59,17 +59,19 @@ pub(crate) struct SessionHistoryEntry {
     pub activated_at: DateTime<Utc>,
 }
 
-/// Summary of a session's conversation history and active conversation.
+/// Snapshot of a session's conversation history and active conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionOverview {
     pub session: Session,
 
-    /// Live conversations in the session's history, most recently activated
-    /// first.
+    /// Live conversations activated by the session, ordered from most to least
+    /// recently activated.
     pub conversations: Vec<ConversationId>,
 
-    /// Active conversation for the session, or `None` if no live conversation
-    /// precedes the most recently archived entry in the session's history.
+    /// The session's active conversation.
+    ///
+    /// `None` if the session has no live conversations or if its most recent
+    /// live conversation precedes an archived one in the session history.
     pub active: Option<ConversationId>,
 }
 
@@ -232,13 +234,12 @@ impl Workspace {
             .collect()
     }
 
-    /// Return a [`SessionOverview`] for every readable session in the backing
-    /// store.
+    /// Return an overview of every session mapping in the backing store.
     ///
-    /// Queries the backing store on each call rather than the in-memory
-    /// workspace index, so callers observe sessions and conversations created
-    /// by other processes after the workspace was opened.
-    /// Session mappings that cannot be read or parsed are skipped.
+    /// Reads the store on every call rather than the in-memory workspace index,
+    /// so long-running callers see sessions and conversations created by other
+    /// processes after the workspace was opened.
+    /// Mappings that cannot be read or parsed are skipped.
     #[must_use]
     pub fn session_overviews(&self) -> Vec<SessionOverview> {
         let live: HashSet<_> = self
