@@ -3,7 +3,7 @@
 //! threads.
 //!
 //! Run it from any worktree of the repository with `just dash`.
-//! The sources are read on background threads (see [`source`]); the main thread
+//! The sources are read on background threads (see `source`); the main thread
 //! only draws and handles keys.
 
 mod app;
