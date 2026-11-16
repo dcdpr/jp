@@ -15,7 +15,13 @@ use jp_workspace::{ConversationLock, Workspace};
 use serde_json::Map;
 
 use super::*;
-use crate::signals::testing::{detached_router, test_router};
+use crate::{
+    cmd::query::{
+        interrupt::{StreamingInterruptResult, apply_streaming_interrupt},
+        turn::TurnPhase,
+    },
+    signals::testing::{detached_router, test_router},
+};
 
 fn make_retry_state(max_retries: u32) -> StreamRetryState {
     let config = RequestConfig {
@@ -115,6 +121,7 @@ async fn retry_after(error: StreamError, retry_state: &mut StreamRetryState) {
         &conv,
         &printer,
         &detached_router(),
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -303,6 +310,7 @@ async fn retryable_error_breaks_for_retry() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -336,6 +344,7 @@ async fn non_retryable_error_returns_error() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -364,6 +373,7 @@ async fn budget_exhausted_returns_error() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -405,6 +415,7 @@ async fn partial_content_flushed_on_retry() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -453,6 +464,7 @@ async fn partial_content_flushed_on_abort() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -493,6 +505,7 @@ async fn retry_without_partial_content_still_works() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -528,6 +541,7 @@ async fn fatal_error_after_reasoning_leaves_the_gap_unshaded() {
         &conv,
         &printer,
         &router,
+        &mut TurnInterrupts::none(),
     )
     .await;
 
@@ -583,6 +597,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
             &conv,
             &printer,
             &router,
+            &mut TurnInterrupts::none(),
         ),
     )
     .await
@@ -593,4 +608,140 @@ async fn interrupt_during_backoff_cuts_wait_short() {
     assert!(matches!(result, StreamErrorOutcome::Interrupted(_)));
     // The attempt was recorded before the wait began.
     assert_eq!(retry_state.consecutive_failures, 1);
+}
+
+/// A retry state whose backoff honours a provider's `Retry-After` of a minute,
+/// far longer than any test timeout.
+fn make_long_backoff_retry_state() -> StreamRetryState {
+    StreamRetryState::new(RequestConfig {
+        max_retries: 3,
+        base_backoff_ms: 1,
+        max_backoff_secs: 120,
+        stream_idle_timeout_secs: 120,
+        max_response_bytes: MaxResponseBytes::default(),
+        cache: CachePolicy::default(),
+    })
+}
+
+// A plugin's `stop` sent while the turn waits out a rate limit must be answered
+// at once, not after the wait: `jp serve-chat` shows it as hanging otherwise,
+// and graceful shutdown aborts the turn after its grace period instead.
+#[tokio::test]
+async fn client_stop_during_backoff_cuts_wait_short() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut retry_state = make_long_backoff_retry_state();
+    let mut turn_coordinator = make_turn_coordinator();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
+
+    let (sender, mut interrupts) = TurnInterrupts::channel();
+    // On the current-thread runtime this task first runs only after the test
+    // task yields, which it does at the backoff select!, so the stop is sent
+    // while the wait is in progress. The task ends once the turn takes it.
+    let send = tokio::spawn(async move {
+        let delivery = sender.try_send(InterruptAction::Stop).unwrap();
+        delivery.await
+    });
+
+    let router = detached_router();
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        handle_stream_error(
+            StreamError::rate_limit(Some(Duration::from_mins(1))),
+            &mut retry_state,
+            &mut turn_coordinator,
+            &conv,
+            &printer,
+            &router,
+            &mut interrupts,
+        ),
+    )
+    .await
+    .expect("the stop must cut the 60s backoff short");
+
+    assert!(
+        matches!(
+            result,
+            StreamErrorOutcome::ClientInterrupt(InterruptAction::Stop)
+        ),
+        "{result:?}"
+    );
+    send.await
+        .unwrap()
+        .expect("the stop was taken, so its sender is told");
+    assert_eq!(retry_state.consecutive_failures, 1);
+}
+
+// The retry has already committed the partial response and reset the
+// coordinator by the time a reply arrives, so the reply must follow the partial
+// response exactly once and lead to a fresh request.
+#[tokio::test]
+async fn client_reply_during_backoff_follows_the_committed_partial_response() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut retry_state = make_long_backoff_retry_state();
+    let mut turn_coordinator = make_turn_coordinator();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+        turn_coordinator.handle_event(stream, Event::message(0, "Hello world"));
+    });
+
+    let (sender, mut interrupts) = TurnInterrupts::channel();
+    let delivery = sender
+        .try_send(InterruptAction::Reply {
+            content: "Try again.".into(),
+            echo: false,
+        })
+        .unwrap();
+
+    let router = detached_router();
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        handle_stream_error(
+            StreamError::rate_limit(Some(Duration::from_mins(1))),
+            &mut retry_state,
+            &mut turn_coordinator,
+            &conv,
+            &printer,
+            &router,
+            &mut interrupts,
+        ),
+    )
+    .await
+    .expect("the reply must cut the 60s backoff short");
+    delivery.await.expect("the reply was taken");
+
+    let StreamErrorOutcome::ClientInterrupt(action) = result else {
+        panic!("expected a client interrupt, got {result:?}");
+    };
+    let applied = conv
+        .update_events(|stream| apply_streaming_interrupt(action, &mut turn_coordinator, stream));
+
+    assert_eq!(applied, StreamingInterruptResult::Break);
+    assert_eq!(turn_coordinator.current_phase(), TurnPhase::Streaming);
+
+    let tail: Vec<_> = conv
+        .events()
+        .iter()
+        .filter_map(|event| {
+            if let Some(ChatResponse::Message { message }) = event.as_chat_response() {
+                Some(format!("response: {message}"))
+            } else {
+                event
+                    .as_chat_request()
+                    .map(|request| format!("request: {}", request.content))
+            }
+        })
+        .collect();
+    assert_eq!(tail, [
+        "request: test",
+        "response: Hello world",
+        "request: Try again.",
+    ]);
 }
