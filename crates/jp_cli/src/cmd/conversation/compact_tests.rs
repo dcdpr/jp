@@ -588,7 +588,7 @@ fn an_empty_plan_on_a_later_target_compacts_nothing() {
         .test_lock(ctx.workspace.acquire_conversation(&id_a).unwrap());
     lock_a
         .as_mut()
-        .update_events(|e| e.extend(stream_of(3).iter().map(|x| x.event.clone())));
+        .update_events(|e| e.extend(stream_of(3).iter().cloned()));
     drop(lock_a);
 
     ctx.set_now(ctx.now() + Duration::from_secs(1));
@@ -604,7 +604,7 @@ fn an_empty_plan_on_a_later_target_compacts_nothing() {
         .test_lock(ctx.workspace.acquire_conversation(&id_b).unwrap());
     lock_b
         .as_mut()
-        .update_events(|e| e.extend(stream_of(2).iter().map(|x| x.event.clone())));
+        .update_events(|e| e.extend(stream_of(2).iter().cloned()));
     drop(lock_b);
 
     let handle_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
@@ -1183,7 +1183,7 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
     for t in 0..6 {
         let req = stream
             .iter()
-            .filter_map(|e| e.event.as_tool_call_request())
+            .filter_map(|e| e.as_tool_call_request())
             .find(|r| r.id == format!("t{t}"))
             .expect("request present");
 

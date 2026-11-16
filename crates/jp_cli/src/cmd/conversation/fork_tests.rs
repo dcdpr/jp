@@ -41,7 +41,7 @@ use crate::{
 fn assert_forked_stream_matches(source: &ConversationStream, fork: &ConversationStream) {
     let stored_ids = |stream: &ConversationStream| -> Vec<String> {
         stream
-            .iter()
+            .iter_with_config()
             .filter(|event| !event.is_turn_start())
             .map(|event| event.event_id.to_string())
             .collect()
@@ -98,7 +98,7 @@ fn turns(count: u32) -> Vec<ConversationEvent> {
 fn requests(stream: &ConversationStream) -> Vec<String> {
     stream
         .iter()
-        .filter_map(|e| e.event.as_chat_request())
+        .filter_map(|e| e.as_chat_request())
         .map(|r| r.content.clone())
         .collect()
 }
@@ -756,7 +756,7 @@ fn test_conversation_fork() {
                 let requests: Vec<_> = convs[1]
                     .2
                     .iter()
-                    .filter_map(|e| e.event.as_chat_request())
+                    .filter_map(|e| e.as_chat_request())
                     .map(|r| r.content.clone())
                     .collect();
                 assert_eq!(requests, vec!["Q1", "Q2", "Q4"]);
@@ -1452,7 +1452,7 @@ fn fork_targets_correct_source() {
     let fork_events = ctx.workspace.events(&fork_handle).unwrap();
     let requests: Vec<&str> = fork_events
         .iter()
-        .filter_map(|e| e.event.as_chat_request())
+        .filter_map(|e| e.as_chat_request())
         .map(|r| r.content.as_str())
         .collect();
     assert_eq!(requests, vec!["beta question"]);
@@ -1462,7 +1462,7 @@ fn fork_targets_correct_source() {
     let a_events = ctx.workspace.events(&handle_a).unwrap();
     let a_requests: Vec<&str> = a_events
         .iter()
-        .filter_map(|e| e.event.as_chat_request())
+        .filter_map(|e| e.as_chat_request())
         .map(|r| r.content.as_str())
         .collect();
     assert_eq!(a_requests, vec!["alpha question"]);

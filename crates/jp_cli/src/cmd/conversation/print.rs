@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::{
     conversation::tool::style::{
@@ -7,6 +9,7 @@ use jp_config::{
 };
 use jp_conversation::stream::TurnOrigin;
 use jp_workspace::ConversationHandle;
+use tracing::debug;
 
 use crate::{
     cli::CommandArgs,
@@ -182,6 +185,7 @@ impl Print {
         print_style: Option<PrintStyle>,
         compacted: bool,
     ) -> Output {
+        let started_at = Instant::now();
         let mut events = ctx.workspace.events(handle)?.clone();
 
         // Selection and the numbers shown in headers both use the raw
@@ -245,13 +249,25 @@ impl Print {
             "turn origins must align with iter_turns()"
         );
 
+        let mut rendered = 0;
         for (turn, origin) in events.iter_turns().zip(&origins) {
             if selected.overlaps_origin(*origin) {
                 renderer.render_turn(&turn, *origin);
+                rendered += 1;
             }
         }
 
         renderer.flush();
+        debug!(
+            id = %handle.id(),
+            events = events.len(),
+            config_deltas = events.config_deltas().count(),
+            turns = raw_count,
+            rendered_turns = rendered,
+            compacted,
+            elapsed_ms = %started_at.elapsed().as_millis(),
+            "Printed conversation."
+        );
         Ok(())
     }
 }

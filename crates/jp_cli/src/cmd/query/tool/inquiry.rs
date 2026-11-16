@@ -269,11 +269,9 @@ impl InquiryBackend for LlmInquiryBackend {
         {
             let target_idx = second_last_visible_event_index(&events);
             if let Some(idx) = target_idx
-                && let Some(event_ref) = events.iter_mut().nth(idx)
+                && let Some(event) = events.iter_mut().nth(idx)
             {
-                event_ref
-                    .event
-                    .add_metadata_field(jp_conversation::event::CACHE_BREAKPOINT_KEY, true);
+                event.add_metadata_field(jp_conversation::event::CACHE_BREAKPOINT_KEY, true);
             }
         }
 
@@ -428,8 +426,8 @@ fn second_last_visible_event_index(events: &ConversationStream) -> Option<usize>
     let mut last = None;
     let mut second_last = None;
 
-    for (i, event_ref) in events.iter().enumerate() {
-        if event_ref.event.kind.is_provider_visible() {
+    for (i, event) in events.iter().enumerate() {
+        if event.kind.is_provider_visible() {
             second_last = last;
             last = Some(i);
         }

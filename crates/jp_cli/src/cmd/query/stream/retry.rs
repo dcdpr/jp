@@ -381,11 +381,10 @@ pub enum StreamErrorOutcome {
 /// Whether the error warrants a restart at all is a separate decision, made by
 /// [`handle_stream_error`].
 pub(crate) fn agent_restart_is_safe(events: &ConversationStream) -> bool {
-    events.iter_turns().next_back().is_none_or(|turn| {
-        turn.iter()
-            .filter_map(|event| event.event.as_tool_call_request())
-            .all(|request| events.find_tool_call_response(&request.id).is_some())
-    })
+    events
+        .last_turn_events()
+        .filter_map(|event| event.as_tool_call_request())
+        .all(|request| events.find_tool_call_response(&request.id).is_some())
 }
 
 /// Single source of truth for handling stream errors during LLM streaming.

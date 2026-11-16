@@ -32,8 +32,7 @@ pub mod turn_iter;
 pub mod turn_mut;
 pub use config_delta::{ApplyDelta, ConfigDelta, ResetDelta};
 pub use iter::{
-    ConversationEventWithConfig, ConversationEventWithConfigMut, ConversationEventWithConfigRef,
-    EventInTurn, IntoIter, IterMut,
+    ConversationEventWithConfig, ConversationEventWithConfigRef, EventInTurn, IntoIter,
 };
 pub use projection::{AffectedItem, TurnOrigin};
 pub use turn_iter::{IterTurns, Turn};
@@ -730,15 +729,8 @@ impl ConversationStream {
     #[must_use]
     pub fn last(&self) -> Option<ConversationEventWithConfigRef<'_>> {
         // `next_back` folds the deltas before the event once; `Iterator::last`
-        // would walk forward and clone the config at every event.
-        self.iter().next_back()
-    }
-
-    /// Similar to [`Self::last`], but returns a mutable reference to the last
-    /// event.
-    #[must_use]
-    pub fn last_mut(&mut self) -> Option<ConversationEventWithConfigMut<'_>> {
-        self.iter_mut().last()
+        // would walk forward over every event.
+        self.iter_with_config().next_back()
     }
 
     /// Returns the first [`ConversationEvent`] in the stream, wrapped in a
@@ -746,7 +738,7 @@ impl ConversationStream {
     /// at the time the event was added.
     #[must_use]
     pub fn first(&self) -> Option<ConversationEventWithConfigRef<'_>> {
-        self.iter().next()
+        self.iter_with_config().next()
     }
 
     /// Pops the last [`ConversationEvent`] from the stream, returning it
@@ -765,7 +757,7 @@ impl ConversationStream {
 
         let config = self
             .last()
-            .map_or_else(|| self.base_config.to_partial(), |v| v.config);
+            .map_or_else(|| Arc::new(self.base_config.to_partial()), |v| v.config);
 
         // Any turn-scoped entry after `pos` is unreadable. Left behind, it
         // would read as part of the turn before once the popped event is gone.
@@ -1260,7 +1252,7 @@ impl ConversationStream {
     /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
     pub fn iter_turns(&self) -> IterTurns<'_> {
-        IterTurns::new(self.iter())
+        IterTurns::new(self.iter_with_config())
     }
 
     /// Iterate over the conversation events, each tagged with its 0-based turn
@@ -1271,9 +1263,8 @@ impl ConversationStream {
     /// turn.
     ///
     /// Unlike `iter_turns`, no per-event configuration is resolved.
-    /// `iter_turns` clones the accumulated [`PartialAppConfig`] for every event
-    /// and materializes the whole stream up front; this walks the events once
-    /// and allocates nothing.
+    /// `iter_turns` folds every config delta and materializes the whole stream
+    /// up front; this walks the events once and allocates nothing.
     /// Prefer it whenever only event content is needed.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
@@ -1301,6 +1292,27 @@ impl ConversationStream {
         })
     }
 
+    /// The events of the last turn, in stream order.
+    ///
+    /// The same events as the last [`Turn`] from [`Self::iter_turns`]: from the
+    /// last [`TurnStart`] onwards, or the whole stream when it holds no
+    /// `TurnStart`.
+    /// Empty for a stream with no events.
+    /// Resolves no per-event configuration and allocates nothing.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    pub fn last_turn_events(&self) -> impl DoubleEndedIterator<Item = &ConversationEvent> {
+        let start = self
+            .events
+            .iter()
+            .rposition(|e| e.as_event().is_some_and(ConversationEvent::is_turn_start))
+            .unwrap_or(0);
+
+        self.events[start..]
+            .iter()
+            .filter_map(InternalEvent::as_event)
+    }
+
     /// Returns the number of turns in the stream.
     ///
     /// A turn is delimited by [`TurnStart`] events.
@@ -1315,23 +1327,25 @@ impl ConversationStream {
             .map_or(0, |event| event.turn + 1)
     }
 
-    /// Returns the turn that was active at the given time.
+    /// Returns the 0-based index of the turn that was active at the given time.
     ///
-    /// Finds the last turn whose starting timestamp is ≤ `dt`.
+    /// Finds the last turn whose first event's timestamp is ≤ `dt`.
     /// Returns `None` if the stream has no turns, or if `dt` is before the
     /// first turn.
-    ///
-    /// Use [`Turn::index()`] on the result to get the 0-based turn index.
     #[must_use]
-    pub fn turn_at_time(&self, dt: DateTime<Utc>) -> Option<Turn<'_>> {
+    pub fn turn_index_at_time(&self, dt: DateTime<Utc>) -> Option<usize> {
         let mut result = None;
-        for turn in self.iter_turns() {
-            let start = turn.iter().next()?.event.timestamp;
-            if start <= dt {
-                result = Some(turn);
-            } else {
+        let mut current = None;
+        for event in self.iter_events_by_turn() {
+            if current == Some(event.turn) {
+                continue;
+            }
+            current = Some(event.turn);
+
+            if event.timestamp > dt {
                 break;
             }
+            result = Some(event.turn);
         }
         result
     }
@@ -1490,25 +1504,41 @@ impl ConversationStream {
         }
     }
 
-    /// Returns an iterator over the events in the stream, wrapped in a
-    /// [`ConversationEventWithConfigRef`], containing the [`PartialAppConfig`]
-    /// at the time the event was added.
-    #[must_use]
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = ConversationEventWithConfigRef<'_>> {
-        Iter {
-            stream: self,
-            front_config: self.base_config.to_partial(),
-            front: 0,
-            back: self.events.len(),
-        }
+    /// Iterate over the conversation events, from either end.
+    ///
+    /// Config deltas, compactions, overlays, and unrecognized entries are
+    /// skipped, and no per-event configuration is resolved.
+    /// Use [`Self::iter_with_config`] when the configuration each event was
+    /// recorded under is needed.
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &ConversationEvent> {
+        self.events.iter().filter_map(InternalEvent::as_event)
     }
 
-    /// Similar to [`Self::iter`], but returns a mutable iterator over the
-    /// events in the stream.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = ConversationEventWithConfigMut<'_>> {
-        IterMut {
-            iter: self.events.iter_mut(),
-            front_config: self.base_config.to_partial(),
+    /// Iterate over the conversation events mutably, from either end.
+    ///
+    /// Yields the same events, in the same order, as [`Self::iter`].
+    /// Editing an event does not change its entry ID.
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut ConversationEvent> {
+        self.events
+            .iter_mut()
+            .filter_map(InternalEvent::as_event_mut)
+    }
+
+    /// Iterate over the conversation events, each with its entry ID and the
+    /// [`PartialAppConfig`] in effect when it was added.
+    ///
+    /// Events with no config delta between them share one config allocation.
+    /// Walking backwards folds every delta before each event it yields; prefer
+    /// [`Self::iter`] whenever only event content is needed.
+    #[must_use]
+    pub fn iter_with_config(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = ConversationEventWithConfigRef<'_>> {
+        Iter {
+            stream: self,
+            front_config: Arc::new(self.base_config.to_partial()),
+            front: 0,
+            back: self.events.len(),
         }
     }
 

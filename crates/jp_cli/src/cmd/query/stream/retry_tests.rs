@@ -412,7 +412,7 @@ async fn partial_content_flushed_on_retry() {
 
     // Partial content should have been flushed to the conversation stream
     let has_response = conv.events().iter().any(|e| {
-        e.event.as_chat_response().is_some_and(
+        e.as_chat_response().is_some_and(
             |r| matches!(r, ChatResponse::Message { message } if message == "Hello world"),
         )
     });
@@ -459,7 +459,7 @@ async fn partial_content_flushed_on_abort() {
     assert!(matches!(result, StreamErrorOutcome::Fatal(_)));
 
     let has_response = conv.events().iter().any(|e| {
-        e.event.as_chat_response().is_some_and(
+        e.as_chat_response().is_some_and(
             |r| matches!(r, ChatResponse::Message { message } if message == "Hello world"),
         )
     });

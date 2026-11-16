@@ -31,11 +31,11 @@ fn conversation_id() -> ConversationId {
 }
 
 fn push_turn(events: &mut ConversationStream, n: usize, question: &str, answer: &str) {
-    let config = events.base_config().to_partial();
+    let config = Arc::new(events.base_config().to_partial());
     let entry = |id: String, kind: EventKind| ConversationEventWithConfig {
         event_id: EventId::fixed(&id),
         event: ConversationEvent::new(kind, DateTime::<Utc>::UNIX_EPOCH),
-        config: config.clone(),
+        config: Arc::clone(&config),
     };
 
     events.extend([
@@ -253,7 +253,7 @@ async fn a_turn_edited_before_the_task_syncs_is_left_without_a_summary() {
     handler.spawn(task(id, &stored(&workspace, id), answering(TURN_1_SUMMARY)));
 
     update(&workspace, id, |events| {
-        for mut event in events.iter_mut() {
+        for event in events.iter_mut() {
             if let Some(request) = event.as_chat_request_mut() {
                 request.content = "An edited question".to_owned();
             }
@@ -422,7 +422,7 @@ fn a_summary_of_an_edited_turn_is_not_current() {
     push_turn(&mut events, 1, "First question", "First answer");
     let summary = generated(&events, "Ask the first question");
 
-    for mut event in events.iter_mut() {
+    for event in events.iter_mut() {
         if let Some(response) = event.as_chat_response_mut() {
             *response = ChatResponse::message("An edited answer");
         }

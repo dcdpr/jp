@@ -1574,9 +1574,9 @@ impl TurnInputs {
 /// never a request, so the comparison holds across it.
 pub(crate) fn last_request_id(events: &ConversationStream) -> Option<EventId> {
     events
-        .iter()
-        .rev()
-        .find(|entry| entry.event.is_chat_request())
+        .iter_events_by_turn()
+        .filter(|entry| entry.is_chat_request())
+        .last()
         .map(|entry| entry.event_id.clone())
 }
 
@@ -1619,16 +1619,13 @@ pub(crate) fn turn_structured_data(
     }
 
     let data = events
-        .iter_turns()
-        .next_back()
-        .and_then(|turn| {
-            turn.iter().rev().find_map(|entry| {
-                entry
-                    .event
-                    .as_chat_response()
-                    .and_then(ChatResponse::as_structured_data)
-                    .cloned()
-            })
+        .last_turn_events()
+        .rev()
+        .find_map(|event| {
+            event
+                .as_chat_response()
+                .and_then(ChatResponse::as_structured_data)
+                .cloned()
         })
         .ok_or(StructuredDataError::Missing)?;
 
@@ -1655,7 +1652,7 @@ fn last_assistant_message(stream: &ConversationStream) -> Option<&str> {
     stream
         .iter()
         .rev()
-        .filter_map(|e| e.event.as_chat_response())
+        .filter_map(ConversationEvent::as_chat_response)
         .find_map(|r| r.as_message())
 }
 

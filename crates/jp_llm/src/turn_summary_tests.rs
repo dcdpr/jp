@@ -41,14 +41,14 @@ fn entry(id: &str, kind: impl Into<EventKind>) -> (String, ConversationEvent) {
 
 fn stream(entries: Vec<(String, ConversationEvent)>) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
-    let config = stream.base_config().to_partial();
+    let config = Arc::new(stream.base_config().to_partial());
     stream.extend(
         entries
             .into_iter()
             .map(|(id, event)| ConversationEventWithConfig {
                 event_id: EventId::fixed(&id),
                 event,
-                config: config.clone(),
+                config: Arc::clone(&config),
             }),
     );
 
@@ -387,7 +387,7 @@ fn editing_a_turn_changes_its_fingerprint() {
     let before = transcripts(&events, &[id("turn001")])[0].fingerprint();
 
     let mut edited = events;
-    for mut event in edited.iter_mut() {
+    for event in edited.iter_mut() {
         if let Some(request) = event.as_chat_request_mut() {
             request.content = "An edited question".to_owned();
         }
@@ -403,7 +403,7 @@ fn editing_stripped_tool_output_keeps_the_fingerprint() {
     let before = transcripts(&events, &[id("turn001")])[0].fingerprint();
 
     let mut edited = events;
-    for mut event in edited.iter_mut() {
+    for event in edited.iter_mut() {
         if let Some(response) = event.as_tool_call_response_mut() {
             response.result = Ok("- buy milk\n- call dentist".to_owned());
         }

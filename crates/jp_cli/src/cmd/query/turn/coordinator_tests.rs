@@ -36,7 +36,7 @@ fn pending_tool_progress_does_not_become_an_executable_or_partial_event() {
     assert_eq!(
         stream
             .iter()
-            .filter_map(|event| event.event.as_tool_call_request())
+            .filter_map(|event| event.as_tool_call_request())
             .count(),
         0
     );
@@ -85,7 +85,7 @@ fn test_transitions_to_executing_on_tool_call() {
     // (the durable source of truth), not carried in the Action.
     let tool_calls: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_request())
+        .filter_map(|e| e.as_tool_call_request())
         .collect();
     assert_eq!(tool_calls.len(), 1);
     assert_eq!(tool_calls[0].id, "call_1");
@@ -136,7 +136,7 @@ fn reasoning_items_split_by_a_redacted_item_render_as_one_region() {
     // has to replay it as a `redacted_thinking` block.
     let redacted: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.metadata.get("anthropic_redacted_thinking"))
+        .filter_map(|e| e.metadata.get("anthropic_redacted_thinking"))
         .filter_map(Value::as_str)
         .collect();
     assert_eq!(
@@ -458,11 +458,11 @@ fn test_refused_discards_buffered_partial_text() {
     );
 
     assert!(
-        !stream.iter().any(|e| e.event.is_chat_response()),
+        !stream.iter().any(ConversationEvent::is_chat_response),
         "refusal must discard partial assistant output"
     );
     // The user's request is retained.
-    assert!(stream.iter().any(|e| e.event.is_chat_request()));
+    assert!(stream.iter().any(ConversationEvent::is_chat_request));
 }
 
 /// A refusal after *flushed* partial text also discards it: the block was
@@ -484,7 +484,7 @@ fn test_refused_discards_flushed_partial_text() {
     coordinator.handle_event(&mut stream, Event::message(0, "A complete sentence."));
     coordinator.handle_event(&mut stream, Event::flush(0));
     // Sanity: the flushed block reached the stream before the refusal.
-    assert!(stream.iter().any(|e| e.event.is_chat_response()));
+    assert!(stream.iter().any(ConversationEvent::is_chat_response));
 
     coordinator.handle_event(
         &mut stream,
@@ -495,10 +495,10 @@ fn test_refused_discards_flushed_partial_text() {
     );
 
     assert!(
-        !stream.iter().any(|e| e.event.is_chat_response()),
+        !stream.iter().any(ConversationEvent::is_chat_response),
         "refusal must discard already-flushed partial assistant output"
     );
-    assert!(stream.iter().any(|e| e.event.is_chat_request()));
+    assert!(stream.iter().any(ConversationEvent::is_chat_request));
 }
 
 /// A max-tokens finish surfaces a chrome notice on stderr, never on stdout.
@@ -706,11 +706,11 @@ fn event_kinds(stream: &ConversationStream) -> Vec<&'static str> {
     stream
         .iter()
         .map(|entry| {
-            if entry.event.is_turn_start() {
+            if entry.is_turn_start() {
                 "TurnStart"
-            } else if entry.event.is_chat_request() {
+            } else if entry.is_chat_request() {
                 "ChatRequest"
-            } else if entry.event.as_chat_response().is_some() {
+            } else if entry.as_chat_response().is_some() {
                 "ChatResponse"
             } else {
                 "other"
@@ -736,7 +736,7 @@ fn restarting_an_unanswered_turn_records_the_model_before_the_request() {
     assert!(coordinator.restart_turn_on(&mut stream, &picked));
 
     assert_eq!(event_kinds(&stream), ["TurnStart", "ChatRequest"]);
-    let first = stream.iter().next().unwrap();
+    let first = stream.first().unwrap();
     assert_eq!(first.config.assistant.model.id.to_string(), "test/picked");
 }
 
@@ -904,7 +904,7 @@ fn test_multi_part_tool_call_deferred_to_flush() {
     let tool_call_count = |stream: &ConversationStream| {
         stream
             .iter()
-            .filter(|e| e.event.as_tool_call_request().is_some())
+            .filter(|e| e.as_tool_call_request().is_some())
             .count()
     };
 
@@ -930,7 +930,7 @@ fn test_multi_part_tool_call_deferred_to_flush() {
     coordinator.handle_event(&mut stream, Event::flush(1));
     let requests: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_request())
+        .filter_map(|e| e.as_tool_call_request())
         .cloned()
         .collect();
     assert_eq!(requests.len(), 1);
@@ -1209,7 +1209,7 @@ fn interrupt_reply_inline_skips_user_header_but_resets_assistant_header() {
     assert!(
         stream
             .iter()
-            .filter_map(|e| e.event.as_chat_request())
+            .filter_map(|e| e.as_chat_request())
             .any(|r| r.content == "actually, ignore that"),
         "expected the inline reply recorded as a ChatRequest"
     );
@@ -1258,7 +1258,7 @@ fn interrupt_reply_during_reasoning_preserves_partial_reasoning() {
     // The partial reasoning is committed as a Reasoning event...
     let responses: Vec<_> = stream
         .iter()
-        .filter_map(|e| e.event.as_chat_response().cloned())
+        .filter_map(|e| e.as_chat_response().cloned())
         .collect();
     assert_eq!(
         responses.len(),
@@ -1274,10 +1274,7 @@ fn interrupt_reply_during_reasoning_preserves_partial_reasoning() {
     );
 
     // ...and the reply lands after it as a new user request.
-    let requests: Vec<_> = stream
-        .iter()
-        .filter_map(|e| e.event.as_chat_request())
-        .collect();
+    let requests: Vec<_> = stream.iter().filter_map(|e| e.as_chat_request()).collect();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[1].content, "actually, do X instead");
 
@@ -1285,9 +1282,9 @@ fn interrupt_reply_during_reasoning_preserves_partial_reasoning() {
     let order: Vec<_> = stream
         .iter()
         .filter_map(|e| {
-            if e.event.as_chat_response().is_some() {
+            if e.as_chat_response().is_some() {
                 Some("response")
-            } else if e.event.as_chat_request().is_some() {
+            } else if e.as_chat_request().is_some() {
                 Some("request")
             } else {
                 None
@@ -1388,7 +1385,7 @@ fn duplicate_flush_after_tool_call_does_not_surface_request() {
     // second flush did not append anything.
     let tool_calls = stream
         .iter()
-        .filter(|e| e.event.as_tool_call_request().is_some())
+        .filter(|e| e.as_tool_call_request().is_some())
         .count();
     assert_eq!(tool_calls, 1);
 }

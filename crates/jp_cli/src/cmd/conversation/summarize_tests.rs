@@ -191,7 +191,7 @@ fn range_stream_carries_the_source_repairs() {
 
     let signatures: Vec<_> = range
         .iter()
-        .filter_map(|e| e.event.metadata.get("signature").cloned())
+        .filter_map(|e| e.metadata.get("signature").cloned())
         .collect();
 
     assert!(
@@ -226,7 +226,7 @@ fn turn_with_everything() -> ConversationStream {
 fn request_payloads(stream: &ConversationStream) -> Vec<String> {
     stream
         .iter()
-        .filter_map(|e| match &e.event.kind {
+        .filter_map(|e| match &e.kind {
             EventKind::ChatRequest(r) => Some(r.content.clone()),
             EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
             EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
@@ -334,7 +334,7 @@ fn a_rule_that_omits_tool_calls_does_not_send_them() {
 fn policies_reach_a_range_that_does_not_start_at_turn_zero() {
     let mut source = ConversationStream::new_test();
     source.start_turn(ChatRequest::from("first"));
-    source.extend(turn_with_everything().iter().map(|e| e.event.clone()));
+    source.extend(turn_with_everything().iter().cloned());
 
     let policies = Compaction::new(1, 1).with_reasoning(PolicySpec {
         policy: ReasoningPolicy::Strip,

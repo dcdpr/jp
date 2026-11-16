@@ -115,18 +115,14 @@ pub(crate) fn unresponded_requests(stream: &ConversationStream) -> Vec<ToolCallR
     // same turn) correctly suppresses the request.
     let responded_ids: std::collections::HashSet<&str> = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_response())
+        .filter_map(|event| event.as_tool_call_response())
         .map(|r| r.id.as_str())
         .collect();
 
     // Walk the most recent turn for ToolCallRequests, in document order.
-    let Some(current_turn) = stream.iter_turns().next_back() else {
-        return Vec::new();
-    };
-
-    current_turn
-        .iter()
-        .filter_map(|event| event.event.as_tool_call_request())
+    stream
+        .last_turn_events()
+        .filter_map(|event| event.as_tool_call_request())
         .filter(|request| !responded_ids.contains(request.id.as_str()))
         .cloned()
         .collect()

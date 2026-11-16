@@ -440,8 +440,8 @@ impl TurnSet {
 fn resolve_cli_from(bound: &CliRangeBound, events: &ConversationStream) -> Bound {
     match bound {
         CliRangeBound::Resolved(b) => Bound::At(b.clone()),
-        CliRangeBound::At(dt) => match events.turn_at_time(*dt) {
-            Some(turn) => Bound::At(RangeBound::Absolute(turn.index() + 1)),
+        CliRangeBound::At(dt) => match events.turn_index_at_time(*dt) {
+            Some(turn) => Bound::At(RangeBound::Absolute(turn + 1)),
             None => Bound::At(RangeBound::Absolute(0)),
         },
     }
@@ -454,8 +454,8 @@ fn resolve_cli_from(bound: &CliRangeBound, events: &ConversationStream) -> Bound
 fn resolve_cli_to(bound: &CliRangeBound, events: &ConversationStream) -> Bound {
     match bound {
         CliRangeBound::Resolved(b) => Bound::At(b.clone()),
-        CliRangeBound::At(dt) => match events.turn_at_time(*dt) {
-            Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
+        CliRangeBound::At(dt) => match events.turn_index_at_time(*dt) {
+            Some(turn) => Bound::At(RangeBound::Absolute(turn)),
             None => Bound::Empty,
         },
     }
@@ -519,12 +519,12 @@ pub(crate) fn keep_first_bound(bound: &RuleBound, events: &ConversationStream) -
             // representable time, means the window covers every turn.
             let Some(cutoff) = chrono::Duration::from_std(*d)
                 .ok()
-                .and_then(|d| first.event.timestamp.checked_add_signed(d))
+                .and_then(|d| first.timestamp.checked_add_signed(d))
             else {
                 return Bound::Empty;
             };
-            match events.turn_at_time(cutoff) {
-                Some(turn) => Bound::At(RangeBound::Absolute(turn.index() + 1)),
+            match events.turn_index_at_time(cutoff) {
+                Some(turn) => Bound::At(RangeBound::Absolute(turn + 1)),
                 None => Bound::At(RangeBound::Absolute(0)),
             }
         }
@@ -547,8 +547,8 @@ pub(crate) fn keep_last_bound(bound: &RuleBound, events: &ConversationStream) ->
             let cutoff = chrono::Duration::from_std(*d)
                 .ok()
                 .and_then(|d| Utc::now().checked_sub_signed(d));
-            match cutoff.and_then(|cutoff| events.turn_at_time(cutoff)) {
-                Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
+            match cutoff.and_then(|cutoff| events.turn_index_at_time(cutoff)) {
+                Some(turn) => Bound::At(RangeBound::Absolute(turn)),
                 None => Bound::Empty,
             }
         }

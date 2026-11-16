@@ -44,8 +44,7 @@ fn metadata_keys(stream: &ConversationStream) -> Vec<String> {
     stream
         .iter()
         .map(|e| {
-            e.event
-                .metadata
+            e.metadata
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>()
@@ -137,8 +136,7 @@ fn recording_a_patch_leaves_the_stored_event_untouched() {
     let stored: Vec<String> = stream
         .iter()
         .map(|e| {
-            e.event
-                .metadata
+            e.metadata
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>()

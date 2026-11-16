@@ -552,7 +552,7 @@ impl TurnCoordinator {
             return false;
         }
 
-        let mut events = stream.iter().rev().map(|entry| entry.event);
+        let mut events = stream.iter().rev();
         events
             .next()
             .is_some_and(ConversationEvent::is_chat_request)
@@ -754,16 +754,12 @@ impl TurnCoordinator {
 fn has_unresponded_tool_calls_in_current_turn(stream: &ConversationStream) -> bool {
     let responded_ids: std::collections::HashSet<&str> = stream
         .iter()
-        .filter_map(|e| e.event.as_tool_call_response())
+        .filter_map(ConversationEvent::as_tool_call_response)
         .map(|r| r.id.as_str())
         .collect();
 
-    let Some(current_turn) = stream.iter_turns().next_back() else {
-        return false;
-    };
-
-    current_turn.iter().any(|e| {
-        e.event
+    stream.last_turn_events().any(|event| {
+        event
             .as_tool_call_request()
             .is_some_and(|r| !responded_ids.contains(r.id.as_str()))
     })
@@ -779,12 +775,9 @@ fn current_cycle_has_answer(stream: &ConversationStream) -> bool {
     stream
         .iter()
         .rev()
-        .take_while(|e| !e.event.is_chat_request() && !e.event.is_tool_call_response())
+        .take_while(|e| !e.is_chat_request() && !e.is_tool_call_response())
         .any(|e| {
-            e.event.is_tool_call_request()
-                || e.event
-                    .as_chat_response()
-                    .is_some_and(|r| !r.is_reasoning())
+            e.is_tool_call_request() || e.as_chat_response().is_some_and(|r| !r.is_reasoning())
         })
 }
 

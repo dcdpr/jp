@@ -3287,7 +3287,7 @@ fn turn_structured_data_takes_a_replayed_turns_answer() {
 
 /// Count the `TurnStart` events in a stream.
 fn turn_start_count(stream: &ConversationStream) -> usize {
-    stream.iter().filter(|e| e.event.is_turn_start()).count()
+    stream.iter().filter(|e| e.is_turn_start()).count()
 }
 
 /// Assert that no `TurnStart` is immediately followed by another `TurnStart`
@@ -3296,10 +3296,10 @@ fn assert_no_adjacent_turn_starts(stream: &ConversationStream) {
     let mut previous_was_turn_start = false;
     for e in stream.iter() {
         assert!(
-            !(previous_was_turn_start && e.event.is_turn_start()),
+            !(previous_was_turn_start && e.is_turn_start()),
             "stream contains adjacent TurnStart events (empty middle turn)"
         );
-        previous_was_turn_start = e.event.is_turn_start();
+        previous_was_turn_start = e.is_turn_start();
     }
 }
 

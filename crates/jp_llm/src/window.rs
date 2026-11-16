@@ -140,10 +140,7 @@ pub fn truncate_to_fit(
     };
 
     // Walk from the start (oldest), accumulating chars to drop.
-    let char_counts: Vec<usize> = events
-        .iter()
-        .map(|e| estimate_event_chars(e.event))
-        .collect();
+    let char_counts: Vec<usize> = events.iter().map(estimate_event_chars).collect();
 
     let mut dropped_chars = 0;
     let mut dropped_events = 0;
@@ -188,7 +185,7 @@ pub fn truncate_to_fit(
 /// project it first (see [`ConversationStream::apply_projection`]).
 #[must_use]
 pub fn estimate_chars(events: &ConversationStream) -> usize {
-    events.iter().map(|e| estimate_event_chars(e.event)).sum()
+    events.iter().map(estimate_event_chars).sum()
 }
 
 /// Char-based estimate of a single event's contribution to the window.

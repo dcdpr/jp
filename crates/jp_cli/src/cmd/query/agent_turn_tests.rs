@@ -97,7 +97,7 @@ impl Provider for AgentProvider {
             yield Ok(Event::ToolCallPending { id: "agent-call-2".into(), name: "http_tool".into() });
             let stored = serde_json::from_str(&storage.read_test_events_raw(&id).unwrap()).unwrap();
             let events = ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
-            assert_eq!(events.iter().filter_map(|event| event.event.as_tool_call_request()).count(), 0);
+            assert_eq!(events.iter().filter_map(|event| event.as_tool_call_request()).count(), 0);
             let mut params = CallToolRequestParams::new("http_tool");
             params.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call".into())])));
             let peer = client.peer().clone();
@@ -120,7 +120,7 @@ impl Provider for AgentProvider {
             assert_eq!(from_mcp(result).unwrap().to_text(), "confirmed");
             let stored = serde_json::from_str(&storage.read_test_events_raw(&id).unwrap()).unwrap();
             let events = ConversationStream::from_parts(json!({}), stored, &config.into()).unwrap();
-            let responses = events.iter().filter_map(|event| event.event.as_tool_call_response()).cloned().collect::<Vec<_>>();
+            let responses = events.iter().filter_map(|event| event.as_tool_call_response()).cloned().collect::<Vec<_>>();
             assert_eq!(responses, vec![
                 ToolCallResponse { id: "agent-call".into(), result: Ok("confirmed".into()) },
                 ToolCallResponse { id: "agent-call-2".into(), result: Ok("confirmed".into()) },
@@ -195,7 +195,7 @@ impl Provider for SwitchingAgentProvider {
             .thread
             .events
             .iter()
-            .filter_map(|event| event.event.as_tool_call_request())
+            .filter_map(|event| event.as_tool_call_request())
             .map(|call| call.id.clone())
             .collect::<Vec<_>>();
         assert_eq!(requests, vec!["agent-call", "agent-call-2"]);
@@ -203,7 +203,7 @@ impl Provider for SwitchingAgentProvider {
             .thread
             .events
             .iter()
-            .filter_map(|event| event.event.as_tool_call_response())
+            .filter_map(|event| event.as_tool_call_response())
             .cloned()
             .collect::<Vec<_>>();
         assert_eq!(responses, vec![
@@ -405,7 +405,7 @@ async fn agent_idle_timeout_with_an_unrecorded_tool_result_ends_the_turn() {
         assert_eq!(error.kind, StreamErrorKind::Timeout);
         assert_eq!(provider.starts.load(Ordering::SeqCst), 1);
         assert_eq!(count.load(Ordering::SeqCst), 0);
-        let requests = lock.events().iter().filter_map(|event| event.event.as_tool_call_request()).map(|call| call.id.clone()).collect::<Vec<_>>();
+        let requests = lock.events().iter().filter_map(|event| event.as_tool_call_request()).map(|call| call.id.clone()).collect::<Vec<_>>();
         assert_eq!(requests, vec!["agent-call"]);
         owner.shutdown().await.unwrap();
     })).await.unwrap();
@@ -435,7 +435,7 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let (printer, output, chrome) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(), TurnInterrupts::none()).await.unwrap();
-        let answers = lock.events().iter().filter_map(|event| event.event.as_inquiry_response()).filter_map(|answer| match answer { InquiryResponse::Answered { answer, .. } => Some(answer.clone()), _ => None }).collect::<Vec<_>>();
+        let answers = lock.events().iter().filter_map(|event| event.as_inquiry_response()).filter_map(|answer| match answer { InquiryResponse::Answered { answer, .. } => Some(answer.clone()), _ => None }).collect::<Vec<_>>();
         assert_eq!(answers, vec![json!(true), json!(true)]);
         assert_eq!(count.load(Ordering::SeqCst), 4);
         assert_eq!(provider.starts.load(Ordering::SeqCst), 1);
