@@ -330,6 +330,9 @@ single-request wire streaming:
   per-shape request types as public API.
   `elelem` should not be published until at least two non-chat shapes are
   migrated so the public surface is not biased toward chat completions.
+  It should also not be published before `Event` carries [RFD 118]'s hosted
+  activity and attribution: a model published without them breaks on the first
+  hosted tool, or routes it through generic metadata.
 
 ## Implementation Plan
 
@@ -376,3 +379,4 @@ reversible.
 [RFD 012]: ../012-typed-llm-streaming-events.md
 [RFD 043]: ../043-incremental-tool-call-argument-streaming.md
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
+[RFD 118]: ../118-provider-response-artifacts.md
