@@ -361,6 +361,55 @@ fn reading_a_release_returns_its_files_without_its_overview() {
     );
 }
 
+/// A release's order is checked rather than read as a fragment, and isn't
+/// counted as one.
+#[test]
+fn a_releases_order_is_checked_but_not_counted() {
+    let dir = fragments_dir(&[
+        ("0.3.0/retry-idle-turns.fixed.md", FRAGMENT),
+        (
+            "0.3.0/.order.json",
+            r#"{ "entries": ["retry-idle-turns.fixed.md"] }"#,
+        ),
+    ]);
+
+    let report = check(dir.path()).unwrap();
+
+    assert_eq!(report.fragments, 1);
+    assert_eq!(report.problems, vec![]);
+}
+
+#[test]
+fn a_malformed_order_is_reported_with_why() {
+    let dir = fragments_dir(&[("0.3.0/.order.json", r#"{ "changelogs": [] }"#)]);
+
+    let report = check(dir.path()).unwrap();
+
+    let found = problems(&report, dir.path());
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].starts_with(
+            "0.3.0/.order.json: not an order, which is a JSON object of `highlights` and \
+             `entries`, each a list of file names: unknown field `changelogs`"
+        ),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn an_order_outside_a_release_is_reported() {
+    let dir = fragments_dir(&[
+        ("retry-idle-turns.fixed.md", FRAGMENT),
+        (".order.json", r#"{ "entries": [] }"#),
+    ]);
+
+    let report = check(dir.path()).unwrap();
+
+    let expected = ".order.json: only a release's directory takes an order; unreleased fragments \
+                    are listed by their first credit";
+    assert_eq!(problems(&report, dir.path()), [expected]);
+}
+
 #[test]
 fn reading_a_part_reports_every_problem_in_it() {
     let dir = fragments_dir(&[

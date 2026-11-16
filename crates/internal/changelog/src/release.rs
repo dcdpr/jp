@@ -3,7 +3,9 @@
 //! [`read`] loads either a specific release subdirectory (`<version>/`) or all
 //! unreleased changes (the top level of the fragments directory plus any
 //! `<version>/` subdirectory without a `v<version>` git tag), resolves credits
-//! from git history and [`forge`], and sorts highlights and entries.
+//! from git history and [`forge`], and sorts highlights and entries: a
+//! release's in the order its `.order.json` ([`Order`]) gives, then the rest by
+//! first credit.
 //!
 //! A [`Release`] serializes to the versioned JSON schema ([`FORMAT`]) consumed
 //! by site generators and external tools:
@@ -44,7 +46,7 @@
 
 use std::{collections::BTreeMap, fmt, fs, io, num::NonZeroU64};
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use doc::repository::web_address;
 use semver::Version;
 use serde::{Serialize, Serializer};
@@ -58,6 +60,7 @@ use crate::{
     highlight::Highlight,
     history::{self, Commit, History},
     links::Links,
+    order::{ORDER, Order, OrderError},
 };
 
 /// Schema version written in the `"format"` field when a [`Release`] is
@@ -78,11 +81,13 @@ pub struct Release {
     /// summary.
     pub overview: String,
 
-    /// Highlights ordered by first credit and then by slug.
+    /// Highlights in the order the release's `.order.json` lists them, then the
+    /// rest ordered by first credit and then by slug.
     pub highlights: Vec<Credited<Highlight>>,
 
     /// Fragment entries grouped by [`Type`] in release-note order, and within
-    /// each type ordered by first credit and then by slug.
+    /// each type in the order the release's `.order.json` lists them, then the
+    /// rest ordered by first credit and then by slug.
     pub entries: Vec<Credited<Fragment>>,
 }
 
@@ -142,6 +147,12 @@ pub enum ReleaseError {
     /// Failed to read `<version>/overview.md`.
     Overview(CheckError),
 
+    /// Failed to read `<version>/.order.json`.
+    Order {
+        path: Utf8PathBuf,
+        error: OrderError,
+    },
+
     /// Repository is a shallow clone and lacks full commit history for credits.
     Shallow,
 
@@ -161,6 +172,7 @@ impl fmt::Display for ReleaseError {
         match self {
             Self::Read(error) => write!(f, "{error}"),
             Self::Overview(error) => write!(f, "{error}"),
+            Self::Order { path, error } => write!(f, "{path}: {error}"),
             Self::Shallow => f.write_str(
                 "the repository is a shallow clone, which lacks the history credits are read \
                  from; fetch the rest of it with `git fetch --unshallow`",
@@ -202,15 +214,18 @@ impl From<NoAddress> for ReleaseError {
 ///
 /// Credits link to `repository` (defaulting to the web URL of git's `origin`
 /// remote) on `forge` (defaulting to [`Forge::infer`]).
+/// A release lists its highlights and entries in the order its `.order.json`
+/// gives, and [`Part::Unreleased`] by first credit.
 /// A tagged release takes its date from tag `v<version>`.
 /// When `<version>/overview.md` is missing or empty, `headings` is used to
 /// generate a fallback summary.
 ///
 /// # Errors
 ///
-/// Returns [`ReleaseError`] if the fragments directory or `overview.md` is
-/// unreadable or invalid, if the repository is a shallow clone, if `git` fails,
-/// or if `forge` requires a repository URL and none is available.
+/// Returns [`ReleaseError`] if the fragments directory, `overview.md`, or
+/// `.order.json` is unreadable or invalid, if the repository is a shallow
+/// clone, if `git` fails, or if `forge` requires a repository URL and none is
+/// available.
 pub fn read(
     dir: &Utf8Path,
     part: &Part,
@@ -236,18 +251,42 @@ pub fn read(
     let history = History::read(dir)?;
     let commits = history.commits();
 
+    // The unreleased part mixes the top level with every untagged release, so
+    // no one release's order applies to it.
+    let order = match part {
+        Part::Unreleased => Order::default(),
+        Part::Release(version) => read_order(&dir.join(version.to_string()))?,
+    };
+
     let mut entries = credit(&project, commits, fragments);
-    entries.sort_by(|(order, entry), (other_order, other)| {
-        (entry.file.type_, order, &entry.slug).cmp(&(other.file.type_, other_order, &other.slug))
+    entries.sort_by(|(name, first, entry), (other_name, other_first, other)| {
+        (
+            entry.file.type_,
+            rank(order.entry(name)),
+            first,
+            &entry.slug,
+        )
+            .cmp(&(
+                other.file.type_,
+                rank(order.entry(other_name)),
+                other_first,
+                &other.slug,
+            ))
     });
     let mut highlights = credit(&project, commits, highlights);
-    highlights.sort_by(|(order, highlight), (other_order, other)| {
-        (order, &highlight.slug).cmp(&(other_order, &other.slug))
-    });
-    let entries: Vec<_> = entries.into_iter().map(|(_, entry)| entry).collect();
+    highlights.sort_by(
+        |(name, first, highlight), (other_name, other_first, other)| {
+            (rank(order.highlight(name)), first, &highlight.slug).cmp(&(
+                rank(order.highlight(other_name)),
+                other_first,
+                &other.slug,
+            ))
+        },
+    );
+    let entries: Vec<_> = entries.into_iter().map(|(_, _, entry)| entry).collect();
     let highlights: Vec<_> = highlights
         .into_iter()
-        .map(|(_, highlight)| highlight)
+        .map(|(_, _, highlight)| highlight)
         .collect();
 
     let (version, date, overview) = match part {
@@ -289,17 +328,19 @@ impl Listed for Highlight {
 /// Sort key for ordering files by their first credit: change requests by
 /// ascending number, then commits from oldest to newest, then uncredited files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Order {
+enum FirstCredit {
     ChangeRequest(NonZeroU64),
     Commit(usize),
     Nobody,
 }
 
+/// Credit each of `files`, paired with its file name and the key that orders it
+/// by its first credit.
 fn credit<T: Listed>(
     project: &Project,
     commits: &[Commit],
     files: Vec<Filed<T>>,
-) -> Vec<(Order, Credited<T>)> {
+) -> Vec<(String, FirstCredit, Credited<T>)> {
     let paths: Vec<&str> = files.iter().map(|filed| filed.path.as_str()).collect();
     let credited = history::credited(commits, &paths);
 
@@ -312,7 +353,9 @@ fn credit<T: Listed>(
                 None => history_credits(project, commits, &indices),
             };
 
-            (order, Credited {
+            let name = filed.path.rsplit('/').next().unwrap_or_default().to_owned();
+
+            (name, order, Credited {
                 slug: filed.slug,
                 credits,
                 file: filed.file,
@@ -325,16 +368,18 @@ fn listed_credits(
     project: &Project,
     commits: &[Commit],
     listed: &[ListedCredit],
-) -> (Order, Vec<Credit>) {
-    let order = listed.first().map_or(Order::Nobody, |credit| match credit {
-        ListedCredit::ChangeRequest(number) => Order::ChangeRequest(*number),
-        ListedCredit::Commit(hash) => Order::Commit(
-            commits
-                .iter()
-                .position(|commit| commit.hash.starts_with(hash.as_str()))
-                .map_or(usize::MAX, |index| commits.len() - index),
-        ),
-    });
+) -> (FirstCredit, Vec<Credit>) {
+    let order = listed
+        .first()
+        .map_or(FirstCredit::Nobody, |credit| match credit {
+            ListedCredit::ChangeRequest(number) => FirstCredit::ChangeRequest(*number),
+            ListedCredit::Commit(hash) => FirstCredit::Commit(
+                commits
+                    .iter()
+                    .position(|commit| commit.hash.starts_with(hash.as_str()))
+                    .map_or(usize::MAX, |index| commits.len() - index),
+            ),
+        });
 
     let mut credits = vec![];
     for credit in listed {
@@ -352,8 +397,8 @@ fn history_credits(
     project: &Project,
     commits: &[Commit],
     indices: &[usize],
-) -> (Order, Vec<Credit>) {
-    let mut order = Order::Nobody;
+) -> (FirstCredit, Vec<Credit>) {
+    let mut order = FirstCredit::Nobody;
     let mut credits = vec![];
 
     for &index in indices {
@@ -362,8 +407,8 @@ fn history_credits(
         };
         if credits.is_empty() {
             order = match project.forge().change_request(&commit.message) {
-                Some(number) => Order::ChangeRequest(number),
-                None => Order::Commit(commits.len() - index),
+                Some(number) => FirstCredit::ChangeRequest(number),
+                None => FirstCredit::Commit(commits.len() - index),
             };
         }
         push_new(&mut credits, project.credit(&commit.hash, &commit.message));
@@ -387,6 +432,20 @@ fn unreleased(dir: &Utf8Path) -> Result<Contents, ReleaseError> {
     }
 
     Ok(contents)
+}
+
+/// Read the `.order.json` of the release directory `dir`.
+fn read_order(dir: &Utf8Path) -> Result<Order, ReleaseError> {
+    Order::read(dir).map_err(|error| ReleaseError::Order {
+        path: dir.join(ORDER),
+        error,
+    })
+}
+
+/// Sort key for a file the order lists at `position`: listed files by their
+/// position, and unlisted files after all of them.
+fn rank(position: Option<usize>) -> usize {
+    position.unwrap_or(usize::MAX)
 }
 
 fn push_new(credits: &mut Vec<Credit>, credit: Credit) {

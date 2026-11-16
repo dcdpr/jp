@@ -10,6 +10,7 @@
 //!     fan-out.md                  unreleased highlight
 //!   0.3.0/                        release subdirectory named by version
 //!     overview.md                 release overview (read by release::read)
+//!     .order.json                 order of highlights and entries (see order)
 //!     retry-idle-turns.fixed.md   released fragment
 //!     highlights/
 //!       plugin-tools.md           released highlight
@@ -33,6 +34,7 @@ use semver::Version;
 use crate::{
     fragment::{self, Fragment, FragmentError, NameError},
     highlight::{self, Highlight, HighlightError},
+    order::{ORDER, Order, OrderError},
 };
 
 /// Top-level documentation file skipped during fragment checks.
@@ -130,6 +132,12 @@ pub enum ProblemKind {
 
     /// Subdirectory inside `highlights/`.
     NestedInHighlights,
+
+    /// A release's `.order.json` isn't an order; the message says why.
+    MalformedOrder(String),
+
+    /// An `.order.json` outside a release's directory.
+    UnreleasedOrder,
 }
 
 impl fmt::Display for ProblemKind {
@@ -153,6 +161,11 @@ impl fmt::Display for ProblemKind {
             Self::NestedInHighlights => {
                 f.write_str("a `highlights/` directory holds no directories")
             }
+            Self::MalformedOrder(message) => f.write_str(message),
+            Self::UnreleasedOrder => f.write_str(
+                "only a release's directory takes an order; unreleased fragments are listed by \
+                 their first credit",
+            ),
         }
     }
 }
@@ -380,6 +393,8 @@ fn read_top_level(
         let path = dir.join(&entry.name);
         if entry.is_dir {
             read_top_level_dir(&path, &entry.name, releases, report, contents)?;
+        } else if entry.name == ORDER {
+            report.problem(&path, ProblemKind::UnreleasedOrder);
         } else if entry.name != README {
             read_file(&path, &entry.name, "", Format::Fragment, report, contents)?;
         }
@@ -423,6 +438,8 @@ fn read_release(
             } else {
                 report.problem(&path, ProblemKind::NestedInRelease);
             }
+        } else if entry.name == ORDER {
+            read_order(&path, report)?;
         } else if entry.name != OVERVIEW {
             read_file(
                 &path,
@@ -458,6 +475,23 @@ fn read_highlights(
                 contents,
             )?;
         }
+    }
+
+    Ok(())
+}
+
+/// Check that the release's order file at `path` is an order.
+fn read_order(path: &Utf8Path, report: &mut Report) -> Result<(), CheckError> {
+    let bytes = fs::read(path).map_err(|source| CheckError {
+        path: path.to_owned(),
+        source,
+    })?;
+    let Ok(text) = String::from_utf8(bytes) else {
+        report.problem(path, ProblemKind::NotUtf8);
+        return Ok(());
+    };
+    if let Err(OrderError::Malformed(message)) = Order::parse(&text) {
+        report.problem(path, ProblemKind::MalformedOrder(message));
     }
 
     Ok(())

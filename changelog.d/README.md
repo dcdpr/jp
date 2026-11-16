@@ -164,7 +164,7 @@ one that needs none, such as with a label.
 
 Cutting a release moves its fragments and highlights into a directory named
 after its version, which may also hold `overview.md`, the release's
-introduction:
+introduction, and `.order.json`, the order its notes list them in:
 
 ```text
 changelog.d/
@@ -173,11 +173,26 @@ changelog.d/
   highlights/fan-out.md         # unreleased
   0.3.0/
     overview.md
+    .order.json
     retry-idle-turns.fixed.md
     highlights/plugin-tools.md
 ```
 
 Released fragments and highlights stay here; correct one like any other file.
+
+The notes list highlights first, then the entries, grouped by type.
+`.order.json` names files in the order to list them, highlights by their name in
+`highlights/`:
+
+```json
+{
+  "highlights": ["plugin-tools.md"],
+  "entries": ["retry-idle-turns.fixed.md"]
+}
+```
+
+Within each type, the entries it names come first, in its order; files it leaves
+out follow, ordered by their first credit, and names no file has are skipped.
 
 ## Checking
 

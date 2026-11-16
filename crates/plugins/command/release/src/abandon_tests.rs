@@ -128,7 +128,11 @@ fn a_cut_whose_notes_nobody_edited_leaves_nothing_to_merge() {
 fn a_published_cut_whose_notes_merged_moves_them_back_from_main() {
     let fixture = filed_0_1_0();
     fixture.write("changelog.d/0.1.0/overview.md", "JP 0.1.0 retries.\n");
-    let main = fixture.commit("Write the overview of 0.1.0");
+    fixture.write(
+        "changelog.d/0.1.0/.order.json",
+        "{ \"entries\": [\"retry.fixed.md\"] }\n",
+    );
+    let main = fixture.commit("Write the overview and order of 0.1.0");
     fixture.push();
 
     let said = run(&fixture, |pipeline| abandon(pipeline, &version("0.1.0"))).unwrap();
@@ -148,10 +152,14 @@ fn a_published_cut_whose_notes_merged_moves_them_back_from_main() {
             .show(&format!("{branch}:changelog.d/retry.fixed.md"))
             .is_some()
     );
-    // The overview waits for the next cut of 0.1.0.
+    // The overview and the order wait for the next cut of 0.1.0.
     assert_eq!(
         fixture.show(&format!("{branch}:changelog.d/0.1.0/overview.md")),
         Some("JP 0.1.0 retries.\n".to_owned())
+    );
+    assert_eq!(
+        fixture.show(&format!("{branch}:changelog.d/0.1.0/.order.json")),
+        Some("{ \"entries\": [\"retry.fixed.md\"] }\n".to_owned())
     );
 
     fixture.publish(&["--delete", "release/0.1", "release-notes/v0.1.0"]);

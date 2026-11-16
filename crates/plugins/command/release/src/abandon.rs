@@ -14,7 +14,7 @@
 //! - Creates `release-notes/abandon-v<version>` moving the release's fragments
 //!   and highlights back to the top level of the fragments directory (removing
 //!   any files copied by `pick` from another release and leaving `overview.md`
-//!   in place).
+//!   and `.order.json` in place).
 //!   If `main` already has the files at the top level unedited, no abandon
 //!   branch is created.
 //! - Prints the `git push` commands needed to remove the remote branches.

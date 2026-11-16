@@ -515,6 +515,95 @@ fn entries_are_ordered_by_type_then_first_credit_then_slug() {
     ]);
 }
 
+/// The order lists files within their type and skips names no file has; files
+/// it leaves out follow, by first credit.
+/// Highlights come first regardless.
+#[test]
+fn a_release_lists_its_files_in_the_order_its_order_file_gives() {
+    let repository = Repository::new(Some("https://github.com/dcdpr/jp"));
+    repository.write("changelog.d/a.added.md", "The first one merged.\n");
+    repository.write("changelog.d/b.added.md", "The second one merged.\n");
+    repository.write("changelog.d/c.added.md", "The third one merged.\n");
+    repository.write("changelog.d/fix.fixed.md", "A fix.\n");
+    repository.write(
+        "changelog.d/highlights/one.md",
+        "# One\n\n- **Authors**: @JeanMertz\n\nThe first story.\n",
+    );
+    repository.write(
+        "changelog.d/highlights/two.md",
+        "# Two\n\n- **Authors**: @JeanMertz\n\nThe second story.\n",
+    );
+    repository.commit("feat: Build things (#1)");
+    repository.file_into("0.3.0", &[
+        "a.added.md",
+        "b.added.md",
+        "c.added.md",
+        "fix.fixed.md",
+        "highlights/one.md",
+        "highlights/two.md",
+    ]);
+    repository.write(
+        "changelog.d/0.3.0/.order.json",
+        r#"{
+            "highlights": ["two.md"],
+            "entries": ["fix.fixed.md", "c.added.md", "gone.added.md", "a.added.md"]
+        }"#,
+    );
+
+    let release = read(
+        &repository.fragments(),
+        &release("0.3.0"),
+        None,
+        None,
+        &Headings::default(),
+    )
+    .unwrap();
+
+    let entries: Vec<&str> = release
+        .entries
+        .iter()
+        .map(|entry| entry.slug.as_str())
+        .collect();
+    assert_eq!(entries, ["c", "a", "b", "fix"]);
+    let highlights: Vec<&str> = release
+        .highlights
+        .iter()
+        .map(|highlight| highlight.slug.as_str())
+        .collect();
+    assert_eq!(highlights, ["two", "one"]);
+}
+
+/// The unreleased part mixes every untagged release, so no release's order
+/// applies to it.
+#[test]
+fn the_unreleased_fragments_ignore_a_releases_order() {
+    let repository = Repository::new(Some("https://github.com/dcdpr/jp"));
+    repository.write("changelog.d/a.added.md", "The first one merged.\n");
+    repository.write("changelog.d/b.added.md", "The second one merged.\n");
+    repository.commit("feat: Build things (#1)");
+    repository.file_into("0.3.0", &["a.added.md", "b.added.md"]);
+    repository.write(
+        "changelog.d/0.3.0/.order.json",
+        r#"{ "entries": ["b.added.md", "a.added.md"] }"#,
+    );
+
+    let release = read(
+        &repository.fragments(),
+        &Part::Unreleased,
+        None,
+        None,
+        &Headings::default(),
+    )
+    .unwrap();
+
+    let entries: Vec<&str> = release
+        .entries
+        .iter()
+        .map(|entry| entry.slug.as_str())
+        .collect();
+    assert_eq!(entries, ["a", "b"]);
+}
+
 #[test]
 fn without_an_origin_every_credit_is_a_commit_linked_nowhere() {
     let repository = Repository::new(None);

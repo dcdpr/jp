@@ -311,6 +311,15 @@ Preparing release notes takes as long as needed without blocking `main`:
   highlights' titles.
   Writing `overview.md` replaces it, and `jp release render <version>` prints
   the summary to start from.
+- **The order** of the notes is highlights first, then the entries grouped by
+  type.
+  A `.order.json` in the release's directory names files in the order to list
+  them, as `{"highlights": [...], "entries": [...]}`: within each type the
+  entries it names come first, in its order, and files it leaves out follow by
+  their first credit.
+  Names no file has are skipped, so the order stays valid as entries are
+  combined or deleted.
+  The unreleased fragments have no order.
 - **More code** comes from `jp release pick 0.3.0 <commit>...`, with commits
   from the first-parent line of the commit checked out, which stands for `main`.
   It cherry-picks them onto `release/0.3` (`git cherry-pick -x`), leaving out
@@ -456,8 +465,8 @@ not been pushed to `origin`) so it can be cut again:
   and highlights back to the top level of `changelog.d/` with any wording edits
   preserved.
   Files copied by `pick` from another release are deleted instead, and
-  `overview.md` remains in `changelog.d/0.3.0/` for the next cut of that
-  version.
+  `overview.md` and `.order.json` remain in `changelog.d/0.3.0/` for the next
+  cut of that version.
 - Prints the `git push` commands to delete the corresponding branches on
   `origin`.
 
@@ -591,8 +600,9 @@ read the JSON output:
   When `forge = "none"`, credits are commits with no `url`.
 - `date` is `null` for a release in preparation, and both `version` and `date`
   are `null` for the unreleased model.
-- Within each type, entries are sorted by their first credit and then by `slug`
-  for deterministic output.
+- Highlights, and the entries within each type, are listed in the order the
+  release's `.order.json` gives, then the rest by their first credit and then by
+  `slug`, for deterministic output.
 - `format` versions the JSON schema so consumers can reject unsupported
   versions.
 

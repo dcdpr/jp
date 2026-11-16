@@ -294,6 +294,7 @@ changelog.d/
   highlights/fan-out.md         # unreleased
   0.3.0/
     overview.md
+    .order.json
     retry-idle-turns.fixed.md
     highlights/plugin-tools.md
 ```
@@ -306,8 +307,9 @@ release branches contain only code and have no `changelog.d/` ([RFD 122]).
 Released and unreleased files share the same format, and validation checks
 released directories as well, so a wording fix to an older release's notes is
 validated like any new change.
-A version directory may also contain `overview.md`, the release's introduction
-([RFD 122]).
+A version directory may also contain `overview.md`, the release's introduction,
+and `.order.json`, the order its notes list its highlights and entries in ([RFD
+122]).
 
 ### Crates and the `jp release` plugin
 
@@ -455,8 +457,9 @@ The set of paths allowed in the fragments directory is closed:
 - `README.md` at the top level, which documents both formats and is ignored by
   the parser (`highlights/` has no `README.md`).
 - `<slug>.<type>.md` and `highlights/<slug>.md` at the top level.
-- `<version>/<slug>.<type>.md`, `<version>/highlights/<slug>.md`, and
-  `<version>/overview.md`, where `<version>` is a semantic version directory.
+- `<version>/<slug>.<type>.md`, `<version>/highlights/<slug>.md`,
+  `<version>/overview.md`, and `<version>/.order.json`, where `<version>` is a
+  semantic version directory.
 
 Any other path is a CI error rather than a silently ignored file, failing early
 instead of vanishing during release assembly.
@@ -464,7 +467,10 @@ This rejects a fragment without a type in its filename, other file extensions
 (`.txt`, `.markdown`), a misspelled `overview.md`, non-version subdirectories,
 deeper directory nesting, or stray files under `highlights/`.
 A top-level `overview.md` has no type in its filename, so it is an error rather
-than a release's introduction.
+than a release's introduction, and a top-level `.order.json` is an error, since
+only a release has an order.
+A release's `.order.json` must be a JSON object of `highlights` and `entries`,
+each a list of file names.
 
 CI runs these rules as two separate checks because they have opposite triggering
 requirements.

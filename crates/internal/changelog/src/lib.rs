@@ -18,7 +18,8 @@
 //!
 //! [`release::read`] assembles a [`Release`] from a release subdirectory (or
 //! from all unreleased files), attributing each file to the change requests or
-//! commits that modified it in git history.
+//! commits that modified it in git history, and listing them in the order a
+//! release's `.order.json` ([`Order`]) gives.
 //! A [`Release`] serializes to JSON and renders to Markdown release notes and
 //! upgrade guides via [`markdown`].
 //!
@@ -40,6 +41,7 @@ pub mod highlight;
 mod history;
 mod links;
 pub mod markdown;
+pub mod order;
 pub mod release;
 
 pub use directory::{CheckError, Place, Problem, ProblemKind, Report, check};
@@ -49,4 +51,5 @@ pub use fragment::{Fragment, FragmentError, NameError, Type, UnknownType, Upgrad
 pub use git::GitError;
 pub use highlight::{Highlight, HighlightError};
 pub use history::{Added, History};
+pub use order::{Order, OrderError};
 pub use release::{Headings, Release, ReleaseError};
