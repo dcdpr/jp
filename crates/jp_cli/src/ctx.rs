@@ -9,6 +9,8 @@ use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_inquire::{release_terminal, terminal_held};
+#[cfg(test)]
+use jp_llm::Provider;
 use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
@@ -77,6 +79,9 @@ pub(crate) struct Ctx {
 
     #[cfg(test)]
     pub(crate) stubbed_now: DateTime<Utc>,
+
+    #[cfg(test)]
+    pub(crate) stubbed_provider: Option<Arc<dyn Provider>>,
 }
 
 pub(crate) struct Term {
@@ -171,6 +176,8 @@ impl Ctx {
 
             #[cfg(test)]
             stubbed_now: DateTime::<Utc>::UNIX_EPOCH,
+            #[cfg(test)]
+            stubbed_provider: None,
         }
     }
 

@@ -903,7 +903,7 @@ pub enum InterruptAction {
     Reply,
 }
 
-/// Response to `query`, sent once the turn has finished.
+/// Response to `query`, sent when the turn ends.
 ///
 /// Carries no transcript: the events are persisted, and the plugin reads them
 /// back with [`PluginToHost::ReadEvents`].
@@ -916,6 +916,13 @@ pub struct QueryCompleteResponse {
     /// The conversation the turn ran on.
     pub conversation: String,
 
+    /// How the turn ended.
+    ///
+    /// Hosts older than protocol version 15 omit this field, which deserializes
+    /// as [`QueryOutcome::Finished`].
+    #[serde(default)]
+    pub outcome: QueryOutcome,
+
     /// The assistant's structured response, present when the request carried a
     /// `schema`.
     ///
@@ -927,6 +934,24 @@ pub struct QueryCompleteResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub data: Option<Value>,
+}
+
+/// How a delegated turn ended.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryOutcome {
+    /// The assistant completed its response without interruption.
+    #[default]
+    Finished,
+
+    /// The turn was stopped and any partial response was persisted.
+    ///
+    /// A stop can come from the plugin's own `interrupt` request or from an
+    /// external interrupt such as Ctrl-C at the host's terminal.
+    Stopped,
+
+    /// The turn was aborted and any unpersisted partial response was discarded.
+    Aborted,
 }
 
 /// The conversation a `query` with `new` created.

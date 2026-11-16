@@ -23,7 +23,8 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 12      | `tool` on `init`, answered with `tool_outcome`.                 |
 /// | 13      | `edit_files`, answered with `edited`.                           |
 /// | 14      | `compact`, answered with `compacted`.                           |
-pub const PROTOCOL_VERSION: u32 = 14;
+/// | 15      | `outcome` on `query_complete`, reporting how the turn ended.    |
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///

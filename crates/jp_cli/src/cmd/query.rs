@@ -68,7 +68,7 @@ use args::{QueryText, ToolFlags, ToolUse};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use interrupt::TurnInterrupts;
+use interrupt::{InterruptAction, TurnInterrupts};
 use jp_attachment::Attachment;
 use jp_config::{
     AppConfig, PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
@@ -103,7 +103,7 @@ use jp_conversation::{
     thread::{Thread, ThreadBuilder},
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
-use jp_llm::{event::NoticeSink, provider};
+use jp_llm::{Provider, event::NoticeSink, provider};
 use jp_mcp::{
     StartupSet,
     server::{
@@ -126,6 +126,7 @@ use serde_json::{Map, Value};
 use strip_ansi_escapes::strip_str;
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, info, trace, warn};
+pub(crate) use turn::TurnEnding;
 use turn_loop::run_turn_loop;
 use url::Url;
 
@@ -677,9 +678,11 @@ impl Query {
         )
         .await?;
 
+        // Direct CLI queries treat all `TurnEnding` variants as a clean exit.
         let mut turn_result = inputs
             .run(lock, stream, ctx.signals.turn_interrupt())
             .await
+            .map(|_ending| ())
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
 
         // Fold a drop-time persist failure into the turn's result before
@@ -1023,9 +1026,13 @@ impl Query {
     ///
     /// The `lock` is proof the conversation is held for the duration (RFD 020),
     /// and it owns what it needs, so nothing here borrows the workspace.
+    ///
+    /// Returns how the turn ended, including a stop or an abort that arrived
+    /// before its request was appended.
     #[expect(clippy::too_many_arguments)]
     pub(crate) async fn run_turn(
         cfg: &AppConfig,
+        provider: Arc<dyn Provider>,
         signals: &SignalRouter,
         mcp_client: &jp_mcp::Client,
         root: Utf8PathBuf,
@@ -1042,13 +1049,8 @@ impl Query {
         pending_trim: PendingStreamTrim,
         mut turn_interrupt: TurnInterrupt,
         mut interrupts: TurnInterrupts,
-    ) -> Result<()> {
+    ) -> Result<TurnEnding> {
         let model_id = cfg.assistant.model.id.resolved();
-
-        let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
-            model_id.provider,
-            &cfg.providers.llm,
-        )?);
 
         debug!(model = %model_id, "Fetching model details.");
 
@@ -1064,12 +1066,12 @@ impl Query {
                     notice.handled();
                 }
                 info!("Interrupted during model lookup; the turn did not start.");
-                return Ok(());
+                return Ok(TurnEnding::Stopped);
             }
 
             Some(action) = interrupts.next_stop() => {
                 info!(?action, "Stopped by a client during model lookup; the turn did not start.");
-                return Ok(());
+                return Ok(ended_before_start(&action));
             }
         };
 
@@ -1380,6 +1382,9 @@ pub(crate) struct TurnInputs {
     /// takes [`TurnInterrupts::none`]; a turn asked for from elsewhere is
     /// reached through here.
     interrupts: TurnInterrupts,
+
+    #[cfg(test)]
+    stubbed_provider: Option<Arc<dyn Provider>>,
 }
 
 impl TurnInputs {
@@ -1456,6 +1461,8 @@ impl TurnInputs {
             pending_trim,
             config,
             interrupts,
+            #[cfg(test)]
+            stubbed_provider: ctx.stubbed_provider.clone(),
         })
     }
 
@@ -1469,7 +1476,7 @@ impl TurnInputs {
         lock: &ConversationLock,
         stream: ConversationStream,
         mut turn_interrupt: TurnInterrupt,
-    ) -> Result<()> {
+    ) -> Result<TurnEnding> {
         let cfg = &self.config;
         let mut interrupts = self.interrupts;
 
@@ -1513,7 +1520,7 @@ impl TurnInputs {
                     notice.handled();
                 }
                 info!("Interrupted while preparing; the turn did not start.");
-                return Ok(());
+                return Ok(TurnEnding::Stopped);
             }
 
             // A client's stop, for the same span: nothing has been appended, so
@@ -1521,7 +1528,7 @@ impl TurnInputs {
             // the turn to take once its own request is in place.
             Some(action) = interrupts.next_stop() => {
                 info!(?action, "Stopped by a client while preparing; the turn did not start.");
-                return Ok(());
+                return Ok(ended_before_start(&action));
             }
         };
 
@@ -1536,8 +1543,20 @@ impl TurnInputs {
         // messages, etc.) before sending the stream to the provider.
         lock.as_mut().update_events(ConversationStream::sanitize);
 
+        #[cfg(test)]
+        let stubbed = self.stubbed_provider;
+        #[cfg(not(test))]
+        let stubbed = None;
+        let provider = if let Some(provider) = stubbed {
+            provider
+        } else {
+            let provider_id = cfg.assistant.model.id.resolved().provider;
+            Arc::from(provider::get_provider(provider_id, &cfg.providers.llm)?)
+        };
+
         Query::run_turn(
             cfg,
+            provider,
             &self.signals,
             &self.mcp_client,
             self.workspace_root,
@@ -1578,6 +1597,17 @@ pub(crate) fn last_request_id(events: &ConversationStream) -> Option<EventId> {
         .filter(|entry| entry.is_chat_request())
         .last()
         .map(|entry| entry.event_id.clone())
+}
+
+/// Map a pre-start client interrupt to its [`TurnEnding`].
+///
+/// [`TurnInterrupts::next_stop`] only yields `Stop` or `Abort`; replies stay
+/// queued until the turn starts.
+fn ended_before_start(action: &InterruptAction) -> TurnEnding {
+    match action {
+        InterruptAction::Abort => TurnEnding::Aborted,
+        _ => TurnEnding::Stopped,
+    }
 }
 
 /// Why a turn has no structured response to hand back.

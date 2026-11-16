@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::{future, sync::Arc};
 
 use assert_matches::assert_matches;
+use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -12,7 +13,7 @@ use jp_config::{
         AllowToggle, Enable, PartialCommandConfigOrString, PartialEnableConfig, PartialToolConfig,
         ResultMode, RunMode, access::PartialEnvRuleConfig,
     },
-    model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
+    model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
     plugins::command::RunPolicy,
     types::{command::CommandConfigOrString, vec::MergeableVec},
     util::build,
@@ -22,7 +23,10 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
-use jp_llm::{Provider, provider::mock::MockProvider};
+use jp_llm::{
+    Error as LlmError, EventStream, Provider, model::ModelDetails, provider::mock::MockProvider,
+    query::ChatQuery,
+};
 use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
@@ -37,7 +41,8 @@ use relative_path::RelativePathBuf;
 use serde_json::Value;
 use tokio::{
     runtime::Runtime,
-    sync::{broadcast, oneshot::error::TryRecvError},
+    sync::{Notify, broadcast, oneshot::error::TryRecvError},
+    task::JoinSet,
 };
 
 use super::{
@@ -464,6 +469,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         // Ctrl-C is how this turn is interrupted, and this test drives that
         // through the router rather than over a channel.
         interrupts: TurnInterrupts::none(),
+        stubbed_provider: None,
     };
 
     // Registered where the lock is taken, so the press reaches it even though
@@ -474,7 +480,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
     signals.interrupt().await;
 
     let stream = lock.events().clone();
-    tokio::time::timeout(
+    let ending = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         inputs.run(&lock, stream, interrupt),
     )
@@ -482,6 +488,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
     .expect("the interrupt ends the wait; a hang here means it was never seen")
     .expect("stopping before the turn starts is not an error");
 
+    assert_eq!(ending, TurnEnding::Stopped);
     assert!(
         lock.events().is_empty(),
         "the turn was interrupted before its request was appended"
@@ -550,6 +557,7 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
         pending_trim: PendingStreamTrim::default(),
         mcp_servers,
         interrupts,
+        stubbed_provider: None,
     };
 
     let mut reply = client
@@ -562,7 +570,7 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
 
     let interrupt = router.turn_interrupt();
     let stream = lock.events().clone();
-    tokio::time::timeout(
+    let ending = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         inputs.run(&lock, stream, interrupt),
     )
@@ -570,6 +578,7 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
     .expect("the stop ends the wait; a hang here means it was never seen")
     .expect("stopping before the turn starts is not an error");
 
+    assert_eq!(ending, TurnEnding::Stopped);
     assert!(
         lock.events().is_empty(),
         "the turn was stopped before its request was appended"
@@ -580,6 +589,224 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
         Err(TryRecvError::Closed),
         "the reply was never acted on, so it is refused rather than reported delivered"
     );
+}
+
+#[tokio::test]
+async fn a_client_abort_during_mcp_startup_ends_the_turn_as_aborted() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    let base_config = Arc::new(AppConfig::new_test());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::clone(&base_config), None)
+        .unwrap();
+
+    let (_release, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
+    });
+    let (_lines, stderr) = broadcast::channel(1);
+    let mcp_servers = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+        stderr,
+    };
+
+    let router = detached_router();
+    let (client, interrupts) = TurnInterrupts::channel();
+    let inputs = turn_inputs(
+        &workspace,
+        base_config,
+        &router,
+        mcp_servers,
+        interrupts,
+        None,
+    );
+
+    let abort = client.try_send(InterruptAction::Abort).unwrap();
+
+    let interrupt = router.turn_interrupt();
+    let stream = lock.events().clone();
+    let ending = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        inputs.run(&lock, stream, interrupt),
+    )
+    .await
+    .expect("the abort ends the wait; a hang here means it was never seen")
+    .expect("aborting before the turn starts is not an error");
+
+    assert_eq!(ending, TurnEnding::Aborted);
+    assert_eq!(abort.await, Ok(()), "the abort was acted on");
+    assert!(
+        lock.events().is_empty(),
+        "the turn was aborted before its request was appended"
+    );
+}
+
+/// Waiting on `asked` ensures MCP startup has already completed and the turn is
+/// blocked in `provider.model_details` when the interrupt fires.
+#[tokio::test]
+async fn an_interrupt_during_the_model_lookup_stops_the_turn_before_it_runs() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    let base_config = Arc::new(AppConfig::new_test());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::clone(&base_config), None)
+        .unwrap();
+
+    let asked = Arc::new(Notify::new());
+    let provider: Arc<dyn Provider> = Arc::new(UnansweredLookup {
+        asked: Arc::clone(&asked),
+    });
+
+    let (router, signals) = test_router();
+    let inputs = turn_inputs(
+        &workspace,
+        base_config,
+        &router,
+        no_mcp_servers(),
+        TurnInterrupts::none(),
+        Some(provider),
+    );
+
+    let interrupt = router.turn_interrupt();
+    let press = tokio::spawn(async move {
+        asked.notified().await;
+        signals.interrupt().await;
+    });
+
+    let stream = lock.events().clone();
+    let ending = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        inputs.run(&lock, stream, interrupt),
+    )
+    .await
+    .expect("the interrupt ends the lookup; a hang here means it was never seen")
+    .expect("stopping before the turn starts is not an error");
+
+    press.await.unwrap();
+    assert_eq!(ending, TurnEnding::Stopped);
+    assert!(
+        lock.events().is_empty(),
+        "the turn was interrupted before its request was appended"
+    );
+}
+
+/// Waiting on `asked` ensures MCP startup has already completed and the turn is
+/// blocked in `provider.model_details` when the client abort arrives.
+#[tokio::test]
+async fn a_client_abort_during_the_model_lookup_ends_the_turn_as_aborted() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    let base_config = Arc::new(AppConfig::new_test());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::clone(&base_config), None)
+        .unwrap();
+
+    let asked = Arc::new(Notify::new());
+    let provider: Arc<dyn Provider> = Arc::new(UnansweredLookup {
+        asked: Arc::clone(&asked),
+    });
+
+    let router = detached_router();
+    let (client, interrupts) = TurnInterrupts::channel();
+    let inputs = turn_inputs(
+        &workspace,
+        base_config,
+        &router,
+        no_mcp_servers(),
+        interrupts,
+        Some(provider),
+    );
+
+    let abort = tokio::spawn(async move {
+        asked.notified().await;
+        client
+            .try_send(InterruptAction::Abort)
+            .expect("the turn is still running")
+            .await
+    });
+
+    let interrupt = router.turn_interrupt();
+    let stream = lock.events().clone();
+    let ending = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        inputs.run(&lock, stream, interrupt),
+    )
+    .await
+    .expect("the abort ends the lookup; a hang here means it was never seen")
+    .expect("aborting before the turn starts is not an error");
+
+    assert_eq!(abort.await.unwrap(), Ok(()), "the abort was acted on");
+    assert_eq!(ending, TurnEnding::Aborted);
+    assert!(
+        lock.events().is_empty(),
+        "the turn was aborted before its request was appended"
+    );
+}
+
+type LlmResult<T> = std::result::Result<T, LlmError>;
+
+/// Mock provider whose `model_details` call notifies `asked` and then hangs.
+struct UnansweredLookup {
+    asked: Arc<Notify>,
+}
+
+#[async_trait]
+impl Provider for UnansweredLookup {
+    async fn model_details(&self, _name: &Name) -> LlmResult<ModelDetails> {
+        self.asked.notify_one();
+        future::pending().await
+    }
+
+    async fn models(&self) -> LlmResult<Vec<ModelDetails>> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> LlmResult<EventStream> {
+        unreachable!("the turn never gets past the model lookup")
+    }
+}
+
+fn no_mcp_servers() -> StartupSet {
+    let (_lines, stderr) = broadcast::channel(1);
+    StartupSet {
+        joins: JoinSet::new(),
+        pending: vec![],
+        stderr,
+    }
+}
+
+fn turn_inputs(
+    workspace: &Workspace,
+    config: Arc<AppConfig>,
+    router: &SignalRouter,
+    mcp_servers: StartupSet,
+    interrupts: TurnInterrupts,
+    stubbed_provider: Option<Arc<dyn Provider>>,
+) -> TurnInputs {
+    TurnInputs {
+        config,
+        signals: router.clone(),
+        mcp_client: jp_mcp::Client::default(),
+        workspace_root: workspace.root().to_path_buf(),
+        interactive: false,
+        attachments: vec![],
+        printer: Arc::new(Printer::sink()),
+        approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        command_plugins: CommandPlugins::default(),
+        chat_request: ChatRequest::from("hello"),
+        workspace_id: workspace.id().clone(),
+        pending_trim: PendingStreamTrim::default(),
+        mcp_servers,
+        interrupts,
+        stubbed_provider,
+    }
 }
 
 async fn run_mock_turn(

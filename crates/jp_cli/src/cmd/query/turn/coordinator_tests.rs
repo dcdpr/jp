@@ -1503,3 +1503,98 @@ fn duplicate_flush_after_tool_call_does_not_surface_request() {
         .count();
     assert_eq!(tool_calls, 1);
 }
+
+fn streaming_coordinator(stream: &mut ConversationStream) -> TurnCoordinator {
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(Printer::sink()),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+    coordinator.start_turn(stream, ChatRequest::from("test"));
+    coordinator
+}
+
+#[test]
+fn a_turn_the_assistant_finishes_ends_as_finished() {
+    let mut stream = ConversationStream::new_test();
+    let mut coordinator = streaming_coordinator(&mut stream);
+
+    coordinator.handle_event(&mut stream, Event::message(0, "Hi"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
+    assert_eq!(coordinator.ending(), TurnEnding::Finished);
+}
+
+#[test]
+fn a_turn_stopped_mid_stream_ends_as_stopped() {
+    let mut stream = ConversationStream::new_test();
+    let mut coordinator = streaming_coordinator(&mut stream);
+
+    coordinator.handle_event(&mut stream, Event::message(0, "Hal"));
+    coordinator.handle_streaming_interrupt(InterruptAction::Stop, &mut stream);
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
+    assert_eq!(coordinator.ending(), TurnEnding::Stopped);
+}
+
+#[test]
+fn a_turn_completed_early_between_phases_ends_as_stopped() {
+    let mut stream = ConversationStream::new_test();
+    let mut coordinator = streaming_coordinator(&mut stream);
+
+    coordinator.complete_early(&mut stream);
+
+    assert_eq!(coordinator.ending(), TurnEnding::Stopped);
+}
+
+#[test]
+fn a_turn_aborted_mid_stream_ends_as_aborted() {
+    let mut stream = ConversationStream::new_test();
+    let mut coordinator = streaming_coordinator(&mut stream);
+
+    coordinator.handle_event(&mut stream, Event::message(0, "Hal"));
+    coordinator.handle_streaming_interrupt(InterruptAction::Abort, &mut stream);
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Aborted);
+    assert_eq!(coordinator.ending(), TurnEnding::Aborted);
+}
+
+#[test]
+fn a_stop_after_the_assistant_finished_leaves_the_turn_finished() {
+    let mut stream = ConversationStream::new_test();
+    let mut coordinator = streaming_coordinator(&mut stream);
+
+    coordinator.handle_event(&mut stream, Event::message(0, "Hi"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+    coordinator.handle_streaming_interrupt(InterruptAction::Stop, &mut stream);
+    coordinator.complete_early(&mut stream);
+
+    assert_eq!(coordinator.ending(), TurnEnding::Finished);
+}
+
+#[test]
+fn a_reply_after_a_stop_leaves_the_turn_to_end_on_its_own() {
+    let mut stream = ConversationStream::new_test();
+    let mut coordinator = streaming_coordinator(&mut stream);
+
+    coordinator.complete_early(&mut stream);
+    coordinator.handle_streaming_interrupt(
+        InterruptAction::Reply {
+            content: "go on".into(),
+            echo: false,
+        },
+        &mut stream,
+    );
+    assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
+
+    coordinator.handle_event(&mut stream, Event::message(0, "Done."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    assert_eq!(coordinator.ending(), TurnEnding::Finished);
+}

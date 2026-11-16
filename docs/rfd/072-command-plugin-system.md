@@ -817,7 +817,7 @@ The turn runs concurrently with the protocol message loop, which continues
 serving other requests while the turn is active.
 When `query` creates a new conversation, the host sends `created` with the new
 conversation ID as soon as the conversation exists.
-When the turn finishes, the host sends `query_complete` (or `error` if the turn
+When the turn ends, the host sends `query_complete` (or `error` if the turn
 could not start or failed).
 Because the conversation remains locked for the duration of the turn, a second
 `query` on the same conversation is rejected as already locked; plugins interact
@@ -828,6 +828,16 @@ A `query` with a `schema` field requests structured output (matching `jp query
 A `query` with `new` can also set `expires_in` (such as `5m` or `1h`) to create
 a temporary conversation, matching `jp query --tmp`.
 Both features require protocol version 11.
+
+`query_complete.outcome` reports how the turn ended: `finished` when the
+assistant completed its response, `stopped` when the turn was stopped and any
+partial response was persisted, or `aborted` when the turn was aborted and any
+unpersisted response was discarded.
+Because a turn can also be interrupted outside the plugin (for example, by
+Ctrl-C at the host's terminal), `outcome` lets the plugin detect when a response
+was interrupted.
+This field requires protocol version 15; when omitted by an older host, it
+defaults to `finished`.
 
 See [Lifecycle](#lifecycle) for how JP handles an active turn when the plugin
 exits.

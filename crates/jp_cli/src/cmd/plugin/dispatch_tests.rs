@@ -1,7 +1,16 @@
+#[cfg(unix)]
+use std::task::Poll;
+
+#[cfg(unix)]
+use async_trait::async_trait;
 use camino_tempfile::{Utf8TempDir, tempdir};
 #[cfg(unix)]
 use chrono::Utc;
+#[cfg(unix)]
+use futures::{StreamExt as _, executor::block_on, stream};
 use inquire::InquireError;
+#[cfg(unix)]
+use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
 use jp_config::{
     PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
@@ -12,6 +21,11 @@ use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
 use jp_editor::MockEditorBackend;
 use jp_inquire::InlineOption;
 use jp_llm::turn_summary::{GeneratedTurnSummary, transcripts};
+#[cfg(unix)]
+use jp_llm::{
+    Error as LlmError, EventStream, Provider, error::StreamError, event::Event,
+    model::ModelDetails, provider::mock::MockProvider, query::ChatQuery,
+};
 #[cfg(unix)]
 use jp_plugin::registry::ApprovedPlugin;
 use jp_plugin::{
@@ -25,6 +39,8 @@ use serial_test::serial;
 use tokio::sync::{Notify, oneshot};
 
 use super::*;
+#[cfg(unix)]
+use crate::signals::testing::test_router;
 use crate::{Globals, editor::CUT_MARKER, env_testing::EnvVarGuard, shutdown::until_shutdown};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
@@ -2032,6 +2048,7 @@ fn a_structured_query_replies_with_the_last_turns_data() {
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
+            QueryOutcome::Finished,
             &events,
             before.as_ref(),
             Some(&object_schema()),
@@ -2039,6 +2056,7 @@ fn a_structured_query_replies_with_the_last_turns_data() {
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: Some("q1".to_owned()),
             conversation: "123".to_owned(),
+            outcome: QueryOutcome::Finished,
             data: Some(json!({"turn": 2})),
         })
     );
@@ -2056,6 +2074,7 @@ fn a_structured_query_whose_turn_produced_no_data_fails() {
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
+            QueryOutcome::Finished,
             &events,
             before.as_ref(),
             Some(&object_schema()),
@@ -2080,6 +2099,7 @@ fn a_structured_query_stopped_before_its_turn_started_fails() {
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
+            QueryOutcome::Stopped,
             &events,
             before.as_ref(),
             Some(&object_schema()),
@@ -2103,6 +2123,7 @@ fn a_structured_query_whose_response_was_cut_short_fails() {
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
+            QueryOutcome::Finished,
             &events,
             None,
             Some(&object_schema()),
@@ -2122,13 +2143,50 @@ fn a_query_without_a_schema_replies_without_data() {
     let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
 
     assert_eq!(
-        completed(None, "123".to_owned(), &events, None, None),
+        completed(
+            None,
+            "123".to_owned(),
+            QueryOutcome::Finished,
+            &events,
+            None,
+            None
+        ),
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: None,
             conversation: "123".to_owned(),
+            outcome: QueryOutcome::Finished,
             data: None,
         })
     );
+}
+
+#[test]
+fn a_stopped_structured_query_replies_with_its_data_and_its_outcome() {
+    let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            QueryOutcome::Stopped,
+            &events,
+            None,
+            Some(&object_schema()),
+        ),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("q1".to_owned()),
+            conversation: "123".to_owned(),
+            outcome: QueryOutcome::Stopped,
+            data: Some(json!({"turn": 1})),
+        })
+    );
+}
+
+#[test]
+fn each_turn_ending_has_its_own_outcome() {
+    assert_eq!(query_outcome(TurnEnding::Finished), QueryOutcome::Finished);
+    assert_eq!(query_outcome(TurnEnding::Stopped), QueryOutcome::Stopped);
+    assert_eq!(query_outcome(TurnEnding::Aborted), QueryOutcome::Aborted);
 }
 
 /// `jp <plugin> -h` without a terminal: a binary nobody approved is refused
@@ -2453,6 +2511,192 @@ fn script_plugin(dir: &Utf8Path, name: &str, _sh: &str, powershell: &str) -> Utf
     .unwrap();
 
     path
+}
+
+/// Mock provider that yields a partial message and then hangs, notifying
+/// `parked` once the turn's streaming loop polls past the initial events.
+#[cfg(unix)]
+struct ParkedProvider {
+    parked: Arc<Notify>,
+}
+
+#[cfg(unix)]
+#[async_trait]
+impl Provider for ParkedProvider {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        let events: [Result<Event, StreamError>; 2] =
+            [Ok(Event::message(0, "Partial")), Ok(Event::flush(0))];
+
+        let parked = Arc::clone(&self.parked);
+        let tail = stream::poll_fn(move |_| {
+            parked.notify_one();
+            Poll::Pending
+        });
+
+        Ok(Box::pin(stream::iter(events).chain(tail)))
+    }
+}
+
+/// Run a plugin that sends `query` followed by `follow_up`, and return the
+/// host's reply to the query.
+///
+/// When `press_once_parked` is set, sends a host interrupt signal as soon as
+/// the notification fires.
+#[cfg(unix)]
+fn reply_to_query(
+    provider: Arc<dyn Provider>,
+    follow_up: &str,
+    press_once_parked: Option<Arc<Notify>>,
+) -> String {
+    let (workspace, _id, fs, tmp) = workspace_with_drafts();
+    let reply = tmp.path().join("reply");
+
+    let script = script_plugin(
+        tmp.path(),
+        "asker",
+        &format!(
+            r#"read -r msg
+echo '{{"type":"ready","protocol":15}}'
+echo '{{"type":"query","id":"q","conversation":"jp-c17000000000","content":"Summarize"}}'
+{follow_up}
+while read -r msg; do
+  case "$msg" in
+    *'"id":"q"'*) printf '%s' "$msg" > {reply}; break ;;
+  esac
+done
+echo '{{"type":"exit","code":0}}'
+"#
+        ),
+        "",
+    );
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(fs),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+    ctx.stubbed_provider = Some(provider);
+
+    let (router, signals) = {
+        let _runtime = runtime.enter();
+        test_router()
+    };
+    ctx.signals = router;
+
+    let presser = press_once_parked.map(|parked| {
+        thread::spawn(move || {
+            block_on(async {
+                parked.notified().await;
+                signals.interrupt().await;
+            });
+        })
+    });
+
+    runtime
+        .block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                run_plugin("asker", &script, &[], &mut ctx),
+            )
+            .await
+        })
+        .expect("the turn ended; a hang here means the stop never reached it")
+        .unwrap();
+
+    if let Some(presser) = presser {
+        presser.join().unwrap();
+    }
+
+    fs::read_to_string(&reply).expect("the plugin received a reply to its query")
+}
+
+#[cfg(unix)]
+#[test]
+fn a_turn_that_finishes_is_reported_as_finished() {
+    let reply = reply_to_query(Arc::new(MockProvider::with_message("Done.")), "", None);
+
+    assert_eq!(
+        reply,
+        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"finished"}"#
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_turn_the_plugin_stops_is_reported_as_stopped() {
+    let provider = Arc::new(ParkedProvider {
+        parked: Arc::new(Notify::new()),
+    });
+
+    let reply = reply_to_query(
+        provider,
+        r#"echo '{"type":"interrupt","conversation":"jp-c17000000000","action":"stop"}'"#,
+        None,
+    );
+
+    assert_eq!(
+        reply,
+        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"stopped"}"#
+    );
+}
+
+/// Host Ctrl-C is routed to the active turn's interrupt handler rather than the
+/// plugin, so `outcome` is how the plugin learns the turn was stopped.
+#[cfg(unix)]
+#[test]
+fn a_turn_stopped_at_the_hosts_terminal_is_reported_as_stopped() {
+    let parked = Arc::new(Notify::new());
+    let provider = Arc::new(ParkedProvider {
+        parked: Arc::clone(&parked),
+    });
+
+    let reply = reply_to_query(provider, "", Some(parked));
+
+    assert_eq!(
+        reply,
+        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"stopped"}"#
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_turn_the_plugin_aborts_is_reported_as_aborted() {
+    let provider = Arc::new(ParkedProvider {
+        parked: Arc::new(Notify::new()),
+    });
+
+    let reply = reply_to_query(
+        provider,
+        r#"echo '{"type":"interrupt","conversation":"jp-c17000000000","action":"abort"}'"#,
+        None,
+    );
+
+    assert_eq!(
+        reply,
+        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"aborted"}"#
+    );
 }
 
 /// Timing and shutdown budget observations from

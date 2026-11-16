@@ -7,7 +7,7 @@ use std::{
 
 use jp_plugin::message::{
     CompactedResponse, ConfigResponse, CreatedResponse, DoneResponse, ErrorResponse,
-    EventsResponse, InterruptAction, QueryCompleteResponse, ReasoningCompaction,
+    EventsResponse, InterruptAction, QueryCompleteResponse, QueryOutcome, ReasoningCompaction,
 };
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -84,6 +84,7 @@ fn query_complete(id: &str) -> HostToPlugin {
     HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: Some(id.to_owned()),
         conversation: "c1".to_owned(),
+        outcome: QueryOutcome::Finished,
         data: None,
     })
 }

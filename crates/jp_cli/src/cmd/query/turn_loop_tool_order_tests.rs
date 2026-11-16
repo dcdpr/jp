@@ -576,7 +576,7 @@ impl Provider for FailingWhileAskedProvider {
 /// What one turn left behind.
 struct Turn {
     /// How the turn ended.
-    result: Result<(), Error>,
+    result: Result<TurnEnding, Error>,
 
     /// The chrome, with a marker where each prompt opened.
     transcript: String,
