@@ -1614,6 +1614,36 @@ fn list_orders_by_a_date_label_with_undated_tickets_last() {
     );
 }
 
+/// Tickets with the same label value follow filing order, in both directions.
+/// An imported issue keeps its original date but gets a newer id, so filing
+/// order is the date first and the id only within one day.
+#[test]
+fn tickets_with_the_same_label_value_follow_filing_order() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_labelled(&dir, "T-02wt0k1", "Filed in March", "2026-03-02", &[
+        "due=2026-12-01",
+    ]);
+    write_labelled(&dir, "T-02wt0k2", "Imported from January", "2026-01-20", &[
+        "due=2026-12-01",
+    ]);
+    write_labelled(&dir, "T-02wt0k3", "Due sooner", "2026-08-05", &[
+        "due=2026-11-20",
+    ]);
+
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due" }))),
+        "T-02wt0k3 Todo         2026-08-05 Due sooner [due=2026-11-20]\nT-02wt0k2 Todo         \
+         2026-01-20 Imported from January [due=2026-12-01]\nT-02wt0k1 Todo         2026-03-02 \
+         Filed in March [due=2026-12-01]\n"
+    );
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due:desc" }))),
+        "T-02wt0k2 Todo         2026-01-20 Imported from January [due=2026-12-01]\nT-02wt0k1 \
+         Todo         2026-03-02 Filed in March [due=2026-12-01]\nT-02wt0k3 Todo         \
+         2026-08-05 Due sooner [due=2026-11-20]\n"
+    );
+}
+
 #[test]
 fn list_orders_by_an_ordered_label() {
     let dir = Utf8TempDir::new().unwrap();

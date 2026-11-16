@@ -9,7 +9,7 @@ fn vocabulary() -> Vocabulary {
             "due": {"values": [], "type": "date", "max": 1},
             "priority": {
                 "values": ["high", "medium", "low"],
-                "retired": ["urgent"],
+                "retired": ["urgent", "someday"],
                 "max": 1,
                 "ordered": true
             },
@@ -69,23 +69,27 @@ fn a_date_key_sorts_by_date_and_puts_undated_items_last_both_ways() {
     ]);
 }
 
+/// Retired values have no place among the active ones, so they follow them in
+/// both directions, ahead of items without a value.
+/// The direction still orders the retired values among themselves.
 #[test]
-fn an_ordered_key_sorts_by_the_declared_order() {
+fn an_ordered_key_sorts_by_the_declared_order_with_retired_values_after_active_ones() {
     let vocabulary = vocabulary();
     let priority = vocabulary.sort_key("priority").unwrap();
     let items = [
         ("low", labels(&["priority=low"])),
         ("urgent", labels(&["priority=urgent"])),
         ("none", labels(&[])),
+        ("someday", labels(&["priority=someday"])),
         ("high", labels(&["priority=HIGH"])),
         ("medium", labels(&["priority=medium"])),
     ];
 
     assert_eq!(sorted(&priority, Direction::Ascending, &items), [
-        "high", "medium", "low", "urgent", "none"
+        "high", "medium", "low", "urgent", "someday", "none"
     ]);
     assert_eq!(sorted(&priority, Direction::Descending, &items), [
-        "urgent", "low", "medium", "high", "none"
+        "low", "medium", "high", "someday", "urgent", "none"
     ]);
 }
 

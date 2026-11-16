@@ -41,6 +41,10 @@ impl<'a> SortKey<'a> {
     /// Items without a sortable value (missing the key, carrying a non-date
     /// value on a `date` key, or carrying an undeclared value on an `ordered`
     /// key) sort after items with a valid value in both directions.
+    /// Retired values of an `ordered` key sort after its active values in both
+    /// directions, and before items without a sortable value; `direction`
+    /// orders the active values among themselves, and the retired ones among
+    /// themselves.
     /// Two items without a sortable value, or two items with the same value,
     /// compare equal.
     ///
@@ -49,23 +53,35 @@ impl<'a> SortKey<'a> {
     #[must_use]
     pub fn compare(&self, a: &Labels, b: &Labels, direction: Direction) -> Ordering {
         match (self.rank(a), self.rank(b)) {
-            (Some(a), Some(b)) => match direction {
-                Direction::Ascending => a.cmp(&b),
-                Direction::Descending => b.cmp(&a),
-            },
+            (Some(a), Some(b)) => a.retired.cmp(&b.retired).then(match direction {
+                Direction::Ascending => a.rank.cmp(&b.rank),
+                Direction::Descending => b.rank.cmp(&a.rank),
+            }),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
     }
 
-    /// Smallest rank among the values `labels` carries under this key.
-    fn rank<'l>(&self, labels: &'l Labels) -> Option<Rank<'l>> {
+    /// Smallest rank among the values `labels` carries under this key, active
+    /// values before retired ones.
+    fn rank<'l>(&self, labels: &'l Labels) -> Option<Ranked<'l>> {
         labels
             .values(self.key)
             .filter_map(|value| self.facet.rank(value))
             .min()
     }
+}
+
+/// Sort position of a single label value: whether it is retired, then its
+/// [`Rank`].
+///
+/// Field order matters: the derived `Ord` puts every active value before every
+/// retired one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Ranked<'a> {
+    pub(crate) retired: bool,
+    pub(crate) rank: Rank<'a>,
 }
 
 /// Sort rank of a single label value.

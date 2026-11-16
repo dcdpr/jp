@@ -34,7 +34,7 @@ pub(crate) enum Sort<'v> {
     Filed(Direction),
 
     /// Sort by a label key's value, placing tickets without the label last and
-    /// breaking ties by ticket ID.
+    /// breaking ties by filing order.
     Label(SortKey<'v>, Direction),
 }
 
@@ -72,11 +72,12 @@ impl Sort<'_> {
         match self {
             Self::Filed(Direction::Ascending) => filed(a).cmp(&filed(b)),
             Self::Filed(Direction::Descending) => filed(b).cmp(&filed(a)),
-            // Break ties by ascending ticket ID in both directions so equal
-            // values have a deterministic order.
+            // Break ties by filing order, oldest first, in both directions.
+            // The date comes before the ID because an imported ticket keeps
+            // its original date but is allocated a newer ID.
             Self::Label(key, direction) => key
                 .compare(&a.1.metadata.labels, &b.1.metadata.labels, *direction)
-                .then_with(|| a.0.cmp(&b.0)),
+                .then_with(|| filed(a).cmp(&filed(b))),
         }
     }
 }

@@ -61,7 +61,8 @@
 //!
 //! Items can be sorted by a single-valued key (`max = 1`) with ordered values:
 //! a `date` key sorts chronologically, and a closed key with `ordered = true`
-//! sorts values in declared order (with retired values after active ones):
+//! sorts values in declared order (with retired values after active ones, in
+//! both directions):
 //!
 //! ```json
 //! {
@@ -106,7 +107,7 @@ use serde_json::Value;
 
 use crate::{
     KeyError, Labels, ValueType, is_date, parse_token,
-    sort::{Rank, SortKey},
+    sort::{Rank, Ranked, SortKey},
     validate_key, validate_value,
 };
 
@@ -270,18 +271,26 @@ impl Facet {
         self.max == Some(1) && (self.value_type == Some(ValueType::Date) || self.is_ordered())
     }
 
-    /// Return the sort [`Rank`] of `value` under this key, or `None` if `value`
+    /// Return the sort position of `value` under this key, or `None` if `value`
     /// is not a valid `YYYY-MM-DD` date (for a `date` key) or is not declared
     /// (for an `ordered` key).
-    pub(crate) fn rank<'a>(&self, value: &'a str) -> Option<Rank<'a>> {
+    pub(crate) fn rank<'a>(&self, value: &'a str) -> Option<Ranked<'a>> {
         if let Some(ranked) = &self.ranked {
-            return ranked
+            let (position, declared) = ranked
                 .iter()
-                .position(|declared| declared.eq_ignore_ascii_case(value))
-                .map(Rank::Position);
+                .enumerate()
+                .find(|(_, declared)| declared.eq_ignore_ascii_case(value))?;
+
+            return Some(Ranked {
+                retired: self.retired.contains(declared),
+                rank: Rank::Position(position),
+            });
         }
 
-        (self.value_type == Some(ValueType::Date) && is_date(value)).then_some(Rank::Date(value))
+        (self.value_type == Some(ValueType::Date) && is_date(value)).then_some(Ranked {
+            retired: false,
+            rank: Rank::Date(value),
+        })
     }
 }
 
