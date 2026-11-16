@@ -63,6 +63,19 @@ pub enum TurnPhase {
     Aborted,
 }
 
+/// How a turn ended, for a caller that reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnEnding {
+    /// The turn ended on its own: the assistant finished answering.
+    Finished,
+
+    /// The turn was stopped, and kept what the assistant had produced.
+    Stopped,
+
+    /// The turn was aborted, and dropped what was not yet persisted.
+    Aborted,
+}
+
 /// Outcome returned by [`TurnCoordinator::handle_event`].
 ///
 /// `action` describes turn-state control flow.
@@ -204,6 +217,13 @@ pub struct TurnCoordinator {
     /// Shares the view's printer, so it is suppressed in JSON mode, matching
     /// content rendering.
     printer: Arc<Printer>,
+
+    /// Whether an interrupt moved the turn to [`TurnPhase::Complete`], rather
+    /// than the assistant finishing.
+    ///
+    /// Cleared when the turn carries on from a continuation, since how it ends
+    /// is then decided again.
+    stopped: bool,
 }
 
 impl TurnCoordinator {
@@ -237,6 +257,7 @@ impl TurnCoordinator {
             json_emitter,
             author,
             printer,
+            stopped: false,
         }
     }
 
@@ -507,6 +528,25 @@ impl TurnCoordinator {
         self.state
     }
 
+    /// How the turn ended, read once the phase is [`TurnPhase::Complete`] or
+    /// [`TurnPhase::Aborted`].
+    ///
+    /// A turn whose assistant had already finished when an interrupt arrived
+    /// reads as [`TurnEnding::Finished`]: the interrupt cut nothing short.
+    pub fn ending(&self) -> TurnEnding {
+        match self.state {
+            TurnPhase::Aborted => TurnEnding::Aborted,
+            _ if self.stopped => TurnEnding::Stopped,
+            _ => TurnEnding::Finished,
+        }
+    }
+
+    /// Move to [`TurnPhase::Complete`] on an interrupt's behalf.
+    fn stop(&mut self) {
+        self.stopped |= self.state != TurnPhase::Complete;
+        self.state = TurnPhase::Complete;
+    }
+
     /// Returns partial assistant content from unflushed buffers, as
     /// correctly-typed responses in stream order.
     ///
@@ -547,6 +587,7 @@ impl TurnCoordinator {
         // The committed partial response replaces these per-request buffers.
         self.event_builder = EventBuilder::new();
         self.state = TurnPhase::Streaming;
+        self.stopped = false;
     }
 
     /// Flush the renderer's internal markdown buffer to the printer.
@@ -664,7 +705,7 @@ impl TurnCoordinator {
             self.push_event(stream, response);
         }
 
-        self.state = TurnPhase::Complete;
+        self.stop();
     }
 
     /// Handle an interrupt action during LLM streaming.
@@ -688,7 +729,7 @@ impl TurnCoordinator {
                     self.push_event(conversation_stream, response);
                 }
 
-                self.state = TurnPhase::Complete;
+                self.stop();
             }
 
             InterruptAction::Abort => self.state = TurnPhase::Aborted,

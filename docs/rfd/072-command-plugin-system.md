@@ -829,6 +829,14 @@ A `query` with `new` can also set `expires_in` (such as `5m` or `1h`) to create
 a temporary conversation, matching `jp query --tmp`.
 Both features require protocol version 11.
 
+`query_complete.outcome` says how the turn ended: `finished` when it ended on
+its own, `stopped` when it was stopped and kept what the assistant had produced,
+or `aborted` when it was aborted and dropped what was not yet persisted.
+A turn can be stopped by something other than the plugin's own `interrupt`,
+such as a Ctrl-C at the host's terminal, so this is the only way a plugin learns
+that its answer was cut short.
+The field requires protocol version 15; an absent field reads as `finished`.
+
 See [Lifecycle](#lifecycle) for how JP handles an active turn when the plugin
 exits.
 

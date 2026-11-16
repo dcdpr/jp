@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use clap::Error as ClapError;
 use jp_plugin::message::{
     ComposeResponse, CreatedResponse, ErrorResponse, OutputFormat, PathsInfo,
-    QueryCompleteResponse, QueryRequest, ToolAction, WorkspaceInfo,
+    QueryCompleteResponse, QueryOutcome, QueryRequest, ToolAction, WorkspaceInfo,
 };
 use serde_json::{Map, json};
 use ticket::epoch::EPOCH_FILE;
@@ -799,6 +799,7 @@ fn plan_answered(data: Value) -> [HostToPlugin; 2] {
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: Some("plan".to_owned()),
             conversation: "jp-c17000000001".to_owned(),
+            outcome: QueryOutcome::Finished,
             data: Some(data),
         }),
     ]

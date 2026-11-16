@@ -676,21 +676,26 @@ fn a_null_answer_survives_the_round_trip() {
     let msg = HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: None,
         conversation: "123".to_owned(),
+        outcome: QueryOutcome::Finished,
         data: Some(Value::Null),
     });
 
     let json = serde_json::to_string(&msg).unwrap();
     assert_eq!(
         json,
-        r#"{"type":"query_complete","conversation":"123","data":null}"#
+        r#"{"type":"query_complete","conversation":"123","outcome":"finished","data":null}"#
     );
     assert_eq!(from_str::<HostToPlugin>(&json).unwrap(), msg);
 
     assert_eq!(
-        from_str::<HostToPlugin>(r#"{"type":"query_complete","conversation":"123"}"#).unwrap(),
+        from_str::<HostToPlugin>(
+            r#"{"type":"query_complete","conversation":"123","outcome":"finished"}"#
+        )
+        .unwrap(),
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: None,
             conversation: "123".to_owned(),
+            outcome: QueryOutcome::Finished,
             data: None,
         })
     );
@@ -701,20 +706,62 @@ fn query_complete_carries_data_only_when_there_is_some() {
     let without = HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: None,
         conversation: "123".to_owned(),
+        outcome: QueryOutcome::Finished,
         data: None,
     });
     let with = HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: None,
         conversation: "123".to_owned(),
+        outcome: QueryOutcome::Finished,
         data: Some(json!({"summary": "short"})),
     });
 
     assert_eq!(
         serde_json::to_string(&without).unwrap(),
-        r#"{"type":"query_complete","conversation":"123"}"#
+        r#"{"type":"query_complete","conversation":"123","outcome":"finished"}"#
     );
     assert_eq!(
         serde_json::to_string(&with).unwrap(),
-        r#"{"type":"query_complete","conversation":"123","data":{"summary":"short"}}"#
+        r#"{"type":"query_complete","conversation":"123","outcome":"finished","data":{"summary":"short"}}"#
+    );
+}
+
+#[test]
+fn query_complete_names_how_the_turn_ended() {
+    let stopped = HostToPlugin::QueryComplete(QueryCompleteResponse {
+        id: Some("q1".to_owned()),
+        conversation: "123".to_owned(),
+        outcome: QueryOutcome::Stopped,
+        data: None,
+    });
+    let aborted = HostToPlugin::QueryComplete(QueryCompleteResponse {
+        id: Some("q1".to_owned()),
+        conversation: "123".to_owned(),
+        outcome: QueryOutcome::Aborted,
+        data: None,
+    });
+
+    assert_eq!(
+        serde_json::to_string(&stopped).unwrap(),
+        r#"{"type":"query_complete","id":"q1","conversation":"123","outcome":"stopped"}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&aborted).unwrap(),
+        r#"{"type":"query_complete","id":"q1","conversation":"123","outcome":"aborted"}"#
+    );
+}
+
+/// A host older than protocol version 15 sends no `outcome`, and all it could
+/// have said is that the turn ended without an error.
+#[test]
+fn query_complete_from_an_older_host_reads_as_finished() {
+    assert_eq!(
+        from_str::<HostToPlugin>(r#"{"type":"query_complete","conversation":"123"}"#).unwrap(),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: None,
+            conversation: "123".to_owned(),
+            outcome: QueryOutcome::Finished,
+            data: None,
+        })
     );
 }

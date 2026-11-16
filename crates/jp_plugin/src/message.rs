@@ -916,6 +916,13 @@ pub struct QueryCompleteResponse {
     /// The conversation the turn ran on.
     pub conversation: String,
 
+    /// How the turn ended.
+    ///
+    /// Absent from a host older than protocol version 15, and read as
+    /// [`QueryOutcome::Finished`], which is all such a host can report.
+    #[serde(default)]
+    pub outcome: QueryOutcome,
+
     /// The assistant's structured response, present when the request carried a
     /// `schema`.
     ///
@@ -927,6 +934,24 @@ pub struct QueryCompleteResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub data: Option<Value>,
+}
+
+/// How a delegated turn ended.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryOutcome {
+    /// The turn ended on its own: the assistant finished answering.
+    #[default]
+    Finished,
+
+    /// The turn was stopped, and kept what the assistant had produced.
+    ///
+    /// The stop can come from the plugin's own `interrupt`, or from anywhere
+    /// else, such as a Ctrl-C at the host's terminal.
+    Stopped,
+
+    /// The turn was aborted, and dropped what was not yet persisted.
+    Aborted,
 }
 
 /// The conversation a `query` with `new` created.

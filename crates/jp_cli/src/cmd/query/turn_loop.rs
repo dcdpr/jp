@@ -63,7 +63,7 @@ use super::{
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
         unresponded_requests,
     },
-    turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
+    turn::{Action, CommittedEvent, TurnCoordinator, TurnEnding, TurnPhase, TurnState},
 };
 use crate::{
     cmd::{
@@ -189,6 +189,8 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
 /// 3. Executing tool calls
 /// 4. Persisting conversation state
 ///
+/// Returns how the turn ended: on its own, stopped, or aborted.
+///
 /// # Errors
 ///
 /// Returns an error if:
@@ -216,7 +218,7 @@ pub(super) async fn run_turn_loop(
     pending_trim: PendingStreamTrim,
     turn_interrupt: TurnInterrupt,
     interrupts: TurnInterrupts,
-) -> Result<(), Error> {
+) -> Result<TurnEnding, Error> {
     let result = drive_turn(
         provider,
         model,
@@ -268,7 +270,7 @@ async fn drive_turn(
     pending_trim: PendingStreamTrim,
     mut turn_interrupt: TurnInterrupt,
     mut interrupts: TurnInterrupts,
-) -> Result<(), Error> {
+) -> Result<TurnEnding, Error> {
     // The turn-level interrupt handler (RFD 045) is the outermost handler scope
     // within the turn: it owns the gaps between phases (persistence, thread
     // building, response processing) and receives interrupts the inner
@@ -364,7 +366,7 @@ async fn drive_turn(
             });
 
             if result == StreamingInterruptResult::Abort {
-                return Ok(());
+                return Ok(TurnEnding::Aborted);
             }
         }
 
@@ -381,7 +383,7 @@ async fn drive_turn(
                 });
             }
 
-            TurnPhase::Complete | TurnPhase::Aborted => return Ok(()),
+            TurnPhase::Complete | TurnPhase::Aborted => return Ok(turn_coordinator.ending()),
 
             TurnPhase::Streaming => {
                 // Calls from a response that failed mid-stream are answered by
@@ -612,7 +614,7 @@ async fn drive_turn(
                                 StreamingInterruptResult::Continue
                                 | StreamingInterruptResult::PromptFailed => {}
                                 StreamingInterruptResult::Break => break,
-                                StreamingInterruptResult::Abort => return Ok(()),
+                                StreamingInterruptResult::Abort => return Ok(TurnEnding::Aborted),
                                 // The menu itself was cancelled with Ctrl-C:
                                 // partial content is committed and the turn is
                                 // complete; begin a graceful shutdown and end
@@ -642,7 +644,7 @@ async fn drive_turn(
                                 StreamingInterruptResult::Continue
                                 | StreamingInterruptResult::PromptFailed => {}
                                 StreamingInterruptResult::Break => break,
-                                StreamingInterruptResult::Abort => return Ok(()),
+                                StreamingInterruptResult::Abort => return Ok(TurnEnding::Aborted),
                                 StreamingInterruptResult::Escalate => {
                                     signals.shutdown_token().cancel();
                                     return Err(cmd::Error::interrupted().into());
@@ -783,7 +785,7 @@ async fn drive_turn(
                                                 | StreamingInterruptResult::PromptFailed
                                                 | StreamingInterruptResult::Break => break,
                                                 StreamingInterruptResult::Abort => {
-                                                    return Ok(());
+                                                    return Ok(TurnEnding::Aborted);
                                                 }
                                                 StreamingInterruptResult::Escalate => {
                                                     signals.shutdown_token().cancel();
@@ -1137,6 +1139,10 @@ async fn drive_turn(
                     // Persist the responses so every tool call keeps a
                     // matching response, then end the turn without a
                     // follow-up request.
+                    //
+                    // A client's abort arrives here as a stop too: cancelling
+                    // the tools is all of the turn's work this phase owns, and
+                    // their responses are kept.
                     ExecutionOutcome::Stopped => {
                         commit_tool_responses(
                             execution_result,
@@ -1145,7 +1151,7 @@ async fn drive_turn(
                             &mut conv,
                         )
                         .await?;
-                        break;
+                        return Ok(TurnEnding::Stopped);
                     }
 
                     // The Host lost its connection to the JP MCP Server, so
@@ -1187,7 +1193,7 @@ async fn drive_turn(
         }
     }
 
-    Ok(())
+    Ok(turn_coordinator.ending())
 }
 
 /// Take a client's interrupt at the top of the turn loop, where this is a

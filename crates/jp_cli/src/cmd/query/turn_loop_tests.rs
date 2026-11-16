@@ -329,7 +329,7 @@ impl Provider for RejectingProvider {
 }
 
 struct RejectedTurn {
-    result: Result<(), Error>,
+    result: Result<TurnEnding, Error>,
     recorded: String,
     /// The model in the config of the last turn's first event, which is what
     /// `jp conversation print` names in the turn's header.
@@ -790,7 +790,12 @@ async fn a_client_reply_continues_the_running_turn() {
         .await;
 
         reply_handle.await.unwrap();
-        assert!(result.is_ok(), "the turn should complete: {result:?}");
+        let ending = result.expect("the turn should complete");
+        assert_eq!(
+            ending,
+            TurnEnding::Finished,
+            "the reply carried the turn on, and the assistant then finished it"
+        );
 
         assert_eq!(
             provider.calls(),
@@ -903,7 +908,8 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
         .await;
 
         stop_handle.await.unwrap();
-        assert!(result.is_ok(), "the turn should complete: {result:?}");
+        let ending = result.expect("the turn should complete");
+        assert_eq!(ending, TurnEnding::Stopped);
 
         assert_eq!(
             provider.calls(),
@@ -927,6 +933,270 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// An abort from a client ends the turn where it is, mid-stream, and is
+/// reported as an abort.
+///
+/// The provider parks after its first response and would never finish on its
+/// own, so a turn that ends at all is one the abort reached while it was
+/// streaming.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_abort_ends_the_turn_mid_stream() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+
+        let config = AppConfig::new_test();
+        let fs = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+
+        let stalled = Arc::new(Notify::new());
+        let provider = Arc::new(StallThenAnswerProvider::new(
+            "Thinking about it.",
+            "never asked",
+            &stalled,
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let router = detached_router();
+        let (interrupt_tx, interrupts) = TurnInterrupts::channel();
+
+        let abort_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                interrupt_tx
+                    .try_send(InterruptAction::Abort)
+                    .expect("the turn is still running")
+                    .await
+                    .expect("the turn acts on the abort");
+            }
+        });
+
+        let result = run_turn_loop(
+            provider.clone() as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false, // interactive
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            Arc::new(Printer::sink()),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("What is 2+2?"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            interrupts,
+        )
+        .await;
+
+        abort_handle.await.unwrap();
+        let ending = result.expect("an abort is not an error");
+        assert_eq!(ending, TurnEnding::Aborted);
+        assert_eq!(
+            provider.calls(),
+            1,
+            "an abort ends the turn, so nothing is asked again"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// Choosing `[a] Abort` from the Ctrl-C menu mid-stream ends the turn, and is
+/// reported as an abort.
+#[tokio::test]
+async fn an_interrupt_abort_during_streaming_ends_the_turn_as_aborted() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+
+        let config = AppConfig::new_test();
+        let mut workspace = Workspace::in_memory(root);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+
+        // Fires once the stream is parked inside the streaming event loop, whose
+        // interrupt handler is then the one a press reaches.
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (router, signals) = test_router();
+        let backend = MockPromptBackend::new().with_inline_responses(['a']);
+
+        let signal_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                signals.interrupt().await;
+            }
+        });
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            false, // interactive
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            Arc::new(Printer::sink()),
+            Arc::new(backend),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("What is 2+2?"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        )
+        .await;
+
+        signal_handle.await.unwrap();
+        let ending = result.expect("an abort is not an error");
+        assert_eq!(ending, TurnEnding::Aborted);
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// A client's stop queued before the turn starts is taken at the top of the
+/// loop, once the turn's request is in place, and ends the turn as stopped
+/// before the provider is asked anything.
+#[tokio::test]
+async fn a_client_stop_taken_between_phases_ends_the_turn_as_stopped() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let config = AppConfig::new_test();
+    let mut workspace = Workspace::in_memory(root);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let (provider, requests) = MockProvider::with_message("never asked").capturing_requests();
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let router = detached_router();
+    let (client, interrupts) = TurnInterrupts::channel();
+    let delivery = client.try_send(InterruptAction::Stop).unwrap();
+
+    let ending = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
+        false, // interactive
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        Arc::new(Printer::sink()),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("Hello"),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(),
+        interrupts,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ending, TurnEnding::Stopped);
+    assert_eq!(delivery.await, Ok(()), "the stop was acted on");
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "the turn ended before the provider was asked"
+    );
+    assert_eq!(
+        lock.events().iter().filter(|e| e.is_chat_request()).count(),
+        1,
+        "the request was appended before the stop was taken"
+    );
+}
+
+/// A client's abort queued before the turn starts is taken at the same point,
+/// and ends the turn as aborted.
+#[tokio::test]
+async fn a_client_abort_taken_between_phases_ends_the_turn_as_aborted() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let config = AppConfig::new_test();
+    let mut workspace = Workspace::in_memory(root);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let (provider, requests) = MockProvider::with_message("never asked").capturing_requests();
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let router = detached_router();
+    let (client, interrupts) = TurnInterrupts::channel();
+    let delivery = client.try_send(InterruptAction::Abort).unwrap();
+
+    let ending = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
+        false, // interactive
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        Arc::new(Printer::sink()),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("Hello"),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(),
+        interrupts,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(ending, TurnEnding::Aborted);
+    assert_eq!(delivery.await, Ok(()), "the abort was acted on");
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "the turn ended before the provider was asked"
+    );
 }
 
 fn client_reply(content: &str) -> InterruptAction {
@@ -1204,7 +1474,8 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
 
         signal_handle.await.unwrap();
 
-        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+        let ending = result.expect("Turn loop should complete");
+        assert_eq!(ending, TurnEnding::Stopped);
 
         // Stop commits the streamed partial content before ending the turn.
         let content = fs
@@ -1531,7 +1802,7 @@ async fn test_normal_completion_persists_content() {
     let printer = Arc::new(printer);
     let router = detached_router();
 
-    run_turn_loop(
+    let ending = run_turn_loop(
         Arc::clone(&provider),
         &model,
         &config,
@@ -1553,6 +1824,8 @@ async fn test_normal_completion_persists_content() {
     )
     .await
     .unwrap();
+
+    assert_eq!(ending, TurnEnding::Finished);
 
     // Verify printer output contains the LLM response
     // Note: markdown renderer may escape special characters like '!' → '\!'
@@ -1621,7 +1894,7 @@ async fn an_interrupt_before_the_first_phase_appends_nothing() {
     .await
     .expect("the router delivers the press to the turn's handler");
 
-    run_turn_loop(
+    let ending = run_turn_loop(
         Arc::clone(&provider),
         &model,
         &config,
@@ -1644,6 +1917,7 @@ async fn an_interrupt_before_the_first_phase_appends_nothing() {
     .await
     .unwrap();
 
+    assert_eq!(ending, TurnEnding::Stopped);
     assert!(
         lock.events().is_empty(),
         "the turn ended before its request was appended"
@@ -2479,7 +2753,8 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
 
         // Unlike an escalation, a stop ends the turn cleanly: no interrupt
         // error, no graceful shutdown.
-        assert!(result.is_ok(), "stop must end the turn cleanly: {result:?}");
+        let ending = result.expect("stop must end the turn cleanly");
+        assert_eq!(ending, TurnEnding::Stopped);
         assert!(
             !router.shutdown_token().is_cancelled(),
             "stop must not request a graceful shutdown"

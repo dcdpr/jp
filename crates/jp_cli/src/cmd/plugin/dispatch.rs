@@ -43,7 +43,7 @@ use jp_plugin::{
         EditFilesRequest, EditedResponse, ErrorResponse, EventsResponse, HostToPlugin, InitMessage,
         InterruptAction as WireAction, InterruptRequest, LockState, LogMessage,
         OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
-        QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
+        QueryOutcome, QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
     registry::{Registry, RegistryPlugin},
 };
@@ -75,7 +75,7 @@ use super::{
 use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::query::{
-        NewTitle, PendingStreamTrim, TurnInputs,
+        NewTitle, PendingStreamTrim, TurnEnding, TurnInputs,
         interrupt::{
             Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
         },
@@ -1174,10 +1174,13 @@ async fn run_query(
         // about the host, not content: the turn's output belongs to the
         // conversation, which is where whoever asked for it is reading.
         let reply = match outcome {
-            Ok(()) => {
-                info!(%conversation, "A delegated turn finished.");
-                let (before, schema) = (before.as_ref(), schema.as_ref());
-                lock.with_events(|events| completed(reply_id, conversation, events, before, schema))
+            Ok(ending) => {
+                info!(%conversation, ?ending, "A delegated turn ended.");
+                let (outcome, before, schema) =
+                    (query_outcome(ending), before.as_ref(), schema.as_ref());
+                lock.with_events(|events| {
+                    completed(reply_id, conversation, outcome, events, before, schema)
+                })
             }
             Err(error) => {
                 // The full chain, not the outermost label: `cmd::Error` renders as
@@ -1306,7 +1309,16 @@ fn query_expiry(
         .ok_or_else(|| invalid("out of range".to_owned()))
 }
 
-/// The reply to a delegated turn that finished.
+/// How a turn's ending is reported on the wire.
+fn query_outcome(ending: TurnEnding) -> QueryOutcome {
+    match ending {
+        TurnEnding::Finished => QueryOutcome::Finished,
+        TurnEnding::Stopped => QueryOutcome::Stopped,
+        TurnEnding::Aborted => QueryOutcome::Aborted,
+    }
+}
+
+/// The reply to a delegated turn that ended without an error.
 ///
 /// With a `schema`, it carries the structured response of the turn this query
 /// started, and is an error when there is none to give: the turn was stopped
@@ -1315,6 +1327,7 @@ fn query_expiry(
 fn completed(
     id: Option<String>,
     conversation: String,
+    outcome: QueryOutcome,
     events: &ConversationStream,
     before: Option<&EventId>,
     schema: Option<&Map<String, Value>>,
@@ -1323,6 +1336,7 @@ fn completed(
         return HostToPlugin::QueryComplete(QueryCompleteResponse {
             id,
             conversation,
+            outcome,
             data: None,
         });
     }
@@ -1331,6 +1345,7 @@ fn completed(
         Ok(data) => HostToPlugin::QueryComplete(QueryCompleteResponse {
             id,
             conversation,
+            outcome,
             data: Some(data),
         }),
         Err(error) => query_error(id, format!("conversation {conversation}: {error}")),
