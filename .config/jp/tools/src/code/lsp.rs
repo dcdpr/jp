@@ -1,0 +1,691 @@
+//! A blocking Language Server Protocol client, large enough to start a server,
+//! ask it questions about a workspace, and shut it down again.
+//!
+//! [`Server::start`] spawns the server and completes the `initialize`
+//! handshake, [`Server::wait_until_ready`] blocks until the server reports that
+//! it has loaded the workspace, and [`Server::request`] sends one request and
+//! waits for its answer.
+//! Dropping a [`Server`] kills the process if [`Server::shutdown`] did not end
+//! it.
+//!
+//! Framing and message routing live in [`Connection`], which works over any
+//! reader and writer, so it is tested without a server process.
+
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt,
+    io::{self, BufRead, BufReader, Write},
+    process::{Child, ChildStderr, Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
+};
+
+use camino::Utf8Path;
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, unbounded};
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
+use url::Url;
+
+/// JSON-RPC error code for a request the server abandoned because its inputs
+/// changed while it was answering.
+/// Sending the request again is the remedy.
+const CONTENT_MODIFIED: i64 = -32801;
+
+/// How often a request that fails with [`CONTENT_MODIFIED`] is sent again.
+const CONTENT_MODIFIED_RETRIES: usize = 3;
+
+/// How many lines of the server's stderr are kept for error messages.
+const STDERR_TAIL_LINES: usize = 20;
+
+/// How long [`Server::shutdown`] waits for the process to exit on its own.
+const EXIT_GRACE: Duration = Duration::from_secs(5);
+
+/// Why a conversation with the language server failed.
+#[derive(Debug)]
+pub enum LspError {
+    /// The server process could not be started.
+    Spawn { command: String, error: io::Error },
+
+    /// The server answered a request with an error.
+    Response {
+        method: String,
+        code: i64,
+        message: String,
+    },
+
+    /// The server did not answer in time.
+    Timeout { method: String, after: Duration },
+
+    /// The server closed the connection, or exited.
+    Closed { detail: String },
+
+    /// The server reported that it could not load the workspace.
+    Unhealthy { message: String },
+
+    /// A message could not be written, or a result did not have the expected
+    /// shape.
+    Protocol { method: String, message: String },
+}
+
+impl fmt::Display for LspError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Spawn { command, error } => write!(f, "Could not start `{command}`: {error}"),
+            Self::Response {
+                method,
+                code,
+                message,
+            } => write!(f, "`{method}` failed ({code}): {message}"),
+            Self::Timeout { method, after } => {
+                write!(f, "`{method}` got no answer within {}s", after.as_secs())
+            }
+            Self::Closed { detail } => write!(f, "The language server stopped: {detail}"),
+            Self::Unhealthy { message } => {
+                write!(
+                    f,
+                    "The language server could not load the workspace: {message}"
+                )
+            }
+            Self::Protocol { method, message } => write!(f, "`{method}`: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for LspError {}
+
+/// The unit a server counts `character` offsets in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PositionEncoding {
+    Utf8,
+    Utf16,
+}
+
+impl PositionEncoding {
+    /// The `character` offset of byte offset `byte` in `line`.
+    ///
+    /// `byte` must lie on a character boundary.
+    #[must_use]
+    pub fn character(self, line: &str, byte: usize) -> u32 {
+        let prefix = &line[..byte.min(line.len())];
+        let units = match self {
+            Self::Utf8 => prefix.len(),
+            Self::Utf16 => prefix.chars().map(char::len_utf16).sum(),
+        };
+
+        u32::try_from(units).unwrap_or(u32::MAX)
+    }
+
+    /// The byte offset in `line` of the `character` offset, or `None` when it
+    /// falls past the line's end or inside a character.
+    #[must_use]
+    pub fn byte(self, line: &str, character: u32) -> Option<usize> {
+        let character = usize::try_from(character).ok()?;
+        let mut units = 0;
+        for (at, c) in line.char_indices() {
+            if units == character {
+                return Some(at);
+            }
+            units += match self {
+                Self::Utf8 => c.len_utf8(),
+                Self::Utf16 => c.len_utf16(),
+            };
+            if units > character {
+                return None;
+            }
+        }
+
+        (units == character).then_some(line.len())
+    }
+}
+
+/// How a server reports that it has loaded the workspace.
+///
+/// The protocol has no standard for this, so each server says it its own way.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadySignal {
+    /// The notification that carries the server's progress.
+    pub method: &'static str,
+
+    /// Read a notification's params: `None` while the server is still loading,
+    /// `Some(Ok(()))` once it is ready, and `Some(Err(message))` once it has
+    /// loaded but cannot answer reliably.
+    pub ready: fn(&Value) -> Option<Result<(), String>>,
+}
+
+/// A message read from the server, after server-to-client requests have been
+/// answered.
+#[derive(Debug)]
+enum Incoming {
+    Response {
+        id: i64,
+        outcome: Result<Value, (i64, String)>,
+    },
+    Notification {
+        method: String,
+        params: Value,
+    },
+}
+
+type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
+/// A JSON-RPC connection to a language server.
+///
+/// A background thread reads messages, answers every server-to-client request
+/// with a `null` result, and forwards responses and notifications to the
+/// caller.
+pub struct Connection {
+    writer: SharedWriter,
+    incoming: Receiver<Result<Incoming, String>>,
+    next_id: i64,
+
+    /// The params of the latest notification of each method.
+    latest: HashMap<String, Value>,
+
+    closed: Option<String>,
+}
+
+impl Connection {
+    pub fn new(reader: impl BufRead + Send + 'static, writer: impl Write + Send + 'static) -> Self {
+        let writer: SharedWriter = Arc::new(Mutex::new(Box::new(writer)));
+        let (sender, incoming) = unbounded();
+        let replies = Arc::clone(&writer);
+        thread::spawn(move || read_loop(reader, &replies, &sender));
+
+        Self {
+            writer,
+            incoming,
+            next_id: 1,
+            latest: HashMap::new(),
+            closed: None,
+        }
+    }
+
+    /// Send a request and wait up to `timeout` for its result.
+    pub fn request(
+        &mut self,
+        method: &str,
+        params: &Value,
+        timeout: Duration,
+    ) -> Result<Value, LspError> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(
+            method,
+            &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+        )?;
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Incoming::Response {
+                id: answered,
+                outcome,
+            } = self.receive(method, deadline, timeout)?
+                && answered == id
+            {
+                return outcome.map_err(|(code, message)| LspError::Response {
+                    method: method.to_owned(),
+                    code,
+                    message,
+                });
+            }
+        }
+    }
+
+    /// Send a notification.
+    pub fn notify(&mut self, method: &str, params: &Value) -> Result<(), LspError> {
+        self.send(
+            method,
+            &json!({ "jsonrpc": "2.0", "method": method, "params": params }),
+        )
+    }
+
+    /// Block until the server reports, the way `signal` describes, that it has
+    /// loaded the workspace.
+    ///
+    /// A server that reports it is done but cannot answer reliably is an error:
+    /// its answers would be incomplete.
+    pub fn wait_until_ready(
+        &mut self,
+        signal: ReadySignal,
+        timeout: Duration,
+    ) -> Result<(), LspError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(outcome) = self.latest.get(signal.method).and_then(signal.ready) {
+                return outcome.map_err(|message| LspError::Unhealthy { message });
+            }
+
+            self.receive(signal.method, deadline, timeout)?;
+        }
+    }
+
+    /// The next message from the server, keeping each notification's params on
+    /// the way.
+    fn receive(
+        &mut self,
+        method: &str,
+        deadline: Instant,
+        timeout: Duration,
+    ) -> Result<Incoming, LspError> {
+        if let Some(detail) = &self.closed {
+            return Err(LspError::Closed {
+                detail: detail.clone(),
+            });
+        }
+
+        let wait = deadline.saturating_duration_since(Instant::now());
+        let message = match self.incoming.recv_timeout(wait) {
+            Ok(Ok(message)) => message,
+            Ok(Err(detail)) => {
+                self.closed = Some(detail.clone());
+                return Err(LspError::Closed { detail });
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                return Err(LspError::Timeout {
+                    method: method.to_owned(),
+                    after: timeout,
+                });
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                let detail = "the connection closed".to_owned();
+                self.closed = Some(detail.clone());
+                return Err(LspError::Closed { detail });
+            }
+        };
+
+        if let Incoming::Notification { method, params } = &message {
+            self.latest.insert(method.clone(), params.clone());
+        }
+
+        Ok(message)
+    }
+
+    fn send(&self, method: &str, message: &Value) -> Result<(), LspError> {
+        let mut writer = self.writer.lock().map_err(|_| LspError::Protocol {
+            method: method.to_owned(),
+            message: "the writer lock is poisoned".to_owned(),
+        })?;
+
+        write_message(&mut **writer, message).map_err(|error| LspError::Closed {
+            detail: format!("sending `{method}` failed: {error}"),
+        })
+    }
+}
+
+/// Read messages until the server closes its output, answering its requests and
+/// forwarding everything else.
+///
+/// The last item sent is the reason reading stopped.
+fn read_loop(
+    mut reader: impl BufRead,
+    writer: &SharedWriter,
+    sender: &Sender<Result<Incoming, String>>,
+) {
+    let detail = loop {
+        let message = match read_message(&mut reader) {
+            Ok(Some(message)) => message,
+            Ok(None) => break "the server closed its output".to_owned(),
+            Err(error) => break format!("reading from the server failed: {error}"),
+        };
+
+        let incoming = match route(message) {
+            Route::Forward(incoming) => incoming,
+            Route::Answer(id) => {
+                // Every server-to-client request gets an empty answer. The
+                // client advertises no capability that makes one matter, and an
+                // unanswered request can stall the server.
+                let reply = json!({ "jsonrpc": "2.0", "id": id, "result": null });
+                if let Ok(mut writer) = writer.lock() {
+                    let _written = write_message(&mut **writer, &reply);
+                }
+                continue;
+            }
+            Route::Ignore => continue,
+        };
+
+        if sender.send(Ok(incoming)).is_err() {
+            return;
+        }
+    };
+
+    let _sent = sender.send(Err(detail));
+}
+
+enum Route {
+    Forward(Incoming),
+    Answer(Value),
+    Ignore,
+}
+
+/// Classify a decoded message as a response, a notification, or a request from
+/// the server.
+fn route(mut message: Value) -> Route {
+    let id = message.get_mut("id").map(Value::take);
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
+    match (method, id) {
+        (Some(_), Some(id)) => Route::Answer(id),
+        (Some(method), None) => Route::Forward(Incoming::Notification {
+            method,
+            params: message
+                .get_mut("params")
+                .map(Value::take)
+                .unwrap_or_default(),
+        }),
+        (None, Some(Value::Number(id))) => {
+            let Some(id) = id.as_i64() else {
+                return Route::Ignore;
+            };
+
+            let outcome = match message.get("error") {
+                Some(error) => Err((
+                    error
+                        .get("code")
+                        .and_then(Value::as_i64)
+                        .unwrap_or_default(),
+                    error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                )),
+                None => Ok(message
+                    .get_mut("result")
+                    .map(Value::take)
+                    .unwrap_or_default()),
+            };
+
+            Route::Forward(Incoming::Response { id, outcome })
+        }
+        _ => Route::Ignore,
+    }
+}
+
+/// Read one `Content-Length`-framed message.
+///
+/// Returns `None` when the stream ends between messages.
+fn read_message(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
+    let mut length = None;
+    let mut started = false;
+    let mut header = String::new();
+
+    loop {
+        header.clear();
+        if reader.read_line(&mut header)? == 0 {
+            if started {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "the stream ended inside a message header",
+                ));
+            }
+            return Ok(None);
+        }
+
+        let line = header.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            if started {
+                break;
+            }
+            continue;
+        }
+
+        started = true;
+        if let Some((name, value)) = line.split_once(':')
+            && name.trim().eq_ignore_ascii_case("content-length")
+        {
+            length = Some(value.trim().parse::<usize>().map_err(io::Error::other)?);
+        }
+    }
+
+    let length = length.ok_or_else(|| io::Error::other("a message has no Content-Length"))?;
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body)?;
+
+    serde_json::from_slice(&body)
+        .map(Some)
+        .map_err(io::Error::other)
+}
+
+fn write_message(writer: &mut dyn Write, message: &Value) -> io::Result<()> {
+    let body = serde_json::to_vec(message)?;
+    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
+    writer.write_all(&body)?;
+    writer.flush()
+}
+
+/// A running language server process.
+pub struct Server {
+    child: Child,
+    connection: Connection,
+    stderr: Arc<Mutex<VecDeque<String>>>,
+    encoding: PositionEncoding,
+    timeout: Duration,
+}
+
+impl Server {
+    /// Start `command` in `root` and complete the `initialize` handshake.
+    ///
+    /// `options` is sent as `initializationOptions`, and `experimental` as the
+    /// client's experimental capabilities.
+    /// `timeout` bounds each request, the handshake included.
+    pub fn start(
+        command: &str,
+        args: &[String],
+        root: &Utf8Path,
+        options: &Value,
+        experimental: &Value,
+        timeout: Duration,
+    ) -> Result<Self, LspError> {
+        let mut child = Command::new(command)
+            .args(args)
+            .current_dir(root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| LspError::Spawn {
+                command: command.to_owned(),
+                error,
+            })?;
+
+        let (Some(stdin), Some(stdout), Some(stderr)) =
+            (child.stdin.take(), child.stdout.take(), child.stderr.take())
+        else {
+            return Err(LspError::Closed {
+                detail: "the server's standard streams were not captured".to_owned(),
+            });
+        };
+
+        let mut server = Self {
+            child,
+            connection: Connection::new(BufReader::new(stdout), stdin),
+            stderr: collect_stderr(stderr),
+            encoding: PositionEncoding::Utf16,
+            timeout,
+        };
+
+        let initialized = server.request_value(
+            "initialize",
+            &initialize_params(root, options, experimental),
+        )?;
+        if initialized
+            .pointer("/capabilities/positionEncoding")
+            .and_then(Value::as_str)
+            == Some("utf-8")
+        {
+            server.encoding = PositionEncoding::Utf8;
+        }
+
+        server
+            .connection
+            .notify("initialized", &json!({}))
+            .map_err(|error| server.explain(error))?;
+
+        Ok(server)
+    }
+
+    /// The unit the server counts `character` offsets in.
+    #[must_use]
+    pub fn encoding(&self) -> PositionEncoding {
+        self.encoding
+    }
+
+    /// Send a notification.
+    pub fn notify(&mut self, method: &str, params: &Value) -> Result<(), LspError> {
+        self.connection
+            .notify(method, params)
+            .map_err(|error| self.explain(error))
+    }
+
+    /// Block until the server has loaded the workspace, for at most `timeout`.
+    pub fn wait_until_ready(
+        &mut self,
+        signal: ReadySignal,
+        timeout: Duration,
+    ) -> Result<(), LspError> {
+        self.connection
+            .wait_until_ready(signal, timeout)
+            .map_err(|error| self.explain(error))
+    }
+
+    /// Send a request and decode its result.
+    ///
+    /// A request the server abandons because its inputs changed is sent again,
+    /// a few times.
+    pub fn request<R: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        params: &Value,
+    ) -> Result<R, LspError> {
+        let value = self.request_value(method, params)?;
+
+        serde_json::from_value(value).map_err(|error| LspError::Protocol {
+            method: method.to_owned(),
+            message: format!("unexpected result: {error}"),
+        })
+    }
+
+    fn request_value(&mut self, method: &str, params: &Value) -> Result<Value, LspError> {
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            match self.connection.request(method, params, self.timeout) {
+                Err(LspError::Response { code, .. })
+                    if code == CONTENT_MODIFIED && attempts <= CONTENT_MODIFIED_RETRIES => {}
+                result => return result.map_err(|error| self.explain(error)),
+            }
+        }
+    }
+
+    /// Ask the server to exit, and wait briefly for it to do so.
+    ///
+    /// Failures are not reported: the answers are already in hand, and [`Drop`]
+    /// kills a server that does not exit.
+    pub fn shutdown(&mut self) {
+        if self
+            .connection
+            .request("shutdown", &Value::Null, EXIT_GRACE)
+            .is_ok()
+        {
+            let _sent = self.connection.notify("exit", &Value::Null);
+        }
+
+        let deadline = Instant::now() + EXIT_GRACE;
+        while Instant::now() < deadline {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Add the tail of the server's stderr to an error that ended the
+    /// connection, since the server usually says why it stopped there.
+    fn explain(&self, error: LspError) -> LspError {
+        let LspError::Closed { detail } = error else {
+            return error;
+        };
+
+        let tail = self
+            .stderr
+            .lock()
+            .map(|lines| lines.iter().cloned().collect::<Vec<_>>().join("\n"))
+            .unwrap_or_default();
+
+        if tail.is_empty() {
+            return LspError::Closed { detail };
+        }
+
+        LspError::Closed {
+            detail: format!("{detail}\n\nThe server's last output:\n{tail}"),
+        }
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        if matches!(self.child.try_wait(), Ok(None)) {
+            let _killed = self.child.kill();
+        }
+        let _reaped = self.child.wait();
+    }
+}
+
+/// Keep the last lines the server writes to stderr.
+///
+/// The stream is drained continuously so a chatty server never blocks on a full
+/// pipe.
+fn collect_stderr(stderr: ChildStderr) -> Arc<Mutex<VecDeque<String>>> {
+    let lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
+    let tail = Arc::clone(&lines);
+
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { return };
+            let Ok(mut tail) = tail.lock() else { return };
+            if tail.len() == STDERR_TAIL_LINES {
+                tail.pop_front();
+            }
+            tail.push_back(line);
+        }
+    });
+
+    lines
+}
+
+fn initialize_params(root: &Utf8Path, options: &Value, experimental: &Value) -> Value {
+    let uri = Url::from_directory_path(root.as_std_path())
+        .map(String::from)
+        .unwrap_or_default();
+
+    json!({
+        "processId": std::process::id(),
+        "rootUri": uri,
+        "workspaceFolders": [{ "uri": uri, "name": root.file_name().unwrap_or("workspace") }],
+        "initializationOptions": options,
+        "capabilities": {
+            "general": { "positionEncodings": ["utf-8", "utf-16"] },
+            "textDocument": {
+                "synchronization": {},
+                "hover": { "contentFormat": ["markdown", "plaintext"] },
+                "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
+                "definition": { "linkSupport": false },
+                "implementation": { "linkSupport": false },
+                "references": {},
+                "selectionRange": {},
+                "callHierarchy": {},
+                "rename": {},
+            },
+            "workspace": { "symbol": {} },
+            "experimental": experimental,
+        },
+    })
+}
+
+#[cfg(test)]
+#[path = "lsp_tests.rs"]
+mod tests;

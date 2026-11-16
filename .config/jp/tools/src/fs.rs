@@ -19,6 +19,7 @@ use delete_file::fs_delete_file;
 use grep_files::fs_grep_files;
 use list_files::fs_list_files;
 use modify_file::fs_modify_file;
+pub(crate) use modify_file::{Change, write_changes};
 use move_file::fs_move_file;
 use read_file::fs_read_file;
 
