@@ -678,8 +678,7 @@ impl Query {
         )
         .await?;
 
-        // A stopped turn is reported the same as a finished one here: whoever
-        // stopped it is at this terminal and saw it happen.
+        // Direct CLI queries treat all `TurnEnding` variants as a clean exit.
         let mut turn_result = inputs
             .run(lock, stream, ctx.signals.turn_interrupt())
             .await
@@ -1384,8 +1383,6 @@ pub(crate) struct TurnInputs {
     /// reached through here.
     interrupts: TurnInterrupts,
 
-    /// The provider to run the turn against in place of the one the config
-    /// names, taken from [`Ctx::stubbed_provider`].
     #[cfg(test)]
     stubbed_provider: Option<Arc<dyn Provider>>,
 }
@@ -1602,10 +1599,10 @@ pub(crate) fn last_request_id(events: &ConversationStream) -> Option<EventId> {
         .map(|entry| entry.event_id.clone())
 }
 
-/// How a turn ended that a client's interrupt ended before its request was
-/// appended.
+/// Map a pre-start client interrupt to its [`TurnEnding`].
 ///
-/// Only a stop or an abort can end a turn that has not started.
+/// [`TurnInterrupts::next_stop`] only yields `Stop` or `Abort`; replies stay
+/// queued until the turn starts.
 fn ended_before_start(action: &InterruptAction) -> TurnEnding {
     match action {
         InterruptAction::Abort => TurnEnding::Aborted,

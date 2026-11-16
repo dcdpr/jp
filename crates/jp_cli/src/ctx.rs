@@ -80,8 +80,6 @@ pub(crate) struct Ctx {
     #[cfg(test)]
     pub(crate) stubbed_now: DateTime<Utc>,
 
-    /// The provider every turn runs against, in place of the one its config
-    /// names.
     #[cfg(test)]
     pub(crate) stubbed_provider: Option<Arc<dyn Provider>>,
 }

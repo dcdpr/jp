@@ -2160,8 +2160,6 @@ fn a_query_without_a_schema_replies_without_data() {
     );
 }
 
-/// A stopped turn that still produced structured data hands it back, and says
-/// it was stopped: the data may be all the plugin needs, or not enough.
 #[test]
 fn a_stopped_structured_query_replies_with_its_data_and_its_outcome() {
     let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
@@ -2515,11 +2513,8 @@ fn script_plugin(dir: &Utf8Path, name: &str, _sh: &str, powershell: &str) -> Utf
     path
 }
 
-/// A provider that streams part of an answer and then never finishes.
-///
-/// `parked` is notified once the stream has nothing more to give, which is when
-/// the turn's streaming loop, and the interrupt handler it registers, are known
-/// to be running.
+/// Mock provider that yields a partial message and then hangs, notifying
+/// `parked` once the turn's streaming loop polls past the initial events.
 #[cfg(unix)]
 struct ParkedProvider {
     parked: Arc<Notify>,
@@ -2557,13 +2552,11 @@ impl Provider for ParkedProvider {
     }
 }
 
-/// Run a plugin that sends `query` on the workspace's one conversation, then
-/// `follow_up` (a protocol line, or nothing), and return the line the plugin
-/// received in reply to the query.
+/// Run a plugin that sends `query` followed by `follow_up`, and return the
+/// host's reply to the query.
 ///
-/// The turn runs against `provider`.
-/// With `press_once_parked`, Ctrl-C is pressed once that notifies, the way it
-/// would be at the host's terminal.
+/// When `press_once_parked` is set, sends a host interrupt signal as soon as
+/// the notification fires.
 #[cfg(unix)]
 fn reply_to_query(
     provider: Arc<dyn Provider>,
@@ -2650,7 +2643,6 @@ fn a_turn_that_finishes_is_reported_as_finished() {
     );
 }
 
-/// The provider never finishes, so the only way the turn ends is the stop.
 #[cfg(unix)]
 #[test]
 fn a_turn_the_plugin_stops_is_reported_as_stopped() {
@@ -2670,9 +2662,8 @@ fn a_turn_the_plugin_stops_is_reported_as_stopped() {
     );
 }
 
-/// A Ctrl-C at the host's terminal reaches the running turn's handler, which
-/// sits above the plugin's, so the plugin never hears of it except through
-/// `outcome`.
+/// Host Ctrl-C is routed to the active turn's interrupt handler rather than the
+/// plugin, so `outcome` is how the plugin learns the turn was stopped.
 #[cfg(unix)]
 #[test]
 fn a_turn_stopped_at_the_hosts_terminal_is_reported_as_stopped() {

@@ -794,7 +794,7 @@ async fn a_client_reply_continues_the_running_turn() {
         assert_eq!(
             ending,
             TurnEnding::Finished,
-            "the reply carried the turn on, and the assistant then finished it"
+            "the reply continued the turn, and the assistant then finished"
         );
 
         assert_eq!(
@@ -935,12 +935,6 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
-/// An abort from a client ends the turn where it is, mid-stream, and is
-/// reported as an abort.
-///
-/// The provider parks after its first response and would never finish on its
-/// own, so a turn that ends at all is one the abort reached while it was
-/// streaming.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_abort_ends_the_turn_mid_stream() {
     let test_result = Box::pin(timeout(Duration::from_secs(10), async {
@@ -1016,8 +1010,8 @@ async fn a_client_abort_ends_the_turn_mid_stream() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
-/// A provider that streams part of an answer and then fails with a rate limit
-/// asking for a minute's wait, counting calls.
+/// Mock provider that yields a partial message followed by a 1-minute
+/// rate-limit error.
 #[derive(Debug, Default)]
 struct RateLimitedProvider {
     calls: AtomicUsize,
@@ -1050,15 +1044,10 @@ impl Provider for RateLimitedProvider {
     }
 }
 
-/// An abort from a client that lands while the turn waits out a retry backoff
-/// ends the turn there, and is reported as an abort.
-///
-/// The abort is sent only once the backoff has registered its own interrupt
-/// handler, so it cannot be taken by the streaming loop instead.
-/// The partial answer in the conversation shows the backoff path ran: it is
-/// committed before the wait, while an abort taken mid-stream drops it.
-/// The backoff asks for a minute, so a turn that ends within the timeout is one
-/// the abort cut short.
+/// Sending an abort after the backoff registers its interrupt handler exercises
+/// the backoff exit rather than the streaming loop.
+/// The partial message remains in the conversation because it is committed
+/// before the backoff wait begins, whereas a mid-stream abort would discard it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_abort_during_retry_backoff_ends_the_turn_as_aborted() {
     let test_result = Box::pin(timeout(Duration::from_secs(10), async {
@@ -1147,8 +1136,6 @@ async fn a_client_abort_during_retry_backoff_ends_the_turn_as_aborted() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
-/// Choosing `[a] Abort` from the Ctrl-C menu mid-stream ends the turn, and is
-/// reported as an abort.
 #[tokio::test]
 async fn an_interrupt_abort_during_streaming_ends_the_turn_as_aborted() {
     let test_result = Box::pin(timeout(Duration::from_secs(10), async {
@@ -1161,8 +1148,6 @@ async fn an_interrupt_abort_during_streaming_ends_the_turn_as_aborted() {
             .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
             .unwrap();
 
-        // Fires once the stream is parked inside the streaming event loop, whose
-        // interrupt handler is then the one a press reaches.
         let stalled = Arc::new(Notify::new());
         let provider: Arc<dyn Provider> = Arc::new(
             StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
@@ -1214,9 +1199,9 @@ async fn an_interrupt_abort_during_streaming_ends_the_turn_as_aborted() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
-/// A client's stop queued before the turn starts is taken at the top of the
-/// loop, once the turn's request is in place, and ends the turn as stopped
-/// before the provider is asked anything.
+/// Queuing the stop before `run_turn_loop` starts ensures it is drained at the
+/// top of the loop, after the request is appended and before the provider is
+/// called.
 #[tokio::test]
 async fn a_client_stop_taken_between_phases_ends_the_turn_as_stopped() {
     let tmp = tempdir().unwrap();
@@ -1275,8 +1260,6 @@ async fn a_client_stop_taken_between_phases_ends_the_turn_as_stopped() {
     );
 }
 
-/// A client's abort queued before the turn starts is taken at the same point,
-/// and ends the turn as aborted.
 #[tokio::test]
 async fn a_client_abort_taken_between_phases_ends_the_turn_as_aborted() {
     let tmp = tempdir().unwrap();

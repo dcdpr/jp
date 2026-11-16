@@ -189,7 +189,7 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
 /// 3. Executing tool calls
 /// 4. Persisting conversation state
 ///
-/// Returns how the turn ended: on its own, stopped, or aborted.
+/// Returns how the turn ended ([`TurnEnding`]).
 ///
 /// # Errors
 ///
@@ -1140,9 +1140,9 @@ async fn drive_turn(
                     // matching response, then end the turn without a
                     // follow-up request.
                     //
-                    // A client's abort arrives here as a stop too: cancelling
-                    // the tools is all of the turn's work this phase owns, and
-                    // their responses are kept.
+                    // A client `Abort` during tool execution also maps to
+                    // `ExecutionOutcome::Stopped`: the running tools are
+                    // cancelled and their cancellation responses are persisted.
                     ExecutionOutcome::Stopped => {
                         commit_tool_responses(
                             execution_result,

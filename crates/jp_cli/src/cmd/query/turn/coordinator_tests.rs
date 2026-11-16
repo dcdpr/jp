@@ -1504,7 +1504,6 @@ fn duplicate_flush_after_tool_call_does_not_surface_request() {
     assert_eq!(tool_calls, 1);
 }
 
-/// A coordinator writing nowhere, with a turn already started on `stream`.
 fn streaming_coordinator(stream: &mut ConversationStream) -> TurnCoordinator {
     let mut coordinator = TurnCoordinator::new(
         Arc::new(Printer::sink()),
@@ -1564,8 +1563,6 @@ fn a_turn_aborted_mid_stream_ends_as_aborted() {
     assert_eq!(coordinator.ending(), TurnEnding::Aborted);
 }
 
-/// A stop that lands once the assistant has finished cut nothing short, so the
-/// turn still reads as finished.
 #[test]
 fn a_stop_after_the_assistant_finished_leaves_the_turn_finished() {
     let mut stream = ConversationStream::new_test();
@@ -1580,7 +1577,6 @@ fn a_stop_after_the_assistant_finished_leaves_the_turn_finished() {
     assert_eq!(coordinator.ending(), TurnEnding::Finished);
 }
 
-/// A reply after a stop carries the turn on, so how it ends is decided again.
 #[test]
 fn a_reply_after_a_stop_leaves_the_turn_to_end_on_its_own() {
     let mut stream = ConversationStream::new_test();

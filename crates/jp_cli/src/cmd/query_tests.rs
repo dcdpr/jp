@@ -591,10 +591,6 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
     );
 }
 
-/// A client's abort that lands while MCP servers are starting ends the turn
-/// before it runs, and is reported as an abort rather than a stop.
-///
-/// The startup never completes, so the only way out of `run` is the abort.
 #[tokio::test]
 async fn a_client_abort_during_mcp_startup_ends_the_turn_as_aborted() {
     let tmp = camino_tempfile::tempdir().unwrap();
@@ -648,11 +644,8 @@ async fn a_client_abort_during_mcp_startup_ends_the_turn_as_aborted() {
     );
 }
 
-/// A Ctrl-C during the model lookup ends the turn before it runs, as a stop.
-///
-/// Pressed only once the provider has been asked for the model, so the wait for
-/// MCP servers is already behind the turn and the lookup is the only place left
-/// to see the press.
+/// Waiting on `asked` ensures MCP startup has already completed and the turn is
+/// blocked in `provider.model_details` when the interrupt fires.
 #[tokio::test]
 async fn an_interrupt_during_the_model_lookup_stops_the_turn_before_it_runs() {
     let tmp = camino_tempfile::tempdir().unwrap();
@@ -700,11 +693,8 @@ async fn an_interrupt_during_the_model_lookup_stops_the_turn_before_it_runs() {
     );
 }
 
-/// A client's abort during the model lookup ends the turn before it runs, as an
-/// abort.
-///
-/// Sent only once the provider has been asked for the model, for the same
-/// reason as the Ctrl-C above.
+/// Waiting on `asked` ensures MCP startup has already completed and the turn is
+/// blocked in `provider.model_details` when the client abort arrives.
 #[tokio::test]
 async fn a_client_abort_during_the_model_lookup_ends_the_turn_as_aborted() {
     let tmp = camino_tempfile::tempdir().unwrap();
@@ -756,10 +746,9 @@ async fn a_client_abort_during_the_model_lookup_ends_the_turn_as_aborted() {
     );
 }
 
-/// What a provider returns; this module's `Result` is the CLI's.
 type LlmResult<T> = std::result::Result<T, LlmError>;
 
-/// A provider whose model lookup never returns, and that says when it is asked.
+/// Mock provider whose `model_details` call notifies `asked` and then hangs.
 struct UnansweredLookup {
     asked: Arc<Notify>,
 }
@@ -784,7 +773,6 @@ impl Provider for UnansweredLookup {
     }
 }
 
-/// A startup set with nothing to wait for.
 fn no_mcp_servers() -> StartupSet {
     let (_lines, stderr) = broadcast::channel(1);
     StartupSet {
@@ -794,7 +782,6 @@ fn no_mcp_servers() -> StartupSet {
     }
 }
 
-/// What a turn on `workspace` needs, with nothing attached and no tools.
 fn turn_inputs(
     workspace: &Workspace,
     config: Arc<AppConfig>,

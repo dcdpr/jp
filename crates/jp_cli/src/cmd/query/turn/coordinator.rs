@@ -63,16 +63,16 @@ pub enum TurnPhase {
     Aborted,
 }
 
-/// How a turn ended, for a caller that reports it.
+/// How a turn ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnEnding {
-    /// The turn ended on its own: the assistant finished answering.
+    /// The assistant completed its response without interruption.
     Finished,
 
-    /// The turn was stopped, and kept what the assistant had produced.
+    /// The turn was stopped and any partial response was persisted.
     Stopped,
 
-    /// The turn was aborted, and dropped what was not yet persisted.
+    /// The turn was aborted and any unpersisted partial response was discarded.
     Aborted,
 }
 
@@ -218,11 +218,9 @@ pub struct TurnCoordinator {
     /// content rendering.
     printer: Arc<Printer>,
 
-    /// Whether an interrupt moved the turn to [`TurnPhase::Complete`], rather
-    /// than the assistant finishing.
+    /// Whether an interrupt transitioned the turn to [`TurnPhase::Complete`].
     ///
-    /// Cleared when the turn carries on from a continuation, since how it ends
-    /// is then decided again.
+    /// Reset when a continuation starts a new streaming cycle.
     stopped: bool,
 }
 
@@ -528,11 +526,11 @@ impl TurnCoordinator {
         self.state
     }
 
-    /// How the turn ended, read once the phase is [`TurnPhase::Complete`] or
+    /// Return how the turn ended once it reaches [`TurnPhase::Complete`] or
     /// [`TurnPhase::Aborted`].
     ///
-    /// A turn whose assistant had already finished when an interrupt arrived
-    /// reads as [`TurnEnding::Finished`]: the interrupt cut nothing short.
+    /// An interrupt that arrives after the assistant has already finished
+    /// leaves the ending as [`TurnEnding::Finished`].
     pub fn ending(&self) -> TurnEnding {
         match self.state {
             TurnPhase::Aborted => TurnEnding::Aborted,
@@ -541,7 +539,7 @@ impl TurnCoordinator {
         }
     }
 
-    /// Move to [`TurnPhase::Complete`] on an interrupt's behalf.
+    /// Transition to [`TurnPhase::Complete`] due to an interrupt.
     fn stop(&mut self) {
         self.stopped |= self.state != TurnPhase::Complete;
         self.state = TurnPhase::Complete;

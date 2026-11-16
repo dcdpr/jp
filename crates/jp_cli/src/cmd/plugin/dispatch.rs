@@ -1309,7 +1309,6 @@ fn query_expiry(
         .ok_or_else(|| invalid("out of range".to_owned()))
 }
 
-/// How a turn's ending is reported on the wire.
 fn query_outcome(ending: TurnEnding) -> QueryOutcome {
     match ending {
         TurnEnding::Finished => QueryOutcome::Finished,
@@ -1318,12 +1317,12 @@ fn query_outcome(ending: TurnEnding) -> QueryOutcome {
     }
 }
 
-/// The reply to a delegated turn that ended without an error.
+/// Build the protocol response for a delegated turn that ended without a
+/// runtime error.
 ///
-/// With a `schema`, it carries the structured response of the turn this query
-/// started, and is an error when there is none to give: the turn was stopped
-/// before it started, answered without structured data, or was cut short.
-/// `before` is the conversation's last request from before the query ran.
+/// When `schema` is set, extracts the structured response from the turn started
+/// after `before` (the last request ID prior to this query), or returns an
+/// error response if the turn produced no structured data.
 fn completed(
     id: Option<String>,
     conversation: String,

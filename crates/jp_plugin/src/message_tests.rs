@@ -751,8 +751,6 @@ fn query_complete_names_how_the_turn_ended() {
     );
 }
 
-/// A host older than protocol version 15 sends no `outcome`, and all it could
-/// have said is that the turn ended without an error.
 #[test]
 fn query_complete_from_an_older_host_reads_as_finished() {
     assert_eq!(
