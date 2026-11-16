@@ -1375,13 +1375,10 @@ fn flush_of_invalid_tool_call_arguments_surfaces_the_call_as_invalid() {
 
     // The recorded request carries no arguments, and keeps the metadata the
     // provider attached to the call.
-    let recorded: Vec<_> = stream
-        .iter()
-        .filter(|e| e.event.is_tool_call_request())
-        .collect();
+    let recorded: Vec<_> = stream.iter().filter(|e| e.is_tool_call_request()).collect();
     assert_eq!(recorded.len(), 1);
     assert_eq!(
-        recorded[0].event.as_tool_call_request(),
+        recorded[0].as_tool_call_request(),
         Some(&ToolCallRequest {
             id: "call_42".into(),
             name: "fs_modify_file".into(),
@@ -1389,7 +1386,7 @@ fn flush_of_invalid_tool_call_arguments_surfaces_the_call_as_invalid() {
         })
     );
     assert_eq!(
-        Value::Object(recorded[0].event.metadata.clone()),
+        Value::Object(recorded[0].metadata.clone()),
         json!({"signature": "sig_1"})
     );
 }
@@ -1418,10 +1415,7 @@ fn an_invalid_tool_call_without_an_id_is_not_recorded() {
     assert!(matches!(outcome.action, Action::Continue));
     assert_eq!(outcome.committed, CommittedEvent::None);
     assert_eq!(
-        stream
-            .iter()
-            .filter(|e| e.event.is_tool_call_request())
-            .count(),
+        stream.iter().filter(|e| e.is_tool_call_request()).count(),
         0
     );
 }
@@ -1449,10 +1443,7 @@ fn an_invalid_tool_call_without_a_name_is_not_recorded() {
     assert!(matches!(outcome.action, Action::Continue));
     assert_eq!(outcome.committed, CommittedEvent::None);
     assert_eq!(
-        stream
-            .iter()
-            .filter(|e| e.event.is_tool_call_request())
-            .count(),
+        stream.iter().filter(|e| e.is_tool_call_request()).count(),
         0
     );
 }
