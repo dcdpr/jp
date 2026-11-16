@@ -2064,6 +2064,7 @@ release-sync:
 #   just backfill docs           write the release's user guide
 #   just backfill proceed        finalize it, build it, and start the next
 #   just backfill revert 0.5.0   take back 0.5.0 and every later release
+#   just backfill archive        keep the period's run, and start it over
 #   just backfill publish        put every release on GitHub
 #
 # `just backfill` alone lists every command.

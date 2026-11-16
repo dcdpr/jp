@@ -274,6 +274,13 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
   any edited fragments.
   Each release's user guide is saved under `refs/backfill/guide/<version>/` and
   restored by `docs` after re-cutting.
+- `just backfill archive [name]` keeps the period's notes, and its guide once
+  cut, as a commit under `refs/backfill/archive/<version>/<name>` that records
+  how each drafting run was started, then takes the period back to before its
+  drafting, so `next` drafts it from scratch.
+  `git diff` between two archives compares runs, such as one model against
+  another or the effect of a rule change.
+  Archives stay in the clone.
 - `just backfill publish` finishes the backfill: it deletes the old test tag
   `v0.1.0` on GitHub, pushes all `release/*` branches and `v*` tags to GitHub in
   a single push (pushing more than three tags at once suppresses GitHub Actions
@@ -415,10 +422,10 @@ Depends on Phases 1 and 2.
 ### Phase 4: JP's history
 
 Add `.config/release/backfill.sh` (`just backfill`) with `init`, `next`,
-`draft`, `changes`, `cut`, `docs`, `highlight`, `proceed`, `revert`, and
-`publish`, the `release-notes` and `release-docs` personas with the changelog
-and user guide rules, and execute the backfill trial to publish JP's historical
-releases.
+`draft`, `changes`, `cut`, `docs`, `highlight`, `proceed`, `revert`, `archive`,
+and `publish`, the `release-notes` and `release-docs` personas with the
+changelog and user guide rules, and execute the backfill trial to publish JP's
+historical releases.
 Depends on Phase 3 and [RFD 122] Phases 5 to 7.
 
 ### Repository settings

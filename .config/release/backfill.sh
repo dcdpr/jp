@@ -39,6 +39,10 @@
 #                  the next period.
 #   revert VER     Take back release VER and every later one, so VER can be cut
 #                  again.
+#   archive [NAME] Keep the notes of the period in drafting, and its guide once
+#                  cut, as NAME, then take the period back to before its
+#                  drafting, so `next` drafts it again from scratch. `archive
+#                  list` lists what's kept; archives stay in the clone.
 #   publish        End the trial: publish every release to GitHub.
 #
 # `next`, `draft`, `docs`, `highlight`, and `proceed` pass what follows `--`, or
@@ -102,6 +106,10 @@ SITE=https://jp.computer
 
 # The types of entry whose changes can change the user guide.
 GUIDED='added changed deprecated removed'
+
+# Where `archive` keeps a period's runs: one commit each, as
+# <ARCHIVE>/<version>/<name>.
+ARCHIVE=refs/backfill/archive
 
 # The tools that read a release's tree in the docs and highlight steps, and the
 # ones that write its guide in the docs step.
@@ -631,7 +639,7 @@ code_paragraph() {
 draft() {
   local version=$1 range=$2 from=$3 until=$4 wanted=$5 extra=$6 code=$7 title=$8
   shift 8
-  local work count paragraph hint='' noun=changes previous since
+  local work count paragraph hint='' noun=changes previous since run
   work=$(mktemp -d)
   noted >"$work/noted"
   : >"$work/credits"
@@ -672,6 +680,12 @@ draft() {
   } >"$work/prompt.md"
 
   [ "$count" -ne 1 ] || noun=change
+  # `archive` names how each run of the period's drafting was started.
+  if in_clone; then
+    run='the default model'
+    [ $# -eq 0 ] || run="jp query $*"
+    git config --add jp-backfill.period.runs "$(date +%F), $run"
+  fi
   say "Drafting fragments for $count $noun of $version. Each fragment written, revised, or deleted is shown first: y does it, e edits it first, r skips it with a reply for the model. ^C stops, and the fragments written stay."
   if ! jp --cfg "$(persona release-notes)" query --new --local --no-edit --title "$title" \
     ${code:+--mount "$CODE_MOUNT=$code"} ${1+"$@"} "@$work/prompt.md"; then
@@ -680,17 +694,19 @@ draft() {
   rm -rf "$work"
 }
 
-# Discard the period's notes: its uncommitted drafts, and the fragments at the
-# top of the fragments directory that credit one of its changes, such as the
-# ones `revert` brings back. Highlights, and the fragments set aside for
-# `--redo`, stay.
+# Discard the notes of release $1, whose changes are the range $2: its
+# uncommitted drafts, and the fragments at the top of the fragments directory
+# that credit one of its changes, such as the ones `revert` brings back.
+# Highlights, and the fragments set aside for `--redo`, stay.
 discard_period() {
-  local work file paths=()
+  local version=$1 range=$2 work file paths=()
   git restore --source=HEAD --staged --worktree -- "$FRAGMENTS"
   git clean -fdq -- "$FRAGMENTS"
+  # The runs that wrote the notes go with them.
+  git config --unset-all jp-backfill.period.runs 2>/dev/null || true
   work=$(mktemp -d)
   noted >"$work/noted"
-  changes files "$(setting period.range)" "$work/noted" >"$work/files"
+  changes files "$range" "$work/noted" >"$work/files"
   while IFS= read -r file; do
     if [ "$(dirname "$file")" = "$FRAGMENTS" ]; then
       paths+=("$file")
@@ -698,14 +714,14 @@ discard_period() {
   done <"$work/files"
   rm -rf "$work"
   if [ ${#paths[@]} -eq 0 ]; then
-    say "Discarded the drafts of $(setting period.version)."
+    say "Discarded the drafts of $version."
     return
   fi
   git rm --quiet -- "${paths[@]}"
   if [ ${#paths[@]} -eq 1 ]; then
-    say "Discarded the drafts of $(setting period.version), and its fragment committed already."
+    say "Discarded the drafts of $version, and its fragment committed already."
   else
-    say "Discarded the drafts of $(setting period.version), and its ${#paths[@]} fragments committed already."
+    say "Discarded the drafts of $version, and its ${#paths[@]} fragments committed already."
   fi
 }
 
@@ -1531,7 +1547,7 @@ cmd_next() {
 
   prepare_code "$end"
   if [ -n "$fresh" ]; then
-    discard_period
+    discard_period "$version" "$range"
   fi
   draft "$version" "$range" "$from" "$day" '' '' "$(code_dir)" "$version: draft notes" ${1+"$@"}
   period_summary
@@ -1719,6 +1735,154 @@ cmd_revert() {
   say "Took back $(joined "$reverting") and their builds; \`just backfill next\` starts $target's period again, with the notes as you left them, and \`just backfill docs\` brings back each release's guide and goes through its entries again."
 }
 
+# Add the file $1 to the index GIT_INDEX_FILE names, at the path $2.
+keep_file() {
+  git update-index --add --cacheinfo "100644,$(git hash-object -w --no-filters -- "$1"),$2"
+}
+
+# Add every file under the directory $1 to the index, under $2/.
+keep_files() {
+  local file
+  [ -d "$1" ] || return 0
+  find "$1" -type f | while IFS= read -r file; do
+    keep_file "$file" "$2/${file#"$1/"}"
+  done
+}
+
+# Add every file under the path $2 of the commit $1 to the index, under $3/.
+keep_tree() {
+  local mode hash path
+  git ls-tree -r "$1" -- "$2" | while read -r mode _ hash path; do
+    git update-index --add --cacheinfo "$mode,$hash,$3/${path#"$2/"}"
+  done
+}
+
+# Write a tree holding release $1's notes under `notes/` and, once it is cut
+# ($2 not empty), its guide under `guide/`, and print the tree's hash.
+#
+# Before the cut, the notes are the period's fragments at the top of the
+# fragments directory, with the highlights there and what its own directory
+# holds, which a release taken back leaves. After it, they are the files of its
+# directory on its notes branch, as edited in the checkout when that branch is
+# checked out, and the guide is the wiki of its release branch, as edited in the
+# worktree beside the clone when that worktree holds the branch.
+archive_tree() {
+  local version=$1 cut=$2 work code branch
+  work=$(mktemp -d)
+  (
+    export GIT_INDEX_FILE=$work/index
+    git read-tree --empty
+    if [ -z "$cut" ]; then
+      noted >"$work/noted"
+      changes files "$(setting period.range)" "$work/noted" |
+        while IFS= read -r file; do
+          [ "$(dirname "$file")" = "$FRAGMENTS" ] || continue
+          keep_file "$file" "notes/$(basename "$file")"
+        done
+      keep_files "$FRAGMENTS/highlights" notes/highlights
+      keep_files "$FRAGMENTS/$version" notes
+    else
+      if [ "$(git symbolic-ref --quiet --short HEAD || true)" = "release-notes/v$version" ]; then
+        keep_files "$FRAGMENTS/$version" notes
+      else
+        keep_tree "release-notes/v$version" "$FRAGMENTS/$version" notes
+      fi
+      code=$(code_dir)
+      branch=refs/heads/release/${version%.*}
+      if [ -e "$code" ] && [ "$(git -C "$code" rev-parse HEAD)" = "$(git rev-parse "$branch")" ]; then
+        keep_files "$code/$WIKI" guide
+      else
+        keep_tree "$branch" "$WIKI" guide
+      fi
+    fi
+    git write-tree
+  )
+  rm -rf "$work"
+}
+
+# List the runs `archive` kept.
+archive_list() {
+  local refs
+  refs=$(git for-each-ref --format='%(refname:strip=3)%09%(creatordate:short)%09%(contents:subject)' "$ARCHIVE/")
+  if [ -z "$refs" ]; then
+    say "No run is archived; \`just backfill archive\` keeps the one in progress."
+    return
+  fi
+  printf '%s\n' "$refs" | while IFS=$'\t' read -r name day subject; do
+    say "$name  archived $day: $subject"
+  done
+  say ""
+  say "Compare two runs with \`git diff $ARCHIVE/<version>/<name> $ARCHIVE/<version>/<other>\`, read one with \`git show $ARCHIVE/<version>/<name>\`, and a file of it with \`git show $ARCHIVE/<version>/<name>:notes/<file>\`."
+}
+
+cmd_archive() {
+  need_clone archive
+  if [ "${1:-}" = list ]; then
+    archive_list
+    return
+  fi
+  local name=${1:-} version cut='' range until tree ref runs state message number
+  version=$(preparing)
+  [ "$(count_of "$version")" -le 1 ] ||
+    die "More than one release is in preparation: $(joined "$version")."
+  if [ -n "$version" ]; then
+    cut=1
+    [ "$version" = "$(setting period.version)" ] ||
+      die "$version is in preparation, but the period in drafting is $(setting period.version)'s."
+  else
+    need_period
+    version=$(setting period.version)
+  fi
+  range=$(setting period.range)
+  until=$(setting period.until)
+
+  if [ -z "$name" ]; then
+    number=1
+    while git rev-parse --quiet --verify "$ARCHIVE/$version/$number" >/dev/null; do
+      number=$((number + 1))
+    done
+    name=$number
+  fi
+  ref=$ARCHIVE/$version/$name
+  git check-ref-format "$ref" || die "$name can't name an archive; use letters, digits, and dashes."
+  ! git rev-parse --quiet --verify "$ref" >/dev/null ||
+    die "$version has an archive named $name already; \`just backfill archive list\` lists them."
+
+  tree=$(archive_tree "$version" "$cut")
+  [ "$tree" != "$(git hash-object -t tree /dev/null)" ] || die "$version has no notes to keep."
+  runs=$(git config --get-all jp-backfill.period.runs 2>/dev/null || true)
+  state=drafted
+  [ -z "$cut" ] || state='cut, with its guide'
+  message=$(printf '%s ending %s, %s\n\nDrafted:\n\n%s\n' "$version" "$until" "$state" \
+    "${runs:-not recorded}")
+  # The archive never leaves the clone, so it isn't signed.
+  git update-ref "$ref" "$(printf '%s\n' "$message" | git commit-tree --no-gpg-sign "$tree")"
+  if [ -n "$cut" ]; then
+    say "Kept the notes and guide of $version as $name."
+  else
+    say "Kept the notes of $version as $name."
+  fi
+
+  if [ -n "$cut" ]; then
+    cmd_revert "$version" >/dev/null
+    # The next run writes its own guide, rather than bring this one back.
+    git update-ref -d "refs/backfill/guide/$version/tip" 2>/dev/null || true
+    git update-ref -d "refs/backfill/guide/$version/base" 2>/dev/null || true
+  fi
+  on_main
+  discard_period "$version" "$range" >/dev/null
+  # Its overview, order, and highlights, which a taken back release keeps for
+  # its next cut, go too: the archive holds them.
+  git rm -q -r --ignore-unmatch -- "$FRAGMENTS/$version" "$FRAGMENTS/highlights"
+  rm -rf "$(git rev-parse --git-path backfill/redo)"
+  if ! git diff --cached --quiet; then
+    git commit --quiet -m "docs(changelog): Set aside the notes of $version, kept as $name"
+    push_main
+  fi
+  clear_period
+  say "Took $version back to before its drafting: \`just backfill next\` drafts it again (it ended on $until), and \`just backfill archive list\` lists the runs kept."
+}
+
 cmd_draft() {
   local fresh='' after='' why='' adding='' only='' redo='' work version range from until
   local code='' wanted='' extra='' title
@@ -1789,7 +1953,7 @@ cmd_draft() {
     git clean -fdq -- "$FRAGMENTS"
     say "Discarded the uncommitted drafts in $FRAGMENTS/."
   elif [ -n "$fresh" ]; then
-    discard_period
+    discard_period "$(setting period.version)" "$(setting period.range)"
   fi
   if [ -n "$only" ]; then
     printf '%s' "$only" >"$work/wanted"
@@ -1939,6 +2103,7 @@ main() {
   highlight) cmd_highlight "$@" ;;
   proceed) cmd_proceed "$@" ;;
   revert) cmd_revert "$@" ;;
+  archive) cmd_archive "$@" ;;
   publish) cmd_publish ;;
   *) usage ;;
   esac
