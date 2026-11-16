@@ -46,6 +46,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Fan-Out](#fan-out)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
+    - [Invalid Tool Call](#invalid-tool-call)
     - [Invocation](#invocation)
     - [JP MCP Server](#jp-mcp-server)
     - [Match](#match)
@@ -339,6 +340,20 @@ user — distinct from a regular chat message.
 Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
+
+### Invalid Tool Call
+
+A flushed [Tool Call](#tool-call) whose accumulated argument text is not a
+complete JSON object (because the JSON is truncated, malformed, or another JSON
+type).
+An invalid tool call is never executed: its `ToolCallRequest` is recorded with
+empty arguments, and its `ToolCallResponse` returns an error describing the
+parse failure to the assistant.
+Implemented as `InvalidToolCall` in `jp_llm::event_builder`.
+
+**Not the same as** an incomplete tool call whose stream ended before the block
+was flushed (which is dropped without being recorded), or a tool call whose
+arguments are a valid JSON object that fails the tool's parameter validation.
 
 ### Invocation
 

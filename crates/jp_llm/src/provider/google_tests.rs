@@ -3,6 +3,7 @@ use jp_config::model::parameters::{
 };
 use jp_conversation::event::ChatRequest;
 use jp_test::function_name;
+use serde_json::json;
 use test_log::test;
 
 use super::*;
@@ -719,6 +720,41 @@ async fn test_gemini_4_hydrogen_xhigh_reasoning()
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
+/// The Gemini client deserializes a function call without `args` as
+/// `Value::Null`; `map_candidate` normalizes it to `"{}"` so `EventBuilder`
+/// accepts it as an empty argument object.
+#[test]
+fn a_function_call_without_args_streams_an_empty_object() {
+    let response: types::GenerateContentResponse = serde_json::from_value(json!({
+        "candidates": [{
+            "content": {
+                "parts": [{ "functionCall": { "name": "git_status" } }],
+                "role": "model",
+            },
+            "finishReason": "STOP",
+            "index": 0,
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "totalTokenCount": 20,
+            "promptTokensDetails": [],
+            "cacheTokensDetails": [],
+            "candidatesTokensDetails": [],
+            "toolUsePromptTokensDetails": [],
+        },
+    }))
+    .expect("valid response chunk");
+
+    let events = map_response(response, &mut IndexMap::new(), false).expect("mappable chunk");
+
+    assert_eq!(events, vec![
+        Event::tool_call_start(0, "git_status_0", "git_status"),
+        Event::tool_call_args(0, "{}"),
+        Event::flush(0),
+        Event::Finished(FinishReason::Completed),
+    ]);
+}
+
 /// Gemini can end a response with a part holding no text and only a thought
 /// signature.
 /// The signature is part of the model's turn and has to reach the next request.
@@ -769,7 +805,7 @@ mod trailing_thought_signature {
                         metadata,
                     } => builder.handle_part(index, part, metadata),
                     Event::Flush { index, metadata } => {
-                        committed.extend(builder.handle_flush(index, metadata));
+                        committed.extend(builder.handle_flush(index, metadata).unwrap());
                     }
                     Event::Finished(_) => committed.extend(builder.drain()),
                     _ => {}

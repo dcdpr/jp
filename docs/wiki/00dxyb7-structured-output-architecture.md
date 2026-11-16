@@ -242,10 +242,10 @@ User runs: jp query --schema '{"type":"object",...}' "Extract contacts"
    → Converts ChatRequest.content to a user message (schema is not
      included in the message text)
 
-3. Provider streams JSON tokens as ChatResponse::Structured parts:
-   Part { index: 0, ChatResponse::Structured { data: String("{\"name") } }
-   Part { index: 0, ChatResponse::Structured { data: String("\": \"Al") } }
-   Part { index: 0, ChatResponse::Structured { data: String("ice\"}") } }
+3. Provider streams JSON tokens as EventPart::Structured parts:
+   Part { index: 0, Structured("{\"name") }
+   Part { index: 0, Structured("\": \"Al") }
+   Part { index: 0, Structured("ice\"}") }
    Flush { index: 0 }
 
 4. EventBuilder accumulates String chunks, parses on flush:
@@ -470,24 +470,16 @@ EventKind::ChatResponse(resp) => {
 ### Streaming Structured Parts
 
 When the provider detects a schema on the current `ChatRequest`, it emits
-streamed text tokens as `ChatResponse::Structured` parts instead of
-`ChatResponse::Message` parts:
+streamed text tokens as `EventPart::Structured` parts instead of
+`EventPart::Message` parts:
 
 ```rust
 // In the provider's event mapping function:
 
-if is_structured_request {
-    Event::Part {
-        index,
-        event: ConversationEvent::now(ChatResponse::Structured {
-            data: Value::String(text_chunk),
-        }),
-    }
+if is_structured {
+    Event::structured(index, text_chunk)
 } else {
-    Event::Part {
-        index,
-        event: ConversationEvent::now(ChatResponse::message(text_chunk)),
-    }
+    Event::message(index, text_chunk)
 }
 ```
 
@@ -540,74 +532,56 @@ The following modules and types are also removed:
 
 ### New `IndexBuffer` Variant
 
-`EventBuilder` gets a new buffer variant for structured response parts:
+`EventBuilder` accumulates structured response parts in a `Structured` buffer
+variant:
 
 ```rust
 enum IndexBuffer {
     Reasoning { content: String },
     Message { content: String },
-    ToolCall { request: ToolCallRequest },
-    Structured { content: String }, // NEW
+    ToolCall { id: String, name: String, arguments_json: String, decoding: ... },
+    Structured { content: String },
 }
 ```
 
-When `handle_part` receives a `ChatResponse::Structured` event, it extracts the
-`Value::String` content and appends to the buffer:
+`handle_part` appends each `EventPart::Structured` chunk to the buffer for its
+index:
 
 ```rust
-fn handle_part(&mut self, index: usize, event: &ConversationEvent) {
-    match &event.kind {
-        // ... existing variants ...
-
-        EventKind::ChatResponse(ChatResponse::Structured { data }) => {
-            let chunk = match data {
-                Value::String(s) => s.as_str(),
-                _ => {
-                    warn!("Structured part with non-string value");
-                    return;
-                }
-            };
-
-            match self.buffers.entry(index) {
-                Entry::Occupied(mut e) => e.get_mut().append(&event.kind),
-                Entry::Vacant(e) => {
-                    e.insert(IndexBuffer::Structured {
-                        content: chunk.to_owned(),
-                    });
-                }
-            }
-        }
+EventPart::Structured(chunk) => match self.buffers.entry(index) {
+    Entry::Occupied(mut e) => match e.get_mut().as_structured_mut() {
+        Some(content) => content.push_str(&chunk),
+        None => warn_mismatch(e.get(), "Structured"),
+    },
+    Entry::Vacant(e) => {
+        e.insert(IndexBuffer::Structured { content: chunk });
     }
-}
+},
 ```
+
+If a part of another kind arrives for an index that already holds a structured
+buffer, it is ignored with a warning.
 
 ### Flush Behavior
 
 On flush, the accumulated string is parsed into a `Value`:
 
 ```rust
-fn handle_flush(&mut self, index: usize, metadata: IndexMap<String, Value>,
-                stream: &mut ConversationStream) {
-    let Some(buffer) = self.buffers.remove(&index) else { return };
-
-    let event = match buffer {
-        // ... existing variants ...
-
-        IndexBuffer::Structured { content } => {
-            let data = serde_json::from_str::<Value>(&content)
-                .unwrap_or_else(|e| {
-                    warn!("Failed to parse structured response: {e}");
-                    Value::String(content)
-                });
-
-            ConversationEvent::now(ChatResponse::Structured { data })
-        }
-    };
-
-    let event = event.with_metadata(metadata);
-    stream.push(event);
+IndexBuffer::Structured { content } => {
+    let data = serde_json::from_str::<Value>(&content).unwrap_or_else(|e| {
+        warn!("Failed to parse structured response JSON: {e}");
+        Value::String(content)
+    });
+    ConversationEvent::now(ChatResponse::Structured { data })
 }
 ```
+
+`handle_flush` merges the metadata from the parts and the flush onto the event
+and returns `Ok(Some(event))` (the `Err` variant of `handle_flush` only occurs
+for tool calls with invalid arguments, never for structured responses).
+The Turn Coordinator pushes the event to the `ConversationStream`.
+Callers that collect a stream's events instead of driving a turn use
+`event_builder::structured_data` to extract the parsed value.
 
 If JSON parsing fails, the raw string is preserved as `Value::String`.
 This ensures no data loss even if the provider returns malformed JSON.
@@ -618,47 +592,38 @@ This ensures no data loss even if the provider returns malformed JSON.
 
 ### Streaming Phase
 
-The `TurnCoordinator` receives `ChatResponse::Structured` parts during
-streaming.
-It must NOT route them through `ChatResponseRenderer` (which applies markdown
-formatting to `Message` and `Reasoning` variants).
+The `TurnCoordinator` receives `EventPart::Structured` parts during streaming.
+It must NOT route them through the chat renderer (`ChatRenderer`, which applies
+markdown formatting to `Message` and `Reasoning` variants).
 
-Instead, `TurnCoordinator::handle_streaming_event` matches on the `ChatResponse`
-variant and delegates to the appropriate renderer:
+Instead, `TurnCoordinator::handle_streaming_event` hands each text-bearing part
+to the `TurnView` as a `ChatResponse` fragment, and `TurnView` sends a
+structured fragment to the `StructuredRenderer` and everything else to the chat
+renderer:
 
 ```rust
-fn handle_streaming_event(
-    &mut self,
-    event: &Event,
-    stream: &mut ConversationStream,
-) -> Action {
-    match event {
-        Event::Part { index, event } => {
-            match &event.kind {
-                EventKind::ChatResponse(
-                    resp @ (ChatResponse::Message { .. }
-                           | ChatResponse::Reasoning { .. })
-                ) => {
-                    self.chat_renderer.render(resp);
-                }
-                EventKind::ChatResponse(
-                    ChatResponse::Structured { .. }
-                ) => {
-                    self.structured_renderer.render_chunk(event);
-                }
-                EventKind::ToolCallRequest(_) => {
-                    // ... existing tool call handling ...
-                }
-                _ => {}
-            }
-
-            self.event_builder.handle_part(*index, event);
-            Action::Continue
-        }
-        // ... Flush, Finished handling unchanged ...
+Event::Part { index, part, metadata } => {
+    match &part {
+        EventPart::Message(text) => self.view.render_chat_response_chunk(
+            &ChatResponse::Message { message: text.clone() },
+        ),
+        EventPart::Reasoning(text) => self.view.render_chat_response_chunk(
+            &ChatResponse::Reasoning { reasoning: text.clone() },
+        ),
+        EventPart::Structured(chunk) => self.view.render_chat_response_chunk(
+            &ChatResponse::Structured { data: Value::String(chunk.clone()) },
+        ),
+        // The turn loop draws the tool-call boundary.
+        EventPart::ToolCall(_) => {}
     }
+
+    self.event_builder.handle_part(index, part, metadata);
+    HandleEventOutcome::new(Action::Continue)
 }
 ```
+
+On the item's `Flush`, `TurnView::end_chat_response` closes the `json` fence, so
+two consecutive structured responses render as two fences.
 
 ### Rendering
 
@@ -884,9 +849,9 @@ Provider::chat_completion_stream
      ▼
 Event stream:
      │
-     │ Part { 0, ChatResponse::Structured { data: String("{\"name") } }
-     │ Part { 0, ChatResponse::Structured { data: String("\": \"") } }
-     │ Part { 0, ChatResponse::Structured { data: String("Alice\"}") } }
+     │ Part { 0, Structured("{\"name") }
+     │ Part { 0, Structured("\": \"") }
+     │ Part { 0, Structured("Alice\"}") }
      │ Flush { 0 }
      │ Finished(Completed)
      │
@@ -898,7 +863,7 @@ TurnCoordinator
      └──► EventBuilder: accumulates "{\"name\": \"Alice\"}"
                 │
                 │ on flush: parse → Structured { data: {"name":"Alice"} }
-                │ push to ConversationStream
+                │ returned to TurnCoordinator, pushed to ConversationStream
                 │
                 ▼
           workspace.persist_active_conversation()
@@ -1137,28 +1102,19 @@ fn test_structured_response_roundtrip() {
 
 ```rust
 #[test]
-fn test_structured_response_accumulation() {
-    let mut stream = ConversationStream::default();
+fn test_accumulates_structured_chunks() {
     let mut builder = EventBuilder::new();
 
-    builder.handle_part(0, &ConversationEvent::now(
-        ChatResponse::Structured {
-            data: Value::String("{\"name".into()),
-        }
-    ));
-    builder.handle_part(0, &ConversationEvent::now(
-        ChatResponse::Structured {
-            data: Value::String("\": \"Alice\"}".into()),
-        }
-    ));
-    builder.handle_flush(0, IndexMap::new(), &mut stream);
-
-    let event = stream.last().unwrap();
-    let resp = event.as_chat_response().unwrap();
-    assert_eq!(
-        resp.as_structured_data(),
-        Some(&json!({"name": "Alice"})),
+    builder.handle_part(0, EventPart::Structured("{\"name".into()), Map::new());
+    builder.handle_part(
+        0,
+        EventPart::Structured("\": \"Alice\"}".into()),
+        Map::new(),
     );
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
+
+    let resp = event.as_chat_response().unwrap();
+    assert_eq!(resp.as_structured_data(), Some(&json!({"name": "Alice"})));
 }
 ```
 
@@ -1166,23 +1122,16 @@ fn test_structured_response_accumulation() {
 
 ```rust
 #[test]
-fn test_structured_response_malformed_json() {
-    let mut stream = ConversationStream::default();
+fn test_structured_malformed_json_falls_back_to_string() {
     let mut builder = EventBuilder::new();
 
-    builder.handle_part(0, &ConversationEvent::now(
-        ChatResponse::Structured {
-            data: Value::String("{\"truncated".into()),
-        }
-    ));
-    builder.handle_flush(0, IndexMap::new(), &mut stream);
+    builder.handle_part(0, EventPart::Structured("{\"truncated".into()), Map::new());
+    let event = builder.handle_flush(0, Map::new()).unwrap().unwrap();
 
-    let event = stream.last().unwrap();
     let resp = event.as_chat_response().unwrap();
-    // Falls back to raw string
     assert_eq!(
         resp.as_structured_data(),
-        Some(&Value::String("{\"truncated".into())),
+        Some(&Value::String("{\"truncated".into()))
     );
 }
 ```

@@ -259,7 +259,8 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
                 builder.handle_part(index, part, metadata);
             }
             Event::Flush { index, metadata } => {
-                flushed.extend(builder.handle_flush(index, metadata));
+                // A summary is message text; a rejected tool call adds none.
+                flushed.extend(builder.handle_flush(index, metadata).ok().flatten());
             }
             Event::Finished(reason) => {
                 flushed.extend(builder.drain());

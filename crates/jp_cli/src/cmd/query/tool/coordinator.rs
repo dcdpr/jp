@@ -5,6 +5,8 @@
 //! [`submit`] hands it a call, [`handle`] advances its calls on each event
 //! [`next_event`] yields while the response is still streaming, and [`finish`]
 //! drives them to their responses once it has ended.
+//! [`reject`] hands it a call whose arguments are not a JSON object, which it
+//! answers with an error without running.
 //!
 //! # Calls in flight
 //!
@@ -42,6 +44,7 @@
 //! [`finish`]: ToolCoordinator::finish
 //! [`handle`]: ToolCoordinator::handle
 //! [`next_event`]: ToolCoordinator::next_event
+//! [`reject`]: ToolCoordinator::reject
 //! [`submit`]: ToolCoordinator::submit
 
 use std::{
@@ -68,7 +71,10 @@ use jp_conversation::{
     },
 };
 use jp_inquire::{PromptCloser, closing_on};
-use jp_llm::query::ToolExecution;
+use jp_llm::{
+    event_builder::{InvalidArguments, InvalidToolCall},
+    query::ToolExecution,
+};
 use jp_mcp::server::StderrSink;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, PersistLevel, Question};
@@ -288,6 +294,10 @@ impl Drop for OpenPrompt {
     }
 }
 
+/// Maximum number of trailing characters from a rejected call's argument text
+/// to quote in the error response.
+const REJECTED_ARGUMENTS_EXCERPT_CHARS: usize = 200;
+
 /// The tool calls of one response, from arrival to their recorded responses.
 struct Batch {
     /// Every call the batch took, in the order the assistant sent them.
@@ -314,8 +324,9 @@ struct Batch {
     /// responses recorded, folded ones included.
     folds: CancellationToken,
 
-    /// Calls settled on arrival, because their tool is not available.
-    unavailable: Vec<ToolCallResponse>,
+    /// Calls settled on arrival, with no executor: their tool is not available,
+    /// or their arguments were rejected.
+    settled_on_arrival: Vec<ToolCallResponse>,
 
     /// Where each call's work in flight reports back.
     events: mpsc::UnboundedSender<ToolEvent>,
@@ -359,7 +370,7 @@ impl Batch {
             groups: Vec::new(),
             restarting: false,
             folds: CancellationToken::new(),
-            unavailable: Vec::new(),
+            settled_on_arrival: Vec::new(),
             events,
             receiver,
             cancellation: CancellationToken::new(),
@@ -649,6 +660,17 @@ pub struct ToolCoordinator {
     tools_config: ToolsConfig,
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
+    /// Error responses for calls settled by [`reject`], keyed by tool call ID.
+    ///
+    /// Kept until the next response starts.
+    /// On a restart, every call without a recorded response is passed to
+    /// [`submit`] again; this map lets [`prepare_one`] return the same
+    /// rejection instead of running the tool with empty arguments.
+    ///
+    /// [`prepare_one`]: Self::prepare_one
+    /// [`reject`]: Self::reject
+    /// [`submit`]: Self::submit
+    rejected: HashMap<String, ToolCallResponse>,
     /// Rendered custom argument output for approved calls, by tool call ID and
     /// then by operation.
     ///
@@ -675,6 +697,7 @@ impl ToolCoordinator {
             tools_config,
             interrupt_config: ToolInterruptConfig::default(),
             executor_source,
+            rejected: HashMap::new(),
             rendered_arguments: HashMap::new(),
         }
     }
@@ -864,6 +887,9 @@ impl ToolCoordinator {
     /// A question still open is recorded on `conv` as withdrawn: whatever would
     /// have answered it reports to a batch that no longer exists.
     pub(crate) fn abandon(&mut self, conv: &ConversationMut) {
+        // Clear rejected calls so IDs reused by the provider in the next
+        // response are not treated as rejected.
+        self.rejected.clear();
         let Some(mut batch) = self.batch.take() else {
             return;
         };
@@ -890,11 +916,19 @@ impl ToolCoordinator {
     /// # Errors
     ///
     /// Returns an error response when the tool cannot be resolved (missing from
-    /// config or definitions).
+    /// config or definitions), or when the call was settled by [`reject`].
+    ///
+    /// [`reject`]: Self::reject
     pub fn prepare_one(
         &mut self,
         request: ToolCallRequest,
     ) -> Result<CallExecutors, ToolCallResponse> {
+        // The request recorded for a rejected call carries no arguments, so
+        // preparing it would run the tool without any.
+        if let Some(response) = self.rejected.get(&request.id) {
+            return Err(response.clone());
+        }
+
         let (id, name) = (request.id.clone(), request.name.clone());
         let Some(prepared) = self
             .tools_config
@@ -921,6 +955,47 @@ impl ToolCoordinator {
                 "Tool '{name}' is not available. It may have been available earlier in this \
                  conversation but is no longer enabled. Do not retry this tool until it it is \
                  available again in the list of enabled tools.",
+            )),
+        }
+    }
+
+    /// Build the error response for a call whose arguments are not a JSON
+    /// object.
+    ///
+    /// Reports the parse error and quotes the last
+    /// [`REJECTED_ARGUMENTS_EXCERPT_CHARS`] characters of the argument text so
+    /// the assistant can see where a truncated call was cut off.
+    fn invalid_arguments(call: &InvalidToolCall) -> ToolCallResponse {
+        let hint = match call.reason {
+            InvalidArguments::Truncated(_) => {
+                " The arguments may have been cut off by the output token limit; if so, send less \
+                 in a single call."
+            }
+            InvalidArguments::Malformed(_) | InvalidArguments::NotAnObject(_) => "",
+        };
+
+        let excerpt_offset = call
+            .arguments_json
+            .char_indices()
+            .rev()
+            .nth(REJECTED_ARGUMENTS_EXCERPT_CHARS - 1)
+            .map_or(0, |(offset, _)| offset);
+        let excerpt = &call.arguments_json[excerpt_offset..];
+        let received = if excerpt_offset == 0 {
+            "The arguments received were:".to_owned()
+        } else {
+            format!(
+                "The arguments received were {} bytes long and ended with:",
+                call.arguments_json.len()
+            )
+        };
+
+        ToolCallResponse {
+            id: call.id.clone(),
+            result: Err(format!(
+                "Tool '{}' was not run: {}. Call it again with its arguments as one complete JSON \
+                 object.{hint}\n\n{received}\n{excerpt}",
+                call.name, call.reason,
             )),
         }
     }
@@ -1048,19 +1123,14 @@ impl ToolCoordinator {
     /// Its formatter describes it and it asks what it needs to right away; what
     /// needs the terminal waits for the calls before it.
     pub(crate) fn submit(&mut self, request: ToolCallRequest, host: &mut Host<'_>) {
-        if self.batch.is_none() {
-            // A new response: the states left by the last one describe calls
-            // that are gone.
-            self.tool_states.clear();
-            self.batch = Some(Batch::new());
-        }
+        self.open_batch();
         let tool_id = request.id.clone();
         let prepared = self.prepare_one(request);
         let Some(mut batch) = self.batch.take() else {
             return;
         };
         match prepared {
-            Err(response) => batch.unavailable.push(response),
+            Err(response) => batch.settled_on_arrival.push(response),
             Ok(CallExecutors {
                 operations,
                 fan_out,
@@ -1084,6 +1154,36 @@ impl ToolCoordinator {
         }
         self.pump(&mut batch, host);
         self.batch = Some(batch);
+    }
+
+    /// Reject a tool call whose arguments are not a JSON object.
+    ///
+    /// Settles the call immediately with an error response describing the
+    /// invalid arguments.
+    /// No executor is created for it, either now or if the call is passed to
+    /// [`submit`] again during a restart.
+    ///
+    /// [`submit`]: Self::submit
+    pub(crate) fn reject(&mut self, call: &InvalidToolCall) {
+        warn!(
+            tool = %call.name,
+            reason = %call.reason,
+            "Tool call arguments rejected, returning error to LLM"
+        );
+        let response = Self::invalid_arguments(call);
+        self.rejected.insert(call.id.clone(), response.clone());
+        self.open_batch().settled_on_arrival.push(response);
+        self.set_tool_state(&call.id, ToolCallState::Completed);
+    }
+
+    /// Returns the active batch, creating a new one if none is open.
+    fn open_batch(&mut self) -> &mut Batch {
+        if self.batch.is_none() {
+            // A new response: the states left by the last one describe calls
+            // that are gone.
+            self.tool_states.clear();
+        }
+        self.batch.get_or_insert_with(Batch::new)
     }
 
     /// Add a call, or one operation of a fanned-out call, to the batch, and
@@ -1374,7 +1474,7 @@ impl ToolCoordinator {
     /// by their cancellation response.
     fn collect(&self, batch: Batch, stop: &Stop) -> IndexMap<String, Review> {
         let mut reviews: IndexMap<String, Review> = batch
-            .unavailable
+            .settled_on_arrival
             .into_iter()
             .map(|response| (response.id.clone(), Review::unchanged(response)))
             .collect();

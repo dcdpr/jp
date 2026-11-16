@@ -221,10 +221,13 @@ fn call(
                     yield Event::Part { index, part, metadata };
                 }
                 flush @ Event::Flush { .. } => {
+                    // Tool-call parts never reach the builder, so no flush
+                    // is rejected.
                     if forced_tool_fallback.is_some()
                         && let Event::Flush { index, metadata } = &flush
                     {
-                        events.extend(builder.handle_flush(*index, metadata.clone()));
+                        let flushed = builder.handle_flush(*index, metadata.clone());
+                        events.extend(flushed.ok().flatten());
                     }
                     yield flush;
                 }

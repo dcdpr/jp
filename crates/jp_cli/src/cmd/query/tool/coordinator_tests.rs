@@ -1217,6 +1217,50 @@ async fn a_fanned_out_calls_description_holds_each_operation_once_in_order() {
     );
 }
 
+/// A rejected call's error response quotes only the last 200 characters of the
+/// argument text, starting on a UTF-8 character boundary.
+#[test]
+fn a_rejected_calls_response_quotes_only_the_end_of_long_arguments() {
+    let call = InvalidToolCall {
+        id: "call_1".into(),
+        name: "fs_create_file".into(),
+        arguments_json: concat!(
+            // 100 characters that are not quoted back...
+            "0123456789012345678901234567890123456789",
+            "0123456789012345678901234567890123456789",
+            "01234567890123456789",
+            // ...and the 200 that are.
+            "é123456789012345678901234567890123456789",
+            "0123456789012345678901234567890123456789",
+            "0123456789012345678901234567890123456789",
+            "0123456789012345678901234567890123456789",
+            "0123456789012345678901234567890123456789",
+        )
+        .into(),
+        reason: InvalidArguments::Malformed("trailing characters at line 1 column 101".into()),
+        metadata: serde_json::Map::new(),
+    };
+
+    assert_eq!(
+        ToolCoordinator::invalid_arguments(&call),
+        ToolCallResponse {
+            id: "call_1".into(),
+            result: Err(concat!(
+                "Tool 'fs_create_file' was not run: the arguments are not valid JSON (trailing ",
+                "characters at line 1 column 101). Call it again with its arguments as one \
+                 complete ",
+                "JSON object.\n\nThe arguments received were 301 bytes long and ended with:\n",
+                "é123456789012345678901234567890123456789",
+                "0123456789012345678901234567890123456789",
+                "0123456789012345678901234567890123456789",
+                "0123456789012345678901234567890123456789",
+                "0123456789012345678901234567890123456789",
+            )
+            .into()),
+        }
+    );
+}
+
 #[test]
 fn test_permission_decision_cache_is_isolated_from_answers() {
     let mut coordinator = ToolCoordinator::new(

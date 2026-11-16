@@ -32,7 +32,7 @@ async fn assemble(schema: &Value, strict: bool, arguments: &str) -> Value {
                 metadata,
             } => builder.handle_part(index, part, metadata),
             Event::Flush { index, metadata } => {
-                let event = builder.handle_flush(index, metadata).unwrap();
+                let event = builder.handle_flush(index, metadata).unwrap().unwrap();
                 let request = event.into_tool_call_request().unwrap();
                 assert_eq!(request.id, "call_1");
                 assert_eq!(request.name, "search");
@@ -194,7 +194,7 @@ async fn provider_round_trip(provider_id: ProviderId, body: &'static str, stream
                 metadata,
             } => builder.handle_part(index, part, metadata),
             Event::Flush { index, metadata } => {
-                if let Some(event) = builder.handle_flush(index, metadata) {
+                if let Some(event) = builder.handle_flush(index, metadata).unwrap() {
                     assert!(event.metadata.is_empty());
                     requests.push(event.into_tool_call_request().unwrap().arguments);
                 }

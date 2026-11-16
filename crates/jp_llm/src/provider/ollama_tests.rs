@@ -204,6 +204,35 @@ fn map_model_without_thinking_capability_is_unsupported() {
     assert_eq!(details.context_window, Some(8_192));
 }
 
+/// When Ollama returns `"arguments": null` for a parameterless tool call,
+/// `map_event` normalizes it to `"{}"` so `EventBuilder` accepts it as an empty
+/// argument object.
+#[test]
+fn a_tool_call_with_null_arguments_streams_an_empty_object() {
+    let response: ChatMessageResponse = serde_json::from_value(json!({
+        "model": "llama3:latest",
+        "created_at": "2025-09-16T21:31:42.798881306+02:00",
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{ "function": { "name": "git_status", "arguments": null } }],
+        },
+        "done": true,
+    }))
+    .unwrap();
+
+    let events = map_event(response, false, &mut false);
+
+    assert_eq!(events, vec![
+        Event::flush(0),
+        Event::tool_call_start(2, "git_status_2", "git_status"),
+        Event::tool_call_args(2, "{}"),
+        Event::flush(2),
+        Event::flush(1),
+        Event::Finished(FinishReason::Completed),
+    ]);
+}
+
 /// An Ollama version that reports no capabilities leaves support unknown,
 /// rather than an empty list being read as "this model does not reason".
 #[test]
