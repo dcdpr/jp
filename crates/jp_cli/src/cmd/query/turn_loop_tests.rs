@@ -7082,11 +7082,12 @@ impl PromptBackend for DiskObservingPromptBackend {
 }
 
 /// A question for the user is on disk before its prompt opens, and answered on
-/// disk once the turn ends.
+/// disk before the answered tool finishes.
 ///
 /// A reader in another process tells a turn waiting on the user from one
 /// running a tool by that unanswered question, so it has to be written before
-/// the prompt blocks, not at the end of the tool phase.
+/// the prompt blocks, and closed before the tool it unblocked runs, not at the
+/// end of the tool phase.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
@@ -7136,8 +7137,27 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
             id: lock.id(),
             seen: Mutex::new(vec![]),
         });
-        let executor_source = TestExecutorSource::new().with_executor("asking_tool", |req| {
-            Box::new(AskingTalkingExecutor::new(&req.id, &req.name))
+        // What the disk holds while the executor runs with its answer, read
+        // strictly: `None` is a stream that failed to load, not one with
+        // nothing pending.
+        let pending_after_answer = Arc::new(Mutex::new(vec![]));
+        let observe: Arc<dyn Fn() + Send + Sync> = {
+            let fs = Arc::clone(&fs);
+            let id = lock.id();
+            let pending = Arc::clone(&pending_after_answer);
+            Arc::new(move || {
+                let count = fs
+                    .load_conversation_stream(&id, &PartialAppConfig::empty())
+                    .ok()
+                    .map(|stream| stream.pending_inquiries().len());
+                pending.lock().unwrap().push(count);
+            })
+        };
+        let executor_source = TestExecutorSource::new().with_executor("asking_tool", move |req| {
+            Box::new(
+                AskingTalkingExecutor::new(&req.id, &req.name)
+                    .with_after_answer(Arc::clone(&observe)),
+            )
         });
         let tool_defs = executor_source.tool_definitions();
 
@@ -7166,6 +7186,10 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
 
         // Exactly one prompt opened, and the question was on disk when it did.
         assert_eq!(*prompts.seen.lock().unwrap(), [true]);
+
+        // The executor ran once with its answer, and by then the answer had
+        // closed the question on disk.
+        assert_eq!(*pending_after_answer.lock().unwrap(), [Some(0)]);
 
         // The answer closed it on disk by the end of the turn. Loaded strictly:
         // a stream that fails to load must not read as "nothing pending".
@@ -7199,6 +7223,9 @@ struct AskingTalkingExecutor {
 
     /// Arguments, unused beyond satisfying the trait.
     arguments: Map<String, Value>,
+
+    /// Run once the executor has its answer, before it completes.
+    after_answer: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl AskingTalkingExecutor {
@@ -7208,7 +7235,14 @@ impl AskingTalkingExecutor {
             tool_id: tool_id.to_owned(),
             tool_name: tool_name.to_owned(),
             arguments: Map::new(),
+            after_answer: None,
         }
+    }
+
+    /// Hold the answered execution until `hook` has run.
+    fn with_after_answer(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.after_answer = Some(hook);
+        self
     }
 }
 
@@ -7241,6 +7275,9 @@ impl Executor for AskingTalkingExecutor {
         if answers.contains_key("which") {
             if let Some(sink) = stderr {
                 sink("after the answer");
+            }
+            if let Some(hook) = &self.after_answer {
+                hook();
             }
 
             return ExecutorResult::Completed(ToolCallResponse {

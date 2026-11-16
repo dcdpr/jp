@@ -8,7 +8,10 @@
 //!
 //! [`SessionBackend`]: jp_storage::backend::SessionBackend
 
-use std::{collections::HashSet, fs};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry},
+    fs,
+};
 
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
@@ -247,17 +250,8 @@ impl Workspace {
             .into_iter()
             .collect();
 
-        let mut seen = HashSet::new();
-        self.sessions
-            .list_session_keys()
+        self.listed_session_mappings()
             .into_iter()
-            .filter_map(|key| {
-                let value = self.sessions.load_session(&key).ok()??;
-                mapping_from_value(value, &key)
-            })
-            // A legacy bare-value file can sit next to its migrated
-            // counterpart until cleanup removes it.
-            .filter(|mapping| seen.insert(session_storage_key(&mapping.id, &mapping.source)))
             .map(|mapping| SessionOverview {
                 conversations: mapping
                     .history
@@ -275,6 +269,40 @@ impl Workspace {
                 },
             })
             .collect()
+    }
+
+    /// Every readable session mapping in the backing store, one per session, in
+    /// the order the backend lists them.
+    ///
+    /// A legacy bare-value file can sit next to its migrated source-prefixed
+    /// counterpart until cleanup removes it.
+    /// The source-prefixed file is kept and the legacy duplicate skipped,
+    /// whichever the backend lists first, matching `load_session_entry`.
+    fn listed_session_mappings(&self) -> Vec<SessionMapping> {
+        let mut mappings = Vec::new();
+        let mut slots = HashMap::new();
+
+        for key in self.sessions.list_session_keys() {
+            let Some(value) = self.sessions.load_session(&key).ok().flatten() else {
+                continue;
+            };
+            let Some(mapping) = mapping_from_value(value, &key) else {
+                continue;
+            };
+
+            let canonical_key = session_storage_key(&mapping.id, &mapping.source);
+            let is_canonical = key == canonical_key;
+            match slots.entry(canonical_key) {
+                Entry::Vacant(slot) => {
+                    slot.insert(mappings.len());
+                    mappings.push(mapping);
+                }
+                Entry::Occupied(slot) if is_canonical => mappings[*slot.get()] = mapping,
+                Entry::Occupied(_) => {}
+            }
+        }
+
+        mappings
     }
 
     /// Record that the given session activated a conversation.

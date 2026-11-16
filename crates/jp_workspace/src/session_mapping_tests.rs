@@ -1,11 +1,14 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::ConversationId;
-use jp_storage::backend::{
-    ConversationFilter, FsStorageBackend, LoadBackend, LockBackend, NullLockBackend,
-    PersistBackend, ReadOnlySessionBackend, SessionBackend,
+use jp_storage::{
+    Error as StorageError,
+    backend::{
+        ConversationFilter, FsStorageBackend, LoadBackend, LockBackend, NullLockBackend,
+        PersistBackend, ReadOnlySessionBackend, SessionBackend,
+    },
 };
 use test_log::test;
 
@@ -446,6 +449,113 @@ fn session_overviews_list_live_conversations_and_the_active_one() {
         active: Some(newer),
     }]);
     assert_eq!(session.leader_pid(), Some(12345));
+}
+
+/// A session backend that lists keys in the order they were first saved, so a
+/// test controls which file the workspace reads first.
+#[derive(Debug, Default)]
+struct OrderedSessions(Mutex<Vec<(String, Value)>>);
+
+impl SessionBackend for OrderedSessions {
+    fn load_session(&self, session_key: &str) -> Result<Option<Value>, StorageError> {
+        let sessions = self.0.lock().unwrap();
+        Ok(sessions
+            .iter()
+            .find(|(key, _)| key == session_key)
+            .map(|(_, value)| value.clone()))
+    }
+
+    fn save_session(&self, session_key: &str, data: &Value) -> Result<(), StorageError> {
+        let mut sessions = self.0.lock().unwrap();
+        match sessions.iter_mut().find(|(key, _)| key == session_key) {
+            Some((_, value)) => *value = data.clone(),
+            None => sessions.push((session_key.to_owned(), data.clone())),
+        }
+        Ok(())
+    }
+
+    fn list_session_keys(&self) -> Vec<String> {
+        let sessions = self.0.lock().unwrap();
+        sessions.iter().map(|(key, _)| key.clone()).collect()
+    }
+}
+
+/// A workspace holding a migrated session mapping and the legacy bare-value
+/// file it was migrated from, listed in the given order.
+///
+/// The two files disagree: the migrated one recorded a later activation of
+/// `newer`, the legacy one only knows `older`.
+fn legacy_beside_migrated_mapping(
+    legacy_first: bool,
+) -> (
+    Utf8TempDir,
+    Workspace,
+    Session,
+    ConversationId,
+    ConversationId,
+) {
+    let (tmp, ws, fs) = setup();
+    let fs = fs.unwrap();
+
+    let session = Session {
+        id: SessionId::new("ci-123").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let older = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let newer = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    fs.write_test_conversation(&older, &jp_conversation::Conversation::default());
+    fs.write_test_conversation(&newer, &jp_conversation::Conversation::default());
+
+    let legacy = serde_json::json!({
+        "history": [{ "id": older, "activated_at": "2025-07-19T14:00:00Z" }],
+        "source": { "type": "env", "key": "JP_SESSION" }
+    });
+    let migrated = serde_json::json!({
+        "history": [
+            { "id": newer, "activated_at": "2025-07-19T15:00:00Z" },
+            { "id": older, "activated_at": "2025-07-19T14:00:00Z" }
+        ],
+        "id": "ci-123",
+        "source": { "type": "env", "key": "JP_SESSION" }
+    });
+
+    let sessions = Arc::new(OrderedSessions::default());
+    if legacy_first {
+        sessions.save_session("ci-123", &legacy).unwrap();
+        sessions
+            .save_session(&session.storage_key(), &migrated)
+            .unwrap();
+    } else {
+        sessions
+            .save_session(&session.storage_key(), &migrated)
+            .unwrap();
+        sessions.save_session("ci-123", &legacy).unwrap();
+    }
+    let ws = ws.with_sessions(sessions);
+
+    (tmp, ws, session, older, newer)
+}
+
+#[test]
+fn session_overviews_prefer_the_migrated_mapping_listed_after_its_legacy_file() {
+    let (_tmp, ws, session, older, newer) = legacy_beside_migrated_mapping(true);
+
+    assert_eq!(ws.session_overviews(), vec![SessionOverview {
+        session,
+        conversations: vec![newer, older],
+        active: Some(newer),
+    }]);
+}
+
+#[test]
+fn session_overviews_prefer_the_migrated_mapping_listed_before_its_legacy_file() {
+    let (_tmp, ws, session, older, newer) = legacy_beside_migrated_mapping(false);
+
+    assert_eq!(ws.session_overviews(), vec![SessionOverview {
+        session,
+        conversations: vec![newer, older],
+        active: Some(newer),
+    }]);
 }
 
 #[test]

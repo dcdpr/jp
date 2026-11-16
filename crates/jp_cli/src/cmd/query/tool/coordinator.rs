@@ -1565,6 +1565,7 @@ impl ToolCoordinator {
                             .remember_answer(tool_name, &question_id, answer.clone());
                     }
                 }
+                Self::persist_inquiry_response(host.conv);
                 self.answer(batch, call, question_id, answer);
             }
             ToolEvent::Unanswered {
@@ -1581,6 +1582,7 @@ impl ToolCoordinator {
                 // error.
                 let result = Self::cancelled_input_result(&reason);
                 Self::record_inquiry_cancelled(host.conv, &inquiry_id, reason);
+                Self::persist_inquiry_response(host.conv);
                 let id = batch.calls[call].tool_id.clone();
                 let response = ToolCallResponse { id, result };
                 self.settle(batch, call, Review::replaced(response), host);
@@ -1591,36 +1593,15 @@ impl ToolCoordinator {
                 question_id,
                 question_text,
                 result,
-            } => {
-                // A withdrawn question was already closed.
-                let open = batch.calls[call]
-                    .question
-                    .take_if(|open| open.inquiry_id == inquiry_id);
-                if open.is_none() {
-                    return;
-                }
-                match result {
-                    Ok(answer) => {
-                        Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
-                        self.answer(batch, call, question_id, answer);
-                    }
-                    Err(error) => {
-                        Self::record_inquiry_cancelled(
-                            host.conv,
-                            &inquiry_id,
-                            Self::cancellation_reason(&error),
-                        );
-                        let Call {
-                            tool_id, tool_name, ..
-                        } = &batch.calls[call];
-                        let response = ToolCallResponse {
-                            id: tool_id.clone(),
-                            result: Err(Self::inquiry_failure(tool_name, &question_text, &error)),
-                        };
-                        self.settle(batch, call, Review::replaced(response), host);
-                    }
-                }
-            }
+            } => self.on_inquired(
+                batch,
+                call,
+                &inquiry_id,
+                question_id,
+                &question_text,
+                result,
+                host,
+            ),
             ToolEvent::Reviewed { call, review } => {
                 batch.prompt_returned();
                 self.on_reviewed(batch, call, review, host);
@@ -1630,6 +1611,50 @@ impl ToolCoordinator {
                 review,
                 connection_lost,
             } => self.on_folded(batch, group, review, connection_lost, host),
+        }
+    }
+
+    /// Take the assistant's answer to a call's question, or its failure to give
+    /// one.
+    fn on_inquired(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        inquiry_id: &InquiryId,
+        question_id: String,
+        question_text: &str,
+        result: Result<Value, InquiryError>,
+        host: &mut Host<'_>,
+    ) {
+        // A withdrawn question was already closed.
+        let open = batch.calls[index]
+            .question
+            .take_if(|open| open.inquiry_id == *inquiry_id);
+        if open.is_none() {
+            return;
+        }
+        match result {
+            Ok(answer) => {
+                Self::record_inquiry_answer(host.conv, inquiry_id, &answer);
+                Self::persist_inquiry_response(host.conv);
+                self.answer(batch, index, question_id, answer);
+            }
+            Err(error) => {
+                Self::record_inquiry_cancelled(
+                    host.conv,
+                    inquiry_id,
+                    Self::cancellation_reason(&error),
+                );
+                Self::persist_inquiry_response(host.conv);
+                let Call {
+                    tool_id, tool_name, ..
+                } = &batch.calls[index];
+                let response = ToolCallResponse {
+                    id: tool_id.clone(),
+                    result: Err(Self::inquiry_failure(tool_name, question_text, &error)),
+                };
+                self.settle(batch, index, Review::replaced(response), host);
+            }
         }
     }
 
@@ -2110,6 +2135,7 @@ impl ToolCoordinator {
                         .cloned()
                 {
                     Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
+                    Self::persist_inquiry_response(host.conv);
                     batch.calls[call].question = None;
                     self.answer(batch, call, question.id.to_string(), answer);
                     return;
@@ -2258,6 +2284,7 @@ impl ToolCoordinator {
                 inquiry.cancel();
             }
             Self::record_inquiry_cancelled(host.conv, &open.inquiry_id, reason);
+            Self::persist_inquiry_response(host.conv);
         }
         // An operation of a fanned-out call is not recorded on its own; the
         // execution service folds it into its call, once told how it ended.
@@ -2411,6 +2438,20 @@ impl ToolCoordinator {
                 .build()
                 .expect("Invalid ConversationStream state");
         });
+    }
+
+    /// Write the conversation to disk after an inquiry response is recorded
+    /// while the batch is still running.
+    ///
+    /// A reader outside this process takes an unanswered request in a
+    /// conversation whose lock is held to mean the turn is waiting on the user,
+    /// so a response kept in memory while the batch's tools run would report a
+    /// question that is already closed.
+    /// A failed write is not fatal; the phase-end flush retries.
+    fn persist_inquiry_response(conv: &mut ConversationMut) {
+        if let Err(error) = conv.flush() {
+            warn!(%error, "Failed to persist an inquiry response.");
+        }
     }
 
     /// Map an inquiry-backend error to its persisted [`CancellationReason`].
