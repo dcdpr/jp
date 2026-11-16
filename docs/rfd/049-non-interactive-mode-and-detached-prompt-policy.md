@@ -94,8 +94,8 @@ tool author's `exclusive = true`.
 ### Prompt Routing
 
 `route_prompt` dispatches on the `Prompt` from [RFD 018] and takes the detached
-policy and optional `exclusive` override to resolve the action when no client
-is attached:
+policy and optional `exclusive` override to resolve the action when no client is
+attached:
 
 ```rust
 fn route_prompt(
