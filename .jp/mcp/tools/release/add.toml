@@ -13,8 +13,10 @@ that requires users to act ends with its section of the upgrade guide: a
 paragraph starting with `BREAKING CHANGE:` that names what broke, then the
 paragraphs saying what changed and how to upgrade.
 
-The fragment is checked against the format before it is written, so a call that
-would break it is refused with the reason.
+Before it is written, the fragment is checked against the format and, with the
+workspace's `format_on_write` on, laid out in its Markdown style
+(`.comfort.toml`), so the file needs no formatting afterwards. A call that would
+break the format is refused with the reason.
 """
 
 examples = '''
