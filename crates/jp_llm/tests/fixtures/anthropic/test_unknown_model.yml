@@ -1,0 +1,41 @@
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        }
+      ],
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "disabled"
+      },
+      "stream": true,
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 404
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "type": "error",
+      "error": {
+        "type": "not_found_error",
+        "message": "model: foobarbaz"
+      },
+      "request_id": "req_011CgoFzcJGGNNwEFMzXPFj1"
+    }

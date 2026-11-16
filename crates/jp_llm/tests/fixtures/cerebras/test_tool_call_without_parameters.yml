@@ -1,0 +1,121 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Call the `ping` tool."
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "ping",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": true
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "ping"
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-9364944e-10e3-40dd-afb6-41cfd08679ff","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-9364944e-10e3-40dd-afb6-41cfd08679ff","choices":[{"delta":{"reasoning":"User"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-9364944e-10e3-40dd-afb6-41cfd08679ff","choices":[{"delta":{"reasoning":" wants to call ping tool. No parameters. Use the function."},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-9364944e-10e3-40dd-afb6-41cfd08679ff","choices":[{"delta":{"tool_calls":[{"function":{"name":"ping","arguments":""},"type":"function","id":"5bf8c593b","index":0}]},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-9364944e-10e3-40dd-afb6-41cfd08679ff","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{}"},"type":"function","index":0}]},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-9364944e-10e3-40dd-afb6-41cfd08679ff","choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk","usage":{"total_tokens":149,"completion_tokens":34,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":14},"prompt_tokens":115,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"created":1794581340.2641854,"queue_time":0.0022278910000000027,"prompt_time":0.001933274,"completion_time":0.020649126,"total_time":0.035274505615234375}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Call the `ping` tool."
+        },
+        {
+          "role": "assistant",
+          "reasoning": "User wants to call ping tool. No parameters. Use the function.",
+          "tool_calls": [
+            {
+              "id": "5bf8c593b",
+              "type": "function",
+              "function": {
+                "name": "ping",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "5bf8c593b",
+          "content": "pong"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":"The"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" user says \"Call the `ping` tool.\" Likely they want us to"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" invoke the ping function"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" with"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" default parameters? The function signature requires address (string) and count (int, default"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" 3). Since they didn't specify address,"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" we need to ask for clarification. Typically we should ask what address to ping. So ask"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"reasoning":" user"},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{"content":"Sure! Which address would you like me to ping?","reasoning":" for address."},"index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-283dfbb8-c35f-48f0-aa7a-1303c82e1a16","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1794581340,"model":"gpt-oss-120b","system_fingerprint":"fp_4e63ac9396838fe79c69","object":"chat.completion.chunk","usage":{"total_tokens":194,"completion_tokens":91,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":70},"prompt_tokens":103,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"created":1794581340.5326514,"queue_time":0.005659254999999995,"prompt_time":0.006017444,"completion_time":0.042211087,"total_time":0.05833840370178223}}
+    
+    data: [DONE]
+    

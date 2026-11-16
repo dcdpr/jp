@@ -82,10 +82,72 @@ fn a_select_setting_reports_the_value_the_agent_settled_on() {
         panic!("expected one setting")
     };
     assert_eq!(option.id.0, "model");
-    let SessionConfigKind::Select { current_value } = &option.kind else {
+    let SessionConfigKind::Select { current_value, .. } = &option.kind else {
         panic!("expected a select")
     };
     assert_eq!(current_value.0, "claude-opus-5-20260101");
+}
+
+#[test]
+fn a_new_session_lists_the_values_its_model_setting_accepts() {
+    let response: NewSessionResponse = serde_json::from_value(json!({
+        "sessionId": "sess-1",
+        "configOptions": [{
+            "id": "model",
+            "name": "Model",
+            "type": "select",
+            "currentValue": "default",
+            "options": [
+                {"value": "default", "name": "Default (recommended)"},
+                {"value": "opus[1m]", "name": "Opus 5", "description": "Opus 5 with 1M context"},
+            ],
+        }],
+    }))
+    .unwrap();
+    let [option] = response.config_options.as_slice() else {
+        panic!("expected one setting")
+    };
+    assert_eq!(
+        option
+            .kind
+            .select_options()
+            .iter()
+            .map(|option| (option.value.0.as_str(), option.name.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("default", Some("Default (recommended)")),
+            ("opus[1m]", Some("Opus 5")),
+        ]
+    );
+}
+
+#[test]
+fn grouped_select_values_are_flattened_in_order() {
+    let response: SetSessionConfigOptionResponse = serde_json::from_value(json!({
+        "configOptions": [{
+            "id": "model",
+            "name": "Model",
+            "type": "select",
+            "currentValue": "sonnet",
+            "options": [
+                {"group": "large", "name": "Large", "options": [{"value": "opus", "name": "Opus"}]},
+                {"group": "small", "name": "Small", "options": [{"value": "sonnet"}, {"value": "haiku"}]},
+            ],
+        }],
+    }))
+    .unwrap();
+    let [option] = response.config_options.as_slice() else {
+        panic!("expected one setting")
+    };
+    assert_eq!(
+        option
+            .kind
+            .select_options()
+            .iter()
+            .map(|option| option.value.0.as_str())
+            .collect::<Vec<_>>(),
+        ["opus", "sonnet", "haiku"]
+    );
 }
 
 #[test]

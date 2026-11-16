@@ -1,0 +1,50 @@
+{
+  "new": [
+    {
+      "file": "src/a.rs",
+      "line": 12,
+      "rule": "CX-003",
+      "symbol": "run",
+      "message": "Magic number 42 in run",
+      "pass": "main",
+      "shared": {
+        "new": 1,
+        "of": 2
+      }
+    },
+    {
+      "file": "src/a.rs",
+      "line": 40,
+      "rule": "CX-004",
+      "symbol": "parse",
+      "message": "Function length 72 in parse",
+      "pass": "main"
+    }
+  ],
+  "enforced": [
+    {
+      "file": "src/b.rs",
+      "line": 3,
+      "rule": "DRY-004",
+      "symbol": "",
+      "message": "wildcard import: std::io",
+      "pass": "main"
+    }
+  ],
+  "base": {
+    "main": 1
+  },
+  "head": {
+    "main": 3
+  },
+  "rules": {
+    "CX-003": {},
+    "CX-004": {
+      "title": "Function length",
+      "guidance": "Return early.\nExtract a helper only when it has a name worth reading."
+    },
+    "DRY-004": {
+      "title": "Wildcard import"
+    }
+  }
+}

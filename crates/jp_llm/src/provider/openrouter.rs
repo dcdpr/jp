@@ -37,7 +37,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::{debug, error, info, trace, warn};
 
-use super::{EventStream, ModelDetails};
+use super::{EventStream, ModelDetails, lookup::find_listed};
 use crate::{
     Error, StreamError,
     decoding::ArgumentDecoders,
@@ -125,12 +125,9 @@ impl Provider for Openrouter {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| ModelDetails::empty(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -1281,6 +1278,15 @@ impl From<jp_openrouter::Error> for StreamError {
                 ..
             }
             | E::Stream(_) => StreamError::transient(err.to_string()).with_source(err),
+            // OpenRouter returns HTTP 400 with no distinct error code for
+            // unknown models, so match the message text to distinguish it from
+            // other 400 Bad Request errors.
+            E::Api {
+                code: 400,
+                ref message,
+            } if message.contains("is not a valid model ID") => {
+                StreamError::unknown_model(err.to_string()).with_source(err)
+            }
             _ => StreamError::other(err.to_string()).with_source(err),
         }
     }

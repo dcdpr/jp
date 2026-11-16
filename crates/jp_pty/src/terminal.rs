@@ -359,10 +359,13 @@ struct Pty {
     input: Mutex<Box<dyn Write + Send>>,
 }
 
-/// A child process running in a terminal.
+/// A child process running in a [`Terminal`].
 ///
-/// Killed on drop, so a test that stops caring about a child does not leave one
-/// behind.
+/// Dropping `Child` terminates the process immediately so tests do not leak
+/// children.
+/// If the child is expected to exit on its own, call [`Self::wait_within`]
+/// before dropping `Child`; killing an instrumented binary while it is exiting
+/// can truncate its coverage profile.
 pub struct Child {
     /// The spawned process.
     child: Box<dyn PtyChild + Send + Sync>,

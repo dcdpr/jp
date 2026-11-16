@@ -11,7 +11,7 @@ use std::{
 use indexmap::IndexSet;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
-use crate::{KeyError, Selector, parse_token};
+use crate::{Condition, KeyError, Selector, parse_token};
 
 /// Key-value annotations attached to a thing.
 ///
@@ -233,13 +233,18 @@ impl Labels {
 
     /// Whether every selector matches.
     ///
-    /// Requiring all of them rather than any composes with other filters: each
-    /// selector narrows the result.
+    /// Requiring all selectors to match lets multiple filters narrow the
+    /// result.
+    /// A comparison selector matches if any value under its key satisfies the
+    /// comparison.
     #[must_use]
     pub fn matches(&self, selectors: &[Selector]) -> bool {
-        selectors.iter().all(|selector| match &selector.value {
-            Some(value) => self.contains(&selector.key, value),
-            None => self.contains_key(&selector.key),
+        selectors.iter().all(|selector| match &selector.condition {
+            Condition::Present => self.contains_key(&selector.key),
+            Condition::Equals(value) => self.contains(&selector.key, value),
+            Condition::Compare(comparison, operand) => self
+                .values(&selector.key)
+                .any(|value| comparison.holds(value, operand)),
         })
     }
 }

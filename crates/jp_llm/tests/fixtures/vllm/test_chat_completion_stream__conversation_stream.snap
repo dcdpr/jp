@@ -213,7 +213,8 @@ expression: v
             "api_key"
           ],
           "api_key_env": "GEMINI_API_KEY",
-          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
         },
         "llamacpp": {
           "base_url": "http://127.0.0.1:8080"
@@ -249,7 +250,12 @@ expression: v
       }
     },
     "plugins": {
-      "shutdown_timeout_secs": 5
+      "command": {
+        "*": {
+          "run": "ask",
+          "shutdown_timeout_secs": 5
+        }
+      }
     }
   },
   "events": [
@@ -261,12 +267,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "We need respond to user \"Test message\". Simple. Need final. Maybe \"Test received. How can I help?\" in English.\n"
+      "reasoning": "The user has sent a simple \"Test message.\" This is likely just checking if I'm responsive. I'll give a brief, friendly acknowledgment.\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Test received. I’m here and ready to help."
+      "message": "Got it! I'm up and running. How can I help you today?"
     }
   ]
 }

@@ -5,7 +5,10 @@ use std::{
 
 use camino_tempfile::tempdir;
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{
+    Conversation, ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
+};
 use test_log::test;
 
 use super::*;
@@ -763,7 +766,12 @@ fn write_meta(conv_dir: &Utf8Path, title: Option<&str>, mtime_secs: u64) {
 /// stream parsing.
 fn write_events(conv_dir: &Utf8Path, count: usize, mtime_secs: u64) {
     let events: Vec<_> = (1..=count)
-        .map(|day| serde_json::json!({ "timestamp": format!("2024-01-{day:02}T00:00:00Z") }))
+        .map(|day| {
+            serde_json::json!({
+                "timestamp": format!("2024-01-{day:02}T00:00:00Z"),
+                "type": "chat_request",
+            })
+        })
         .collect();
     fs::write(
         conv_dir.join(EVENTS_FILE),
@@ -782,7 +790,11 @@ fn write_base_config(conv_dir: &Utf8Path, mtime_secs: u64) {
 /// Write a valid, loadable conversation stream (`base_config.json` +
 /// `events.json`).
 fn write_valid_stream(conv_dir: &Utf8Path) {
-    let (base_config, events) = ConversationStream::new_test().to_parts().unwrap();
+    write_stream(conv_dir, &ConversationStream::new_test());
+}
+
+fn write_stream(conv_dir: &Utf8Path, stream: &ConversationStream) {
+    let (base_config, events) = stream.to_parts().unwrap();
     fs::write(
         conv_dir.join(BASE_CONFIG_FILE),
         serde_json::to_string(&base_config).unwrap(),
@@ -975,6 +987,62 @@ fn stream_loads_from_newer_root() {
         stream.is_ok(),
         "the newer user-local stream is selected over the stale workspace copy"
     );
+}
+
+fn one_turn_stream() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.push_event(ChatResponse::message("hi there"));
+    stream
+}
+
+#[test]
+fn events_load_without_reading_the_base_config() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, _user_dir) = dual_root_storage(tmp.path());
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&conv).unwrap();
+
+    let stream = one_turn_stream();
+    write_stream(&conv, &stream);
+    fs::write(conv.join(BASE_CONFIG_FILE), "not valid json").unwrap();
+
+    assert!(
+        storage
+            .load_conversation_stream(&id, &PartialAppConfig::empty())
+            .is_err()
+    );
+
+    let events = storage.load_conversation_events(&id).unwrap();
+    let expected: Vec<_> = stream
+        .iter_events_by_turn()
+        .map(|event| event.event.clone())
+        .collect();
+    assert_eq!(events, expected);
+}
+
+#[test]
+fn events_load_from_newer_root() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let ws_conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    let user_conv = user_dir.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&ws_conv).unwrap();
+    fs::create_dir_all(&user_conv).unwrap();
+
+    // Newer, valid stream in user-local; older, corrupt copy in the workspace.
+    write_stream(&user_conv, &one_turn_stream());
+    set_mtime(&user_conv.join(EVENTS_FILE), 2_000);
+    set_mtime(&user_conv.join(BASE_CONFIG_FILE), 2_000);
+    fs::write(ws_conv.join(EVENTS_FILE), "not valid json").unwrap();
+    set_mtime(&ws_conv.join(EVENTS_FILE), 1_000);
+
+    let events = storage.load_conversation_events(&id).unwrap();
+    assert_eq!(events.len(), 3, "TurnStart, ChatRequest, ChatResponse");
 }
 
 /// Write a legacy-format conversation stream: no `base_config.json`, with the
@@ -1539,6 +1607,56 @@ fn metadata_and_stream_resolve_independently() {
         conv.events_count, 2,
         "event count comes from the newer-stream root, resolved independently"
     );
+}
+
+#[test]
+fn batch_metadata_and_stream_resolve_independently() {
+    // The batch loader backs the conversation index, so it must pick each
+    // conversation's metadata and stream roots the way the single-conversation
+    // loader does. Each direction is covered: preferring one root for the
+    // stream regardless of mtime fails one of the two conversations.
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+
+    let stream_in_user = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let ws_a = workspace
+        .join(CONVERSATIONS_DIR)
+        .join(stream_in_user.to_dirname(None));
+    let user_a = user_dir
+        .join(CONVERSATIONS_DIR)
+        .join(stream_in_user.to_dirname(None));
+    fs::create_dir_all(&ws_a).unwrap();
+    fs::create_dir_all(&user_a).unwrap();
+    write_meta(&ws_a, Some("workspace title"), 2_000);
+    write_events(&ws_a, 1, 1_000);
+    write_meta(&user_a, Some("user title"), 1_000);
+    write_events(&user_a, 2, 2_000);
+
+    let stream_in_workspace = ConversationId::try_from_deciseconds_str("17636257527").unwrap();
+    let ws_b = workspace
+        .join(CONVERSATIONS_DIR)
+        .join(stream_in_workspace.to_dirname(None));
+    let user_b = user_dir
+        .join(CONVERSATIONS_DIR)
+        .join(stream_in_workspace.to_dirname(None));
+    fs::create_dir_all(&ws_b).unwrap();
+    fs::create_dir_all(&user_b).unwrap();
+    write_meta(&ws_b, Some("workspace title"), 1_000);
+    write_events(&ws_b, 3, 2_000);
+    write_meta(&user_b, Some("user title"), 2_000);
+    write_events(&user_b, 1, 1_000);
+
+    let batch = storage.load_conversation_metadata_batch(&[stream_in_user, stream_in_workspace]);
+
+    assert_eq!(batch[0].0, stream_in_user);
+    let a = batch[0].1.as_ref().unwrap();
+    assert_eq!(a.title.as_deref(), Some("workspace title"));
+    assert_eq!(a.events_count, 2);
+
+    assert_eq!(batch[1].0, stream_in_workspace);
+    let b = batch[1].1.as_ref().unwrap();
+    assert_eq!(b.title.as_deref(), Some("user title"));
+    assert_eq!(b.events_count, 3);
 }
 
 #[test]

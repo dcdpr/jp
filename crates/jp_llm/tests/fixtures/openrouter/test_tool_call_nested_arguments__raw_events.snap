@@ -1,0 +1,506 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABq-C914gp3LKhzy-bXtYHHO6W9m8bGYYGPUl2TB3Qdupi3_67hwfRtmP5yKHJoUE0qjQBOVgRYJ9R4cXmJdUV-SRWjTqe3z3V16xWkaHKiJNmiCbiWdz69l3xL02SixpL4KXXUA6piU6_Nge4Yo4aHgZEz1f681ZuhA9QUN49fzaeAioxYtAzuHUxiVwASjsqQzatjbWQlVbOatHGUuWTVYyOkkJZmams1NoNf6jrTZ0VWt5t9DL4A-0zIvpwmSZAanFL-YhgOS6MPiw4-ecs7KENiP1tiSJH2YqDjdhdYJ78mr7er2JF-08AEdQhisqZq5fwwiaAKtBh1L07C4duLarTwkZ0YLCj5IPP8OzbK-fkwn61r9yjMLSGZpN1SvJkEA8HOLV50Gq_osYtgawf6GEdoMllMe6TEVaP-zZvkYMsOxRbp-9xP2JxVE9xpYuZHFQx7YLi2-FVdMTTT0qfcDX3BBg2N5UWFrFtVNRnD4kBYNMRcMfQlUBI7uUh0SRKshuE56sAqFtiPL4ivD_-qDsdZkNR9KhA-h78pkzntT82fxHcLNkOEdvX5eU1dKwECJEyG4-NO0vqfUQN6pWil3rT2T-Q9XWyrY60MpDzhZqoK_ufStDhkwd5DrnmdH6VQzaRoyxhA327EKpm216tZfOR41DLh_YM_CKq_yyA1-PjeQEA-ZMdndjvXoC04gwoPPevxkjnRhMagvXPFobJNEiWK2v2XafgMsPmS33x9Kt962XIsKwTtmxoXrxqALf04hGsN1L0j64Pi4tpSxQIxoaH_WwoYYoAxmxaEPaHOTbmALgiP6qY8hsEnyXIk6gKUM4Bw-cLcNNqb3Mx1Q-67UReNPp3Q5FIQsiEToNfdb4Og7BCowt4QIykaqrZUGafCjsVcN_ogSFNkyXcEYh_NB1ODmZH2g2Q1OIs6lJ5LRNmltLzfMSw0zbgfOfqALxTYrEw96EunTQtIlWfsfbv_KWKpl9nt8JSEpP4d3Ca0YBGLfCFXAzvZFD51aS7Zg0G54K0kumAWbZsRiOfyAN8umnrkmotr-AnbtPYUixYHmODlR_WZkPV3wiTbm27POaGoRi2FsNxeWLMOwq9yEmB-Snh80I6o-iH3MuW-gB0mcMHltwIom-7_NLcbYgZRhmZfL-bx2dajUblcr5b8BTD7Y-ytZrp2VGNT2LyljxfgVAPAm0kndVC9cCBGFvLjLCBF6V4DRDhBHDORByqh7IWuEAsgTG2kNNP5Vl7uWuBgCwog3NLX6bMOCvtfyiUYfiHrvoh7M1n_H4g5RQBMNB42qU0dvzxU8NRMEcy8l1LPJ03cC3UCmwUiGF1APBWuS8c2DSsHuQWzR0ZCoWuxdZA5j_OuS55JEpJa2QGYt705GFGjBsMM0opSllhDRSj5-XIHIOocM2fbLuWcN8-MpgkUaSfJv2nRUdIStP4FLZrt8o6D8C5bMQUZqNOkUgy0hHagYvyDIPCv2pqCShP8PkSuLYAL2-HIUZv_V_UsnKHtm0QOkaH_96-aGUiz8tzKDnJtKxzBwg4yp0KvvqpkqX-1g2obbdfZ206qJ99UbT7k7_PNg5EG6Q74SI9vHOTYCafD5d4vgkKIy2E2gZcrVO_2drQKbdBwuTkPM14_FvJoTJd1iNrV23h-NnlH_cOKmpjxvpAoKtzX-HZ1eG0Ys3an_Cwz9aBO-JnSjsZQ-rsR9K3Tq4yGp4gMOM7ilkTQH1ygBXxkjflPxd1pEZEDunEA4Jpbq2ZCvHAPCUIzHns9_jtOvu_5bIXExfr7P_ZUYgFhDpD9EfYyGTJrdK2ApnYWWrS4xEkrobP1zXVTCq_F9W2q9DnZon40XRoRH9W1eYtJYqKxC7QUMvE4OmtgVv9rr9fOWviuV6e2zHrMh-xXHDDuRJgKSgfuaYc0CgmSgjH5kbZ2PahDJlb7CyUmi2SB0ce7fSQWosOTcJRH9BXjdl5C8V8BbgGUvNMcERf01nqXuPpnUNEgOcQ0ZkTOjCnS8_H_mWz3-zV3KaYHX2W5aUNEGlQ=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_03567becbc5ff379016af82f759d4487d19059b08ed37dde55"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                Start {
+                    id: "call_hOHxvIhkkVMbgRtZqK8PgnMT",
+                    name: "read_files",
+                    decoding: Some(
+                        ArgumentDecoding {
+                            omit_null: [],
+                            properties: {
+                                "ops": ArgumentDecoding {
+                                    omit_null: [],
+                                    properties: {},
+                                    items: Some(
+                                        ArgumentDecoding {
+                                            omit_null: [
+                                                "start_line",
+                                            ],
+                                            properties: {},
+                                            items: None,
+                                        },
+                                    ),
+                                },
+                            },
+                            items: None,
+                        },
+                    ),
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "ops",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":[",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "path",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "a",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    ".txt",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "start",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "_line",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "1",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "},{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "path",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "b",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    ".txt",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "start",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "_line",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "1",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "}",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "]}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABq-C93RcQ8PSIcMGpeos5KiQak59JIxdKKn33NXitSEQOYTAurdDfiM0QrzqLeT1F3qM0c3tZvFARTP9h54QgeIxNcpgxfyyBnlkIpFzk_7huw7T_Dj4i2SQrKlmukwWTq1j1ATMTzNPhIVaBAGnzgmZMye2ZXEY9kmA5DL-0n9HD8tGGEMGN0v8ggOYWYrX8Yszq3mY-z-8GzR1cHWnLNN35OponjadJSdzkqfcVTJr-vn8dzbd61CbNnNW-L1QPri5xp6_D_WhYTnEtPBib5WxysqUWzmEJm1MQTVe0AIU6sVwhdVx6gGQuvUidDxwt4JQsNPxu7qm07ev9CM8hAErGVoe0KHQlIA2impaaxk7heMRJln-jzfkY_P6NOrZueow-kY8ddjl8gzwVZG9fSPRZ5AAAQaboSVDLcCzfvbeHEIHcEFbGJ30Z_oLIHiBfbnY9oRENu0VBrdOAGoU3ha2SP84kmuuMBhuSnbsdR-Qag2qNdi73aJcw2qCp2vZ3S0E_t0oZIsp-nb99ts-51qDmfnNSRHdYRZKHmpVtjvPsQQ01EwNUYLH2ViyyzmoPRpbalYmnIRKf2JtNw26moYvhg5BYwXRou17saf5notSZMpZGjUyl5HQbPEVoEl3QsfEsj8iLtU5QYy-oWR2LClvhYRoW-MIoZMbSYLgtBPAy2dwK93ygcs-EVe6C65dg3Os6n6CypqdO8QWKnAQ6k_I0IWD2n8kOG1L6DZ7hgDCkbz47tTJap0YZgkuHsTsFVaRs7lqiEOnoDznAwu4Hxbm8r1hwHRQjfa50FzFkN5cdF5rdm9cSBSg6MSO56rI5ysge7sxj1KKAjTW5550BM5nAUiW1YC-WxVoMw68reo_4YjabXXg883YGPCPJqsZIevi-NzSQsYygQzoOWpTAY1W5S9c52CgTo662qLHRL50msW8R8pJuIeAyWS75XVhxOh5fUD-CX4nUUdkqDep72j-4k_cgEFX3ehwLETptGe2Fzxav0iQbXojCIp4FsREBWGxQPoRfEzrjb67BWcH7FyXlnu-JXqCWi8YkW4uQIwUXe712Nqrx5EpF8Z6M1FAQd20tDRMBiwkMT_EPnDyU7VrDgsAaslb8A2fLAyj6A167_Z1PWqrWw3np5hgAv3fGpbVIEhKg-4quSfuxpMh17kYUqYDPK0_GjYTbXnzH9OJtqt2ZDlAZs0YGdG3gJcJ9S7m5EQxEKZ4Z9DNT5jcBekn_pMuqcQNenNMfq4D3_WLBa4AkXcsrU-tiOLQO587RtbnzmCW5rZii8rllcXwXBt1J-O8gamdHexVDC3L7NejNAcwCiSgpsevnDuIcg8z8UX5_ryL9nahvvtEJsON2dBp5-CQwupaDYiT4iYQtUNIu6I_eQ_SKKIzpai9oD5gSJSakG0gtAuzJ3IXCY_Mo_27dxcgnqH-kXHVEKGpfjikexUccaxPzaPwSzpsXpOi7HGjpGiQNTPb5sNSOcIM23QHHvfAHWGu7jRke7Em2Uya9WRwrUa-bZc7a2omuzEpy_NHKYlNdCPAmI4p9MZNZJWQUtGCbPeNBwlGu-RJJVUK7O9Uxt_OHf0tk9tphYbV_zmrFHh8xFsvDKyTDGDmIEcngWOB9_rVEAW5YttswmwfWSFO_2SZhPfqguxplHk_cj9uQUv-9UJLL9eBmR9spLvyM-ZWuJOrh8aeD9zdlLi4k__BzeW-DTOwsVm8EeM1lDjJIjlUrK5YWJVPIm0YYXUjXZ_Jiw_Q2bud_AzsC3jLaluFdGQlAPS1bjwMXWFHhhibQ4P-GSzReuuu-R8KrdCSx6tlYM86md7wGe4oNkpgK87S8RkDBqF6dJVNQiIs1LO7vJZtuCgzraW0ecd2b15pZJse7VuGJv4yUoc6gNOVvXuueqKZVpwu3CNJ9sIG238ZKGME4uXDR1BfidXrev_5grfW_by3J_3bMpyXlbawaBBwx2GxqG0lqZNgaWTPNIW3hVlhebgW2lAlTQJIMdHIHokYXmO8OerExUhj6d6P6zfb4=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_0dc48668f6d3705e016af82f770a1087d19935f64effdc5d59"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " read",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " both",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " files",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " in",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " one",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " call",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " Contents",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ":\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "-",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ".txt",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "alpha",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "-",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " b",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ".txt",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "beta",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

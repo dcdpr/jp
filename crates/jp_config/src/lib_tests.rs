@@ -1080,6 +1080,7 @@ fn test_ensure_no_missing_assignments() {
             match &error.error {
                 KvAssignmentErrorKind::KvParse { .. }
                 | KvAssignmentErrorKind::UnknownKey { .. }
+                | KvAssignmentErrorKind::Moved { .. }
                 | KvAssignmentErrorKind::UnknownIndex { .. } => {}
 
                 KvAssignmentErrorKind::Json(_)
@@ -1204,6 +1205,45 @@ fn an_id_object_replaces_the_id_in_every_json_form() {
     assert_eq!(
         dotted.assistant.model.id,
         PartialModelIdOrAliasConfig::from("openai/claude-haiku-4-5")
+    );
+}
+
+/// Assigning a nested plugin option via a dotted key preserves the plugin's
+/// other fields and sibling plugins configured in earlier layers.
+#[test]
+fn a_dotted_plugin_option_keeps_the_run_policy() {
+    let configured = || {
+        let mut p = PartialAppConfig::empty();
+        for key in ["plugins.command.ticket.run", "plugins.command.wiki.run"] {
+            p.assign(KvAssignment::try_from_cli(key, "allow").unwrap())
+                .unwrap();
+        }
+        p
+    };
+    let run = |p: &PartialAppConfig, plugin: &str| {
+        p.plugins
+            .command
+            .plugins
+            .clone()
+            .into_map()
+            .get(plugin)
+            .and_then(|plugin| plugin.run)
+    };
+
+    let mut dotted = configured();
+    dotted
+        .assign(
+            KvAssignment::try_from_cli("plugins.command.ticket.options.assistant", "Ada via jp")
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        run(&dotted, "ticket"),
+        Some(plugins::command::RunPolicy::Allow)
+    );
+    assert_eq!(
+        run(&dotted, "wiki"),
+        Some(plugins::command::RunPolicy::Allow)
     );
 }
 

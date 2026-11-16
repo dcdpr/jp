@@ -44,6 +44,35 @@ fn write_failed_classifies_other_errors_as_write_failed() {
 }
 
 #[test]
+fn rename_failed_names_source_and_target() {
+    let error = Error::rename_failed(
+        Utf8Path::new("/data/conv/events.json.tmp"),
+        Utf8Path::new("/data/conv/events.json"),
+        io::Error::from(io::ErrorKind::NotFound),
+    );
+
+    assert!(matches!(error, Error::RenameFailed { .. }));
+    assert_eq!(
+        error.to_string(),
+        "failed to rename /data/conv/events.json.tmp to /data/conv/events.json"
+    );
+}
+
+#[test]
+fn rename_failed_classifies_full_disk_as_out_of_space() {
+    let error = Error::rename_failed(
+        Utf8Path::new("/data/conv/events.json.tmp"),
+        Utf8Path::new("/data/conv/events.json"),
+        os_disk_full(),
+    );
+
+    assert_eq!(
+        error.to_string(),
+        "no space left on device while writing /data/conv/events.json"
+    );
+}
+
+#[test]
 fn write_failed_keeps_the_os_error_as_the_source() {
     let error = Error::write_failed(Utf8Path::new("/data/conv/events.json"), os_disk_full());
 

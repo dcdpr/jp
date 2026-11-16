@@ -11,7 +11,7 @@ use jp_tool::Context;
 
 use crate::{
     Tool,
-    util::{ToolResult, truncate, unknown_tool},
+    util::{OneOrMany, ToolResult, truncate, unknown_tool},
 };
 
 mod check;
@@ -55,7 +55,13 @@ const SOURCE_PATHS: &[&str] = &[
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("swift_") {
         "check" => swift_check(&ctx, t.opt("configuration")?).await,
-        "test" => swift_test(&ctx, t.opt("testname")?, t.opt("target")?).await,
+        "test" => {
+            let testnames = t
+                .opt::<OneOrMany<String>>("testname")?
+                .map(OneOrMany::into_vec)
+                .unwrap_or_default();
+            swift_test(&ctx, &testnames, t.opt("target")?).await
+        }
         "test_ui" => swift_test_ui(&ctx, t.opt("tests")?).await,
         // `check` is a call parameter, not a tool config option, so it is read
         // with `opt` rather than `option_or`.

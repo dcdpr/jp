@@ -442,6 +442,28 @@ fn per_choice_error_is_classified_by_status_code() -> Result {
     Ok(())
 }
 
+#[test]
+fn an_invalid_model_id_is_an_unknown_model() {
+    let error = StreamError::from(jp_openrouter::Error::Api {
+        code: 400,
+        message: r#"{"error":{"message":"foobarbaz is not a valid model ID","code":400}}"#
+            .to_owned(),
+    });
+
+    assert_eq!(error.kind, StreamErrorKind::UnknownModel);
+    assert!(!error.is_retryable());
+}
+
+#[test]
+fn a_malformed_request_is_not_an_unknown_model() {
+    let error = StreamError::from(jp_openrouter::Error::Api {
+        code: 400,
+        message: r#"{"error":{"message":"Provider returned error","code":400}}"#.to_owned(),
+    });
+
+    assert_eq!(error.kind, StreamErrorKind::Other);
+}
+
 fn forced_tool_request(
     reasoning: ReasoningDetails,
     enable_reasoning: bool,

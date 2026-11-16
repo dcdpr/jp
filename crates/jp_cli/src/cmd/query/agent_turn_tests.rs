@@ -413,7 +413,7 @@ async fn agent_idle_timeout_with_an_unrecorded_tool_result_ends_the_turn() {
 
 #[tokio::test]
 async fn agent_continuation_waits_for_host_recording_without_resubmission() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let temp = tempdir().unwrap();
         let root = temp.path();
         let mut config = AppConfig::new_test();
@@ -443,5 +443,5 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         assert_eq!(output.lock().as_str(), "Finished.\n\n");
         assert_eq!(chrome.lock().as_str(), "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m ─────────────────────────────────────────────────────────\n\n");
         owner.shutdown().await.unwrap();
-    }).await.unwrap();
+    })).await.unwrap();
 }

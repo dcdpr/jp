@@ -360,11 +360,11 @@ fn resolve_mounts(ctx: &Context, inputs: &[String]) -> Result<Vec<(Utf8PathBuf, 
         let relative = lexical_workspace_relative(path)
             .ok_or_else(|| refuse(format!("Cannot mount '{input}': not workspace-relative.")))?;
 
-        let target = if relative.as_str().is_empty() {
-            MOUNT_ROOT.to_owned()
-        } else {
-            format!("{MOUNT_ROOT}/{relative}")
-        };
+        // The container path is POSIX regardless of the host, so join the
+        // components with `/` rather than the host's separator.
+        let target = relative
+            .components()
+            .fold(MOUNT_ROOT.to_owned(), |acc, c| format!("{acc}/{c}"));
 
         resolved.push((host, target));
     }

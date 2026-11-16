@@ -77,7 +77,7 @@ fn returning_to_anthropic_retains_the_intervening_openai_turn() {
             {"role":"user","content":[{"type":"tool_result","tool_use_id":"call-fixed","content":"OAK","is_error":false}]},
             {"role":"assistant","content":[{"type":"text","text":"Found OAK."}]},
             {"role":"user","content":[{"type":"text","text":"Check."}]},
-            {"role":"assistant","content":[{"type":"text","text":"<think>\nForeign reasoning.\n</think>\n\n"},{"type":"text","text":"Confirmed OAK."}]}
+            {"role":"assistant","content":[{"type":"text","text":"Confirmed OAK."}]}
         ])
     );
 }
@@ -117,7 +117,7 @@ fn replay_uses_the_replacement_request() {
     assert_eq!(prepared.history.len(), 6);
     assert_eq!(
         serde_json::to_value(&prepared.history[5]).unwrap(),
-        json!({"role":"assistant","content":[{"type":"text","text":"<think>\nForeign reasoning.\n</think>\n\n"},{"type":"text","text":"Confirmed OAK."}]})
+        json!({"role":"assistant","content":[{"type":"text","text":"Confirmed OAK."}]})
     );
 }
 

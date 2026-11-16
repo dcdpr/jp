@@ -1,0 +1,142 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains."
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_files",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "ops": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "The files to read, one element per file.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "enum": [
+                          "a.txt",
+                          "b.txt"
+                        ]
+                      },
+                      "start_line": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "ops"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"reasoning":"We"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"reasoning":" need to call function read_files with both ops entries."},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"tool_calls":[{"function":{"name":"read_files","arguments":""},"type":"function","id":"d2c1e0ead","index":0}]},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"ops"},"type":"function","index":0}]},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\":["},"type":"function","index":0}]},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"path\":\"a.txt"},"type":"function","index":0}]},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"},{\"path\":\"b.txt\"}]}"},"type":"function","index":0}]},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-bbaa2972-2b0e-4c7b-a8ce-f4bd404e3ab5","choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk","usage":{"total_tokens":223,"completion_tokens":46,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":12},"prompt_tokens":177,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"created":1794649949.126817,"queue_time":0.021948252,"prompt_time":0.001580141,"completion_time":0.027211101,"total_time":0.06258320808410645}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Read `a.txt` and `b.txt` with a single `read_files` call that lists both files in `ops`, then tell me what each file contains."
+        },
+        {
+          "role": "assistant",
+          "reasoning": "We need to call function read_files with both ops entries.",
+          "tool_calls": [
+            {
+              "id": "d2c1e0ead",
+              "type": "function",
+              "function": {
+                "name": "read_files",
+                "arguments": "{\"ops\":[{\"path\":\"a.txt\"},{\"path\":\"b.txt\"}]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "d2c1e0ead",
+          "content": "a.txt: alpha\nb.txt: beta"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"reasoning":"We"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"reasoning":" need to respond with what each file contains. Already provided"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"reasoning":"."},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"content":"The files contain","reasoning":" So answer accordingly."},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"content":":\n\n- **a.txt** → `alpha`  \n-"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{"content":" **b.txt** → `beta`"},"index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-c53ed786-6b43-44e5-88cb-9a839d9ff0b1","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1794649949,"model":"gpt-oss-120b","system_fingerprint":"fp_365d1af6b3d96d47607a","object":"chat.completion.chunk","usage":{"total_tokens":202,"completion_tokens":50,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":17},"prompt_tokens":152,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"created":1794649949.434457,"queue_time":0.022061973,"prompt_time":0.0016099299999999999,"completion_time":0.027992784,"total_time":0.055468082427978516}}
+    
+    data: [DONE]
+    

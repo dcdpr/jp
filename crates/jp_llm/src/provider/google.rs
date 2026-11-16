@@ -1,3 +1,4 @@
+// qual:allow(srp, file_length=1200) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4m"
 use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
 use async_stream::stream;
@@ -25,7 +26,7 @@ use jp_tool::ToolDefinition;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use super::{CONTINUE_MESSAGE, EventStream, Provider, trace_to_tmpfile};
+use super::{CONTINUE_MESSAGE, EventStream, Provider, lookup::find_listed, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{
@@ -49,20 +50,18 @@ static PROVIDER: ProviderId = ProviderId::Google;
 /// heartbeat always lands before the idle window elapses.
 const RESPONSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// How long a response may stay silent before keep-alives stop.
-///
-/// Gemini sends a function call as one part once its arguments are complete, so
-/// a model writing a large call is silent for as long as the writing takes.
-/// This bounds that wait; a connection that died mid-response is detected this
-/// long plus one idle window after its last part.
-const RESPONSE_KEEPALIVE_ALLOWANCE: Duration = Duration::from_mins(5);
-
 const THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
 const THOUGHT_SIGNATURE_DUMMY_VALUE: &str = "skip_thought_signature_validator";
 
 #[derive(Debug, Clone)]
 pub struct Google {
     client: GeminiClient,
+
+    /// How long a response may stay silent before keep-alives stop, from
+    /// `providers.llm.google.silence_allowance_secs`.
+    ///
+    /// `None` sends no keep-alives.
+    silence_allowance: Option<Duration>,
 }
 
 #[async_trait]
@@ -70,12 +69,9 @@ impl Provider for Google {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| table_details(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -103,11 +99,13 @@ impl Provider for Google {
             "Request payload."
         );
 
-        Ok(with_response_keepalive(
-            call(client, request, slug, 0, structured),
-            RESPONSE_KEEPALIVE_INTERVAL,
-            RESPONSE_KEEPALIVE_ALLOWANCE,
-        ))
+        let stream = call(client, request, slug, 0, structured);
+        Ok(match self.silence_allowance {
+            Some(allowance) => {
+                with_response_keepalive(stream, RESPONSE_KEEPALIVE_INTERVAL, allowance)
+            }
+            None => stream,
+        })
     }
 }
 
@@ -182,26 +180,6 @@ fn call(
             }
         }
     })
-}
-
-#[cfg(test)]
-impl Google {
-    /// Build the Google wire request for `query` and serialize it to JSON
-    /// without sending.
-    /// Test-only seam for snapshotting request construction (notably compaction
-    /// projection) across providers.
-    #[expect(
-        clippy::unused_self,
-        reason = "uniform per-provider seam; only some providers read instance state"
-    )]
-    pub(crate) fn request_value(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<serde_json::Value> {
-        let (request, _) = create_request(model, query)?;
-        Ok(serde_json::to_value(request)?)
-    }
 }
 
 #[expect(clippy::too_many_lines)]
@@ -283,7 +261,7 @@ fn create_request(
                         low,
                         medium,
                         high,
-                        xhigh: _,
+                        xhigh,
                         max: _,
                     }) => {
                         let level = config
@@ -298,6 +276,7 @@ fn create_request(
                             ReasoningEffort::Low if low => Some(types::ThinkingLevel::Low),
                             ReasoningEffort::Medium if medium => Some(types::ThinkingLevel::Medium),
                             ReasoningEffort::High if high => Some(types::ThinkingLevel::High),
+                            ReasoningEffort::XHigh if xhigh => Some(types::ThinkingLevel::XHigh),
 
                             // Any other level is unsupported and clamps to high
                             // (the documented default). Warn rather than clamp
@@ -549,6 +528,20 @@ fn map_model(model: types::Model) -> ModelDetails {
     details
 }
 
+/// Build [`ModelDetails`] for `id` from [`MODEL_OVERRIDES`] alone.
+///
+/// Returns [`ModelDetails::empty`] if `id` is not in the table.
+fn table_details(id: ModelIdConfig) -> ModelDetails {
+    let mut details = model_overrides(&id.name)
+        .cloned()
+        .unwrap_or_else(|| ModelDetails::empty(id.clone()));
+
+    // Preserve the requested ID when `id.name` matched an alias entry in
+    // `MODEL_OVERRIDES`.
+    details.id = id;
+    details
+}
+
 /// Look up the details for `id`, under its canonical id or an alias.
 ///
 /// `None` for a model absent from [`MODEL_OVERRIDES`].
@@ -572,14 +565,29 @@ fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
 /// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
-// qual:allow(complexity, magic_numbers) reason: "model catalogue: thinking
-// budgets and cutoff dates are data maintained against Google's published
-// documentation"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
 
     Catalog::new(vec![
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-carbon"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
         Entry {
             aliases: &[],
             value: ModelDetails {
@@ -589,6 +597,24 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
                 max_output_tokens: None,
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-hydrogen"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
                 ),
                 knowledge_cutoff: Some(date(2026, 3, 1)),
                 deprecated: Some(ModelDeprecation::Active),
@@ -1016,6 +1042,10 @@ impl TryFrom<&GoogleConfig> for Google {
 
         Ok(Google {
             client: GeminiClient::new(api_key).with_api_url(config.base_url.clone()),
+            silence_allowance: match config.silence_allowance_secs {
+                0 => None,
+                secs => Some(Duration::from_secs(u64::from(secs))),
+            },
         })
     }
 }
@@ -1422,6 +1452,10 @@ impl From<GeminiError> for StreamError {
                     return insufficient_quota(&msg, err);
                 }
 
+                if unknown_model_name(value).is_some() {
+                    return StreamError::unknown_model(msg).with_source(err);
+                }
+
                 // An oversized prompt is the same size on the next attempt, so it
                 // is fatal rather than retryable.
                 if looks_like_context_window_error(&msg) {
@@ -1438,25 +1472,30 @@ impl From<GeminiError> for StreamError {
 
 impl From<GeminiError> for Error {
     fn from(error: GeminiError) -> Self {
-        match &error {
-            GeminiError::Api(api) if api.get("status").and_then(Value::as_u64) == Some(404) => {
-                if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
-                    v.as_str().and_then(|s| {
-                        s.contains("Call ListModels").then(|| {
-                            s.split('/')
-                                .nth(1)
-                                .and_then(|v| v.split(' ').next())
-                                .unwrap_or("unknown")
-                        })
-                    })
-                }) {
-                    return Self::UnknownModel(model.to_owned());
-                }
-                Self::Gemini(error)
-            }
-            _ => Self::Gemini(error),
+        if let GeminiError::Api(api) = &error
+            && let Some(model) = unknown_model_name(api)
+        {
+            return Self::UnknownModel(model.to_owned());
         }
+
+        Self::Gemini(error)
     }
+}
+
+/// Extract the rejected model name from a Gemini `404` unknown-model error.
+///
+/// Gemini reports unknown models with a `404` status and a message naming the
+/// model resource: `models/<name> is not found for API version ...`.
+/// A `404` for a wrong endpoint carries no such message.
+fn unknown_model_name(api: &Value) -> Option<&str> {
+    if api.get("status").and_then(Value::as_u64) != Some(404) {
+        return None;
+    }
+
+    let message = api.pointer("/message/error/message")?.as_str()?;
+    let name = message.strip_prefix("models/")?.split(' ').next()?;
+
+    (!name.is_empty()).then_some(name)
 }
 
 /// Returns `true` if the error is a Google API 400 "Corrupted thought
@@ -1526,34 +1565,8 @@ fn is_function_response_content(content: &types::Content) -> bool {
             .all(|part| matches!(part.data, types::ContentData::FunctionResponse(_)))
 }
 
-/// Google's recorded-test route.
 #[cfg(test)]
-pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
-
-#[cfg(test)]
-static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
-    id: ProviderId::Google,
-    base_url: |config| config.google.base_url.clone(),
-    // The client addresses the API version as part of the host, so the
-    // recording server has to be reachable at the same path.
-    set_base_url: |config, url| config.google.base_url = format!("{url}/v1beta"),
-    use_replay_credentials: |config| {
-        config.google.api_key_env = super::replay_credential_env().into();
-    },
-    model: || ModelDetails {
-        id: "google/gemini-2.5-flash-lite".parse().unwrap(),
-        display_name: None,
-        context_window: Some(200_000),
-        max_output_tokens: Some(64_000),
-        reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        subscription: None,
-        features: vec![],
-    },
-};
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "google_tests.rs"]

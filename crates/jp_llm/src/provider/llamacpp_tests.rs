@@ -122,6 +122,26 @@ fn create_request_asks_the_template_to_skip_thinking_when_reasoning_is_off() {
 }
 
 #[test]
+fn create_request_allows_parallel_tool_calls_when_tools_are_declared() {
+    let details = ModelDetails::empty((PROVIDER, "Qwen3.5-9B-GGUF").try_into().unwrap());
+    let mut query = reasoning_query(None);
+    query.tools.push(jp_tool::ToolDefinition {
+        name: "run_me".to_owned(),
+        docs: jp_tool::ToolDocs::default(),
+        parameters: serde_json::json!({ "type": "object", "properties": {} }),
+    });
+
+    let (request, ..) = create_request(&details, query).unwrap();
+
+    assert_eq!(request["parallel_tool_calls"], serde_json::json!(true));
+}
+
+#[test]
+fn create_request_omits_parallel_tool_calls_without_tools() {
+    assert_eq!(request_body(None).get("parallel_tool_calls"), None);
+}
+
+#[test]
 fn parse_deepseek_format_reasoning_in_dedicated_field() {
     // The default `--reasoning-format deepseek`: reasoning arrives in
     // `reasoning_content`, regular content in `content`.

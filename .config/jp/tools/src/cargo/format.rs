@@ -3,42 +3,34 @@ use std::collections::BTreeSet;
 use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
-use super::MAX_DIAGNOSTIC_BYTES;
+use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope, comfort_scope};
 use crate::util::{ToolResult, error, truncate};
 
 pub(crate) async fn cargo_format(
     root: &Utf8Path,
     rustflags: &str,
-    package: Option<String>,
+    packages: &[String],
 ) -> ToolResult {
-    cargo_format_impl(root, rustflags, package.as_deref(), &SystemProcessRunner)
+    cargo_format_impl(root, rustflags, packages, &SystemProcessRunner)
 }
 
 fn cargo_format_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
-    package: Option<&str>,
+    packages: &[String],
     runner: &R,
 ) -> ToolResult {
-    // 1. Run rustfmt over the workspace (or selected package).
-    let cargo_scope = package.map_or("--all".to_owned(), |v| format!("--package={v}"));
+    // 1. Run rustfmt over the workspace (or selected packages).
+    let mut cargo_args = vec!["fmt"];
+    let scope = cargo_scope(packages, "--all");
+    cargo_args.extend(scope.iter().map(String::as_str));
+    cargo_args.extend(["--", "--color=never", "--files-with-diff"]);
 
     let ProcessOutput {
         stderr: cargo_stderr,
         status: cargo_status,
         stdout: cargo_stdout,
-    } = runner.run_with_env(
-        "cargo",
-        &[
-            "fmt",
-            &cargo_scope,
-            "--",
-            "--color=never",
-            "--files-with-diff",
-        ],
-        root,
-        &[("RUSTFLAGS", rustflags)],
-    )?;
+    } = runner.run_with_env("cargo", &cargo_args, root, &[("RUSTFLAGS", rustflags)])?;
 
     if !cargo_status.is_success() {
         return error(format!(
@@ -57,12 +49,7 @@ fn cargo_format_impl<R: ProcessRunner>(
     //    comments, not to standalone markdown files (READMEs, docs) in the
     //    workspace.
     let mut comfort_args = vec!["--list-changed", "--language", "rust"];
-    if let Some(pkg) = package {
-        comfort_args.push("--package");
-        comfort_args.push(pkg);
-    } else {
-        comfort_args.push("--workspace");
-    }
+    comfort_args.extend(comfort_scope(packages));
 
     let ProcessOutput {
         stderr: comfort_stderr,

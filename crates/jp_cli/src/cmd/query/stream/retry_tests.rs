@@ -86,6 +86,94 @@ fn agent_restart_requires_committed_tool_results() {
     assert!(agent_restart_is_safe(&events));
 }
 
+fn make_retry_state_with_idle(stream_idle_timeout_secs: u32) -> StreamRetryState {
+    StreamRetryState::new(RequestConfig {
+        max_retries: 5,
+        base_backoff_ms: 1,
+        max_backoff_secs: 1,
+        stream_idle_timeout_secs,
+        max_response_bytes: MaxResponseBytes::default(),
+        cache: CachePolicy::default(),
+    })
+}
+
+/// Feed one error through the production retry path and require a retry.
+async fn retry_after(error: StreamError, retry_state: &mut StreamRetryState) {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut turn_coordinator = make_turn_coordinator();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
+
+    let result = handle_stream_error(
+        error,
+        retry_state,
+        &mut turn_coordinator,
+        &conv,
+        &printer,
+        &detached_router(),
+    )
+    .await;
+
+    assert!(matches!(result, StreamErrorOutcome::Retry), "{result:?}");
+}
+
+// A request that timed out before its first token is resent unchanged, so the
+// same window would fail it the same way. Gemini writing an 8k-token tool call
+// against a 330k-token prompt took 80s to send anything, and six attempts at
+// 60s each all failed.
+#[tokio::test]
+async fn idle_timeout_doubles_after_each_timeout_up_to_four_times() {
+    let mut state = make_retry_state_with_idle(60);
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(1)));
+
+    retry_after(StreamError::timeout("silent"), &mut state).await;
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(2)));
+
+    retry_after(StreamError::timeout("silent"), &mut state).await;
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(4)));
+
+    retry_after(StreamError::timeout("silent"), &mut state).await;
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(4)));
+}
+
+// A rate limit or a 503 says nothing about how long the response takes to
+// start, so it leaves the window alone.
+#[tokio::test]
+async fn idle_timeout_ignores_errors_other_than_timeouts() {
+    let mut state = make_retry_state_with_idle(60);
+
+    retry_after(StreamError::transient("503"), &mut state).await;
+    retry_after(StreamError::rate_limit(None), &mut state).await;
+
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(1)));
+}
+
+#[tokio::test]
+async fn idle_timeout_returns_to_configured_value_after_success() {
+    let mut state = make_retry_state_with_idle(60);
+    retry_after(StreamError::timeout("silent"), &mut state).await;
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(2)));
+
+    state.reset();
+
+    assert_eq!(state.idle_timeout(), Some(Duration::from_mins(1)));
+}
+
+#[tokio::test]
+async fn disabled_idle_timeout_stays_disabled_after_timeouts() {
+    let mut state = make_retry_state_with_idle(0);
+    assert_eq!(state.idle_timeout(), None);
+
+    // A disabled timeout cannot fire, but a provider can still report one.
+    retry_after(StreamError::timeout("silent"), &mut state).await;
+
+    assert_eq!(state.idle_timeout(), None);
+}
+
 #[test]
 fn can_retry_retryable_within_budget() {
     let state = make_retry_state(3);

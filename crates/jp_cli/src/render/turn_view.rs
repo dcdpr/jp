@@ -349,6 +349,11 @@ impl TurnView {
         self.model_id = model_id;
     }
 
+    /// Set the model identifier shown on subsequent assistant role headers.
+    pub fn set_model_id(&mut self, model_id: Option<String>) {
+        self.model_id = model_id;
+    }
+
     /// Emit a role-boundary header, attaching the pending turn detail to it.
     ///
     /// The single place that consumes `pending_turn_detail`: the first header

@@ -1,0 +1,57 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "Gxs5xrNBAq0fdNv4KKlqxdb2W1iWGRWt",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Paris"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "y0G3c6p8jaD3URiNhHi2PWP4wsGH55G3",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Tokyo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Currently, the weather in **Paris** is 18 degrees and sunny. In **Tokyo**, it is also 18 degrees and sunny.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

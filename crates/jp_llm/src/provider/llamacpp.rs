@@ -18,6 +18,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails,
+    lookup::find_listed,
     openai_compat::{
         assemble_event_stream, convert_events, convert_tool_choice, convert_tools,
         to_system_messages,
@@ -48,12 +49,9 @@ impl Provider for Llamacpp {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, Error> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| ModelDetails::empty(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>, Error> {
@@ -252,6 +250,9 @@ fn create_request(
     if !converted_tools.is_empty() {
         body["tools"] = json!(converted_tools);
         body["tool_choice"] = json!(tool_choice_val);
+        // llama.cpp limits a response to one tool call unless asked otherwise:
+        // <https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md>
+        body["parallel_tool_calls"] = json!(true);
     }
 
     if let Some(schema) = structured_schema {

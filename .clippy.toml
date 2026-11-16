@@ -6,6 +6,7 @@ too-many-arguments-threshold = 10
 doc-valid-idents = [
     "CommonMark",
     "ConPTY",
+    "FastAPI",
     "LlamaCPP",
     "OpenAI",
     "OpenRouter",

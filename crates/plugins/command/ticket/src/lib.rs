@@ -23,6 +23,7 @@ mod definitions;
 mod edit;
 mod label;
 mod options;
+mod order;
 mod tool;
 
 use std::io::{self, BufRead, Write};
@@ -39,15 +40,20 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
-    board::{self, Place},
+    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, ValueType,
+    Vocabulary,
+    board::{self, Place, Placement},
     check::Problem,
     checklist::{self, Progress},
     import::Import,
     store,
 };
 
-use crate::options::{LABELS_KEY, Options, leftover_labels_file};
+use crate::{
+    options::{BoardOptions, LABELS_KEY, Options, leftover_labels_file},
+    order::ListOrder,
+    tool::in_board_order,
+};
 
 /// The name the plugin is configured under, `plugins.command.ticket`.
 pub(crate) const PLUGIN: &str = "ticket";
@@ -275,8 +281,21 @@ enum Command {
 
     /// Print the board: Todo, In Progress, and Done, each in board order.
     ///
-    /// Done shows its top `board.done_limit` tickets; `list` shows them all.
-    Board,
+    /// Done is truncated to `board.done_limit` tickets unless `--limit` is
+    /// passed; `list` shows every Done ticket.
+    /// Truncated columns show `(<shown>/<total>)` in their heading, such as
+    /// `Todo (10/190)`.
+    Board {
+        /// Print only this column: `todo`, `in progress`, or `done`.
+        /// Repeat to include multiple columns; they print in board order.
+        #[arg(long = "status")]
+        statuses: Vec<Status>,
+
+        /// Maximum number of tickets to show per column, from the top.
+        /// Overrides `board.done_limit` for Done.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 
     /// Move a ticket next to another in the same column of the board.
     #[command(group(ArgGroup::new("place").required(true)))]
@@ -340,15 +359,23 @@ enum Command {
         labels: Vec<String>,
     },
 
-    /// List tickets, ordered by id.
+    /// List tickets, ordered by id unless `--order` is set.
     ///
     /// With `jp -F json`, the tickets are printed as JSON.
     List {
+        /// Sort order: `board` (by status and board rank), `filed` (by filing
+        /// date), or a sortable label key such as `due` (tickets without the
+        /// label sort last).
+        /// Append `:desc` to `filed` or a label key to reverse the order.
+        #[arg(long)]
+        order: Option<String>,
+
         /// Only tickets at this status: `todo`, `in progress`, or `done`.
         #[arg(long)]
         status: Option<Status>,
 
-        /// Only tickets carrying this label, as `key` or `key=value`.
+        /// Only tickets carrying this label, as `key`, `key=value`, or a date
+        /// comparison with `<`, `<=`, `>`, or `>=` (e.g. `due<2026-12-01`).
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
@@ -471,12 +498,18 @@ impl LabelVerb {
 enum ToolsCommand {
     /// Write a starting set of tool definitions, one file per tool.
     ///
-    /// Refuses to overwrite a file that exists.
-    /// The workspace configuration has to load the directory for the tools to
-    /// appear.
+    /// Existing files that match the shipped definitions are left untouched.
+    /// Files with different contents are overwritten if they are tracked by git
+    /// with no uncommitted changes; otherwise `--force` is required.
+    /// The workspace configuration must load the directory for the tools to
+    /// take effect.
     Init {
         /// Directory to write them into, relative to the workspace root.
         path: Utf8PathBuf,
+
+        /// Overwrite files that git cannot restore.
+        #[arg(long)]
+        force: bool,
     },
 
     /// Regenerate what the tool definitions mirror from configuration.
@@ -486,6 +519,11 @@ enum ToolsCommand {
     Sync {
         /// Directory holding the definitions, relative to the workspace root.
         path: Utf8PathBuf,
+
+        /// Overwrite the synced file even if git cannot restore it or another
+        /// plugin wrote it.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -1547,7 +1585,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             uncheck,
         }),
 
-        Command::Board => show_board(dir, ctx.options.board.done_limit),
+        Command::Board { statuses, limit } => show_board(dir, &ctx.options.board, &statuses, limit),
 
         Command::Rank { id, before, after } => rank(dir, id, before, after),
 
@@ -1575,20 +1613,17 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
         } => import_all(dir, formatting, ctx.options, &numbers, &repo, &labels),
 
         Command::List {
+            order,
             status,
             labels,
             query,
             under,
-        } => list(
-            dir,
-            &Filter {
-                status,
-                labels: &labels,
-                query: query.as_deref(),
-                under,
-            },
-            ctx.format.is_json(),
-        ),
+        } => list(ctx, order.as_deref(), &Filter {
+            status,
+            labels: &labels,
+            query: query.as_deref(),
+            under,
+        }),
 
         Command::Check => check(dir, ctx.options, ctx.format.is_json()),
 
@@ -1626,8 +1661,9 @@ fn move_ticket(
     status: Status,
     at: Option<(Place, TicketId)>,
 ) -> Result<Output, String> {
-    let board::Moved { path, previous } =
-        board::move_to(dir, formatting, id, status, at).map_err(|error| error.to_string())?;
+    let placement = at.map(|(place, other)| Placement::Next(place, other));
+    let board::Moved { path, previous } = board::move_to(dir, formatting, id, status, placement)
+        .map_err(|error| error.to_string())?;
     let next_to = at.map(|(place, other)| format!("{} {other}", relation(place)));
 
     let mut output = Output::from(match next_to {
@@ -1671,11 +1707,14 @@ fn relation(place: Place) -> &'static str {
 /// Write the tool definitions, or what they mirror from configuration.
 fn tools(ctx: &Context<'_>, command: ToolsCommand) -> Result<Output, String> {
     match command {
-        ToolsCommand::Init { path } => definitions::init(&resolve_dir(ctx.root, &path)),
-        ToolsCommand::Sync { path } => definitions::sync(
+        ToolsCommand::Init { path, force } => {
+            definitions::init(&resolve_dir(ctx.root, &path), force)
+        }
+        ToolsCommand::Sync { path, force } => definitions::sync(
             &resolve_dir(ctx.root, &path),
             ctx.config,
             &ctx.options.vocabulary()?,
+            force,
         ),
     }
 }
@@ -1703,12 +1742,20 @@ fn rename(
     .into())
 }
 
-/// Print the board, one column after another.
+/// Print the board's columns vertically in board order (`Todo`, `In Progress`,
+/// `Done`).
 ///
-/// Stacked rather than side by side, which would wrap on a narrow terminal.
-/// Done is cut to its top `done_limit` tickets, and its heading says how many
-/// there are.
-fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
+/// If `statuses` is non-empty, only the listed columns are printed.
+/// Each column is truncated to `limit` tickets, or to `layout.done_limit` for
+/// `Done` when `limit` is `None`.
+/// Column headings show `(<total>)` when complete and `(<shown>/<total>)` when
+/// truncated.
+fn show_board(
+    dir: &Utf8Path,
+    layout: &BoardOptions,
+    statuses: &[Status],
+    limit: Option<usize>,
+) -> Result<Output, String> {
     let entries = store::list(dir).map_err(|error| error.to_string())?;
     let order = board::read(dir).map_err(|error| error.to_string())?;
 
@@ -1723,6 +1770,10 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
 
     let mut columns = vec![];
     for status in [Status::Todo, Status::InProgress, Status::Done] {
+        if !statuses.is_empty() && !statuses.contains(&status) {
+            continue;
+        }
+
         let column: Vec<TicketId> = tickets
             .iter()
             .filter(|(_, ticket)| ticket.metadata.status == status)
@@ -1731,14 +1782,11 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
         let laid_out = order.arrange(status, &column);
 
         let total = laid_out.len();
-        let shown = if status == Status::Done {
-            total.min(done_limit)
-        } else {
-            total
-        };
+        let limit = limit.or((status == Status::Done).then_some(layout.done_limit));
+        let shown = limit.map_or(total, |limit| total.min(limit));
 
         let mut text = if shown < total {
-            format!("{status} ({total}, showing {shown})\n")
+            format!("{status} ({shown}/{total})\n")
         } else {
             format!("{status} ({total})\n")
         };
@@ -1757,7 +1805,8 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
     })
 }
 
-/// One line of a board column: the status is the column's, so it is left out.
+/// Format a single row in a board column (ID, filing date, title, labels, and
+/// checklist progress; status is omitted because the column heading names it).
 fn board_row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let labels = if ticket.metadata.labels.is_empty() {
@@ -1766,7 +1815,12 @@ fn board_row(id: TicketId, ticket: &Ticket) -> String {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {}{labels}{}\n", ticket.title, progress(ticket))
+    format!(
+        "{id:<9} {} {}{labels}{}\n",
+        ticket.metadata.date,
+        ticket.title,
+        progress(ticket)
+    )
 }
 
 /// A ticket's checklist progress as a listing appends it, ` (2 of 5 checked)`,
@@ -2280,7 +2334,8 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
 
         out.push_str(&format!("{key}  {}{notes}\n", facet.description()));
         if facet.is_open() {
-            out.push_str(&format!("  {key}=<any value>\n"));
+            let value = facet.value_type().map_or("any value", ValueType::describe);
+            out.push_str(&format!("  {key}=<{value}>\n"));
         }
         for value in facet.values() {
             out.push_str(&format!("  {key}={value}\n"));
@@ -2508,12 +2563,25 @@ struct Filter<'a> {
     under: Option<TicketId>,
 }
 
-/// List tickets, filtered by whatever the caller named.
+/// List tickets matching `filter`, sorted by ID or by `order`.
 ///
-/// Labels are matched as written on the ticket rather than through the
-/// vocabulary, so a ticket carrying a label the board has since dropped can
-/// still be found and fixed.
-fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, String> {
+/// Labels are matched against the ticket's raw metadata rather than resolved
+/// through the vocabulary, so tickets carrying removed labels can still be
+/// found and updated.
+fn list(ctx: &Context<'_>, order: Option<&str>, filter: &Filter<'_>) -> Result<Output, String> {
+    let (dir, json) = (ctx.dir.as_path(), ctx.format.is_json());
+    // Default ID order does not use the vocabulary, so listing still works when
+    // the label configuration is invalid.
+    let vocabulary = match order {
+        Some(_) => ctx.options.vocabulary()?,
+        None => Vocabulary::default(),
+    };
+    let order = order
+        .map(|text| {
+            ListOrder::parse(text, &vocabulary)
+                .ok_or_else(|| order::refusal("--order", &vocabulary))
+        })
+        .transpose()?;
     let query = filter
         .query
         .map(str::trim)
@@ -2539,40 +2607,77 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
                 .under
                 .is_none_or(|under| ticket.metadata.parent == Some(under))
     });
-
-    let text = if json {
-        let rows: Vec<Row<'_>> = tickets
-            .iter()
-            .map(|(id, ticket, path)| Row {
-                id: *id,
-                title: &ticket.title,
-                metadata: &ticket.metadata,
-                comments: ticket.comments.len(),
-                path,
-                checklist: ticket.checklist(),
-            })
-            .collect();
-
-        let json = serde_json::to_string_pretty(&rows)
-            .map_err(|error| format!("failed to serialize tickets: {error}"))?;
-
-        format!("{json}\n")
-    } else {
-        tickets
-            .iter()
-            .map(|(id, ticket, _)| row(*id, ticket))
-            .collect()
-    };
+    if let Some(order) = &order {
+        arrange(dir, &mut tickets, order, &mut warnings);
+    }
 
     Ok(Output {
-        text,
+        text: render_listing(&tickets, json)?,
         json,
         warnings,
         ..Output::default()
     })
 }
 
-/// One line of the human-readable listing.
+/// Render `tickets` as a JSON array when `json` is `true`, or as one [`row`]
+/// per line.
+fn render_listing(tickets: &[(TicketId, &Ticket, &str)], json: bool) -> Result<String, String> {
+    if !json {
+        return Ok(tickets
+            .iter()
+            .map(|(id, ticket, _)| row(*id, ticket))
+            .collect());
+    }
+
+    let rows: Vec<Row<'_>> = tickets
+        .iter()
+        .map(|(id, ticket, path)| Row {
+            id: *id,
+            title: &ticket.title,
+            metadata: &ticket.metadata,
+            comments: ticket.comments.len(),
+            path,
+            checklist: ticket.checklist(),
+        })
+        .collect();
+    let json = serde_json::to_string_pretty(&rows)
+        .map_err(|error| format!("failed to serialize tickets: {error}"))?;
+
+    Ok(format!("{json}\n"))
+}
+
+/// Sort `tickets` in place according to `order`.
+///
+/// If `.board.json` cannot be read in board order, each status column falls
+/// back to ID order and a warning is appended to `warnings`.
+fn arrange(
+    dir: &Utf8Path,
+    tickets: &mut [(TicketId, &Ticket, &str)],
+    order: &ListOrder<'_>,
+    warnings: &mut Vec<String>,
+) {
+    let ListOrder::Sorted(sort) = order else {
+        let board = board::read(dir).unwrap_or_else(|error| {
+            warnings.push(format!("{error} (columns are listed by id)"));
+            board::Order::default()
+        });
+        let found: Vec<(TicketId, &Ticket)> = tickets
+            .iter()
+            .map(|(id, ticket, _)| (*id, *ticket))
+            .collect();
+        let laid_out: Vec<TicketId> = in_board_order(&found, &board)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        tickets.sort_by_key(|(id, ..)| laid_out.iter().position(|other| other == id));
+        return;
+    };
+
+    tickets.sort_by(|(a_id, a, _), (b_id, b, _)| sort.compare((*a_id, *a), (*b_id, *b)));
+}
+
+/// Format a single ticket line for human-readable listings (ID, status, filing
+/// date, title, labels, and checklist progress).
 fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let status = ticket.metadata.status.to_string();
@@ -2583,7 +2688,8 @@ fn row(id: TicketId, ticket: &Ticket) -> String {
     };
 
     format!(
-        "{id:<9} {status:<12} {}{labels}{}\n",
+        "{id:<9} {status:<12} {} {}{labels}{}\n",
+        ticket.metadata.date,
         ticket.title,
         progress(ticket)
     )

@@ -1,0 +1,48 @@
+when:
+  path: /v1/models
+  method: GET
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "object": "list",
+      "data": [
+        {
+          "id": "Qwen/Qwen3.8-27B-FP8",
+          "object": "model",
+          "created": 1794041324,
+          "owned_by": "flash-next-rtx",
+          "root": "/model",
+          "parent": null,
+          "max_model_len": 1000000,
+          "permission": [
+            {
+              "id": "modelperm-a3f15b1f8cf4076f",
+              "object": "model_permission",
+              "created": 1794041324,
+              "allow_create_engine": false,
+              "allow_sampling": true,
+              "allow_logprobs": true,
+              "allow_search_indices": false,
+              "allow_view": true,
+              "allow_fine_tuning": false,
+              "organization": "*",
+              "group": null,
+              "is_blocking": false
+            }
+          ]
+        },
+        {
+          "id": "deepseek-v4.1-flash",
+          "object": "model",
+          "created": 1794041325,
+          "owned_by": "tobor-dsv41",
+          "root": "deepseek-v4.1-flash",
+          "parent": null,
+          "max_model_len": 409600
+        }
+      ]
+    }

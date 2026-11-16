@@ -1,0 +1,25 @@
+[package]
+description = "Whether a command plugin may overwrite a file: when git can restore it, or when the user passes `--force`."
+name = "overwrite"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+camino = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

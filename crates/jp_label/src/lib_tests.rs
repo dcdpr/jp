@@ -74,9 +74,57 @@ fn an_empty_value_reads_as_a_bare_key() {
 
 #[test]
 fn a_selector_renders_back_to_its_token() {
-    for token in ["crate=jp_cli", "draft"] {
+    for token in [
+        "crate=jp_cli",
+        "draft",
+        "due<2026-12-01",
+        "due<=2026-12-01",
+        "due>2026-12-01",
+        "due>=2026-12-01",
+    ] {
         assert_eq!(Selector::parse(token).unwrap().to_string(), token);
     }
+}
+
+#[test]
+fn a_selector_reads_its_condition() {
+    assert_eq!(
+        Selector::parse("draft").unwrap().condition,
+        Condition::Present
+    );
+    assert_eq!(
+        Selector::parse("crate=jp_cli").unwrap().condition,
+        Condition::Equals("jp_cli".to_owned())
+    );
+    assert_eq!(Selector::parse(" due <= 2026-12-01 ").unwrap(), Selector {
+        key: "due".to_owned(),
+        condition: Condition::Compare(Comparison::LessOrEqual, "2026-12-01".to_owned()),
+    });
+}
+
+/// The first `=` ends the key, so a value may contain `<` or `>` and still
+/// match.
+#[test]
+fn an_equals_before_a_comparison_makes_a_pair() {
+    assert_eq!(
+        Selector::parse("expr=a<b").unwrap().condition,
+        Condition::Equals("a<b".to_owned())
+    );
+}
+
+#[test]
+fn a_comparison_needs_a_date() {
+    assert_eq!(
+        Selector::parse("due<friday").unwrap_err().to_string(),
+        "label value 'friday' is not a date written YYYY-MM-DD, the only kind of value `<`, `<=`, \
+         `>`, and `>=` compare"
+    );
+    assert!(Selector::parse("due<").is_err());
+    assert!(Selector::parse("due<2026-1-5").is_err());
+    assert!(matches!(
+        Selector::parse("<2026-12-01"),
+        Err(KeyError::EmptyKey)
+    ));
 }
 
 #[test]

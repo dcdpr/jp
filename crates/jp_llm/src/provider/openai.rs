@@ -1,4 +1,6 @@
+// qual:allow(srp, file_length=2900) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4k"
 use std::{
+    collections::HashMap,
     sync::{Arc, LazyLock, Mutex, PoisonError},
     time::Duration,
 };
@@ -53,35 +55,9 @@ use crate::{
 
 pub mod auth;
 pub mod oauth;
-#[cfg(test)]
-pub(crate) mod parity;
 pub mod rate_limits;
 pub(crate) mod resolve;
 pub mod usage;
-
-#[cfg(test)]
-#[path = "openai/auth_rejected_tests.rs"]
-mod auth_rejected_tests;
-
-#[cfg(test)]
-#[path = "openai/fold_tests.rs"]
-mod fold_tests;
-
-#[cfg(test)]
-#[path = "openai/latency_tests.rs"]
-mod latency_tests;
-
-#[cfg(test)]
-#[path = "openai/redeem_tests.rs"]
-mod redeem_tests;
-
-#[cfg(test)]
-#[path = "openai/switchable_tests.rs"]
-mod switchable_tests;
-
-#[cfg(test)]
-#[path = "openai/usage_limit_tests.rs"]
-mod usage_limit_tests;
 
 /// The path the subscription host serves the responses endpoint at.
 ///
@@ -260,64 +236,6 @@ impl Openai {
         resolve::preflight(&provider.config, provider.store.as_ref(), "", Utc::now())?;
 
         Ok(provider)
-    }
-
-    /// Build a provider around an explicit credential, bypassing the chain.
-    ///
-    /// Test seam: no environment or store access, no preflight.
-    #[cfg(test)]
-    pub(crate) fn with_credential(config: &OpenaiConfig, credential: Credential) -> Self {
-        Self {
-            config: config.clone(),
-            store: None,
-            fixed_credential: Some((credential, resolve::Attribution::default())),
-            base_url: config.base_url.clone(),
-            codex_base_url: config.codex_base_url.clone(),
-            reset_budget: RESET_PROPAGATION_BUDGET,
-            reset_interval: RESET_RETRY_INTERVAL,
-            pending_redemption: Arc::new(Mutex::new(None)),
-            client_cache: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    /// Build a provider that resolves its chain against `store`.
-    ///
-    /// Test seam: the chain walks an in-memory store instead of the user's, and
-    /// no preflight runs.
-    #[cfg(test)]
-    pub(crate) fn with_store(config: &OpenaiConfig, store: CredentialStore) -> Self {
-        Self {
-            store: Some(store),
-            fixed_credential: None,
-            ..Self::with_credential(config, Credential::ApiKey(String::new()))
-        }
-    }
-
-    /// Shorten the wait for a redeemed reset, so a test pinning it runs in
-    /// milliseconds rather than the minute production allows.
-    #[cfg(test)]
-    pub(crate) fn with_reset_timing(mut self, budget: Duration, interval: Duration) -> Self {
-        self.reset_budget = budget;
-        self.reset_interval = interval;
-        self
-    }
-
-    /// Build a provider around an explicit subscription credential.
-    ///
-    /// Test seam for recording and replaying the subscription endpoint without
-    /// reading the user's credential store.
-    #[cfg(test)]
-    pub(crate) fn with_subscription_credential(
-        config: &OpenaiConfig,
-        token: String,
-        account_id: String,
-    ) -> Self {
-        let mut provider = Self::with_credential(config, Credential::Bearer(token));
-        let Some((_, attribution)) = &mut provider.fixed_credential else {
-            unreachable!("with_credential always sets a fixed credential");
-        };
-        attribution.account_id = Some(account_id);
-        provider
     }
 
     /// Resolve the credential for a request against `model`.
@@ -582,37 +500,25 @@ impl Provider for Openai {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let attempt = self.resolve(name.as_ref()).await?;
 
-        // The subscription host serves no model endpoint, so the capability
-        // table is the only source. It is authoritative on the API path too, so
-        // this costs nothing but the round-trip it skips.
-        if attempt.is_subscription() {
-            let details = map_model(ModelResponse::named(name.to_string()))?;
+        // Neither route needs a network lookup: the subscription host has no
+        // models endpoint, and the API's `GET /v1/models/{id}` returns only the
+        // model ID, so all capability metadata comes from `CAPABILITIES`.
+        let details = map_model(ModelResponse::named(name.to_string()))?;
 
-            // Refused here rather than at the host, which answers a model it
-            // does not serve with the same 404 it gives a typo. A model the
-            // table has never heard of is let through: the catalog ships with
-            // the binary and the plan's model set does not.
-            if details.subscription == Some(false) {
-                return Err(Error::UnsupportedForCredential(format!(
-                    "{name} is not served by a ChatGPT subscription; pick one of {}, or add \
-                     `api_key` to providers.llm.openai.auth",
-                    subscription_models().collect::<Vec<_>>().join(", ")
-                )));
-            }
-
-            return Ok(details);
+        // Reject known API-only models up front with credential guidance; the
+        // subscription host rejects them with the same `model_not_found` error
+        // it returns for a typo. Unknown models (`subscription: None`) are
+        // allowed through so newly added subscription models work without a
+        // binary update.
+        if attempt.is_subscription() && details.subscription == Some(false) {
+            return Err(Error::UnsupportedForCredential(format!(
+                "{name} is not served by a ChatGPT subscription; pick one of {}, or add `api_key` \
+                 to providers.llm.openai.auth",
+                subscription_models().collect::<Vec<_>>().join(", ")
+            )));
         }
 
-        let (_, http) = self.clients(&attempt, &session_id(None))?;
-
-        http.get(format!("{}/v1/models/{}", self.base_url, name))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<ModelResponse>()
-            .await
-            .map_err(Into::into)
-            .and_then(map_model)
+        Ok(details)
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -836,6 +742,7 @@ async fn start_streaming(
     model: &str,
 ) -> std::result::Result<EventStream, StreamError> {
     let mut reasoning = ReasoningState::default();
+    let mut arguments = StreamedArguments::default();
     let model = model.to_owned();
     let stream = client
         .stream(request)
@@ -847,6 +754,7 @@ async fn start_streaming(
                 is_structured,
                 reasoning_enabled,
                 &mut reasoning,
+                &mut arguments,
             ))
         })
         .try_flatten()
@@ -1049,12 +957,21 @@ fn map_non_streaming_response(
 ) -> Result<Vec<Event>> {
     let incomplete_reason = response.incomplete_details.map(|details| details.reason);
     let mut reasoning = ReasoningState::default();
+    let mut arguments = StreamedArguments::default();
     let mut events = response
         .output
         .into_iter()
         .enumerate()
         .flat_map(|(index, item)| synthesize_non_streaming_output_item_events(index, item))
-        .flat_map(|event| map_event(event, is_structured, reasoning_enabled, &mut reasoning))
+        .flat_map(|event| {
+            map_event(
+                event,
+                is_structured,
+                reasoning_enabled,
+                &mut reasoning,
+                &mut arguments,
+            )
+        })
         .collect::<std::result::Result<Vec<_>, StreamError>>()?;
 
     events.push(map_non_streaming_finish_reason(
@@ -1231,145 +1148,6 @@ impl ModelResponse {
             _created: chrono::DateTime::UNIX_EPOCH,
             _owned_by: String::new(),
         }
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn catalog_model_details(name: &str) -> ModelDetails {
-    map_model(ModelResponse::named(name.to_owned())).expect("a valid OpenAI model id")
-}
-
-/// `OpenAI`'s recorded-test routes.
-///
-/// The only provider so far billed two ways, so the only one whose fixtures are
-/// recorded twice and compared.
-#[cfg(test)]
-pub(crate) static TEST_SUPPORT: OpenaiTestSupport = OpenaiTestSupport;
-
-#[cfg(test)]
-pub(crate) struct OpenaiTestSupport;
-
-#[cfg(test)]
-impl super::ProviderTestSupport for OpenaiTestSupport {
-    fn api(&self) -> &'static dyn super::ProviderTestRoute {
-        &API_ROUTE
-    }
-
-    fn subscription(&self) -> Option<&'static dyn super::ProviderTestRoute> {
-        Some(&SUBSCRIPTION_ROUTE)
-    }
-
-    fn assert_rewrite_preserves_meaning(&self, model: &ModelDetails, query: ChatQuery) {
-        parity::assert_rewrite_preserves_meaning(model, query);
-    }
-
-    fn project_request(&self, body: &serde_json::Value) -> serde_json::Value {
-        parity::project_body(body)
-    }
-}
-
-#[cfg(test)]
-static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
-    id: PROVIDER,
-    base_url: |config| config.openai.base_url.clone(),
-    set_base_url: |config, url| config.openai.base_url = url,
-    use_replay_credentials: |config| {
-        config.openai.api_key_env = super::replay_credential_env().into();
-    },
-    // The same model the subscription route records against, read from the
-    // catalog rather than restated here. Comparing two recordings only says
-    // something about the wire dialects when everything else about the request
-    // is held equal, and the model drives reasoning shape, cache handling, and
-    // sampling.
-    model: || catalog_model_details(SHARED_TEST_MODEL),
-};
-
-/// The model both recorded routes use.
-///
-/// Served by a subscription and by the API, and the cheapest model that carries
-/// the full GPT-5.6 feature set.
-#[cfg(test)]
-pub(crate) const SHARED_TEST_MODEL: &str = "gpt-5.6-luna";
-
-#[cfg(test)]
-static SUBSCRIPTION_ROUTE: SubscriptionTestRoute = SubscriptionTestRoute;
-
-/// The `ChatGPT` subscription route.
-///
-/// Recording authenticates exactly as a user's own machine does: through the
-/// credential store, resolved by the same chain a real request walks.
-/// Logging in is a one-time `jp provider llm auth login openai`, and refresh
-/// and rotation are then the production code's problem rather than the
-/// harness's.
-#[cfg(test)]
-pub(crate) struct SubscriptionTestRoute;
-
-#[cfg(test)]
-impl super::ProviderTestRoute for SubscriptionTestRoute {
-    fn base_url(&self, config: &jp_config::providers::llm::LlmProviderConfig) -> String {
-        config.openai.codex_base_url.clone()
-    }
-
-    fn set_base_url(&self, config: &mut jp_config::providers::llm::LlmProviderConfig, url: String) {
-        // The recording server forwards a request's path onto the target's
-        // host and drops whatever path the target URL carried. This is the only
-        // endpoint JP addresses below a path, so the path is restated here to
-        // survive the round trip and reach `…/backend-api/codex/responses`
-        // rather than the web app's front door.
-        config.openai.codex_base_url = format!("{url}/backend-api/codex");
-    }
-
-    fn provider(
-        &self,
-        config: &jp_config::providers::llm::LlmProviderConfig,
-        recording: bool,
-    ) -> std::result::Result<Box<dyn Provider>, String> {
-        // A replayed cassette answers without authenticating, so the token only
-        // has to exist. Reading the store on replay would make the suite
-        // depend on the machine running it.
-        if !recording {
-            return Ok(Box::new(Openai::with_subscription_credential(
-                &config.openai,
-                "test-token".to_owned(),
-                "test-account".to_owned(),
-            )));
-        }
-
-        let profile = super::first_stored_profile(jp_credentials::PROVIDER_OPENAI).ok_or(
-            "recording needs a stored ChatGPT subscription; run `jp provider llm auth login \
-             openai` once",
-        )?;
-
-        let mut config = config.openai.clone();
-        config.auth = vec![AuthEntry::Subscription(Some(profile))];
-
-        Openai::new(&config)
-            .map(|provider| Box::new(provider) as Box<dyn Provider>)
-            .map_err(|error| error.to_string())
-    }
-
-    fn model(&self) -> ModelDetails {
-        catalog_model_details(SHARED_TEST_MODEL)
-    }
-}
-
-#[cfg(test)]
-impl Openai {
-    /// Build the OpenAI wire request for `query` and serialize it to JSON
-    /// without sending.
-    /// Test-only seam for snapshotting request construction (notably compaction
-    /// projection) across providers.
-    #[expect(
-        clippy::unused_self,
-        reason = "uniform per-provider seam; only some providers read instance state"
-    )]
-    pub(crate) fn request_value(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<serde_json::Value> {
-        let (request, ..) = create_request(model, query)?;
-        Ok(serde_json::to_value(request)?)
     }
 }
 
@@ -1717,8 +1495,6 @@ fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
 /// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
 /// to derive from, so every value here is maintained by hand against OpenAI's
 /// published model documentation.
-// qual:allow(complexity, magic_numbers) reason: "model catalogue: context
-// windows, output limits and cutoff dates are data, not constants"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
@@ -2807,6 +2583,60 @@ impl ReasoningState {
     }
 }
 
+/// Accumulated `function_call_arguments.delta` text for each unfinished
+/// function call, keyed by output index.
+///
+/// `OutputItemDone` carries the complete arguments for a function call.
+/// [`map_event`] compares them against the accumulated deltas to emit any
+/// unstreamed suffix.
+#[derive(Default)]
+struct StreamedArguments(HashMap<usize, String>);
+
+impl StreamedArguments {
+    fn record(&mut self, index: usize, delta: &str) {
+        self.0.entry(index).or_default().push_str(delta);
+    }
+
+    /// Return any unstreamed suffix of the finished function call's arguments.
+    ///
+    /// Returns `None` if `item` is not a function call or if the deltas already
+    /// delivered the full `arguments` string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `call.arguments` does not start with the accumulated
+    /// deltas, since already-emitted argument chunks cannot be retracted.
+    fn finish(
+        &mut self,
+        index: usize,
+        item: &types::OutputItem,
+    ) -> std::result::Result<Option<String>, StreamError> {
+        let types::OutputItem::FunctionCall(call) = item else {
+            return Ok(None);
+        };
+
+        let streamed = self.0.remove(&index).unwrap_or_default();
+        let Some(missing) = call.arguments.strip_prefix(streamed.as_str()) else {
+            return Err(StreamError::other(format!(
+                "OpenAI's finished `{}` call contradicts its streamed arguments.",
+                call.name
+            )));
+        };
+        if missing.is_empty() {
+            return Ok(None);
+        }
+
+        debug!(
+            index,
+            name = call.name,
+            streamed_size = streamed.len(),
+            finished_size = call.arguments.len(),
+            "Completing unstreamed function call arguments."
+        );
+        Ok(Some(missing.to_owned()))
+    }
+}
+
 /// Map an Openai [`types::Event`] into one or more [`Event`]s.
 ///
 /// This is the only place where OpenAI wire events become JP events.
@@ -2819,6 +2649,7 @@ fn map_event(
     is_structured: bool,
     reasoning_enabled: bool,
     reasoning: &mut ReasoningState,
+    arguments: &mut StreamedArguments,
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
@@ -2919,7 +2750,11 @@ fn map_event(
             delta,
             output_index,
             ..
-        } => vec![Ok(Event::tool_call_args(output_index as usize, delta))],
+        } => {
+            let index = output_index as usize;
+            arguments.record(index, &delta);
+            vec![Ok(Event::tool_call_args(index, delta))]
+        }
 
         OutputItemDone { item, output_index } => {
             let index = output_index as usize;
@@ -2954,9 +2789,18 @@ fn map_event(
                 | types::OutputItem::ComputerToolCall(_) => return vec![],
             };
 
-            // A function call's start and argument chunks are emitted from the
-            // `OutputItemAdded` and `FunctionCallArgumentsDelta` events; only
-            // the flush remains to be emitted here.
+            // Function call start and argument chunks are normally emitted from
+            // `OutputItemAdded` and `FunctionCallArgumentsDelta`. However, the
+            // ChatGPT subscription endpoint omits `FunctionCallArgumentsDelta`
+            // events for parallel calls and only includes the arguments on the
+            // finished `OutputItemDone` item. Emit any suffix the deltas did
+            // not deliver before flushing the tool call.
+            match arguments.finish(index, &item) {
+                Ok(missing) => {
+                    events.extend(missing.map(|missing| Ok(Event::tool_call_args(index, missing))));
+                }
+                Err(error) => return vec![Err(error)],
+            }
             events.push(Ok(Event::flush_with_metadata(index, metadata)));
             events
         }
@@ -3937,6 +3781,36 @@ impl From<types::response::Error> for Error {
         Self::OpenaiResponse(error)
     }
 }
+
+#[cfg(test)]
+pub(crate) mod parity;
+
+#[cfg(test)]
+pub(crate) mod test_support;
+
+#[cfg(test)]
+#[path = "openai/auth_rejected_tests.rs"]
+mod auth_rejected_tests;
+
+#[cfg(test)]
+#[path = "openai/fold_tests.rs"]
+mod fold_tests;
+
+#[cfg(test)]
+#[path = "openai/latency_tests.rs"]
+mod latency_tests;
+
+#[cfg(test)]
+#[path = "openai/redeem_tests.rs"]
+mod redeem_tests;
+
+#[cfg(test)]
+#[path = "openai/switchable_tests.rs"]
+mod switchable_tests;
+
+#[cfg(test)]
+#[path = "openai/usage_limit_tests.rs"]
+mod usage_limit_tests;
 
 #[cfg(test)]
 #[path = "openai_tests.rs"]

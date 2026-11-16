@@ -2,6 +2,11 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Writes run one at a time, in the order written. Each file is independent, so
+# a failure does not stop the rest.
+fan_out = { concurrency = 1 }
+
 summary = "Create a new file in the project's local filesystem."
 description = """
 Tickets and RFDs cannot be created here. A ticket's filename carries an id drawn

@@ -1,0 +1,10 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    Stream {
+        kind: UnknownModel,
+        message: "The model `foobarbaz` does not exist. (HTTP 404 Not Found)",
+    },
+]

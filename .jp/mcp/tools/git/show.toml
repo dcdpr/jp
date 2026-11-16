@@ -6,6 +6,11 @@ style.parameters = "function_call"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# One revision per operation; reads run unbounded and every failure is
+# reported.
+fan_out = true
+
 summary = "Show commit details: message and changed file stats (no diff content)."
 description = """
 Shows the full commit message and a list of changed files with their \

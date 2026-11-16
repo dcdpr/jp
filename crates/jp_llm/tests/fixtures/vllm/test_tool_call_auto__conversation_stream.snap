@@ -210,7 +210,8 @@ expression: v
             "api_key"
           ],
           "api_key_env": "GEMINI_API_KEY",
-          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
         },
         "llamacpp": {
           "base_url": "http://127.0.0.1:8080"
@@ -246,7 +247,12 @@ expression: v
       }
     },
     "plugins": {
-      "shutdown_timeout_secs": 5
+      "command": {
+        "*": {
+          "run": "ask",
+          "shutdown_timeout_secs": 5
+        }
+      }
     }
   },
   "events": [
@@ -257,17 +263,13 @@ expression: v
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
-      "type": "chat_response",
-      "message": "I'll run the tool with some arguments:\n\n"
-    },
-    {
-      "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "chatcmpl-tool-b5698c9449264def",
+      "id": "chatcmpl-tool-bf9053d15682a7a0",
       "name": "run_me",
       "arguments": {
-        "foo": "SGVsbG8sIHdvcmxkIQ==",
+        "foo": "Zm9v",
         "bar": [
+          "Zm9v",
           "Zm9v"
         ]
       }
@@ -275,14 +277,14 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "chatcmpl-tool-b5698c9449264def",
+      "id": "chatcmpl-tool-bf9053d15682a7a0",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully and returned **\"working!\"**."
+      "message": "The tool ran successfully and returned \"working!\" with the arguments:\n- `foo`: `\"foo\"`\n- `bar`: `[\"foo\", \"foo\"]`\n\nLet me know if you'd like me to run it again with different arguments or need anything else!"
     }
   ]
 }

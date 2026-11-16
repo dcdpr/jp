@@ -21,147 +21,133 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " run the tool with",
+                " run the `run",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " whatever",
+                "_me` tool.",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " arguments I want.",
+                " Let me look at",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " Let",
+                " the schema",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " me look",
+                ":\n\n- `",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " at the schema",
+                "foo`:",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ":\n",
+                " type",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "- foo",
+                " is",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ": string or",
+                " `[\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " null, required\n",
+                "string\", \"null",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "- bar: string",
+                "\"]`, default",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " or array, required",
+                " is `\"foo\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ", enum [\"foo",
+                "`, required\n",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\"],",
+                "- `bar`:",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " items enum",
+                " type is `[\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " [\"foo\", \"",
+                "string\", \"array",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "bar\"]\n\nWait",
+                "\"]`, enum",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ", bar",
+                " is `",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " has enum [\"foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\"] at the top",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " level and",
+                "[\"foo\"]`,",
             ),
             metadata: {},
         },
@@ -175,63 +161,133 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " enum [\"foo\",\"",
+                " are",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "bar\"].",
+                " `{\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " That's a bit",
+                "type\": \"string",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " odd. If bar",
+                "\", \"enum\":",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " is a string,",
+                " [\"foo\", \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " it must be \"",
+                "bar\"]}`,",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "foo\". If it",
+                " required\n\nSo `",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "'s an array,",
+                "foo` can",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " items must be \"",
+                " be a string or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " null (",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "default \"foo\").",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n`bar`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can be a string",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "must be \"foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\")",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " or an array of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " strings where",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " each item is \"",
             ),
             metadata: {},
         },
@@ -252,49 +308,77 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " me just",
+                " me provide some",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " call it",
+                " reasonable",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " with foo =",
+                " arguments. I'll",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"hello\" and",
+                " use `foo`",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " bar = [\"foo",
+                " as \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\", \"bar\"].",
+                "foo\" (",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "\n",
+                "the default) and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " `bar` as",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " an array containing",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"foo\" and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"bar\".\n",
             ),
             metadata: {},
         },
@@ -306,7 +390,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "chatcmpl-tool-a561ff74956ad924",
+                    id: "chatcmpl-tool-90a95cd2ae19790b",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -334,7 +418,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\"hello world\", \"bar\": ",
+                    "\"foo\", \"bar\": ",
                 ),
             ),
             metadata: {},
@@ -364,133 +448,133 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "I ra",
+                "The tool ran successfu",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "n the `run_m",
+                "lly and returned **\"wo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "e` too",
+                "rki",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "l with:",
+                "ng!",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\n\n- **`foo",
+                "\"**. \n\nHere's",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "`**: `\"hell",
+                " what I pa",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "o wo",
+                "ssed:\n- ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "rld\"` (a s",
+                "**`foo`**: ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "tring)\n-",
+                "`\"foo\"` (the default",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " **`bar`",
+                " string v",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "**: `[\"foo",
+                "alue)\n- ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\", \"bar",
+                "**`bar`**:",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\"]` (an array of val",
+                " `[\"foo\",",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "id enu",
+                " \"bar\"]` (a",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "m item",
+                "n arr",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s)\n\nAnd it retur",
+                "ay with both ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ned: **",
+                "allowed enu",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "working!",
+                "m",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "** 🎉",
+                " items)",
             ),
             metadata: {},
         },

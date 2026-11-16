@@ -1,6 +1,11 @@
+use std::fs;
+
+use camino::Utf8PathBuf;
+use camino_tempfile::tempdir;
 use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Action, Context};
 use pretty_assertions::assert_eq;
+use serde_json::{Value, json};
 
 use super::{super::error_message, *};
 
@@ -80,7 +85,7 @@ fn runs_both_targets_by_default() {
         ])
         .returns_success(PASSING_SUMMARY);
 
-    let result = swift_test_impl(&ctx(), None, None, &runner).unwrap();
+    let result = swift_test_impl(&ctx(), &[], None, &runner).unwrap();
 
     assert_eq!(
         result.unwrap_content(),
@@ -97,7 +102,7 @@ fn the_drive_target_skips_the_app_entirely() {
         .args(&["test", "--package-path", "apps/macos/Tools/jpdrive"])
         .returns_success(DRIVE_SUMMARY);
 
-    let result = swift_test_impl(&ctx(), None, Some("drive"), &runner).unwrap();
+    let result = swift_test_impl(&ctx(), &[], Some("drive"), &runner).unwrap();
 
     assert_eq!(
         result.unwrap_content(),
@@ -121,7 +126,7 @@ fn the_app_target_runs_only_the_unit_bundle() {
         ])
         .returns_success(PASSING_SUMMARY);
 
-    let result = swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap();
+    let result = swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap();
 
     assert_eq!(
         result.unwrap_content(),
@@ -137,7 +142,7 @@ fn the_ui_target_points_at_the_other_tool() {
     // cost a minute to say no.
     let runner = MockProcessRunner::never_called();
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("ui"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("ui"), &runner).unwrap());
 
     assert!(message.contains("swift_test_ui"), "got: {message}");
 }
@@ -159,7 +164,7 @@ fn keeps_the_message_under_a_recorded_issue() {
             status: ExitCode::from_code(1),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap());
 
     assert!(message.contains("recorded an issue"), "got: {message}");
     assert!(
@@ -204,7 +209,7 @@ fn passes_a_filter_to_each_runner_in_its_own_form() {
         ])
         .returns_success(DRIVE_SUMMARY);
 
-    swift_test_impl(&ctx(), Some("Tree"), Some("drive"), &drive).unwrap();
+    swift_test_impl(&ctx(), &["Tree".to_owned()], Some("drive"), &drive).unwrap();
 
     let app = prepared_app_only()
         .expect("xcodebuild")
@@ -220,7 +225,13 @@ fn passes_a_filter_to_each_runner_in_its_own_form() {
         ])
         .returns_success(PASSING_SUMMARY);
 
-    swift_test_impl(&ctx(), Some("WorkspaceReaderTests"), Some("app"), &app).unwrap();
+    swift_test_impl(
+        &ctx(),
+        &["WorkspaceReaderTests".to_owned()],
+        Some("app"),
+        &app,
+    )
+    .unwrap();
 }
 
 /// A filter naming a suite in the other target matches nothing there, which is
@@ -232,7 +243,13 @@ fn a_filter_matching_nothing_in_one_target_fails_the_run() {
         .returns_success("Test run with 0 tests passed after 0.001 seconds.");
 
     let message = error_message(
-        swift_test_impl(&ctx(), Some("WorkspaceReaderTests"), Some("drive"), &runner).unwrap(),
+        swift_test_impl(
+            &ctx(),
+            &["WorkspaceReaderTests".to_owned()],
+            Some("drive"),
+            &runner,
+        )
+        .unwrap(),
     );
 
     assert!(message.contains("no test ran"), "got: {message}");
@@ -251,8 +268,9 @@ fn an_xctest_zero_count_alone_is_not_a_pass() {
         .expect("xcodebuild")
         .returns_success(format!("{XCTEST_ZERO}\n** TEST SUCCEEDED **"));
 
-    let message =
-        error_message(swift_test_impl(&ctx(), Some("NoSuchSuite"), Some("app"), &runner).unwrap());
+    let message = error_message(
+        swift_test_impl(&ctx(), &["NoSuchSuite".to_owned()], Some("app"), &runner).unwrap(),
+    );
 
     assert!(message.contains("no test ran"), "got: {message}");
 }
@@ -265,7 +283,7 @@ fn drops_the_xctest_zero_count_beside_a_real_summary() {
         .expect("xcodebuild")
         .returns_success(format!("{XCTEST_ZERO}\n{PASSING_SUMMARY}"));
 
-    let result = swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap();
+    let result = swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap();
 
     assert_eq!(
         result.unwrap_content(),
@@ -281,8 +299,9 @@ fn a_run_with_no_summary_is_not_a_pass() {
         .expect("xcodebuild")
         .returns_success("Testing started\nnote: something unrelated");
 
-    let message =
-        error_message(swift_test_impl(&ctx(), Some("NoSuchSuite"), Some("app"), &runner).unwrap());
+    let message = error_message(
+        swift_test_impl(&ctx(), &["NoSuchSuite".to_owned()], Some("app"), &runner).unwrap(),
+    );
 
     assert!(message.contains("no test ran"), "got: {message}");
 }
@@ -295,7 +314,7 @@ fn recognizes_an_xctest_summary() {
         "Test Suite 'All tests' passed\n\t Executed 20 tests, with 0 failures in 1.234 seconds",
     );
 
-    let result = swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap();
+    let result = swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap();
 
     assert!(
         result.unwrap_content().contains("Executed 20 tests"),
@@ -314,7 +333,7 @@ fn drops_build_noise_from_the_summary() {
              JP.app/Contents/MacOS/JP\n{PASSING_SUMMARY}"
         ));
 
-    let result = swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap();
+    let result = swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap();
 
     assert_eq!(
         result.unwrap_content(),
@@ -332,7 +351,7 @@ fn reports_failing_tests() {
             status: ExitCode::from_code(65),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap());
 
     assert_eq!(
         message,
@@ -352,7 +371,7 @@ fn names_the_target_that_failed() {
             status: ExitCode::from_code(1),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("drive"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("drive"), &runner).unwrap());
 
     assert!(
         message.starts_with("DriveKit tests failed:"),
@@ -375,7 +394,7 @@ fn names_a_crash_rather_than_dumping_the_log() {
             status: ExitCode::from_code(1),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("drive"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("drive"), &runner).unwrap());
 
     assert_eq!(
         message,
@@ -401,7 +420,7 @@ fn shows_the_end_of_an_unrecognizable_failure() {
             status: ExitCode::from_code(1),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("drive"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("drive"), &runner).unwrap());
 
     assert!(
         message.contains("the run died rather than failing"),
@@ -432,7 +451,7 @@ fn reports_the_failing_test_and_the_summary() {
             status: ExitCode::from_code(65),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap());
 
     assert_eq!(
         message,
@@ -454,11 +473,188 @@ fn a_package_failure_stops_before_the_app_build() {
             status: ExitCode::from_code(1),
         });
 
-    let message = error_message(swift_test_impl(&ctx(), None, None, &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], None, &runner).unwrap());
 
     assert!(
         message.starts_with("DriveKit tests failed:"),
         "got: {message}"
+    );
+}
+
+/// Each name gets a `swift test` run of its own, and with more than one name
+/// each summary says which name it answers.
+#[test]
+fn runs_the_driver_package_once_per_name() {
+    let runner = MockProcessRunner::builder()
+        .expect("swift")
+        .args(&[
+            "test",
+            "--package-path",
+            "apps/macos/Tools/jpdrive",
+            "--filter",
+            "Tree",
+        ])
+        .returns_success(DRIVE_SUMMARY)
+        .expect("swift")
+        .args(&[
+            "test",
+            "--package-path",
+            "apps/macos/Tools/jpdrive",
+            "--filter",
+            "Act",
+        ])
+        .returns_success(DRIVE_SUMMARY);
+
+    let result = swift_test_impl(
+        &ctx(),
+        &["Tree".to_owned(), "Act".to_owned()],
+        Some("drive"),
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.unwrap_content(),
+        format!("```\nDriveKit `Tree`: {CLEANED_DRIVE}\nDriveKit `Act`: {CLEANED_DRIVE}\n```")
+    );
+}
+
+/// A name that matches nothing fails the run even when the name before it
+/// matched, and the failure names it.
+#[test]
+fn a_driver_name_matching_nothing_beside_one_that_matched_fails() {
+    let runner = MockProcessRunner::builder()
+        .expect("swift")
+        .returns_success(DRIVE_SUMMARY)
+        .expect("swift")
+        .returns_success("Test run with 0 tests passed after 0.001 seconds.");
+
+    let message = error_message(
+        swift_test_impl(
+            &ctx(),
+            &["Tree".to_owned(), "Typo".to_owned()],
+            Some("drive"),
+            &runner,
+        )
+        .unwrap(),
+    );
+
+    assert!(
+        message.starts_with("DriveKit `Typo` exited successfully but reported no test summary"),
+        "got: {message}"
+    );
+}
+
+/// A runner for an app run in `root` that writes a result bundle recording
+/// `executed` as the tests that ran.
+///
+/// `xcodebuild` is answered by creating the bundle directory, which is what
+/// tells the tool a bundle exists to be read; `xcrun` is answered with the
+/// document `xcresulttool` would print for it.
+fn app_run_recording(root: Utf8PathBuf, executed: &[&str]) -> MockProcessRunner {
+    let cases: Vec<Value> = executed
+        .iter()
+        .map(|id| json!({ "name": id, "nodeIdentifier": id, "nodeType": "Test Case" }))
+        .collect();
+    let document = json!({
+        "testNodes": [{ "name": "JPTests", "nodeType": "Unit test bundle", "children": cases }]
+    })
+    .to_string();
+
+    MockProcessRunner::responding(move |spec| {
+        let stdout = match spec.program.as_str() {
+            "xcodebuild" => {
+                fs::create_dir_all(root.join("tmp/swift-test/run.xcresult"))?;
+                PASSING_SUMMARY.to_owned()
+            }
+            "xcrun" => document.clone(),
+            _ => String::new(),
+        };
+
+        Ok(ProcessOutput {
+            stdout,
+            stderr: String::new(),
+            status: ExitCode::success(),
+        })
+    })
+}
+
+fn ctx_in(root: &Utf8PathBuf) -> Context {
+    Context {
+        root: root.clone(),
+        ..ctx()
+    }
+}
+
+/// Several names reach `xcodebuild` as one selector each in a single run, and
+/// the run writes a result bundle so the names can be checked against it.
+#[test]
+fn several_app_names_run_together_and_are_checked() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().to_owned();
+    let runner = app_run_recording(root.clone(), &[
+        "WorkspaceReaderTests/opens()",
+        "ThemeTests/resolves()",
+    ]);
+
+    let result = swift_test_impl(
+        &ctx_in(&root),
+        &["WorkspaceReaderTests".to_owned(), "ThemeTests".to_owned()],
+        Some("app"),
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.unwrap_content(),
+        format!("```\nJP: {CLEANED_SUMMARY}\n```")
+    );
+
+    let xcodebuild = runner
+        .calls()
+        .into_iter()
+        .find(|call| call.program == "xcodebuild")
+        .expect("the app run must have happened");
+    assert_eq!(xcodebuild.args, [
+        "test",
+        "-project",
+        "apps/macos/JP.xcodeproj",
+        "-scheme",
+        "JP",
+        "-destination",
+        "platform=macOS",
+        "-resultBundlePath",
+        "tmp/swift-test/run.xcresult",
+        "-only-testing:JPTests/WorkspaceReaderTests",
+        "-only-testing:JPTests/ThemeTests",
+    ]);
+}
+
+/// `xcodebuild` passes over a selector that matches nothing and still prints a
+/// passing summary for the rest, so the result bundle is what names the typo.
+#[test]
+fn an_app_name_missing_from_the_result_bundle_fails_the_run() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().to_owned();
+    let runner = app_run_recording(root.clone(), &["WorkspaceReaderTests/opens()"]);
+
+    let message = error_message(
+        swift_test_impl(
+            &ctx_in(&root),
+            &["WorkspaceReaderTests".to_owned(), "NoSuchSuite".to_owned()],
+            Some("app"),
+            &runner,
+        )
+        .unwrap(),
+    );
+
+    assert_eq!(
+        message,
+        format!(
+            "These names matched no test in the app's unit tests, and `xcodebuild` passed over \
+             them rather than failing:\n\n```\nNoSuchSuite\n```\n\nWhat did run:\n\n```\nJP: \
+             {CLEANED_SUMMARY}\n```"
+        )
     );
 }
 
@@ -471,7 +667,7 @@ fn stops_when_the_library_fails_to_build() {
         .expect("just")
         .returns_error("error: could not compile `jp_ffi`");
 
-    let message = error_message(swift_test_impl(&ctx(), None, Some("app"), &runner).unwrap());
+    let message = error_message(swift_test_impl(&ctx(), &[], Some("app"), &runner).unwrap());
 
     assert!(
         message.starts_with("Building `jp_ffi` failed:"),

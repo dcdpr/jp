@@ -360,6 +360,28 @@ the root of the configuration:
 $ jp query --cfg '{"assistant": {"model": {"parameters": {"temperature": 0.2}}}}' "..."
 ```
 
+Each key in the object behaves like its dot-delimited equivalent.
+Setting a map entry merges it into the existing map without removing entries
+from earlier configuration layers:
+
+```bash
+$ jp --cfg '{"plugins": {"command": {"ticket": {"options": {"assistant": "Ada"}}}}}'
+$ jp --cfg 'plugins.command.ticket.options.assistant=Ada'   # equivalent
+```
+
+A list in the object replaces the existing list, just like `:=`.
+To replace an entire map instead of merging into it, use `:=` on the map key
+directly (for example, `plugins.command.ticket.options:={...}`).
+
+`plugins.command` and `conversation.tools` combine their `'*'` defaults and
+named entries in a single table, so `:=` on either key merges the named entries
+rather than replacing the map.
+To replace all named entries, pass a map wrapper with `"strategy": "replace"`:
+
+```bash
+$ jp --cfg 'plugins.command:={"value": {"ticket": {"run": "allow"}}, "strategy": "replace"}'
+```
+
 #### Reset Keywords
 
 Two reserved uppercase keywords discard everything loaded so far, and layer

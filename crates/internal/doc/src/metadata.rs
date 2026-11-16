@@ -230,13 +230,6 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
             .map(|field| field.value)
             .collect()
     }
-
-    /// Whether the line at `index` belongs to the field `key`, continuation
-    /// lines included.
-    #[must_use]
-    pub fn is_field_line(&self, key: &str, index: usize) -> bool {
-        field_lines(self.lines, key).is_some_and(|range| range.contains(&index))
-    }
 }
 
 /// The value of the field spanning `range`: what follows its key, and its
@@ -302,6 +295,11 @@ impl Document {
     /// The line count is fixed, so the document keeps its line endings.
     pub fn lines_mut(&mut self) -> &mut [String] {
         &mut self.lines
+    }
+
+    /// Retain only the lines for which `keep` returns `true`.
+    pub fn retain_lines(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.lines.retain(|line| keep(line));
     }
 
     /// The metadata block, read.

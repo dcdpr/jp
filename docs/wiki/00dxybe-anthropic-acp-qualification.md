@@ -79,7 +79,7 @@ No API-key fallback is configured.
 From the repository root, with the pinned runtime on PATH:
 
 ```sh
-RECORD=1 cargo test -p jp_llm cache_reconstruction -- --nocapture
+RECORD=1 just test -p jp_llm cache_reconstruction --no-capture
 cargo insta accept
 ```
 

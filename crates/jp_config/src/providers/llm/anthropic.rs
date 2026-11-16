@@ -63,7 +63,7 @@ pub struct AnthropicConfig {
     ///
     /// Defaults to `acp`: use `claude-agent-acp` and Claude Code's active
     /// subscription login.
-    /// Install `@agentclientprotocol/claude-agent-acp@0.81.0` and sign in with
+    /// Install `@agentclientprotocol/claude-agent-acp@0.102.0` and sign in with
     /// `jp provider llm auth login anthropic --name personal`.
     /// Named subscriptions select their registered login directory.
     ///

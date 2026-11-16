@@ -9,7 +9,7 @@ use jp_attachment::AttachmentContent;
 use jp_config::{
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningConfig,
+        parameters::{ParametersConfig, ReasoningConfig, ReasoningEffort},
     },
     providers::llm::vllm::VllmConfig,
 };
@@ -22,6 +22,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails,
+    lookup::find_listed,
     openai_compat::{assemble_event_stream, convert_events, convert_tool_choice, convert_tools},
     trace_to_tmpfile,
 };
@@ -50,12 +51,9 @@ impl Provider for Vllm {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, Error> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| ModelDetails::empty(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>, Error> {
@@ -212,22 +210,13 @@ fn create_request(
         "Built vLLM request."
     );
 
-    // Models such as Qwen3 default to thinking-on, so
-    // `chat_template_kwargs.enable_thinking` tells the chat template whether to
-    // prompt the model to think at all. Models whose template doesn't read the
-    // kwarg silently ignore it. DeepSeek templates read `thinking` instead, so
-    // both keys are sent and each family's template uses the one it knows.
-    let reasoning_enabled = !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off));
-
     let mut body = json!({
         "model": slug,
         "messages": messages,
         "stream": true,
-        "chat_template_kwargs": {
-            "enable_thinking": reasoning_enabled,
-            "thinking": reasoning_enabled,
-        },
     });
+
+    apply_reasoning(&mut body, model, parameters);
 
     if let Some(temperature) = parameters.temperature {
         body["temperature"] = json!(temperature);
@@ -265,6 +254,61 @@ fn create_request(
     }
 
     Ok((body, is_structured, decoders))
+}
+
+/// Add the reasoning fields for `parameters` to the request `body`.
+///
+/// When `parameters.reasoning` is `None`, no reasoning fields are added,
+/// leaving thinking to the model's chat template and the server's
+/// `--default-chat-template-kwargs`.
+///
+/// A named effort, `off` included, is sent as `reasoning_effort` alone. vLLM
+/// rewrites it through `--reasoning-effort-map` and derives the chat template's
+/// thinking switch from the result, but only when the request does not set that
+/// switch itself, so no kwarg accompanies it.
+/// This needs a vLLM that translates the effort (vllm-project/vllm#43401, May
+/// 2026); older releases reject `none`, `minimal`, `xhigh`, and `max`.
+///
+/// `auto` and a token count name no effort for the server to translate, so they
+/// turn thinking on through chat template kwargs.
+/// Templates disagree on the kwarg's name: Qwen3's reads `enable_thinking`, and
+/// the `DeepSeek` V3.1 family's reads `thinking`.
+/// Both are sent, and a template ignores the one it does not declare.
+fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &ParametersConfig) {
+    let effort = match parameters.reasoning {
+        Some(ReasoningConfig::Off) => ReasoningEffort::None,
+        reasoning => match model.custom_reasoning_config(reasoning, model.max_output_tokens) {
+            Some(custom) => custom.effort,
+            None => return,
+        },
+    };
+
+    let effort = match effort {
+        ReasoningEffort::None => "none",
+        ReasoningEffort::Xlow => "minimal",
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::Max => "max",
+        ReasoningEffort::Auto => {
+            body["chat_template_kwargs"] = thinking_on();
+            return;
+        }
+        ReasoningEffort::Absolute(tokens) => {
+            body["thinking_token_budget"] = json!(tokens);
+            body["chat_template_kwargs"] = thinking_on();
+            return;
+        }
+    };
+
+    body["reasoning_effort"] = json!(effort);
+}
+
+/// The chat template kwargs that switch thinking on, under every name a served
+/// template is known to read.
+fn thinking_on() -> Value {
+    json!({ "enable_thinking": true, "thinking": true })
 }
 
 /// A `/v1/models` listing from vLLM.
@@ -347,10 +391,12 @@ static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
     use_replay_credentials: |config| {
         config.vllm.api_key_env = super::replay_credential_env().into();
     },
+    // Matches the recording deployment's model and its `max_model_len` context
+    // window.
     model: || ModelDetails {
-        id: "vllm/Qwen/Qwen3.8-Flash-Next-NVFP4".parse().unwrap(),
+        id: "vllm/Qwen/Qwen3.8-27B-FP8".parse().unwrap(),
         display_name: None,
-        context_window: Some(131_072),
+        context_window: Some(1_000_000),
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,

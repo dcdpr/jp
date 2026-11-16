@@ -35,6 +35,13 @@ where
         return Ok(Some(with_dedup_flag(next, dedup)));
     }
 
+    // An empty `next` means the incoming layer left the field unset. Return
+    // `prev` as-is so the default deduplication pass below does not strip
+    // duplicate elements from lists that the layer did not modify.
+    if next.is_empty() {
+        return Ok(Some(prev));
+    }
+
     let mut prev_value = match prev {
         MergeableVec::Vec(v) => v,
         MergeableVec::Merged(v) => v.value,
@@ -114,6 +121,37 @@ where
     } else {
         next
     };
+
+    vec_with_strategy(prev, next, context)
+}
+
+/// Normalization for partial list items before merge deduplication.
+///
+/// A partial field left `None` and the same field set to `Some(default)`
+/// resolve to the same value, but compare unequal in [`PartialEq`].
+/// Normalizing both to a canonical form allows list deduplication to treat them
+/// as equal.
+pub trait CanonicalItem {
+    /// Normalize `self` in place so equivalent partials compare equal.
+    fn canonicalize(&mut self);
+}
+
+/// Merge two `MergeableVec` values after normalizing items via
+/// [`CanonicalItem`].
+///
+/// Normalizes every element in `prev` and `next` before merging and
+/// deduplicating with [`vec_with_strategy`], so equivalent partials (for
+/// example, `position: None` and `position: Some(0)`) are deduplicated.
+pub fn canonical_vec_with_strategy<T>(
+    mut prev: MergeableVec<T>,
+    mut next: MergeableVec<T>,
+    context: &(),
+) -> MergeResult<MergeableVec<T>>
+where
+    T: CanonicalItem + Clone + PartialEq + Serialize + DeserializeOwned + Schematic,
+{
+    prev.iter_mut().for_each(CanonicalItem::canonicalize);
+    next.iter_mut().for_each(CanonicalItem::canonicalize);
 
     vec_with_strategy(prev, next, context)
 }

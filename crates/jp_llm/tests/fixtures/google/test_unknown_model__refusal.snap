@@ -1,0 +1,10 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    Stream {
+        kind: UnknownModel,
+        message: "API Error: {\"status\":404,\"message\":{\"error\":{\"code\":404,\"message\":\"models/foobarbaz is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.\",\"status\":\"NOT_FOUND\"}},\"context\":{\"cause\":\"Invalid status code\"}}",
+    },
+]

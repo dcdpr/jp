@@ -67,6 +67,27 @@ pub struct GoogleConfig {
     /// The base URL to use for API requests.
     #[setting(default = "https://generativelanguage.googleapis.com/v1beta")]
     pub base_url: String,
+
+    /// How many seconds Google may send nothing while working on a response,
+    /// before `assistant.request.stream_idle_timeout_secs` starts counting.
+    ///
+    /// Defaults to `300`.
+    /// Set to `0` to apply only the idle timeout, as for other providers.
+    ///
+    /// Google sends nothing, not even response headers, until the first part of
+    /// a response exists, and it sends a tool call only once all of its
+    /// arguments are written.
+    /// A response to a large conversation, or one that opens with a large tool
+    /// call, can therefore be silent for minutes while healthy.
+    /// Each attempt that times out resends the whole conversation and is billed
+    /// again.
+    ///
+    /// The allowance applies to every silent stretch, before the first part and
+    /// between parts.
+    /// A connection that has died is detected after this allowance plus one
+    /// idle timeout.
+    #[setting(default = 300)]
+    pub silence_allowance_secs: u32,
 }
 
 impl Validator for GoogleConfig {
@@ -91,6 +112,7 @@ impl AssignKeyValue for PartialGoogleConfig {
             }
             "api_key_env" => self.api_key_env = kv.try_some_value()?,
             "base_url" => self.base_url = kv.try_some_string()?,
+            "silence_allowance_secs" => self.silence_allowance_secs = kv.try_some_u32()?,
             _ => return missing_key(&kv),
         }
 
@@ -104,6 +126,10 @@ impl PartialConfigDelta for PartialGoogleConfig {
             auth: delta_opt(self.auth.as_ref(), next.auth),
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+            silence_allowance_secs: delta_opt(
+                self.silence_allowance_secs.as_ref(),
+                next.silence_allowance_secs,
+            ),
         }
     }
 }
@@ -114,6 +140,9 @@ impl FillDefaults for PartialGoogleConfig {
             auth: self.auth.or(defaults.auth),
             api_key_env: self.api_key_env.or(defaults.api_key_env),
             base_url: self.base_url.or(defaults.base_url),
+            silence_allowance_secs: self
+                .silence_allowance_secs
+                .or(defaults.silence_allowance_secs),
         }
     }
 }
@@ -126,6 +155,10 @@ impl ToPartial for GoogleConfig {
             auth: partial_opt(&self.auth, defaults.auth),
             api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
             base_url: partial_opt(&self.base_url, defaults.base_url),
+            silence_allowance_secs: partial_opt(
+                &self.silence_allowance_secs,
+                defaults.silence_allowance_secs,
+            ),
         }
     }
 }

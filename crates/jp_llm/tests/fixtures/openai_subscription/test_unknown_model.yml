@@ -1,0 +1,36 @@
+when:
+  path: /backend-api/codex/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Test message"
+        }
+      ],
+      "reasoning": {
+        "effort": "none",
+        "summary": "auto"
+      },
+      "store": false,
+      "stream": true,
+      "tool_choice": "auto",
+      "tools": []
+    }
+then:
+  status: 400
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "detail": "The 'foobarbaz' model is not supported when using Codex with a ChatGPT account.",
+      "error": {
+        "type": "invalid_request_error",
+        "code": "model_not_found",
+        "message": "The 'foobarbaz' model is not supported when using Codex with a ChatGPT account."
+      }
+    }

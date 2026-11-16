@@ -14,6 +14,10 @@ docs/rfd/000-*-template.md text eol=lf
 docs/rfd/.priority.json text eol=lf
 docs/ticket/.board.json text eol=lf
 
+# What `qual diff --format json` prints, which a test compares against its
+# output byte for byte.
+crates/internal/qual/fixtures/** text eol=lf
+
 # Written by `jp vite sync` from the plugin's own copy, so GitHub collapses it
 # in review.
 docs/.vitepress/jp-vite/** linguist-generated

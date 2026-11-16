@@ -1940,6 +1940,56 @@ ticket-import NNN *ARGS: _install-ticket
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
 
+# Pull uncommitted changes from the chat bridge (`jp serve chat`) on HOST into a
+# local review worktree and reset the remote checkout.
+#
+# DIR is the bridge's repository checkout on HOST. The recipe captures the
+# remote `HEAD` and a binary diff of all uncommitted changes (including
+# untracked files) under `jp-serve-chat.lock`, creates a local worktree at that
+# base commit, and stages the diff there. Commit the changes as your own, rebase
+# onto `origin/main`, and open a pull request.
+#
+# After the patch applies locally, a second locked SSH call resets the remote
+# checkout only if `HEAD` and the diff's SHA-256 hash are unchanged; if a turn
+# or pull ran in the meantime, the remote checkout is left untouched so you can
+# run `just chat-take` again. Both calls run
+# `crates/plugins/command/serve-chat/take.sh` on HOST, which stops at the first
+# failing command.
+#
+#   just chat-take bridge-host src/jp
+[group('ticket')]
+chat-take HOST DIR WORKTREE="../jp-chat-take":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    patch="$(mktemp)"
+    trap 'rm -f "$patch"' EXIT
+
+    # Pass the script via stdin so HOST's login shell only needs to invoke `sh`.
+    take={{quote(justfile_directory() + "/crates/plugins/command/serve-chat/take.sh")}}
+    ssh {{quote(HOST)}} sh -s -- snapshot {{quote(DIR)}} < "$take" > "$patch"
+
+    base="$(head -n 1 "$patch")"
+    if [ "$(wc -l < "$patch")" -le 1 ]; then
+        echo "Nothing to take: the bridge's checkout is clean."
+        exit 0
+    fi
+    sum="$(tail -n +2 "$patch" | shasum -a 256 | cut -d ' ' -f 1)"
+
+    git fetch --quiet origin
+    if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+        echo "The bridge's checkout is at $base, which isn't here after fetching origin." >&2
+        exit 1
+    fi
+
+    branch="chat-take-$(date +%Y%m%d-%H%M%S)"
+    git worktree add --quiet -b "$branch" {{quote(WORKTREE)}} "$base"
+    tail -n +2 "$patch" | git -C {{quote(WORKTREE)}} apply --index
+
+    ssh {{quote(HOST)}} sh -s -- reset {{quote(DIR)}} "$base" "$sum" < "$take"
+
+    echo "Taken into {{WORKTREE}} on $branch, staged. The bridge's checkout is clean again."
+
 # Locally develop the documentation, with hot-reloading.
 #
 # Runs through `jp vite serve`, which keeps the site's settings in step with the
@@ -2011,16 +2061,6 @@ check-and-fix *FLAGS:
 qual *FLAGS: _install-rustqual
     rustqual -c .config/rustqual/config.toml --no-fail {{FLAGS}}
     rustqual -c .config/rustqual/dry.toml --no-fail {{FLAGS}}
-
-# Re-record the rustqual baselines that `qual-ci` gates against.
-#
-# Run after a change that deliberately moves the finding count — a refactor
-# that removes findings, or an accepted batch of new ones — and commit the
-# result alongside it, so the diff shows what moved and why.
-[group('check')]
-qual-baseline: _install-rustqual
-    rustqual -c .config/rustqual/config.toml --no-fail --save-baseline .config/rustqual/baseline.json
-    rustqual -c .config/rustqual/dry.toml --no-fail --save-baseline .config/rustqual/baseline-dry.json
 
 # Run tests, using nextest.
 [group('check')]
@@ -2267,95 +2307,36 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 
 # Check structural code quality on CI.
 #
-# Gates on per-category regression against the committed baselines rather than
-# on an absolute score. The workspace carries known findings; the bar for new
-# code is "no worse than what is already there". Refresh with
-# `just qual-baseline`.
+# Runs `qual` (`crates/internal/qual`) to fail on any `rustqual` finding
+# introduced since the merge base of `HEAD` and `BASE`, as well as any finding
+# for an enforced rule in `.config/rustqual/qual.toml`. Pre-existing findings in
+# non-enforced rules pass.
 #
-# rustqual's own `--compare --fail-on-regression` is deliberately unused. It
-# prints a finding delta, but defines a regression as `quality_score` dropping,
-# and that score is a ratio over every function in the workspace: a change that
-# adds compliant code alongside a new finding dilutes the score enough to hold
-# it level, and the gate passes. A baseline it cannot parse is worse — rustqual
-# prints the error, reports "not regressed", and exits 0 under `--no-fail`.
+# When `BASE` is git's null object ID (sent by GitHub when a push creates a
+# branch), `qual` skips the base comparison and checks only enforced rules.
 #
-# So rustqual runs only as a report generator, into a temp file, and
-# `regressions.jq` decides the verdict: any count above its baseline fails the
-# job, and a baseline that cannot be compared is an error rather than a pass.
-#
-# Output is captured. Each pass prints every baselined finding on every run,
-# which buries the verdict; on success only the totals are shown, on failure the
-# categories that moved. `--format github` is deliberately absent: it annotates
-# all baselined findings rather than the new ones, and GitHub caps the display
-# at ten, so the annotations would hide the regression behind existing findings.
-#
-# Needs `jq`, which GitHub's runners ship.
+# Emits `::error` workflow annotations to stdout and, when
+# `$GITHUB_STEP_SUMMARY` is set, appends a Markdown summary with per-rule
+# remediation guidance.
 [group('ci')]
-qual-ci: _install-rustqual _install_ci_matchers
+qual-ci BASE="origin/main": _install-rustqual _install_ci_matchers
     #!/usr/bin/env sh
     set -eu
 
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/rustqual.XXXXXX")
-    trap 'rm -rf "$tmp"' EXIT
-
-    filter=.config/rustqual/regressions.jq
-    main=.config/rustqual/baseline.json
-
-    # Prove the gate can still fail before trusting it to pass. A gate that has
-    # broken open is invisible by definition, so both directions are checked on
-    # every run: a baseline one finding below the current one has to read as a
-    # regression, and an unparseable baseline has to be an error.
-    canary() {
-        jq '.magic_number_warnings = (.magic_number_warnings // 0) - 1' \
-            "$main" > "$tmp/lowered.json" || return 1
-        out=$(jq -nr -f "$filter" \
-            --slurpfile old "$tmp/lowered.json" --slurpfile new "$main" 2>&1) || {
-            echo "::error::the regression filter errored on its canary input"
-            printf '%s\n' "$out"
-            return 1
-        }
-        [ -n "$out" ] || {
-            echo "::error::the regression filter reported nothing for a known regression"
-            return 1
-        }
-        printf 'not json\n' > "$tmp/broken.json" || return 1
-        if jq -nr -f "$filter" \
-            --slurpfile old "$tmp/broken.json" --slurpfile new "$main" >/dev/null 2>&1
-        then
-            echo "::error::the regression filter accepted a malformed baseline"
-            return 1
-        fi
-    }
-
-    qual_pass() {
-        base=".config/rustqual/$2"
-        fresh="$tmp/$2"
-        log=$(rustqual -c ".config/rustqual/$1" --no-fail --save-baseline "$fresh" 2>&1) || {
-            echo "::error::rustqual could not analyse the workspace in the $1 pass"
-            printf '%s\n' "$log"
-            return 1
-        }
-        over=$(jq -nr -f "$filter" --slurpfile old "$base" --slurpfile new "$fresh" 2>&1) || {
-            echo "::error::cannot compare the $1 pass against $base"
-            printf '%s\n' "$over"
-            return 1
-        }
-        totals=$(jq -nr --slurpfile old "$base" --slurpfile new "$fresh" \
-            '"findings \($old[0].total_findings) -> \($new[0].total_findings)"') || return 1
-        [ -z "$over" ] || {
-            echo "::error::rustqual regression in the $1 pass ($totals)"
-            printf '%s\n' "$over"
-            echo "Fix the findings above, or run \`just qual-baseline\` and commit the result when the new count is deliberate."
-            return 1
-        }
-        echo "$1: no category above baseline ($totals)"
-    }
-
-    canary
+    qual="cargo run {{quiet_flag}} --locked --package qual --"
 
     status=0
-    qual_pass config.toml baseline.json || status=1
-    qual_pass dry.toml baseline-dry.json || status=1
+    $qual diff --base "{{BASE}}" --format github || status=$?
+
+    # Exit code 1 means a failing verdict (still summarized below); exit codes
+    # > 1 mean `qual` errored before producing a verdict.
+    if [ "$status" -gt 1 ]; then
+        echo "::error::qual could not compare the workspace against {{BASE}} (exit code $status)"
+    elif [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        # Reuses the base report cached by the first `qual diff` call above.
+        $qual diff --base "{{BASE}}" --format markdown >> "$GITHUB_STEP_SUMMARY" || true
+    fi
+
     exit "$status"
 
 # Check code formatting on CI.
@@ -2517,8 +2498,19 @@ docs-ci: _install_ci_matchers
     cargo doc --locked --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
 
 # Generate code coverage on CI.
+#
+# `--no-report` turns off the cleanup `cargo llvm-cov` otherwise does before a
+# run, so workspace test binaries restored from the cache stay in `target/`. A
+# crate whose build hash changed (a new dependency, say) gets a new binary next
+# to the stale one, and the report counts the stale binary's regions, mapped
+# onto the new source, as uncovered. The `cargo clean` below removes the
+# workspace crates' artifacts and keeps the cached dependencies.
+#
+# It is `cargo clean`, not `cargo llvm-cov clean --workspace`: the latter cleans
+# only the `dev` profile's directory, and these builds use `coverage`.
 [group('ci')]
 coverage-ci: _coverage-setup _install_ci_matchers
+    cargo clean --locked --workspace --profile=coverage --target-dir=target/llvm-cov-target
     cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info --profile=coverage
@@ -2646,6 +2638,21 @@ _install-wiki *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/wiki --debug {{args}}
+
+# Build and install the `jp-serve-chat` command plugin that backs `jp serve
+# chat`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`;
+# the machine running the bridge approves it with
+# `plugins.command.serve-chat.run = "allow"`.
+_install-serve-chat *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-serve-chat >/dev/null 2>&1; then
+        echo "Skipping jp-serve-chat rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/serve-chat --debug {{args}}
 
 # Install the four plugins the site needs, from this checkout.
 #

@@ -168,7 +168,7 @@ fn sync_offers_each_tool_the_labels() {
         &json!({ "domain": { "description": "The subsystem", "values": ["llm", "storage"] } }),
     );
 
-    let output = sync(dir.path(), &config, &options).unwrap();
+    let output = sync(dir.path(), &config, &options, false).unwrap();
 
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(
@@ -210,7 +210,7 @@ fn sync_describes_the_rules_in_terms_of_a_page() {
         "type": { "description": "The kind", "values": ["note", "study"], "min": 1, "max": 1 },
     }));
 
-    sync(dir.path(), &config, &options).unwrap();
+    sync(dir.path(), &config, &options, false).unwrap();
 
     let schemas = r#"
 [conversation.tools.wiki_create.parameters.labels]
@@ -236,7 +236,7 @@ fn sync_without_labels_says_the_tools_take_any() {
         "wiki_list": declaring("plugin.command.wiki.list", &["labels"]),
     }}});
 
-    let output = sync(dir.path(), &config, &options(&Value::Null)).unwrap();
+    let output = sync(dir.path(), &config, &options(&Value::Null), false).unwrap();
 
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(

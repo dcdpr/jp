@@ -36,7 +36,7 @@ use error::Result;
 pub use handle::ConversationHandle;
 pub use id::Id;
 use jp_config::{AppConfig, PartialAppConfig};
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
         ConversationFilter, ConversationIndexEntry, FsStorageBackend, InMemoryStorageBackend,
@@ -838,6 +838,29 @@ impl Workspace {
             })
             .ok_or_else(|| Error::not_found("Conversation events", id))?;
         Ok(arc.read())
+    }
+
+    /// Read a conversation's events in stream order without resolving its
+    /// config.
+    ///
+    /// If the stream is already loaded in memory, clones the events from the
+    /// in-memory stream (including unpersisted changes).
+    /// Otherwise, loads the events directly from the backing store without
+    /// resolving the conversation's config or caching the stream in the
+    /// workspace.
+    ///
+    /// Returns an error if the events cannot be loaded from the backing store.
+    pub fn read_events(&self, h: &ConversationHandle) -> Result<Vec<ConversationEvent>> {
+        let id = h.id();
+        if let Some(stream) = self.state.events.get(&id).and_then(OnceLock::get) {
+            return Ok(stream
+                .read()
+                .iter_events_by_turn()
+                .map(|event| event.event.clone())
+                .collect());
+        }
+
+        Ok(self.loader.load_conversation_events(&id)?)
     }
 
     /// Acquire an exclusive cross-process lock on a conversation.

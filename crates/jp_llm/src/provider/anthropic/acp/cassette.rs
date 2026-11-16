@@ -104,6 +104,7 @@ const SENSITIVE: &[&[&str]] = &[
     &["params", "authStatus", "account", "organization"],
     &["params", "cwd"],
     &["params", "message", "cwd"],
+    &["params", "message", "original_cwd"],
 ];
 
 /// Replace the value at `path`, if the message has one there.

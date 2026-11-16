@@ -1,0 +1,57 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_015BndXVPHm1N6XAJGUJiX3N",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Paris"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_0189rNnEwiZZfycECE4s81nc",
+                        name: "get_weather",
+                        arguments: {
+                            "city": String("Tokyo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Based on the weather data:\n\n**Paris**: 18°C and sunny ☀\u{fe0f}\n\n**Tokyo**: 18°C and sunny ☀\u{fe0f}\n\nInterestingly, both cities are currently experiencing the same weather conditions - a pleasant 18 degrees Celsius with sunny skies. This is quite a coincidence! Both cities should have beautiful weather today.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

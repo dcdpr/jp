@@ -4,41 +4,6 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 1,
-            part: Message(
-                "I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "'ll run the tool wi",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "th some ar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "gum",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ents:\n\n",
-            ),
-            metadata: {},
-        },
         Flush {
             index: 0,
             metadata: {},
@@ -47,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "chatcmpl-tool-b5698c9449264def",
+                    id: "chatcmpl-tool-bf9053d15682a7a0",
                     name: "run_me",
                     decoding: Some(
                         ArgumentDecoding {
@@ -75,7 +40,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\"Hello, world!\", \"bar\": ",
+                    "\"foo\", \"bar\": ",
                 ),
             ),
             metadata: {},
@@ -84,7 +49,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "[\"foo\"]}",
+                    "[\"foo\", \"foo\"]}",
                 ),
             ),
             metadata: {},
@@ -112,21 +77,119 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "lly and retur",
+                "lly and returned \"wo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ned **\"worki",
+                "rking",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ng!\"**.",
+                "!\" with the ar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "g",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "uments:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\n- `f",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "oo`: `\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo\"`\n- `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "bar`: `[\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo\", \"f",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "oo\"]`\n\nLet me ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "know if you'd ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "like me to run i",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "t again with different argum",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ents ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "or need anythin",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "g else!",
             ),
             metadata: {},
         },

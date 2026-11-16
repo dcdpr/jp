@@ -55,7 +55,7 @@ pub(super) struct Account {
 
 impl AgentAuth {
     pub(super) fn is_subscription(&self) -> bool {
-        matches!(self, Self::Account { account } if matches!(account.plan.as_str(), "Claude Pro" | "Claude Max" | "pro" | "max"))
+        matches!(self, Self::Account { account } if matches!(account.plan.as_str(), "Claude Pro" | "Claude Max" | "Claude Ultra" | "pro" | "max" | "ultra"))
     }
 }
 
@@ -523,11 +523,14 @@ impl State {
                             )));
                         }
                     };
-                    let kind = if matches!(&rejection, Error::RequestRejected { detail, .. } if looks_like_context_window_error(detail))
-                    {
-                        StreamErrorKind::ContextWindowExceeded
-                    } else {
-                        StreamErrorKind::Other
+                    let kind = match &rejection {
+                        Error::ModelUnavailable { .. } => StreamErrorKind::UnknownModel,
+                        Error::RequestRejected { detail, .. }
+                            if looks_like_context_window_error(detail) =>
+                        {
+                            StreamErrorKind::ContextWindowExceeded
+                        }
+                        _ => StreamErrorKind::Other,
                     };
                     return Err(
                         StreamError::new(kind, rejection.to_string()).with_source(rejection)

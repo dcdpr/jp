@@ -1,0 +1,17 @@
+when:
+  path: /v1/models/foobarbaz
+  method: GET
+then:
+  status: 404
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "type": "error",
+      "error": {
+        "type": "not_found_error",
+        "message": "model: foobarbaz"
+      },
+      "request_id": "req_011CgoFzdMmjtx3LHViwn7Xj"
+    }

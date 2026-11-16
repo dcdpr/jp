@@ -56,6 +56,9 @@ apps/macos/Tools/*/.build/
 .git/
 /tmp
 **/fixtures/
+# Loop harness runs. Turn logs quote the repository back at every search; the
+# assistant reads a mission's ledger by naming it.
+.config/loop/missions/*/state/
 docs2/
 lcov.info
 *.log

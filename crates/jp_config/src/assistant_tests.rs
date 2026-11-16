@@ -460,3 +460,79 @@ fn test_assistant_config_deserialize() {
         assert_eq!(result.unwrap(), expected);
     }
 }
+
+/// Merge `file` into the base config, resolve it, then merge `file` again onto
+/// the resolved config's partial representation.
+///
+/// This reproduces passing `--cfg` on a conversation that already loaded the
+/// same config file: the conversation base is a resolved config converted back
+/// to a partial via [`ToPartial`], while the `--cfg` file is a raw partial.
+fn apply_twice(file: &crate::PartialAppConfig) -> (crate::AppConfig, crate::AppConfig) {
+    let mut base = crate::AppConfig::new_test().to_partial();
+    base.merge(&(), file.clone()).unwrap();
+    let once = crate::util::build(base).unwrap();
+
+    let mut partial = once.to_partial();
+    partial.merge(&(), file.clone()).unwrap();
+    let twice = crate::util::build(partial).unwrap();
+
+    (once, twice)
+}
+
+fn section_file(position: Option<i32>) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial.assistant.system_prompt_sections = MergeableVec::Vec(vec![PartialSectionConfig {
+        content: Some("read git history".into()),
+        tag: Some("git_reading_skill".into()),
+        title: None,
+        position,
+    }]);
+    partial
+}
+
+fn instructions_file(position: Option<isize>) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial.assistant.instructions = MergeableVec::Vec(vec![PartialInstructionsConfig {
+        title: Some("Git Staging".into()),
+        items: Some(vec!["stage related hunks only".into()]),
+        position,
+        ..Default::default()
+    }]);
+    partial
+}
+
+#[test]
+fn redeclared_section_without_position_is_deduplicated() {
+    let (once, twice) = apply_twice(&section_file(None));
+
+    assert_eq!(once.assistant.system_prompt_sections.len(), 1);
+    assert_eq!(twice.assistant.system_prompt_sections.len(), 1);
+}
+
+#[test]
+fn redeclared_section_with_default_position_is_deduplicated() {
+    let (once, twice) = apply_twice(&section_file(Some(0)));
+
+    assert_eq!(once.assistant.system_prompt_sections.len(), 1);
+    assert_eq!(twice.assistant.system_prompt_sections.len(), 1);
+}
+
+#[test]
+fn redeclared_instructions_without_position_are_deduplicated() {
+    let (once, twice) = apply_twice(&instructions_file(None));
+
+    assert_eq!(
+        twice.assistant.instructions.len(),
+        once.assistant.instructions.len()
+    );
+}
+
+#[test]
+fn redeclared_instructions_with_default_position_are_deduplicated() {
+    let (once, twice) = apply_twice(&instructions_file(Some(0)));
+
+    assert_eq!(
+        twice.assistant.instructions.len(),
+        once.assistant.instructions.len()
+    );
+}

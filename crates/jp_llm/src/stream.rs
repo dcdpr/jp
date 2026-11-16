@@ -238,13 +238,14 @@ pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> Even
 }
 
 /// Inject a synthetic [`Event::KeepAlive`] every `interval` while a response is
-/// open but silent, for at most `allowance` of continuous silence.
+/// in flight but silent, for at most `allowance` of continuous silence.
 ///
-/// A response opens with its first item and closes with [`Event::Finished`].
-/// Some providers generate parts of a response without sending anything: Google
-/// delivers a function call as one complete part once the model has finished
-/// writing its arguments, so a large call reads as a long silence in the middle
-/// of an otherwise healthy response.
+/// The response is in flight from the first poll until [`Event::Finished`].
+/// Some providers send nothing while the model works: Google withholds even its
+/// response headers until the first part exists, and delivers a function call
+/// as one complete part once the model has finished writing its arguments.
+/// A large prompt, or a large call written before any text, therefore reads as
+/// a long silence in an otherwise healthy response.
 /// The keep-alives keep a downstream [`with_idle_timeout`] from treating that
 /// silence as a dead connection.
 ///
@@ -254,8 +255,7 @@ pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> Even
 /// Silence is measured against the wall clock, for the same reason as in
 /// [`with_idle_timeout`]: time the machine spends asleep counts.
 ///
-/// Before the first item and after the response finishes, this is a transparent
-/// pass-through.
+/// After the response finishes, this is a transparent pass-through.
 /// Apply it per-provider, only where the provider is known to have such gaps.
 #[must_use]
 pub fn with_response_keepalive(
@@ -275,23 +275,21 @@ fn with_response_keepalive_at(
 ) -> EventStream {
     stream! {
         let mut stream = stream;
-        let mut open = false;
         let mut finished = false;
         let mut last_item = now();
         loop {
-            // Outside an open response, pass through and let the downstream
-            // idle timeout own liveness.
-            let next = if open {
-                timeout(interval, stream.next()).await
-            } else {
+            // Once the response has finished, pass through and let the
+            // downstream idle timeout own liveness.
+            let next = if finished {
                 Ok(stream.next().await)
+            } else {
+                timeout(interval, stream.next()).await
             };
 
             match next {
                 Ok(Some(item)) => {
                     // A response stays closed once finished, whatever trails it.
                     finished |= matches!(item, Ok(Event::Finished(_)));
-                    open = !finished;
                     last_item = now();
                     yield item;
                 }

@@ -7,8 +7,7 @@
 #
 # rustqual's DRY dimension is all-or-nothing. Turning off `[duplicates]`
 # disables DRY-002 (dead code) and DRY-006 (dead types) along with DRY-003
-# (repeated fragments) — verified, not assumed: the dead-code count goes 256 to
-# 0 on this workspace when the section is disabled.
+# (repeated fragments)
 #
 # DRY-003 fires ~2038 times inside `*_tests.rs`, on the repeated setup blocks
 # that make each `#[test]` self-contained. That shape is deliberate here (see
@@ -23,13 +22,62 @@
 [duplicates]
 enabled = false
 
-# rustqual judges test code by production thresholds unless told otherwise.
-# Several test functions here are deliberately long and self-contained, so
-# `LONG_FN` and `SRP_MODULE` fire on files that are working as intended. Left
-# unset so the baseline records the real numbers; raise these if the findings
-# turn out to obscure genuine regressions rather than merely sit in the
-# baseline.
+# rustqual's default of 300 is its own house style, not JP's. Only code lines
+# count: blank lines, `//`, `///`, and block comments are excluded, and
+# counting stops at the first `#[cfg(test)]` in the file. Decided in T-0yh5m6r.
 #
-# [tests]
-# max_function_lines = 150
-# file_length        = 800
+# `lcom4_threshold`: `SRP-001` scores a struct on cohesion (LCOM4, weight 0.4),
+# field count, method count, and fan-out, and fires at 0.6. At rustqual's
+# default of 2, two method groups score the full 0.4, so a single-field command
+# struct whose `run` method does not read `self` fires on fan-out alone. At 3,
+# two groups score 0.2 and three or more score 0.4.
+#
+# `max_independent_clusters`: set high to disable the independent-cluster check
+# in `SRP-002`, which has no dedicated toggle. `rustqual` reports only the
+# cluster count without naming the functions in each cluster, leaving nothing
+# actionable. Restore the default of 2 once the vendored `rustqual` includes
+# cluster names (T-1dhk659).
+[srp]
+file_length              = 800
+lcom4_threshold          = 3
+max_independent_clusters = 1_000_000
+
+# `.expect()` counts as an error-handling finding (`A20`), the same as
+# `.unwrap()`, `panic!` and `unreachable!`. A deliberate `.expect()` with a
+# documented `# Panics` section takes a `qual:allow` with a reason, so each one
+# is visible in review. If those markers ever approach `max_suppression_ratio`
+# (5%), raise the ratio rather than allowing `.expect()` wholesale. Decided in
+# T-0yh5m6r.
+[complexity]
+allow_expect = false
+
+# Thresholds for test code: `*_tests.rs` files, which rustqual recognizes through
+# their `#[cfg(test)] #[path = "…"] mod tests;` declaration, and `tests/`
+# directories. JP's tests are self-contained by design, so they run long.
+#
+# - `file_length`: no limit. Set far beyond any real file, because rustqual
+#   cannot disable the check for test files alone.
+# - `max_function_lines`: 150 (compared to 60 for production code). Of the 185
+#   test functions over 60 lines on 2026-10-07, 14 are over 150. The limit is a
+#   starting point; individual cases are decided as they come up.
+#
+# Decided in T-0yh5m6r.
+[tests]
+file_length        = 1_000_000
+max_function_lines = 150
+
+# Rules covered by Clippy are disabled (T-0yh5m6r):
+#
+# - `SLM` (methods that do not use `self`): covered by `clippy::unused_self`
+#   (enabled via `clippy::pedantic`). `rustqual` ignores
+#   `#[expect(clippy::unused_self)]`, so keeping `SLM` enabled would require a
+#   duplicate suppression comment on every deliberate case.
+# - `NMS` (`&mut self` never mutated): covered by
+#   `clippy::needless_pass_by_ref_mut` (tracked in T-1haa4rr). Because
+#   `rustqual` checks syntax without type information, all 22 `NMS` findings in
+#   the workspace on 2026-11-11 were false positives on methods that return
+#   `&mut` to a field or mutate through a method call, while Clippy caught 20
+#   genuine cases that `NMS` missed.
+[structural]
+check_slm = false
+check_nms = false

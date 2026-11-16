@@ -2,6 +2,11 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Independent reads against the GitHub API. Bounded so a large batch does not
+# trip its secondary rate limit; every failure is reported.
+fan_out = { concurrency = 4 }
+
 summary = "Fetch the contents of one or more files"
 
 examples = """

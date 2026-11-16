@@ -8,10 +8,38 @@ use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
 
 use super::{
-    Tool, ensure_workspace_root, format_duration, note_duration, required_capabilities, run,
-    rustflags,
+    Tool, cargo_scope, comfort_scope, ensure_workspace_root, format_duration, note_duration,
+    packages, required_capabilities, run, rustflags,
 };
-use crate::util::root::{CARGO_MANIFEST, resolve_root};
+use crate::util::{
+    OneOrMany,
+    root::{CARGO_MANIFEST, resolve_root},
+};
+
+/// A `package` argument as the assistant sends it.
+fn package_arg(value: Value) -> Option<OneOrMany<String>> {
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn a_single_package_and_a_list_are_both_accepted() {
+    assert_eq!(packages(package_arg(json!("jp_cli"))), vec!["jp_cli"]);
+    assert_eq!(
+        packages(package_arg(json!(["jp_storage", "jp_workspace"]))),
+        vec!["jp_storage", "jp_workspace"]
+    );
+}
+
+/// An empty list names no package, so it scopes the run like an omitted
+/// argument does rather than running nothing.
+#[test]
+fn an_empty_package_list_scopes_to_the_workspace() {
+    let none = packages(package_arg(json!([])));
+
+    assert_eq!(cargo_scope(&none, "--workspace"), vec!["--workspace"]);
+    assert_eq!(comfort_scope(&none), vec!["--workspace"]);
+    assert_eq!(packages(None), Vec::<String>::new());
+}
 
 /// Create `relative` under `root` as a cargo package.
 ///

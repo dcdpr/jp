@@ -1393,6 +1393,32 @@ fn disjoint_windows_without_an_overlapping_summary_stay_separate() {
 }
 
 #[test]
+fn a_turn_list_plans_one_range_per_item_and_one_for_items_that_overlap() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..8 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    let rule = summary_rule(None);
+    let plan = |turns: &str| {
+        let compact = parse_compact(&["--turn", turns]);
+        let windows = compact.range.windows(&stream);
+        plan_rule_ranges(&stream, &stream, &rule, &windows, &compact.range)
+            .unwrap()
+            .iter()
+            .map(|r| (r.from_turn, r.to_turn))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(plan("1..2,5,7..8"), vec![(0, 1), (4, 4), (6, 7)]);
+
+    // Items that abut are two regions, so a summary rule writes two summaries.
+    assert_eq!(plan("1..2,3..4"), vec![(0, 1), (2, 3)]);
+
+    // Items that share a turn are one region, compacted once.
+    assert_eq!(plan("1..4,3..6"), vec![(0, 5)]);
+}
+
+#[test]
 fn overlapping_first_and_last_windows_compact_once() {
     // On a 3-turn conversation `--first 2 --last 2` covers every turn twice.
     // Compaction acts per window, so two windows here would compact turn 2

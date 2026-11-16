@@ -254,6 +254,307 @@ impl Provider for RunawayProvider {
     }
 }
 
+/// Test provider that rejects `glm-5.3` with [`StreamErrorKind::UnknownModel`]
+/// and succeeds for any other model.
+///
+/// `served` controls the list returned by [`Provider::models`]; `None` causes
+/// `models()` to return an error.
+#[derive(Debug)]
+struct RejectingProvider {
+    served: Option<Vec<&'static str>>,
+    requested: Mutex<Vec<String>>,
+}
+
+impl RejectingProvider {
+    fn serving(served: Option<Vec<&'static str>>) -> Self {
+        Self {
+            served,
+            requested: Mutex::new(vec![]),
+        }
+    }
+
+    fn requested(&self) -> Vec<String> {
+        self.requested.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl Provider for RejectingProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        let Some(served) = &self.served else {
+            return Err(LlmError::InvalidResponse("listing unavailable".into()));
+        };
+
+        Ok(served
+            .iter()
+            .map(|name| {
+                ModelDetails::empty(id::ModelIdConfig {
+                    provider: ProviderId::Test,
+                    name: name.parse().expect("valid name"),
+                })
+            })
+            .collect())
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        let name = model.id.name.to_string();
+        self.requested.lock().unwrap().push(name.clone());
+
+        if name == "glm-5.3" {
+            return Ok(Box::pin(stream::iter(vec![Err(
+                StreamError::unknown_model(
+                    "The model `glm-5.3` does not exist. (HTTP 404 Not Found)",
+                ),
+            )])));
+        }
+
+        let events = vec![
+            Event::message(0, format!("answered by {name}")),
+            Event::flush(0),
+            Event::Finished(FinishReason::Completed),
+        ];
+        Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
+    }
+}
+
+struct RejectedTurn {
+    result: Result<(), Error>,
+    recorded: String,
+    /// The model in the config of the last turn's first event, which is what
+    /// `jp conversation print` names in the turn's header.
+    turn_model: String,
+    events: Vec<&'static str>,
+    chrome: String,
+}
+
+async fn run_rejected_turn(
+    provider: Arc<RejectingProvider>,
+    interactive: bool,
+    prompts: MockPromptBackend,
+) -> RejectedTurn {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let mut config = AppConfig::new_test();
+    let glm = id::ModelIdOrAliasConfig::Id(id::ModelIdConfig {
+        provider: ProviderId::Test,
+        name: "glm-5.3".parse().unwrap(),
+    });
+    // `AppConfig::new_test()` is already resolved, so set both the primary and
+    // inquiry model IDs explicitly.
+    config.assistant.model.id = glm.clone();
+    config.conversation.inquiry.assistant.model.id = glm;
+    // Enable retries so the request count verifies that `UnknownModel` is not
+    // retried.
+    config.assistant.request.max_retries = 5;
+    config.assistant.request.base_backoff_ms = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&root.join(".jp")).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let dyn_provider: Arc<dyn Provider> = provider;
+    let model = dyn_provider
+        .model_details(&"glm-5.3".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, chrome) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let router = detached_router();
+
+    let result = Box::pin(timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            interactive,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(prompts),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        ),
+    ))
+    .await
+    .expect("an unknown model should end the turn, not hang it");
+
+    let recorded = lock
+        .events()
+        .config()
+        .unwrap()
+        .assistant
+        .model
+        .id
+        .resolved()
+        .name
+        .to_string();
+
+    let stream = lock.events();
+    let turn_model = stream
+        .iter_turns()
+        .next_back()
+        .and_then(|turn| {
+            turn.iter()
+                .next()
+                .map(|e| e.config.assistant.model.id.to_string())
+        })
+        .unwrap_or_default();
+    let events = stream
+        .iter()
+        .map(|e| {
+            if e.event.is_turn_start() {
+                "TurnStart"
+            } else if e.event.is_chat_request() {
+                "ChatRequest"
+            } else if e.event.as_chat_response().is_some() {
+                "ChatResponse"
+            } else {
+                "other"
+            }
+        })
+        .collect();
+    drop(stream);
+
+    printer.flush();
+    let chrome = String::from_utf8(strip_ansi_escapes::strip(chrome.lock().as_str())).unwrap();
+
+    RejectedTurn {
+        result,
+        recorded,
+        turn_model,
+        events,
+        chrome,
+    }
+}
+
+#[tokio::test]
+async fn unknown_model_lists_the_served_models() {
+    let provider = Arc::new(RejectingProvider::serving(Some(vec![
+        "Qwen/Qwen3.8-27B-FP8",
+        "deepseek-v4.1-flash",
+    ])));
+    // Seed a selection response to verify that non-interactive turns do not
+    // prompt.
+    let prompts = MockPromptBackend::new().with_select_responses([1]);
+
+    let RejectedTurn {
+        result, recorded, ..
+    } = run_rejected_turn(provider.clone(), false, prompts).await;
+
+    let Err(Error::UnknownModel { model, available }) = result else {
+        panic!("expected an unknown-model error, got: {result:?}");
+    };
+    assert_eq!(model, "glm-5.3");
+    assert_eq!(available, vec![
+        "Qwen/Qwen3.8-27B-FP8".to_owned(),
+        "deepseek-v4.1-flash".to_owned(),
+    ]);
+    assert_eq!(
+        provider.requested(),
+        vec!["glm-5.3".to_owned()],
+        "an unknown model is the same on every attempt, so it must not be retried"
+    );
+    assert_eq!(recorded, "glm-5.3");
+}
+
+#[tokio::test]
+async fn unknown_model_without_a_listing_names_no_alternatives() {
+    let provider = Arc::new(RejectingProvider::serving(None));
+
+    let result = run_rejected_turn(provider, false, MockPromptBackend::new())
+        .await
+        .result;
+
+    let Err(Error::UnknownModel { model, available }) = result else {
+        panic!("expected an unknown-model error, got: {result:?}");
+    };
+    assert_eq!(model, "glm-5.3");
+    assert!(available.is_empty());
+}
+
+#[tokio::test]
+async fn unknown_model_picked_replacement_answers_the_turn() {
+    let provider = Arc::new(RejectingProvider::serving(Some(vec![
+        "Qwen/Qwen3.8-27B-FP8",
+        "deepseek-v4.1-flash",
+    ])));
+    let prompts = MockPromptBackend::new().with_select_responses([1]);
+
+    let turn = run_rejected_turn(provider.clone(), true, prompts).await;
+
+    turn.result
+        .expect("the picked model should answer the turn");
+    assert_eq!(provider.requested(), vec![
+        "glm-5.3".to_owned(),
+        "deepseek-v4.1-flash".to_owned(),
+    ]);
+    assert_eq!(turn.recorded, "deepseek-v4.1-flash");
+    // The turn restarted on the picked model: the refused attempt left no
+    // second `TurnStart`, and the turn's config names the picked model from its
+    // first event, so replay labels the answer with it.
+    assert_eq!(turn.events, vec![
+        "TurnStart",
+        "ChatRequest",
+        "ChatResponse"
+    ]);
+    assert_eq!(turn.turn_model, "test/deepseek-v4.1-flash");
+    assert_eq!(
+        turn.chrome,
+        "\n── jp (test/deepseek-v4.1-flash) ───────────────────────────────────────────────\n\n"
+    );
+}
+
+#[tokio::test]
+async fn unknown_model_dismissed_picker_ends_with_the_error() {
+    let provider = Arc::new(RejectingProvider::serving(Some(vec![
+        "Qwen/Qwen3.8-27B-FP8",
+        "deepseek-v4.1-flash",
+    ])));
+
+    // An empty `MockPromptBackend` returns a cancelled-prompt error.
+    let RejectedTurn {
+        result,
+        recorded,
+        turn_model,
+        events,
+        ..
+    } = run_rejected_turn(provider.clone(), true, MockPromptBackend::new()).await;
+
+    let Err(Error::UnknownModel { model, available }) = result else {
+        panic!("expected an unknown-model error, got: {result:?}");
+    };
+    assert_eq!(model, "glm-5.3");
+    assert_eq!(available.len(), 2);
+    assert_eq!(provider.requested(), vec!["glm-5.3".to_owned()]);
+    assert_eq!(recorded, "glm-5.3");
+    assert_eq!(events, vec!["TurnStart", "ChatRequest"]);
+    assert_eq!(turn_model, "test/glm-5.3");
+}
+
 /// A provider whose stream yields the given events and then stays pending
 /// forever, simulating an in-flight response that only an interrupt can stop.
 #[derive(Debug)]
@@ -9435,7 +9736,7 @@ impl BuiltinTool for HttpInquiryTool {
     reason = "Keep the end-to-end setup and persisted assertions in one scenario"
 )]
 async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let mut config = AppConfig::new_test();
@@ -9540,7 +9841,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
              ─────────────────────────────────────────────────────────\n\n"
         );
         owner.shutdown().await.unwrap();
-    })
+    }))
     .await
     .unwrap();
 }
@@ -9554,7 +9855,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
     reason = "Keep the end-to-end setup and persisted assertions in one scenario"
 )]
 async fn a_formatters_question_is_answered_before_the_call_runs() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let mut config = AppConfig::new_test();
@@ -9670,7 +9971,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
              \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\x1b[0m\n\nconfirmed\x1b[0m\n\n"
         );
         owner.shutdown().await.unwrap();
-    })
+    }))
     .await
     .unwrap();
 }
@@ -9684,7 +9985,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
     reason = "Keep the end-to-end setup and the prompt-time snapshot in one scenario"
 )]
 async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answer() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let mut config = AppConfig::new_test();
@@ -9789,7 +10090,7 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
         // Only the result follows: the call was already described.
         assert_eq!(after, "\nconfirmed\x1b[0m\n\n");
         owner.shutdown().await.unwrap();
-    })
+    }))
     .await
     .unwrap();
 }

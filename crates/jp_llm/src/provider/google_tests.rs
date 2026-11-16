@@ -207,6 +207,39 @@ fn test_map_model_gemini_3_8_flash() {
 }
 
 #[test]
+fn test_map_model_gemini_4_carbon() {
+    let model = types::Model {
+        base_model_id: "gemini-4-carbon".to_owned(),
+        display_name: "Gemini 4 Carbon".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "gemini-4-carbon").try_into().unwrap()
+    );
+    assert_eq!(details.display_name, Some("Gemini 4 Carbon".to_owned()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.prefill, None);
+}
+
+#[test]
 fn test_map_model_gemini_4_argon() {
     let model = types::Model {
         base_model_id: "gemini-4-argon".to_owned(),
@@ -226,6 +259,39 @@ fn test_map_model_gemini_4_argon() {
     assert_eq!(
         details.reasoning,
         Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.prefill, None);
+}
+
+#[test]
+fn test_map_model_gemini_4_hydrogen() {
+    let model = types::Model {
+        base_model_id: "gemini-4-hydrogen".to_owned(),
+        display_name: "Gemini 4 Hydrogen".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "gemini-4-hydrogen").try_into().unwrap()
+    );
+    assert_eq!(details.display_name, Some("Gemini 4 Hydrogen".to_owned()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(false, true, true, true, true, false).always_on())
     );
     assert_eq!(
         details.knowledge_cutoff,
@@ -390,6 +456,59 @@ fn test_absolute_effort_resolves_against_configured_max_tokens() {
         .expect("configured reasoning sends a thinking config");
 
     assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::High));
+}
+
+#[test]
+fn test_xhigh_effort_requests_xhigh_level_when_supported() {
+    let model = table_details((PROVIDER, "gemini-4-hydrogen").try_into().unwrap());
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::XHigh),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("configured reasoning sends a thinking config");
+
+    assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::XHigh));
+    assert_eq!(
+        thinking.thinking_budget, None,
+        "a level-based model takes no token budget"
+    );
+}
+
+/// Gemini's API expects `"XHIGH"` without an underscore, not the `"X_HIGH"`
+/// that a `SCREAMING_SNAKE_CASE` serde rename of `XHigh` would produce.
+///
+/// See:
+/// <https://aistudio.google.com/api-reference/generate-content/generate-content#request-body>
+#[test]
+fn test_xhigh_level_wire_spelling() {
+    assert_eq!(
+        serde_json::to_value(types::ThinkingLevel::XHigh).unwrap(),
+        Value::from("XHIGH")
+    );
 }
 
 /// A model the API reports as not thinking is recorded as not reasoning, even
@@ -568,6 +687,34 @@ async fn test_unknown_model_inferred_thinking_level()
             },
         )))
         .event(ChatRequest::from("What is 2 + 2?"));
+
+    run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
+#[test(tokio::test)]
+async fn test_gemini_4_hydrogen_xhigh_reasoning()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let id: ModelIdConfig = "google/gemini-4-hydrogen".parse().unwrap();
+
+    // Combine the catalog entry with the token limits `map_model` reads from
+    // the API.
+    let mut details = table_details(id.clone());
+    details.context_window = Some(1_048_576);
+    details.max_output_tokens = Some(65_536);
+
+    let request = TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(PartialReasoningConfig::Custom(
+            PartialCustomReasoningConfig {
+                effort: Some(ReasoningEffort::XHigh),
+                exclude: Some(false),
+            },
+        )))
+        .event(ChatRequest::from(
+            "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How \
+             much does the ball cost? Answer in one sentence.",
+        ));
 
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
@@ -1573,6 +1720,26 @@ mod stream_error_classification {
     }
 
     #[test]
+    fn a_model_the_api_does_not_list_is_an_unknown_model() {
+        let error = StreamError::from(api_error(
+            404,
+            "models/gemini-future-99 is not found for API version v1beta, or is not supported for \
+             generateContent. Call ModelService.ListModels to see the list of available models \
+             and their supported methods.",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::UnknownModel);
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn a_404_without_a_model_resource_is_not_an_unknown_model() {
+        let error = StreamError::from(api_error(404, "Requested entity was not found."));
+
+        assert_eq!(error.kind, StreamErrorKind::Other);
+    }
+
+    #[test]
     fn oversized_input_is_a_context_window_error() {
         let error = StreamError::from(api_error(
             400,
@@ -1770,6 +1937,7 @@ mod service_tier_configuration {
             auth: vec![jp_config::providers::llm::AuthEntry::ApiKey(None)],
             api_key_env: api_key_env().into(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            silence_allowance_secs: 300,
         })
         .unwrap()
     }
@@ -1861,5 +2029,78 @@ mod service_tier_configuration {
 
         assert!(val.get("serviceTier").is_none());
         assert!(val.get("service_tier").is_none());
+    }
+}
+
+mod silence_allowance {
+    use std::time::Duration;
+
+    use futures::StreamExt as _;
+    use jp_config::providers::llm::{AuthEntry, google::GoogleConfig};
+    use jp_conversation::{ConversationStream, thread::Thread};
+    use tokio::net::TcpListener;
+
+    use crate::{
+        event::Event,
+        model::ModelDetails,
+        provider::{Google, Provider as _, ProviderId},
+        query::{ChatQuery, Truncation},
+    };
+
+    /// Start a request against a server that accepts the connection and never
+    /// answers, and return the first item seen within `wait`.
+    ///
+    /// The listener never calls `accept`: the kernel completes the handshake
+    /// from its backlog, so the request is sent and no byte comes back.
+    async fn first_item_from_silent_server(
+        silence_allowance_secs: u32,
+        wait: Duration,
+    ) -> Option<Event> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1beta", listener.local_addr().unwrap());
+        let google = Google::try_from(&GoogleConfig {
+            auth: vec![AuthEntry::ApiKey(None)],
+            api_key_env: if cfg!(windows) { "USERNAME" } else { "USER" }.into(),
+            base_url,
+            silence_allowance_secs,
+        })
+        .unwrap();
+        let model = ModelDetails::empty((ProviderId::Google, "gemini-4-argon").try_into().unwrap());
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events: ConversationStream::new_test().with_turn("test"),
+            },
+            tools: vec![],
+            tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+            truncation: Truncation::default(),
+        };
+
+        let mut stream = google.chat_completion_stream(&model, query).await.unwrap();
+        let item = tokio::time::timeout(wait, stream.next())
+            .await
+            .ok()
+            .flatten();
+        drop(listener);
+
+        item.map(Result::unwrap)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_request_gets_keepalives_within_the_allowance() {
+        let item = first_item_from_silent_server(300, Duration::from_secs(7)).await;
+
+        assert!(matches!(item, Some(Event::KeepAlive)), "{item:?}");
+    }
+
+    // `0` leaves the request to the caller's idle timeout alone, as for other
+    // providers: nothing at all arrives from a server that does not answer.
+    #[tokio::test(start_paused = true)]
+    async fn a_zero_allowance_sends_no_keepalives() {
+        let item = first_item_from_silent_server(0, Duration::from_secs(7)).await;
+
+        assert!(item.is_none(), "{item:?}");
     }
 }

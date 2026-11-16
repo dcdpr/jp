@@ -215,16 +215,68 @@ fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
 
 /// File a ticket under `id`, so a test can lay several out in a known order.
 fn write_ticket_as(dir: &Utf8TempDir, id: &str, title: &str) -> TicketId {
+    write_ticket_filed(dir, id, title, DATE)
+}
+
+fn write_ticket_filed(dir: &Utf8TempDir, id: &str, title: &str, date: &str) -> TicketId {
+    write_labelled(dir, id, title, date, &[])
+}
+
+fn write_labelled(
+    dir: &Utf8TempDir,
+    id: &str,
+    title: &str,
+    date: &str,
+    labels: &[&str],
+) -> TicketId {
     let id: TicketId = id.parse().unwrap();
+    let labels = Labels::from_tokens(labels).unwrap();
     let tickets = dir.path().join(store::DEFAULT_DIR);
     fs::create_dir_all(&tickets).unwrap();
     fs::write(
         tickets.join(format!("{}slug.md", id.file_prefix())),
-        render::ticket(&draft(title, &Labels::default())),
+        render::ticket(&NewTicket {
+            date,
+            ..draft(title, &labels)
+        }),
     )
     .unwrap();
 
     id
+}
+
+fn sortable_options() -> Options {
+    let Value::Object(options) = json!({
+        "assistant": "jp",
+        "labels": {
+            "due": { "description": "When.", "values": [], "max": 1, "type": "date" },
+            "priority": {
+                "description": "How soon.",
+                "values": ["high", "low"],
+                "max": 1,
+                "ordered": true
+            },
+            "client": { "description": "The client.", "values": ["cli"] }
+        }
+    }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+fn list_sortable(dir: &Utf8TempDir, args: Value) -> Outcome {
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: "list".to_owned(),
+        arguments: object(args),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+
+    run(&init(dir), &call, &sortable_options())
 }
 
 /// A description holding a checklist of three items, one of them checked.
@@ -253,6 +305,15 @@ fn description(dir: &Utf8TempDir) -> String {
     parse::document(&fs::read_to_string(path).unwrap())
         .unwrap()
         .description
+}
+
+fn filed_on(dir: &Utf8TempDir, id: TicketId) -> String {
+    let path = store::locate_ticket(&tickets(dir).dir, id).unwrap();
+
+    parse::document(&fs::read_to_string(path).unwrap())
+        .unwrap()
+        .metadata
+        .date
 }
 
 /// Ids are generated, so tests follow the ones that were handed out.
@@ -1404,25 +1465,23 @@ fn only_a_new_title_needs_to_move_files() {
 #[test]
 fn list_shows_one_line_per_ticket_and_filters() {
     let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Still open");
-    create_ticket(&dir, "Finished");
-    let [open, finished] = ids(&dir)[..] else {
-        panic!("expected two tickets")
-    };
+    write_ticket_as(&dir, "T-02wt0k1", "Still open");
+    write_ticket_as(&dir, "T-02wt0k2", "Finished");
     content(run_tool(
         &dir,
         "edit",
-        json!({ "id": finished.to_string(), "status": "done" }),
+        json!({ "id": "T-02wt0k2", "status": "done" }),
     ));
 
     let all = content(run_tool(&dir, "list", json!({})));
     assert_eq!(
         all,
-        format!("{open} Todo         Still open\n{finished} Done         Finished\n")
+        "T-02wt0k1 Todo         2026-08-05 Still open\nT-02wt0k2 Done         2026-08-05 \
+         Finished\n"
     );
 
     let todo = content(run_tool(&dir, "list", json!({ "status": "todo" })));
-    assert_eq!(todo, format!("{open} Todo         Still open\n"));
+    assert_eq!(todo, "T-02wt0k1 Todo         2026-08-05 Still open\n");
 }
 
 /// The first Todo line is the next thing to work on: each column comes in the
@@ -1447,9 +1506,171 @@ fn list_follows_the_board_order() {
 
     assert_eq!(
         out,
-        "T-02wt0k2 Todo         Filed second\nT-02wt0k1 Todo         Filed first\nT-02wt0k3 In \
-         Progress  Started\n"
+        "T-02wt0k2 Todo         2026-08-05 Filed second\nT-02wt0k1 Todo         2026-08-05 Filed \
+         first\nT-02wt0k3 In Progress  2026-08-05 Started\n"
     );
+}
+
+#[test]
+fn list_orders_by_the_date_tickets_were_filed() {
+    let dir = Utf8TempDir::new().unwrap();
+    let march = write_ticket_filed(&dir, "T-02wt0k1", "Filed in March", "2026-03-02");
+    let may = write_ticket_filed(&dir, "T-02wt0k2", "Filed in May", "2026-05-10");
+    write_ticket_filed(&dir, "T-02wt0k3", "Filed later in May", "2026-05-10");
+    // Simulates an imported GitHub issue whose ID was allocated after its original filing date.
+    write_ticket_filed(&dir, "T-02wt0k4", "Filed in January", "2026-01-20");
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    store::set_status(&tickets, &Formatting::default(), may, Status::Done).unwrap();
+    board::rank(
+        &tickets,
+        march,
+        board::Place::Before,
+        "T-02wt0k3".parse().unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "filed:desc" }))),
+        "T-02wt0k3 Todo         2026-05-10 Filed later in May\nT-02wt0k2 Done         2026-05-10 \
+         Filed in May\nT-02wt0k1 Todo         2026-03-02 Filed in March\nT-02wt0k4 Todo         \
+         2026-01-20 Filed in January\n"
+    );
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "filed" }))),
+        "T-02wt0k4 Todo         2026-01-20 Filed in January\nT-02wt0k1 Todo         2026-03-02 \
+         Filed in March\nT-02wt0k2 Done         2026-05-10 Filed in May\nT-02wt0k3 Todo         \
+         2026-05-10 Filed later in May\n"
+    );
+    // The board's ranking still decides the default order.
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "board" }))),
+        content(run_tool(&dir, "list", json!({}))),
+    );
+    assert!(
+        content(run_tool(&dir, "list", json!({})))
+            .starts_with("T-02wt0k1 Todo         2026-03-02 Filed in March\nT-02wt0k3 Todo"),
+    );
+}
+
+#[test]
+fn a_date_order_is_filtered_and_paged() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_filed(&dir, "T-02wt0k1", "Oldest", "2026-01-01");
+    write_ticket_filed(&dir, "T-02wt0k2", "Middle", "2026-02-01");
+    write_ticket_filed(&dir, "T-02wt0k3", "Newest", "2026-03-01");
+
+    assert_eq!(
+        content(run_tool_with_options(
+            &dir,
+            "list",
+            json!({ "order": "filed:desc", "status": "todo", "page": 2 }),
+            json!({ "page_size": 2 }),
+        )),
+        "T-02wt0k1 Todo         2026-01-01 Oldest\n\nPage 2 of 2 (3 tickets).\n"
+    );
+}
+
+#[test]
+fn a_date_order_ignores_an_unreadable_board_order() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_as(&dir, "T-02wt0k1", "Filed first");
+    fs::write(dir.path().join("docs/ticket/.board.json"), "not an order").unwrap();
+
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "order": "filed" }))),
+        "T-02wt0k1 Todo         2026-08-05 Filed first\n"
+    );
+}
+
+#[test]
+fn list_orders_by_a_date_label_with_undated_tickets_last() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_labelled(&dir, "T-02wt0k1", "Whenever", "2026-08-05", &[]);
+    write_labelled(&dir, "T-02wt0k2", "December", "2026-08-05", &[
+        "due=2026-12-01",
+    ]);
+    write_labelled(&dir, "T-02wt0k3", "November", "2026-08-05", &[
+        "due=2026-11-20",
+    ]);
+    write_labelled(&dir, "T-02wt0k4", "Also November", "2026-08-05", &[
+        "due=2026-11-20",
+    ]);
+
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due" }))),
+        "T-02wt0k3 Todo         2026-08-05 November [due=2026-11-20]\nT-02wt0k4 Todo         \
+         2026-08-05 Also November [due=2026-11-20]\nT-02wt0k2 Todo         2026-08-05 December \
+         [due=2026-12-01]\nT-02wt0k1 Todo         2026-08-05 Whenever\n"
+    );
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due:desc" }))),
+        "T-02wt0k2 Todo         2026-08-05 December [due=2026-12-01]\nT-02wt0k3 Todo         \
+         2026-08-05 November [due=2026-11-20]\nT-02wt0k4 Todo         2026-08-05 Also November \
+         [due=2026-11-20]\nT-02wt0k1 Todo         2026-08-05 Whenever\n"
+    );
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due:asc" }))),
+        content(list_sortable(&dir, json!({ "order": "due" }))),
+    );
+}
+
+#[test]
+fn tickets_with_the_same_label_value_follow_filing_order() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_labelled(&dir, "T-02wt0k1", "Filed in March", "2026-03-02", &[
+        "due=2026-12-01",
+    ]);
+    write_labelled(&dir, "T-02wt0k2", "Imported from January", "2026-01-20", &[
+        "due=2026-12-01",
+    ]);
+    write_labelled(&dir, "T-02wt0k3", "Due sooner", "2026-08-05", &[
+        "due=2026-11-20",
+    ]);
+
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due" }))),
+        "T-02wt0k3 Todo         2026-08-05 Due sooner [due=2026-11-20]\nT-02wt0k2 Todo         \
+         2026-01-20 Imported from January [due=2026-12-01]\nT-02wt0k1 Todo         2026-03-02 \
+         Filed in March [due=2026-12-01]\n"
+    );
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "due:desc" }))),
+        "T-02wt0k2 Todo         2026-01-20 Imported from January [due=2026-12-01]\nT-02wt0k1 \
+         Todo         2026-03-02 Filed in March [due=2026-12-01]\nT-02wt0k3 Todo         \
+         2026-08-05 Due sooner [due=2026-11-20]\n"
+    );
+}
+
+#[test]
+fn list_orders_by_an_ordered_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_labelled(&dir, "T-02wt0k1", "Low", "2026-08-05", &["priority=low"]);
+    write_labelled(&dir, "T-02wt0k2", "High", "2026-08-05", &["priority=high"]);
+
+    assert_eq!(
+        content(list_sortable(&dir, json!({ "order": "priority" }))),
+        "T-02wt0k2 Todo         2026-08-05 High [priority=high]\nT-02wt0k1 Todo         \
+         2026-08-05 Low [priority=low]\n"
+    );
+}
+
+#[test]
+fn an_unknown_order_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(run_tool(&dir, "list", json!({ "order": "due" }))),
+        "`order` must be one of: board, filed, filed:desc."
+    );
+    // `client` is defined in the vocabulary, but is neither `ordered` nor `max = 1`.
+    for order in ["client", "due:sideways", "board:desc", "newest"] {
+        assert_eq!(
+            error_message(list_sortable(&dir, json!({ "order": order }))),
+            "`order` must be one of: board, filed, filed:desc, due, due:desc, priority, \
+             priority:desc.",
+            "{order}"
+        );
+    }
 }
 
 /// A query matches the title, the description, or a comment, whatever its case,
@@ -1476,8 +1697,8 @@ fn list_finds_a_query_in_the_title_description_and_comments() {
 
     assert_eq!(
         out,
-        "T-02wt0k1 Todo         Wrap is off by one\nT-02wt0k2 Todo         Header \
-         misaligned\nT-02wt0k3 Todo         Colour is wrong (1 comment)\n"
+        "T-02wt0k1 Todo         2026-08-05 Wrap is off by one\nT-02wt0k2 Todo         2026-08-05 \
+         Header misaligned\nT-02wt0k3 Todo         2026-08-05 Colour is wrong (1 comment)\n"
     );
 }
 
@@ -1500,12 +1721,12 @@ fn list_pages_through_a_long_listing() {
 
     assert_eq!(
         content(page(1)),
-        "T-02wt0k1 Todo         First\nT-02wt0k2 Todo         Second\n\nPage 1 of 2 (3 tickets). \
-         Pass `page: 2` for more.\n"
+        "T-02wt0k1 Todo         2026-08-05 First\nT-02wt0k2 Todo         2026-08-05 \
+         Second\n\nPage 1 of 2 (3 tickets). Pass `page: 2` for more.\n"
     );
     assert_eq!(
         content(page(2)),
-        "T-02wt0k3 Todo         Third\n\nPage 2 of 2 (3 tickets).\n"
+        "T-02wt0k3 Todo         2026-08-05 Third\n\nPage 2 of 2 (3 tickets).\n"
     );
     assert_eq!(error_message(page(3)), "Page 3 is past the last page, 2.");
 }
@@ -1532,8 +1753,8 @@ fn an_unreadable_board_order_lists_each_column_by_id() {
 
     assert!(
         out.starts_with(
-            "T-02wt0k1 Todo         Filed first\nT-02wt0k2 Todo         Filed second\n\nCould not \
-             read:\n- docs/ticket/.board.json: "
+            "T-02wt0k1 Todo         2026-08-05 Filed first\nT-02wt0k2 Todo         2026-08-05 \
+             Filed second\n\nCould not read:\n- docs/ticket/.board.json: "
         ),
         "{out}"
     );
@@ -1864,7 +2085,8 @@ fn list_under_a_parent_shows_only_its_children() {
 
     assert_eq!(
         content(run_tool(&dir, "list", json!({ "under": FIXED_ID }))),
-        "T-02wt0m0 Todo         Bound tool output\nT-02wt0m1 Done         Record token usage\n"
+        "T-02wt0m0 Todo         2026-08-05 Bound tool output\nT-02wt0m1 Done         2026-08-05 \
+         Record token usage\n"
     );
 }
 
@@ -1900,7 +2122,7 @@ fn an_unknown_tool_names_the_ones_served() {
     assert_eq!(
         error_message(run_tool(&dir, "frobnicate", json!({}))),
         "`jp ticket` serves no tool named `frobnicate`. It serves: comment, create, edit, list, \
-         show."
+         move, show."
     );
 }
 
@@ -1945,12 +2167,14 @@ fn create_writes_labels_and_list_shows_them() {
     ));
 
     let id = ids(&dir)[0];
+    let filed = filed_on(&dir, id);
     let listed = content(run_tool(&dir, "list", json!({})));
 
     assert_eq!(
         listed,
         format!(
-            "{id} Todo         Flag parsing drops the last value [client=cli, package=jp_config]\n"
+            "{id} Todo         {filed} Flag parsing drops the last value [client=cli, \
+             package=jp_config]\n"
         )
     );
 }
@@ -2438,7 +2662,272 @@ fn list_counts_the_checklist() {
 
     assert_eq!(
         out,
-        "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\nT-02wt0kz Todo         \
-         No checklist here\n"
+        "T-02wt0kx Todo         2026-08-05 Exercise recorded tool rounds (1 of 3 \
+         checked)\nT-02wt0kz Todo         2026-08-05 No checklist here\n"
     );
+}
+
+fn three_in_todo(dir: &Utf8TempDir) -> [TicketId; 3] {
+    [
+        write_ticket_as(dir, "T-02wt0k1", "First"),
+        write_ticket_as(dir, "T-02wt0k2", "Second"),
+        write_ticket_as(dir, "T-02wt0k3", "Third"),
+    ]
+}
+
+fn board_file(dir: &Utf8TempDir) -> String {
+    fs::read_to_string(tickets(dir).dir.join(board::BOARD_FILE)).unwrap()
+}
+
+#[test]
+fn move_changes_the_column_and_says_where_the_ticket_landed() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k2", "status": "in progress" })
+        )),
+        "Moved T-02wt0k2:\n- status: Todo -> In Progress\n- place: 1 of 1 in In Progress\n"
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k2", "status": "in progress" })
+        )),
+        "Moved T-02wt0k2:\n- status: already In Progress\n- place: 1 of 1 in In Progress\n"
+    );
+    // Changing status without a placement does not create `.board.json`.
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
+}
+
+#[test]
+fn move_places_a_ticket_before_or_after_another() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "before": "T-02wt0k1" })
+        )),
+        "Moved T-02wt0k3:\n- place: 1 of 3 in Todo, at the top\n"
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k1", "after": "T-02wt0k2" })
+        )),
+        "Moved T-02wt0k1:\n- place: 3 of 3 in Todo, below T-02wt0k2\n"
+    );
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({}))),
+        "T-02wt0k3 Todo         2026-08-05 Third\nT-02wt0k2 Todo         2026-08-05 \
+         Second\nT-02wt0k1 Todo         2026-08-05 First\n"
+    );
+}
+
+/// Moving to `bottom` anchors after the last ticket in the column, which writes
+/// every preceding ticket in that column into `.board.json`.
+#[test]
+fn move_to_the_top_and_the_bottom_of_a_column() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "position": "top" })
+        )),
+        "Moved T-02wt0k3:\n- place: 1 of 3 in Todo, at the top\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k3\"\n  ],\n  \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "position": "bottom" })
+        )),
+        "Moved T-02wt0k3:\n- place: 3 of 3 in Todo, below T-02wt0k2\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k1\",\n    \"T-02wt0k2\",\n    \"T-02wt0k3\"\n  ],\n  \
+         \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+}
+
+/// Moving a ranked ticket to another column and back without a placement drops
+/// its previous rank, placing it below the column's ranked tickets.
+#[test]
+fn move_out_of_a_column_and_back_forgets_the_rank() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k3", "position": "top" }),
+    );
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k1", "after": "T-02wt0k3" }),
+    );
+
+    run_tool(
+        &dir,
+        "move",
+        json!({ "id": "T-02wt0k3", "status": "in progress" }),
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "status": "todo" })
+        )),
+        "Moved T-02wt0k3:\n- status: In Progress -> Todo\n- place: 3 of 3 in Todo, below \
+         T-02wt0k2\n"
+    );
+    assert_eq!(
+        board_file(&dir),
+        "{\n  \"todo\": [\n    \"T-02wt0k1\"\n  ],\n  \"in_progress\": [],\n  \"done\": []\n}\n"
+    );
+}
+
+#[test]
+fn move_to_another_column_and_a_place_in_it_at_once() {
+    let dir = Utf8TempDir::new().unwrap();
+    let [first, ..] = three_in_todo(&dir);
+    store::set_status(
+        &tickets(&dir).dir,
+        &Formatting::default(),
+        first,
+        Status::InProgress,
+    )
+    .unwrap();
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k3", "status": "in progress", "position": "top" })
+        )),
+        "Moved T-02wt0k3:\n- status: Todo -> In Progress\n- place: 1 of 2 in In Progress, at the \
+         top\n"
+    );
+}
+
+#[test]
+fn move_next_to_a_ticket_in_another_column_changes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    let [_, second, _] = three_in_todo(&dir);
+    store::set_status(
+        &tickets(&dir).dir,
+        &Formatting::default(),
+        second,
+        Status::Done,
+    )
+    .unwrap();
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k1", "after": "T-02wt0k2" })
+        )),
+        "T-02wt0k2 is Done, not Todo; a ticket is placed next to one in the column it moves to."
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "move",
+            json!({ "id": "T-02wt0k1", "before": "T-02wt0k1" })
+        )),
+        "T-02wt0k1 can't be ranked against itself."
+    );
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
+}
+
+#[test]
+fn move_closing_a_parent_with_open_children_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (parent, ..) = family(&dir);
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "move",
+            json!({ "id": FIXED_ID, "status": "done", "position": "top" }),
+        )),
+        "T-02wt0kx has open children: T-02wt0m0. Close them, or move them out from under \
+         T-02wt0kx, first."
+    );
+    let path = store::locate_ticket(&tickets(&dir).dir, parent).unwrap();
+    let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.status, Status::Todo);
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
+}
+
+#[test]
+fn move_closing_a_ticket_warns_about_unchecked_items() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "move",
+            json!({ "id": FIXED_ID, "status": "done" })
+        )),
+        "Moved T-02wt0kx:\n- status: Todo -> Done\n- place: 1 of 1 in Done\n- warning: closed \
+         with 2 of 3 checklist items unchecked: \"Cover a second tool call\", \"Cover parallel \
+         calls\". Check the ones that are done, and remove the rest with a comment saying why.\n"
+    );
+}
+
+#[test]
+fn move_refuses_arguments_that_name_no_single_place() {
+    let dir = Utf8TempDir::new().unwrap();
+    three_in_todo(&dir);
+    let refused = |arguments: Value| error_message(run_tool(&dir, "move", arguments));
+
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1" })),
+        "Name where to move it: `status`, or one of `before`, `after`, and `position`."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "before": "T-02wt0k2", "position": "top" })),
+        "Name one of `before`, `after`, and `position`, not several."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "position": "middle" })),
+        "`position` must be one of: top, bottom."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "status": "blocked" })),
+        "`status` must be one of: todo, in progress, done."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "after": 7 })),
+        "`after`: `7` is not a ticket id."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-0zzzzzz", "position": "top" })),
+        "No T-0zzzzzz."
+    );
+    assert_eq!(
+        refused(json!({ "id": "T-02wt0k1", "after": "T-0zzzzzz" })),
+        "No ticket T-0zzzzzz."
+    );
+    assert!(!tickets(&dir).dir.join(board::BOARD_FILE).exists());
 }

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#
+# Verify that the workspace and all targets compile.
+
+set -euo pipefail
+
+exec cargo check --workspace --all-targets --message-format short

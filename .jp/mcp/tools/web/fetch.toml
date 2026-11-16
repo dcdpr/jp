@@ -2,6 +2,10 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Independent fetches, bounded because a `headless` fetch starts a browser.
+fan_out = { concurrency = 2 }
+
 summary = "Fetch the contents of a web page or PDF over HTTP(S)."
 
 examples = """

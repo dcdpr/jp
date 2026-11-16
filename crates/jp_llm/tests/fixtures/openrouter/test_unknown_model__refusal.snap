@@ -1,0 +1,10 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    Stream {
+        kind: UnknownModel,
+        message: "API error (status 400): {\n  \"error\": {\n    \"message\": \"foobarbaz is not a valid model ID\",\n    \"code\": 400\n  },\n  \"user_id\": \"[redacted]\"\n}",
+    },
+]

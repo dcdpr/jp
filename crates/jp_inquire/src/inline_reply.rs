@@ -7,19 +7,59 @@
 //! Bracketed paste is enabled for the duration of the prompt, so pasted text
 //! (including newlines) is inserted into the buffer literally instead of being
 //! replayed as keystrokes, where the first newline would submit the reply.
-//! The widget itself never spawns an editor — it only signals intent via
+//! The widget itself never spawns an editor; it only signals intent via
 //! [`ReplyOutcome::OpenEditor`], keeping `jp_inquire` free of editor concerns.
 
-use std::{borrow::Cow, io::Write};
+use std::{
+    borrow::Cow,
+    io::{self, Write},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, RecvTimeoutError},
+    },
+    thread,
+};
 
 use crossterm::cursor::SetCursorStyle;
 use inquire::InquireError;
 use nu_ansi_term::{Color, Style};
+use parking_lot::Mutex;
 use reedline::{
     CursorConfig, EditCommand, EditMode, Emacs, Highlighter, KeyCode, KeyModifiers, Keybindings,
     Prompt, PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent, Signal, StyledText, Vi,
     default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
 };
+
+use crate::{
+    close::{CloseWatch, POLL_INTERVAL},
+    terminal::LEAVE_WIDGET,
+};
+
+/// Number of active [`InlineReply`] prompts currently awaiting input.
+static OPEN: AtomicUsize = AtomicUsize::new(0);
+
+/// Return `true` if an [`InlineReply`] prompt is currently active (with
+/// bracketed paste and keyboard enhancement flags enabled).
+pub(crate) fn is_open() -> bool {
+    OPEN.load(Ordering::Acquire) > 0
+}
+
+/// Guard that increments [`OPEN`] while an [`InlineReply`] is active.
+struct OpenReply;
+
+impl OpenReply {
+    fn new() -> Self {
+        OPEN.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for OpenReply {
+    fn drop(&mut self) {
+        OPEN.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// Host-command sentinel used to surface the editor-escape keybinding through
 /// reedline's `ExecuteHostCommand` → [`Signal::HostCommand`] passthrough.
@@ -43,11 +83,15 @@ pub enum ReplyEditMode {
 pub enum ReplyOutcome {
     /// The user pressed Enter.
     ///
-    /// Carries the buffer, which may be empty — the meaning of an empty
+    /// Carries the buffer, which may be empty; the meaning of an empty
     /// submission is the caller's policy.
     Submit(String),
 
-    /// The user cancelled with `Ctrl+C`.
+    /// The user cancelled with `Ctrl+C`, or the prompt was closed with
+    /// [`close_all`] or a [`PromptCloser`].
+    ///
+    /// [`PromptCloser`]: crate::PromptCloser
+    /// [`close_all`]: crate::close_all
     Cancelled,
 
     /// The user asked to escalate to the external editor (`Ctrl+X`).
@@ -115,15 +159,27 @@ impl InlineReply {
     }
 
     /// Display the prompt and block until the user submits, cancels, or
-    /// requests the external editor.
+    /// requests the external editor, or the prompt is closed.
     ///
     /// `output` is the stream reedline renders to (the caller's `/dev/tty`
     /// writer); it is owned for the duration of the prompt.
     /// The caller drains any buffered terminal output before calling and
     /// restores it afterwards.
+    ///
+    /// When closed programmatically, leaves the rendered prompt rows intact and
+    /// moves the cursor to the start of the line below.
     pub fn prompt(&self, output: Box<dyn Write + Send>) -> Result<ReplyOutcome, InquireError> {
+        let watch = CloseWatch::current();
+        if watch.requested() {
+            return Ok(ReplyOutcome::Cancelled);
+        }
+
+        let mut output = SharedOutput::new(output);
+        let close = Arc::new(AtomicBool::new(false));
+
         let mut engine = Reedline::create()
-            .with_output(output)
+            .with_output(Box::new(output.clone()))
+            .with_break_signal(Arc::clone(&close))
             .with_edit_mode(self.build_edit_mode())
             // Ask the terminal to bracket pastes so a pasted newline is
             // inserted into the buffer instead of submitting the reply.
@@ -151,7 +207,20 @@ impl InlineReply {
             help: self.help_message.clone().unwrap_or_default(),
         };
 
-        let signal = engine.read_line(&prompt).map_err(InquireError::IO)?;
+        let open = OpenReply::new();
+        let closing = CloseSignal::raise_on(watch, close);
+        let signal = engine.read_line(&prompt).map_err(InquireError::IO);
+        drop(closing);
+        drop(open);
+
+        let signal = signal?;
+        if matches!(signal, Signal::ExternalBreak(_)) {
+            // Reedline returns from an external break with the cursor inside
+            // the buffer; move to the next line and clear below the prompt.
+            output.write_all(LEAVE_WIDGET.as_bytes())?;
+            output.flush()?;
+        }
+
         Ok(outcome_from_signal(
             signal,
             engine.current_buffer_contents(),
@@ -215,12 +284,72 @@ fn outcome_from_signal(signal: Signal, buffer: &str) -> ReplyOutcome {
         Signal::HostCommand(cmd) if cmd == OPEN_EDITOR_SENTINEL => ReplyOutcome::OpenEditor {
             current_text: buffer.to_owned(),
         },
-        // A normal submission, or a stray external break (no break signal is
-        // installed, so this is not expected) — submit what was typed.
-        Signal::Success(text) | Signal::ExternalBreak(text) => ReplyOutcome::Submit(text),
-        // Ctrl+C / Ctrl+D, any non-sentinel host command, and any future
-        // (`#[non_exhaustive]`) variant cancel the reply.
+        Signal::Success(text) => ReplyOutcome::Submit(text),
+        // Ctrl+C / Ctrl+D, a break because the prompt was closed, any
+        // non-sentinel host command, and any future (`#[non_exhaustive]`)
+        // variant cancel the reply.
         _ => ReplyOutcome::Cancelled,
+    }
+}
+
+/// Shared writer wrapper so [`InlineReply::prompt`] can write [`LEAVE_WIDGET`]
+/// after `reedline` returns.
+#[derive(Clone)]
+struct SharedOutput(Arc<Mutex<Box<dyn Write + Send>>>);
+
+impl SharedOutput {
+    fn new(output: Box<dyn Write + Send>) -> Self {
+        Self(Arc::new(Mutex::new(output)))
+    }
+}
+
+impl Write for SharedOutput {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.lock().flush()
+    }
+}
+
+/// Background watcher that sets reedline's break signal when [`CloseWatch`]
+/// fires.
+///
+/// Reedline resets its break flag when handling the break, whereas
+/// [`CloseWatch`] remains set, so a dedicated `AtomicBool` is bridged from a
+/// polling thread.
+struct CloseSignal {
+    open: Option<mpsc::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl CloseSignal {
+    fn raise_on(watch: CloseWatch, signal: Arc<AtomicBool>) -> Self {
+        let (open, returned) = mpsc::channel::<()>();
+
+        let thread = thread::spawn(move || {
+            while returned.recv_timeout(POLL_INTERVAL) == Err(RecvTimeoutError::Timeout) {
+                if watch.requested() {
+                    signal.store(true, Ordering::Release);
+                    return;
+                }
+            }
+        });
+
+        Self {
+            open: Some(open),
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for CloseSignal {
+    fn drop(&mut self) {
+        drop(self.open.take());
+        if let Some(thread) = self.thread.take() {
+            drop(thread.join());
+        }
     }
 }
 

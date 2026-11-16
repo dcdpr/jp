@@ -3,6 +3,11 @@ enable = false
 run = "allow"
 
 source = "mcp.bookworm.crate_readme"
+
+# Independent reads against crates.io and docs.rs, bounded to stay polite to
+# both; every failure is reported.
+fan_out = { concurrency = 4 }
+
 summary = "Get a crate's README as markdown."
 description = """\
 Fetches the README for a specific crate version and converts it from HTML to \

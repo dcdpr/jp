@@ -24,6 +24,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails, Provider,
+    lookup::find_listed,
     openai::{flatten_all_of, parameters_with_strict_mode},
     openai_compat::{merge_consecutive_assistant_messages, parse_chunk},
 };
@@ -59,12 +60,9 @@ impl Provider for Cerebras {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        find_listed(&id, self.models())
+            .await
+            .map_or_else(|| map_model(name.as_ref()), Ok)
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {

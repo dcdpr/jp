@@ -9,13 +9,15 @@ use super::*;
 
 const REPOSITORY: &str = "https://github.com/o/r";
 
-/// Run git in `dir`, failing the test when it does.
+/// Run `git` in `dir` isolated from global and system git config, so host
+/// settings such as commit signing and hooks do not affect the test.
 fn git(dir: &Utf8Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(["-c", "user.name=Tester", "-c", "user.email=t@example.com"])
-        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "")
+        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap();
     assert!(

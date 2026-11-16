@@ -11,7 +11,7 @@ use std::{
     pin::Pin,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -24,7 +24,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use jp_config::{
     AppConfig,
     interrupt::{StreamingInterruptAction, ToolInterruptAction},
-    plugins::{PluginsConfig, command::RunPolicy},
+    plugins::PluginsConfig,
     util::{build, list_configs_in_load_path},
 };
 use jp_conversation::{ConversationId, ConversationStream, EventId, event::ChatRequest};
@@ -37,13 +37,13 @@ use jp_llm::event::NoticeSink;
 use jp_plugin::{
     Manifest, PROTOCOL_VERSION,
     message::{
-        ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
-        ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
-        DescribeResponse, DoneResponse, DraftResponse, EditFilesRequest, EditedResponse,
-        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, InterruptAction as WireAction,
-        InterruptRequest, LockState, LogMessage, OutputFormat as PluginOutputFormat, PathsInfo,
-        PluginToHost, QueryCompleteResponse, QueryRequest, SetTitleRequest, WorkspaceInfo,
-        WriteDraftRequest,
+        CompactRequest, CompactedResponse, ComposeMode, ComposeOption, ComposeRequest,
+        ComposeResponse, ConfigEntry, ConfigResponse, ConfigsResponse, ConversationSummary,
+        ConversationsResponse, CreatedResponse, DescribeResponse, DoneResponse, DraftResponse,
+        EditFilesRequest, EditedResponse, ErrorResponse, EventsResponse, HostToPlugin, InitMessage,
+        InterruptAction as WireAction, InterruptRequest, LockState, LogMessage,
+        OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
+        QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
     registry::{Registry, RegistryPlugin},
 };
@@ -53,15 +53,19 @@ use jp_task::task::{TitleGeneratorTask, TurnSummaries, TurnSummaryTask};
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::{Map, Value};
 use tokio::{
-    sync::mpsc::{self, error::TrySendError},
+    sync::{
+        mpsc::{self, error::TrySendError},
+        oneshot,
+    },
     task::{JoinHandle as TaskHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{
-    admission::{Official, admit},
+    admission::{Official, admit, denial},
     approvals::ApprovalStore,
+    compaction,
     discovery::{self, LocalPlugin},
     help, install, output,
     process_tree::ProcessTree,
@@ -82,24 +86,33 @@ use crate::{
     editor::{draft_query_text, draft_revision, report_editor_failure},
 };
 
+/// Grace period for a stopped turn to finish before it is aborted.
+const TURN_STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// Extra time in a plugin run's shutdown budget for reaping the child process
+/// and draining its stderr.
+const SHUTDOWN_MARGIN: Duration = Duration::from_secs(2);
+
+/// Total shutdown budget for a plugin run with plugin exit timeout `grace`.
+///
+/// Combines the plugin's `grace`, [`TURN_STOP_GRACE`] for any running turns,
+/// and [`SHUTDOWN_MARGIN`] for process cleanup.
+fn shutdown_budget(grace: Duration) -> Duration {
+    grace + TURN_STOP_GRACE + SHUTDOWN_MARGIN
+}
+
 /// Runs the prompts a plugin asks for.
 ///
 /// Composition lives on this side of the protocol because the host owns both
 /// ends of it: the plugin's stdin carries the protocol, so it has no terminal
 /// to read keys from, and only the host knows which editor `Ctrl+X` opens.
 ///
-/// Holds handles rather than borrows, so the message loop it belongs to can
-/// take the context mutably.
+/// Owns `Arc` handles rather than borrowing `Ctx`, so prompts can run on a
+/// dedicated thread while the message loop borrows `Ctx` mutably.
+#[derive(Clone)]
 pub(crate) struct Composer {
     printer: Arc<Printer>,
-
-    /// Renders the widgets, rather than the composer building them.
-    ///
-    /// Everything the widget owns — its keybindings, and the hints that
-    /// describe them — lives behind here, so a second caller cannot quietly
-    /// ship a reply buffer with the wrong edit mode or no key hints at all.
     prompts: Arc<dyn PromptBackend>,
-
     editor: Option<Arc<dyn EditorBackend>>,
     edit_mode: ReplyEditMode,
     interactive: bool,
@@ -429,8 +442,11 @@ pub(crate) async fn run_plugin(
         interactive: ctx.term.interactive,
     };
 
-    // How long a plugin asked to shut down has to exit before it is killed.
-    let grace = Duration::from_secs(config.plugins.shutdown_timeout_secs.into());
+    let grace = config.plugins.command.shutdown_timeout(name);
+
+    // Claim a shutdown budget so `until_shutdown` does not drop `run_plugin`
+    // before the plugin and its delegated turns have had time to stop.
+    let _shutdown_budget = ctx.shutdown_budgets.claim(shutdown_budget(grace));
 
     let PluginProcess {
         mut child,
@@ -482,6 +498,7 @@ pub(crate) async fn run_plugin(
     // started it, and the plugin can exit while one is in flight, so they are
     // awaited below rather than left for the runtime to drop half-finished.
     let mut turns = JoinSet::new();
+    let running = RunningTurns::default();
     let (late, mut arrivals) = LateWrites::new();
 
     // Part of the result rather than returned early: a plugin that exits
@@ -497,7 +514,7 @@ pub(crate) async fn run_plugin(
                 &shutdown_sent,
                 &composer,
                 &mut turns,
-                &RunningTurns::default(),
+                &running,
                 &late,
                 &mut arrivals,
             )
@@ -521,11 +538,8 @@ pub(crate) async fn run_plugin(
 
     // After the plugin is dealt with, before the child is reaped: a turn writes
     // its reply to a process that has to still be there to read it.
-    //
-    // Unbounded, because a turn takes as long as the assistant takes and the
-    // work is the user's. A run that has to end sooner than that is what the
-    // interrupt ladder is for.
-    while turns.join_next().await.is_some() {}
+    let shutdown = ctx.signals.shutdown_token();
+    finish_turns(&mut turns, &running, &shutdown, TURN_STOP_GRACE).await;
 
     // Always clean up, even on error. What the plugin started and left running
     // goes with it, whether or not the plugin had to be killed: a worker holding
@@ -543,6 +557,40 @@ pub(crate) async fn run_plugin(
     drop(shutdown_handle);
 
     result
+}
+
+/// Wait for delegated turns to finish.
+///
+/// Waits indefinitely while no shutdown is requested.
+/// When `shutdown` is cancelled, sends a stop request to all running turns so
+/// each can persist its partial state, and aborts any turn still running after
+/// `grace` (dropping its task and releasing its conversation lock).
+async fn finish_turns(
+    turns: &mut JoinSet<()>,
+    running: &RunningTurns,
+    shutdown: &CancellationToken,
+    grace: Duration,
+) {
+    loop {
+        tokio::select! {
+            biased;
+            () = shutdown.cancelled() => break,
+            joined = turns.join_next() => if joined.is_none() {
+                return;
+            },
+        }
+    }
+
+    running.stop_all();
+
+    let ended = async { while turns.join_next().await.is_some() {} };
+    if tokio::time::timeout(grace, ended).await.is_err() {
+        warn!(
+            turns = turns.len(),
+            "Turns were still running after being asked to stop; aborting them."
+        );
+        turns.shutdown().await;
+    }
 }
 
 /// Send the plugin its `init` message.
@@ -810,8 +858,8 @@ async fn message_loop(
         // lock to deliver `Shutdown` if the user interrupts partway.
         match msg {
             PluginToHost::Compose(request) => {
-                let response = HostToPlugin::Composed(composer.compose(&request));
-                answer(stdin, &response, "a compose request")?;
+                let shutdown = ctx.signals.shutdown_token();
+                answer_compose(composer, request, stdin, &shutdown).await?;
             }
 
             PluginToHost::EditFiles(request) => {
@@ -831,6 +879,13 @@ async fn message_loop(
             // generic arm below does not.
             PluginToHost::Print(print) => {
                 output::print(&ctx.printer, &print, &ctx.config().style.markdown);
+            }
+
+            // `None` means the compaction is running and will answer for itself.
+            PluginToHost::Compact(request) => {
+                if let Some(response) = run_compact(ctx, request, stdin, turns) {
+                    answer(stdin, &response, "a compact request")?;
+                }
             }
 
             // Answered once the turn has acted on it, which can be well after
@@ -909,6 +964,54 @@ async fn message_loop(
         1u8,
         "plugin exited unexpectedly without sending exit message",
     )))
+}
+
+/// Answer a plugin's `compose` request, unless a graceful shutdown is requested
+/// while its prompt is open.
+async fn answer_compose(
+    composer: &Composer,
+    request: ComposeRequest,
+    stdin: &Mutex<ChildStdin>,
+    shutdown: &CancellationToken,
+) -> Result<(), cmd::Error> {
+    let Some(response) = compose(composer, request, shutdown).await else {
+        return Ok(());
+    };
+
+    answer(
+        stdin,
+        &HostToPlugin::Composed(response),
+        "a compose request",
+    )
+}
+
+/// Run a plugin's `compose` prompt on a dedicated thread, returning `None` if
+/// `shutdown` is cancelled first.
+///
+/// Running the prompt on its own thread keeps the message loop free to observe
+/// shutdown requests even when the prompt blocks in `inquire` waiting for a
+/// keystroke.
+/// If shutdown is requested while the prompt is open, the thread is left behind
+/// and no response is sent to the plugin.
+async fn compose(
+    composer: &Composer,
+    request: ComposeRequest,
+    shutdown: &CancellationToken,
+) -> Option<ComposeResponse> {
+    let declined = ComposeResponse {
+        id: request.id.clone(),
+        text: None,
+        values: vec![],
+    };
+
+    let (answered, answer) = oneshot::channel();
+    let composer = composer.clone();
+    thread::spawn(move || drop(answered.send(composer.compose(&request))));
+
+    tokio::select! {
+        response = answer => Some(response.unwrap_or(declined)),
+        () = shutdown.cancelled() => None,
+    }
 }
 
 /// Write one answer to the plugin; `what` names the request it answers.
@@ -1151,12 +1254,18 @@ fn lock_for_query(
             .map_err(|error| format!("failed to create the conversation: {error}"));
     }
 
-    let id = parse_conversation_id(&request.conversation)?;
+    lock_existing(ctx, &request.conversation)
+}
+
+/// Take exclusive hold of an existing conversation, failing rather than waiting
+/// when something else holds it.
+fn lock_existing(ctx: &Ctx, conversation: &str) -> Result<ConversationLock, String> {
+    let id = parse_conversation_id(conversation)?;
 
     let handle = ctx
         .workspace
         .acquire_conversation(&id)
-        .map_err(|error| format!("conversation {}: {error}", request.conversation))?;
+        .map_err(|error| format!("conversation {conversation}: {error}"))?;
 
     match ctx
         .workspace
@@ -1396,6 +1505,57 @@ async fn prepare_turn(
     .await?;
 
     Ok((inputs, stream))
+}
+
+/// Spawn a task to apply a plugin's `compact` request to a conversation.
+///
+/// Returns `None` once the background task is spawned; the task sends the
+/// correlated reply when compaction finishes.
+/// Returns `Some` if locking or config resolution fails before the task can
+/// start.
+fn run_compact(
+    ctx: &Ctx,
+    request: CompactRequest,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    turns: &mut JoinSet<()>,
+) -> Option<HostToPlugin> {
+    let CompactRequest {
+        id,
+        conversation,
+        compactions,
+    } = request;
+    let failed = |message: String| Some(action_failed(id.clone(), "compact", message));
+
+    let lock = match lock_existing(ctx, &conversation) {
+        Ok(lock) => lock,
+        Err(error) => return failed(error),
+    };
+    let config = match conversation_config(ctx, &lock, &[]) {
+        Ok(config) => config,
+        Err(error) => return failed(error),
+    };
+
+    let stdin = Arc::clone(stdin);
+    turns.spawn(async move {
+        let reply = match compaction::compact(&compactions, &config, lock).await {
+            Ok(compactions) => HostToPlugin::Compacted(CompactedResponse {
+                id,
+                conversation,
+                compactions,
+            }),
+            Err(error) => {
+                warn!(%conversation, %error, "A compaction failed.");
+                action_failed(id, "compact", error)
+            }
+        };
+
+        // A writer that panicked mid-message leaves the lock poisoned. The pipe
+        // itself is still usable, and the plugin is waiting on this reply.
+        let mut writer = stdin.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(write_message(&mut *writer, &reply));
+    });
+
+    None
 }
 
 /// Decide how a conversation nobody has named gets a title from its first
@@ -1785,6 +1945,22 @@ impl RunningTurns {
             .remove(&conversation);
     }
 
+    /// Send [`InterruptAction::Stop`] to every running turn.
+    ///
+    /// Skips turns whose interrupt channel is already closed or full.
+    fn stop_all(&self) {
+        // A panic elsewhere leaves the map as it was, and the turns in it
+        // still have to be stopped.
+        let turns = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+
+        for (conversation, sender) in turns.iter() {
+            match sender.try_send(InterruptAction::Stop) {
+                Ok(_) => debug!(%conversation, "Asked a turn to stop for shutdown."),
+                Err(error) => debug!(%conversation, %error, "Could not ask a turn to stop."),
+            }
+        }
+    }
+
     /// Queue `action` for the turn running on `conversation`.
     ///
     /// The [`Delivery`] resolves once the turn acts on it.
@@ -1984,6 +2160,7 @@ fn handle_request(
         PluginToHost::Compose(_)
         | PluginToHost::EditFiles(_)
         | PluginToHost::Query(_)
+        | PluginToHost::Compact(_)
         | PluginToHost::Interrupt(_)
         | PluginToHost::Print(_) => {
             unreachable!("answered before the lock")
@@ -2544,15 +2721,26 @@ fn handle_read_config(
     })
 }
 
+/// Serialize a plugin log's structured fields as compact JSON, or return `None`
+/// if empty.
+fn log_fields(log: &LogMessage) -> Option<String> {
+    (!log.fields.is_empty()).then(|| Value::Object(log.fields.clone()).to_string())
+}
+
 fn emit_log(log: &LogMessage) {
+    // `tracing` requires static field names at compile time, so dynamic plugin
+    // fields are serialized into a single `fields` attribute.
+    let fields = log_fields(log);
+    let fields = fields.as_deref().map(tracing::field::display);
+
     match log.level.as_str() {
-        "trace" => trace!(target: "plugin", message = %log.message),
-        "debug" => debug!(target: "plugin", message = %log.message),
-        "info" => tracing::info!(target: "plugin", message = %log.message),
-        "warn" => warn!(target: "plugin", message = %log.message),
-        "error" => error!(target: "plugin", message = %log.message),
+        "trace" => trace!(target: "plugin", fields, message = %log.message),
+        "debug" => debug!(target: "plugin", fields, message = %log.message),
+        "info" => tracing::info!(target: "plugin", fields, message = %log.message),
+        "warn" => warn!(target: "plugin", fields, message = %log.message),
+        "error" => error!(target: "plugin", fields, message = %log.message),
         _ => {
-            warn!(target: "plugin", level = %log.level, message = %log.message, "unknown log level");
+            warn!(target: "plugin", level = %log.level, fields, message = %log.message, "unknown log level");
         }
     }
 }
@@ -2600,14 +2788,11 @@ fn is_process_alive(pid: u32) -> bool {
 /// Checked before anything else, including downloading an official plugin:
 /// there is no point fetching a binary this run will not start.
 fn check_not_denied(name: &str, plugins_config: &PluginsConfig) -> Result<(), cmd::Error> {
-    if plugins_config
-        .command
-        .get(name)
-        .is_some_and(|c| c.run == Some(RunPolicy::Deny))
-    {
-        return Err(cmd::Error::from(format!(
-            "plugin `{name}` is denied by configuration (plugins.command.{name}.run = \"deny\")"
-        )));
+    let command = &plugins_config.command;
+    let own = command.get(name).and_then(|c| c.run);
+
+    if let Some(refusal) = denial(name, own, Some(command.defaults.run)) {
+        return Err(cmd::Error::from(refusal));
     }
 
     Ok(())

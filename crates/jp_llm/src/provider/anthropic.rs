@@ -1,3 +1,4 @@
+// qual:allow(srp, file_length=2400) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4j"
 pub mod acp;
 pub mod auth;
 mod http;
@@ -9,7 +10,6 @@ use std::{env, mem, ops::RangeInclusive, sync::LazyLock, time::Duration};
 use async_anthropic::{
     Client,
     errors::AnthropicError,
-    messages::DEFAULT_MAX_TOKENS,
     types::{
         self, Effort, JsonOutputFormat, ListModelsResponse, OutputConfig, System, Thinking,
         ToolBash, ToolCodeExecution, ToolComputerUse, ToolTextEditor, ToolWebSearch,
@@ -22,8 +22,6 @@ use camino::Utf8PathBuf;
 use chrono::{NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
-#[cfg(test)]
-use jp_config::providers::llm::anthropic::AuthEntry;
 use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
@@ -39,10 +37,15 @@ use jp_conversation::{
 use jp_credentials::CredentialStore;
 use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use serde_json::{Map, Value, json};
+use tokio::time::timeout;
 use tracing::{debug, info, trace, warn};
 
 use self::resolve::Route;
-use super::{CONTINUE_MESSAGE, Provider, output_schema_is_open, trace_to_tmpfile};
+use super::{
+    CONTINUE_MESSAGE, Provider,
+    lookup::{self, MODEL_LOOKUP_TIMEOUT},
+    output_schema_is_open, trace_to_tmpfile,
+};
 use crate::{
     credential::Credential,
     error::{
@@ -72,6 +75,15 @@ static PROVIDER: ProviderId = ProviderId::Anthropic;
 /// See:
 /// <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
 const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
+
+/// Fallback `max_tokens` sent when neither configuration nor [`ModelDetails`]
+/// specifies an output limit.
+///
+/// The Messages API requires `max_tokens` on every request, and the limit
+/// covers both thinking and response tokens.
+/// Models with a lower ceiling reject the request unless
+/// `assistant.model.parameters.max_tokens` is configured.
+const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 32_000;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
@@ -230,22 +242,6 @@ impl Anthropic {
         }
 
         Ok(provider)
-    }
-
-    /// Build a provider around an explicit credential, bypassing the chain.
-    ///
-    /// Test seam: no environment or store access, no preflight.
-    #[cfg(test)]
-    pub(crate) fn with_credential(config: &AnthropicConfig, credential: Credential) -> Self {
-        Anthropic {
-            config: config.clone(),
-            beta: BetaFeatures(config.beta_headers.clone()),
-            chain_on_max_tokens: config.chain_on_max_tokens,
-            store: None,
-            fixed_credential: Some(credential),
-            client_cache: http::Clients::default(),
-            seen_notices: resolve::SeenNotices::default(),
-        }
     }
 
     /// Resolve the credential for a request against `model`.
@@ -453,10 +449,23 @@ impl Provider for Anthropic {
                 return Ok(model);
             }
             let (client, _) = self.client_for(&attempt.route)?;
-            match client.models().get(name).await {
-                Ok(model) => return map_model(model),
-                Err(error) => attempt = self.advance_or_fail(&attempt, error, name).await?,
-            }
+            let failure = match timeout(MODEL_LOOKUP_TIMEOUT, client.models().get(name)).await {
+                Ok(Ok(model)) => return map_model(model),
+
+                // Rejected or spent credentials also fail the chat request, so
+                // advance the credential chain now or fail if it is exhausted.
+                Ok(Err(error)) if is_switchable(&error) => {
+                    attempt = self.advance_or_fail(&attempt, error, name).await?;
+                    continue;
+                }
+
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => lookup::TIMED_OUT.to_owned(),
+            };
+
+            let details = table_details(name)?;
+            lookup::skipped(&details.id, &failure);
+            return Ok(details);
         }
     }
 
@@ -472,7 +481,7 @@ impl Provider for Anthropic {
 
             if let Route::Acp(directory) = attempt.route {
                 acp::inspect(directory.as_deref()).await?;
-                return Ok(vec![acp::model_details(&"claude-opus-5".parse()?)]);
+                return Ok(acp::models(directory.as_deref()).await?);
             }
             let (client, _) = self.client_for(&attempt.route)?;
             let mut all_models = vec![];
@@ -1225,10 +1234,12 @@ fn soft_force_retry(
 
 /// Why the API refused a thinking block.
 ///
-/// Both kinds are repaired the same way, by replaying the reasoning as
-/// `<think>` text instead of a native thinking block.
-/// They differ in where the offending block can be, which is what decides where
-/// to look when the error carries no usable position.
+/// Both kinds are repaired the same way: removing the block's metadata so
+/// subsequent requests omit the reasoning instead of sending a native thinking
+/// block.
+/// They differ in where the offending block can appear, which determines where
+/// [`fallback_thinking_block`] searches when the error carries no usable
+/// position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ThinkingRejection {
     /// An invalid `signature` on a thinking block.
@@ -1381,29 +1392,29 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 }
 
 /// Build [`EventPatch`] instructions for the thinking blocks the API refused.
-/// The caller yields these as [`Event::Patch`] so the CLI can remove the
-/// provider metadata from the persisted conversation stream.
-/// On the next request rebuild, [`convert_event`] will fall through to the
-/// `<think>` tag path for events that no longer carry a signature.
 ///
-/// A rejected block downgrades every thinking and redacted-thinking block in
-/// the whole assistant turn holding it.
+/// The caller yields these as [`Event::Patch`] to strip the provider metadata
+/// from the conversation stream.
+/// On the next request rebuild, [`convert_event`] omits reasoning events that
+/// carry no signature or redacted payload.
+///
+/// A rejected block strips every `thinking` and `redacted_thinking` block in
+/// the assistant turn containing it.
 /// Anthropic treats that turn as one assistant message and requires its
-/// thinking blocks back exactly as generated, so rewriting a subset is rejected
-/// with `thinking blocks ... cannot be modified`; rewriting all of them leaves
-/// text and tool use, which the API accepts.
+/// thinking blocks back intact, so dropping a subset is rejected with `thinking
+/// blocks ... cannot be modified`; dropping all of them leaves only text and
+/// tool use, which the API accepts.
 ///
 /// This applies to any turn, not only the newest.
 /// Models that retain prior turns' thinking validate those turns too, so a
-/// partial rewrite anywhere is refused.
-/// The cost is the rest of that turn's reasoning, which buys a repair that
-/// converges in one round per broken turn instead of one round per message.
+/// partial strip anywhere is refused.
+/// Dropping the rest of the turn's reasoning lets the repair converge in one
+/// round per broken turn instead of one round per message.
 ///
-/// When the error carries no usable position — unparseable, unresolvable, or
-/// resolving into a turn with no native thinking — [`fallback_thinking_block`]
-/// picks where to look based on `rejection`.
-/// Both paths yield a turn, and the patch set is always that whole turn, so no
-/// route through this function can emit the partial rewrite the API refuses.
+/// When the error carries no usable position (unparseable, unresolvable, or
+/// resolving to a turn with no native thinking), [`fallback_thinking_block`]
+/// selects a target based on `rejection`.
+/// Both paths resolve to a turn and patch every thinking block in it.
 ///
 /// Returns `None` if no thinking block can be located.
 fn build_thinking_patches(
@@ -1470,8 +1481,9 @@ fn last_turn_thinking_block(request: &types::CreateMessagesRequest) -> Option<(u
     })
 }
 
-/// Build the patch that strips a thinking block's provider metadata, so the
-/// event is replayed as `<think>` text rather than a native thinking block.
+/// Build a patch that strips a thinking block's provider metadata, so
+/// subsequent requests omit the event's reasoning instead of sending a native
+/// thinking block.
 fn thinking_patch(key: &'static str, value: String) -> EventPatch {
     EventPatch {
         matcher: EventMatcher::MetadataValue {
@@ -1521,7 +1533,7 @@ fn last_assistant_turn(messages: &[types::Message]) -> Option<RangeInclusive<usi
 /// that is not purely tool results, and ends just before the next such message
 /// (or at the end of the request).
 /// This is the span Anthropic reports as a single logical message in error
-/// positions, so it is also the unit a repair has to rewrite whole.
+/// positions, so a repair must patch the entire span together.
 fn assistant_turn_containing(messages: &[types::Message], msg_idx: usize) -> RangeInclusive<usize> {
     let starts_turn =
         |msg: &types::Message| msg.role == types::MessageRole::User && !is_tool_result_message(msg);
@@ -1714,23 +1726,6 @@ fn resolve_cache_control(policy: CachePolicy) -> Option<types::CacheControl> {
     })
 }
 
-#[cfg(test)]
-impl Anthropic {
-    /// Build the Anthropic wire request for `query` and serialize it to JSON
-    /// without sending.
-    /// Test-only seam for snapshotting request construction (notably compaction
-    /// projection) across providers.
-    pub(crate) fn request_value(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<serde_json::Value> {
-        let bearer = matches!(self.fixed_credential, Some(Credential::Bearer(_)));
-        let (request, ..) = create_request(model, query, true, &self.beta, bearer)?;
-        Ok(serde_json::to_value(request)?)
-    }
-}
-
 #[expect(clippy::too_many_lines)]
 fn create_request(
     model: &ModelDetails,
@@ -1890,9 +1885,14 @@ fn create_request(
 
     // The trailing assistant message, if any, is the continuation target.
     // Anthropic rejects native thinking blocks there once the turn has been
-    // resumed, so rewrite them as `<think>` text before deciding how to
-    // continue.
-    downgrade_trailing_thinking(&mut messages);
+    // resumed, so drop them before deciding how to continue.
+    let dropped = drop_trailing_thinking(&mut messages);
+    if dropped > 0 {
+        debug!(
+            dropped,
+            "Dropped thinking from the continued assistant message."
+        );
+    }
 
     // Models that don't support assistant prefill require the conversation to
     // end with a user message. When the last message is from the assistant
@@ -1967,11 +1967,11 @@ fn create_request(
         .unwrap_or_else(|| {
             warn!(
                 %model.id,
-                %DEFAULT_MAX_TOKENS,
+                %DEFAULT_MAX_OUTPUT_TOKENS,
                 "HTTP request serialization has no configured or reported output limit; using its fallback."
             );
 
-            DEFAULT_MAX_TOKENS as u32
+            DEFAULT_MAX_OUTPUT_TOKENS
         });
 
     let reasoning_config =
@@ -2172,6 +2172,31 @@ fn create_request(
                 );
             }
         }
+    } else if model.reasoning.is_none()
+        && parameters.reasoning.is_none()
+        && !model.served_by_subscription()
+    {
+        // When reasoning is unconfigured and support is unknown (e.g. after a
+        // failed model lookup), request summarized adaptive thinking. Omitting
+        // `thinking` uses the API default, which on current models runs
+        // thinking with `display: "omitted"` and bills reasoning tokens that
+        // never reach the transcript. Effort is omitted so the API default
+        // applies.
+        //
+        // Skip this fallback on the ACP subscription route
+        // (`served_by_subscription`), where `acp::model_details` leaves
+        // `reasoning` unset and Claude Code chooses the thinking mode when
+        // `thinking` is omitted. Sending `adaptive` there fails on models that
+        // reject adaptive thinking, such as Haiku 4.5.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; requesting summarized adaptive thinking."
+        );
+
+        builder.thinking(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        });
     } else if model.features.contains(&BETWEEN_TOOLS_THINKING) {
         // Reasoning is off on a model that rejects `thinking: disabled`.
         // `between_tools` is the lowest setting it accepts; omitting the field
@@ -2271,15 +2296,7 @@ fn create_request(
 
 /// Derive reasoning support from the API-reported model capabilities.
 ///
-/// This is the sole source of reasoning support: every model goes through it,
-/// and the override table carries no mode or ladder of its own, only an
-/// `always_on` flag applied to the result.
-/// A model newer than this binary therefore still receives an explicit thinking
-/// configuration rather than falling back to the provider default, which bills
-/// for thinking tokens the caller never sees.
-///
-/// Returns `None` when the capabilities report nothing about thinking, leaving
-/// support genuinely unknown.
+/// Returns `None` when `capabilities` does not specify thinking support.
 fn derive_reasoning(capabilities: &types::ModelCapabilities) -> Option<ReasoningDetails> {
     let thinking = &capabilities.thinking;
 
@@ -2368,11 +2385,14 @@ const BETWEEN_TOOLS_THINKING: &str = "between-tools-thinking";
 /// them with a 400, so they are only sent when this flag is present.
 const SAMPLING_PARAMETERS: &str = "sampling-parameters";
 
-/// Model facts the capabilities API does not report.
+/// Static model metadata not reported by `/v1/models`, plus a fallback snapshot
+/// of the fields `/v1/models` does report.
 ///
-/// Everything else (token limits, reasoning mode and effort ladder, structured
-/// output, feature flags) is derived from the API, so a newly released model
-/// only needs an entry here when one of these facts differs from the defaults.
+/// Token limits, reasoning support, and structured output come from the live
+/// `/v1/models/{id}` lookup when it succeeds, and fall back to [`reported`]
+/// when the lookup fails or times out.
+///
+/// [`reported`]: Self::reported
 #[derive(Debug, Clone)]
 struct ModelOverrides {
     /// The model's canonical id.
@@ -2404,11 +2424,26 @@ struct ModelOverrides {
     /// Sonnet 5.5, rather than to omitting the thinking field.
     /// Only meaningful together with `always_on`.
     between_tools: bool,
+
+    /// Snapshot of capabilities from `/v1/models/{id}`, used when the live
+    /// model lookup fails or times out.
+    reported: Option<Reported>,
+}
+
+/// Capabilities reported by `/v1/models/{id}`, stored as a static fallback for
+/// [`ModelOverrides`].
+#[derive(Debug, Clone)]
+struct Reported {
+    context_window: u32,
+    max_output_tokens: u32,
+
+    /// Reasoning support before [`ModelOverrides::always_on`] is applied.
+    reasoning: ReasoningDetails,
+
+    structured_output: bool,
 }
 
 impl ModelOverrides {
-    /// Overrides for `id` that change nothing: no known cutoff, active, and
-    /// every flag off.
     fn new(id: &'static str) -> Self {
         Self {
             id,
@@ -2418,6 +2453,7 @@ impl ModelOverrides {
             sampling: false,
             always_on: false,
             between_tools: false,
+            reported: None,
         }
     }
 }
@@ -2428,20 +2464,36 @@ impl Cataloged for ModelOverrides {
     }
 }
 
-/// Look up the facts the capabilities API cannot supply.
-///
-/// Returns `None` for a model absent from [`MODEL_OVERRIDES`], leaving its
-/// cutoff and deprecation status unknown rather than asserting defaults for a
-/// model this binary predates.
+/// Look up the [`MODEL_OVERRIDES`] entry for `id` (by canonical ID or alias).
 fn model_overrides(id: &str) -> Option<&'static ModelOverrides> {
     MODEL_OVERRIDES.get(id)
 }
 
-/// The facts the capabilities API cannot supply, per model.
+/// Static model catalog for Anthropic models.
+///
+/// `reported` entries mirror the recorded `/v1/models` response in
+/// `tests/fixtures/anthropic/test_models.yml`.
 // qual:allow(complexity, magic_numbers) reason: "model catalogue: cutoff dates
-// are data maintained by hand against Anthropic's published documentation"
+// and limits are data maintained by hand against Anthropic's published
+// documentation and recorded API responses"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
     let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);
+    let adaptive = |xhigh, max| {
+        Some(Reported {
+            context_window: 1_000_000,
+            max_output_tokens: 128_000,
+            reasoning: ReasoningDetails::adaptive(xhigh, max),
+            structured_output: true,
+        })
+    };
+    let budgetted = |context_window| {
+        Some(Reported {
+            context_window,
+            max_output_tokens: 64_000,
+            reasoning: ReasoningDetails::budgetted(1_024, None),
+            structured_output: true,
+        })
+    };
 
     Catalog::new(vec![
         Entry {
@@ -2449,6 +2501,16 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
+                ..ModelOverrides::new("claude-fable-5-2")
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 6),
+                always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5-1")
             },
         },
@@ -2457,6 +2519,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-fable-5")
             },
         },
@@ -2465,6 +2528,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-5-5")
             },
         },
@@ -2472,6 +2536,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 5),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-5")
             },
         },
@@ -2483,6 +2548,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2026, 6),
                 always_on: true,
                 between_tools: true,
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-sonnet-5-5")
             },
         },
@@ -2490,13 +2556,23 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-sonnet-5")
+            },
+        },
+        // Knowledge cutoff not yet known; accepts `thinking: disabled`.
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                reported: adaptive(true, true),
+                ..ModelOverrides::new("claude-haiku-5-5")
             },
         },
         Entry {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-4-8")
             },
         },
@@ -2504,6 +2580,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &["claude-opus-4-7-20260416"],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 1),
+                reported: adaptive(true, true),
                 ..ModelOverrides::new("claude-opus-4-7")
             },
         },
@@ -2512,6 +2589,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
                 sampling: true,
+                reported: adaptive(false, true),
                 ..ModelOverrides::new("claude-sonnet-4-6")
             },
         },
@@ -2520,6 +2598,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
                 sampling: true,
+                reported: adaptive(false, true),
                 ..ModelOverrides::new("claude-opus-4-6")
             },
         },
@@ -2529,6 +2608,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 8),
                 prefill: true,
                 sampling: true,
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-opus-4-5")
             },
         },
@@ -2538,6 +2618,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
                 sampling: true,
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-haiku-4-5")
             },
         },
@@ -2547,6 +2628,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
                 sampling: true,
+                reported: budgetted(200_000),
                 ..ModelOverrides::new("claude-sonnet-4-5")
             },
         },
@@ -2586,6 +2668,57 @@ fn derive_features(capabilities: &types::ModelCapabilities) -> Vec<&'static str>
     }
 
     features
+}
+
+/// Build [`ModelDetails`] for `name` from [`MODEL_OVERRIDES`] alone.
+///
+/// Returns [`ModelDetails::empty`] if `name` is not in the table.
+fn table_details(name: &Name) -> Result<ModelDetails> {
+    let id = (PROVIDER, name.as_ref()).try_into()?;
+    let Some(overrides) = model_overrides(name.as_ref()) else {
+        return Ok(ModelDetails::empty(id));
+    };
+
+    let reported = overrides.reported.as_ref();
+    let reasoning = reported.map(|reported| &reported.reasoning);
+
+    // Mirror the feature flags that `derive_features` derives from live capabilities.
+    let mut features = vec![];
+    if reasoning.is_some_and(|reasoning| !reasoning.is_unsupported()) {
+        features.push("interleaved-thinking");
+    }
+    if let Some(ReasoningDetails::Supported {
+        mode: ReasoningMode::Adaptive { .. },
+        ..
+    }) = reasoning
+    {
+        features.push("adaptive-thinking");
+    }
+    if overrides.between_tools {
+        features.push(BETWEEN_TOOLS_THINKING);
+    }
+    if overrides.sampling {
+        features.push(SAMPLING_PARAMETERS);
+    }
+
+    let mut reasoning = reasoning.copied();
+    if overrides.always_on {
+        reasoning = reasoning.map(ReasoningDetails::always_on);
+    }
+
+    Ok(ModelDetails {
+        id,
+        display_name: None,
+        context_window: reported.map(|reported| reported.context_window),
+        max_output_tokens: reported.map(|reported| reported.max_output_tokens),
+        reasoning,
+        knowledge_cutoff: overrides.knowledge_cutoff,
+        deprecated: Some(overrides.deprecated.clone()),
+        structured_output: reported.map(|reported| reported.structured_output),
+        prefill: Some(overrides.prefill),
+        subscription: None,
+        features,
+    })
 }
 
 fn map_model(model: types::Model) -> Result<ModelDetails> {
@@ -2693,24 +2826,7 @@ fn quota_reset_at(seconds: u64) -> Option<chrono::DateTime<chrono::Utc>> {
 /// See:
 /// <https://docs.claude.com/en/docs/build-with-claude/structured-outputs#json-schema-limitations>
 fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
-    if let Some(r) = src.remove("$ref") {
-        return Map::from_iter([("$ref".into(), r)]);
-    }
-
     let mut out = Map::new();
-
-    // Helper macro to move a field from src to out.
-    macro_rules! move_field {
-        ($key:literal) => {
-            if let Some(v) = src.remove($key) {
-                out.insert($key.into(), v);
-            }
-        };
-    }
-
-    // Extract common fields
-    move_field!("title");
-    move_field!("description");
 
     // Recursive Transformation Helpers
     let transform_val = |v: Value| match v {
@@ -2726,9 +2842,47 @@ fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
         |v: Vec<Value>| -> Vec<Value> { v.into_iter().map(transform_val).collect() };
 
     // Handle Recursive Dictionaries
+    //
+    // Extract `$defs` and `definitions` before returning early on `$ref`, so a
+    // root `$ref` schema (such as Pydantic's `RootModel`) retains its sibling
+    // definitions.
     for key in ["$defs", "definitions"] {
         if let Some(Value::Object(defs)) = src.remove(key) {
             out.insert(key.into(), Value::Object(transform_map(defs)));
+        }
+    }
+
+    if let Some(r) = src.remove("$ref") {
+        out.insert("$ref".into(), r);
+        return out;
+    }
+
+    // Helper macro to move a field from src to out.
+    macro_rules! move_field {
+        ($key:literal) => {
+            if let Some(v) = src.remove($key) {
+                out.insert($key.into(), v);
+            }
+        };
+    }
+
+    // Extract common fields
+    move_field!("title");
+    move_field!("description");
+
+    // Anthropic accepts only string, number, boolean, and null enum members,
+    // and rejects a request with any other. Leave any other `enum` in `src` to
+    // be appended to `description` rather than sent as a constraint. The whole
+    // list moves, so a mixed enum doesn't lose its complex members.
+    if let Some(values) = src.remove("enum") {
+        let primitive = values
+            .as_array()
+            .is_some_and(|members| members.iter().all(|m| !m.is_array() && !m.is_object()));
+
+        if primitive {
+            out.insert("enum".into(), values);
+        } else {
+            src.insert("enum".into(), values);
         }
     }
 
@@ -2912,52 +3066,96 @@ fn convert_tools(
 ///
 /// Events from the same role are combined into a single message with multiple
 /// content blocks.
+///
+/// Reasoning omitted by [`convert_event`] is counted and logged.
+/// When a user text block immediately follows omitted reasoning with no
+/// assistant content in between, the user interrupted the assistant
+/// mid-reasoning, and that block is prefixed with
+/// [`INTERRUPTED_REASONING_NOTE`].
+/// The note is added only to the outgoing request; the stored conversation is
+/// unchanged.
 fn convert_events(
     events: ConversationStream,
     cache: Option<types::CacheControl>,
 ) -> Vec<types::Message> {
-    events
-        .into_iter()
-        .filter_map(|event| {
-            let aliases = &event.config.providers.llm.aliases;
+    let mut messages: Vec<types::Message> = vec![];
+    let mut dropped = 0_usize;
+    let mut interrupted = false;
 
-            let is_anthropic = event
-                .config
-                .assistant
-                .model
-                .id
-                .finalize(aliases)
-                .is_ok_and(|id| id.provider == Some(PROVIDER));
+    for event in events {
+        let aliases = &event.config.providers.llm.aliases;
 
-            let has_cache_breakpoint = event
-                .event
-                .metadata
-                .get(jp_conversation::event::CACHE_BREAKPOINT_KEY)
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
+        let is_anthropic = event
+            .config
+            .assistant
+            .model
+            .id
+            .finalize(aliases)
+            .is_ok_and(|id| id.provider == Some(PROVIDER));
 
-            convert_event(event.event, is_anthropic).map(|(role, mut content)| {
-                if has_cache_breakpoint && let Some(cache) = cache {
-                    apply_cache_control(&mut content, cache);
-                }
+        let has_cache_breakpoint = event
+            .event
+            .metadata
+            .get(jp_conversation::event::CACHE_BREAKPOINT_KEY)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
 
-                (role, content)
-            })
-        })
-        .fold(vec![], |mut messages, (role, content)| {
-            match messages.last_mut() {
-                // If the last message has the same role, append content to it.
-                Some(last) if last.role == role => last.content.0.push(content),
-                // Different role or no messages yet, start a new message.
-                _ => messages.push(types::Message {
-                    role,
-                    content: types::MessageContentList(vec![content]),
-                }),
+        let has_reasoning = matches!(
+            &event.event.kind,
+            EventKind::ChatResponse(ChatResponse::Reasoning { reasoning })
+                if !reasoning.trim().is_empty()
+        );
+
+        let Some((role, mut content)) = convert_event(event.event, is_anthropic) else {
+            if has_reasoning {
+                dropped += 1;
+                interrupted = true;
             }
+            continue;
+        };
 
-            messages
-        })
+        match (&role, &mut content) {
+            (types::MessageRole::Assistant, _) => interrupted = false,
+            (types::MessageRole::User, types::MessageContent::Text(text)) if interrupted => {
+                debug!("Noting reasoning the user interrupted.");
+                text.text = format!("{INTERRUPTED_REASONING_NOTE}\n\n{}", text.text);
+                interrupted = false;
+            }
+            _ => {}
+        }
+
+        if has_cache_breakpoint && let Some(cache) = cache {
+            apply_cache_control(&mut content, cache);
+        }
+
+        match messages.last_mut() {
+            // If the last message has the same role, append content to it.
+            Some(last) if last.role == role => last.content.0.push(content),
+            // Different role or no messages yet, start a new message.
+            _ => messages.push(types::Message {
+                role,
+                content: types::MessageContentList(vec![content]),
+            }),
+        }
+    }
+
+    if dropped > 0 {
+        debug!(
+            dropped,
+            "Left reasoning without an Anthropic signature out of the request."
+        );
+    }
+
+    messages
 }
+
+/// Note prepended to a user message that follows interrupted reasoning.
+///
+/// Interrupted reasoning has no signature, so [`convert_event`] omits it from
+/// the request.
+/// Without this note, the model receives a reply to reasoning it cannot see.
+const INTERRUPTED_REASONING_NOTE: &str =
+    "Your previous turn was interrupted while you were still reasoning, before you replied.";
 
 fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheControl) {
     match content {
@@ -2974,7 +3172,8 @@ fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheC
     }
 }
 
-/// Rewrite thinking blocks in the trailing assistant message as `<think>` text.
+/// Drop thinking blocks from the trailing assistant message, and remove the
+/// message if no content blocks remain.
 ///
 /// When the conversation ends with an assistant message, that turn is being
 /// continued rather than answered with a tool result.
@@ -2982,43 +3181,32 @@ fn apply_cache_control(content: &mut types::MessageContent, cache: types::CacheC
 /// turn has been resumed or replayed, the block sequence no longer matches a
 /// single original generation and the API fails with `thinking blocks ...
 /// cannot be modified`.
-/// Rewriting readable thinking as ordinary `<think>` text preserves the
-/// reasoning as context while sidestepping that validation; redacted
-/// (encrypted) thinking has no readable form, so it is dropped.
+/// The reasoning cannot be sent as text either (see [`convert_event`]), so the
+/// model continues from its visible output alone.
 ///
-/// Only the final assistant message is rewritten.
-/// Thinking that precedes a tool result in an earlier turn is left native, as
-/// the API requires for tool-use reasoning continuity.
-fn downgrade_trailing_thinking(messages: &mut [types::Message]) {
+/// Only the final assistant message is affected.
+/// Thinking that precedes a tool result in an earlier turn stays native, as the
+/// API requires for tool-use reasoning continuity.
+///
+/// Returns the number of blocks dropped.
+fn drop_trailing_thinking(messages: &mut Vec<types::Message>) -> usize {
     let Some(last) = messages.last_mut() else {
-        return;
+        return 0;
     };
 
     if last.role != types::MessageRole::Assistant {
-        return;
+        return 0;
     }
 
-    let blocks = mem::take(&mut last.content.0);
-    last.content.0 = blocks
-        .into_iter()
-        .filter_map(|content| match content {
-            types::MessageContent::Thinking(types::Thinking { thinking, .. }) => {
-                Some(think_tag_text(&thinking))
-            }
-            types::MessageContent::RedactedThinking { .. } => None,
-            other => Some(other),
-        })
-        .collect();
-}
+    let count = last.content.0.len();
+    last.content.0.retain(|content| !is_thinking_block(content));
+    let dropped = count - last.content.0.len();
 
-/// Wrap reasoning text in `<think>` tags as a plain text content block.
-///
-/// Used wherever reasoning must be sent to Anthropic as ordinary text rather
-/// than a native thinking block: reasoning from other providers replayed
-/// through this provider, and signed thinking in a continuation target that
-/// would otherwise be rejected.
-fn think_tag_text(reasoning: &str) -> types::MessageContent {
-    types::MessageContent::Text(format!("<think>\n{reasoning}\n</think>\n\n").into())
+    if last.content.0.is_empty() {
+        messages.pop();
+    }
+
+    dropped
 }
 
 fn convert_event(
@@ -3059,14 +3247,13 @@ fn convert_event(
                 types::MessageContent::RedactedThinking { data }
             } else {
                 match response {
-                    // A signed-but-textless thinking block whose signature a
-                    // repair patch removed has nothing left to send. Drop it
-                    // rather than emit an empty `<think></think>` pair.
-                    ChatResponse::Reasoning { reasoning } if reasoning.trim().is_empty() => {
-                        return None;
-                    }
-                    // Reasoning from other providers - wrap in <think> tags.
-                    ChatResponse::Reasoning { reasoning } => think_tag_text(&reasoning),
+                    // Omit reasoning that cannot be sent as a native block:
+                    // reasoning from other providers, partial reasoning from
+                    // an interrupted stream, and thinking whose signature was
+                    // stripped by a repair patch. Anthropic refuses requests
+                    // that carry reasoning in message text
+                    // (`reasoning_extraction`).
+                    ChatResponse::Reasoning { .. } => return None,
                     ChatResponse::Message { message } => {
                         types::MessageContent::Text(message.into())
                     }
@@ -3283,6 +3470,18 @@ impl From<AnthropicError> for StreamError {
                 .with_source(error)
             }
 
+            // A wrong endpoint also returns `not_found_error`, so require the
+            // `model:` prefix in the message (e.g. `model: claude-nonexistent`).
+            E::Api(ref api_error)
+                if api_error.error_type == "not_found_error"
+                    && api_error
+                        .message
+                        .as_deref()
+                        .is_some_and(|message| message.starts_with("model:")) =>
+            {
+                StreamError::unknown_model(error.to_string()).with_source(error)
+            }
+
             // An oversized prompt is the same size on the next attempt, so it
             // is classified rather than left to the generic fallback below.
             E::Api(ref api_error)
@@ -3299,216 +3498,8 @@ impl From<AnthropicError> for StreamError {
     }
 }
 
-/// Anthropic's recorded-test routes.
-///
-/// Both reach the same host; a subscription request differs by its bearer
-/// token, the Claude Code fingerprint, and the identity line leading its system
-/// content.
 #[cfg(test)]
-pub(crate) static TEST_SUPPORT: AnthropicTestSupport = AnthropicTestSupport;
-
-#[cfg(test)]
-pub(crate) struct AnthropicTestSupport;
-
-#[cfg(test)]
-impl super::ProviderTestSupport for AnthropicTestSupport {
-    fn api(&self) -> &'static dyn super::ProviderTestRoute {
-        &API_ROUTE
-    }
-
-    fn subscription(&self) -> Option<&'static dyn super::ProviderTestRoute> {
-        Some(&SUBSCRIPTION_ROUTE)
-    }
-
-    /// Strip the transport-mandated identity line, then erase what the model
-    /// authored.
-    fn project_request(&self, body: &serde_json::Value) -> serde_json::Value {
-        let mut body = body.clone();
-
-        strip_identity_line(&mut body);
-
-        // Only an assistant turn holds the model's words. A `text` block in
-        // `system` is JP's own prompt and stays compared.
-        for message in body
-            .get_mut("messages")
-            .and_then(Value::as_array_mut)
-            .into_iter()
-            .flatten()
-        {
-            if message.get("role").and_then(Value::as_str) != Some("assistant") {
-                continue;
-            }
-
-            for block in message
-                .get_mut("content")
-                .and_then(Value::as_array_mut)
-                .into_iter()
-                .flatten()
-            {
-                erase_model_output(block);
-            }
-        }
-
-        // `id` names a tool call, `tool_use_id` is how its result answers it.
-        // Both are minted by the host.
-        super::number_ids(&mut body, &["id", "tool_use_id"]);
-
-        body
-    }
-}
-
-/// Drop the identity line a bearer request has to lead with, and the block that
-/// bounds it.
-///
-/// A request left holding nothing but those two ends up with an empty `system`,
-/// while a request that never had a system prompt omits the field.
-/// Both say the same thing and have to read the same way.
-#[cfg(test)]
-fn strip_identity_line(body: &mut Value) {
-    let Some(system) = body.get_mut("system").and_then(Value::as_array_mut) else {
-        return;
-    };
-
-    system.retain(|block| {
-        let text = block
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        text != CLAUDE_CODE_IDENTITY_LINE && text != IDENTITY_LINE_OVERRIDE
-    });
-
-    if system.is_empty()
-        && let Some(body) = body.as_object_mut()
-    {
-        body.remove("system");
-    }
-}
-
-/// Erase what the model contributed to one content block of an assistant turn.
-///
-/// The Messages dialect files it three ways, and `input` here holds a tool
-/// call's arguments.
-/// Other dialects use the same key for the entire conversation, which is why
-/// this reading belongs to Anthropic alone.
-#[cfg(test)]
-fn erase_model_output(block: &mut Value) {
-    match block
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-    {
-        "text" => {
-            if let Some(text) = block.get_mut("text")
-                && text.is_string()
-            {
-                *text = Value::from("<model prose>");
-            }
-        }
-
-        // The thinking text is the model's; the signature is that text in a
-        // form only the host can verify.
-        "thinking" => {
-            if let Some(thinking) = block.get_mut("thinking")
-                && thinking.is_string()
-            {
-                *thinking = Value::from("<model prose>");
-            }
-            if let Some(signature) = block.get_mut("signature")
-                && signature.is_string()
-            {
-                *signature = Value::from("<opaque>");
-            }
-        }
-
-        "tool_use" => {
-            if let Some(input) = block.get_mut("input") {
-                *input = Value::from("<model arguments>");
-            }
-        }
-
-        _ => {}
-    }
-}
-
-#[cfg(test)]
-static SUBSCRIPTION_ROUTE: SubscriptionTestRoute = SubscriptionTestRoute;
-
-/// The direct HTTP subscription route.
-///
-/// Recording authenticates exactly as a user's own machine does: through the
-/// credential store, resolved by the same chain a real request walks.
-/// Logging in is a one-time `jp provider llm auth login anthropic`, and refresh
-/// and rotation are then the production code's problem rather than the
-/// harness's.
-#[cfg(test)]
-pub(crate) struct SubscriptionTestRoute;
-
-#[cfg(test)]
-impl super::ProviderTestRoute for SubscriptionTestRoute {
-    fn base_url(&self, config: &jp_config::providers::llm::LlmProviderConfig) -> String {
-        config.anthropic.base_url.clone()
-    }
-
-    fn set_base_url(&self, config: &mut jp_config::providers::llm::LlmProviderConfig, url: String) {
-        config.anthropic.base_url = url;
-    }
-
-    fn provider(
-        &self,
-        config: &jp_config::providers::llm::LlmProviderConfig,
-        recording: bool,
-    ) -> std::result::Result<Box<dyn super::Provider>, String> {
-        // A replayed cassette answers without authenticating, so the token only
-        // has to exist. Reading the store on replay would make the suite
-        // depend on the machine running it.
-        if !recording {
-            return Ok(Box::new(Anthropic::with_credential(
-                &config.anthropic,
-                Credential::Bearer("test-token".to_owned()),
-            )));
-        }
-
-        let profile = super::first_stored_profile(jp_credentials::PROVIDER_ANTHROPIC).ok_or(
-            "recording needs a stored Claude subscription; run `jp provider llm auth login \
-             anthropic` once",
-        )?;
-
-        let mut config = config.anthropic.clone();
-        config.auth = vec![AuthEntry::Subscription(Some(profile))];
-        config.subscription_flow = SubscriptionFlow::Direct;
-
-        Anthropic::new(&config)
-            .map(|provider| Box::new(provider) as Box<dyn super::Provider>)
-            .map_err(|error| error.to_string())
-    }
-
-    fn model(&self) -> ModelDetails {
-        API_ROUTE.model()
-    }
-}
-
-#[cfg(test)]
-static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
-    id: ProviderId::Anthropic,
-    base_url: |config| config.anthropic.base_url.clone(),
-    set_base_url: |config, url| config.anthropic.base_url = url,
-    use_replay_credentials: |config| {
-        config.anthropic.api_key_env = super::replay_credential_env().into();
-    },
-    model: || ModelDetails {
-        id: "anthropic/claude-haiku-4-5".parse().unwrap(),
-        display_name: None,
-        context_window: Some(200_000),
-        max_output_tokens: Some(64_000),
-        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        subscription: None,
-        features: vec!["interleaved-thinking", "context-editing"],
-    },
-};
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "anthropic/fallback_tests.rs"]

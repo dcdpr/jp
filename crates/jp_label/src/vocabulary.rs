@@ -49,6 +49,34 @@
 //!
 //! Leaving `values` out makes a bare key instead, which takes none.
 //!
+//! An open key can restrict its values to a [`ValueType`] with `type`,
+//! rejecting values of any other format on write:
+//!
+//! ```json
+//! { "due": { "description": "When the work is wanted.", "values": [], "type": "date" } }
+//! ```
+//!
+//! `date` is the only supported type: a calendar date in `YYYY-MM-DD` format,
+//! which a [`Selector`] can compare with `<`, `<=`, `>`, and `>=`.
+//!
+//! Items can be sorted by a single-valued key (`max = 1`) with ordered values:
+//! a `date` key sorts chronologically, and a closed key with `ordered = true`
+//! sorts values in declared order (with retired values after active ones, in
+//! both directions):
+//!
+//! ```json
+//! {
+//!   "priority": {
+//!     "description": "How soon the work matters.",
+//!     "values": ["high", "medium", "low"],
+//!     "max": 1,
+//!     "ordered": true
+//!   }
+//! }
+//! ```
+//!
+//! [`Vocabulary::sort_key`] returns a [`SortKey`] for comparing two items.
+//!
 //! A key can also be held to one item across a collection, with `unique`:
 //! `"key"` lets one item carry the key at all, and `"key-value"` lets one item
 //! carry each of its values.
@@ -65,6 +93,9 @@
 //! Reading is liberal and writing is strict: an item parsed off disk reports
 //! whatever labels it carries, but only [`Vocabulary::resolve`] and
 //! [`Vocabulary::resolve_against`] produce a set a write will accept.
+//!
+//! [`Selector`]: crate::Selector
+//! [`SortKey`]: crate::SortKey
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -74,7 +105,11 @@ use std::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{KeyError, Labels, parse_token, validate_key, validate_value};
+use crate::{
+    KeyError, Labels, ValueType, is_date, parse_token,
+    sort::{Rank, Ranked, SortKey},
+    validate_key, validate_value,
+};
 
 /// The on-disk shape of one key's entry.
 ///
@@ -86,16 +121,22 @@ struct Entry {
     #[serde(default)]
     description: String,
     /// Absent for a key that takes no value, empty for one that takes any.
+    ///
+    /// Stored as a `Vec` to preserve declaration order for `ordered` keys.
     #[serde(default)]
-    values: Option<BTreeSet<String>>,
+    values: Option<Vec<String>>,
     #[serde(default)]
-    retired: BTreeSet<String>,
+    retired: Vec<String>,
     #[serde(default)]
     min: Option<usize>,
     #[serde(default)]
     max: Option<usize>,
     #[serde(default)]
     unique: Option<Unique>,
+    #[serde(default, rename = "type")]
+    value_type: Option<ValueType>,
+    #[serde(default)]
+    ordered: bool,
 }
 
 /// How much of a key one item of a collection holds on its own.
@@ -136,6 +177,10 @@ pub struct Facet {
     min: usize,
     max: Option<usize>,
     unique: Option<Unique>,
+    value_type: Option<ValueType>,
+    /// Active values followed by retired values in declaration order, when
+    /// `ordered` is set.
+    ranked: Option<Vec<String>>,
 }
 
 impl Facet {
@@ -166,6 +211,14 @@ impl Facet {
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// Value type constraint for this key, or `None` for unrestricted text.
+    ///
+    /// Only open keys (`values = []`) can have a value type.
+    #[must_use]
+    pub fn value_type(&self) -> Option<ValueType> {
+        self.value_type
     }
 
     /// How much of this key one item of a collection holds on its own, or
@@ -203,6 +256,42 @@ impl Facet {
     pub fn bound(&self) -> Option<String> {
         bound(self.min, self.max)
     }
+
+    /// Whether `ordered` is set on this key, ranking its values in declaration
+    /// order.
+    #[must_use]
+    pub fn is_ordered(&self) -> bool {
+        self.ranked.is_some()
+    }
+
+    /// Whether items can be sorted by this key (`max = 1` with either `type =
+    /// "date"` or `ordered = true`).
+    #[must_use]
+    pub fn is_sortable(&self) -> bool {
+        self.max == Some(1) && (self.value_type == Some(ValueType::Date) || self.is_ordered())
+    }
+
+    /// Return the [`Ranked`] sort position of `value` under this key, or `None`
+    /// if `value` is not a valid `YYYY-MM-DD` date (for a `date` key) or is not
+    /// declared (for an `ordered` key).
+    pub(crate) fn rank<'a>(&self, value: &'a str) -> Option<Ranked<'a>> {
+        if let Some(ranked) = &self.ranked {
+            let (position, declared) = ranked
+                .iter()
+                .enumerate()
+                .find(|(_, declared)| declared.eq_ignore_ascii_case(value))?;
+
+            return Some(Ranked {
+                retired: self.retired.contains(declared),
+                rank: Rank::Position(position),
+            });
+        }
+
+        (self.value_type == Some(ValueType::Date) && is_date(value)).then_some(Ranked {
+            retired: false,
+            rank: Rank::Date(value),
+        })
+    }
 }
 
 /// `min` and `max` in words, or `None` when neither holds an item to anything.
@@ -221,39 +310,86 @@ fn bound(min: usize, max: Option<usize>) -> Option<String> {
     }
 }
 
-/// Check a facet asks for something an item, and a collection of them, can
-/// meet.
-fn check(key: &str, facet: &Facet) -> Result<(), Error> {
-    let key = key.to_owned();
+/// Validate that a facet's constraints are internally satisfiable.
+fn check(facet: &Facet) -> Result<(), Unmeetable> {
+    if facet.value_type.is_some() && !facet.open {
+        return Err(Unmeetable::TypeOnClosedKey);
+    }
     if facet.open && !facet.retired.is_empty() {
-        return Err(Error::RetiredOnOpenKey { key });
+        return Err(Unmeetable::RetiredOnOpenKey);
     }
     if facet.is_bare() && facet.is_bounded() {
-        return Err(Error::BoundOnBareKey { key });
+        return Err(Unmeetable::BoundOnBareKey);
     }
 
     let min = facet.min;
     match facet.max {
-        Some(0) => return Err(Error::ZeroMax { key }),
-        Some(max) if min > max => return Err(Error::MinAboveMax { key, min, max }),
+        Some(0) => return Err(Unmeetable::ZeroMax),
+        Some(max) if min > max => return Err(Unmeetable::MinAboveMax { min, max }),
         _ => {}
     }
 
     // A retired value can't be added, so only the active ones can make up the
     // count on a new item.
     if !facet.open && min > facet.active.len() {
-        return Err(Error::MinAboveValues {
-            key,
+        return Err(Unmeetable::MinAboveValues {
             min,
             values: facet.active.len(),
         });
     }
 
     if facet.unique == Some(Unique::Key) && min > 0 {
-        return Err(Error::UniqueRequired { key, min });
+        return Err(Unmeetable::UniqueRequired { min });
+    }
+
+    let listed = !facet.open && !facet.is_bare();
+    if facet.is_ordered() && !(listed && facet.max == Some(1)) {
+        return Err(Unmeetable::UnorderableKey);
     }
 
     Ok(())
+}
+
+/// Validate that all active and retired values for `key` are well-formed,
+/// non-empty, and case-insensitively unique.
+fn check_values(
+    key: &str,
+    values: &BTreeSet<String>,
+    retired: &BTreeSet<String>,
+) -> Result<(), Error> {
+    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    for value in values.iter().chain(retired) {
+        validate_value(value).map_err(Error::Name)?;
+        if value.is_empty() {
+            return Err(Error::EmptyValue {
+                key: key.to_owned(),
+            });
+        }
+
+        // Reject duplicates within either list and across active and retired.
+        if let Some(existing) = seen.insert(value.to_ascii_lowercase(), value.clone()) {
+            return Err(Error::DuplicateValue {
+                key: key.to_owned(),
+                first: existing,
+                second: value.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Concatenate `values` and `retired` in declaration order, deduplicating
+/// repeated entries.
+fn declared_order(values: &[String], retired: &[String]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+
+    values
+        .iter()
+        .chain(retired)
+        .filter(|value| seen.insert(value.as_str()))
+        .cloned()
+        .collect()
 }
 
 /// The keys a consumer defines, each with the values it accepts.
@@ -315,40 +451,29 @@ impl Vocabulary {
                 });
             }
 
-            let open = entry.values.as_ref().is_some_and(BTreeSet::is_empty);
-            let values = entry.values.unwrap_or_default();
-
-            let mut seen_values: BTreeMap<String, String> = BTreeMap::new();
-            for value in values.iter().chain(&entry.retired) {
-                validate_value(value).map_err(Error::Name)?;
-                if value.is_empty() {
-                    return Err(Error::EmptyValue { key: key.clone() });
-                }
-
-                // Covers both within-list and active-versus-retired
-                // collisions: a value in both lists has no answer to "may this
-                // be added?".
-                if let Some(existing) =
-                    seen_values.insert(value.to_ascii_lowercase(), value.clone())
-                {
-                    return Err(Error::DuplicateValue {
-                        key: key.clone(),
-                        first: existing,
-                        second: value.clone(),
-                    });
-                }
-            }
+            let open = entry.values.as_ref().is_some_and(Vec::is_empty);
+            let declared = entry.values.unwrap_or_default();
+            let values: BTreeSet<String> = declared.iter().cloned().collect();
+            let retired: BTreeSet<String> = entry.retired.iter().cloned().collect();
+            check_values(&key, &values, &retired)?;
 
             let facet = Facet {
                 description: entry.description,
                 active: values,
-                retired: entry.retired,
+                retired,
                 open,
                 min: entry.min.unwrap_or(0),
                 max: entry.max,
                 unique: entry.unique,
+                value_type: entry.value_type,
+                ranked: entry
+                    .ordered
+                    .then(|| declared_order(&declared, &entry.retired)),
             };
-            check(&key, &facet)?;
+            check(&facet).map_err(|problem| Error::Unmeetable {
+                key: key.clone(),
+                problem,
+            })?;
 
             facets.insert(key, facet);
         }
@@ -376,6 +501,22 @@ impl Vocabulary {
     /// Every key, paired with its entry, in order.
     pub fn facets(&self) -> impl Iterator<Item = (&str, &Facet)> {
         self.0.iter().map(|(key, facet)| (key.as_str(), facet))
+    }
+
+    /// Sortable keys in alphabetical order; see [`Facet::is_sortable`].
+    pub fn sortable_keys(&self) -> impl Iterator<Item = &str> {
+        self.facets()
+            .filter(|(_, facet)| facet.is_sortable())
+            .map(|(key, _)| key)
+    }
+
+    /// Return a [`SortKey`] for `key`, or `None` if `key` is undefined or not
+    /// sortable; see [`Facet::is_sortable`].
+    #[must_use]
+    pub fn sort_key(&self, key: &str) -> Option<SortKey<'_>> {
+        let (key, facet) = self.0.get_key_value(key)?;
+
+        facet.is_sortable().then_some(SortKey { key, facet })
     }
 
     /// The keys that take any value, in order.
@@ -457,7 +598,8 @@ impl Vocabulary {
     /// The tokens are the item's whole set, so each key's `min` and `max` are
     /// checked against them.
     ///
-    /// A key that takes any value keeps the value as given.
+    /// An open key preserves the value's original spelling after validating any
+    /// configured `type`.
     /// An empty vocabulary accepts every well-formed token, spelled as given.
     /// Neither checks `unique`, which needs the rest of the collection; see
     /// [`Vocabulary::clashes`].
@@ -483,6 +625,7 @@ impl Vocabulary {
         let mut unknown_keys = vec![];
         let mut unknown_values = vec![];
         let mut retired = vec![];
+        let mut mistyped = vec![];
 
         for token in requested {
             let Ok((key, value)) = parse_token(token) else {
@@ -506,6 +649,17 @@ impl Vocabulary {
                 continue;
             };
 
+            // `check` only allows `type` on open keys (`values = []`), so this
+            // never rejects an explicitly listed value.
+            if let Some(expected) = facet.value_type.filter(|kind| !kind.accepts(&value)) {
+                mistyped.push(Mistyped {
+                    key: key.to_owned(),
+                    value,
+                    expected,
+                });
+                continue;
+            }
+
             if let Some(known) = matching(facet.active.iter(), &value) {
                 accepted.entry(key).or_default().insert(known.to_owned());
             } else if let Some(known) = matching(facet.retired.iter(), &value) {
@@ -527,6 +681,7 @@ impl Vocabulary {
             || !unknown_keys.is_empty()
             || !unknown_values.is_empty()
             || !retired.is_empty()
+            || !mistyped.is_empty()
             || !miscounted.is_empty()
         {
             return Err(Rejected {
@@ -534,6 +689,7 @@ impl Vocabulary {
                 unknown_keys,
                 unknown_values,
                 retired,
+                mistyped,
                 miscounted,
                 addable: self.tokens(),
                 open_keys: self.open_keys().map(ToOwned::to_owned).collect(),
@@ -684,6 +840,7 @@ fn free_form(requested: &[String]) -> Result<Labels, Rejected> {
             unknown_keys: vec![],
             unknown_values: vec![],
             retired: vec![],
+            mistyped: vec![],
             miscounted: vec![],
             addable: vec![],
             open_keys: vec![],
@@ -725,22 +882,69 @@ pub enum Error {
         first: String,
         second: String,
     },
+    /// A key's constraints cannot be satisfied.
+    Unmeetable { key: String, problem: Unmeetable },
+}
+
+/// Reason a key's constraints cannot be satisfied ([`Error::Unmeetable`]).
+///
+/// [`Display`] formats the predicate following `` `<key>` in the label
+/// vocabulary ``.
+///
+/// [`Display`]: fmt::Display
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unmeetable {
     /// `min` or `max` on a key that takes no value.
-    BoundOnBareKey { key: String },
+    BoundOnBareKey,
     /// `max = 0`, which no item carrying the key could meet.
-    ZeroMax { key: String },
+    ZeroMax,
     /// `min` above `max`.
-    MinAboveMax { key: String, min: usize, max: usize },
+    MinAboveMax { min: usize, max: usize },
     /// `min` above the number of values the key defines.
-    MinAboveValues {
-        key: String,
-        min: usize,
-        values: usize,
-    },
+    MinAboveValues { min: usize, values: usize },
     /// `retired` on a key that takes any value.
-    RetiredOnOpenKey { key: String },
+    RetiredOnOpenKey,
     /// `unique = "key"` on a key every item has to carry.
-    UniqueRequired { key: String, min: usize },
+    UniqueRequired { min: usize },
+    /// `type` on a key that lists its values or takes none.
+    TypeOnClosedKey,
+    /// `ordered` on a key that does not list explicit values or does not set
+    /// `max = 1`.
+    UnorderableKey,
+}
+
+impl fmt::Display for Unmeetable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BoundOnBareKey => f.write_str("takes no value, so it has no `min` or `max`."),
+            Self::ZeroMax => f.write_str(
+                "has `max = 0`, which no item carrying it meets; retire its values instead.",
+            ),
+            Self::MinAboveMax { min, max } => write!(f, "has `min = {min}` above `max = {max}`."),
+            Self::MinAboveValues { min, values } => {
+                write!(
+                    f,
+                    "has `min = {min}`, but only {values} values to choose from."
+                )
+            }
+            Self::RetiredOnOpenKey => f.write_str(
+                "takes any value (`values = []`), so it has nothing to retire. To retire every \
+                 value of a key, list them under `retired` and leave `values` out.",
+            ),
+            Self::UniqueRequired { min } => write!(
+                f,
+                "is required on every item (`min = {min}`) but allowed on one (`unique = \
+                 \"key\"`), which no two items can meet."
+            ),
+            Self::TypeOnClosedKey => f.write_str(
+                "has a `type`, but only a key taking any value (`values = []`) can have one.",
+            ),
+            Self::UnorderableKey => f.write_str(
+                "sets `ordered`, but only a key that lists its values and has `max = 1` can be \
+                 ordered.",
+            ),
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -749,7 +953,7 @@ impl fmt::Display for Error {
             Self::Malformed(reason) => write!(
                 f,
                 "The label vocabulary is not a map of each key to a `description`, `values`, and \
-                 the optional `retired`, `min`, and `max`: {reason}"
+                 the optional `retired`, `min`, `max`, `unique`, `type`, and `ordered`: {reason}"
             ),
             Self::Name(error) => write!(f, "The label vocabulary is unusable: {error}."),
             Self::EmptyValue { key } => {
@@ -764,35 +968,9 @@ impl fmt::Display for Error {
                 "`{first}` and `{second}` under `{key}` in the label vocabulary are the same \
                  value."
             ),
-            Self::BoundOnBareKey { key } => write!(
-                f,
-                "`{key}` in the label vocabulary takes no value, so it has no `min` or `max`."
-            ),
-            Self::ZeroMax { key } => write!(
-                f,
-                "`{key}` in the label vocabulary has `max = 0`, which no item carrying it meets; \
-                 retire its values instead."
-            ),
-            Self::MinAboveMax { key, min, max } => write!(
-                f,
-                "`{key}` in the label vocabulary has `min = {min}` above `max = {max}`."
-            ),
-            Self::MinAboveValues { key, min, values } => write!(
-                f,
-                "`{key}` in the label vocabulary has `min = {min}`, but only {values} values to \
-                 choose from."
-            ),
-            Self::RetiredOnOpenKey { key } => write!(
-                f,
-                "`{key}` in the label vocabulary takes any value (`values = []`), so it has \
-                 nothing to retire. To retire every value of a key, list them under `retired` and \
-                 leave `values` out."
-            ),
-            Self::UniqueRequired { key, min } => write!(
-                f,
-                "`{key}` in the label vocabulary is required on every item (`min = {min}`) but \
-                 allowed on one (`unique = \"key\"`), which no two items can meet."
-            ),
+            Self::Unmeetable { key, problem } => {
+                write!(f, "`{key}` in the label vocabulary {problem}")
+            }
         }
     }
 }
@@ -821,12 +999,34 @@ pub struct Rejected {
     pub unknown_values: Vec<String>,
     /// Retired, and not already on the item.
     pub retired: Vec<String>,
+    /// Values that do not match their key's `type`.
+    pub mistyped: Vec<Mistyped>,
     /// Keys the item would carry too few or too many values of.
     pub miscounted: Vec<Miscount>,
     /// The tokens a write may add.
     pub addable: Vec<String>,
     /// The keys a write may add with any value.
     pub open_keys: Vec<String>,
+}
+
+/// A label value that does not match its key's [`ValueType`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mistyped {
+    pub key: String,
+    pub value: String,
+    pub expected: ValueType,
+}
+
+impl fmt::Display for Mistyped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`{}={}` is not {}.",
+            self.key,
+            self.value,
+            self.expected.describe()
+        )
+    }
 }
 
 /// A bounded key an item would carry too few or too many values of.
@@ -922,8 +1122,13 @@ impl fmt::Display for Rejected {
             )?;
         }
 
-        // The whole set is offered only for a label the vocabulary refused; a
-        // miscount offers the values of its own key.
+        for mistyped in &self.mistyped {
+            sentence(f, mistyped.to_string())?;
+        }
+
+        // Only list the full vocabulary when a key or value is unknown or
+        // retired; miscounts list their own key's values, and mistyped values
+        // state the expected format.
         let refused = !self.malformed.is_empty()
             || !self.unknown_keys.is_empty()
             || !self.unknown_values.is_empty()

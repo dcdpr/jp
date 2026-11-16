@@ -555,6 +555,9 @@ Ok(
                         base_url: Some(
                             "https://generativelanguage.googleapis.com/v1beta",
                         ),
+                        silence_allowance_secs: Some(
+                            300,
+                        ),
                     },
                     llamacpp: PartialLlamacppConfig {
                         base_url: Some(
@@ -636,12 +639,17 @@ Ok(
                 ),
             },
             plugins: PartialPluginsConfig {
-                shutdown_timeout_secs: Some(
-                    5,
-                ),
-                command: Map(
-                    {},
-                ),
+                command: PartialCommandPluginsConfig {
+                    defaults: PartialCommandPluginDefaultsConfig {
+                        run: None,
+                        shutdown_timeout_secs: Some(
+                            5,
+                        ),
+                    },
+                    plugins: Map(
+                        {},
+                    ),
+                },
             },
             user: PartialUserConfig {
                 name: None,

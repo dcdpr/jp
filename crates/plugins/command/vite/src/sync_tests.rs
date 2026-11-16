@@ -93,14 +93,6 @@ fn a_file_differing_only_in_line_endings_is_left_alone() {
     assert_eq!(paths(&changes), ["write docs/.vitepress/jp-vite/style.css"]);
 }
 
-#[test]
-fn only_a_carriage_return_ending_a_line_is_ignored() {
-    assert!(same_text(b"a\r\nb\r\n", b"a\nb\n"));
-    assert!(same_text(b"a\nb", b"a\r\nb"));
-    assert!(!same_text(b"a\rb\n", b"ab\n"));
-    assert!(!same_text(b"a\r\n", b"a\n\n"));
-}
-
 /// A page is created where there is none, and left as it is where there is one,
 /// whatever it holds.
 #[test]

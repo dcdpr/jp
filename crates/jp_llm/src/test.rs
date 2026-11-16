@@ -23,6 +23,7 @@ use jp_test::mock::{Snap, Vcr};
 use jp_tool::{ToolDefinition, ToolDocs};
 
 use crate::{
+    error::StreamErrorKind,
     event::{Event, FinishReason},
     event_builder::EventBuilder,
     model::ModelDetails,
@@ -137,6 +138,28 @@ mod harness_tests {
 
         assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
     }
+
+    // One variable per route, so pointing one self-hosted provider at a remote
+    // server leaves every other provider recording against its own endpoint.
+    #[test]
+    fn each_route_reads_its_own_upstream_variable() {
+        assert_eq!(
+            upstream_env(ProviderId::Vllm, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_VLLM"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Llamacpp, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_LLAMACPP"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Openai, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_OPENAI"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Openai, ProviderTestMode::Subscription),
+            "JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION"
+        );
+    }
 }
 
 /// An entry in the per-request event log used for snapshot testing.
@@ -151,6 +174,26 @@ pub enum TestEvent {
 
     /// The stream finished with this reason.
     Finished(FinishReason),
+}
+
+/// Outcome of a chat request expected to be refused by the provider.
+///
+/// The mock server's address is redacted to `[base_url]` in error messages so
+/// snapshots stay deterministic across runs.
+#[derive(Debug, Clone)]
+#[expect(dead_code, reason = "fields read via Debug formatting in snapshots")]
+pub enum TestRefusal {
+    /// The request failed before a stream was returned.
+    Request(String),
+
+    /// The stream ended with this error.
+    Stream {
+        kind: StreamErrorKind,
+        message: String,
+    },
+
+    /// The provider answered the request.
+    Answered,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -177,6 +220,25 @@ pub enum TestRequest {
         name: String,
         #[expect(clippy::type_complexity)]
         assert: Arc<dyn Fn(&[ModelDetails])>,
+    },
+
+    /// A chat completion request the provider is expected to refuse.
+    ///
+    /// Built from [`Self::Chat`] by [`Self::expect_refusal`].
+    /// Snapshotted as `refusal` instead of as events.
+    Refused {
+        model: ModelDetails,
+        query: ChatQuery,
+        assert: Arc<dyn Fn(&TestRefusal)>,
+    },
+
+    /// A model details request that may fail.
+    ///
+    /// Snapshotted as `model_lookup`, with the error text when it fails.
+    ModelLookup {
+        name: String,
+        #[expect(clippy::type_complexity)]
+        assert: Arc<dyn Fn(&Result<ModelDetails, String>)>,
     },
 
     /// A tool call response, given the same ID as the last tool call request in
@@ -359,7 +421,7 @@ impl TestRequest {
         )
     }
 
-    #[expect(dead_code)]
+    /// Add an assertion that runs after this turn, with every response so far.
     pub fn assert_chat(mut self, assert: impl Fn(&[Vec<TestEvent>]) + 'static) -> Self {
         if let Self::Chat { assert: a, .. } = &mut self {
             *a = Arc::new(assert);
@@ -392,6 +454,22 @@ impl TestRequest {
         self
     }
 
+    /// Convert this [`Self::Chat`] request into [`Self::Refused`] and run
+    /// `assert` on the outcome.
+    ///
+    /// Call this after all other [`Self::Chat`] builder methods, which are
+    /// no-ops on [`Self::Refused`].
+    pub fn expect_refusal(self, assert: impl Fn(&TestRefusal) + 'static) -> Self {
+        match self {
+            Self::Chat { model, query, .. } => Self::Refused {
+                model,
+                query,
+                assert: Arc::new(assert),
+            },
+            other => other,
+        }
+    }
+
     /// Add an attachment to the thread.
     pub fn attachment(mut self, attachment: Attachment) -> Self {
         if let Self::Chat { query, .. } = &mut self {
@@ -402,14 +480,14 @@ impl TestRequest {
 
     pub fn as_thread(&self) -> Option<&Thread> {
         match self {
-            Self::Chat { query, .. } => Some(&query.thread),
+            Self::Chat { query, .. } | Self::Refused { query, .. } => Some(&query.thread),
             _ => None,
         }
     }
 
     pub fn as_thread_mut(&mut self) -> Option<&mut Thread> {
         match self {
-            Self::Chat { query, .. } => Some(&mut query.thread),
+            Self::Chat { query, .. } | Self::Refused { query, .. } => Some(&mut query.thread),
             _ => None,
         }
     }
@@ -430,8 +508,16 @@ impl std::fmt::Debug for TestRequest {
                 .field("model", model)
                 .field("query", query)
                 .finish(),
+            Self::Refused { model, query, .. } => f
+                .debug_struct("Refused")
+                .field("model", model)
+                .field("query", query)
+                .finish(),
             Self::Models { .. } => f.debug_struct("Models").finish(),
             Self::ModelDetails { .. } => f.debug_struct("ModelDetails").finish(),
+            Self::ModelLookup { name, .. } => {
+                f.debug_struct("ModelLookup").field("name", name).finish()
+            }
             Self::ToolCallResponse {
                 result,
                 panic_on_missing_request,
@@ -507,28 +593,34 @@ pub async fn run_chat_completion(
     .await
 }
 
-/// Environment variable naming the server to record against.
+/// Return the environment variable that overrides the recording URL for
+/// `provider` and `mode`.
 ///
-/// Has no effect on playback, which answers from the cassette and never
-/// forwards.
-const UPSTREAM_ENV: &str = "JP_TEST_UPSTREAM";
+/// Formatted as `JP_TEST_UPSTREAM_<ROUTE>` using the route's uppercase fixture
+/// directory name (e.g. `JP_TEST_UPSTREAM_VLLM` or
+/// `JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION`).
+/// Ignored during playback.
+fn upstream_env(provider: ProviderId, mode: ProviderTestMode) -> String {
+    format!(
+        "JP_TEST_UPSTREAM_{}",
+        fixture_dir(provider, mode).to_uppercase()
+    )
+}
 
-/// The server the recorder forwards to.
+/// Return the upstream base URL the VCR recorder forwards requests to.
 ///
-/// The provider's configured base URL, unless `JP_TEST_UPSTREAM` names another
-/// one.
-/// A self-hosted provider is configured with a loopback address, which finds a
-/// server only on the machine doing the recording; the variable aims the
-/// recording at a deployment elsewhere.
-///
-/// Only the upstream moves.
-/// Requests still travel through the mock server that writes the cassette.
-fn record_upstream(route: &dyn ProviderTestRoute, config: &LlmProviderConfig) -> String {
-    if let Ok(url) = env::var(UPSTREAM_ENV) {
-        return url;
-    }
-
-    route.base_url(config)
+/// Defaults to the route's configured base URL unless overridden by its
+/// [`upstream_env`] variable (for example, to record a self-hosted provider
+/// against a remote server instead of `localhost`).
+/// Requests still pass through the local mock server so the cassette is
+/// recorded.
+fn record_upstream(
+    provider: ProviderId,
+    mode: ProviderTestMode,
+    route: &dyn ProviderTestRoute,
+    config: &LlmProviderConfig,
+) -> String {
+    env::var(upstream_env(provider, mode)).unwrap_or_else(|_| route.base_url(config))
 }
 
 #[expect(clippy::too_many_lines)]
@@ -552,7 +644,7 @@ pub async fn run_chat_completion_mode(
         },
     };
 
-    let vcr = Vcr::new(record_upstream(route, &config))
+    let vcr = Vcr::new(record_upstream(provider_id, mode, route, &config))
         .with_fixture_suffix(&fixture_dir(provider_id, mode));
 
     vcr.cassette(
@@ -563,7 +655,7 @@ pub async fn run_chat_completion_mode(
             });
         },
         |recording, url| async move {
-            route.set_base_url(&mut config, url);
+            route.set_base_url(&mut config, url.clone());
 
             if !recording {
                 route.use_replay_credentials(&mut config);
@@ -591,6 +683,9 @@ pub async fn run_chat_completion_mode(
             let mut history = vec![];
             let mut model_details = vec![];
             let mut models = vec![];
+            let mut refusals = vec![];
+            let mut model_lookups = vec![];
+            let redact = |text: String| text.replace(&url, "[base_url]");
 
             for (index, mut request) in requests.into_iter().enumerate() {
                 all_events.push(vec![]);
@@ -655,12 +750,12 @@ pub async fn run_chat_completion_mode(
                 }
 
                 let config = match &request {
-                    TestRequest::Chat { query, .. } => {
+                    TestRequest::Chat { query, .. } | TestRequest::Refused { query, .. } => {
                         query.thread.events.config().unwrap().to_partial()
                     }
-                    TestRequest::Models { .. } | TestRequest::ModelDetails { .. } => {
-                        PartialAppConfig::empty()
-                    }
+                    TestRequest::Models { .. }
+                    | TestRequest::ModelDetails { .. }
+                    | TestRequest::ModelLookup { .. } => PartialAppConfig::empty(),
                     TestRequest::ToolCallResponse { .. } | TestRequest::Func(_) => {
                         unreachable!("resolved at start of loop")
                     }
@@ -798,6 +893,33 @@ pub async fn run_chat_completion_mode(
                         model_details.push(value);
                         assert(&model_details);
                     }
+                    TestRequest::Refused {
+                        model,
+                        query,
+                        assert,
+                    } => {
+                        let refusal = match provider.chat_completion_stream(&model, query).await {
+                            Err(error) => TestRefusal::Request(redact(error.to_string())),
+                            Ok(stream) => match stream.try_collect::<Vec<_>>().await {
+                                Err(error) => TestRefusal::Stream {
+                                    kind: error.kind,
+                                    message: redact(error.message().to_owned()),
+                                },
+                                Ok(_) => TestRefusal::Answered,
+                            },
+                        };
+                        assert(&refusal);
+                        refusals.push(refusal);
+                    }
+                    TestRequest::ModelLookup { name, assert } => {
+                        let name: Name = name.parse().unwrap();
+                        let result = provider
+                            .model_details(&name)
+                            .await
+                            .map_err(|error| redact(error.to_string()));
+                        assert(&result);
+                        model_lookups.push(result);
+                    }
                     TestRequest::ToolCallResponse { .. } | TestRequest::Func(_) => {
                         unreachable!("resolved at start of loop")
                     }
@@ -849,6 +971,14 @@ pub async fn run_chat_completion_mode(
 
             if has_models_request {
                 outputs.push(("models", Snap::debug(models)));
+            }
+
+            if !refusals.is_empty() {
+                outputs.push(("refusal", Snap::debug(refusals)));
+            }
+
+            if !model_lookups.is_empty() {
+                outputs.push(("model_lookup", Snap::debug(model_lookups)));
             }
 
             outputs

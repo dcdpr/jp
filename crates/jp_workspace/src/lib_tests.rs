@@ -9,6 +9,7 @@ use jp_config::{
     model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId},
     util::build,
 };
+use jp_conversation::event::ChatRequest;
 use jp_storage::{
     backend::{FsStorageBackend, NullLockBackend, NullPersistBackend, PersistBackend as _},
     value::read_json,
@@ -560,6 +561,64 @@ fn test_load_index_existing_workspace_events_accessible() {
 
     let stream_config = events.config();
     assert!(stream_config.is_ok());
+}
+
+#[test]
+fn read_events_from_the_store_leaves_the_stream_unloaded() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
+
+    {
+        let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+        ws.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let h = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(h).into_mut();
+        conv.update_events(|events| events.start_turn(ChatRequest::from("hello")));
+        conv.flush().unwrap();
+    }
+
+    let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+    ws.disable_persistence();
+    ws.load_conversation_index();
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let events = ws.read_events(&handle).unwrap();
+
+    assert_eq!(events.len(), 2, "TurnStart and ChatRequest");
+    assert_eq!(
+        events[1].as_chat_request().map(|req| req.content.as_str()),
+        Some("hello")
+    );
+    assert!(
+        ws.state.events.get(&id).and_then(OnceLock::get).is_none(),
+        "reading events must not load the stream into the workspace"
+    );
+}
+
+#[test]
+fn read_events_of_a_loaded_stream_include_unpersisted_changes() {
+    let mut ws = Workspace::in_memory("root");
+    let id = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let conv = ws.test_lock(handle).into_mut();
+    conv.update_events(|events| events.start_turn(ChatRequest::from("hello")));
+
+    // The turn has not been flushed to storage, so `read_events` can only find
+    // it in memory.
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let events = ws.read_events(&handle).unwrap();
+    assert_eq!(
+        events[1].as_chat_request().map(|req| req.content.as_str()),
+        Some("hello")
+    );
+
+    drop(conv);
 }
 
 /// Regression test: continuing a conversation without the original config

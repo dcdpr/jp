@@ -7,7 +7,6 @@ use serde_json::json;
 
 use super::*;
 
-/// A workspace with one planned RFD, in development, and one draft.
 fn workspace() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     let rfds = root.path().join("docs/rfd");
@@ -41,7 +40,6 @@ fn workspace() -> Utf8TempDir {
     root
 }
 
-/// The workspace a call runs in, as the host describes it in `init`.
 fn init(root: &Utf8TempDir, config: Value) -> InitMessage {
     InitMessage {
         version: jp_plugin::PROTOCOL_VERSION,
@@ -139,13 +137,11 @@ fn list_takes_the_sections_and_category_the_command_does() {
     );
 }
 
-/// A board file that doesn't parse leaves every RFD unranked, so the default
-/// listing comes back empty; the assistant has to be told why.
 #[test]
 fn list_says_when_it_could_not_read_the_board() {
     let root = workspace();
-    // Joined the way the RFD directory and the file name are, so the path
-    // reads the same as in the message on Windows too.
+    // Join components in the same order as production code so path separators
+    // match on Windows.
     let board = root.path().join("docs/rfd").join(".priority.json");
     fs::write(&board, "<<<<<<< HEAD\n{}\n").unwrap();
 
@@ -156,8 +152,6 @@ fn list_says_when_it_could_not_read_the_board() {
     assert!(out.ends_with("); every RFD reads as unranked.\n"), "{out}");
 }
 
-/// A ticket that can't be read may be the tracking one, so `show` saying the
-/// RFD isn't in development has to say it may be wrong.
 #[test]
 fn show_says_when_it_could_not_read_a_ticket() {
     let root = workspace();
@@ -198,8 +192,6 @@ fn show_prints_one_rfd_as_markdown() {
     );
 }
 
-/// The assistant files a tracking ticket with `ticket_create`, so an RFD that
-/// can carry one and has none is shown with the labels it takes.
 #[test]
 fn show_names_the_labels_a_missing_tracking_ticket_takes() {
     let root = trackable();
@@ -215,8 +207,6 @@ fn show_names_the_labels_a_missing_tracking_ticket_takes() {
     );
 }
 
-/// The document's sections follow the metadata, inside a fence longer than any
-/// the document holds, so a code block in the RFD doesn't end the result.
 #[test]
 fn show_with_the_body_fences_it_past_its_own_code_blocks() {
     let root = workspace();
@@ -242,8 +232,6 @@ fn show_with_the_body_fences_it_past_its_own_code_blocks() {
     );
 }
 
-/// A model passes `42` as a number as readily as a string, and a draft by its
-/// slot.
 #[test]
 fn show_takes_an_id_as_a_number_or_a_draft_slot() {
     let root = workspace();
@@ -312,9 +300,6 @@ fn a_tool_without_a_preview_says_so() {
     );
 }
 
-/// The host compiles the call's access grants and the plugin enforces them:
-/// reading the RFDs has to be allowed, and so does reading the tickets, which
-/// say what is in development.
 #[test]
 fn the_access_policy_has_to_allow_reading() {
     let root = workspace();
@@ -340,8 +325,6 @@ fn the_access_policy_has_to_allow_reading() {
     assert!(content(with_access(&everything)).contains("042"));
 }
 
-/// Without a ticket directory there is nothing to read there, so the policy
-/// isn't asked about one.
 #[test]
 fn a_missing_ticket_directory_needs_no_access() {
     let root = workspace();
@@ -375,7 +358,6 @@ fn an_unreadable_access_policy_refuses_the_call() {
     );
 }
 
-/// A tool reaches only the workspace, whichever directory points outside it.
 #[test]
 fn a_directory_outside_the_workspace_is_refused() {
     let root = workspace();
@@ -426,7 +408,6 @@ fn with_policy(name: &str, arguments: Value, rules: Vec<FsRule>) -> ToolCall {
     call
 }
 
-/// The configuration a draft takes its author from.
 fn by_jane() -> Value {
     json!({ "user": { "name": "Jane Doe <jane@example.com>" } })
 }
@@ -445,25 +426,32 @@ fn draft_writes_a_draft() {
     let root = workspace();
     with_template(&root);
 
+    let options = Options {
+        assistant: "jp".to_owned(),
+        ..Options::default()
+    };
     let out = content(run(
         &init(&root, by_jane()),
         &call(
             "draft",
             json!({ "category": "design", "title": "Tool Limits" }),
         ),
-        &Options::default(),
+        &options,
     ));
 
     assert_eq!(out, "Created docs/rfd/drafts/D01-tool-limits.md\n");
     let draft = fs::read_to_string(root.path().join("docs/rfd/drafts/D01-tool-limits.md")).unwrap();
-    assert!(
-        draft.contains("- **Authors**: Jane Doe <jane@example.com>\n"),
-        "{draft}"
+    // Tool-created drafts use `options.assistant` rather than `user.name`.
+    assert_eq!(
+        draft,
+        format!(
+            "# RFD D01: Tool Limits\n\n- **Status**: Draft\n- **Category**: Design\n- \
+             **Authors**: jp\n- **Date**: {}\n\n## Summary\n\nWhat.\n",
+            today()
+        )
     );
 }
 
-/// Without a ticket the title is the draft's only source of one; with a ticket,
-/// the ticket's title serves.
 #[test]
 fn draft_needs_a_title_unless_it_has_a_ticket() {
     let root = workspace();
@@ -491,7 +479,6 @@ fn draft_needs_a_title_unless_it_has_a_ticket() {
     );
 }
 
-/// Drafting from a ticket writes to the ticket, which the policy has to allow.
 #[test]
 fn draft_from_a_ticket_has_to_be_allowed_to_write_it() {
     let root = workspace();
@@ -523,9 +510,6 @@ fn draft_from_a_ticket_has_to_be_allowed_to_write_it() {
     );
 }
 
-/// Publishing a draft moves its file; accepting or implementing an RFD only
-/// edits files.
-/// The policy is asked for what the step does.
 #[test]
 fn promote_asks_for_what_the_step_does() {
     let root = workspace();
@@ -570,8 +554,6 @@ fn promote_publishes_a_draft() {
     assert!(root.path().join("docs/rfd/001-sketch.md").exists());
 }
 
-/// The relationship tools take the RFD that holds the relationship as `id`, the
-/// way the commands take it first.
 #[test]
 fn relationship_tools_take_the_holding_rfd_as_id() {
     let root = workspace();
@@ -599,8 +581,6 @@ fn relationship_tools_take_the_holding_rfd_as_id() {
     );
 }
 
-/// What a command leaves for someone to check reaches the assistant with what
-/// it changed.
 #[test]
 fn warnings_follow_the_result() {
     let root = workspace();
@@ -650,8 +630,6 @@ fn rename_and_renumber_move_the_file() {
     );
 }
 
-/// A call kept to the RFDs and the tickets can't search the rest of the
-/// workspace for references, and says so.
 #[test]
 fn renumber_without_the_workspace_says_what_went_unchecked() {
     let root = workspace();
@@ -676,7 +654,6 @@ fn renumber_without_the_workspace_says_what_went_unchecked() {
     assert!(root.path().join("docs/rfd/drafts/D07-sketch.md").exists());
 }
 
-/// The workspace with RFD 043 Accepted and no tracking ticket yet.
 fn trackable() -> Utf8TempDir {
     let root = workspace();
     fs::write(
@@ -688,8 +665,6 @@ fn trackable() -> Utf8TempDir {
     root
 }
 
-/// A tool call has no terminal to offer the tracking ticket on, so it names the
-/// labels to file it with instead, the configured ones included.
 #[test]
 fn promoting_to_accepted_names_the_labels_of_the_tracking_ticket_it_skipped() {
     let root = trackable();
@@ -720,8 +695,6 @@ fn promoting_to_accepted_names_the_labels_of_the_tracking_ticket_it_skipped() {
     );
 }
 
-/// A tool call has no terminal to offer the tracking ticket on, so it says how
-/// to file it instead.
 #[test]
 fn promoting_to_accepted_names_the_tracking_ticket_it_skipped() {
     let root = trackable();
@@ -741,7 +714,6 @@ fn promoting_to_accepted_names_the_tracking_ticket_it_skipped() {
     );
 }
 
-/// The ticket directory follows `jp ticket`'s configuration.
 #[test]
 fn the_ticket_directory_is_the_one_jp_ticket_uses() {
     let root = workspace();

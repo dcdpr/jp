@@ -103,6 +103,7 @@ fn initialize_error_display_omits_stderr_section_when_empty() {
     );
 }
 
+// qual:allow(test_quality, no_sut) reason: "calls the derived `Display` through `to_string()`"
 #[test]
 fn initialize_timeout_display_includes_timeout_command_and_stderr() {
     let error = Error::InitializeTimeout {

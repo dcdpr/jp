@@ -53,5 +53,5 @@ directory.
 
 ## Related
 
-RFD D72 introduces `metadata.local.json` beside the draft, which the same sync
+RFD 114 introduces `metadata.local.json` beside the draft, which the same sync
 would delete; its Phase 1 depends on this fix.

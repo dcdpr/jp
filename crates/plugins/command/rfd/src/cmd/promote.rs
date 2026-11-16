@@ -20,7 +20,7 @@ use regex::Regex;
 use super::{is_draft, parse, stem};
 use crate::{
     Output,
-    document::{Document, NoMetadata},
+    document::{Document, NoMetadata, cited, reference_label},
     id::{self, ResolveError, RfdId},
     paths::{self, Paths},
     priority,
@@ -41,6 +41,10 @@ static DRAFT_TOKEN: LazyLock<Regex> =
 /// The relationship fields a promotion reads, each with the field the other RFD
 /// carries back.
 const LINKS: [(&str, &str); 2] = [("Requires", "Required by"), ("Extends", "Extended by")];
+
+/// Back-link metadata fields that may reference drafts on a draft RFD, but must
+/// be stripped when publishing.
+const BACK_LINKS: [&str; 2] = ["Required by", "Extended by"];
 
 /// Advance the RFD `id` one status.
 ///
@@ -111,9 +115,7 @@ fn to_discussion(
     // Back-links from drafts were bookkeeping for the draft-to-draft policy; a
     // published RFD can't carry them.
     let mut promoted = Document::parse(&paths::read(&new_file)?);
-    let required = promoted.uncite("Required by", is_draft);
-    let extended = promoted.uncite("Extended by", is_draft);
-    if required || extended {
+    if drop_draft_back_links(&mut promoted) {
         paths.write(&new_file, &promoted.render())?;
     }
 
@@ -155,15 +157,18 @@ fn check_number(paths: &Paths, draft: RfdId, number: RfdId) -> Result<RfdId, Str
     Ok(number)
 }
 
-/// Refuse a draft that would publish a reference to another draft: the docs
-/// build rejects draft ids anywhere in a published RFD.
+/// Reject a draft that would publish a reference to another draft, since the
+/// docs build rejects draft IDs anywhere in a published RFD.
 ///
-/// The draft's own id doesn't count, since the promotion rewrites it, and
-/// neither do its `Required by` and `Extended by` back-links, which it drops.
+/// Ignores the draft's own ID (rewritten during promotion) and any `Required
+/// by` or `Extended by` back-links to drafts (stripped along with their unused
+/// reference definitions).
 fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<(), String> {
-    let header = document.header();
+    let mut published = document.clone();
+    drop_draft_back_links(&mut published);
+    let header = published.header();
     for (field, _) in LINKS {
-        if header.citations(field).iter().any(|cited| is_draft(cited)) {
+        if header.citations(field).iter().any(|id| is_draft(id)) {
             return Err(format!(
                 "Cannot promote: '{field}' on {name} contains draft references.\n  {}\nPromote \
                  those drafts first, or remove the entries.",
@@ -173,15 +178,10 @@ fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<()
     }
 
     let own = draft.to_string();
-    let strays: BTreeSet<String> = document
+    let strays: BTreeSet<String> = published
         .lines()
         .iter()
-        .enumerate()
-        .filter(|(index, _)| {
-            !header.is_field_line("Required by", *index)
-                && !header.is_field_line("Extended by", *index)
-        })
-        .flat_map(|(_, line)| draft_tokens(line))
+        .flat_map(|line| draft_tokens(line))
         .filter(|token| *token != own)
         .collect();
 
@@ -196,6 +196,34 @@ fn check_publishable(document: &Document, draft: RfdId, name: &str) -> Result<()
          reword the references.",
         listed.join("\n")
     ))
+}
+
+/// Remove draft entries from `Required by` and `Extended by`, along with any
+/// reference link definitions used only by those entries.
+///
+/// Returns `true` if the document was modified.
+fn drop_draft_back_links(document: &mut Document) -> bool {
+    let labels: Vec<String> = BACK_LINKS
+        .iter()
+        .filter_map(|field| document.header().wrapped(field))
+        .flat_map(|value| {
+            value
+                .split(", ")
+                .filter(|entry| cited(entry).is_some_and(|id| is_draft(&id)))
+                .filter_map(reference_label)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let mut dropped = false;
+    for field in BACK_LINKS {
+        dropped |= document.uncite(field, is_draft);
+    }
+    for label in labels {
+        dropped |= document.remove_unused_definition(&label);
+    }
+
+    dropped
 }
 
 /// The draft ids `line` mentions standing alone.

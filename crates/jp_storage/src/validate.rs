@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, fs, time::SystemTime};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_conversation::ConversationId;
@@ -7,7 +7,10 @@ use tracing::{debug, trace};
 
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries, trash::trash_conversation, value::cleanup_tmp_files,
+    Storage, dir_entries,
+    scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
+    trash::trash_conversation,
+    value::{cleanup_tmp_files, has_tmp_files},
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -97,15 +100,21 @@ impl Storage {
     /// For each directory entry it verifies:
     ///
     /// 1. The directory name parses as a [`ConversationId`].
-    /// 2. A `metadata.json` file exists and is a valid JSON object.
+    /// 2. A `metadata.json` file exists and is valid JSON.
     /// 3. An `events.json` file exists and is a JSON array where each element
-    ///    contains `timestamp` and `kind` fields.
+    ///    contains `timestamp` and `type` fields.
     ///
-    /// No field values are materialized — the check uses [`IgnoredAny`] to
-    /// skip values without allocating.
+    /// Field values are skipped via [`IgnoredAny`] without allocating.
     /// Content-level issues (bad field values, missing optional fields, schema
     /// mismatches) are handled at load time by
     /// [`ConversationStream::sanitize`].
+    ///
+    /// Directories whose files match the size and modification time from the
+    /// last passing scan are skipped without re-reading the files.
+    /// Scan records are cached in memory and persisted to user-local storage
+    /// across processes.
+    /// Directories with a file modified within two seconds before the scan are
+    /// not cached, so the next scan re-reads them.
     ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
@@ -114,9 +123,26 @@ impl Storage {
     /// [`IgnoredAny`]: serde::de::IgnoredAny
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
+        self.validate_conversations_at(SystemTime::now())
+    }
+
+    /// Run [`Self::validate_conversations`] as a scan started at
+    /// `scan_started`.
+    fn validate_conversations_at(&self, scan_started: SystemTime) -> ValidationResult {
         trace!("Validating conversations.");
 
+        let cache_path = self
+            .user
+            .as_ref()
+            .map(|user| user.join(CONVERSATIONS_DIR))
+            .filter(|dir| dir.is_dir())
+            .map(|dir| dir.join(SCAN_CACHE_FILE));
+        if let Some(path) = &cache_path {
+            self.scan.load(path);
+        }
+
         let mut result = ValidationResult::default();
+        let mut scanned = Vec::new();
 
         for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
@@ -129,7 +155,13 @@ impl Storage {
             }
 
             self.cleanup_import_staging(&conversations_dir);
-            validate_root(&conversations_dir, &mut result);
+            self.cleanup_orphaned_tmp_files(&conversations_dir);
+            validate_root(&conversations_dir, &self.scan, &mut result, &mut scanned);
+        }
+
+        self.scan.extend(scanned.iter().cloned(), scan_started);
+        if let Some(path) = &cache_path {
+            self.scan.save(path, scanned, scan_started);
         }
 
         debug!(
@@ -183,6 +215,37 @@ impl Storage {
             let _err = std::fs::remove_dir_all(path);
         }
     }
+
+    /// Remove orphaned `.tmp` files from conversation directories under
+    /// `conversations_dir`.
+    ///
+    /// Acquires each conversation's lock before deleting its `.tmp` files so
+    /// the sweep does not delete the staging file of an in-flight atomic write
+    /// in another process.
+    /// Conversations that are currently locked are skipped.
+    fn cleanup_orphaned_tmp_files(&self, conversations_dir: &Utf8Path) {
+        for entry in dir_entries(conversations_dir) {
+            if !entry.file_type().is_ok_and(|ft| ft.is_dir())
+                || entry.file_name().starts_with('.')
+                || !has_tmp_files(entry.path())
+            {
+                continue;
+            }
+
+            // Unparseable directory names cannot be locked and will be trashed
+            // by `validate_root`.
+            let Ok(id) = ConversationId::try_from_dirname(entry.file_name()) else {
+                continue;
+            };
+
+            let Ok(Some(_guard)) = self.try_lock_conversation(&id.to_string(), None) else {
+                trace!(%id, "Skipping temp file cleanup: conversation is locked.");
+                continue;
+            };
+
+            cleanup_tmp_files(entry.path());
+        }
+    }
 }
 
 /// Trash a conversation that failed validation.
@@ -194,7 +257,16 @@ pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::
     trash_conversation(&entry.conversations_dir, &entry.dirname, &error_msg)
 }
 
-fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
+/// Validate every conversation directory under `conversations_dir`.
+///
+/// Directories that pass validation and have complete file stamps are appended
+/// to `scanned`.
+fn validate_root(
+    conversations_dir: &Utf8Path,
+    cache: &ScanCache,
+    result: &mut ValidationResult,
+    scanned: &mut Vec<(Utf8PathBuf, ScannedDir)>,
+) {
     trace!(root = %conversations_dir, "Validating conversation root.");
 
     let entries: Vec<_> = dir_entries(conversations_dir)
@@ -204,34 +276,50 @@ fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
         })
         .collect();
 
-    for entry in &entries {
-        cleanup_tmp_files(entry.path());
-    }
-
     let outcomes: Vec<_> = entries
         .par_iter()
-        .map(|entry| validate_entry(conversations_dir, entry.file_name(), entry.path()))
+        .map(|entry| validate_entry(conversations_dir, entry.file_name(), entry.path(), cache))
         .collect();
 
-    for outcome in outcomes {
+    for (entry, outcome) in entries.into_iter().zip(outcomes) {
         match outcome {
-            Ok(v) => result.valid.push(v),
+            Ok((valid, scan)) => {
+                result.valid.push(valid);
+                if let Some(scan) = scan {
+                    scanned.push((entry.into_path(), scan));
+                }
+            }
             Err(e) => result.invalid.push(e),
         }
     }
 }
 
 /// Validate a single conversation directory entry.
+///
+/// Returns [`ScannedDir`] alongside the result when `metadata.json` and
+/// `events.json` both have valid file stamps.
 fn validate_entry(
     conversations_dir: &Utf8Path,
     dirname: &str,
     entry_path: &Utf8Path,
-) -> Result<ValidConversation, InvalidConversation> {
+    cache: &ScanCache,
+) -> Result<(ValidConversation, Option<ScannedDir>), InvalidConversation> {
     let id = ConversationId::try_from_dirname(dirname).map_err(|_| InvalidConversation {
         conversations_dir: conversations_dir.to_path_buf(),
         error: ValidationError::InvalidDirname,
         dirname: dirname.to_owned(),
     })?;
+    let valid = ValidConversation {
+        id,
+        dirname: dirname.to_owned(),
+    };
+
+    // Capture file stamps before reading any files so a mid-check write keeps
+    // the older stamp and is re-read on the next scan.
+    let stamps = DirStamps::of(entry_path);
+    if let Some(scan) = cache.get(entry_path, &stamps) {
+        return Ok((valid, Some(scan)));
+    }
 
     let metadata_path = entry_path.join(METADATA_FILE);
     if !metadata_path.is_file() {
@@ -267,16 +355,13 @@ fn validate_entry(
             dirname: dirname.to_owned(),
         });
     }
-    validate_events(&events_path).map_err(|source| InvalidConversation {
+    let summary = validate_events(&events_path).map_err(|source| InvalidConversation {
         conversations_dir: conversations_dir.to_path_buf(),
         error: ValidationError::CorruptEvents { source },
         dirname: dirname.to_owned(),
     })?;
 
-    Ok(ValidConversation {
-        id,
-        dirname: dirname.to_owned(),
-    })
+    Ok((valid, stamps.scanned(summary)))
 }
 
 /// Confirm `metadata.json` is a valid JSON object.
@@ -294,38 +379,24 @@ fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + 
 fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use serde::de::IgnoredAny;
 
-    let buf = std::fs::read(path)?;
+    let buf = fs::read(path)?;
     serde_json::from_slice::<IgnoredAny>(&buf)?;
     Ok(())
 }
 
 /// Confirm `events.json` is a JSON array of objects with `timestamp` and `type`
-/// fields.
+/// fields, and summarize it from the same parse.
 ///
-/// All elements in the array — both `ConfigDelta` and `ConversationEvent` —
+/// All elements in the array (both `ConfigDelta` and `ConversationEvent`)
 /// serialize with `timestamp` and `type` as top-level fields.
 /// `type` is the tag for the flattened `EventKind` enum on events, and an
 /// explicit `"config_delta"` tag on config deltas.
-///
-/// Uses [`IgnoredAny`] for field values — the parser skips over them without
-/// allocating.
 /// This confirms the structural shape without materializing any event data.
-///
-/// [`IgnoredAny`]: serde::de::IgnoredAny
-fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use serde::de::IgnoredAny;
-
-    #[derive(serde::Deserialize)]
-    struct EventProbe {
-        #[expect(dead_code)]
-        timestamp: IgnoredAny,
-        #[expect(dead_code)]
-        r#type: IgnoredAny,
-    }
-
-    let buf = std::fs::read(path)?;
-    serde_json::from_slice::<Vec<EventProbe>>(&buf)?;
-    Ok(())
+fn validate_events(
+    path: &Utf8Path,
+) -> Result<EventsSummary, Box<dyn std::error::Error + Send + Sync>> {
+    let buf = fs::read(path)?;
+    Ok(EventsSummary::parse(&buf)?)
 }
 
 #[cfg(test)]

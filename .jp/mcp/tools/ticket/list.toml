@@ -1,13 +1,15 @@
 [conversation.tools.ticket_list]
 enable = false
 source = "plugin.command.ticket.list"
-summary = "List the tickets in the repository, in board order."
+summary = "List the tickets in the repository, in board order, by filing date, or by a label."
 description = """
-One line per ticket: id, status, title, labels, checklist progress, and comment
-count.
+One line per ticket: id, status, filing date, title, labels, checklist progress,
+and comment count.
 
-Tickets come in board order: Todo, In Progress, then Done, each column top
-first. The first Todo ticket is the next one to work on.
+Tickets come in board order by default: Todo, In Progress, then Done, each
+column top first. The first Todo ticket is the next one to work on. Set `order`
+to sort across all columns instead, either by filing date (`filed`) or by a
+sortable label key such as `due`.
 
 Use it to find what is open before filing something new, and to resolve a title
 you half-remember into an id for `ticket_show`. Filter by status to read one
@@ -62,6 +64,16 @@ The open tickets filed under one parent:
 ```json
 {"under": "T-02wt0kx", "status": "todo"}
 ```
+
+The most recently filed tickets, whatever their status:
+```json
+{"order": "filed:desc"}
+```
+
+The open tickets due soonest, undated ones last:
+```json
+{"status": "todo", "order": "due"}
+```
 """
 
 [conversation.tools.ticket_list.style]
@@ -85,6 +97,23 @@ type = "string"
 required = false
 summary = "Only the tickets filed under this one, such as `T-02wt0kx`."
 
+[conversation.tools.ticket_list.parameters.order]
+type = "string"
+required = false
+enum = ["board", "filed", "filed:desc"]
+summary = "How to order the tickets. Defaults to `board`."
+description = """
+- `board`: Todo, In Progress, then Done, each column in board order, top first.
+- `filed`: by filing date across all statuses, oldest first (`filed:desc` for
+  newest first).
+- A sortable label key, such as `due`: by that label's value across all
+  statuses (`<key>:desc` to reverse the order). Tickets without the label
+  always sort last.
+"""
+
+# `jp ticket tools sync` adds the board's sortable label keys (`max = 1` with
+# `type = "date"` or `ordered = true`) to `enum`.
+
 [conversation.tools.ticket_list.parameters.page]
 type = "integer"
 required = false
@@ -97,6 +126,9 @@ summary = "Only tickets carrying every one of these labels."
 description = """
 Each entry is a `key=value` pair, or a bare `key` to match any value under it.
 Every entry has to match, so each one narrows the listing further.
+
+Date-typed keys also support `<`, `<=`, `>`, and `>=` comparisons with a
+`YYYY-MM-DD` date, such as `due<2026-12-01`.
 
 Retired values are accepted here, which is how you find the tickets still
 carrying one.

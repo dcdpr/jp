@@ -51,7 +51,7 @@ fn test_cargo_check_with_warnings() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -89,7 +89,7 @@ fn test_cargo_check_no_warnings() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -120,7 +120,7 @@ fn clean_clippy_with_comfort_drift_appends_note() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -159,7 +159,7 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -196,7 +196,7 @@ fn comfort_drift_listing_is_bounded() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -233,7 +233,7 @@ fn comfort_real_failure_is_reported_as_error() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -262,7 +262,7 @@ fn clippy_failure_short_circuits_before_running_comfort() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -286,6 +286,7 @@ fn package_scope_is_passed_through_to_both_tools() {
             "--color=never",
             "--package=my_pkg",
             "--quiet",
+            "--keep-going",
             "--all-targets",
             "--all-features",
         ])
@@ -305,7 +306,7 @@ fn package_scope_is_passed_through_to_both_tools() {
         &ctx.root,
         "-W warnings",
         None,
-        Some("my_pkg"),
+        &["my_pkg".to_owned()],
         Checks::default(),
         &runner,
     )
@@ -314,6 +315,60 @@ fn package_scope_is_passed_through_to_both_tools() {
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."
     );
+}
+
+/// Several packages are checked in one clippy run and one comfort run, so
+/// shared dependencies compile once.
+#[test]
+fn each_package_is_passed_through_to_both_tools() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "clippy",
+            "--color=never",
+            "--package=jp_storage",
+            "--package=jp_workspace",
+            "--quiet",
+            "--keep-going",
+            "--all-targets",
+            "--all-features",
+        ])
+        .returns_success("")
+        .expect("comfort")
+        .args(&[
+            "--check",
+            "--list-changed",
+            "--language",
+            "rust",
+            "--package",
+            "jp_storage",
+            "--package",
+            "jp_workspace",
+        ])
+        .returns_success("")
+        .expect("jp")
+        .args(&["--no-interactive", "wiki", "check"])
+        .returns_success("Checked 12 pages: 0 errors, 0 warnings.\n");
+
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        &["jp_storage".to_owned(), "jp_workspace".to_owned()],
+        WIKI,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+    // The wiki check covers the whole wiki, so it runs once however many
+    // packages are named.
+    assert_eq!(runner.calls().len(), 3);
 }
 
 /// The configured profile has to reach clippy.
@@ -332,6 +387,7 @@ fn profile_is_passed_through_to_clippy() {
             "--color=never",
             "--workspace",
             "--quiet",
+            "--keep-going",
             "--all-targets",
             "--all-features",
             "--profile=agent",
@@ -344,7 +400,7 @@ fn profile_is_passed_through_to_clippy() {
         &ctx.root,
         "-W warnings",
         Some("agent"),
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -368,6 +424,7 @@ fn clippy_gets_no_profile_flag_unless_configured() {
             "--color=never",
             "--workspace",
             "--quiet",
+            "--keep-going",
             "--all-targets",
             "--all-features",
         ])
@@ -379,7 +436,7 @@ fn clippy_gets_no_profile_flag_unless_configured() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -410,10 +467,10 @@ fn checksum_freshness_reaches_cargo() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks {
             checksum_freshness: true,
-            wiki: false,
+            ..Checks::default()
         },
         &runner,
     )
@@ -445,7 +502,7 @@ fn checksum_freshness_is_absent_unless_opted_into() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         Checks::default(),
         &runner,
     )
@@ -465,6 +522,7 @@ fn checksum_freshness_is_absent_unless_opted_into() {
 const WIKI: Checks = Checks {
     checksum_freshness: false,
     wiki: true,
+    qual: false,
 };
 
 /// A clean wiki adds nothing: the run reads as it would without the check.
@@ -481,7 +539,7 @@ fn a_clean_wiki_adds_nothing() {
         .args(&["--no-interactive", "wiki", "check"])
         .returns_success("Checked 12 pages: 0 errors, 0 warnings.\n");
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WIKI, &runner).unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -509,7 +567,7 @@ fn wiki_findings_are_reported() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WIKI, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             `cargo clippy` found no warnings or errors.
@@ -539,12 +597,416 @@ fn a_wiki_that_cant_be_checked_is_a_note() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WIKI, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             `cargo clippy` found no warnings or errors.
 
             The wiki wasn't checked: `jp wiki check` failed: error: unknown command `wiki`"});
+}
+
+const QUAL: Checks = Checks {
+    checksum_freshness: false,
+    wiki: false,
+    qual: true,
+};
+
+/// A failing verdict as `qual diff --format json` prints it.
+/// `qual`'s own tests assert that it prints exactly this file, so a change to
+/// the shape of its output reaches the tests that read it here.
+const QUAL_VERDICT: &str =
+    include_str!("../../../../../crates/internal/qual/fixtures/verdict.json");
+
+const QUAL_PASSING: &str =
+    r#"{"new": [], "enforced": [], "base": {"main": 3}, "head": {"main": 3}, "rules": {}}"#;
+
+/// One new finding in each of the packages `a` and `b`.
+const QUAL_TWO_PACKAGES: &str = indoc::indoc! {r#"
+    {
+      "new": [
+        {
+          "file": "crates/a/src/lib.rs",
+          "line": 7,
+          "rule": "DRY-002",
+          "symbol": "unused",
+          "message": "dead code: unused",
+          "pass": "dry"
+        },
+        {
+          "file": "crates/b/src/lib.rs",
+          "line": 3,
+          "rule": "DRY-002",
+          "symbol": "stale",
+          "message": "dead code: stale",
+          "pass": "dry"
+        }
+      ],
+      "enforced": [],
+      "base": { "dry": 0 },
+      "head": { "dry": 2 },
+      "rules": { "DRY-002": { "title": "Dead code detected" } }
+    }
+"#};
+
+/// `cargo metadata` for a workspace at `/ws` holding the packages `a` and `b`.
+const METADATA: &str = indoc::indoc! {r#"
+    {
+      "workspace_root": "/ws",
+      "packages": [
+        { "name": "a", "manifest_path": "/ws/crates/a/Cargo.toml" },
+        { "name": "b", "manifest_path": "/ws/crates/b/Cargo.toml" }
+      ]
+    }
+"#};
+
+const REMOTE_MAIN: &[&str] = &["rev-parse", "--verify", "--quiet", "origin/main^{commit}"];
+
+const QUAL_DIFF: &[&str] = &[
+    "run",
+    "--quiet",
+    "--package",
+    "qual",
+    "--",
+    "diff",
+    "--base",
+    "origin/main",
+    "--format",
+    "json",
+];
+
+/// A verdict printed with the exit code `qual` gives a failing one.
+fn failing_verdict(stdout: &str) -> ProcessOutput {
+    ProcessOutput {
+        stdout: stdout.to_owned(),
+        stderr: String::new(),
+        status: ExitCode::from_code(1),
+    }
+}
+
+/// A passing gate adds nothing: the run reads as it would without the gate.
+#[test]
+fn a_passing_gate_adds_nothing() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .args(REMOTE_MAIN)
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .args(QUAL_DIFF)
+        .returns_success(QUAL_PASSING);
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], QUAL, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+#[test]
+fn new_findings_are_listed_under_their_rule_with_its_guidance() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .returns(failing_verdict(QUAL_VERDICT));
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], QUAL, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
+            `cargo clippy` found no warnings or errors.
+
+            The `qual` job on CI fails on these rustqual findings:
+
+            # New rustqual findings (2)
+
+            ## CX-003
+
+            - `src/a.rs:12` in `run`: Magic number 42 in run
+              2 findings share this rule and symbol, 1 more than at the base.
+
+            ## CX-004: Function length
+
+            - `src/a.rs:40` in `parse`: Function length 72 in parse
+
+            Return early.
+            Extract a helper only when it has a name worth reading.
+
+            # rustqual findings in enforced rules (1)
+
+            ## DRY-004: Wildcard import
+
+            - `src/b.rs:3`: wildcard import: std::io
+
+            Fix each finding. Don't silence one with a marker, a changed threshold, or an edit under `.config/rustqual/` unless the user asked for that in this conversation. If a finding looks wrong, say so. The markers rustqual accepts:
+
+            - `// qual:allow(<dimension>, <target>) reason: "<why>"` above an item suppresses that kind of finding in it.
+            - `// qual:api` above a public item whose callers live outside the workspace.
+            - `// qual:test_helper` above an item used only from tests."#});
+}
+
+/// `package` selects the findings listed, not the code analysed: a change in
+/// one package can leave a function in another without callers, and CI fails on
+/// that finding too.
+#[test]
+fn package_selects_the_findings_listed_and_counts_the_rest() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .args(QUAL_DIFF)
+        .returns(failing_verdict(QUAL_TWO_PACKAGES))
+        .expect("cargo")
+        .args(&["metadata", "--no-deps", "--format-version=1"])
+        .returns_success(METADATA);
+
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        &["a".to_owned()],
+        QUAL,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
+            `cargo clippy` found no warnings or errors.
+
+            The `qual` job on CI fails on these rustqual findings:
+
+            # New rustqual findings (1)
+
+            ## DRY-002: Dead code detected
+
+            - `crates/a/src/lib.rs:7` in `unused`: dead code: unused
+
+            Findings outside the checked packages: 1. Run `cargo_check` without `package` to list them.
+
+            Fix each finding. Don't silence one with a marker, a changed threshold, or an edit under `.config/rustqual/` unless the user asked for that in this conversation. If a finding looks wrong, say so. The markers rustqual accepts:
+
+            - `// qual:allow(<dimension>, <target>) reason: "<why>"` above an item suppresses that kind of finding in it.
+            - `// qual:api` above a public item whose callers live outside the workspace.
+            - `// qual:test_helper` above an item used only from tests."#});
+}
+
+#[test]
+fn findings_only_outside_the_package_are_counted() {
+    let (_dir, ctx) = ctx();
+    let metadata = indoc::indoc! {r#"
+        {
+          "workspace_root": "/ws",
+          "packages": [{ "name": "c", "manifest_path": "/ws/crates/c/Cargo.toml" }]
+        }
+    "#};
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .returns(failing_verdict(QUAL_TWO_PACKAGES))
+        .expect("cargo")
+        .returns_success(metadata);
+
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        &["c".to_owned()],
+        QUAL,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            The `qual` job on CI fails on rustqual findings outside the checked packages (2). Run `cargo_check` without `package` to list them."});
+}
+
+/// A checkout without the `origin` remote compares against its local `main`.
+#[test]
+fn the_local_main_is_the_base_without_a_remote_one() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .args(REMOTE_MAIN)
+        .returns_error("")
+        .expect("cargo")
+        .args(&[
+            "run",
+            "--quiet",
+            "--package",
+            "qual",
+            "--",
+            "diff",
+            "--base",
+            "main",
+            "--format",
+            "json",
+        ])
+        .returns_success(QUAL_PASSING);
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], QUAL, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+/// The gate is built with the profile and flags of the clippy run, so the two
+/// share a directory under `target/` and neither rebuilds what the other built.
+#[test]
+fn the_gate_is_built_with_the_profile_and_flags_of_the_clippy_run() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .args(&[
+            "run",
+            "--quiet",
+            "--package",
+            "qual",
+            "--profile=agent",
+            "--",
+            "diff",
+            "--base",
+            "origin/main",
+            "--format",
+            "json",
+        ])
+        .returns_success(QUAL_PASSING);
+
+    cargo_check_impl(
+        &ctx.root,
+        "-W warnings -Zthreads=0",
+        Some("agent"),
+        &[],
+        QUAL,
+        &runner,
+    )
+    .unwrap();
+
+    let call = call_with_arg(&runner, "run").expect("the gate must have run");
+    assert_eq!(call.env, vec![(
+        "RUSTFLAGS".to_owned(),
+        "-W warnings -Zthreads=0".to_owned()
+    )]);
+}
+
+/// A gate that reaches no verdict is a note, not a failed run: clippy's result
+/// stands, and an error outcome would drop it.
+#[test]
+fn a_gate_that_reaches_no_verdict_is_a_note() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "warning: something".to_owned(),
+            status: ExitCode::success(),
+        })
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "qual: could not run `rustqual --version`: No such file or directory\n"
+                .to_owned(),
+            status: ExitCode::from_code(2),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], QUAL, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            ```
+            warning: something
+            ```
+
+            New rustqual findings weren't checked: `qual diff --base origin/main` failed: qual: could not run `rustqual --version`: No such file or directory"});
+}
+
+/// A verdict without a field the note is built from is not read as a pass.
+#[test]
+fn a_verdict_that_cant_be_read_is_a_note() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("git")
+        .returns_success("0123abcd\n")
+        .expect("cargo")
+        .returns_success(r#"{"new": []}"#);
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], QUAL, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            New rustqual findings weren't checked: `qual diff` printed a verdict that can't be read: missing field `enforced` at line 1 column 11"});
+}
+
+/// Findings in code that doesn't compile are noise, so the gate waits for
+/// clippy to succeed.
+#[test]
+fn clippy_failure_short_circuits_before_running_the_gate() {
+    let (_dir, ctx) = ctx();
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "error: build failed".to_owned(),
+            status: ExitCode::from_code(101),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], QUAL, &runner).unwrap();
+
+    match result {
+        Outcome::Error { message, .. } => {
+            assert_eq!(message, "Cargo command failed: error: build failed");
+        }
+        _ => panic!("Expected Outcome::Error, got: {result:?}"),
+    }
+    assert_eq!(runner.calls().len(), 1);
 }
 
 /// The first command `runner` ran whose first argument is `arg`.

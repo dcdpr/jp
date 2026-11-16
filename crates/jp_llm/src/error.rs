@@ -137,6 +137,12 @@ impl StreamError {
         Self::new(StreamErrorKind::ContextWindowExceeded, message)
     }
 
+    /// Create an unknown-model error.
+    #[must_use]
+    pub fn unknown_model(message: impl Into<String>) -> Self {
+        Self::new(StreamErrorKind::UnknownModel, message)
+    }
+
     /// Create an output-limit error.
     #[must_use]
     pub fn output_limit(message: impl Into<String>) -> Self {
@@ -387,6 +393,10 @@ impl StreamError {
                     return Self::new(StreamErrorKind::InsufficientQuota, display);
                 }
 
+                if looks_like_unknown_model(code, body) {
+                    return Self::unknown_model(display);
+                }
+
                 // An oversized prompt is the same size on the next attempt, so
                 // it is classified before the retry heuristics below. A 429 is
                 // exempt: it is an authoritative rate-limit signal, and
@@ -427,23 +437,26 @@ impl StreamError {
 /// Try to extract a human-readable error message from a JSON error response
 /// body.
 ///
-/// Two envelope shapes are recognized:
+/// Three envelope shapes are recognized, in priority order:
 ///
-/// - Nested — `{"error": {"message": "..."}}`, used by OpenAI, Anthropic and
+/// - Nested: `{"error": {"message": "..."}}`, used by OpenAI, Anthropic, and
 ///   Google.
-/// - Flat — `{"message": "...", "type": "...", "code": "..."}`, used by
-///   Cerebras for every status it returns.
-///
-/// A body carrying both is read as nested: a provider that nests is describing
-/// the failure there, and its outer `message` belongs to something else.
+/// - Flat: `{"message": "...", "type": "...", "code": "..."}`, used by
+///   Cerebras.
+/// - Detail: `{"detail": "..."}`, used by FastAPI servers (such as a gateway in
+///   front of vLLM).
+///   Non-string `detail` values, such as FastAPI validation error arrays, are
+///   ignored.
 fn extract_api_error_body(body: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
 
     let nested = parsed.get("error").and_then(|e| e.get("message"));
     let flat = parsed.get("message");
+    let detail = parsed.get("detail");
 
     nested
         .or(flat)
+        .or(detail)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
 }
@@ -499,6 +512,10 @@ pub enum StreamErrorKind {
     /// Distinct from the Host's output-byte ceiling.
     MaxOutputTokens,
 
+    /// The provider does not serve the requested model.
+    /// This is not retryable: the request has to name a different model.
+    UnknownModel,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -520,6 +537,7 @@ impl StreamErrorKind {
             Self::ContextWindowExceeded => "Context window exceeded",
             Self::OutputLimit => "Output limit exceeded",
             Self::MaxOutputTokens => "Output token limit exceeded",
+            Self::UnknownModel => "Unknown model",
             Self::Other => "Stream Error",
         }
     }
@@ -764,6 +782,45 @@ pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
         || lower.contains("prompt is too long")
         || lower.contains("exceeds the maximum number of tokens")
         || lower.contains("too many tokens")
+}
+
+/// Check whether an error response indicates an unknown or unavailable model.
+///
+/// The status code alone is ambiguous: a misconfigured `base_url` path also
+/// returns `404` (e.g. `{"detail":"Not Found"}` from the HTTP server), and a
+/// `400` can reject a model for other reasons (e.g. unsupported tool calls).
+/// Matches both nested (`{"error": {...}}`) and flat JSON error envelopes for:
+///
+/// - OpenAI: `"code": "model_not_found"`, returned with `404` by the API and
+///   with `400` by the subscription endpoint
+/// - Cerebras: `"code": "model_archived"`
+/// - vLLM (`404` only): `"param": "model"`, or `"type": "NotFoundError"` with a
+///   `"does not exist"` message on older servers
+/// - A gateway in front of vLLM (`404` only): `{"detail": "unknown model: …"}`
+pub(crate) fn looks_like_unknown_model(status: u16, body: &str) -> bool {
+    if !matches!(status, 400 | 404) {
+        return false;
+    }
+
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+
+    let error = parsed
+        .get("error")
+        .filter(|error| error.is_object())
+        .unwrap_or(&parsed);
+    let field = |key: &str| error.get(key).and_then(serde_json::Value::as_str);
+
+    if matches!(field("code"), Some("model_not_found" | "model_archived")) {
+        return true;
+    }
+
+    status == 404
+        && (field("param") == Some("model")
+            || (field("type") == Some("NotFoundError")
+                && field("message").is_some_and(|message| message.contains("does not exist")))
+            || field("detail").is_some_and(|detail| detail.starts_with("unknown model:")))
 }
 
 /// Heuristic check for transient network/proxy failures based on error text.

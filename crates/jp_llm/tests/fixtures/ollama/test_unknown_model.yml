@@ -1,0 +1,27 @@
+when:
+  path: /api/chat
+  method: POST
+  json_body_str: >-
+    {
+      "model": "foobarbaz",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message",
+          "tool_calls": [],
+          "thinking": null
+        }
+      ],
+      "options": {},
+      "stream": true,
+      "think": false
+    }
+then:
+  status: 404
+  header:
+    - name: content-type
+      value: application/json; charset=utf-8
+  json_body_str: >-
+    {
+      "error": "model 'foobarbaz' not found"
+    }

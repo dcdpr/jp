@@ -1,0 +1,236 @@
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5.6-luna",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": []
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+        }
+      ],
+      "reasoning": {
+        "effort": "none",
+        "summary": "auto"
+      },
+      "store": false,
+      "stream": true,
+      "tool_choice": "auto",
+      "tools": [
+        {
+          "type": "function",
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "enum": [
+                  "Paris",
+                  "Tokyo"
+                ]
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          },
+          "strict": true,
+          "description": null
+        }
+      ],
+      "truncation": "auto"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: response.created
+    data: {"type":"response.created","response":{"id":"resp_0dba2b2f6e3f53da016af7238f2eb087d29bbdf7a185de5324","object":"response","created_at":1794581391,"status":"in_progress","access_programs":null,"background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"input_transformations":[],"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"function","description":null,"name":"get_weather","output_schema":null,"parameters":{"type":"object","properties":{"city":{"type":"string","enum":["Paris","Tokyo"]}},"required":["city"],"additionalProperties":false},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    
+    event: response.in_progress
+    data: {"type":"response.in_progress","response":{"id":"resp_0dba2b2f6e3f53da016af7238f2eb087d29bbdf7a185de5324","object":"response","created_at":1794581391,"status":"in_progress","access_programs":null,"background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"input_transformations":[],"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"function","description":null,"name":"get_weather","output_schema":null,"parameters":{"type":"object","properties":{"city":{"type":"string","enum":["Paris","Tokyo"]}},"required":["city"],"additionalProperties":false},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"fc_0dba2b2f6e3f53da016af7239065c887d29459491e07ef2454","type":"function_call","status":"in_progress","arguments":"","call_id":"call_iehaUqWzXNzqFpshzn4bkyXD","name":"get_weather"},"output_index":0,"sequence_number":2}
+    
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","delta":"{\"city\":\"Paris\"}","item_id":"fc_0dba2b2f6e3f53da016af7239065c887d29459491e07ef2454","obfuscation":"","output_index":0,"sequence_number":3}
+    
+    event: response.function_call_arguments.done
+    data: {"type":"response.function_call_arguments.done","arguments":"{\"city\":\"Paris\"}","item_id":"fc_0dba2b2f6e3f53da016af7239065c887d29459491e07ef2454","output_index":0,"sequence_number":4}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"fc_0dba2b2f6e3f53da016af7239065c887d29459491e07ef2454","type":"function_call","status":"completed","arguments":"{\"city\":\"Paris\"}","call_id":"call_iehaUqWzXNzqFpshzn4bkyXD","name":"get_weather"},"output_index":0,"sequence_number":5}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"fc_0dba2b2f6e3f53da016af7239065dc87d287a380ae1c7c57af","type":"function_call","status":"in_progress","arguments":"","call_id":"call_SCC9zVxYU4f9DDUZcc9PxqKZ","name":"get_weather"},"output_index":1,"sequence_number":6}
+    
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","delta":"{\"city\":\"Tokyo\"}","item_id":"fc_0dba2b2f6e3f53da016af7239065dc87d287a380ae1c7c57af","obfuscation":"","output_index":1,"sequence_number":7}
+    
+    event: response.function_call_arguments.done
+    data: {"type":"response.function_call_arguments.done","arguments":"{\"city\":\"Tokyo\"}","item_id":"fc_0dba2b2f6e3f53da016af7239065dc87d287a380ae1c7c57af","output_index":1,"sequence_number":8}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"fc_0dba2b2f6e3f53da016af7239065dc87d287a380ae1c7c57af","type":"function_call","status":"completed","arguments":"{\"city\":\"Tokyo\"}","call_id":"call_SCC9zVxYU4f9DDUZcc9PxqKZ","name":"get_weather"},"output_index":1,"sequence_number":9}
+    
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_0dba2b2f6e3f53da016af7238f2eb087d29bbdf7a185de5324","object":"response","created_at":1794581391,"status":"completed","access_programs":null,"background":false,"completed_at":1794581392,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"input_transformations":[],"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[{"id":"fc_0dba2b2f6e3f53da016af7239065c887d29459491e07ef2454","type":"function_call","status":"completed","arguments":"{\"city\":\"Paris\"}","call_id":"call_iehaUqWzXNzqFpshzn4bkyXD","name":"get_weather"},{"id":"fc_0dba2b2f6e3f53da016af7239065dc87d287a380ae1c7c57af","type":"function_call","status":"completed","arguments":"{\"city\":\"Tokyo\"}","call_id":"call_SCC9zVxYU4f9DDUZcc9PxqKZ","name":"get_weather"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"function","description":null,"name":"get_weather","output_schema":null,"parameters":{"type":"object","properties":{"city":{"type":"string","enum":["Paris","Tokyo"]}},"required":["city"],"additionalProperties":false},"strict":true}],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":{"input_tokens":73,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":48,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":121},"user":null,"metadata":{}},"sequence_number":10}
+    
+---
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5.6-luna",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": []
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Look up the weather in Paris and in Tokyo. Call `get_weather` once for each city, with both calls in the same response, before you answer."
+        },
+        {
+          "type": "function_call",
+          "arguments": "{\"city\":\"Paris\"}",
+          "call_id": "call_iehaUqWzXNzqFpshzn4bkyXD",
+          "id": null,
+          "name": "get_weather",
+          "status": null
+        },
+        {
+          "type": "function_call",
+          "arguments": "{\"city\":\"Tokyo\"}",
+          "call_id": "call_SCC9zVxYU4f9DDUZcc9PxqKZ",
+          "id": null,
+          "name": "get_weather",
+          "status": null
+        },
+        {
+          "type": "function_call_output",
+          "id": null,
+          "status": null,
+          "call_id": "call_iehaUqWzXNzqFpshzn4bkyXD",
+          "output": "18 degrees and sunny"
+        },
+        {
+          "type": "function_call_output",
+          "id": null,
+          "status": null,
+          "call_id": "call_SCC9zVxYU4f9DDUZcc9PxqKZ",
+          "output": "18 degrees and sunny"
+        }
+      ],
+      "reasoning": {
+        "effort": "none",
+        "summary": "auto"
+      },
+      "store": false,
+      "stream": true,
+      "tool_choice": "auto",
+      "tools": [],
+      "truncation": "auto"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: response.created
+    data: {"type":"response.created","response":{"id":"resp_08dc3261da39ad2f016af72390c35c87d2a8492eb051b32d08","object":"response","created_at":1794581392,"status":"in_progress","access_programs":null,"background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"input_transformations":[],"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    
+    event: response.in_progress
+    data: {"type":"response.in_progress","response":{"id":"resp_08dc3261da39ad2f016af72390c35c87d2a8492eb051b32d08","object":"response","created_at":1794581392,"status":"in_progress","access_programs":null,"background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"input_transformations":[],"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","type":"message","status":"in_progress","content":[],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":2}
+    
+    event: response.content_part.added
+    data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"-","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"RuolWapLSJI58jo","output_index":0,"sequence_number":4}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" **","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"qv2u45lMfzKtu","output_index":0,"sequence_number":5}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"Paris","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"gUPDW6uSOxi","output_index":0,"sequence_number":6}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":":**","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"ic3sEE7Pw2ir9","output_index":0,"sequence_number":7}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" ","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"TCQmIr9d9scfnJn","output_index":0,"sequence_number":8}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"18","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"7ZIQ07awOiqGXp","output_index":0,"sequence_number":9}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"°C","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"XqGfUfpYi7YdqN","output_index":0,"sequence_number":10}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" and","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"06V7QZbqH9Rh","output_index":0,"sequence_number":11}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" sunny","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"Comj56fHdT","output_index":0,"sequence_number":12}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"  \n","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"UTYBLr8Aj3Kxc","output_index":0,"sequence_number":13}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"-","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"pr580VglDl27D9n","output_index":0,"sequence_number":14}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" **","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"mlIyKuhHlpHkN","output_index":0,"sequence_number":15}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"Tokyo","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"YkMlft4bxLu","output_index":0,"sequence_number":16}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":":**","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"nvinsvG9ZjRq9","output_index":0,"sequence_number":17}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" ","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"C4pbHRCajS9FRSe","output_index":0,"sequence_number":18}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"18","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"9U99pTrxEAxhMa","output_index":0,"sequence_number":19}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"°C","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"OLKMDjUrOIljKP","output_index":0,"sequence_number":20}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" and","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"eOAi3xRUZfuS","output_index":0,"sequence_number":21}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" sunny","item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"obfuscation":"glUQ6fx3k0","output_index":0,"sequence_number":22}
+    
+    event: response.output_text.done
+    data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","logprobs":[],"output_index":0,"sequence_number":23,"text":"- **Paris:** 18°C and sunny  \n- **Tokyo:** 18°C and sunny"}
+    
+    event: response.content_part.done
+    data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"- **Paris:** 18°C and sunny  \n- **Tokyo:** 18°C and sunny"},"sequence_number":24}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"- **Paris:** 18°C and sunny  \n- **Tokyo:** 18°C and sunny"}],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":25}
+    
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_08dc3261da39ad2f016af72390c35c87d2a8492eb051b32d08","object":"response","created_at":1794581392,"status":"completed","access_programs":null,"background":false,"completed_at":1794581393,"error":null,"frequency_penalty":0.0,"image":{"context_compression":"disabled"},"incomplete_details":null,"input_transformations":[],"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[{"id":"msg_08dc3261da39ad2f016af72391638887d2a13df41a999409e8","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"- **Paris:** 18°C and sunny  \n- **Tokyo:** 18°C and sunny"}],"phase":"final_answer","role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":{"input_tokens":114,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":23,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":137},"user":null,"metadata":{}},"sequence_number":26}
+    

@@ -11,6 +11,11 @@ Run all tests in a specific package:
 {"package": "jp_config"}
 ```
 
+Run all tests in several packages, in one build:
+```json
+{"package": ["jp_storage", "jp_workspace"]}
+```
+
 Run only tests matching a name:
 ```json
 {"package": "jp_llm", "testname": "builtin"}
@@ -34,8 +39,9 @@ results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.cargo_test.parameters.package]
-summary = "Package to run tests for, if unspecified, all workspace packages will be tested."
-type = "string"
+summary = "Package, or list of packages, to test in one run. If unspecified, all workspace packages will be tested."
+type = ["string", "array"]
+items.type = "string"
 
 [conversation.tools.cargo_test.parameters.testname]
 summary = "If specified, only run tests containing this string in their names."

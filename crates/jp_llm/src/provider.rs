@@ -5,6 +5,7 @@ pub mod google;
 pub mod anthropic;
 pub mod cerebras;
 pub mod llamacpp;
+pub(crate) mod lookup;
 pub mod mock;
 pub mod ollama;
 pub mod openai;
@@ -72,7 +73,13 @@ pub trait Provider: Send + Sync {
         })
     }
 
-    /// Get details of a model.
+    /// Look up capability metadata for `name`.
+    ///
+    /// Remote metadata queries are advisory: if a lookup fails, times out, or
+    /// does not list `name`, the provider falls back to built-in metadata or
+    /// [`ModelDetails::empty`].
+    /// Returns an error only when a pre-request check fails, such as credential
+    /// resolution or a model unsupported by the active credential.
     async fn model_details(&self, name: &Name) -> Result<ModelDetails>;
 
     /// Get a list of available models.
@@ -482,12 +489,12 @@ impl ProviderTestSupport for UnsupportedTestRoute {
 #[cfg(test)]
 pub(crate) fn provider_test_support(id: ProviderId) -> &'static dyn ProviderTestSupport {
     match id {
-        ProviderId::Anthropic => &anthropic::TEST_SUPPORT,
+        ProviderId::Anthropic => &anthropic::test_support::TEST_SUPPORT,
         ProviderId::Cerebras => &cerebras::TEST_SUPPORT,
-        ProviderId::Google => &google::TEST_SUPPORT,
+        ProviderId::Google => &google::test_support::TEST_SUPPORT,
         ProviderId::Llamacpp => &llamacpp::TEST_SUPPORT,
         ProviderId::Ollama => &ollama::TEST_SUPPORT,
-        ProviderId::Openai => &openai::TEST_SUPPORT,
+        ProviderId::Openai => &openai::test_support::TEST_SUPPORT,
         ProviderId::Openrouter => &openrouter::TEST_SUPPORT,
         ProviderId::Test => &mock::TEST_SUPPORT,
         ProviderId::Vllm => &vllm::TEST_SUPPORT,

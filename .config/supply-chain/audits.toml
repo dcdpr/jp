@@ -171,6 +171,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.35.0 -> 0.36.0"
 
+[[audits.libsqlite3-sys]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.36.0 -> 0.39.1"
+
 [[audits.libz-rs-sys]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -325,6 +330,11 @@ version = "0.1.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.37.0 -> 0.38.0"
+
+[[audits.rusqlite]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.38.0 -> 0.41.1"
 
 [[audits.rustls]]
 who = "Jean Mertz <git@jeanmertz.com>"

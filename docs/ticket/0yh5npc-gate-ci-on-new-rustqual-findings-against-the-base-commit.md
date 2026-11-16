@@ -1,6 +1,6 @@
 # Gate CI on new rustqual findings against the base commit
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
@@ -13,6 +13,10 @@ the findings that are new.
 
 Closes T-0yb2pgw: a baseline produced in the same run can't go stale, and it
 always shares a base with the measured tree.
+
+`qual` is temporary: T-1dhk659's follow-up folds it into a vendored rustqual.
+Keep the recipe a thin call to the gate binary, so swapping `qual diff` for
+rustqual's own command later touches only that call.
 
 ## Base revision
 
@@ -37,7 +41,39 @@ always shares a base with the measured tree.
 - `.config/rustqual/baseline.json`, `baseline-dry.json` and `regressions.jq`.
 - The `qual-baseline` recipe.
 - The canary in `qual-ci`.
-  The fail-closed behaviour is covered by unit tests in the `qual` crate.
+  The fail-closed behaviour is covered by unit tests in the `qual` crate, which
+  move with it into rustqual.
 - Check the `justfile`, the configs and `docs/` for any other references to the
   baselines.
   Keep `just qual` as the exploratory entry point.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T08:22:12Z
+
+Two things differ from the description:
+
+- **No-base case:** `qual report` does not fail on enforced-rule findings, so
+  `qual diff --base <rev>` accepts git's null object ID (40 or 64 zeros) as "no
+  base": it analyzes only the working tree and fails only on enforced rules.
+  The workflow passes `github.event.before` through unchanged, without branching
+  on the null object ID in shell or workflow YAML.
+- **History on push:** fetching only the `before` SHA on top of a `fetch-depth:
+  1` checkout leaves `git merge-base HEAD <before>` without a common ancestor,
+  so the `qual` task uses `fetch_depth: '0'` on push and `'2'` on pull requests.
+
+If a force-push to `main` leaves the previous tip unreachable in the clone, `git
+merge-base` fails and `qual` exits with code 2, failing the job.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-11T15:09:42Z
+
+Verified after merge (#1319): the `qual` job ran on the push to `main`, with the
+full checkout and `github.event.before` as the base, and failed a pull request
+on a probe finding with an `::error` annotation on its line.
+`qual` is a required status check on `main`.

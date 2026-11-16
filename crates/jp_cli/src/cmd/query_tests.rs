@@ -7,12 +7,14 @@ use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
+    assistant::sections::PartialSectionConfig,
     conversation::tool::{
         AllowToggle, Enable, PartialCommandConfigOrString, PartialEnableConfig, PartialToolConfig,
         ResultMode, RunMode, access::PartialEnvRuleConfig,
     },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
-    types::command::CommandConfigOrString,
+    plugins::command::RunPolicy,
+    types::{command::CommandConfigOrString, vec::MergeableVec},
     util::build,
 };
 use jp_conversation::{
@@ -1578,6 +1580,79 @@ fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
     assert_eq!(lock.events().config_deltas().count(), 1);
 }
 
+fn section(tag: &str, position: i32) -> PartialSectionConfig {
+    PartialSectionConfig {
+        content: Some(format!("{tag} content")),
+        tag: Some(tag.to_owned()),
+        title: None,
+        position: Some(position),
+    }
+}
+
+/// Run two queries without CLI overrides against a conversation initialized
+/// from `base`, and return the config delta produced by the second query.
+///
+/// The first query may record a delta for the built-in tools injected during
+/// query config resolution.
+fn second_plain_query_delta(base: &PartialAppConfig) -> Option<ApplyDelta> {
+    let tmp = Utf8TempDir::new().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    workspace.load_conversation_index();
+    let conversation_id = make_id(4002);
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::new(build(base.clone()).unwrap()),
+    );
+    let id = conversation_id.to_string();
+
+    let mut delta = None;
+    for _ in 0..2 {
+        let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
+        let Resolved {
+            config,
+            mut handles,
+            ..
+        } = resolve_config(
+            cli.command,
+            || Ok(base.clone()),
+            &cli.globals.config,
+            &mut workspace,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+
+        let lock = workspace.test_lock(handles.remove(0));
+        delta = turn_config_delta(&config, &lock).unwrap();
+        if let Some(delta) = delta.clone() {
+            lock.as_mut()
+                .update_events(|events| events.add_config_delta(delta));
+        }
+    }
+
+    delta
+}
+
+#[test]
+fn plain_query_records_no_delta_for_unsorted_prompt_sections() {
+    let mut base = AppConfig::new_test().to_partial();
+    base.assistant.system_prompt_sections =
+        MergeableVec::Vec(vec![section("late", 10), section("early", -10)]);
+
+    assert_eq!(second_plain_query_delta(&base), None);
+}
+
+#[test]
+fn plain_query_records_no_delta_for_repeated_prompt_sections() {
+    let mut base = AppConfig::new_test().to_partial();
+    base.assistant.system_prompt_sections =
+        MergeableVec::Vec(vec![section("a", 0), section("b", 0), section("a", 0)]);
+
+    assert_eq!(second_plain_query_delta(&base), None);
+}
+
 /// A built-in registered as locked-on must survive config resolution as an
 /// enabled tool.
 /// Before RFD 081 the enable predicate matched only one variant, so this
@@ -2149,6 +2224,69 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     assert_eq!(
         model_delta["delta"]["assistant"]["model"]["id"]["name"],
         "gpt-model"
+    );
+}
+
+/// A conversation keeps the default plugin policy it was created under.
+///
+/// Its stored configuration states `plugins.command.'*'.run`, and the
+/// conversation layer sits above the config files, so a default the files
+/// change afterwards reaches new conversations and not this one.
+/// `--cfg` sits above the conversation layer, and does reach it.
+#[tokio::test]
+async fn a_conversation_keeps_the_default_plugin_policy_it_was_created_under() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+
+    // Created while the config files leave the default at `ask`.
+    let asking = AppConfig::new_test().to_partial();
+    let first = Query {
+        new_conversation: true,
+        query: inline_query("hello"),
+        ..Default::default()
+    };
+    let created = build_query_config(&workspace, asking.clone(), &[], &first, None);
+    assert_eq!(created.plugins.command.defaults.run, RunPolicy::Ask);
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(created.clone()), None)
+        .unwrap();
+    let conversation_id = lock.id();
+    run_mock_turn(&created, &lock, "hello", "Hi.").await;
+    drop(lock);
+
+    // From here on the config files deny every plugin that is not named.
+    let mut denying = asking.clone();
+    denying.plugins.command.defaults.run = Some(RunPolicy::Deny);
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let next = Query {
+        query: inline_query("again"),
+        ..Default::default()
+    };
+
+    let resumed = build_query_config(&workspace, denying.clone(), &[], &next, Some(&handle));
+    assert_eq!(
+        resumed.plugins.command.defaults.run,
+        RunPolicy::Ask,
+        "the conversation's stored default wins over the config files"
+    );
+
+    let fresh = build_query_config(&workspace, denying, &[], &first, None);
+    assert_eq!(
+        fresh.plugins.command.defaults.run,
+        RunPolicy::Deny,
+        "a new conversation takes the default the config files set"
+    );
+
+    let deny = "plugins.command.*.run=deny"
+        .parse::<KeyValueOrPath>()
+        .unwrap();
+    let overridden = build_query_config(&workspace, asking, &[deny], &next, Some(&handle));
+    assert_eq!(
+        overridden.plugins.command.defaults.run,
+        RunPolicy::Deny,
+        "`--cfg` wins over the conversation's stored default"
     );
 }
 

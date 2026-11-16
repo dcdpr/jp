@@ -7,11 +7,12 @@
 //! A tool filtering by labels is also offered retired values and a bare key per
 //! facet, which is how a filter asks for any value under it.
 //!
-//! A vocabulary with a key that takes any value gets no list at all: a list
-//! holds only the values it names, so it would refuse that key's.
-//! Its labels are described in words instead.
+//! A vocabulary with an open key (`values = []`) cannot use a JSON Schema
+//! `enum`, which would reject unlisted values for that key.
+//! Instead, it describes the accepted labels in prose, including any
+//! [`ValueType`] constraints and, for filters, the date comparison operators.
 
-use jp_label::{Unique, Vocabulary};
+use jp_label::{Unique, ValueType, Vocabulary};
 
 use crate::toml_string;
 
@@ -54,6 +55,11 @@ pub(crate) fn render(
     } else {
         rules(vocabulary, item)
     };
+    let notes = [rules, types(vocabulary, filter)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let notes = (!notes.is_empty()).then(|| notes.join(" "));
 
     let mut out = String::new();
     if role == Role::Create && vocabulary.facets().any(|(_, facet)| facet.min() > 0) {
@@ -64,7 +70,7 @@ pub(crate) fn render(
     out.push_str(&format!(
         "\n[conversation.tools.{key}.parameters.{parameter}.items]\n"
     ));
-    if let Some(summary) = summary(&tokens, &open, rules.as_deref(), filter) {
+    if let Some(summary) = summary(&tokens, &open, notes.as_deref(), filter) {
         out.push_str(&format!("summary = {}\n", toml_string(&summary)));
     }
     if open.is_empty() {
@@ -127,6 +133,28 @@ fn summary(tokens: &[String], open: &[&str], rules: Option<&str>, filter: bool) 
     }
 
     Some(summary)
+}
+
+/// Prose describing the [`ValueType`] constraints on the vocabulary's keys, or
+/// `None` if no key is typed.
+///
+/// When `filter` is `true`, includes the comparison operators for date-typed
+/// keys.
+fn types(vocabulary: &Vocabulary, filter: bool) -> Option<String> {
+    let sentences: Vec<String> = vocabulary
+        .facets()
+        .filter_map(|(key, facet)| facet.value_type().map(|kind| (key, kind)))
+        .map(|(key, kind)| match kind {
+            ValueType::Date if filter => format!(
+                "`{key}` holds {}; compare it with `<`, `<=`, `>`, or `>=`, as in \
+                 `{key}<2026-12-01`.",
+                kind.describe()
+            ),
+            ValueType::Date => format!("`{key}` takes {}.", kind.describe()),
+        })
+        .collect();
+
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 /// What the vocabulary's bounded and unique keys ask of an `item`, as

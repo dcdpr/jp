@@ -35,13 +35,6 @@ pub(crate) struct PositionalIds<const SESSION: bool, const MULTI: bool> {
     ids: Vec<ConversationTarget>,
 }
 
-#[cfg(test)]
-impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
-    pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
-        Self { ids }
-    }
-}
-
 /// Flag-based conversation ID arguments: `-i/--id/--ids`
 ///
 /// Always supports bare `--id` (no value) for the interactive picker.
@@ -54,13 +47,6 @@ impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
 #[derive(Debug, Default)]
 pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool, const GLOBAL: bool = false> {
     ids: Vec<ConversationTarget>,
-}
-
-#[cfg(test)]
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FlagIds<SESSION, MULTI, GLOBAL> {
-    pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
-        Self { ids }
-    }
 }
 
 /// The `-i` / `--id` flag that reads into a [`FlagIds`] of the same parameters.
@@ -424,6 +410,9 @@ pub(crate) fn format_target_help(session: bool, multi: bool, ansi: bool) -> Stri
         {}
     ", keyword_help(session, multi, ansi)}
 }
+
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
 #[path = "conversation_id_tests.rs"]

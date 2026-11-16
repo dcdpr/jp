@@ -1,17 +1,18 @@
 //! Definitions for the tools this plugin serves.
 //!
-//! `jp ticket tools init` writes a starting set, one file per tool, and `jp
-//! ticket tools sync` writes the one part that mirrors configuration: the
-//! board's labels, offered in the schemas of the tools that take them.
-//! `tool_definitions` runs both; this module says which files there are and
-//! which tools take labels.
+//! `jp ticket tools init` writes the default tool definitions (one file per
+//! tool), and `jp ticket tools sync` generates the config-dependent schema
+//! overrides: the board's label vocabulary on tools that accept labels, and the
+//! valid `order` values on `list` (including sortable label keys).
+//! `tool_definitions` implements both commands; this module declares the
+//! template files and parameter mappings.
 
 use camino::Utf8Path;
 use serde_json::Value;
 use ticket::Vocabulary;
 use tool_definitions::{Definitions, Mirror, Role};
 
-use crate::Output;
+use crate::{Output, order};
 
 /// The definitions this plugin ships.
 pub(crate) const DEFINITIONS: Definitions = Definitions {
@@ -21,6 +22,7 @@ pub(crate) const DEFINITIONS: Definitions = Definitions {
         ("create.toml", include_str!("../tools/create.toml")),
         ("edit.toml", include_str!("../tools/edit.toml")),
         ("list.toml", include_str!("../tools/list.toml")),
+        ("move.toml", include_str!("../tools/move.toml")),
         ("show.toml", include_str!("../tools/show.toml")),
     ],
     offers: "labels",
@@ -45,22 +47,32 @@ const SYNCED_NOTES: &str = "\
 # A board with a key that takes any value gets no lists at all: a list holds
 # only the values it names, so it would refuse that key's. Its labels are
 # described in words instead.
+#
+# `list` is also offered the orders it accepts: `board`, `filed`, and each
+# label key the board can sort by, with `:desc` to reverse it.
 ";
 
 /// What a synced file adds to its notes when the board defines no labels.
 const NO_LABELS: &str = "#\n# The board defines no labels, so the tools take any label.\n";
 
-/// Write the starting definitions into `dir`, creating it if needed.
-pub(crate) fn init(dir: &Utf8Path) -> Result<Output, String> {
-    DEFINITIONS.init(dir).map(Output::from)
+/// Write the default tool definitions into `dir`, creating it if needed.
+///
+/// Existing files that git cannot restore are overwritten only when `force` is
+/// true.
+pub(crate) fn init(dir: &Utf8Path, force: bool) -> Result<Output, String> {
+    DEFINITIONS.init(dir, force).map(Output::from)
 }
 
-/// Write the board's labels into the schemas of the configured tools that take
-/// them, as `dir`'s synced file.
+/// Write [`tool_definitions::SYNCED_FILE`] in `dir` with the board's configured
+/// labels.
+///
+/// An existing synced file that git cannot restore is overwritten only when
+/// `force` is true.
 pub(crate) fn sync(
     dir: &Utf8Path,
     config: &Value,
     vocabulary: &Vocabulary,
+    force: bool,
 ) -> Result<Output, String> {
     let notes = if vocabulary.is_empty() {
         format!("{SYNCED_NOTES}{NO_LABELS}")
@@ -68,21 +80,36 @@ pub(crate) fn sync(
         SYNCED_NOTES.to_owned()
     };
 
+    let orders = order::names(vocabulary);
+
     DEFINITIONS
-        .sync(dir, config, &notes, |tool| mirrors(tool, vocabulary))
+        .sync(
+            dir,
+            config,
+            &notes,
+            |tool| mirrors(tool, vocabulary, &orders),
+            force,
+        )
         .map(Output::from)
 }
 
-/// The parameters of `tool` that take their values from the configuration.
-fn mirrors<'a>(tool: &str, vocabulary: &'a Vocabulary) -> Vec<Mirror<'a>> {
-    let (parameter, role) = match tool {
-        "create" => ("labels", Role::Create),
-        "edit" => ("add_labels", Role::Add),
-        "list" => ("labels", Role::Filter),
-        _ => return vec![],
-    };
-
-    vec![Mirror::labels(parameter, vocabulary, "ticket", role)]
+/// Config-mirrored parameter schemas for `tool`: label lists from `vocabulary`,
+/// plus `orders` when `tool` is `"list"`.
+fn mirrors<'a>(tool: &str, vocabulary: &'a Vocabulary, orders: &'a [String]) -> Vec<Mirror<'a>> {
+    match tool {
+        "create" => vec![Mirror::labels("labels", vocabulary, "ticket", Role::Create)],
+        "edit" => vec![Mirror::labels(
+            "add_labels",
+            vocabulary,
+            "ticket",
+            Role::Add,
+        )],
+        "list" => vec![
+            Mirror::labels("labels", vocabulary, "ticket", Role::Filter),
+            Mirror::one_of("order", orders),
+        ],
+        _ => vec![],
+    }
 }
 
 #[cfg(test)]

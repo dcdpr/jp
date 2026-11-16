@@ -37,7 +37,7 @@
 //! graceful shutdown request.
 
 use std::{
-    fmt,
+    fmt, io,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -46,6 +46,8 @@ use std::{
 };
 
 use futures::{Stream, StreamExt as _};
+use jp_inquire::{release_terminal, terminal_held};
+use jp_printer::open_tty;
 use tokio::{
     runtime::{Handle, Runtime},
     sync::mpsc::{self, error::TrySendError},
@@ -119,6 +121,7 @@ impl SignalRouter {
         let signals = os_signals();
 
         Self::with_signal_source(runtime.handle(), signals, escalation_cooldown, |code| {
+            release_prompt_terminal();
             std::process::exit(code)
         })
     }
@@ -546,6 +549,26 @@ impl RouterInner {
         ) {
             self.shutdown_token.cancel();
         }
+    }
+}
+
+/// Restore the terminal if a prompt is open when the process exits immediately.
+///
+/// Writes directly to `/dev/tty` (or `stdout`) rather than going through the
+/// printer, because immediate exit (`SIGQUIT` or third Ctrl-C) does not wait
+/// for the printer worker.
+fn release_prompt_terminal() {
+    if !terminal_held() {
+        return;
+    }
+
+    let released = match open_tty() {
+        Some(mut tty) => release_terminal(&mut tty),
+        None => release_terminal(&mut io::stdout()),
+    };
+
+    if let Err(error) = released {
+        debug!(%error, "Failed to restore the terminal an open prompt held.");
     }
 }
 

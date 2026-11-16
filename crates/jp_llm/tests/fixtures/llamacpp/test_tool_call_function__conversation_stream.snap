@@ -210,7 +210,8 @@ expression: v
             "api_key"
           ],
           "api_key_env": "GEMINI_API_KEY",
-          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          "base_url": "https://generativelanguage.googleapis.com/v1beta",
+          "silence_allowance_secs": 300
         },
         "llamacpp": {
           "base_url": "http://127.0.0.1:8080"
@@ -246,7 +247,12 @@ expression: v
       }
     },
     "plugins": {
-      "shutdown_timeout_secs": 5
+      "command": {
+        "*": {
+          "run": "ask",
+          "shutdown_timeout_secs": 5
+        }
+      }
     }
   },
   "events": [
@@ -258,24 +264,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
+      "id": "4SerJg0AObmf3vEKyozs1Bpt3bmmiEow",
       "name": "run_me",
       "arguments": {
-        "foo": "aGVsbG8=",
+        "foo": "dGVzdA==",
         "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
+      "id": "4SerJg0AObmf3vEKyozs1Bpt3bmmiEow",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool has run successfully with the provided arguments. The output indicates that everything is working as expected. Let me know if you'd like to try different arguments or explore other tools!"
+      "message": "The tool executed successfully with the provided arguments.\n\nOutput: `working!`\n\nLet me know if you'd like to try another example or adjust the parameters!"
     }
   ]
 }

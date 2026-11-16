@@ -75,14 +75,21 @@ pub struct RequestConfig {
     ///
     /// The timer resets every time the provider sends data, so it fires when a
     /// connection goes silent for the full duration.
-    /// Before the first token of a response, that silence is measured exactly.
-    /// After it, some providers send nothing while the model writes a tool
-    /// call, and that time counts as activity: for as long as the call is open
-    /// on most providers, and for up to five minutes of silence on Google.
-    /// A connection that dies at that point is detected only once that
+    /// Some providers send nothing while the model writes a tool call, and that
+    /// time counts as activity for as long as the call is open.
+    /// Google can be silent for the whole response, so it has its own allowance
+    /// before this timer starts: `providers.llm.google.silence_allowance_secs`.
+    /// A connection that dies during such a stretch is detected only once the
     /// allowance has passed.
     /// A timed-out stream is treated as a transient error and retried according
     /// to `max_retries` and the backoff settings.
+    /// Each retry after a timeout doubles the window, up to four times this
+    /// value, so a response that is slow to start (a large prompt, or a long
+    /// tool call written before anything is sent) gets longer each attempt
+    /// rather than failing the same way every time.
+    /// A retried request keeps its longer window until its response ends; once
+    /// a response has sent content, the next request starts again at this
+    /// value.
     ///
     /// Raise this for models with a very long time-to-first-token (such as
     /// deep-research models) if you observe spurious retries.

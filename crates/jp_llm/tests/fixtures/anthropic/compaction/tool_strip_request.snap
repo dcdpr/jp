@@ -19,10 +19,6 @@ expression: request
       "content": [
         {
           "type": "text",
-          "text": "<think>\nThe user wants a capital city.\n</think>\n\n"
-        },
-        {
-          "type": "text",
           "text": "Paris."
         }
       ]

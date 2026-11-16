@@ -7,13 +7,24 @@ expression: v
         Flushed(
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I will run the tool with a default string argument and a single element array argument.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "XKlv3S6qUhMOu2TFBjOi50mehedlfHVg",
+                        id: "n2iYkI6xKzeWiU0luNlVTNzERwnlToiI",
                         name: "run_me",
                         arguments: {
                             "foo": String("Hello World"),
-                            "bar": String("[\"foo\", \"foo\"]"),
+                            "bar": String("[\"foo\"]"),
                         },
                     },
                 ),
@@ -30,7 +41,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully with the arguments `foo=\"Hello World\"` and `bar=[\"foo\", \"foo\"]`. The output indicates: **working!**",
+                        message: "The tool executed successfully.",
                     },
                 ),
                 metadata: {},

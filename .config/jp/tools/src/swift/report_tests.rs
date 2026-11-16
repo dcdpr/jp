@@ -3,6 +3,57 @@ use serde_json::json;
 
 use super::*;
 
+/// The whole point of the check: `xcodebuild` unions the selectors and ignores
+/// one that matches nothing, so without this a typo alongside a real name is a
+/// passing run that quietly did half the work.
+#[test]
+fn names_the_requested_tests_that_never_ran() {
+    let executed = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
+    let requested = [
+        "UISuite/ConversationListTests/clickSelects()".to_owned(),
+        "UISuite/ConversationListTests/clickSelcts()".to_owned(),
+    ];
+
+    assert_eq!(unmatched(&requested, &executed), vec![
+        "UISuite/ConversationListTests/clickSelcts()".to_owned()
+    ]);
+}
+
+/// A suite stands for everything under it, so naming one is answered by any
+/// test beneath it rather than by an identifier equal to it.
+#[test]
+fn a_suite_is_matched_by_the_tests_inside_it() {
+    let executed = [
+        "UISuite/ConversationListTests/clickSelects()".to_owned(),
+        "UISuite/ConversationListTests/labelsRows()".to_owned(),
+    ];
+
+    assert!(unmatched(&["UISuite/ConversationListTests".to_owned()], &executed).is_empty());
+    assert!(unmatched(&["UISuite".to_owned()], &executed).is_empty());
+}
+
+/// A prefix that stops mid-name is not a suite of that name.
+/// Matching on the bare string would let `ConversationList` answer for
+/// `ConversationListTests`.
+#[test]
+fn a_partial_name_is_not_a_match() {
+    let executed = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
+
+    assert_eq!(
+        unmatched(&["UISuite/ConversationList".to_owned()], &executed),
+        vec!["UISuite/ConversationList".to_owned()]
+    );
+}
+
+/// An unreadable bundle cannot answer the question, and answering "none of them
+/// ran" would fail a suite that passed.
+#[test]
+fn nothing_is_unmatched_when_nothing_is_known() {
+    let requested = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
+
+    assert!(unmatched(&requested, &[]).is_empty());
+}
+
 /// A result bundle's test tree, in the shape `xcresulttool get test-results
 /// tests` documents.
 ///

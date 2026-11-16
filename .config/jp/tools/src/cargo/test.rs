@@ -2,7 +2,7 @@ use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde_json::{Value, from_str};
 
-use super::MAX_DIAGNOSTIC_BYTES;
+use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope};
 use crate::{
     to_simple_xml_with_root,
     util::{ToolResult, truncate},
@@ -52,7 +52,7 @@ pub(crate) async fn cargo_test(
     root: &Utf8Path,
     rustflags: &str,
     profile: Option<&str>,
-    package: Option<String>,
+    packages: &[String],
     testname: Option<String>,
     backtrace: Option<bool>,
     checksum_freshness: bool,
@@ -61,7 +61,7 @@ pub(crate) async fn cargo_test(
         root,
         rustflags,
         profile,
-        package,
+        packages,
         testname,
         backtrace.unwrap_or(false),
         checksum_freshness,
@@ -73,14 +73,14 @@ fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
     profile: Option<&str>,
-    package: Option<String>,
+    packages: &[String],
     testname: Option<String>,
     backtrace: bool,
     checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let test_name = testname.unwrap_or_default();
-    let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+    let scope = cargo_scope(packages, "--workspace");
     // `--profile` selects a nextest profile; the cargo one has its own flag.
     let profile_arg = profile.map(|name| format!("--cargo-profile={name}"));
 
@@ -102,10 +102,9 @@ fn cargo_test_impl<R: ProcessRunner>(
         env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
     }
 
-    let mut args = vec![
-        "nextest",
-        "run",
-        package.as_str(),
+    let mut args = vec!["nextest", "run"];
+    args.extend(scope.iter().map(String::as_str));
+    args.extend([
         // Once to still print any compilation errors.
         "--cargo-quiet",
         // Run all tests, even if one fails.
@@ -116,7 +115,7 @@ fn cargo_test_impl<R: ProcessRunner>(
         "--status-level=fail",
         // JSON output to be parsed by the tool.
         "--message-format=libtest-json-plus",
-    ];
+    ]);
     if let Some(profile) = profile_arg.as_deref() {
         args.push(profile);
     }

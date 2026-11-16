@@ -1,0 +1,75 @@
+[conversation.tools.ticket_move]
+source = "plugin.command.ticket.move"
+summary = "Move a ticket to another column or reorder it within a column."
+description = """
+Move a ticket on the board: to another column, to a position within a column,
+or both in one call. Each column is a queue worked from the top.
+
+- `status` moves the ticket to `todo`, `in progress`, or `done`; `done` closes
+  it. A parent can close only once all of its children are `done`. Closing a
+  ticket with unchecked checklist items is allowed, and the result lists them.
+  Without `status`, the ticket stays in its current column.
+- `before` or `after` places the ticket directly above or below another ticket,
+  which must be in the target column.
+- `position` places the ticket at the `top` or `bottom` of the target column.
+
+Pass at most one of `before`, `after`, or `position`. Without any of them, a
+ticket moved to another column is placed below any ranked tickets in that
+column.
+
+The result reports the ticket's new position in the column and the ticket
+directly above it.
+"""
+
+examples = """
+Put a ticket at the top of Todo, as the next thing to work on:
+```json
+{"id": "T-02wt0kx", "position": "top"}
+```
+
+Place a ticket directly below another ticket:
+```json
+{"id": "T-02wt0kx", "after": "T-02wt0m3"}
+```
+
+Start work on a ticket ahead of other in-progress tickets:
+```json
+{"id": "T-02wt0kx", "status": "in progress", "position": "top"}
+```
+"""
+
+# Multiple moves in a single call run sequentially in the order given, so each
+# move sees the board state written by the previous one.
+fan_out = { concurrency = 1 }
+
+[conversation.tools.ticket_move.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_move.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to move: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_move.parameters.status]
+type = "string"
+required = false
+enum = ["todo", "in progress", "done"]
+summary = "Target column; `done` closes the ticket. Omit to keep the current column."
+
+[conversation.tools.ticket_move.parameters.before]
+type = "string"
+required = false
+summary = "Place the ticket directly above this ticket (must be in the target column)."
+
+[conversation.tools.ticket_move.parameters.after]
+type = "string"
+required = false
+summary = "Place the ticket directly below this ticket (must be in the target column)."
+
+[conversation.tools.ticket_move.parameters.position]
+type = "string"
+required = false
+enum = ["top", "bottom"]
+summary = "Place the ticket at the top or bottom of the target column."

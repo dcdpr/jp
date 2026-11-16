@@ -413,7 +413,10 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
     );
     tap.observe(
         Side::Agent,
-        &json!({"method": "_claude/sdkMessage", "params": {"message": {"cwd": "/home/someone/work"}}}),
+        &json!({"method": "_claude/sdkMessage", "params": {"message": {
+            "cwd": "/home/someone/work",
+            "original_cwd": "/home/someone/work/crate",
+        }}}),
     );
 
     let contents = std::fs::read_to_string(&path).unwrap();
@@ -433,6 +436,10 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
     assert_eq!(recorded[1].message["params"]["cwd"], json!("[redacted]"));
     assert_eq!(
         recorded[2].message["params"]["message"]["cwd"],
+        json!("[redacted]")
+    );
+    assert_eq!(
+        recorded[2].message["params"]["message"]["original_cwd"],
         json!("[redacted]")
     );
     assert!(!contents.contains("someone"), "{contents}");

@@ -11,7 +11,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 use serde_json::Value;
 
 use super::{
@@ -167,6 +167,19 @@ impl LoadBackend for InMemoryStorageBackend {
             format!("<memory>/{id}"),
             LoadErrorInner::MissingConversationStream(*id),
         ))
+    }
+
+    fn load_conversation_events(
+        &self,
+        id: &ConversationId,
+    ) -> std::result::Result<Vec<ConversationEvent>, LoadError> {
+        self.load_conversation_stream(id, &PartialAppConfig::empty())
+            .map(|stream| {
+                stream
+                    .iter_events_by_turn()
+                    .map(|event| event.event.clone())
+                    .collect()
+            })
     }
 
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId> {

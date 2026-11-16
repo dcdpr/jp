@@ -8,7 +8,8 @@
 //! Resolution produces a [`TurnSet`]: an ordered, non-overlapping list of
 //! inclusive 0-based turn windows.
 //! Most selections are a single window; `--first N --last M` produces two,
-//! skipping the turns in between.
+//! skipping the turns in between, and a `--turn` list (`1,3..10,15`) produces
+//! one per item.
 //!
 //! A bound never splits a turn.
 //! The two ends resolve a time value differently: `--from <time>` starts at the
@@ -24,7 +25,7 @@ use std::{fmt, str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use clap::{
-    Arg, ArgMatches, Command,
+    Arg, ArgAction, ArgMatches, Command,
     builder::{RangedU64ValueParser, TypedValueParser},
     value_parser,
 };
@@ -215,7 +216,7 @@ fn parse_turn_pos(s: &str) -> Result<TurnPos, String> {
     }
 }
 
-/// A `--turn` value: a single turn, or an inclusive range.
+/// One item of a `--turn` value: a single turn, or an inclusive range.
 ///
 /// Either end of a range may be open: `10..` is turn 10 through the end, `..10`
 /// is the first 10 turns, and `..` is the whole conversation.
@@ -228,7 +229,7 @@ pub(crate) enum TurnSpec {
     Range(Option<TurnPos>, Option<TurnPos>),
 }
 
-/// Parse a `--turn` value: `N` (a single turn) or a range `A..B`.
+/// Parse one item of a `--turn` value: `N` (a single turn) or a range `A..B`.
 ///
 /// The separator is `..` and both ends are inclusive, matching the compaction
 /// DSL (`1..5` is turns 1 through 5).
@@ -250,6 +251,99 @@ fn parse_turn(s: &str) -> Result<TurnSpec, String> {
         return Ok(TurnSpec::Range(from, to));
     }
     Ok(TurnSpec::Single(parse_turn_pos(s)?))
+}
+
+impl TurnSpec {
+    /// Validate that this item's bounds fall within a conversation of `count`
+    /// turns and are ordered `from <= to`.
+    ///
+    /// Checks endpoint bounds before ordering because a from-end position only
+    /// resolves to a valid turn number when it is within `count`.
+    fn check(&self, count: usize) -> Result<(), String> {
+        let ends = match self {
+            Self::Single(pos) => [Some(*pos), None],
+            Self::Range(a, b) => [*a, *b],
+        };
+
+        if let Some(pos) = ends
+            .into_iter()
+            .flatten()
+            .find(|pos| pos.out_of_range(count))
+        {
+            return Err(format!(
+                "turn {pos} out of range (conversation has {count} turns)"
+            ));
+        }
+
+        // An open end is the start or end of the conversation, so it can never
+        // precede its sibling.
+        let Self::Range(Some(from), Some(to)) = self else {
+            return Ok(());
+        };
+
+        let (from_turn, to_turn) = (from.turn_number(count), to.turn_number(count));
+        if to_turn < from_turn {
+            // Both spellings are shown: the range as written, and the turns a
+            // from-end position resolves to, which is where the crossing is
+            // visible.
+            return Err(format!(
+                "range {from}..{to} is not valid: turn {to_turn} comes before turn {from_turn}"
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// The window this item names, with unresolved bounds.
+    fn window(&self) -> BoundWindow {
+        let (from, to) = match self {
+            Self::Single(pos) => {
+                let at = pos.to_range_bound();
+                (at.clone(), at)
+            }
+            Self::Range(a, b) => (
+                // Open start (`--turn ..B`) begins at the first turn.
+                a.map_or(RangeBound::Absolute(0), TurnPos::to_range_bound),
+                // Open end (`--turn A..`) runs through the last turn.
+                b.map_or(RangeBound::FromEnd(0), TurnPos::to_range_bound),
+            ),
+        };
+
+        BoundWindow {
+            from: Bound::At(from),
+            to: Bound::At(to),
+        }
+    }
+}
+
+/// Merge overlapping windows from a `--turn` list.
+///
+/// Resolves bounds against `events` before comparing so from-end positions
+/// (such as `2..-1` and `4`) can be ordered by turn index.
+/// Adjacent windows that do not share a turn (such as `1..3` and `4..6`) remain
+/// separate.
+fn merge_overlapping(windows: &[BoundWindow], events: &ConversationStream) -> Vec<BoundWindow> {
+    let mut resolved: Vec<TurnWindow> = windows
+        .iter()
+        .filter_map(|window| resolve_window(window, events))
+        .collect();
+    resolved.sort_by_key(|w| (w.from, w.to));
+
+    let mut merged: Vec<TurnWindow> = Vec::with_capacity(resolved.len());
+    for window in resolved {
+        match merged.last_mut() {
+            Some(last) if window.from <= last.to => last.to = last.to.max(window.to),
+            _ => merged.push(window),
+        }
+    }
+
+    merged
+        .into_iter()
+        .map(|w| BoundWindow {
+            from: Bound::At(RangeBound::Absolute(w.from)),
+            to: Bound::At(RangeBound::Absolute(w.to)),
+        })
+        .collect()
 }
 
 /// The resolution of one window bound (`from` or `to`) against a stream.
@@ -475,8 +569,9 @@ pub(crate) struct TurnSelection {
     /// `--last N`: the last N turns.
     last: Option<usize>,
 
-    /// `--turn`: turns by number.
-    turn: Option<TurnSpec>,
+    /// `--turn`: turns by number, one entry per list item.
+    /// Empty when the flag is not given.
+    turn: Vec<TurnSpec>,
 
     /// `--from`: the start of the range, inclusive.
     from: Option<CliRangeBound>,
@@ -503,15 +598,18 @@ impl CommandArgs for TurnSelection {
                     .long("turn")
                     .alias("turns")
                     .value_name("TURN")
+                    .action(ArgAction::Append)
                     .value_parser(parse_turn)
+                    .value_delimiter(',')
                     .allow_negative_numbers(true)
                     .conflicts_with_all(["first", "last", "from", "to"])
                     .help(
                         "Select turns by number: a single turn (`3`), an inclusive range \
                          (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the \
-                         first 10), or `..` (all). Numbers are 1-based and stable across new \
-                         turns; `-N` instead counts from the end, so `-1` is the last turn and \
-                         `-3..-2` the two turns before it",
+                         first 10), or `..` (all). Comma-separate several to select them all \
+                         (`1,3..10,15`). Numbers are 1-based and stable across new turns; `-N` \
+                         instead counts from the end, so `-1` is the last turn and `-3..-2` the \
+                         two turns before it",
                     ),
             )
             .arg(
@@ -581,7 +679,10 @@ impl CommandArgs for TurnSelection {
         Ok(Self {
             first: Flag::<First>::strict(matches)?,
             last: Flag::<Last>::strict(matches)?,
-            turn: matches.get_one("turn").cloned(),
+            turn: matches
+                .get_many("turn")
+                .map(|specs| specs.cloned().collect())
+                .unwrap_or_default(),
             from: matches.get_one("from").cloned(),
             to: matches.get_one("to").cloned(),
             keep_first: matches.get_one("keep_first").cloned(),
@@ -665,7 +766,10 @@ impl TurnSelection {
     pub(crate) fn from_last_turn(last: Option<usize>, turn: Option<usize>) -> Self {
         Self {
             last,
-            turn: turn.map(|n| TurnSpec::Single(TurnPos::Absolute(n))),
+            turn: turn
+                .map(|n| TurnSpec::Single(TurnPos::Absolute(n)))
+                .into_iter()
+                .collect(),
             ..Self::default()
         }
     }
@@ -678,7 +782,7 @@ impl TurnSelection {
     pub(crate) fn is_set(&self) -> bool {
         self.first.is_some()
             || self.last.is_some()
-            || self.turn.is_some()
+            || !self.turn.is_empty()
             || self.from.is_some()
             || self.to.is_some()
             || self.keep_first.is_some()
@@ -754,80 +858,37 @@ impl TurnSelection {
         Ok(())
     }
 
-    /// Reject a `--turn` value the conversation cannot honour.
+    /// Validate every `--turn` item against a conversation of `count` turns.
     ///
-    /// Two ways it cannot.
-    /// An endpoint outside the conversation is an error rather than a clamped
-    /// selection, because `--turn` names specific turns (unlike
-    /// `--first`/`--last`).
-    /// A range whose end precedes its start names no turn in any conversation,
-    /// so it is rejected as malformed rather than resolved into an empty
-    /// selection.
-    ///
-    /// The endpoint check runs first: a from-end position only has a turn
-    /// number once it is known to fall inside the conversation.
+    /// Unlike `--first`/`--last`, which clamp to the conversation length,
+    /// `--turn` rejects endpoints outside the conversation.
+    /// It also rejects inverted ranges (`from > to`) as malformed rather than
+    /// resolving them to an empty selection.
     pub(crate) fn check_turn_range(&self, count: usize) -> Result<(), String> {
-        let ends = match self.turn.as_ref() {
-            Some(TurnSpec::Single(pos)) => [Some(*pos), None],
-            Some(TurnSpec::Range(a, b)) => [*a, *b],
-            None => return Ok(()),
-        };
-
-        if let Some(pos) = ends
-            .into_iter()
-            .flatten()
-            .find(|pos| pos.out_of_range(count))
-        {
-            return Err(format!(
-                "turn {pos} out of range (conversation has {count} turns)"
-            ));
-        }
-
-        // An open end is the start or end of the conversation, so it can never
-        // precede its sibling.
-        let Some(TurnSpec::Range(Some(from), Some(to))) = self.turn.as_ref() else {
-            return Ok(());
-        };
-
-        let (from_turn, to_turn) = (from.turn_number(count), to.turn_number(count));
-        if to_turn < from_turn {
-            // Both spellings are shown: the range as written, and the turns a
-            // from-end position resolves to, which is where the crossing is
-            // visible.
-            return Err(format!(
-                "range {from}..{to} is not valid: turn {to_turn} comes before turn {from_turn}"
-            ));
-        }
-
-        Ok(())
+        self.turn.iter().try_for_each(|spec| spec.check(count))
     }
 
     /// The base windows named by the positive selectors, with unresolved
     /// bounds.
     ///
-    /// One window for `--turn`, for `--from`/`--to`, and for no selector at all
-    /// (the whole conversation); two when `--first` and `--last` are combined.
+    /// One window for a single `--turn` item, for `--from`/`--to`, and for no
+    /// selector at all (the whole conversation); two when `--first` and
+    /// `--last` are combined.
+    /// A `--turn` list contributes one window per item, with overlapping items
+    /// merged into a single window.
     /// `--first 0` and `--last 0` contribute no window.
     ///
-    /// Keep flags are not applied here — see [`Self::trim`].
+    /// Keep flags are not applied here; see [`Self::trim`].
     pub(crate) fn windows(&self, events: &ConversationStream) -> Vec<BoundWindow> {
-        if let Some(spec) = &self.turn {
-            let (from, to) = match spec {
-                TurnSpec::Single(pos) => {
-                    let at = pos.to_range_bound();
-                    (at.clone(), at)
-                }
-                TurnSpec::Range(a, b) => (
-                    // Open start (`--turn ..B`) begins at the first turn.
-                    a.map_or(RangeBound::Absolute(0), TurnPos::to_range_bound),
-                    // Open end (`--turn A..`) runs through the last turn.
-                    b.map_or(RangeBound::FromEnd(0), TurnPos::to_range_bound),
-                ),
+        if !self.turn.is_empty() {
+            let windows: Vec<_> = self.turn.iter().map(TurnSpec::window).collect();
+
+            // Merge overlapping items here rather than in `TurnSet` because
+            // callers such as `compact` operate on each base window separately.
+            return match windows.len() {
+                1 => windows,
+                _ => merge_overlapping(&windows, events),
             };
-            return vec![BoundWindow {
-                from: Bound::At(from),
-                to: Bound::At(to),
-            }];
         }
 
         if self.first.is_some() || self.last.is_some() {

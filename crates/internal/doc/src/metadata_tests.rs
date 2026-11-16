@@ -209,17 +209,6 @@ fn a_line_that_is_not_a_field_opens_nothing() {
 }
 
 #[test]
-fn a_field_owns_its_continuation_lines() {
-    let (lines, _) = header_of(DOCUMENT);
-    let header = Header::of(&lines);
-
-    assert!(header.is_field_line("Summary", 6));
-    assert!(header.is_field_line("Summary", 7));
-    assert!(!header.is_field_line("Summary", 5));
-    assert!(!header.is_field_line("Summary", 9));
-}
-
-#[test]
 fn a_document_renders_back_unchanged() {
     assert_eq!(Document::parse(DOCUMENT).render(), DOCUMENT);
     assert_eq!(Document::parse("no newline").render(), "no newline");

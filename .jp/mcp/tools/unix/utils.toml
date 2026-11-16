@@ -3,6 +3,11 @@ enable = false
 run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Each operation runs its own utility. They are cheap and independent, so they
+# run unbounded and every failure is reported.
+fan_out = true
+
 summary = "Run common unix command-line utilities."
 description = """
 A collection of useful unix tools available for quick tasks. Each tool is

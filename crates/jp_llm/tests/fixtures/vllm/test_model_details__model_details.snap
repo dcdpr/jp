@@ -7,12 +7,12 @@ expression: v
         id: ModelIdConfig {
             provider: Vllm,
             name: Name(
-                "Qwen/Qwen3.8-Flash-Next-NVFP4",
+                "Qwen/Qwen3.8-27B-FP8",
             ),
         },
         display_name: None,
         context_window: Some(
-            131072,
+            1000000,
         ),
         max_output_tokens: None,
         reasoning: None,

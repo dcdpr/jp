@@ -22,7 +22,7 @@ fn test_cargo_test_success() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -53,7 +53,7 @@ fn test_cargo_test_with_failure() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -102,7 +102,7 @@ fn a_timed_out_test_is_reported_as_failed() {
         Utf8Path::new("/work"),
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -146,7 +146,7 @@ fn a_failed_run_with_no_parsed_failures_is_not_reported_as_passing() {
         Utf8Path::new("/work"),
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -187,7 +187,7 @@ fn no_tests_ran_error_is_bounded() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -239,7 +239,7 @@ fn failure_output_is_bounded_across_the_whole_run() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -297,7 +297,7 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -361,7 +361,45 @@ fn cargo_profile_is_passed_through_to_nextest() {
         &ctx.root,
         "-W warnings",
         Some("agent"),
+        &[],
+        Some("my_test".to_owned()),
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(content, "Ran 1/1 tests, of which 0 failed.\n");
+}
+
+/// Every named package reaches nextest as its own flag, so one run builds and
+/// tests them together, with the name filter applying across all of them.
+#[test]
+fn each_package_is_passed_to_nextest() {
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "nextest",
+            "run",
+            "--package=jp_storage",
+            "--package=jp_workspace",
+            "--cargo-quiet",
+            "--no-fail-fast",
+            "--hide-progress-bar",
+            "--final-status-level=none",
+            "--status-level=fail",
+            "--message-format=libtest-json-plus",
+            "my_test",
+        ])
+        .returns_success(stdout);
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
         None,
+        &["jp_storage".to_owned(), "jp_workspace".to_owned()],
         Some("my_test".to_owned()),
         false,
         false,
@@ -404,7 +442,7 @@ fn test_rustflags_reaches_cargo() {
         &ctx.root,
         "-W warnings -Zthreads=0",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -435,7 +473,7 @@ fn insta_workspace_root_names_the_checkout_under_test() {
         Utf8Path::new("/work/jp.git/bookworm-tool-def"),
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -469,7 +507,7 @@ fn test_backtrace_disabled_by_default() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -503,7 +541,7 @@ fn test_checksum_freshness_disabled_by_default() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         false,
@@ -536,7 +574,7 @@ fn test_checksum_freshness_enabled() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         false,
         true,
@@ -570,7 +608,7 @@ fn test_backtrace_enabled() {
         &ctx.root,
         "-W warnings",
         None,
-        None,
+        &[],
         None,
         true,
         false,

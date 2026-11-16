@@ -3,6 +3,11 @@ enable = false
 run = "allow"
 
 source = "mcp.bookworm.crate_resource"
+
+# Independent reads against crates.io and docs.rs, bounded to stay polite to
+# both; every failure is reported.
+fan_out = { concurrency = 4 }
+
 summary = "Fetch a crate resource (metadata, README, items, source) by URI."
 description = """\
 Single entry point for everything else bookworm exposes. Supported URI shapes:

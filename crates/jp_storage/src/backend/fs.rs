@@ -8,7 +8,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use relative_path::RelativePath;
 use serde::de::DeserializeOwned;
@@ -250,6 +250,13 @@ impl LoadBackend for FsStorageBackend {
         fallback: &PartialAppConfig,
     ) -> std::result::Result<ConversationStream, LoadError> {
         self.storage.load_conversation_stream(id, fallback)
+    }
+
+    fn load_conversation_events(
+        &self,
+        id: &ConversationId,
+    ) -> std::result::Result<Vec<ConversationEvent>, LoadError> {
+        self.storage.load_conversation_events(id)
     }
 
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId> {

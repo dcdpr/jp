@@ -27,7 +27,7 @@ fn no_changes_anywhere_reports_nothing_to_format() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
@@ -41,7 +41,7 @@ fn rustfmt_changes_only_lists_those_files() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- src/lib.rs\n- src/main.rs"
@@ -61,7 +61,7 @@ fn formatted_file_listing_is_bounded() {
         .expect("comfort")
         .returns_success("");
 
-    let content = cargo_format_impl(&ctx.root, "-W warnings", None, &runner)
+    let content = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner)
         .unwrap()
         .unwrap_content();
 
@@ -87,7 +87,7 @@ fn comfort_changes_only_lists_those_files() {
         .expect("comfort")
         .returns_success(comfort_stdout);
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- crates/foo/src/lib.rs"
@@ -105,7 +105,7 @@ fn overlapping_changes_are_deduplicated_and_sorted() {
         .expect("comfort")
         .returns_success(comfort_stdout);
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- src/a.rs\n- src/b.rs\n- src/c.rs"
@@ -135,8 +135,48 @@ fn with_package_argument_is_passed_through_to_both_tools() {
         ])
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", Some("my_pkg"), &runner).unwrap();
+    let result =
+        cargo_format_impl(&ctx.root, "-W warnings", &["my_pkg".to_owned()], &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
+}
+
+/// Several packages are formatted in one run of each tool, not one run per
+/// package.
+#[test]
+fn each_package_is_passed_through_to_both_tools() {
+    let (_dir, ctx) = ctx();
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "fmt",
+            "--package=jp_storage",
+            "--package=jp_workspace",
+            "--",
+            "--color=never",
+            "--files-with-diff",
+        ])
+        .returns_success("")
+        .expect("comfort")
+        .args(&[
+            "--list-changed",
+            "--language",
+            "rust",
+            "--package",
+            "jp_storage",
+            "--package",
+            "jp_workspace",
+        ])
+        .returns_success("");
+
+    let result = cargo_format_impl(
+        &ctx.root,
+        "-W warnings",
+        &["jp_storage".to_owned(), "jp_workspace".to_owned()],
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(result.unwrap_content(), "No files to format.");
+    assert_eq!(runner.calls().len(), 2);
 }
 
 #[test]
@@ -150,7 +190,7 @@ fn without_package_uses_workspace_scope_on_both_tools() {
         .args(&["--list-changed", "--language", "rust", "--workspace"])
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
@@ -166,7 +206,7 @@ fn rustfmt_failure_short_circuits_before_running_comfort() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "cargo fmt failed: error: could not format files");
@@ -188,7 +228,7 @@ fn comfort_failure_is_reported_even_when_rustfmt_succeeded() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
@@ -208,7 +248,7 @@ fn trailing_newlines_in_output_are_tolerated() {
         .expect("comfort")
         .returns_success(comfort_stdout);
 
-    let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, "-W warnings", &[], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- src/lib.rs\n- src/main.rs"

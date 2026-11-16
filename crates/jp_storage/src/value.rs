@@ -62,13 +62,16 @@ pub fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
 /// the temp file is cleaned up on a best-effort basis.
 /// The temp file lives on the same filesystem as `path`, so the write needs
 /// room for a full second copy of the content.
+/// Because the temp file path (`{path}.tmp`) is fixed, callers must serialize
+/// concurrent writes to the same `path`.
 ///
 /// The write is skipped when `path` already holds the exact same bytes, so an
 /// unchanged file keeps its modification time.
 /// Use [`write_json_force`] when a refreshed mtime is required regardless of
 /// content.
 ///
-/// A failure names the path it was writing, and reports a full filesystem as
+/// A failed write names the file it was writing, a failed rename names both the
+/// temp file and `path`, and a full filesystem is reported as
 /// [`Error::OutOfSpace`].
 pub fn write_json<T: Serialize>(path: &Utf8Path, value: &T) -> Result<()> {
     write_json_impl(path, value, false)
@@ -120,7 +123,7 @@ fn write_bytes(path: &Utf8Path, bytes: &[u8], force: bool) -> Result<()> {
 
     if let Err(error) = fs::rename(&tmp_path, path) {
         let _err = fs::remove_file(&tmp_path);
-        return Err(Error::write_failed(path, error));
+        return Err(Error::rename_failed(tmp_path, path, error));
     }
 
     Ok(())
@@ -133,11 +136,25 @@ fn tmp_path_for(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(s)
 }
 
+/// Whether `dir` contains any `.tmp` files.
+///
+/// Returns `false` for a directory that cannot be read.
+pub(crate) fn has_tmp_files(dir: &Utf8Path) -> bool {
+    dir.read_dir_utf8()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| is_tmp_file(entry.path()))
+}
+
 /// Remove orphaned `.tmp` files from a directory.
 ///
 /// These can be left behind if the process crashes after writing the temp file
 /// but before the rename completes.
-/// Safe to call on any directory; non-`.tmp` entries are ignored.
+/// Non-`.tmp` entries are ignored.
+///
+/// Because an active [`write_json`] call also stages its data in a `.tmp` file,
+/// the caller must hold the lock that serializes writes to `dir`.
 pub fn cleanup_tmp_files(dir: &Utf8Path) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
@@ -145,11 +162,15 @@ pub fn cleanup_tmp_files(dir: &Utf8Path) {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.as_str().ends_with(TMP_SUFFIX) && path.is_file() {
+        if is_tmp_file(path) {
             tracing::trace!(%path, "Cleaning up orphaned .tmp file.");
             let _err = fs::remove_file(path);
         }
     }
+}
+
+fn is_tmp_file(path: &Utf8Path) -> bool {
+    path.as_str().ends_with(TMP_SUFFIX) && path.is_file()
 }
 
 #[cfg(test)]

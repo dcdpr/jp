@@ -1,0 +1,49 @@
+when:
+  path: "/v1beta/models/gemini-4-hydrogen:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost? Answer in one sentence."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 65536,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": null,
+          "thinkingLevel": "XHIGH"
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "**Begin Dissecting the Problem**\n\nI'm now zeroing in on the riddle. The core challenge lies in unpacking the cost difference and total cost into two separate variables, with \"cost\" being the key one to look at. I'm focusing on the constraint that the problem is solvable through a very simple mathematical process, and it requires a concise solution.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 39,"totalTokenCount": 642,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 39}],"thoughtsTokenCount": 603,"serviceTier": "standard"},"modelVersion": "gemini-4-hydrogen","responseId": "n6r2auzuD8LMnsEPu-PIyAs"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "**Finalizing the Solution**\n\nThe calculation is complete, and I've verified the cost of the ball is indeed $0.05, or 5 cents. I've drafted three versions, and I'm settling on Draft 2 as the clearest and most persuasive while remaining within the one-sentence limit: \"The ball costs $0.05 (5 cents), making the bat $1.05 for a total of $1.10.\" I am now confident.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 39,"totalTokenCount": 642,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 39}],"thoughtsTokenCount": 603,"serviceTier": "standard"},"modelVersion": "gemini-4-hydrogen","responseId": "n6r2auzuD8LMnsEPu-PIyAs"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "The ball costs $0.05 (5 cents), which means the bat costs $1.05 and their combined"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 39,"candidatesTokenCount": 25,"totalTokenCount": 670,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 39}],"candidatesTokensDetails": [{"modality": "TEXT","tokenCount": 25}],"thoughtsTokenCount": 606,"serviceTier": "standard"},"modelVersion": "gemini-4-hydrogen","responseId": "n6r2auzuD8LMnsEPu-PIyAs"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": " total is $1.10."}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 39,"candidatesTokenCount": 33,"totalTokenCount": 678,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 39}],"candidatesTokensDetails": [{"modality": "TEXT","tokenCount": 33}],"thoughtsTokenCount": 606,"serviceTier": "standard"},"modelVersion": "gemini-4-hydrogen","responseId": "n6r2auzuD8LMnsEPu-PIyAs"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "","thoughtSignature": "EsERCr4RAWkUfRMQpVLA42LmJBRR46xnyklXpNcwJ6oISpWgOmj02JkleRgyGiZwCILEBJ83s+JIoYbOFS3smkrf9N5+K5IQOc02ddSzkeE7e1DyuF5H/4EuSfomU7nYaEaawRtbaVgRx8voHgZOlPLaBMBYYtxUqwruLAFnfTwjrxuqGtiu7pNMdB/O6sTpl0amQD23VmY9qH1cuNjXpsgtgEvVsYhw9dqoSItKDVTwSqR2W9LP9GlHqH4/11rRwX2zNzUEph157MrNZ4/WzgQYdDmcC+W2buQHuL5Zu1kiOV/S4TBCSfdIk8D77+tQrzv5WLn9xx7ybkvvkU1vXTroFfd3zRkS8CVuDGm5YWP+5CAs27rd7jiG1y4491MeMEUoANvySv4PnkpzybDXO0zMEImi19Rv3yLNlE1cJvAOAlbpFNJe7SeP9l0sYGcix3AzM2nTuiyNnCtEukztQRfGsLDEJtzZ4Yv/wM/7G7Dq3o1Yo93mhQuhti7rO5r6GCwk0yc+ue0fH95NS+vITrNo253N/g7jC2BWFOZfxtwjA7dpYE44Ukrs3JKRzQvZUK00rH8BIf8RYVVcJWtqBiv3Gx8Loxg39iISc2uirp8XBAy+vb0How55vAyrLZn4Y83fglSWQ+aB3yO8ySmGBE4ga/t5S3gZ6DGMlp1B0zn8mE+zDEn7hjvVOaLT46O4hlhBvGrL44n22m3fT47j5s8O4bjQO1UB5AkDlASc2YPrvqXK51h0GCnuZMkALxlGIaTYIrrcwLml+Thocx3eo/G4awF92SNE3lCk6rlc3Q6GiSp1IynGzZs/geiM6YhjIwERDngoSkA3hV+lU0e6wc5OokP3afxoknaje+5LCz9h2bJBCCuvyhNVwLBLe+shsgERM3XS9b/KAmkuFT+b5DxV1F3/soCVFaqe4kIJuQmDv5/JrniO1ZeFuHTLzw+XnJjOVrHxlG6agQ4bhPpEQReHPFUL4qOfsl13TZRNvpeVwjNmSGm/PvwmB5tRDmBJtXt3nirH9ep8gTSdPPiw5pLlFE/399TZhEe2RTWuhFuKM0dDkL8rG6dJJjvgOtiaDid1RZknJ1xQxA6HSjKKTaC7kd2bGweBCjl5C1FOLDOgQI5yM21n257R+8FYU2IOMTXHTTqtgWjiFUjZQAuit0+Y4IH72Q2dAWCynvyb/OQlSSPFSL/RLtBEQOgQa28yDnkd1FFLTReMNFEsHMi3b+GkHEBW6Aw3sLosaGC5ztCJgi7haOwqxDgUbemqblgG9XCNL+CvFwyQq3aa+o0JCSZrepQfZzRdKGOx8xykY+J4YlK5HV3GFPTDUYO2e628N0A6OD035u4hmKaWa3VYuRKNAedsk9vsAD2V5yWaK+f/zJc5ynPThfQ7XxD+jrGszTCjO6j5KmZWHGCA/qai8eeddz+fFh5hro+gV3z2BJcpqWUlELP3uFEPObI4yYvDAFxBgCorz78lRsfXyZd9Pi/vovIKFP7Jn16wAD/i5Gt8iykwWAm+6N9l4AxYtYznPpNiLsN4usKqEpYYYhEhkw7gDdjtF19KEbt1dLuPqPDl27uKlbo8jwtZME0SnLsHq6RoLR0nq/F7tWYj+V0HOavm+Q2+MjoLouxt9a9CQ68zobEs1fsVldiM3ILMKfF1fDavMuPQO75dqg3ERTK+QQshsiWo/1t2aiX5h+TZc399GcJrP2nbk1kyvPiBpACkDJOH5vvN6RRKr/129D9DJaTyqNhqnKMzEtzUGT4dCYSJWiGJQAIbO35yXcGHbInuvRVB2So0n//y+uvPbTdJlvBqAOYbbkZsKQuLVK6lMXeE2NZjkawBhE9r8lcMFzRXSzzOGBhsKgCfHCvwuXEwf2TOr2T07yQQ+MheMeES0Xz7d+ZzmTGZc9Qpuut6u68/ZX5UEjb31a/1pc2XqHwyEq/3eN4Zq2/IPpXIG0GQDGmriS+VcIJjyuDq1QGSy8otymf3eO6HoZ2FnMPXd4MHZ238XAFcr7CF4B7bH/25ikOVbCNziuNqAIVngoVgLTNuBzRVUDZe35WCvfd3YUy03qbsB7qHAlzyGFnEQwK4y2yzxKZLA9bXAGMU6cQbd4QNUAOO6coA2apTI41ktF6vutX27paFyBW5usjB+xe0O6blRYwBtPO/87/A2Rh619e/ExiTpNUG9Gt4PJF/hw8zJ1ApFLLlNYsiUxigs7ESBGUO1V9+tc3vR57yaFgoh2DmjagqutjFzdIzPndq93Fmh+/2DR4+gEg/8LAZJPmw0UP68oDsGA2Nm3hbEw7UcRnO8sqG/PL55AaSqB6bJrrHLBoQEJdfrolpZky4q3cMtKQ19Y51BQEflc/ROqvsv/jndQsbICxDSNqOV+F/X2YKs/7aeEjShiIW4Sdb0hTC3TlxPFpwWnFkBcVer4pdeHhO+c8Fl9ajfPQ/AvNOVhp0V2GTxEQRp0pQA2qeRRzpky1q4vFTGHFe/aK9S+fUZ2X/VFs4aHbbiQvVC+I0eoh5fpBT06WFtJf2xgi4GTz+hwsaxCXzGrhT1SY1oqOFyrAnPvop+/veq844RFtrU66JefDkJ6EBHmSLumCJ1f7klYLrNM//RVgoFLx1E9+nH9roBH9YqAiZtqJPcpXEbu5OPERj8QPbRKrFZK9eb2RNfDTDAI9ttRGILtg5+Tx98ztRWakm+cpI6+YpoHzoJdIUaOg2jtTBHBA4Q/J8GBCqBx6oKX4GRqEygB7zBiXpXyfR6Fc/WZ+2xrclcj59l7U+eK/HAYDu9ssZJsed4z6FfY8tiHaAHBPU2zKpTfkixpJxvtzGh57rE19NXPwFVodyH4MqbRh0qrtbYxNsEq64qKj1QLDsvm1M5zFd8FsMMr1FBaeYqxEIplgTjwFzrTYsXTu2O6RS+WAGQwjmLMEp+YpDLhvL3UGq0rMYwkp3vdWPkwoDS0uQIsg0wyrPQ27aU3Urf/vhVBhck+UD/tn/W9eOWKGd"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 70,"candidatesTokenCount": 37,"totalTokenCount": 713,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 70}],"candidatesTokensDetails": [{"modality": "TEXT","tokenCount": 37}],"thoughtsTokenCount": 606,"serviceTier": "standard"},"modelVersion": "gemini-4-hydrogen","responseId": "n6r2auzuD8LMnsEPu-PIyAs"}
+    

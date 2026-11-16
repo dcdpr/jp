@@ -102,6 +102,14 @@ fn ctrl_c_maps_to_cancelled() {
 }
 
 #[test]
+fn a_break_maps_to_cancelled() {
+    assert_eq!(
+        outcome_from_signal(Signal::ExternalBreak("draft".into()), "draft"),
+        ReplyOutcome::Cancelled
+    );
+}
+
+#[test]
 fn editor_sentinel_maps_to_open_editor_with_buffer() {
     let outcome = outcome_from_signal(
         Signal::HostCommand(OPEN_EDITOR_SENTINEL.to_owned()),

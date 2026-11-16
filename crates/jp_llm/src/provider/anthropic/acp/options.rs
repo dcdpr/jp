@@ -3,11 +3,14 @@
 use std::collections::BTreeMap;
 
 use async_anthropic::types::{Effort, ExtendedThinking, JsonOutputFormat, ThinkingDisplay};
-use jp_config::{assistant::request::CachePolicy, model::id::Name};
+use jp_config::assistant::request::CachePolicy;
 use serde::Serialize;
 use serde_json::Value;
 
-use super::transcript::PreparedRequest;
+use super::{
+    subscription_model,
+    transcript::{PreparedRequest, SESSION_TITLE},
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +29,7 @@ struct ClaudeCode<'a> {
 #[serde(rename_all = "camelCase")]
 struct Options<'a> {
     system_prompt: CustomPrompt<'a>,
-    model: &'a Name,
+    model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     effort: Option<&'a Effort>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,6 +43,9 @@ struct Options<'a> {
     env: &'a BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_format: Option<&'a JsonOutputFormat>,
+    /// Session title for `session/new` requests.
+    /// Resumed sessions read the title from their transcript instead.
+    title: &'static str,
 }
 
 #[derive(Serialize)]
@@ -126,7 +132,11 @@ pub(super) fn metadata(
                     prompt: &prepared.system_prompt,
                     snapshot: false,
                 },
-                model: &prepared.model,
+                // Session metadata is sent before the adapter returns its
+                // offered model list, so pass the API model name here; once the
+                // session opens, `drive` resolves the `model` config option
+                // against the offered list.
+                model: subscription_model(&prepared.model, &[]),
                 effort: prepared.effort.as_ref(),
                 thinking,
                 tools: [],
@@ -145,6 +155,7 @@ pub(super) fn metadata(
                 persist_session: !prepared.history.is_empty(),
                 env,
                 output_format: prepared.schema.as_ref(),
+                title: SESSION_TITLE,
             },
         },
     })

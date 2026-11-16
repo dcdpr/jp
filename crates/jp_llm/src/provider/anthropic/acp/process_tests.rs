@@ -1,8 +1,19 @@
 use std::ffi::OsStr;
 
+use serde::Serialize;
+use serde_json::Value;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
 use super::*;
+
+#[derive(Serialize)]
+struct Ping {}
+
+impl rpc::Request for Ping {
+    const METHOD: &'static str = "test/ping";
+
+    type Response = Value;
+}
 
 #[test]
 fn adapter_launcher_uses_the_platform_entry_point() {
@@ -81,20 +92,24 @@ async fn process_failure_retains_stderr() {
     #[cfg(unix)]
     let mut command = Command::new("sh");
     #[cfg(unix)]
-    command.args(["-c", "printf fixture-error >&2; exit 7"]);
+    command.args(["-c", "read request; printf fixture-error >&2; exit 7"]);
     #[cfg(windows)]
     let mut command = Command::new("cmd.exe");
     #[cfg(windows)]
-    command.args(["/D", "/C", "echo fixture-error >&2 & exit /B 7"]);
-    // The adapter never speaks: the foreground request cannot be answered, so
-    // the exit status is what ends the connection.
+    command.args([
+        "/D",
+        "/C",
+        "set /P request= & echo fixture-error >&2 & exit /B 7",
+    ]);
+    // The adapter exits without answering the request, so `run` reports the
+    // non-zero exit status.
     let error = tokio::time::timeout(
         Duration::from_secs(5),
         run(
             command,
             Tap::none(),
-            Box::new(|_| Box::pin(async { Ok(serde_json::Value::Null) })),
-            |_peer| async { Ok(()) },
+            Box::new(|_| Box::pin(async { Ok(Value::Null) })),
+            |peer| async move { peer.request(Ping {}).await.map(drop) },
         ),
     )
     .await
@@ -104,6 +119,31 @@ async fn process_failure_retains_stderr() {
     let detail = error.data.unwrap();
     assert_eq!(detail["cause"]["exit_code"], 7);
     assert_eq!(detail["stderr"].as_str().unwrap().trim(), "fixture-error");
+}
+
+/// `cat >/dev/null` blocks until JP closes the adapter's stdin after
+/// `foreground` completes, so the non-zero exit happens after the request has
+/// already succeeded.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_exit_after_the_answered_sequence_is_not_a_failure() {
+    let mut command = Command::new("sh");
+    command.args([
+        "-c",
+        r#"read request; printf '{"jsonrpc":"2.0","id":1,"result":{}}\n'; cat >/dev/null; printf late-write-failed >&2; exit 1"#,
+    ]);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        run(
+            command,
+            Tap::none(),
+            Box::new(|_| Box::pin(async { Ok(Value::Null) })),
+            |peer| async move { peer.request(Ping {}).await.map(drop) },
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
 }
 
 #[tokio::test]

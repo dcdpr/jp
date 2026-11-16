@@ -721,6 +721,7 @@ fn carry(
                 && rejected.unknown_keys.is_empty()
                 && rejected.unknown_values.is_empty()
                 && rejected.retired.is_empty()
+                && rejected.mistyped.is_empty()
         }
     };
 
