@@ -30,43 +30,43 @@ Acceptance criteria:
 - **From**: jp
 - **Date**: 2026-11-13T14:54:05Z
 
-Implemented in the working tree as the record-and-answer design: the call is
-recorded and answered with an error, and no executor is created for it.
+Implemented the record-and-answer design: an invalid tool call is recorded with
+empty arguments and answered with an error response, without creating an
+executor.
 
 - `EventBuilder::handle_flush` returns `Result<Option<ConversationEvent>,
   InvalidToolCall>`.
-  Argument text that is truncated, not JSON, or JSON of another type is an
-  `InvalidToolCall`; empty text and `{}` are a call without arguments.
-- `TurnCoordinator` records the call as a `ToolCallRequest` without arguments,
-  keeping the provider's metadata, and surfaces
-  `CommittedEvent::InvalidToolCall`.
-- `ToolCoordinator::reject` settles it on arrival with an error that names the
-  parse failure and quotes the last 200 characters of the argument text.
+  Argument text that is truncated, malformed, or not a JSON object returns
+  `Err(InvalidToolCall)`; empty text and `{}` produce a `ToolCallRequest` with
+  an empty argument map.
+- `TurnCoordinator` records the call as a `ToolCallRequest` with empty arguments
+  and the provider's metadata, then surfaces `CommittedEvent::InvalidToolCall`.
+- `ToolCoordinator::reject` settles the call on arrival with an error response
+  describing the parse failure and quoting the trailing 200 characters of the
+  argument text.
 
-Decisions made along the way:
+Design notes:
 
-- **Restart.** A restart submits every call without a response, and the request
-  recorded for a rejected call reads as a call without arguments.
-  The tool coordinator keeps rejected ids until the next response starts, and
-  `prepare_one` refuses them.
-- **`null`.** Rejected in the builder like any non-object.
-  Google and Ollama hold parsed arguments and re-serialize them, and the Gemini
-  client reads a call without `args` as `null`, so both providers emit `{}` for
-  `null`.
-- **Empty id or name.** A rejected call without an id or a name is dropped with
-  a warning, since it cannot be answered.
-  A call with well-formed arguments and an empty id or name is unchanged: an
-  OpenAI-compatible server that omits ids works today for a single call, and
-  rejecting those would break it.
+- **Restart.** Restarting tool calls re-submits every unresponded call, and the
+  request recorded for a rejected call has empty arguments.
+  `ToolCoordinator` retains rejected call IDs until the next response starts so
+  `prepare_one` returns the stored rejection instead of executing the tool.
+- **`null`.** `EventBuilder` rejects literal `"null"` like any other non-object
+  value.
+  Because Google and Ollama deserialize parameterless tool calls with `null`
+  arguments, both providers normalize `Value::Null` to `"{}"` when emitting
+  `ArgumentChunk`.
+- **Empty ID or name.** An `InvalidToolCall` with an empty ID or tool name is
+  dropped with a warning because no response can be paired with it.
+  Valid tool calls with an empty ID or name remain unchanged so single-call
+  responses from OpenAI-compatible servers that omit IDs continue to work.
 
-Not covered here:
+Out of scope:
 
-- A response cut off after a call's `Start` but before any argument text still
-  flushes an empty buffer, which reads as a call without arguments.
-  The builder cannot tell it from a real one; it needs the finish reason, which
-  is T-0eyhkvs territory.
-- A rejected call shows nothing on the terminal while the turn runs, as with an
-  unavailable tool.
-  It appears on replay.
-- A model that truncates the same call on every attempt loops until T-0n0pmyh
-  bounds the cycle count.
+- A stream truncated after `ToolCallPart::Start` but before any `ArgumentChunk`
+  still flushes an empty buffer and is treated as a zero-argument call.
+  Distinguishing that case requires inspecting `FinishReason` (tracked in
+  T-0eyhkvs).
+- A rejected call renders no terminal output during the live turn (matching
+  unavailable tools), though it appears on replay.
+- Bounding repeated truncation loops is tracked in T-0n0pmyh.

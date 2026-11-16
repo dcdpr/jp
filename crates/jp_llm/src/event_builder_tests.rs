@@ -476,8 +476,6 @@ fn drain_drops_incomplete_tool_call_but_keeps_partial_text() {
     ));
 }
 
-/// Flush one call, `call_1` to `fs_modify_file`, whose argument text is
-/// `arguments`.
 fn flush_tool_call(arguments: &str) -> Result<Option<ConversationEvent>, InvalidToolCall> {
     let mut builder = EventBuilder::new();
     builder.handle_part(
@@ -498,9 +496,9 @@ fn flush_tool_call(arguments: &str) -> Result<Option<ConversationEvent>, Invalid
     builder.handle_flush(0, Map::new())
 }
 
-/// A provider that stops generating in the middle of a call still closes the
-/// call's block, so the unfinished text reaches a flush.
-/// It must not be read as a call without arguments.
+/// When a provider stops generating mid-call, it still flushes the tool-call
+/// block; the truncated JSON must be rejected rather than treated as empty
+/// arguments.
 #[test]
 fn truncated_tool_call_arguments_are_rejected() {
     assert_eq!(
@@ -545,8 +543,9 @@ fn non_object_tool_call_arguments_are_rejected() {
     );
 }
 
-/// `null` is not read as "no arguments": a provider with none to send streams
-/// no argument text, and one that holds a parsed `null` says so itself.
+/// Literal `"null"` is rejected as a non-object rather than treated as empty
+/// arguments; providers whose SDK represents missing arguments as `Value::Null`
+/// normalize it to `"{}"` before emitting `ArgumentChunk`.
 #[test]
 fn null_tool_call_arguments_are_rejected() {
     assert_eq!(
@@ -575,8 +574,9 @@ fn empty_object_tool_call_arguments_are_accepted() {
     );
 }
 
-/// Whoever records a rejected call needs the metadata its request event would
-/// have carried, such as a signature the provider expects back.
+/// `InvalidToolCall` preserves metadata from both `Part` and `Flush` events so
+/// the caller can attach provider metadata (such as thought signatures) to the
+/// recorded request.
 #[test]
 fn rejected_tool_call_keeps_part_and_flush_metadata() {
     let mut builder = EventBuilder::new();

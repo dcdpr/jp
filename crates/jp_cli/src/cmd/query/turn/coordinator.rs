@@ -116,12 +116,11 @@ pub enum CommittedEvent {
     /// prompts appear at the same streaming boundary as before.
     ToolCallRequest(ToolCallRequest),
 
-    /// A tool call was committed whose arguments the provider did not deliver
-    /// as a JSON object.
+    /// A tool call whose arguments are not a JSON object was committed.
     ///
-    /// The stream holds its [`ToolCallRequest`] without arguments.
-    /// The shell must answer the call with a response saying why it was
-    /// rejected, and must not run it.
+    /// The stream records the [`ToolCallRequest`] with an empty argument map.
+    /// The shell must reject the call with an error response rather than
+    /// executing it.
     InvalidToolCall(InvalidToolCall),
 }
 
@@ -422,17 +421,14 @@ impl TurnCoordinator {
         }
     }
 
-    /// Record a tool call the provider finished with arguments that are not a
-    /// JSON object.
+    /// Record a flushed tool call whose arguments are not a JSON object.
     ///
-    /// The call is committed as a [`ToolCallRequest`] without arguments and
-    /// with the metadata the provider attached to it, so the conversation keeps
-    /// what the assistant asked for and the response that rejects the call has
-    /// a request to answer.
+    /// Commits a [`ToolCallRequest`] with empty arguments and the provider's
+    /// metadata so the error response has a matching request in the
+    /// conversation stream.
     ///
-    /// A call without an id or a name is dropped instead.
-    /// No response can be paired with a request that has no id, and a request
-    /// without a name asks for no tool.
+    /// Drops the call if its ID or tool name is empty, because a response
+    /// cannot be paired with an unnamed or ID-less request.
     fn record_invalid_tool_call(
         &self,
         stream: &mut ConversationStream,

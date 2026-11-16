@@ -1258,8 +1258,8 @@ async fn a_stop_while_the_assistant_answers_a_formatters_question_cancels_it() {
     .unwrap();
 }
 
-/// A source whose `tool` calls run at once, logging the id of every call an
-/// executor is created for in `created`.
+/// Executor source that runs `tool` calls immediately and records each created
+/// executor's call ID in `created`.
 fn logging_source(
     created: &Arc<Mutex<Vec<String>>>,
     runs: &Arc<AtomicUsize>,
@@ -1272,10 +1272,8 @@ fn logging_source(
     })
 }
 
-/// A call whose arguments are not a JSON object is answered with an error that
-/// says so, and no executor is ever created for it.
-/// The call sent next to it runs as usual, and both responses go back to the
-/// assistant.
+/// A call whose arguments are not a JSON object is answered with an error and
+/// never creates an executor, while valid calls in the same response still run.
 #[tokio::test]
 async fn a_call_with_non_object_arguments_is_answered_without_an_executor() {
     Box::pin(timeout(Duration::from_secs(10), async {
@@ -1336,10 +1334,9 @@ async fn a_call_with_non_object_arguments_is_answered_without_an_executor() {
     .unwrap();
 }
 
-/// A response that runs out of output tokens in the middle of a call's
-/// arguments still closes the call.
-/// The call is the only one in the response: it is answered with what was cut
-/// off, nothing runs, and the assistant gets the answer.
+/// When a response hits `MaxTokens` mid-arguments and flushes the truncated
+/// tool call, the call is rejected with an error quoting the truncated JSON and
+/// no executor is created.
 #[tokio::test]
 async fn a_call_cut_short_by_the_token_limit_is_answered_without_an_executor() {
     Box::pin(timeout(Duration::from_secs(10), async {
@@ -1393,9 +1390,9 @@ async fn a_call_cut_short_by_the_token_limit_is_answered_without_an_executor() {
     .unwrap();
 }
 
-/// A restart submits every call that has no response yet, and the request
-/// recorded for a rejected call looks like a call without arguments.
-/// It is answered with its rejection again, not run.
+/// Restarting tool calls re-submits every call without a response; a call
+/// recorded with empty arguments after rejection is rejected again rather than
+/// executed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_restart_does_not_run_a_call_rejected_for_its_arguments() {
     Box::pin(timeout(Duration::from_secs(10), async {

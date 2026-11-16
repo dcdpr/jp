@@ -5,8 +5,8 @@
 //! [`submit`] hands it a call, [`handle`] advances its calls on each event
 //! [`next_event`] yields while the response is still streaming, and [`finish`]
 //! drives them to their responses once it has ended.
-//! [`reject`] hands it a call whose arguments could not be read, which it
-//! answers without running.
+//! [`reject`] hands it a call whose arguments are not a JSON object, which it
+//! answers with an error without running.
 //!
 //! # Calls in flight
 //!
@@ -294,8 +294,8 @@ impl Drop for OpenPrompt {
     }
 }
 
-/// How many characters of a rejected call's argument text its response quotes
-/// back to the assistant.
+/// Maximum number of trailing characters from a rejected call's argument text
+/// to quote in the error response.
 const REJECTED_ARGUMENTS_EXCERPT_CHARS: usize = 200;
 
 /// The tool calls of one response, from arrival to their recorded responses.
@@ -660,13 +660,16 @@ pub struct ToolCoordinator {
     tools_config: ToolsConfig,
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
-    /// The responses of the calls [`reject`] settled, by tool call id.
+    /// Error responses for calls settled by [`reject`], keyed by tool call ID.
     ///
-    /// Kept until the next response starts, so that submitting one of these
-    /// calls, as a restart does with every call that has no response yet,
-    /// settles it with the same response again instead of preparing it.
+    /// Kept until the next response starts.
+    /// On a restart, every call without a recorded response is passed to
+    /// [`submit`] again; this map lets [`prepare_one`] return the same
+    /// rejection instead of running the tool with empty arguments.
     ///
+    /// [`prepare_one`]: Self::prepare_one
     /// [`reject`]: Self::reject
+    /// [`submit`]: Self::submit
     rejected: HashMap<String, ToolCallResponse>,
     /// Rendered custom argument output for approved calls, by tool call ID and
     /// then by operation.
@@ -884,8 +887,8 @@ impl ToolCoordinator {
     /// A question still open is recorded on `conv` as withdrawn: whatever would
     /// have answered it reports to a batch that no longer exists.
     pub(crate) fn abandon(&mut self, conv: &ConversationMut) {
-        // The calls of the next response are new ones, even where a provider
-        // issues an id it has used before.
+        // Clear rejected calls so IDs reused by the provider in the next
+        // response are not treated as rejected.
         self.rejected.clear();
         let Some(mut batch) = self.batch.take() else {
             return;
@@ -956,11 +959,12 @@ impl ToolCoordinator {
         }
     }
 
-    /// The response for a call whose arguments are not a JSON object.
+    /// Build the error response for a call whose arguments are not a JSON
+    /// object.
     ///
-    /// Says what was wrong with the argument text and quotes its last
-    /// [`REJECTED_ARGUMENTS_EXCERPT_CHARS`] characters, which is where a call
-    /// the provider stopped generating ends.
+    /// Reports the parse error and quotes the last
+    /// [`REJECTED_ARGUMENTS_EXCERPT_CHARS`] characters of the argument text so
+    /// the assistant can see where a truncated call was cut off.
     fn invalid_arguments(call: &InvalidToolCall) -> ToolCallResponse {
         let hint = match call.reason {
             InvalidArguments::Truncated(_) => {
@@ -1152,13 +1156,12 @@ impl ToolCoordinator {
         self.batch = Some(batch);
     }
 
-    /// Settle a tool call the assistant finished requesting with arguments that
-    /// are not a JSON object.
+    /// Reject a tool call whose arguments are not a JSON object.
     ///
-    /// The call is answered with an error saying what was wrong with its
-    /// arguments.
-    /// No executor is created for it, here or when the call is passed to
-    /// [`submit`] before the next response starts.
+    /// Settles the call immediately with an error response describing the
+    /// invalid arguments.
+    /// No executor is created for it, either now or if the call is passed to
+    /// [`submit`] again during a restart.
     ///
     /// [`submit`]: Self::submit
     pub(crate) fn reject(&mut self, call: &InvalidToolCall) {
@@ -1173,7 +1176,7 @@ impl ToolCoordinator {
         self.set_tool_state(&call.id, ToolCallState::Completed);
     }
 
-    /// The batch for the response being handled, started if none is.
+    /// Returns the active batch, creating a new one if none is open.
     fn open_batch(&mut self) -> &mut Batch {
         if self.batch.is_none() {
             // A new response: the states left by the last one describe calls

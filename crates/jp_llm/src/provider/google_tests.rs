@@ -720,9 +720,9 @@ async fn test_gemini_4_hydrogen_xhigh_reasoning()
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
-/// The client reads a function call without `args` as `null`.
-/// It is a call without arguments, and must reach the event builder as one
-/// rather than as argument text that is not an object.
+/// The Gemini client deserializes a function call without `args` as
+/// `Value::Null`; `map_candidate` normalizes it to `"{}"` so `EventBuilder`
+/// accepts it as an empty argument object.
 #[test]
 fn a_function_call_without_args_streams_an_empty_object() {
     let response: types::GenerateContentResponse = serde_json::from_value(json!({

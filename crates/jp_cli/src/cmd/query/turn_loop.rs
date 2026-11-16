@@ -974,10 +974,10 @@ async fn drive_turn(
                                     };
                                     tool_coordinator.submit(req, &mut host);
                                 }
-                                // The request recorded for this call has no
-                                // arguments, so it is answered rather than
-                                // submitted: the assistant is told what was
-                                // wrong with what it sent.
+                                // The recorded request has empty arguments;
+                                // reject the call immediately with an error
+                                // response instead of submitting it for
+                                // execution.
                                 CommittedEvent::InvalidToolCall(call) => {
                                     tool_renderer.complete(&call.id);
                                     tool_coordinator.reject(&call);

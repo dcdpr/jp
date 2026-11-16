@@ -184,21 +184,21 @@ the turn loop acts on; none of them becomes a conversation event.
 
 2. **Flush boundary**: A `Flush { index }` signals that all parts for that index
    are complete.
-   The [Event Builder](#event-builder) turns them into a single
-   `ConversationEvent`, carrying the metadata of the parts and of the flush.
+   The [Event Builder](#event-builder) merges them into a single
+   `ConversationEvent` along with the metadata from the parts and the flush.
 
 3. **Ordering**: Indices are assigned in order.
    Flush events arrive in index order.
    This preserves the sequence of events.
 
-4. **Tool calls arrive in parts**: a `Start` with the call's id and name, then
-   zero or more `ArgumentChunk`s that together hold the arguments as JSON text.
-   The `Flush` completes the call, and only then are the arguments parsed.
-   A provider that receives a call in one piece, such as Google or Ollama, emits
-   the `Start` and a single `ArgumentChunk` together.
-   `decoding` is request-local: it tells the Event Builder which `null`
-   placeholders a strict schema forced into the arguments, and is never
-   persisted.
+4. **Tool calls arrive in parts**: A `Start` part carries the call's ID and
+   name, followed by zero or more `ArgumentChunk` parts containing raw JSON
+   text.
+   The arguments are parsed when `Flush` completes the call.
+   Providers that receive a tool call as a single message (such as Google or
+   Ollama) emit `Start` and a single `ArgumentChunk` together.
+   `decoding` is request-local state that tells `EventBuilder` which `null`
+   placeholders were injected for strict-mode schemas; it is not persisted.
 
 **Example stream (single cycle, metadata omitted):**
 
@@ -558,10 +558,10 @@ Accumulates streamed `EventPart` chunks into complete `ConversationEvent`
 instances.
 `EventBuilder` lives in `jp_llm::event_builder`.
 
-**Key insight:** Uses index-based buffering.
-Each index gets its own buffer.
-On `Flush { index }`, the buffer for that index is turned into one event and
-returned to the caller, which pushes it to the `ConversationStream`.
+Uses index-based buffering: each index has its own buffer.
+On `Flush { index }`, the buffer for that index is finalized into a
+`ConversationEvent` and returned to the caller, which pushes it to the
+`ConversationStream`.
 
 **State:**
 
@@ -629,24 +629,23 @@ fn handle_flush(index, metadata) -> Result<Option<ConversationEvent>, InvalidToo
     Ok(Some(event))
 
 fn drain() -> Vec<ConversationEvent>:
-    // The stream ended. Flush every buffer that is left, except tool calls:
-    // one that never got its Flush is incomplete, and is dropped.
+    // The stream ended. Flush every remaining buffer except tool calls:
+    // a tool call that never received a Flush is incomplete and is dropped.
 ```
 
 **Properties:**
 
 - One index = one event type (never mixes reasoning and message)
 - Flush order matches index order (preserves sequence)
-- Tool-call parts accumulate as text until the `Flush` (see [Event
-  Model](#event-model)); the arguments are parsed then, not as they arrive.
-- A tool call's arguments are a JSON object, or the call is rejected.
-  Empty argument text is a call without arguments.
-  Text that ends before the JSON does, is not JSON, or is JSON of another type
-  comes back as an `InvalidToolCall`, never as a `ToolCallRequest` with empty
-  arguments.
-  The Turn Coordinator records such a call without its arguments, and the Tool
-  Coordinator answers it with an error instead of running it (see [Tool Error
-  Handling](#tool-error-handling)).
+- Tool-call parts accumulate as raw JSON text until `Flush` (see [Event
+  Model](#event-model)), when the arguments are parsed.
+- Tool-call arguments must parse as a JSON object, or the call is rejected.
+  Empty argument text is treated as an empty argument map.
+  Truncated JSON, malformed JSON, or a non-object JSON value returns an
+  `InvalidToolCall` error rather than a `ToolCallRequest` with empty arguments.
+  The Turn Coordinator records the request with empty arguments, and the Tool
+  Coordinator returns an error response instead of executing the tool (see [Tool
+  Error Handling](#tool-error-handling)).
 
 ### Chat Response Renderer
 
@@ -1864,21 +1863,22 @@ ToolCallResponse {
 LLM receives error, can respond appropriately
 ```
 
-A tool call that cannot be run is answered the same way, and no executor is
-created for it:
+A tool call that cannot be executed is answered with an error `ToolCallResponse`
+without creating an executor:
 
-- **Unavailable tool**: the LLM named a tool that is not enabled.
-- **Invalid arguments**: the provider finished the call, but its argument text
-  is not a JSON object (see [Event Builder](#event-builder)).
-  The response says what was wrong and quotes the end of the text, so an
-  assistant whose call was cut off by the output token limit can see where it
-  stopped.
+- **Unavailable tool**: The LLM requested a tool that is not enabled.
+- **Invalid arguments**: The provider flushed the tool call, but its argument
+  text is not a JSON object (see [Event Builder](#event-builder)).
+  The error response describes the parse failure and quotes the trailing 200
+  characters of the argument text so the assistant can see where a truncated
+  call was cut off.
 
-The request recorded for a call with invalid arguments carries no arguments, so
-it reads like a call that takes none.
-The Tool Coordinator therefore keeps the rejection until the next response
-starts: a restart, which submits every call that has no response yet, answers
-the call with the same error again rather than running it.
+Because the recorded `ToolCallRequest` for a rejected call has an empty argument
+map, it is indistinguishable in the stream from a call that takes no arguments.
+The Tool Coordinator retains the rejected call's error response until the next
+LLM response starts: if the user restarts tool execution from the interrupt
+menu, re-submitting unresponded calls returns the stored rejection instead of
+executing the tool.
 
 -----
 

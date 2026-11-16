@@ -343,17 +343,17 @@ or be sent to the LLM provider as context.
 
 ### Invalid Tool Call
 
-A [Tool Call](#tool-call) the provider finished whose argument text is not a
-JSON object: the text ends before the JSON does, is not JSON, or is JSON of
-another type.
-It is never run.
-Its request is recorded without arguments, and its response is an error telling
-the assistant what was wrong with them.
+A flushed [Tool Call](#tool-call) whose accumulated argument text is not a
+complete JSON object (because the JSON is truncated, malformed, or another JSON
+type).
+An invalid tool call is never executed: its `ToolCallRequest` is recorded with
+empty arguments, and its `ToolCallResponse` returns an error describing the
+parse failure to the assistant.
 Implemented as `InvalidToolCall` in `jp_llm::event_builder`.
 
-**Not the same as** a tool call the stream ended before finishing, which is
-dropped without a record, nor a call whose arguments are a JSON object the
-tool's parameters do not accept.
+**Not the same as** an incomplete tool call whose stream ended before the block
+was flushed (which is dropped without being recorded), or a tool call whose
+arguments are a valid JSON object that fails the tool's parameter validation.
 
 ### Invocation
 

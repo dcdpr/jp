@@ -204,9 +204,9 @@ fn map_model_without_thinking_capability_is_unsupported() {
     assert_eq!(details.context_window, Some(8_192));
 }
 
-/// Ollama's arguments arrive already parsed, and `null` is a call without any.
-/// It must reach the event builder as one, rather than as argument text that is
-/// not an object.
+/// When Ollama returns `"arguments": null` for a parameterless tool call,
+/// `map_event` normalizes it to `"{}"` so `EventBuilder` accepts it as an empty
+/// argument object.
 #[test]
 fn a_tool_call_with_null_arguments_streams_an_empty_object() {
     let response: ChatMessageResponse = serde_json::from_value(json!({

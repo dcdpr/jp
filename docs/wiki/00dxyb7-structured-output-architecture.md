@@ -532,7 +532,8 @@ The following modules and types are also removed:
 
 ### New `IndexBuffer` Variant
 
-`EventBuilder` accumulates structured response parts in a buffer of their own:
+`EventBuilder` accumulates structured response parts in a `Structured` buffer
+variant:
 
 ```rust
 enum IndexBuffer {
@@ -558,8 +559,8 @@ EventPart::Structured(chunk) => match self.buffers.entry(index) {
 },
 ```
 
-A part of another kind arriving for an index that holds a structured buffer is
-ignored with a warning.
+If a part of another kind arrives for an index that already holds a structured
+buffer, it is ignored with a warning.
 
 ### Flush Behavior
 
@@ -575,13 +576,12 @@ IndexBuffer::Structured { content } => {
 }
 ```
 
-`handle_flush` returns the event as `Ok(Some(event))`, with the metadata of the
-parts and of the flush merged onto it.
-The Turn Coordinator pushes it to the `ConversationStream`.
-`event_builder::structured_data`, for callers that collect a request's events
-instead of streaming them, reads the structured value from it.
-The `Err` side of `handle_flush` is a tool call with invalid arguments, and
-never a structured response.
+`handle_flush` merges the metadata from the parts and the flush onto the event
+and returns `Ok(Some(event))` (the `Err` variant of `handle_flush` only occurs
+for tool calls with invalid arguments, never for structured responses).
+The Turn Coordinator pushes the event to the `ConversationStream`.
+Callers that collect a stream's events instead of driving a turn use
+`event_builder::structured_data` to extract the parsed value.
 
 If JSON parsing fails, the raw string is preserved as `Value::String`.
 This ensures no data loss even if the provider returns malformed JSON.

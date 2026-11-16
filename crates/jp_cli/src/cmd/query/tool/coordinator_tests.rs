@@ -1217,10 +1217,8 @@ async fn a_fanned_out_calls_description_holds_each_operation_once_in_order() {
     );
 }
 
-/// Argument text can be as large as the file the assistant was writing, so a
-/// rejected call's response quotes only its end, where a call that was cut
-/// short stops.
-/// The quote starts on a character boundary, here a two-byte one.
+/// A rejected call's error response quotes only the last 200 characters of the
+/// argument text, starting on a UTF-8 character boundary.
 #[test]
 fn a_rejected_calls_response_quotes_only_the_end_of_long_arguments() {
     let call = InvalidToolCall {

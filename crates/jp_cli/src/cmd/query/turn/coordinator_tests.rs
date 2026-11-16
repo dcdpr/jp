@@ -1334,9 +1334,8 @@ fn flush_producing_tool_call_surfaces_request_as_committed_event() {
     }
 }
 
-/// A tool call flushed with arguments that are not a JSON object is recorded,
-/// so the conversation keeps what the assistant asked for, but it is surfaced
-/// as invalid rather than as a request: the shell answers it and never runs it.
+/// A tool call flushed with invalid argument JSON is recorded in the stream
+/// with empty arguments and surfaced as `CommittedEvent::InvalidToolCall`.
 #[test]
 fn flush_of_invalid_tool_call_arguments_surfaces_the_call_as_invalid() {
     let mut stream = ConversationStream::new_test();
@@ -1395,9 +1394,8 @@ fn flush_of_invalid_tool_call_arguments_surfaces_the_call_as_invalid() {
     );
 }
 
-/// A rejected call can only be answered through its id.
-/// Without one it is dropped: recorded, it would be a request no response can
-/// ever be paired with.
+/// A rejected call without an ID is dropped rather than recorded, because no
+/// tool response could be paired with it.
 #[test]
 fn an_invalid_tool_call_without_an_id_is_not_recorded() {
     let mut stream = ConversationStream::new_test();
@@ -1428,8 +1426,7 @@ fn an_invalid_tool_call_without_an_id_is_not_recorded() {
     );
 }
 
-/// A rejected call without a name asks for no tool the assistant could be told
-/// to call again, so it is dropped like one without an id.
+/// A rejected call without a tool name is dropped rather than recorded.
 #[test]
 fn an_invalid_tool_call_without_a_name_is_not_recorded() {
     let mut stream = ConversationStream::new_test();

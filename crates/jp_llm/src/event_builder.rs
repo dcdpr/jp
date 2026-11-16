@@ -90,12 +90,12 @@ pub fn structured_data(events: Vec<Event>) -> Option<Value> {
         .find_map(ChatResponse::into_structured_data)
 }
 
-/// A tool call the provider finished whose arguments are not a JSON object.
+/// A flushed tool call whose arguments are not a JSON object.
 ///
-/// [`EventBuilder::handle_flush`] returns this in place of a
-/// [`ToolCallRequest`], so a call the model stopped writing halfway, or wrote
-/// as something other than an object, is never read as a call without
-/// arguments.
+/// [`EventBuilder::handle_flush`] returns this error instead of a
+/// [`ToolCallRequest`] when the accumulated argument text is truncated,
+/// malformed, or not a JSON object, preventing the call from being treated as a
+/// valid call with empty arguments.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("tool call `{name}` has invalid arguments: {reason}")]
 pub struct InvalidToolCall {
@@ -111,29 +111,29 @@ pub struct InvalidToolCall {
     /// Why `arguments_json` was rejected.
     pub reason: InvalidArguments,
 
-    /// The metadata a [`ToolCallRequest`] event for this call would have
-    /// carried: what the provider attached to the call's parts and to its
-    /// flush.
+    /// Metadata accumulated from the call's `Part` and `Flush` events.
     pub metadata: Map<String, Value>,
 }
 
-/// Why a tool call's argument text is not a usable arguments object.
+/// Reason a tool call's argument text failed to parse as a JSON object.
 ///
-/// The `Truncated` and `Malformed` variants hold the JSON parser's message,
-/// which locates the error by line and column.
+/// `Truncated` and `Malformed` carry the `serde_json` error message (including
+/// line and column).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidArguments {
-    /// The text ends before the JSON value does, which is what a provider that
-    /// stops generating in the middle of a call leaves behind.
+    /// The input ended before the JSON value was complete (for example, when
+    /// generation hit the output token limit mid-call).
     #[error("the arguments end before the JSON does ({0})")]
     Truncated(String),
 
-    /// The text is not JSON.
+    /// The input is not valid JSON.
     #[error("the arguments are not valid JSON ({0})")]
     Malformed(String),
 
-    /// The text is valid JSON, but its top-level value is not an object.
-    /// Holds what the value is, worded for the message: `an array`, `null`.
+    /// The input is valid JSON, but its root value is not an object.
+    ///
+    /// Carries a human-readable description of the JSON type (such as `"an
+    /// array"` or `"null"`).
     #[error("the arguments are {0}, not a JSON object")]
     NotAnObject(&'static str),
 }
@@ -327,9 +327,9 @@ impl EventBuilder {
         Ok(Some(event))
     }
 
-    /// Takes the metadata for the event flushed at `index`: what its `Part`
-    /// events accumulated (e.g. thinking signatures that arrive via
-    /// `SignatureDelta`), then what the `Flush` event itself carried.
+    /// Removes and merges the metadata for `index` from accumulated `Part`
+    /// events (such as `SignatureDelta` thinking signatures) and the `Flush`
+    /// event itself.
     fn take_metadata(&mut self, index: usize, flush: Map<String, Value>) -> Map<String, Value> {
         let mut metadata = self.metadata.remove(&index).unwrap_or_default();
         metadata.extend(flush);
@@ -533,10 +533,10 @@ impl IndexBuffer {
     }
 }
 
-/// Parses the argument text a tool call accumulated.
+/// Parses accumulated tool-call argument JSON into a key-value map.
 ///
-/// Empty text is a call without arguments: a provider with none to send streams
-/// no argument chunks.
+/// Empty or whitespace-only input is treated as an empty argument map, since
+/// providers omit `ArgumentChunk` events when a tool takes no arguments.
 fn parse_arguments(json: &str) -> Result<Map<String, Value>, InvalidArguments> {
     if json.trim().is_empty() {
         return Ok(Map::new());
