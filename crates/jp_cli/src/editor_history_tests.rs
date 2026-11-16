@@ -11,9 +11,8 @@ fn at(secs: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, secs).unwrap()
 }
 
-/// Keep comrak's default escaping.
-/// Minimizing escapes costs a full re-parse per escape, which made opening the
-/// editor on a long conversation take seconds.
+/// Keep comrak's default escaping (`foo\_bar`), because
+/// `experimental_minimize_commonmark` re-parses the message once per escape.
 #[test]
 fn history_keeps_default_escapes() {
     let mut stream = ConversationStream::new_test();
