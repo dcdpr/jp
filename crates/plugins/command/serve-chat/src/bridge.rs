@@ -300,15 +300,16 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         self.pump();
     }
 
-    /// Route the messages ready in the intake, which spawns a decision task for
-    /// a message that needs one.
+    /// Drain ready messages from `intake` and spawn a decision task if the
+    /// front message awaits classification.
     fn pump(&mut self) {
         while let Some(incoming) = self.intake.next(&self.events_tx) {
             self.route(incoming);
         }
     }
 
-    /// Apply the decision for the front inbox message and advance the inbox.
+    /// Apply `decided` for the front message in `intake` and drain any
+    /// unblocked messages.
     fn decided(&mut self, decided: Decided) {
         let today = self.conversations.today();
         if let Some((incoming, action)) = self.intake.decided(decided, &self.host, today) {

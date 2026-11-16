@@ -1,11 +1,12 @@
-//! Inbound messages on their way to a turn: decided, then given context.
+//! Pre-turn message classification and context injection.
 //!
-//! [`Intake`] wraps the [`Inbox`].
-//! For the front message it spawns the decide call and, when the message is to
-//! be answered, the context lookups, which run while the inbox is still blocked
-//! on that message so later messages can't overtake it.
-//! [`Intake::decided`] then hands the bridge the message, with its context
-//! appended, and the [`Action`] to take.
+//! [`Intake`] wraps [`Inbox`], spawning the [`Decide`] call for the front
+//! message and running any [`Injector`] context lookups when the message is
+//! classified as [`Action::Answer`].
+//! Lookups run before [`Inbox::decided`] is called so the inbox stays blocked
+//! on the front message and later messages cannot overtake it.
+//! [`Intake::decided`] logs the verdict and lookups, appends rendered context
+//! to the message, and returns the message with the resolved [`Action`].
 
 use std::{sync::Arc, time::Duration};
 
@@ -22,13 +23,13 @@ use crate::{
     transport::Chat,
 };
 
-/// What the decision task for the front message reports.
+/// Output of the decision and context-lookup task for the front inbox message.
 #[derive(Debug)]
 pub(crate) struct Decided {
     result: Result<Verdict, String>,
     took: Duration,
 
-    /// The context looked up for the message, when it is to be answered.
+    /// Context lookup results when the message resolves to [`Action::Answer`].
     injected: Option<Injected>,
 }
 
@@ -50,7 +51,8 @@ impl Intake {
         self.threshold = threshold;
     }
 
-    /// Look up context for messages to be answered with `injector`.
+    /// Configure the [`Injector`] used to look up context for messages that
+    /// will be answered.
     pub(crate) fn inject_with(&mut self, injector: Option<Arc<Injector>>) {
         self.injector = injector;
     }
@@ -70,11 +72,11 @@ impl Intake {
         self.inbox.push(chat, person, text);
     }
 
-    /// The next message ready to route, or `None` once the inbox is empty or
-    /// waiting on a decision.
+    /// Pop the next message ready to route, or return `None` if the inbox is
+    /// empty or awaiting a decision.
     ///
-    /// A message that needs deciding spawns its decision task, which reports
-    /// [`Event::Decided`] on `events`.
+    /// If the front message requires classification, spawns a decision task
+    /// that sends [`Event::Decided`] on `events`.
     pub(crate) fn next(&mut self, events: &mpsc::UnboundedSender<Event>) -> Option<Incoming> {
         loop {
             match self.inbox.next()? {
@@ -84,8 +86,8 @@ impl Intake {
         }
     }
 
-    /// Spawn the task awaiting `decision` for the message `text`, which looks
-    /// up its context when it is to be answered.
+    /// Spawn a task that awaits `decision` for `text`, runs context lookups if
+    /// the message will be answered, and sends [`Event::Decided`] on `events`.
     fn spawn(&self, decision: Decision, text: String, events: &mpsc::UnboundedSender<Event>) {
         let events = events.clone();
         let injector = self.injector.clone();
@@ -107,10 +109,9 @@ impl Intake {
         });
     }
 
-    /// Take the message `decided` was for, log the decision, and return the
-    /// message with its context appended and the action to take.
-    ///
-    /// `today` dates the appended context.
+    /// Complete the in-flight decision for the front inbox message, log the
+    /// verdict and any lookups, and return the message (with rendered context
+    /// appended for `today`) alongside the resolved [`Action`].
     pub(crate) fn decided<H: Host>(
         &mut self,
         decided: Decided,
