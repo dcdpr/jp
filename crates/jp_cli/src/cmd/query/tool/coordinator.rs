@@ -117,8 +117,7 @@ pub(crate) struct Host<'a> {
     /// Answers a question routed to an assistant instead of the user.
     pub inquiry_backend: &'a Arc<dyn InquiryBackend>,
 
-    /// The conversation each inquiry is recorded on, and written to disk when a
-    /// question waits on the user.
+    /// Active conversation for recording and flushing inquiry events.
     pub conv: &'a mut ConversationMut,
 
     /// What the user asked to remember for the turn, and the inquiry counter.
@@ -1614,8 +1613,7 @@ impl ToolCoordinator {
         }
     }
 
-    /// Take the assistant's answer to a call's question, or its failure to give
-    /// one.
+    /// Handle the inquiry backend's response or error for a tool question.
     fn on_inquired(
         &mut self,
         batch: &mut Batch,
@@ -2039,10 +2037,9 @@ impl ToolCoordinator {
         );
 
         if host.interactive && target.is_user() {
-            // On disk before the prompt shows, so a reader outside this
-            // process can tell the turn is waiting on the user: an unanswered
-            // request in a conversation whose lock is held.
-            // A failed write is not fatal; the phase-end flush retries.
+            // Flush before opening the prompt so external readers see an
+            // unanswered InquiryRequest while the conversation lock is held.
+            // Flush errors are non-fatal; the phase-end flush retries.
             if let Err(error) = host.conv.flush() {
                 warn!(%error, "Failed to persist a question before asking it.");
             }
@@ -2440,14 +2437,12 @@ impl ToolCoordinator {
         });
     }
 
-    /// Write the conversation to disk after an inquiry response is recorded
-    /// while the batch is still running.
+    /// Flush the conversation to disk after recording an inquiry response.
     ///
-    /// A reader outside this process takes an unanswered request in a
-    /// conversation whose lock is held to mean the turn is waiting on the user,
-    /// so a response kept in memory while the batch's tools run would report a
-    /// question that is already closed.
-    /// A failed write is not fatal; the phase-end flush retries.
+    /// External readers treat an unanswered `InquiryRequest` on a locked
+    /// conversation as waiting on user input, so responses must be flushed
+    /// before the remaining tools in the batch continue running.
+    /// Flush errors are non-fatal; the phase-end flush retries.
     fn persist_inquiry_response(conv: &mut ConversationMut) {
         if let Err(error) = conv.flush() {
             warn!(%error, "Failed to persist an inquiry response.");

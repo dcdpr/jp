@@ -7024,9 +7024,6 @@ impl DiskObservingPromptBackend {
     }
 }
 
-/// Whether the conversation as written to disk has a question waiting for an
-/// answer.
-/// `false` when nothing readable is on disk yet.
 fn pending_on_disk(fs: &FsStorageBackend, id: &jp_conversation::ConversationId) -> bool {
     fs.load_conversation_stream(id, &PartialAppConfig::empty())
         .is_ok_and(|stream| !stream.pending_inquiries().is_empty())
@@ -7081,13 +7078,9 @@ impl PromptBackend for DiskObservingPromptBackend {
     }
 }
 
-/// A question for the user is on disk before its prompt opens, and answered on
-/// disk before the answered tool finishes.
-///
-/// A reader in another process tells a turn waiting on the user from one
-/// running a tool by that unanswered question, so it has to be written before
-/// the prompt blocks, and closed before the tool it unblocked runs, not at the
-/// end of the tool phase.
+/// Verifies that a user-targeted `InquiryRequest` is flushed to disk before its
+/// prompt blocks, and its `InquiryResponse` is flushed before the tool finishes
+/// executing.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
@@ -7137,9 +7130,8 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
             id: lock.id(),
             seen: Mutex::new(vec![]),
         });
-        // What the disk holds while the executor runs with its answer, read
-        // strictly: `None` is a stream that failed to load, not one with
-        // nothing pending.
+        // Record the number of pending inquiries on disk when the tool resumes
+        // with its answer (`None` if the stream fails to load).
         let pending_after_answer = Arc::new(Mutex::new(vec![]));
         let observe: Arc<dyn Fn() + Send + Sync> = {
             let fs = Arc::clone(&fs);
@@ -7184,15 +7176,9 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
         .await
         .unwrap();
 
-        // Exactly one prompt opened, and the question was on disk when it did.
         assert_eq!(*prompts.seen.lock().unwrap(), [true]);
-
-        // The executor ran once with its answer, and by then the answer had
-        // closed the question on disk.
         assert_eq!(*pending_after_answer.lock().unwrap(), [Some(0)]);
 
-        // The answer closed it on disk by the end of the turn. Loaded strictly:
-        // a stream that fails to load must not read as "nothing pending".
         let stream = fs
             .load_conversation_stream(&lock.id(), &PartialAppConfig::empty())
             .expect("the conversation is on disk");
@@ -7224,7 +7210,6 @@ struct AskingTalkingExecutor {
     /// Arguments, unused beyond satisfying the trait.
     arguments: Map<String, Value>,
 
-    /// Run once the executor has its answer, before it completes.
     after_answer: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
@@ -7239,7 +7224,6 @@ impl AskingTalkingExecutor {
         }
     }
 
-    /// Hold the answered execution until `hook` has run.
     fn with_after_answer(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
         self.after_answer = Some(hook);
         self

@@ -1240,7 +1240,6 @@ fn test_sanitize_legacy_duplicate_ids_pair_by_order() {
     assert_eq!(responses, 1);
 }
 
-/// A boolean question with `id`, asked at second `second`.
 fn question(id: &str, second: u32) -> ConversationEvent {
     ConversationEvent::new(
         InquiryRequest::new(
@@ -1252,7 +1251,6 @@ fn question(id: &str, second: u32) -> ConversationEvent {
     )
 }
 
-/// An answer to question `id`, at second `second`.
 fn answer(id: &str, second: u32) -> ConversationEvent {
     ConversationEvent::new(
         InquiryResponse::boolean(id, true),
@@ -1260,7 +1258,6 @@ fn answer(id: &str, second: u32) -> ConversationEvent {
     )
 }
 
-/// The seconds the stream's pending questions were asked at.
 fn pending_seconds(stream: &ConversationStream) -> Vec<u32> {
     stream
         .pending_inquiries()
@@ -1283,7 +1280,6 @@ fn test_pending_inquiries_are_the_last_turns_unanswered_questions() {
 
 #[test]
 fn test_pending_inquiries_leave_out_earlier_turns() {
-    // Turn 1 ended with its question unanswered; turn 2 answered its own.
     let mut stream = ConversationStream::new_test();
     stream.start_turn("turn 1");
     stream.push(question("call_1.confirm", 1));
@@ -1296,7 +1292,6 @@ fn test_pending_inquiries_leave_out_earlier_turns() {
 
 #[test]
 fn test_pending_inquiries_pair_a_repeated_id_by_order() {
-    // The answer closes the first ask, leaving the second open.
     let mut stream = ConversationStream::new_test();
     stream.start_turn("turn");
     stream.push(question("call_1.confirm", 1));

@@ -59,20 +59,17 @@ pub(crate) struct SessionHistoryEntry {
     pub activated_at: DateTime<Utc>,
 }
 
-/// What one session is working on, as a reader outside that session sees it.
+/// Summary of a session's conversation history and active conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionOverview {
-    /// The session the mapping belongs to.
     pub session: Session,
 
-    /// The live conversations the session has activated, most recently
-    /// activated first.
+    /// Live conversations in the session's history, most recently activated
+    /// first.
     pub conversations: Vec<ConversationId>,
 
-    /// The session's active conversation, resolved the way the session itself
-    /// resolves it.
-    /// `None` when the session has none, including when its most recent live
-    /// conversation sits behind an archived one.
+    /// Active conversation for the session, or `None` if no live conversation
+    /// precedes the most recently archived entry in the session's history.
     pub active: Option<ConversationId>,
 }
 
@@ -235,13 +232,13 @@ impl Workspace {
             .collect()
     }
 
-    /// Every session mapping in the backing store, each with its live
-    /// conversations and its active one.
+    /// Return a [`SessionOverview`] for every readable session in the backing
+    /// store.
     ///
-    /// Reads the store on every call rather than this workspace's index, so a
-    /// long-running reader sees sessions and conversations other processes
-    /// created since it opened the workspace.
-    /// A mapping that cannot be read or parsed is left out.
+    /// Queries the backing store on each call rather than the in-memory
+    /// workspace index, so callers observe sessions and conversations created
+    /// by other processes after the workspace was opened.
+    /// Session mappings that cannot be read or parsed are skipped.
     #[must_use]
     pub fn session_overviews(&self) -> Vec<SessionOverview> {
         let live: HashSet<_> = self
@@ -271,13 +268,12 @@ impl Workspace {
             .collect()
     }
 
-    /// Every readable session mapping in the backing store, one per session, in
-    /// the order the backend lists them.
+    /// Load every readable session mapping from the backing store, deduplicated
+    /// by session in backend listing order.
     ///
-    /// A legacy bare-value file can sit next to its migrated source-prefixed
-    /// counterpart until cleanup removes it.
-    /// The source-prefixed file is kept and the legacy duplicate skipped,
-    /// whichever the backend lists first, matching `load_session_entry`.
+    /// If both a migrated source-prefixed file and a legacy bare-value file
+    /// exist for the same session, the canonical source-prefixed mapping wins
+    /// regardless of listing order.
     fn listed_session_mappings(&self) -> Vec<SessionMapping> {
         let mut mappings = Vec::new();
         let mut slots = HashMap::new();

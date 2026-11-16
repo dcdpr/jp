@@ -1072,11 +1072,12 @@ impl ConversationStream {
         });
     }
 
-    /// The positions in the stream of the [`InquiryRequest`]s no
-    /// [`InquiryResponse`] in the same turn answers.
+    /// Returns the stream indices of [`InquiryRequest`] events that have no
+    /// matching [`InquiryResponse`] in the same turn.
     ///
-    /// Pairs within a turn, and by order when an ID repeats in one: each
-    /// response answers the earliest request with its ID that is still open.
+    /// Requests and responses are paired within each turn.
+    /// When an inquiry ID appears multiple times in a turn, each response pairs
+    /// with the earliest unmatched request sharing that ID.
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
@@ -1117,13 +1118,15 @@ impl ConversationStream {
         unanswered
     }
 
-    /// The questions asked in the last turn that have no answer yet, oldest
-    /// first.
+    /// Returns unanswered [`InquiryRequest`] events from the last turn, in
+    /// stream order.
     ///
-    /// A question and its answer pair within their turn, the way
-    /// [`Self::sanitize`] pairs them.
-    /// Questions left open in earlier turns are not included: a turn that ended
-    /// cannot take their answers any more.
+    /// Requests and responses are paired within the turn by inquiry ID (and in
+    /// arrival order when an ID repeats).
+    /// Unanswered requests from earlier turns are omitted because completed
+    /// turns cannot receive new responses.
+    ///
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
     #[must_use]
     pub fn pending_inquiries(&self) -> Vec<&ConversationEvent> {
         let last_turn = self

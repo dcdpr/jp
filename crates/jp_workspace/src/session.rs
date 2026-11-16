@@ -290,9 +290,10 @@ impl Session {
         session_storage_key(&self.id, &self.source)
     }
 
-    /// The Unix session-leader PID a `Getsid` session was derived from.
+    /// Return the Unix session-leader PID for a `Getsid` session.
     ///
-    /// `None` for any other source, or an id that is not a PID.
+    /// Returns `None` for other session sources or if the session ID is not a
+    /// valid PID.
     #[must_use]
     pub fn leader_pid(&self) -> Option<i32> {
         match self.source {
