@@ -72,9 +72,7 @@ impl Sort<'_> {
         match self {
             Self::Filed(Direction::Ascending) => filed(a).cmp(&filed(b)),
             Self::Filed(Direction::Descending) => filed(b).cmp(&filed(a)),
-            // Break ties by filing order, oldest first, in both directions.
-            // The date comes before the ID because an imported ticket keeps
-            // its original date but is allocated a newer ID.
+            // Break ties by ascending filing order in both directions.
             Self::Label(key, direction) => key
                 .compare(&a.1.metadata.labels, &b.1.metadata.labels, *direction)
                 .then_with(|| filed(a).cmp(&filed(b))),
@@ -83,6 +81,9 @@ impl Sort<'_> {
 }
 
 /// Sort key for filing order: filing date, then ticket ID.
+///
+/// Compares date before ID because imported tickets retain their original
+/// filing date while receiving a newly allocated ID.
 fn filed((id, ticket): (TicketId, &Ticket)) -> (&str, TicketId) {
     (&ticket.metadata.date, id)
 }

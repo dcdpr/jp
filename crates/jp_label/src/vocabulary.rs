@@ -271,9 +271,9 @@ impl Facet {
         self.max == Some(1) && (self.value_type == Some(ValueType::Date) || self.is_ordered())
     }
 
-    /// Return the sort position of `value` under this key, or `None` if `value`
-    /// is not a valid `YYYY-MM-DD` date (for a `date` key) or is not declared
-    /// (for an `ordered` key).
+    /// Return the [`Ranked`] sort position of `value` under this key, or `None`
+    /// if `value` is not a valid `YYYY-MM-DD` date (for a `date` key) or is not
+    /// declared (for an `ordered` key).
     pub(crate) fn rank<'a>(&self, value: &'a str) -> Option<Ranked<'a>> {
         if let Some(ranked) = &self.ranked {
             let (position, declared) = ranked

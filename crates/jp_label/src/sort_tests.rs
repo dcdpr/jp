@@ -69,9 +69,6 @@ fn a_date_key_sorts_by_date_and_puts_undated_items_last_both_ways() {
     ]);
 }
 
-/// Retired values have no place among the active ones, so they follow them in
-/// both directions, ahead of items without a value.
-/// The direction still orders the retired values among themselves.
 #[test]
 fn an_ordered_key_sorts_by_the_declared_order_with_retired_values_after_active_ones() {
     let vocabulary = vocabulary();

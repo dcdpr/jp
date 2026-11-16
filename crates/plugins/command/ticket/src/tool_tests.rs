@@ -1614,9 +1614,6 @@ fn list_orders_by_a_date_label_with_undated_tickets_last() {
     );
 }
 
-/// Tickets with the same label value follow filing order, in both directions.
-/// An imported issue keeps its original date but gets a newer id, so filing
-/// order is the date first and the id only within one day.
 #[test]
 fn tickets_with_the_same_label_value_follow_filing_order() {
     let dir = Utf8TempDir::new().unwrap();

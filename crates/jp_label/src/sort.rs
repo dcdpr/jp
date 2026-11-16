@@ -38,18 +38,17 @@ impl<'a> SortKey<'a> {
 
     /// Compare two label sets by their value under this key.
     ///
-    /// Items without a sortable value (missing the key, carrying a non-date
-    /// value on a `date` key, or carrying an undeclared value on an `ordered`
-    /// key) sort after items with a valid value in both directions.
-    /// Retired values of an `ordered` key sort after its active values in both
-    /// directions, and before items without a sortable value; `direction`
-    /// orders the active values among themselves, and the retired ones among
-    /// themselves.
+    /// In both directions, items with an active value sort first, followed by
+    /// items with a retired value (on an `ordered` key), followed by items
+    /// without a sortable value (missing the key, carrying a non-date value on
+    /// a `date` key, or carrying an undeclared value on an `ordered` key).
+    /// `direction` orders active values among themselves and retired values
+    /// among themselves.
     /// Two items without a sortable value, or two items with the same value,
     /// compare equal.
     ///
     /// If a hand-edited item carries multiple values for the key, its earliest
-    /// value (by `Rank`) is used in both directions.
+    /// value (active before retired) is used in both directions.
     #[must_use]
     pub fn compare(&self, a: &Labels, b: &Labels, direction: Direction) -> Ordering {
         match (self.rank(a), self.rank(b)) {
