@@ -7,8 +7,9 @@
 //! reply at a time, and never ahead of an earlier message from the same chat.
 //! Any other message waits in the [`Queue`].
 //! Before either, when a [`Decide`] classifier is configured, incoming messages
-//! pass through the [`Inbox`], which classifies each message as `answer`,
-//! `ignore`, `new_conversation`, or `compact`.
+//! pass through the [`Intake`], which classifies each message as `answer`,
+//! `ignore`, `new_conversation`, or `compact`, and looks up context for the
+//! messages to be answered.
 //!
 //! Each chat uses one conversation per day, or per week with a weekly
 //! `rollover`.
@@ -36,9 +37,11 @@ use tokio::{
 use crate::{
     answer::last_answer,
     checkout::Checkout,
-    decide::{Action, Decide, Verdict},
+    decide::{Action, Decide},
     host::{Host, Level, ReplyError, fields},
-    inbox::{Inbox, Incoming, Next},
+    inbox::Incoming,
+    inject::Injector,
+    intake::{Decided, Intake},
     options::Options,
     queue::{Queue, Waiting},
     state::{Conversations, State},
@@ -106,11 +109,9 @@ pub(crate) enum Event {
         result: Result<(), String>,
     },
 
-    /// Classification result for the front message in the inbox.
-    Decided {
-        result: Result<Verdict, String>,
-        took: Duration,
-    },
+    /// Classification result for the front message in the inbox, and the
+    /// context looked up for it when it is to be answered.
+    Decided(Decided),
 
     /// Compaction of `chat`'s conversation completed.
     Compacted {
@@ -140,8 +141,7 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
     /// present.
     paused: Option<Vec<Chat>>,
 
-    inbox: Inbox,
-
+    intake: Intake,
     events_tx: mpsc::UnboundedSender<Event>,
     events_rx: mpsc::UnboundedReceiver<Event>,
 }
@@ -166,7 +166,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             queue: Queue::default(),
             running: None,
             paused: None,
-            inbox: Inbox::default(),
+            intake: Intake::default(),
             events_tx,
             events_rx,
         }
@@ -174,7 +174,18 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
     /// Configure the [`Decide`] client used to classify incoming messages.
     pub(crate) fn with_decider(mut self, decider: Option<Arc<dyn Decide>>) -> Self {
-        self.inbox.decide_with(decider);
+        let threshold = self
+            .options
+            .decide
+            .as_ref()
+            .map_or(0.0, |decide| decide.threshold);
+        self.intake.decide_with(decider, threshold);
+        self
+    }
+
+    /// Configure the [`Injector`] that looks up context for decided messages.
+    pub(crate) fn with_injector(mut self, injector: Option<Arc<Injector>>) -> Self {
+        self.intake.inject_with(injector);
         self
     }
 
@@ -274,7 +285,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
                 ]),
             );
             if let Some(id) = message.sender.first()
-                && self.inbox.first_sighting(id)
+                && self.intake.first_sighting(id)
             {
                 self.host.print(&stranger(&message, id));
             }
@@ -285,68 +296,24 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             return;
         };
 
-        self.inbox.push(message.chat, key, text);
+        self.intake.push(message.chat, key, text);
         self.pump();
     }
 
-    /// Drain ready messages from the inbox, or spawn a decision task for the
-    /// front message.
+    /// Drain ready messages from `intake` and spawn a decision task if the
+    /// front message awaits classification.
     fn pump(&mut self) {
-        while let Some(next) = self.inbox.next() {
-            match next {
-                Next::Take(incoming) => self.route(incoming),
-                Next::Decide(decision) => {
-                    let events = self.events_tx.clone();
-                    tokio::spawn(async move {
-                        let asked = Instant::now();
-                        let result = decision.await;
-                        drop(events.send(Event::Decided {
-                            result,
-                            took: asked.elapsed(),
-                        }));
-                    });
-                }
-            }
+        while let Some(incoming) = self.intake.next(&self.events_tx) {
+            self.route(incoming);
         }
     }
 
-    /// Log the decide API's answer for a message in `chat`, and how long it
-    /// took.
-    fn log_decision(&self, result: &Result<Verdict, String>, chat: &Chat, took: Duration) {
-        match result {
-            Ok(verdict) => self.host.log_with(
-                Level::INFO,
-                "Message classified.",
-                fields([
-                    ("chat", chat.to_string().into()),
-                    ("action", verdict.action.key().into()),
-                    ("probability", verdict.probability.into()),
-                    ("took_ms", millis(took)),
-                ]),
-            ),
-            Err(error) => self.host.log_with(
-                Level::WARN,
-                "Decide failed, answering.",
-                fields([
-                    ("chat", chat.to_string().into()),
-                    ("error", error.as_str().into()),
-                    ("took_ms", millis(took)),
-                ]),
-            ),
-        }
-    }
-
-    /// Apply the decision for the front inbox message and advance the inbox.
-    fn decided(&mut self, result: Result<Verdict, String>, took: Duration) {
-        let threshold = self
-            .options
-            .decide
-            .as_ref()
-            .map_or(0.0, |decide| decide.threshold);
-
-        if let Some(incoming) = self.inbox.decided() {
-            self.log_decision(&result, &incoming.chat, took);
-            match action(result.ok(), threshold) {
+    /// Apply `decided` for the front message in `intake` and drain any
+    /// unblocked messages.
+    fn decided(&mut self, decided: Decided) {
+        let today = self.conversations.today();
+        if let Some((incoming, action)) = self.intake.decided(decided, &self.host, today) {
+            match action {
                 Action::Answer => self.route(incoming),
                 Action::Ignore => self.host.log_with(
                     Level::INFO,
@@ -489,7 +456,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
             Event::Ended { result } => self.ended(result).await,
 
-            Event::Decided { result, took } => self.decided(result, took),
+            Event::Decided(decided) => self.decided(decided),
 
             Event::Compacted { chat, result } => self.compacted(&chat, result),
 
@@ -527,7 +494,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         let ended = Instant::now();
         self.outbox.typing(&running.chat, false);
         if let Some(sent) = self.answer(&running, result).await {
-            self.inbox
+            self.intake
                 .remember(&running.chat, &format!("Assistant: {sent}"));
         }
         if let Some(phases) = phases(&running, ended, Instant::now()) {
@@ -759,7 +726,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 }
 
 /// Convert `duration` to whole milliseconds as a JSON [`Value`].
-fn millis(duration: Duration) -> Value {
+pub(crate) fn millis(duration: Duration) -> Value {
     u64::try_from(duration.as_millis())
         .unwrap_or(u64::MAX)
         .into()
@@ -790,16 +757,6 @@ fn phases(running: &Running, ended: Instant, answered: Instant) -> Option<Map<St
         ("run_ms", millis(ended.duration_since(accepted))),
         ("answer_ms", millis(answered.duration_since(ended))),
     ]))
-}
-
-/// Resolve the action to take from the decider's `verdict`.
-///
-/// Falls back to [`Action::Answer`] when the request failed or the verdict's
-/// probability is below `threshold`.
-fn action(verdict: Option<Verdict>, threshold: f64) -> Action {
-    verdict
-        .filter(|verdict| verdict.probability >= threshold)
-        .map_or(Action::Answer, |verdict| verdict.action)
 }
 
 /// Spawn a task to compact `conversation` on the host and emit

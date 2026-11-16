@@ -89,10 +89,8 @@ The model answers one `choice` question, picking one of:
 | `compact`          | Compacts the conversation now, and replies with what changed |
 
 The last two are commands.
-They are offered only for a message that starts by mentioning the bot, such as
-"@JP compact please", or one in a direct chat.
-Any other message is answered or ignored, so two people talking about starting
-over don't reset the bot's conversation.
+Every message is offered all four, in group and direct chats alike, and the
+decide model judges whether a message asks for a command; no @mention is needed.
 
 `compact` sends the host the compaction rules configured in `options.compact`
 and replies with a summary of the compacted turns.
@@ -154,6 +152,63 @@ phone number.
 Set `signal.account_id` to the bridge account's UUID so those mentions are
 recognized (look for `sourceUuid` on messages from the bridge's number in
 `signal-cli -o json receive`).
+
+### Injected context
+
+When `decide` is configured, the bridge can run pre-turn context lookups for a
+message and append the output under an `# Auto-Injected Context` heading, so the
+assistant has the context without calling a tool:
+
+- **References**: for each distinct match of an `inject.references` regex in the
+  message (up to five per message), the bridge runs that reference's command
+  with `{0}` replaced by the full match and `{1}`, `{2}`, ... by capture groups.
+- **Packs**: the decide request includes a second `choice` question asking which
+  pack in `inject.packs` (or `none`) the assistant needs, and runs the selected
+  pack's command when its probability is at least `inject.threshold`.
+  Each pack's `when` field is the criterion description sent to the decide
+  model.
+
+<!-- end list -->
+
+```toml
+[[plugins.command.serve-chat.options.inject.references]]
+pattern = '\bT-[0-9a-z]{7}\b'
+command = ["jp", "ticket", "show", "{0}"]
+
+[plugins.command.serve-chat.options.inject.packs.oldest]
+when = "The last message asks which tickets are the oldest, or were filed first."
+title = "Tickets, oldest first"
+command = ["jp", "ticket", "list", "--order", "filed"]
+
+[plugins.command.serve-chat.options.inject.packs.newest]
+when = "The last message asks what was filed recently."
+title = "Tickets, newest first"
+command = ["jp", "ticket", "list", "--order", "filed:desc"]
+
+[plugins.command.serve-chat.options.inject.packs.due]
+when = "The last message asks what is due, overdue, or has a deadline."
+title = "Open tickets, due soonest first"
+command = ["jp", "ticket", "list", "--status", "todo", "--order", "due"]
+
+[plugins.command.serve-chat.options.inject.packs.done]
+when = "The last message asks what was finished or shipped."
+title = "Done"
+command = ["jp", "ticket", "board", "--status", "done", "--limit", "20"]
+```
+
+Packs are read from configuration at startup; adding or removing a pack requires
+no code change.
+
+- Commands run concurrently in the workspace root with a 10-second timeout per
+  command.
+  Each command's output is truncated to `inject.max_chars` characters.
+- Failed lookups are logged (`Context lookup failed.`) and omitted; the turn
+  still runs without them.
+- Lookups run only for messages classified as `answer`.
+- `Message classified.` logs the selected pack and its probability, and `Context
+  looked up.` logs the completed lookups, failure count, and duration.
+- The injected section stays in the conversation with the lookup date so later
+  turns treat it as a snapshot.
 
 ## The checkout
 
@@ -306,6 +361,11 @@ turn even within an existing conversation.
 | `decide.api_key_env`     | `JEV_API_KEY`; `""` sends no token     |
 | `decide.threshold`       | `0.5`                                  |
 | `decide.instructions`    | "What should the assistant do...?"     |
+| `inject.threshold`       | `0.5`                                  |
+| `inject.instructions`    | "Which of these would ... need...?"    |
+| `inject.max_chars`       | `8000`                                 |
+| `inject.packs`           | none                                   |
+| `inject.references`      | none                                   |
 | `people.<key>.name`      | required                               |
 | `people.<key>.signal`    | none                                   |
 | `checkout.enabled`       | `true`                                 |

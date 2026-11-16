@@ -8,9 +8,10 @@
 //! - `transport` defines the chat transport interface; `signal` implements it
 //!   over `signal-cli` in JSON-RPC mode.
 //! - `bridge` routes messages from allowed senders to conversations and
-//!   schedules turns, with `inbox` buffering messages awaiting a `decide`
-//!   verdict and `queue` batching messages awaiting a turn; `turn` builds each
-//!   turn's request and runs it on the host.
+//!   schedules turns, with `intake` (backed by `inbox`, `decide`, and `inject`)
+//!   classifying incoming messages and running pre-turn context lookups, and
+//!   `queue` batching messages awaiting a turn; `turn` builds each turn's
+//!   request and runs it on the host.
 //! - `checkout` locks the git checkout during turns, pulls when clean, and
 //!   pauses the bridge if a turn modifies files outside the writable
 //!   directories.
@@ -23,6 +24,8 @@ mod checkout;
 mod decide;
 mod host;
 mod inbox;
+mod inject;
+mod intake;
 mod options;
 mod queue;
 mod signal;
@@ -44,8 +47,9 @@ use tokio::sync::{mpsc, watch};
 use crate::{
     bridge::Bridge,
     checkout::{GitCheckout, Unguarded},
-    decide::{Decide, SystemOne},
+    decide::{Decide, PackQuestion, SystemOne},
     host::{Host as _, HostClient, Level, fields},
+    inject::{Injector, Process},
     options::Options,
     signal::{Logger, Signal},
     state::State,
@@ -206,14 +210,27 @@ fn serve(
             fields([("path", state_dir(init)?.as_str().into())]),
         );
 
+        let injector = options.inject.clone().map(|inject| {
+            let runner = Arc::new(Process::new(init.workspace.root.clone()));
+            Arc::new(Injector::new(inject, runner))
+        });
+
         if !options.checkout.enabled {
             let bridge = Bridge::new(client.clone(), outbox, Unguarded, options, state);
-            return bridge.with_decider(decider).run(inbound, shutdown).await;
+            return bridge
+                .with_decider(decider)
+                .with_injector(injector)
+                .run(inbound, shutdown)
+                .await;
         }
 
         let checkout = GitCheckout::open(&init.workspace.root, options.checkout.writable.clone())?;
         let bridge = Bridge::new(client.clone(), outbox, checkout, options, state);
-        bridge.with_decider(decider).run(inbound, shutdown).await
+        bridge
+            .with_decider(decider)
+            .with_injector(injector)
+            .run(inbound, shutdown)
+            .await
     })
 }
 
@@ -238,7 +255,13 @@ fn decider(options: &Options) -> Result<Option<Arc<dyn Decide>>, String> {
         ),
     };
 
-    Ok(Some(Arc::new(SystemOne::new(decide.clone(), token)?)))
+    let packs = options.inject.as_ref().and_then(PackQuestion::new);
+
+    Ok(Some(Arc::new(SystemOne::new(
+        decide.clone(),
+        token,
+        packs,
+    )?)))
 }
 
 /// Directory where the bridge persists its chat-to-conversation mapping.

@@ -41,8 +41,9 @@ pub(crate) enum Next {
     /// Route the message immediately.
     Take(Incoming),
 
-    /// Await this decision for the front message, then call [`Inbox::decided`].
-    Decide(Decision),
+    /// Await the decision for the front message (paired with the message text),
+    /// then call [`Inbox::decided`].
+    Decide(Decision, String),
 }
 
 #[derive(Default)]
@@ -102,7 +103,8 @@ impl Inbox {
         match (&front.context, &self.decider) {
             (Some(context), Some(decider)) => {
                 self.deciding = true;
-                Some(Next::Decide(decider.decide(context.clone(), Action::ALL)))
+                let decision = decider.decide(context.clone(), Action::ALL);
+                Some(Next::Decide(decision, front.text.clone()))
             }
             _ => self.pending.pop_front().map(Next::Take),
         }

@@ -22,6 +22,8 @@ jp_plugin = { workspace = true }
 camino = { workspace = true, features = ["serde1"] }
 chrono = { workspace = true }
 humantime = { workspace = true }
+# Finds the ticket, RFD, and wiki ids a message names, for `inject.references`.
+regex = { workspace = true, features = ["std", "perf", "unicode-perl"] }
 # Calls the decide API, which says whether a group message is for the assistant.
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive", "std"] }

@@ -154,6 +154,11 @@ impl Conversations {
         self.rollover
     }
 
+    /// Return the current date from the conversation clock.
+    pub(crate) fn today(&self) -> NaiveDate {
+        (self.today)()
+    }
+
     /// Start date of the current rollover period.
     pub(crate) fn period(&self) -> NaiveDate {
         self.rollover.start((self.today)())

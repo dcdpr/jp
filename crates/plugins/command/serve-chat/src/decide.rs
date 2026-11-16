@@ -8,15 +8,26 @@
 //! Every message is offered all actions, including the commands
 //! (`new_conversation`, `compact`); the decide model determines whether a
 //! message requests one.
+//!
+//! With `inject.packs` configured, the same request asks a second `choice`
+//! question, [`PackQuestion`]: which context pack, if any, the assistant needs
+//! for the message.
 
 use std::{future::Future, pin::Pin, time::Duration};
 
 use serde_json::{Map, Value, json};
 
-use crate::options::DecideOptions;
+use crate::options::{DecideOptions, InjectOptions, NO_PACK};
 
 /// Question key in the System One request and response.
 const QUESTION: &str = "action";
+
+/// Key of the pack question in the System One request and response.
+const PACK_QUESTION: &str = "pack";
+
+/// Criterion description for [`NO_PACK`].
+const NO_PACK_DESCRIPTION: &str = "The assistant needs none of the other options to answer the \
+                                   last message, or the message asks nothing of it.";
 
 /// HTTP request timeout for a decide API call.
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -83,10 +94,82 @@ impl Action {
 }
 
 /// Action selected by the decide model and its probability.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Verdict {
     pub action: Action,
     pub probability: f64,
+
+    /// Context pack selected for the message, if a pack question was asked and
+    /// a pack other than [`NO_PACK`] was chosen.
+    pub pack: Option<Pick>,
+}
+
+/// Context pack selected by the decide model and its probability.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Pick {
+    pub name: String,
+    pub probability: f64,
+}
+
+/// System One `choice` question for selecting a context pack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PackQuestion {
+    instructions: String,
+
+    /// Configured `(name, when)` pairs in deterministic order.
+    packs: Vec<(String, String)>,
+}
+
+impl PackQuestion {
+    /// Build the pack question from `inject`, or return `None` if no packs are
+    /// configured.
+    pub(crate) fn new(inject: &InjectOptions) -> Option<Self> {
+        if inject.packs.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            instructions: inject.instructions.clone(),
+            packs: inject
+                .packs
+                .iter()
+                .map(|(name, pack)| (name.clone(), pack.when.clone()))
+                .collect(),
+        })
+    }
+
+    /// Serialize this question as a System One `choice` definition.
+    fn request(&self) -> Value {
+        let mut criteria = Map::new();
+        criteria.insert(NO_PACK.to_owned(), json!(NO_PACK_DESCRIPTION));
+        for (name, when) in &self.packs {
+            criteria.insert(name.clone(), json!(when));
+        }
+
+        json!({ "type": "choice", "instructions": self.instructions, "criteria": criteria })
+    }
+
+    /// Extract the selected pack from `body`, returning `None` if the model
+    /// chose [`NO_PACK`] or if the pack answer is missing, unknown, or
+    /// malformed.
+    ///
+    /// Pack selection is best-effort: an invalid pack answer skips the pack
+    /// lookup without failing the action verdict.
+    fn pick(&self, body: &Value) -> Option<Pick> {
+        let answer = body.pointer(&format!("/answers/{PACK_QUESTION}"))?;
+        let choice = answer.get("choice").and_then(Value::as_str)?;
+        let (name, _) = self.packs.iter().find(|(name, _)| name == choice)?;
+        let probability = answer
+            .get("probabilities")
+            .and_then(|probabilities| probabilities.get(choice))
+            .and_then(Value::as_f64)
+            .filter(|probability| (0.0..=1.0).contains(probability))?;
+
+        Some(Pick {
+            name: name.clone(),
+            probability,
+        })
+    }
 }
 
 pub(crate) type Decision = Pin<Box<dyn Future<Output = Result<Verdict, String>> + Send>>;
@@ -102,10 +185,15 @@ pub(crate) struct SystemOne {
     client: reqwest::Client,
     options: DecideOptions,
     token: Option<String>,
+    packs: Option<PackQuestion>,
 }
 
 impl SystemOne {
-    pub(crate) fn new(options: DecideOptions, token: Option<String>) -> Result<Self, String> {
+    pub(crate) fn new(
+        options: DecideOptions,
+        token: Option<String>,
+        packs: Option<PackQuestion>,
+    ) -> Result<Self, String> {
         let client = reqwest::Client::builder()
             .timeout(TIMEOUT)
             .build()
@@ -115,19 +203,19 @@ impl SystemOne {
             client,
             options,
             token,
+            packs,
         })
     }
 }
 
 impl Decide for SystemOne {
     fn decide(&self, state: String, actions: &'static [Action]) -> Decision {
-        let mut request =
-            self.client
-                .post(&self.options.url)
-                .json(&request_body(&self.options, &state, actions));
+        let body = request_body(&self.options, &state, actions, self.packs.as_ref());
+        let mut request = self.client.post(&self.options.url).json(&body);
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
+        let packs = self.packs.clone();
 
         Box::pin(async move {
             let response = request
@@ -146,13 +234,19 @@ impl Decide for SystemOne {
 
             let body: Value = serde_json::from_str(&body)
                 .map_err(|error| format!("the decide API's answer isn't JSON: {error}"))?;
-            verdict(&body, actions)
+            verdict(&body, actions, packs.as_ref())
         })
     }
 }
 
-/// Build the System One JSON request body for `state` and `actions`.
-pub(crate) fn request_body(options: &DecideOptions, state: &str, actions: &[Action]) -> Value {
+/// Build the System One JSON request body for `state`, `actions`, and the
+/// optional `packs` question.
+pub(crate) fn request_body(
+    options: &DecideOptions,
+    state: &str,
+    actions: &[Action],
+    packs: Option<&PackQuestion>,
+) -> Value {
     let criteria: Map<String, Value> = actions
         .iter()
         .map(|action| (action.key().to_owned(), json!(action.description())))
@@ -162,6 +256,9 @@ pub(crate) fn request_body(options: &DecideOptions, state: &str, actions: &[Acti
         QUESTION.to_owned(),
         json!({ "type": "choice", "instructions": options.instructions, "criteria": criteria }),
     );
+    if let Some(packs) = packs {
+        questions.insert(PACK_QUESTION.to_owned(), packs.request());
+    }
 
     json!({
         "model": options.model,
@@ -170,8 +267,13 @@ pub(crate) fn request_body(options: &DecideOptions, state: &str, actions: &[Acti
     })
 }
 
-/// Parse the chosen [`Action`] and its probability from a System One response.
-pub(crate) fn verdict(body: &Value, actions: &[Action]) -> Result<Verdict, String> {
+/// Parse the chosen [`Action`], its probability, and the optional pack [`Pick`]
+/// from a System One response.
+pub(crate) fn verdict(
+    body: &Value,
+    actions: &[Action],
+    packs: Option<&PackQuestion>,
+) -> Result<Verdict, String> {
     let answer = body
         .pointer(&format!("/answers/{QUESTION}"))
         .ok_or_else(|| format!("the decide API's answer has no `answers.{QUESTION}`"))?;
@@ -194,6 +296,7 @@ pub(crate) fn verdict(body: &Value, actions: &[Action]) -> Result<Verdict, Strin
     Ok(Verdict {
         action,
         probability,
+        pack: packs.and_then(|packs| packs.pick(body)),
     })
 }
 
