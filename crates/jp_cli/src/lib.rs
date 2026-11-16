@@ -1317,6 +1317,8 @@ fn configure_logging(
         "reqwest=off",
         "rustls=off",
         "tokio=off",
+        "process_wrap=off",
+        "rmcp=off",
         "jp_llm::provider::anthropic::acp::protocol=off",
     ];
 
