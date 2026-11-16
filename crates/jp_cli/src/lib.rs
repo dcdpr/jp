@@ -1319,6 +1319,7 @@ fn configure_logging(
         "tokio=off",
         "process_wrap=off",
         "rmcp=off",
+        "schematic=off",
         "jp_llm::provider::anthropic::acp::protocol=off",
     ];
 
