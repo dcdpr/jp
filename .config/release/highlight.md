@@ -22,8 +22,9 @@ Read it with `wiki_list` and `wiki_show`, and leave it as it is.
    - **Authors**: <author>
    - **Credits**: <credit>
    
-   <What the feature does for people, in a few short paragraphs, with a short
-   example of using it.>
+   <What the feature lets people do and why that's useful, in a few short
+   paragraphs, with a short example of using it, and what comes next for it
+   when the release's RFDs or tickets plan it.>
    ```
 
    Give it an `Authors` line for each author and a `Credits` line for each

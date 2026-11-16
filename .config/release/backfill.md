@@ -33,8 +33,12 @@ ended up.
    When in doubt, write a fragment.
 4. Before writing a fragment, name in one line the files and functions that show
    what it describes, so it can be checked against them.
-5. Write one fragment per group with `changelog_add`, with `credits` naming
-   every change in the group, copied from their headings.
+5. Write one fragment per group with `changelog_add`: one or two short sentences
+   naming the feature and what it lets people do, leaving its flags and options
+   to its guide page.
+   Its `credits` name the changes in the group that built or changed the
+   feature, copied from their headings; leave out a change that only touched it
+   in passing, such as one that made many features usable at once.
 6. If a commit belongs to a fragment you already wrote, update that fragment
    with `fs_modify_file` instead of creating a duplicate: describe the feature's
    final state in the release and append a `- **Credits**:` line for the commit

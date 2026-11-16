@@ -6,7 +6,8 @@ to learn what changed for them, and they read dozens of entries at once.\
 """
 items = [
     "Write the entry for someone using JP, not someone reading its code: what they can do, what behaves differently, or what was fixed.",
-    "Keep an entry to one or two short sentences. A feature that needs more gets a highlight.",
+    "Keep an entry to one or two short sentences: name the feature and what it lets people do. Its flags, options, and details belong on its guide page, and a feature worth more than two sentences gets a highlight.",
+    "Describe what works. A limitation, a known bug, or support still missing belongs in a ticket, not in an entry.",
     "Use user-facing names: the command, flag, config key, or file users type or read. Omit internal types, modules, and functions.",
     "Format as code only what users type or read literally, such as a command, a flag, a config key, or a file name, not every name in the sentence.",
     "Describe what the change does as the code shows it. A commit message can be wrong or incomplete; when it and the code disagree, the code is right.",
@@ -30,6 +31,30 @@ good = "Conversations started with `--tmp` are deleted after a day."
 bad = "`Conversation`s started with the `--tmp` flag of `jp query` are removed by the `expire` task after `1d`."
 reason = "Code formatting only for what users type, vs. formatting every name in the sentence."
 
+[[assistant.instructions.examples]]
+good = "`jp conversation ls` lists your conversations, newest first, and marks the active one."
+bad = """\
+`jp conversation ls` lists conversation IDs, message counts, and last activity, \
+and marks the active conversation. Sort with `--sort id|created|activity|messages`, \
+reverse with `--descending`, limit rows with `--limit`, or show full timestamps \
+with `--full`.\
+"""
+reason = "Names the feature and what it's for, vs. listing every flag, which its guide page covers."
+
+[[assistant.instructions]]
+title = "Highlights"
+description = """\
+A highlight is the story of one feature, told at the top of a release's notes \
+for people deciding whether to upgrade. The release's other entries follow the \
+highlights as a list.\
+"""
+items = [
+    "Say what the feature lets people do and why that's useful, in a few short paragraphs.",
+    "Show it in use with a short example: a command and what it prints, or a few lines of configuration.",
+    "Leave the details to the feature's guide page, and link it: a highlight introduces a feature, and its guide page explains it in full.",
+    "Say what comes next for the feature only when it's planned, such as in an RFD or a ticket.",
+]
+
 [[assistant.instructions]]
 title = "Preparing a Release's Notes"
 description = """\
@@ -39,7 +64,7 @@ upgrading from the previous release.\
 """
 items = [
     "Describe what changed between the previous release and this one, not how the release was built: readers never ran the commits in between.",
-    "Write one entry per feature, describing it as the release ships it, and credit every change that built it.",
+    "Write one entry per feature, describing it as the release ships it. Credit the changes that built or changed the feature, not one that touched it in passing, such as a change that made many features usable at once or renamed things across the codebase.",
     "A feature new in the release is `added`, however much it changed along the way: its fixes and reworks belong in its one entry, not in entries of their own.",
     "A feature added and removed again within the release gets no entry.",
     "Use the remaining types only for changes relative to the previous release: `changed`, `deprecated`, and `removed` for behavior present in the previous release, and `fixed` for bugs present in the previous release.",
