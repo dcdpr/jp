@@ -28,10 +28,8 @@ const props = defineProps({
     filterField: { type: String, default: 'category' },
     // Whether entries carry a one-line summary worth toggling.
     showSummary: { type: Boolean, default: true },
-    // The kind of document listed, `ticket` or `wiki`, which says where a
-    // label opened in a new tab leads; and what the entries are called, for
-    // the line above a table narrowed to a label.
-    labelKind: { type: String, default: null },
+    // Plural noun for the listed entries, shown in the active label-filter
+    // banner (e.g. "Tickets labelled ...").
     labelNoun: { type: String, default: 'Entries' },
 })
 
@@ -253,7 +251,6 @@ const filtered = computed(() => {
         <DocLabels
             v-if="entry.labels?.length"
             :labels="entry.labels"
-            :kind="labelKind"
             :filter="labelFilter"
             :pick="toggleLabel"
         />
