@@ -637,9 +637,8 @@ fn drain() -> Vec<ConversationEvent>:
 
 - One index = one event type (never mixes reasoning and message)
 - Flush order matches index order (preserves sequence)
-- Tool-call parts accumulate as text until the `Flush` (see
-  [Event Model](#event-model)); the arguments are parsed then, not as they
-  arrive.
+- Tool-call parts accumulate as text until the `Flush` (see [Event
+  Model](#event-model)); the arguments are parsed then, not as they arrive.
 - A tool call's arguments are a JSON object, or the call is rejected.
   Empty argument text is a call without arguments.
   Text that ends before the JSON does, is not JSON, or is JSON of another type

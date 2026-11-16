@@ -303,8 +303,8 @@ populated by `FragmentAggregator`, or an `InvalidToolCall` when the argument
 text is not one complete JSON object: the text ended before the root value
 closed, it was not JSON, or its root was not an object.
 A call with no argument text at all is a call without arguments.
-The check reads the `arguments_json` buffer today, so `IncrementalArgParser`
-has to report these three cases once that buffer is gone.
+The check reads the `arguments_json` buffer today, so `IncrementalArgParser` has
+to report these three cases once that buffer is gone.
 
 `TurnCoordinator` already matches on `EventPart::ToolCall` variants (per [RFD
 012]) and forwards the progress events returned for `ArgumentChunk` parts to
@@ -321,8 +321,8 @@ EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
 
 ### Backwards compatibility
 
-- The final `ToolCallRequest` event emitted on flush is unchanged, and so is
-  the `InvalidToolCall` returned in its place for arguments that are not one
+- The final `ToolCallRequest` event emitted on flush is unchanged, and so is the
+  `InvalidToolCall` returned in its place for arguments that are not one
   complete JSON object.
 - `ToolCallArgumentProgress` events are ephemeral and are not persisted to
   `ConversationStream`.
