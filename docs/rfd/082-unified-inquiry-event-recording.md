@@ -820,9 +820,9 @@ each turn.
   prompts are not inquiry events and remain out of scope.
 
   > [!TIP]
-  > [RFD 018] makes permission and result-delivery prompts inquiry events, and
-  > has every prompt drawn from its `InquiryRequest` rather than recorded next
-  > to it.
+  > [RFD 018] extends inquiry events to permission (`RunTool`) and
+  > result-delivery (`DeliverToolResult`) prompts, and renders every prompt from
+  > its persisted `InquiryRequest` rather than from in-memory state.
 
 - **Stream replay and event-driven UI.** Sub-agent reasoning trails, replay
   tooling, and conversation viewers benefit from complete inquiry recording, but

@@ -546,9 +546,10 @@ ordering.
 Independent of Phases 1 through 3; prerequisite for Phase 5.
 
 > [!TIP]
-> [RFD 018] turns every prompt into an inquiry event and makes the queue the
-> turn's unanswered inquiries, permission prompts included; its phase 2 covers
-> this phase.
+> [RFD 018] records every prompt as an `InquiryRequest` event and unifies the
+> pending-prompt queue around the turn's unanswered inquiries, including
+> permission prompts.
+> Phase 2 of [RFD 018] implements this phase.
 
 ### Phase 5: Ctrl-C inside prompts
 
