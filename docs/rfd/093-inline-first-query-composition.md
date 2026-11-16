@@ -216,6 +216,12 @@ parsed partial in full (and will adopt same-turn config resolution from [RFD
    on inline submit (step 2) or saved through the external editor on `Ctrl+X`
    (step 4), and replaced query text was already reported (step 1).
 
+> [!TIP]
+> [RFD 131] replaces step 1's direct-send rule when an unsent draft exists: on
+> an interactive terminal it prompts whether to discard the draft, keep it, or
+> edit it with the query appended, and in non-interactive runs it keeps the
+> draft.
+
 ### Composition loop
 
 A `compose_query` function in `jp_cli` (next to `edit_query`) runs the
@@ -389,3 +395,4 @@ Update `docs/configuration.md` and the usage docs for the new default, the
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 080]: 080-editor-as-a-config-source.md
 [RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 131]: 131-queued-replies.md

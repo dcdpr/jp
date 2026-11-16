@@ -6,6 +6,7 @@
 - **Label**: client=cli
 - **Label**: package=jp_printer
 - **Label**: relevant-rfd=091
+- **Label**: relevant-rfd=132
 - **Label**: type=bug
 
 Narrowing a terminal that reflows its contents leaves parts of a drawn status

@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-04
 - **Extends**: [RFD 048]
-- **Required by**: [RFD 049]
+- **Required by**: [RFD 049], [RFD 131], [RFD 132]
 - **Summary**: Separates terminal promptability, per-channel cursor capability,
   and format selection into distinct signals on `Printer` and `--interactive`.
 
@@ -495,6 +495,34 @@ This proposal requires both read and write access and errors under
 `--interactive` otherwise; whether any real environment produces a write-only
 `/dev/tty` is unknown.
 
+### A pipe reader that writes to the same terminal
+
+Resolving `auto` per channel enables stderr status-region repaints even when
+stdout is a pipe, but most downstream pipe commands write to the same terminal
+(`tee`, `jq`, `bat`, or a pager).
+Their output lands at the current cursor position (inside the drawn status
+region from [RFD 091]), so the region's next erase clears part of the piped
+program's output and leaves stale region rows on screen.
+Pagers such as `less` (used as an example in [Observable behaviour
+changes](#observable-behaviour-changes)) also switch to the alternate screen,
+which the status region then draws over.
+
+JP can distinguish a pipe from a regular file by inspecting the file descriptor
+type, but it cannot detect whether the process reading the pipe writes to the
+terminal, and pipe readers that do not write to the terminal (such as `| gzip >
+out.gz`) work without issue.
+This trade-off is documented rather than blocked, matching `curl` and `pv` when
+they render progress on stderr while stdout feeds a pipe; users can disable
+individual status regions via each region's `show` config key.
+If terminal collisions prove common in practice, the fallback is disabling
+stderr repaints whenever stdout is a pipe, at the cost of losing progress
+indicators on non-displaying pipes.
+
+> [!TIP]
+> [RFD 132] makes the same trade-off for its interactive input field: when the
+> field is active and stdout or stderr is a pipe, JP prints a one-time warning
+> on the terminal and proceeds.
+
 ## Implementation Plan
 
 ### Phase 1: Channel capability on `Printer`
@@ -554,4 +582,6 @@ behavioural changes and the mechanical renames bisect cleanly.
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 087]: 087-session-scoped-active-workspace.md
 [RFD 091]: 091-printer-owned-status-region.md
+[RFD 131]: 131-queued-replies.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md
 [\#1068]: https://github.com/dcdpr/jp/issues/1068

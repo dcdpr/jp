@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
-- **Extended by**: [RFD 092]
+- **Extended by**: [RFD 092], [RFD 131]
 - **Summary**: Replaces ad-hoc interrupt handling with a global signal router
   and a LIFO stack of RAII-scoped handlers.
 
@@ -674,3 +674,4 @@ Depends on Phases 2 through 4.
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md
+[RFD 131]: 131-queued-replies.md

@@ -123,6 +123,13 @@ A second SIGINT within the escalation cooldown
 reaches the second rung.
 `kill -QUIT` remains an immediate exit.
 
+> [!TIP]
+> [RFD 132] adds a second delivery path for Ctrl-C: in raw mode, Ctrl-C arrives
+> as a keystroke (`0x03`) that the input field or event pump forwards to
+> `SignalRouter`.
+> Only presses not consumed by an open prompt count toward rung 2, so pressing
+> Ctrl-C inside nested prompts backs out one level per press.
+
 **Menu cancel contract.** In every interrupt menu, ESC means "continue": it
 closes the menu and resumes the interrupted work, matching `[c]`.
 Ctrl-C is the only key that climbs the ladder.
@@ -230,8 +237,7 @@ with Ctrl-C escalates to rung 2 (exit 130), matching every other interrupt menu.
 Reply reuses the streaming menu's machinery (commit partials, inject the
 `ChatRequest`, and prepare a continuation), while the existing `sanitize` pass
 covers pending tool calls.
-The menu omits an Abort option because the previous cycle is already persisted
-at a phase gap, leaving nothing unsaved to discard.
+The menu omits an Abort option, as every menu does (see [No Abort](#no-abort)).
 
 The turn scope uses the same configuration shape as the other menu scopes:
 
@@ -265,6 +271,10 @@ Because the fallback menu can open outside any turn or conversation, it has no
 Reply option, no straight-to-editor path, and no configuration surface; allowing
 an `action` override here would reintroduce silent first-press exits.
 
+> [!TIP]
+> In [RFD 132]'s idle input field, pressing Ctrl-C opens this fallback menu
+> regardless of whether the buffer contains text; `Ctrl+U` clears the line.
+
 **Menu erase-on-close.** Menus erase themselves after a choice.
 `inquire` prompts clear their body and write a one-line answered summary that
 the caller erases (cursor-up plus clear-line on its writer), and the
@@ -274,6 +284,30 @@ scrollback after the menu clears.
 Because `InlineReply` is erased on submit, the normal rendering path must once
 again echo the submitted reply (which was omitted while the surviving widget
 remained on screen).
+
+### No Abort
+
+The streaming menu's `[a] Abort (discard & exit)` option is removed, along with
+`abort` as a documented value of `interrupt.streaming.action`.
+The turn menu never included Abort for the same reason that now applies across
+every scope: the turn loop persists each event to disk as it commits, so
+completed blocks are already saved.
+Abort can discard only the currently streaming reasoning or message block that
+the provider has not yet closed, which does not match what "discard & exit"
+implies.
+Replacing or removing a committed response is a conversation-history operation
+(`jp query --replay` or `jp conversation edit`), not an interrupt action.
+The tool menu already has no Abort option.
+
+`abort` remains accepted as a hidden alias that resolves to `stop`.
+Because conversations record config deltas permanently, any conversation that
+recorded `action = "abort"` must continue to load, and the user cannot edit that
+historical delta out of the stream.
+Accepting `abort` is silent for the same reason: emitting a warning would repeat
+on every load of that conversation with no way for the user to clear it.
+The variant is omitted from doc comments, generated `config.toml` files, and the
+JSON Schema via `#[variant(hidden)]` (matching `ProviderId::Test`), and JP never
+writes it.
 
 ### Handler policy
 
@@ -377,6 +411,15 @@ Queued presses are handled at both boundaries: the coordinator drains any
 pending interrupt notification before displaying a prompt, and the in-tree
 widgets poll a cancellation source between terminal events so an active prompt
 reacts immediately when a signal arrives.
+
+`inquire`-based prompts make the same distinction at the `PromptBackend`
+boundary: Ctrl-C returns an `Interrupted` outcome rather than propagating as
+`InquireError::OperationInterrupted`, preventing generic error-handling arms
+from swallowing the interrupt.
+Three call sites currently fold `OperationInterrupted` into a cancellation
+(`classify_prompt_exit` in the interrupt handler, `prompt_cancellation_reason`
+in the tool coordinator, and `declined_or_failed` in `cmd/target.rs`); Phase 5
+updates each call site to handle `Interrupted` explicitly.
 
 **Relationship to [RFD 088].** [RFD 088] states that Ctrl-C inside `InlineReply`
 is always a local reply cancellation rather than [RFD 045] escalation.
@@ -525,6 +568,20 @@ Interactive predicate, document and test the non-interactive ladder, and
 implement the SIGINT re-raise exit convention.
 Independent of the other phases.
 
+### Phase 8: Remove Abort
+
+Remove `[a] Abort` from the streaming interrupt menu.
+Hide `abort` on `interrupt.streaming.action` and resolve it to `stop`, with a
+test verifying that a recorded `abort` config delta still loads.
+In the command-plugin protocol, continue accepting
+`jp_plugin::message::InterruptAction::Abort` from plugins by mapping it to
+`stop`, and update its doc comments so they no longer describe it as discarding
+the turn.
+Remove `InterruptAction::Abort`, `TurnPhase::Aborted`, and
+`StreamingInterruptResult::Abort`, and update the `action` doc comment and the
+query stream pipeline wiki page (W-00dxyb6).
+Independent of the other phases.
+
 ## References
 
 - [RFD 045]: the signal router, handler stack, and escalation model this RFD
@@ -541,3 +598,4 @@ Independent of the other phases.
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 072]: 072-command-plugin-system.md
 [RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md

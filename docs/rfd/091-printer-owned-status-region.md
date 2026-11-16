@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 048]
-- **Extended by**: [RFD 120]
+- **Extended by**: [RFD 120], [RFD 132]
 - **Summary**: Consolidates ephemeral terminal timers and live subprocess output
   windows into a single status-region primitive owned by `jp_printer`.
 
@@ -500,6 +500,11 @@ outside the printer worker.
 Logging setup runs before printer construction and passes this flag into the
 printer constructor alongside condition 2.
 
+> [!TIP]
+> [RFD 132] routes the opt-in stderr tracing layer through the printer so the
+> worker erases and redraws the status region around trace lines like any other
+> chrome, retiring condition 3 and enabling status regions under `-v`.
+
 To make condition 2 explicit and testable, `Printer::terminal` captures stderr
 tty status and the terminal's row and column counts at construction.
 `Printer::memory` accepts an explicit capability override so tests can exercise
@@ -833,6 +838,12 @@ responsibilities belong to the status region and the client.
   suspends the status region rather than sharing the terminal with an active
   prompt widget.
 
+> [!TIP]
+> [RFD 132] extends the status region with interactive rows: a reedline input
+> field that owns the cursor, and (when `query.live_input` is enabled) menu and
+> reply prompts rendered inside the region so the status row stays visible while
+> prompts are open.
+
 ## Risks and Open Questions
 
 - **Row accounting under resize.** The window budget is computed from the
@@ -1023,6 +1034,7 @@ contracts.
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
 [RFD 096]: 096-terminal-output-sanitization-for-untrusted-content.md
 [RFD 120]: 120-ephemeral-reasoning-window.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md
 [Tesler]: https://en.wikipedia.org/wiki/Law_of_conservation_of_complexity
 [`ErrChannel`]: https://github.com/dcdpr/jp/blob/main/crates/jp_printer/src/printer.rs
 [`InlineResults`]: https://github.com/dcdpr/jp/blob/main/crates/jp_config/src/conversation/tool/style.rs

@@ -128,6 +128,12 @@ assert prompt rendering independently of stdout and stderr.
 The `tracing` subscriber writes tracing logs directly to the log file without
 going through `Printer`.
 
+> [!TIP]
+> [RFD 132] routes the opt-in stderr tracing layer (`-v`, `--log`,
+> `--log-file=-`) through `Printer` so the worker erases and redraws status
+> regions and the input field around trace lines; the log-file layer continues
+> writing directly to disk.
+
 ### Standard Input
 
 `stdin` carries only query content and injected context (e.g., `cat file.rs | jp
@@ -241,3 +247,4 @@ This phase is independent of Phases 1 and 2.
 [RFD 091]: 091-printer-owned-status-region.md
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
 [RFD 104]: 104-terminal-capability-and-promptability-signals.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md
