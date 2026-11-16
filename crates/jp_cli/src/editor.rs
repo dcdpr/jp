@@ -495,12 +495,14 @@ fn history_entry(
         .with_timezone(&local_offset)
         .format("%Y-%m-%d %H:%M:%S");
 
+    // `experimental_minimize_commonmark` stays off: it re-parses and re-renders
+    // the whole message once per escape, which takes seconds on a long reply
+    // full of `_`, `*`, or `[` and delays opening the editor.
     let options = comrak::Options {
         render: comrak::options::Render {
             width: HISTORY_WRAP_WIDTH,
             r#unsafe: true,
             prefer_fenced: true,
-            experimental_minimize_commonmark: true,
             ..Default::default()
         },
         ..Default::default()
@@ -510,7 +512,7 @@ fn history_entry(
     let mut buf = String::new();
     match &event.event.kind {
         EventKind::ChatRequest(request) => {
-            buf.push_str(&format!("## You on {timestamp}\n\n"));
+            buf.push_str(&format!("\n\n## You on {timestamp}\n\n"));
             buf.push_str(comrak::markdown_to_commonmark(&request.content, &options).trim());
         }
         EventKind::ChatResponse(ChatResponse::Message { message }) => {
