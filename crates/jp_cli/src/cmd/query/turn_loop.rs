@@ -725,6 +725,7 @@ async fn drive_turn(
                                         &conv,
                                         &printer,
                                         signals,
+                                        &mut interrupts,
                                     )
                                     .await
                                     {
@@ -778,6 +779,51 @@ async fn drive_turn(
                                                 // A menu that could not run also
                                                 // breaks: the stream is dead, so
                                                 // there is nothing to resume.
+                                                StreamingInterruptResult::Continue
+                                                | StreamingInterruptResult::PromptFailed
+                                                | StreamingInterruptResult::Break => break,
+                                                StreamingInterruptResult::Abort => {
+                                                    return Ok(());
+                                                }
+                                                StreamingInterruptResult::Escalate => {
+                                                    signals.shutdown_token().cancel();
+                                                    return Err(cmd::Error::interrupted().into());
+                                                }
+                                            }
+                                        }
+                                        // The partial response was already
+                                        // committed before the backoff wait, so
+                                        // `apply_streaming_interrupt` only
+                                        // records the interrupt action (e.g.
+                                        // appending a reply or completing the
+                                        // turn).
+                                        StreamErrorOutcome::ClientInterrupt(action) => {
+                                            // `commit_partial_response` flushed
+                                            // with `ResponseBoundary::Continuation`,
+                                            // leaving any open reasoning region
+                                            // pending for the retry; close it
+                                            // before applying the interrupt.
+                                            turn_coordinator.flush_renderer();
+                                            printer.flush_instant();
+
+                                            info!(
+                                                ?action,
+                                                "Client interrupt received during retry backoff."
+                                            );
+
+                                            let result = conv.update_events(|stream| {
+                                                apply_streaming_interrupt(
+                                                    action,
+                                                    &mut turn_coordinator,
+                                                    stream,
+                                                )
+                                            });
+
+                                            match result {
+                                                // The stream has already ended,
+                                                // so there is nothing left to
+                                                // poll; break to start a fresh
+                                                // request.
                                                 StreamingInterruptResult::Continue
                                                 | StreamingInterruptResult::PromptFailed
                                                 | StreamingInterruptResult::Break => break,
