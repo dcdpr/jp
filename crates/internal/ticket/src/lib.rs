@@ -70,7 +70,7 @@ pub mod store;
 
 pub use doc::epoch::{self, Epoch};
 pub use id::TicketId;
-pub use jp_label::{Labels, Selector, Unique, ValueType, Vocabulary};
+pub use jp_label::{Direction, Labels, Selector, SortKey, Unique, ValueType, Vocabulary};
 
 /// The metadata key one label is written under.
 ///

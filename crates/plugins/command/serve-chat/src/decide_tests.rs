@@ -24,11 +24,11 @@ fn offered(body: &Value) -> Vec<&String> {
 }
 
 #[test]
-fn a_message_that_may_give_a_command_is_offered_the_commands() {
+fn a_message_is_offered_every_action() {
     let body = request_body(
         &options(),
         "Last message:\nAda Client (to you): compact please",
-        Action::offered(true),
+        Action::ALL,
     );
 
     assert_eq!(body["model"], "jev-latest");
@@ -50,17 +50,6 @@ fn a_message_that_may_give_a_command_is_offered_the_commands() {
 }
 
 #[test]
-fn any_other_message_is_offered_answering_or_ignoring_it() {
-    let body = request_body(
-        &options(),
-        "Last message:\nAda Client: thanks!",
-        Action::offered(false),
-    );
-
-    assert_eq!(offered(&body), ["answer", "ignore"]);
-}
-
-#[test]
 fn the_answer_is_the_chosen_action_and_its_probability() {
     let body = json!({
         "model": "jev-1.13.0",
@@ -76,7 +65,7 @@ fn the_answer_is_the_chosen_action_and_its_probability() {
     });
 
     assert_eq!(
-        verdict(&body, Action::offered(true)),
+        verdict(&body, Action::ALL),
         Ok(Verdict {
             action: Action::NewConversation,
             probability: 0.82,
@@ -106,11 +95,7 @@ fn an_answer_the_bridge_cant_act_on_is_an_error() {
     ];
 
     for (body, error) in cases {
-        assert_eq!(
-            verdict(&body, Action::offered(true)),
-            Err(error.to_owned()),
-            "{body}"
-        );
+        assert_eq!(verdict(&body, Action::ALL), Err(error.to_owned()), "{body}");
     }
 }
 
@@ -119,7 +104,7 @@ fn a_command_that_wasnt_offered_is_an_error() {
     let body = json!({ "answers": { "action": { "choice": "compact", "probabilities": { "compact": 0.9 } } } });
 
     assert_eq!(
-        verdict(&body, Action::offered(false)),
+        verdict(&body, &[Action::Ignore, Action::Answer]),
         Err("the decide API chose `compact`, which isn't an option".to_owned())
     );
 }

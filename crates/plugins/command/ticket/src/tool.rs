@@ -34,7 +34,11 @@ use ticket::{
     parse, render, store,
 };
 
-use crate::{PLUGIN, label, options::Options};
+use crate::{
+    PLUGIN, label,
+    options::Options,
+    order::{self, BOARD, ListOrder},
+};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -1107,13 +1111,13 @@ fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     }
 }
 
-/// List the board, filtered by whatever the caller named, one page at a time.
+/// List tickets matching the caller's filters, one page at a time.
 ///
-/// Tickets come in board order: Todo, In Progress, then Done, each column top
-/// first, so the first Todo line is the next thing to work on.
-/// Labels are matched as written on the ticket rather than through the
-/// vocabulary, so a ticket carrying a label the board has since dropped can
-/// still be found.
+/// Defaults to board order (Todo, In Progress, then Done, each column ordered
+/// top-first) unless `order` specifies another sort order.
+/// Labels are matched against the ticket's raw metadata rather than resolved
+/// through the vocabulary, so tickets carrying removed labels can still be
+/// found.
 fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer {
     let status = match args
         .optional::<String>("status")?
@@ -1132,6 +1136,16 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
         Some(Ok(under)) => Some(under),
         Some(Err(refusal)) => return refuse(format!("`under`: {refusal}")),
         None => None,
+    };
+    let order_text = args.optional::<String>("order")?;
+    // Default board order does not use the vocabulary, so listing still works
+    // when the label configuration is invalid.
+    let vocabulary = match order_text {
+        Some(_) => tickets.options.vocabulary()?,
+        None => Vocabulary::default(),
+    };
+    let Some(order) = ListOrder::parse(order_text.as_deref().unwrap_or(BOARD), &vocabulary) else {
+        return refuse(order::refusal("order", &vocabulary));
     };
     let page = args.optional::<usize>("page")?.unwrap_or(1);
     if page == 0 {
@@ -1162,22 +1176,13 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
             && under.is_none_or(|under| ticket.metadata.parent == Some(under))
     });
 
-    // An order file that can't be read costs the order, not the listing: the
-    // columns fall back to id order, and the reader is told why.
-    let order = match board::read(&tickets.dir) {
-        Ok(order) => order,
-        Err(problem) => {
-            let file = tickets.relative(&tickets.dir.join(board::BOARD_FILE));
-            let reason = match problem {
-                store::Error::Board { reason, .. } => reason,
-                other => other.to_string(),
-            };
-            unreadable.push(format!("{file}: {reason} (columns are listed by id)"));
-            Order::default()
+    let laid_out = match order {
+        ListOrder::Board => in_board_order(&found, &board_order(tickets, &mut unreadable)),
+        ListOrder::Sorted(sort) => {
+            found.sort_by(|a, b| sort.compare(*a, *b));
+            found
         }
     };
-
-    let laid_out = in_board_order(&found, &order);
     let count = laid_out.len();
     let pages = count.div_ceil(page_size).max(1);
     if page > pages {
@@ -1236,9 +1241,29 @@ pub(crate) fn children_heading(children: &[(TicketId, &Ticket)]) -> String {
     format!("## Children ({done} of {} done)", children.len())
 }
 
+/// Read `.board.json`, or return an empty [`Order`] if the file cannot be read.
+///
+/// On read failure, columns fall back to ID order and the error is recorded in
+/// `unreadable`.
+fn board_order(tickets: &Tickets<'_>, unreadable: &mut Vec<String>) -> Order {
+    let problem = match board::read(&tickets.dir) {
+        Ok(order) => return order,
+        Err(problem) => problem,
+    };
+
+    let file = tickets.relative(&tickets.dir.join(board::BOARD_FILE));
+    let reason = match problem {
+        store::Error::Board { reason, .. } => reason,
+        other => other.to_string(),
+    };
+    unreadable.push(format!("{file}: {reason} (columns are listed by id)"));
+
+    Order::default()
+}
+
 /// `found` laid out the way the board shows it: Todo, In Progress, then Done,
 /// each column in `order`.
-fn in_board_order<'a>(
+pub(crate) fn in_board_order<'a>(
     found: &[(TicketId, &'a Ticket)],
     order: &Order,
 ) -> Vec<(TicketId, &'a Ticket)> {
@@ -1293,8 +1318,9 @@ fn preview(document: &str) -> String {
     Formatter::new().format_terminal(&quoted).unwrap_or(quoted)
 }
 
-/// Render one page of the board as one line per ticket, then `footer`, which
-/// says where the page sits when there are more.
+/// Render one page of tickets (one line per ticket: ID, status, filing date,
+/// title, labels, checklist progress, and comment count), followed by the
+/// pagination `footer` and any `unreadable` file errors.
 fn render_list(
     tickets: &[(TicketId, &Ticket)],
     footer: Option<&str>,
@@ -1323,8 +1349,8 @@ fn render_list(
             .map_or_else(String::new, |progress| format!(" ({progress})"));
 
         out.push_str(&format!(
-            "{id:<9} {status:<12} {}{labels}{checklist}{comments}\n",
-            ticket.title
+            "{id:<9} {status:<12} {} {}{labels}{checklist}{comments}\n",
+            ticket.metadata.date, ticket.title
         ));
     }
 

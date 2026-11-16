@@ -437,8 +437,9 @@ fn a_kept_retired_value_counts_toward_the_bound() {
 fn a_bound_on_a_key_without_values_is_an_error() {
     assert_eq!(
         Vocabulary::parse(r#"{"draft": {"min": 1}}"#),
-        Err(Error::BoundOnBareKey {
-            key: "draft".to_owned()
+        Err(Error::Unmeetable {
+            key: "draft".to_owned(),
+            problem: Unmeetable::BoundOnBareKey,
         })
     );
 }
@@ -449,24 +450,23 @@ fn a_bound_on_a_key_without_values_is_an_error() {
 fn bounds_no_item_can_meet_are_an_error() {
     assert_eq!(
         Vocabulary::parse(r#"{"type": {"values": ["bug"], "max": 0}}"#),
-        Err(Error::ZeroMax {
-            key: "type".to_owned()
+        Err(Error::Unmeetable {
+            key: "type".to_owned(),
+            problem: Unmeetable::ZeroMax,
         })
     );
     assert_eq!(
         Vocabulary::parse(r#"{"type": {"values": ["bug", "feature"], "min": 2, "max": 1}}"#),
-        Err(Error::MinAboveMax {
+        Err(Error::Unmeetable {
             key: "type".to_owned(),
-            min: 2,
-            max: 1
+            problem: Unmeetable::MinAboveMax { min: 2, max: 1 },
         })
     );
     assert_eq!(
         Vocabulary::parse(r#"{"type": {"values": ["bug"], "retired": ["chore"], "min": 2}}"#),
-        Err(Error::MinAboveValues {
+        Err(Error::Unmeetable {
             key: "type".to_owned(),
-            min: 2,
-            values: 1
+            problem: Unmeetable::MinAboveValues { min: 2, values: 1 },
         })
     );
 }
@@ -602,8 +602,9 @@ fn a_value_of_another_type_is_refused() {
 fn a_type_on_a_key_not_taking_any_value_is_an_error() {
     let error = Vocabulary::parse(r#"{"due": {"values": ["soon"], "type": "date"}}"#).unwrap_err();
 
-    assert_eq!(error, Error::TypeOnClosedKey {
-        key: "due".to_owned()
+    assert_eq!(error, Error::Unmeetable {
+        key: "due".to_owned(),
+        problem: Unmeetable::TypeOnClosedKey,
     });
     assert_eq!(
         error.to_string(),
@@ -613,10 +614,53 @@ fn a_type_on_a_key_not_taking_any_value_is_an_error() {
 
     assert_eq!(
         Vocabulary::parse(r#"{"due": {"type": "date"}}"#).unwrap_err(),
-        Error::TypeOnClosedKey {
-            key: "due".to_owned()
+        Error::Unmeetable {
+            key: "due".to_owned(),
+            problem: Unmeetable::TypeOnClosedKey,
         }
     );
+}
+
+#[test]
+fn ordered_needs_a_key_listing_its_values_with_max_one() {
+    for source in [
+        r#"{"priority": {"values": ["high", "low"], "ordered": true}}"#,
+        r#"{"priority": {"values": ["high", "low"], "max": 2, "ordered": true}}"#,
+        r#"{"priority": {"values": [], "max": 1, "ordered": true}}"#,
+        r#"{"priority": {"ordered": true}}"#,
+    ] {
+        let error = Vocabulary::parse(source).unwrap_err();
+
+        assert_eq!(
+            error,
+            Error::Unmeetable {
+                key: "priority".to_owned(),
+                problem: Unmeetable::UnorderableKey,
+            },
+            "{source}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "`priority` in the label vocabulary sets `ordered`, but only a key that lists its \
+             values and has `max = 1` can be ordered."
+        );
+    }
+
+    assert!(
+        Vocabulary::parse(r#"{"priority": {"values": ["high", "low"], "ordered": false}}"#).is_ok()
+    );
+}
+
+#[test]
+fn a_value_listed_twice_is_still_one_value() {
+    let vocabulary = Vocabulary::parse(
+        r#"{"client": {"values": ["cli", "macos", "cli"], "retired": ["web", "web"]}}"#,
+    )
+    .unwrap();
+
+    let facet = vocabulary.facet("client").unwrap();
+    assert_eq!(facet.values().collect::<Vec<_>>(), ["cli", "macos"]);
+    assert_eq!(facet.retired().collect::<Vec<_>>(), ["web"]);
 }
 
 #[test]
@@ -634,8 +678,9 @@ fn an_unknown_type_is_an_error() {
 fn retiring_values_of_a_key_taking_any_value_is_an_error() {
     let error = Vocabulary::parse(r#"{"client": {"values": [], "retired": ["cli"]}}"#).unwrap_err();
 
-    assert_eq!(error, Error::RetiredOnOpenKey {
-        key: "client".to_owned()
+    assert_eq!(error, Error::Unmeetable {
+        key: "client".to_owned(),
+        problem: Unmeetable::RetiredOnOpenKey,
     });
     assert_eq!(
         error.to_string(),
@@ -762,9 +807,9 @@ fn an_unknown_uniqueness_is_an_error() {
 fn a_required_key_unique_as_a_whole_is_an_error() {
     assert_eq!(
         Vocabulary::parse(r#"{"owner": {"values": ["jp"], "min": 1, "unique": "key"}}"#),
-        Err(Error::UniqueRequired {
+        Err(Error::Unmeetable {
             key: "owner".to_owned(),
-            min: 1
+            problem: Unmeetable::UniqueRequired { min: 1 },
         })
     );
 

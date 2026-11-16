@@ -287,7 +287,7 @@ fn message(envelope: &Value, account: &Account) -> Option<Inbound> {
         .get("mentions")
         .and_then(Value::as_array)
         .map_or(&[][..], Vec::as_slice);
-    let (text, mentioned, leading_mention) = resolve_mentions(raw, mentions, own_ids);
+    let (text, mentioned) = resolve_mentions(raw, mentions, own_ids);
     let replied = data
         .get("quote")
         .is_some_and(|quote| is_own(quote, "authorNumber", "authorUuid", own_ids));
@@ -311,7 +311,6 @@ fn message(envelope: &Value, account: &Account) -> Option<Inbound> {
         sender,
         name: field(envelope, "sourceName"),
         addressed: mentioned || replied,
-        leading_mention,
         text,
         attachments,
     })
@@ -384,7 +383,7 @@ fn is_own(value: &Value, number: &str, uuid: &str, own_ids: &[String]) -> bool {
 }
 
 /// Replace Signal mention placeholders in `text`, and report whether any
-/// mention targets `own_ids`, and whether the text starts with one that does.
+/// mention targets `own_ids`.
 ///
 /// Signal encodes each mention in the message body as a `U+FFFC` placeholder
 /// accompanied by a `{start, length, number, uuid}` entry measured in UTF-16
@@ -393,12 +392,8 @@ fn is_own(value: &Value, number: &str, uuid: &str, own_ids: &[String]) -> bool {
 /// message with `(to you)` via `Inbound::addressed`); mentions of other
 /// accounts are rendered as `@<number>`, or `@someone` when only a UUID is
 /// present.
-fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (String, bool, bool) {
+fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (String, bool) {
     let mut units: Vec<u16> = text.encode_utf16().collect();
-    // Before any splice: the start offsets index the original text.
-    let leading = units
-        .iter()
-        .position(|unit| !char::from_u32(u32::from(*unit)).is_some_and(char::is_whitespace));
     let mut spans: Vec<(usize, usize, &Value)> = mentions
         .iter()
         .filter_map(|mention| {
@@ -411,7 +406,6 @@ fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (Stri
     spans.sort_by_key(|(start, ..)| std::cmp::Reverse(*start));
 
     let mut mentioned = false;
-    let mut leading_mention = false;
     for (start, length, mention) in spans {
         let Some(end) = start.checked_add(length).filter(|end| *end <= units.len()) else {
             continue;
@@ -419,7 +413,6 @@ fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (Stri
 
         let replacement = if is_own(mention, "number", "uuid", own_ids) {
             mentioned = true;
-            leading_mention |= Some(start) == leading;
             String::new()
         } else {
             match mention.get("number").and_then(Value::as_str) {
@@ -430,7 +423,7 @@ fn resolve_mentions(text: &str, mentions: &[Value], own_ids: &[String]) -> (Stri
         units.splice(start..end, replacement.encode_utf16());
     }
 
-    (String::from_utf16_lossy(&units), mentioned, leading_mention)
+    (String::from_utf16_lossy(&units), mentioned)
 }
 
 /// Read `signal-cli` stdout lines and forward messages to `inbound` until EOF.

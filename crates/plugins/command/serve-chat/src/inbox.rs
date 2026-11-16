@@ -32,10 +32,6 @@ pub(crate) struct Incoming {
     /// Formatted message text, prefixed with the sender's name in group chats.
     pub text: String,
 
-    /// Whether the message can issue a command (sent in a direct chat, or
-    /// starting with a bot mention in a group).
-    pub commands: bool,
-
     /// Recent chat transcript passed to the decider, if configured.
     pub context: Option<String>,
 }
@@ -84,14 +80,13 @@ impl Inbox {
     }
 
     /// Enqueue a message from `person` in `chat`.
-    pub(crate) fn push(&mut self, chat: Chat, person: String, text: String, commands: bool) {
+    pub(crate) fn push(&mut self, chat: Chat, person: String, text: String) {
         let context = self.decider.is_some().then(|| self.context(&chat, &text));
         self.remember(&chat, &text);
         self.pending.push_back(Incoming {
             chat,
             person,
             text,
-            commands,
             context,
         });
     }
@@ -107,8 +102,7 @@ impl Inbox {
         match (&front.context, &self.decider) {
             (Some(context), Some(decider)) => {
                 self.deciding = true;
-                let actions = Action::offered(front.commands);
-                Some(Next::Decide(decider.decide(context.clone(), actions)))
+                Some(Next::Decide(decider.decide(context.clone(), Action::ALL)))
             }
             _ => self.pending.pop_front().map(Next::Take),
         }

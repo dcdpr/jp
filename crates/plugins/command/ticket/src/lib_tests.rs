@@ -103,6 +103,19 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
     body.parse().unwrap()
 }
 
+/// Read `id`'s filing date from disk so tests that run `add` (which uses
+/// today's date) don't hardcode a date.
+fn filed_on(dir: &Utf8Path, id: TicketId) -> String {
+    store::list(dir)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| entry.ticket.ok())
+        .expect("the ticket to be readable")
+        .metadata
+        .date
+}
+
 /// File a labelled ticket and hand back its id.
 fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
     run_command(dir, Command::Add {
@@ -544,6 +557,7 @@ fn list_filters_are_optional() {
 
     match args.command {
         Command::List {
+            order,
             status,
             labels,
             query,
@@ -553,9 +567,127 @@ fn list_filters_are_optional() {
             assert_eq!(status, Some(Status::InProgress));
             assert!(labels.is_empty());
             assert_eq!(under, None);
+            assert_eq!(order, None);
         }
         other => panic!("expected list, got {other:?}"),
     }
+}
+
+#[test]
+fn list_takes_an_order() {
+    match parse(&["list", "--order", "due:desc"]).unwrap().command {
+        Command::List { order, .. } => assert_eq!(order.as_deref(), Some("due:desc")),
+        other => panic!("expected list, got {other:?}"),
+    }
+}
+
+fn write_dated(dir: &Utf8Path, body: &str, title: &str, date: &str, labels: &[&str]) {
+    let document = ticket::render::ticket(&NewTicket {
+        title,
+        authors: "john",
+        date,
+        labels: &Labels::from_tokens(labels).unwrap(),
+        description: "",
+        parent: None,
+    });
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
+}
+
+#[test]
+fn list_orders_by_a_label_or_by_filing_date() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    write_dated(root, "02wt0k1", "Undated", "2026-03-01", &[]);
+    write_dated(root, "02wt0k2", "Due later", "2026-01-01", &[
+        "due=2026-12-01",
+    ]);
+    write_dated(root, "02wt0k3", "Due sooner", "2026-02-01", &[
+        "due=2026-11-20",
+    ]);
+    let listing = |order: &str| {
+        run_with_options(
+            root,
+            Command::List {
+                order: Some(order.to_owned()),
+                under: None,
+                status: None,
+                labels: vec![],
+                query: None,
+            },
+            &dated_board(),
+        )
+    };
+
+    assert_eq!(
+        listing("due").unwrap().text,
+        "T-02wt0k3 Todo         2026-02-01 Due sooner [due=2026-11-20]\nT-02wt0k2 Todo         \
+         2026-01-01 Due later [due=2026-12-01]\nT-02wt0k1 Todo         2026-03-01 Undated\n"
+    );
+    assert_eq!(
+        listing("filed:desc").unwrap().text,
+        "T-02wt0k1 Todo         2026-03-01 Undated\nT-02wt0k3 Todo         2026-02-01 Due sooner \
+         [due=2026-11-20]\nT-02wt0k2 Todo         2026-01-01 Due later [due=2026-12-01]\n"
+    );
+}
+
+#[test]
+fn list_follows_the_board_when_asked() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    write_ticket(root, "02wt0k1", "Finished", Status::Done);
+    write_ticket(root, "02wt0k2", "Queued second", Status::Todo);
+    write_ticket(root, "02wt0k3", "Queued first", Status::Todo);
+    std::fs::write(
+        root.join(board::BOARD_FILE),
+        r#"{"todo": ["T-02wt0k3"], "in_progress": [], "done": []}"#,
+    )
+    .unwrap();
+    let listing = |order: Option<&str>| {
+        run_in(root, Command::List {
+            order: order.map(ToOwned::to_owned),
+            under: None,
+            status: None,
+            labels: vec![],
+            query: None,
+        })
+        .unwrap()
+        .text
+    };
+
+    assert_eq!(
+        listing(None),
+        "T-02wt0k1 Done         2026-08-05 Finished\nT-02wt0k2 Todo         2026-08-05 Queued \
+         second\nT-02wt0k3 Todo         2026-08-05 Queued first\n"
+    );
+    assert_eq!(
+        listing(Some("board")),
+        "T-02wt0k3 Todo         2026-08-05 Queued first\nT-02wt0k2 Todo         2026-08-05 Queued \
+         second\nT-02wt0k1 Done         2026-08-05 Finished\n"
+    );
+}
+
+#[test]
+fn list_refuses_an_order_the_board_cannot_sort_by() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = run_with_options(
+        dir.path(),
+        Command::List {
+            order: Some("priority".to_owned()),
+            under: None,
+            status: None,
+            labels: vec![],
+            query: None,
+        },
+        &dated_board(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`--order` must be one of: board, filed, filed:desc, due, due:desc."
+    );
 }
 
 /// Repeating `--label` narrows the listing rather than replacing the previous
@@ -1244,7 +1376,8 @@ fn status_places_the_ticket_next_to_its_neighbour() {
     .unwrap();
     assert!(
         board.text.contains(
-            "In Progress (3)\nT-02wt0k2 Started\nT-02wt0k1 Moving\nT-02wt0k3 Also started\n"
+            "In Progress (3)\nT-02wt0k2 2026-08-05 Started\nT-02wt0k1 2026-08-05 \
+             Moving\nT-02wt0k3 2026-08-05 Also started\n"
         ),
         "{}",
         board.text
@@ -1345,8 +1478,9 @@ fn board_prints_each_column_in_board_order() {
 
     assert_eq!(
         output.text,
-        "Todo (3)\nT-02wt0k3 Third filed\nT-02wt0k1 First filed\nT-02wt0k2 Second filed\n\nIn \
-         Progress (0)\n\nDone (1/2)\nT-02wt0k5 Newer done\n"
+        "Todo (3)\nT-02wt0k3 2026-08-05 Third filed\nT-02wt0k1 2026-08-05 First filed\nT-02wt0k2 \
+         2026-08-05 Second filed\n\nIn Progress (0)\n\nDone (1/2)\nT-02wt0k5 2026-08-05 Newer \
+         done\n"
     );
 }
 
@@ -1367,7 +1501,7 @@ fn board_prints_only_the_statuses_named() {
 
     assert_eq!(
         output.text,
-        "Todo (1)\nT-02wt0k1 Queued\n\nIn Progress (1)\nT-02wt0k2 Started\n"
+        "Todo (1)\nT-02wt0k1 2026-08-05 Queued\n\nIn Progress (1)\nT-02wt0k2 2026-08-05 Started\n"
     );
 }
 
@@ -1400,8 +1534,9 @@ fn board_limit_cuts_every_column() {
 
     assert_eq!(
         output.text,
-        "Todo (2/3)\nT-02wt0k1 First queued\nT-02wt0k2 Second queued\n\nIn Progress \
-         (1)\nT-02wt0k4 Started\n\nDone (2/3)\nT-02wt0k7 Newest done\nT-02wt0k6 Older done\n"
+        "Todo (2/3)\nT-02wt0k1 2026-08-05 First queued\nT-02wt0k2 2026-08-05 Second queued\n\nIn \
+         Progress (1)\nT-02wt0k4 2026-08-05 Started\n\nDone (2/3)\nT-02wt0k7 2026-08-05 Newest \
+         done\nT-02wt0k6 2026-08-05 Older done\n"
     );
 }
 
@@ -1456,7 +1591,7 @@ fn rank_places_a_ticket_and_the_board_follows() {
     assert!(
         board
             .text
-            .starts_with("Todo (2)\nT-02wt0k2 Second filed\nT-02wt0k1 First"),
+            .starts_with("Todo (2)\nT-02wt0k2 2026-08-05 Second filed\nT-02wt0k1 2026-08-05 First"),
         "{}",
         board.text
     );
@@ -1640,21 +1775,24 @@ fn commands_run_against_the_resolved_directory() {
     assert_eq!(commented.text, format!("Added {id}#1 by john\n"));
 
     let listed = run_command(&dir, Command::List {
+        order: None,
         under: None,
         status: None,
         labels: vec![],
         query: None,
     })
     .unwrap();
+    let filed = filed_on(dir.path(), id);
     assert_eq!(
         listed.text,
-        format!("{id} Todo         Tool call header misaligned\n")
+        format!("{id} Todo         {filed} Tool call header misaligned\n")
     );
 
     let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
     assert!(closed.text.contains("Todo -> Done"), "{}", closed.text);
 
     let json = run_json(&dir, Command::List {
+        order: None,
         under: None,
         status: Some(Status::Done),
         labels: vec![],
@@ -2077,7 +2215,7 @@ fn show_prints_the_parent_and_the_children() {
         shown.text,
         format!(
             "# T-02wt0kx: Investigate\n\n- **Path**: {}\n- **Status**: Todo\n\n## Children (0 of \
-             1 done)\n\nT-02wt0m0 Todo         Bound output\n",
+             1 done)\n\nT-02wt0m0 Todo         2026-08-05 Bound output\n",
             dir.path().join("02wt0kx-slug.md")
         )
     );
@@ -2315,6 +2453,7 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
     ]);
 
     let listed = run_command(&dir, Command::List {
+        order: None,
         under: None,
         status: None,
         labels: vec![],
@@ -2322,9 +2461,12 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
     })
     .unwrap();
 
+    let filed = filed_on(dir.path(), id);
     assert_eq!(
         listed.text,
-        format!("{id} Todo         Window title truncates [client=macos, package=jp_config]\n")
+        format!(
+            "{id} Todo         {filed} Window title truncates [client=macos, package=jp_config]\n"
+        )
     );
 }
 
@@ -2337,6 +2479,7 @@ fn listing_narrows_to_tickets_carrying_every_label() {
     add_labelled(&dir, "None", &[]);
 
     let listed = run_command(&dir, Command::List {
+        order: None,
         under: None,
         status: None,
         labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
@@ -2344,9 +2487,10 @@ fn listing_narrows_to_tickets_carrying_every_label() {
     })
     .unwrap();
 
+    let filed = filed_on(dir.path(), both);
     assert_eq!(
         listed.text,
-        format!("{both} Todo         Both [client=macos, package=jp_cli]\n")
+        format!("{both} Todo         {filed} Both [client=macos, package=jp_cli]\n")
     );
 }
 
@@ -2360,6 +2504,7 @@ fn listing_narrows_on_a_bare_key() {
     add_labelled(&dir, "Crate work", &["package=jp_cli"]);
 
     let listed = run_command(&dir, Command::List {
+        order: None,
         under: None,
         status: None,
         labels: vec!["client".to_owned()],
@@ -2392,6 +2537,7 @@ fn listing_narrows_on_a_query() {
     .unwrap();
     let listing = |query: &str| {
         run_command(&dir, Command::List {
+            order: None,
             under: None,
             status: None,
             labels: vec![],
@@ -2401,11 +2547,13 @@ fn listing_narrows_on_a_query() {
         .text
     };
 
+    let titled_on = filed_on(dir.path(), titled);
+    let described_on = filed_on(dir.path(), described);
     assert_eq!(
         listing("wrap"),
         format!(
-            "{titled} Todo         Wrap is off by one\n{described} Todo         Header \
-             misaligned\n"
+            "{titled} Todo         {titled_on} Wrap is off by one\n{described} Todo         \
+             {described_on} Header misaligned\n"
         )
     );
     assert_eq!(listing("  ").lines().count(), 3);
@@ -2810,6 +2958,7 @@ fn a_broken_vocabulary_fails_what_labels_or_files() {
     run_with_options(
         dir.path(),
         Command::List {
+            order: None,
             under: None,
             status: None,
             labels: vec![],
@@ -3146,6 +3295,7 @@ fn listing_narrows_on_a_date_comparison() {
         run_with_options(
             dir.path(),
             Command::List {
+                order: None,
                 under: None,
                 status: None,
                 labels: vec![label.to_owned()],
@@ -3157,13 +3307,15 @@ fn listing_narrows_on_a_date_comparison() {
         .text
     };
 
+    let early_on = filed_on(dir.path(), early);
+    let late_on = filed_on(dir.path(), late);
     assert_eq!(
         listing("due<2026-12-01"),
-        format!("{early} Todo         Early [due=2026-11-20]\n")
+        format!("{early} Todo         {early_on} Early [due=2026-11-20]\n")
     );
     assert_eq!(
         listing("due>=2026-11-21"),
-        format!("{late} Todo         Late [due=2026-12-20]\n")
+        format!("{late} Todo         {late_on} Late [due=2026-12-20]\n")
     );
 }
 
@@ -3174,6 +3326,7 @@ fn listing_refuses_a_comparison_with_something_other_than_a_date() {
     let error = run_with_options(
         dir.path(),
         Command::List {
+            order: None,
             under: None,
             status: None,
             labels: vec!["due<friday".to_owned()],
@@ -3248,6 +3401,7 @@ fn unreadable_tickets_are_warned_about_separately() {
     std::fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
 
     let listed = run_json(&dir, Command::List {
+        order: None,
         under: None,
         status: None,
         labels: vec![],
@@ -3499,6 +3653,7 @@ fn show_list_and_board_count_the_checklist() {
     );
 
     let listed = run_command(&dir, Command::List {
+        order: None,
         status: None,
         labels: vec![],
         query: None,
@@ -3507,7 +3662,7 @@ fn show_list_and_board_count_the_checklist() {
     .unwrap();
     assert_eq!(
         listed.text,
-        "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\n"
+        "T-02wt0kx Todo         2026-08-05 Exercise recorded tool rounds (1 of 3 checked)\n"
     );
 
     let board = run_command(&dir, Command::Board {
@@ -3517,8 +3672,8 @@ fn show_list_and_board_count_the_checklist() {
     .unwrap();
     assert_eq!(
         board.text,
-        "Todo (1)\nT-02wt0kx Exercise recorded tool rounds (1 of 3 checked)\n\nIn Progress \
-         (0)\n\nDone (0)\n"
+        "Todo (1)\nT-02wt0kx 2026-08-05 Exercise recorded tool rounds (1 of 3 checked)\n\nIn \
+         Progress (0)\n\nDone (0)\n"
     );
 }
 
@@ -3529,6 +3684,7 @@ fn list_json_counts_the_checklist() {
     write_ticket(dir.path(), "02wt0kz", "No checklist", Status::Todo);
 
     let out = run_json(&dir, Command::List {
+        order: None,
         status: None,
         labels: vec![],
         query: None,

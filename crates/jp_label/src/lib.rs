@@ -38,10 +38,12 @@
 use std::fmt;
 
 mod labels;
+mod sort;
 mod value_type;
 pub mod vocabulary;
 
 pub use labels::Labels;
+pub use sort::{Direction, SortKey};
 pub use value_type::ValueType;
 use value_type::is_date;
 pub use vocabulary::{Clash, Miscount, Mistyped, Rejected, Unique, Vocabulary};
