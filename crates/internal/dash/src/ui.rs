@@ -51,6 +51,18 @@ const CHROME: usize = 3;
 /// Maximum width of the worktree and branch columns.
 const MAX_NAME_WIDTH: usize = 36;
 
+/// Width of the JP column, which fits `waiting 59m` and `running ×2`.
+const JP_WIDTH: usize = 11;
+
+/// Width of the PR column.
+const PR_WIDTH: usize = 6;
+
+/// Width of the CI column, which fits `✗ 12 failed` and `● 100/100`.
+const CI_WIDTH: usize = 12;
+
+/// Width of the review column.
+const REVIEW_WIDTH: usize = 6;
+
 /// How a run of text is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Style {
@@ -154,10 +166,10 @@ pub fn body_rows(height: u16) -> usize {
 #[must_use]
 pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
     let (width, height) = (usize::from(width), usize::from(height));
-    let rows = app.visible();
+    let rows = app.table.visible();
     let widths = columns(&rows, width);
     let selected = app.selected_index();
-    let display = app.display();
+    let display = app.table.display();
     let listing = Listing::of(&display, app.now);
 
     let mut lines = vec![
@@ -167,7 +179,7 @@ pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
 
     for line in display
         .iter()
-        .skip(app.scroll)
+        .skip(app.cursor.scroll)
         .take(height.saturating_sub(CHROME))
     {
         let line = match line {
@@ -176,25 +188,7 @@ pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
                 item,
                 indent,
             } => {
-                let mut line = match *item {
-                    Item::Row(row) => table_line(
-                        cells(app, row),
-                        &widths,
-                        row.pr.as_ref().map(|pr| (PR_COLUMN, pr.url.as_str())),
-                    ),
-                    Item::Tab { tab, index, .. } => {
-                        table_line(tab_cells(tab, index, *indent), &widths, None)
-                    }
-                    Item::Conversation { conversation, .. } => {
-                        listing.line(conversation, *indent, app.now)
-                    }
-                    Item::Operation {
-                        conversation,
-                        operation,
-                        ..
-                    } => operation_line(operation, &conversation.id, *indent),
-                }
-                .fit(width);
+                let mut line = item_line(app, *item, *indent, &widths, &listing).fit(width);
                 if Some(*index) == selected {
                     line.reverse();
                 }
@@ -215,17 +209,43 @@ pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
     lines.truncate(height);
 
     if let Some(highlighted) = app.sort_menu {
-        overlay(&mut lines, &sort_menu(app.sort, highlighted), width);
+        overlay(&mut lines, &sort_menu(app.table.sort, highlighted), width);
     }
 
     lines.into_iter().map(|line| line.fit(width)).collect()
 }
 
-/// Map a mouse click at column `x`, row `y` to a [`App::display`] index and
+/// The line of a selectable table item, as wide as its content.
+fn item_line(
+    app: &App,
+    item: Item<'_>,
+    indent: Option<Indent>,
+    widths: &[usize; 7],
+    listing: &Listing,
+) -> Line {
+    match item {
+        Item::Row(row) => table_line(
+            cells(app, row),
+            widths,
+            row.pr.as_ref().map(|pr| (PR_COLUMN, pr.url.as_str())),
+        ),
+        Item::Tab { tab, index, .. } => table_line(tab_cells(tab, index, indent), widths, None),
+        Item::Conversation { conversation, .. } => listing.line(conversation, indent, app.now),
+        Item::Operation {
+            conversation,
+            operation,
+            ..
+        } => operation_line(operation, &conversation.id, indent),
+    }
+}
+
+/// Map a mouse click at column `x`, row `y` to a [`Table::display`] index and
 /// [`Target`].
 ///
 /// Returns `None` if the click is outside the table body or while the sort menu
 /// is open.
+///
+/// [`Table::display`]: crate::app::Table::display
 #[must_use]
 pub fn hit(app: &App, width: u16, height: u16, x: u16, y: u16) -> Option<(usize, Target)> {
     if app.sort_menu.is_some() {
@@ -237,12 +257,12 @@ pub fn hit(app: &App, width: u16, height: u16, x: u16, y: u16) -> Option<(usize,
     if line >= usize::from(height).saturating_sub(CHROME) {
         return None;
     }
-    let index = app.scroll + line;
-    if index >= app.display().len() {
+    let index = app.cursor.scroll + line;
+    if index >= app.table.display().len() {
         return None;
     }
 
-    let widths = columns(&app.visible(), usize::from(width));
+    let widths = columns(&app.table.visible(), usize::from(width));
     let start = |column: usize| widths[..column].iter().sum::<usize>() + SPACING * column;
     let within =
         |column: usize, x: usize| (start(column)..start(column) + widths[column]).contains(&x);
@@ -313,7 +333,7 @@ fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
         } else if row.terminals.is_empty() {
             text_width(&row.name)
         } else {
-            let tab = text_width(guide(Some(Indent::Tab { last: true }))) + 4;
+            let tab = text_width(guide(Some(Indent::Tab { last: true }))) + text_width("tab ");
             text_width(&row.name).max(tab + row.terminals.len().to_string().len())
         }
     });
@@ -325,9 +345,7 @@ fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
         HEADINGS[1],
     );
 
-    // JP fits `waiting 59m` and `running ×2`, CI `✗ 12 failed` and
-    // `● 100/100`.
-    let mut widths = [name, branch, 11, 0, 6, 12, 6];
+    let mut widths = [name, branch, JP_WIDTH, 0, PR_WIDTH, CI_WIDTH, REVIEW_WIDTH];
     let taken = widths.iter().sum::<usize>() + SPACING * (widths.len() - 1);
     widths[3] = width.saturating_sub(taken);
     widths
@@ -396,11 +414,11 @@ fn operation_line(operation: Operation, id: &str, indent: Option<Indent>) -> Lin
 }
 
 fn header_line(app: &App) -> Line {
-    let rows = app.visible();
+    let rows = app.table.visible();
     let mut line = Line::default();
     line.push("dash  ", BOLD);
 
-    if let Some(filter) = &app.filter
+    if let Some(filter) = &app.table.filter
         && !filter.query.is_empty()
     {
         line.push(
@@ -408,7 +426,7 @@ fn header_line(app: &App) -> Line {
                 "filter /{}: {} of {}",
                 filter.query,
                 rows.len(),
-                app.total_rows()
+                app.table.total_rows()
             ),
             fg(Color::Yellow),
         );
@@ -420,12 +438,12 @@ fn header_line(app: &App) -> Line {
             rows.iter().partition(|row| row.is_worktree());
         let shown = worktrees.len();
 
-        let mut summary = if app.worktrees.data.is_none() {
+        let mut summary = if app.feeds.worktrees.data.is_none() {
             "reading worktrees…".to_owned()
-        } else if app.show_all {
+        } else if app.table.show_all {
             format!("all {shown} worktrees")
         } else {
-            format!("{shown} active of {} worktrees", app.total())
+            format!("{shown} active of {} worktrees", app.table.total())
         };
         match elsewhere.len() {
             0 => {}
@@ -435,8 +453,11 @@ fn header_line(app: &App) -> Line {
         line.push(summary, PLAIN);
     }
 
-    if app.sort != Sort::default() {
-        line.push(format!(" · by {}", app.sort.label().to_lowercase()), PLAIN);
+    if app.table.sort != Sort::default() {
+        line.push(
+            format!(" · by {}", app.table.sort.label().to_lowercase()),
+            PLAIN,
+        );
     }
 
     line.push("   ", PLAIN);
@@ -461,7 +482,7 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
 
     // `jp` runs belong to worktrees; a pull request without one has none,
     // whatever state that source is in.
-    let jp = unknown(&app.jp)
+    let jp = unknown(&app.feeds.jp)
         .filter(|_| row.is_worktree())
         .unwrap_or_else(|| {
             let waiting = row.runs.iter().filter_map(|run| run.waiting_since).min();
@@ -484,7 +505,7 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
             }),
     };
 
-    let [pr, ci, review] = match (unknown(&app.prs), &row.pr) {
+    let [pr, ci, review] = match (unknown(&app.feeds.prs), &row.pr) {
         (Some(marker), _) => [marker.clone(), marker.clone(), marker],
         (None, None) => [
             (String::new(), PLAIN),
@@ -679,73 +700,69 @@ fn activity(conversation: &SessionConversation, now: DateTime<Utc>) -> String {
 
 /// Format the elapsed time from `then` to `now` as `12s`, `5m`, `3h`, or `2d`.
 fn age(now: DateTime<Utc>, then: DateTime<Utc>) -> String {
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+
     let seconds = (now - then).num_seconds().max(0);
     match seconds {
-        0..60 => format!("{seconds}s"),
-        60..3_600 => format!("{}m", seconds / 60),
-        3_600..86_400 => format!("{}h", seconds / 3_600),
-        _ => format!("{}d", seconds / 86_400),
+        0..MINUTE => format!("{seconds}s"),
+        MINUTE..HOUR => format!("{}m", seconds / MINUTE),
+        HOUR..DAY => format!("{}h", seconds / HOUR),
+        _ => format!("{}d", seconds / DAY),
     }
 }
 
 /// The sort menu's lines, with entry `highlighted` reversed and the order in
 /// force marked.
 fn sort_menu(current: Sort, highlighted: usize) -> Vec<Line> {
-    let entries: Vec<String> = Sort::ALL
+    let mut body: Vec<(String, Style)> = Sort::ALL
         .iter()
         .enumerate()
         .map(|(index, sort)| {
             let mark = if *sort == current { " ✓" } else { "" };
-            format!("{} {}{mark}", index + 1, sort.label())
+            let style = if index == highlighted {
+                Style {
+                    reversed: true,
+                    ..PLAIN
+                }
+            } else {
+                PLAIN
+            };
+            (format!("{} {}{mark}", index + 1, sort.label()), style)
         })
         .collect();
-    let hint = "enter sort · esc close";
-    let inner = entries
+    body.push(("enter sort · esc close".to_owned(), DIM));
+
+    panel(" Sort by ", &body)
+}
+
+/// A box around `body`, one line per entry, with `title` in its top border.
+fn panel(title: &str, body: &[(String, Style)]) -> Vec<Line> {
+    let inner = body
         .iter()
-        .map(|entry| text_width(entry))
-        .chain([text_width(hint)])
+        .map(|(text, _)| text_width(text))
         .max()
         .unwrap_or(0)
         + 2;
 
-    let title = " Sort by ";
     let bar = |left: char, right: char, label: &str| {
         let fill = "─".repeat(inner.saturating_sub(text_width(label)));
         format!("{left}{label}{fill}{right}")
     };
-    let padded = |text: &str| {
-        format!(
-            " {text}{} ",
-            " ".repeat(inner.saturating_sub(text_width(text) + 2))
-        )
-    };
 
-    let mut lines = vec![];
     let mut top = Line::default();
     top.push(bar('╭', '╮', title), BOLD);
-    lines.push(top);
+    let mut lines = vec![top];
 
-    for (index, entry) in entries.iter().enumerate() {
+    for (text, style) in body {
+        let blanks = " ".repeat(inner.saturating_sub(text_width(text) + 2));
         let mut line = Line::default();
         line.push("│", BOLD);
-        let style = if index == highlighted {
-            Style {
-                reversed: true,
-                ..PLAIN
-            }
-        } else {
-            PLAIN
-        };
-        line.push(padded(entry), style);
+        line.push(format!(" {text}{blanks} "), *style);
         line.push("│", BOLD);
         lines.push(line);
     }
-
-    let mut hint_line = Line::default();
-    hint_line.push("│", BOLD);
-    hint_line.push(padded(hint), DIM);
-    hint_line.push("│", BOLD);
-    lines.push(hint_line);
 
     let mut bottom = Line::default();
     bottom.push(bar('╰', '╯', ""), BOLD);
@@ -794,17 +811,20 @@ fn status_line(app: &App) -> Line {
     let mut line = Line::default();
 
     if let Some(name) = &app.new_branch {
-        line.push(format!("new worktree from {}: ", app.base_branch()), PLAIN);
+        line.push(
+            format!("new worktree from {}: ", app.feeds.base_branch()),
+            PLAIN,
+        );
         line.push(name.clone(), BOLD);
         line.push("   enter create · esc cancel", DIM);
         return line;
     }
 
-    if let Some(filter) = &app.filter
+    if let Some(filter) = &app.table.filter
         && filter.editing
     {
         line.push(format!("/{}", filter.query), BOLD);
-        if !filter.query.is_empty() && app.visible().is_empty() {
+        if !filter.query.is_empty() && app.table.visible().is_empty() {
             line.push("  no match", fg(Color::Red));
         }
         line.push("   enter keep · esc cancel", DIM);
@@ -816,13 +836,13 @@ fn status_line(app: &App) -> Line {
         return line;
     }
 
-    let base = format!("updating {}", app.base_branch());
+    let base = format!("updating {}", app.feeds.base_branch());
     let errors: Vec<String> = [
-        ("git", &app.worktrees.error),
-        ("ghostty", &app.terminals.error),
-        ("jp", &app.jp.error),
-        ("github", &app.prs.error),
-        (base.as_str(), &app.base.error),
+        ("git", &app.feeds.worktrees.error),
+        ("ghostty", &app.feeds.terminals.error),
+        ("jp", &app.feeds.jp.error),
+        ("github", &app.feeds.prs.error),
+        (base.as_str(), &app.feeds.base.error),
     ]
     .into_iter()
     .filter_map(|(source, error)| Some(format!("{source}: {}", error.as_ref()?)))

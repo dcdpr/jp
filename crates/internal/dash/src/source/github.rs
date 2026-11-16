@@ -44,9 +44,20 @@ const LOCAL_REVIEWS_INTERVAL: Duration = Duration::from_mins(3);
 /// Review-thread refresh interval for pull requests without a local worktree.
 const REMOTE_REVIEWS_INTERVAL: Duration = Duration::from_mins(15);
 
-/// Review threads counted per pull request.
+/// Review threads read per pull request.
 /// GraphQL charges a request per thread, so this bounds the query's cost.
+/// Threads past it are counted, but not checked for a reply.
 const THREADS: u32 = 30;
+
+/// The HTTP status of a conditional request whose resource has not changed.
+const NOT_MODIFIED: u16 = 304;
+
+/// The first and last HTTP status of a successful response.
+const SUCCESS_FIRST: u16 = 200;
+const SUCCESS_LAST: u16 = 299;
+
+/// Characters of a REST error body shown when it holds no `message`.
+const ERROR_BODY_CHARS: usize = 80;
 
 /// Pull request number to its review threads and how many have a reply.
 type Counts = HashMap<u64, (u32, u32)>;
@@ -167,35 +178,14 @@ impl GitHub {
 
         let mut prs = vec![];
         for pull in pulls {
-            if branches.contains(&pull.head.r#ref) {
+            let head = local_branch(&pull);
+            if branches.contains(&head) {
                 local.insert(pull.number);
             }
 
-            let sha = &pull.head.sha;
-            let runs = self.get(
-                &format!("repos/{repo}/commits/{sha}/check-runs?per_page=100"),
-                online,
-            );
-            let status = self.get(
-                &format!("repos/{repo}/commits/{sha}/status?per_page=100"),
-                online,
-            );
-            let (runs, status) = match (runs, status) {
-                (Ok(runs), Ok(status)) => (runs, status),
-                (Err(Error::NotCached(_)), _) | (_, Err(Error::NotCached(_))) => continue,
-                (Err(error), _) | (_, Err(error)) => return Err(error),
-            };
-
-            prs.push(PullRequest {
-                number: pull.number,
-                title: pull.title,
-                url: pull.html_url,
-                head: pull.head.r#ref,
-                draft: pull.draft,
-                checks: checks(contexts(&runs, &status)?),
-                threads: 0,
-                answered: 0,
-            });
+            if let Some(pr) = self.pull_request(&repo, pull, head, online)? {
+                prs.push(pr);
+            }
         }
         let before = self.state.rest.len();
         self.state
@@ -225,6 +215,44 @@ impl GitHub {
         }
 
         Ok(prs)
+    }
+
+    /// Read the checks of `pull`'s head commit into a [`PullRequest`] whose
+    /// local branch is `head`, without its review threads.
+    ///
+    /// `None` when the checks are not cached and `online` is `false`.
+    fn pull_request(
+        &mut self,
+        repo: &str,
+        pull: RestPull,
+        head: String,
+        online: bool,
+    ) -> Result<Option<PullRequest>, Error> {
+        let sha = &pull.head.sha;
+        let runs = self.get(
+            &format!("repos/{repo}/commits/{sha}/check-runs?per_page=100"),
+            online,
+        );
+        let status = self.get(
+            &format!("repos/{repo}/commits/{sha}/status?per_page=100"),
+            online,
+        );
+        let (runs, status) = match (runs, status) {
+            (Ok(runs), Ok(status)) => (runs, status),
+            (Err(Error::NotCached(_)), _) | (_, Err(Error::NotCached(_))) => return Ok(None),
+            (Err(error), _) | (_, Err(error)) => return Err(error),
+        };
+
+        Ok(Some(PullRequest {
+            number: pull.number,
+            title: pull.title,
+            url: pull.html_url,
+            head,
+            draft: pull.draft,
+            checks: checks(contexts(&runs, &status)?),
+            threads: 0,
+            answered: 0,
+        }))
     }
 
     /// Fetch and update review-thread counts for `numbers` (must be non-empty).
@@ -321,7 +349,7 @@ impl GitHub {
         };
 
         match response.status {
-            304 => self
+            NOT_MODIFIED => self
                 .state
                 .rest
                 .get(path)
@@ -330,7 +358,7 @@ impl GitHub {
                     program: "gh",
                     message: format!("{path}: 304 for a response never fetched"),
                 }),
-            200..=299 => {
+            SUCCESS_FIRST..=SUCCESS_LAST => {
                 let body = response.body.to_owned();
                 if let Some(etag) = response.etag {
                     self.state.rest.insert(path.to_owned(), Cached {
@@ -469,7 +497,7 @@ fn api_message(body: &str) -> String {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|value| Some(value.get("message")?.as_str()?.to_owned()))
-        .unwrap_or_else(|| body.chars().take(80).collect())
+        .unwrap_or_else(|| body.chars().take(ERROR_BODY_CHARS).collect())
 }
 
 fn parse_json<T: DeserializeOwned>(json: &str) -> Result<T, Error> {
@@ -487,12 +515,57 @@ struct RestPull {
     #[serde(default)]
     draft: bool,
     head: Head,
+    base: Base,
 }
 
 #[derive(Deserialize)]
 struct Head {
     r#ref: String,
     sha: String,
+
+    /// `None` when the account that opened the pull request is gone.
+    user: Option<User>,
+
+    /// `None` when the fork the pull request comes from was deleted.
+    repo: Option<Repo>,
+}
+
+#[derive(Deserialize)]
+struct Base {
+    repo: Repo,
+}
+
+#[derive(Deserialize)]
+struct User {
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct Repo {
+    full_name: String,
+    #[serde(default)]
+    default_branch: String,
+}
+
+/// The local branch `gh pr checkout` gives a pull request: its head branch, or
+/// `<owner>/<branch>` when it comes from another repository and its head branch
+/// has the default branch's name.
+///
+/// That keeps a fork's `main` from passing for the local `main`.
+fn local_branch(pull: &RestPull) -> String {
+    let head = &pull.head;
+    let base = &pull.base.repo;
+    let foreign = head
+        .repo
+        .as_ref()
+        .is_none_or(|repo| repo.full_name != base.full_name);
+
+    match &head.user {
+        Some(user) if foreign && head.r#ref == base.default_branch => {
+            format!("{}/{}", user.login, head.r#ref)
+        }
+        _ => head.r#ref.clone(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -536,6 +609,49 @@ enum Context {
     },
 }
 
+impl Context {
+    /// The check's name, when this attempt at it started (`None` for a commit
+    /// status, or a check run that has not started), and its outcome.
+    fn into_attempt(self) -> (String, Option<String>, Outcome) {
+        match self {
+            Self::CheckRun {
+                name,
+                status,
+                conclusion,
+                started_at,
+            } => {
+                let outcome = if status != "COMPLETED" {
+                    Outcome::Pending
+                } else if matches!(
+                    conclusion.as_deref(),
+                    Some("SUCCESS" | "NEUTRAL" | "SKIPPED")
+                ) {
+                    Outcome::Passed
+                } else {
+                    Outcome::Failed
+                };
+                (name, started_at, outcome)
+            }
+            Self::StatusContext { context, state } => {
+                let outcome = match state.as_str() {
+                    "SUCCESS" => Outcome::Passed,
+                    "PENDING" | "EXPECTED" => Outcome::Pending,
+                    _ => Outcome::Failed,
+                };
+                (context, None, outcome)
+            }
+        }
+    }
+}
+
+/// How one check ended, or that it has not yet.
+#[derive(Clone, Copy)]
+enum Outcome {
+    Passed,
+    Pending,
+    Failed,
+}
+
 /// Combine a commit's `check-runs` and `status` responses.
 fn contexts(runs: &str, status: &str) -> Result<Vec<Context>, Error> {
     let runs: CheckRuns = parse_json(runs)?;
@@ -570,7 +686,7 @@ fn reviews_query(numbers: &[u64]) -> String {
     for number in numbers {
         query.push_str(&format!(
             "    pr{number}: pullRequest(number: {number}) {{ reviewThreads(first: {THREADS}) {{ \
-             nodes {{ comments(first: 2) {{ nodes {{ id }} }} }} }} }}\n"
+             totalCount nodes {{ comments(first: 2) {{ nodes {{ id }} }} }} }} }}\n"
         ));
     }
     query.push_str("  }\n}");
@@ -593,7 +709,15 @@ struct ReviewsData {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewedPullRequest {
-    review_threads: Nodes<Thread>,
+    review_threads: Threads,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Threads {
+    /// Every thread, including those past the ones read.
+    total_count: u32,
+    nodes: Vec<Thread>,
 }
 
 #[derive(Deserialize)]
@@ -617,12 +741,13 @@ fn parse_reviews(json: &str) -> Result<Counts, Error> {
         .into_iter()
         .filter_map(|(alias, pr)| {
             let number = alias.strip_prefix("pr")?.parse().ok()?;
-            let threads = pr?.review_threads.nodes;
+            let threads = pr?.review_threads;
             let answered = threads
+                .nodes
                 .iter()
                 .filter(|thread| thread.comments.nodes.len() > 1)
                 .count();
-            Some((number, (count(threads.len()), count(answered))))
+            Some((number, (threads.total_count, count(answered))))
         })
         .collect();
 
@@ -636,45 +761,10 @@ fn parse_reviews(json: &str) -> Result<Counts, Error> {
 /// One that has not started yet has no `started_at` and is the latest by
 /// definition.
 fn checks(contexts: Vec<Context>) -> Checks {
-    #[derive(Clone, Copy)]
-    enum Outcome {
-        Passed,
-        Pending,
-        Failed,
-    }
-
     let mut latest: HashMap<String, (Option<String>, Outcome)> = HashMap::new();
 
     for context in contexts {
-        let (name, started_at, outcome) = match context {
-            Context::CheckRun {
-                name,
-                status,
-                conclusion,
-                started_at,
-            } => {
-                let outcome = if status != "COMPLETED" {
-                    Outcome::Pending
-                } else if matches!(
-                    conclusion.as_deref(),
-                    Some("SUCCESS" | "NEUTRAL" | "SKIPPED")
-                ) {
-                    Outcome::Passed
-                } else {
-                    Outcome::Failed
-                };
-                (name, started_at, outcome)
-            }
-            Context::StatusContext { context, state } => {
-                let outcome = match state.as_str() {
-                    "SUCCESS" => Outcome::Passed,
-                    "PENDING" | "EXPECTED" => Outcome::Pending,
-                    _ => Outcome::Failed,
-                };
-                (context, None, outcome)
-            }
-        };
-
+        let (name, started_at, outcome) = context.into_attempt();
         let newer = latest
             .get(&name)
             .is_none_or(|(seen, _)| match (seen, &started_at) {

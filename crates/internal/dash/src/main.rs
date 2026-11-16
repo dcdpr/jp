@@ -39,7 +39,7 @@ use crate::{
     app::{Action, App, Update},
     create::Created,
     source::{Refresher, ghostty, jp},
-    ui::Line,
+    ui::{Line, Span},
 };
 
 /// Poll timeout before redrawing with any pending source updates.
@@ -144,39 +144,46 @@ fn event_loop(
             continue;
         }
 
-        let action = match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => app.handle(key),
-            Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollDown => {
-                    app.wheel(true);
-                    Action::None
-                }
-                MouseEventKind::ScrollUp => {
-                    app.wheel(false);
-                    Action::None
-                }
-                MouseEventKind::Down(MouseButton::Left) => {
-                    match ui::hit(&app, width, height, mouse.column, mouse.row) {
-                        Some((line, target)) => app.click(line, target),
-                        None => Action::None,
-                    }
-                }
-                _ => continue,
-            },
-            Event::Resize(..) => {
-                // Text the old size left outside the new one is not
-                // overwritten by the next frame.
-                execute!(out, Clear(ClearType::All))?;
-                painted.clear();
-                continue;
-            }
-            _ => continue,
-        };
-
-        if action == Action::Quit {
-            return Ok(());
+        let event = event::read()?;
+        if let Event::Resize(..) = event {
+            // Text the old size left outside the new one is not overwritten by
+            // the next frame.
+            execute!(out, Clear(ClearType::All))?;
+            painted.clear();
+            continue;
         }
-        carry_out(action, dir, updates, refresher);
+
+        match react(&mut app, event, width, height) {
+            Action::Quit => return Ok(()),
+            action => carry_out(action, dir, updates, refresher),
+        }
+    }
+}
+
+/// Hand a key press or mouse event to `app`, on a screen `width` by `height`,
+/// and return what it asks for.
+/// Any other event asks for nothing.
+fn react(app: &mut App, event: Event, width: u16, height: u16) -> Action {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => app.handle(key),
+        Event::Mouse(mouse) => match mouse.kind {
+            MouseEventKind::ScrollDown => {
+                app.wheel(true);
+                Action::None
+            }
+            MouseEventKind::ScrollUp => {
+                app.wheel(false);
+                Action::None
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                match ui::hit(app, width, height, mouse.column, mouse.row) {
+                    Some((line, target)) => app.click(line, target),
+                    None => Action::None,
+                }
+            }
+            _ => Action::None,
+        },
+        _ => Action::None,
     }
 }
 
@@ -199,18 +206,7 @@ fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher
                 opened
             });
         }
-        Action::Open(url) => in_background(updates, move || {
-            Command::new("open")
-                .arg(&url)
-                .status()
-                .map_err(|error| format!("Opening {url} failed: {error}"))
-                .and_then(|status| {
-                    status
-                        .success()
-                        .then_some(())
-                        .ok_or_else(|| format!("Opening {url} failed: {status}"))
-                })
-        }),
+        Action::Open(url) => in_background(updates, move || open_url(&url)),
         Action::CreateWorktree { number, branch } => {
             create_worktree(dir, Some(number), updates, refresher, move |dir| {
                 create::for_pull_request(dir, number, &branch)
@@ -243,6 +239,19 @@ fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher
             });
         }
     }
+}
+
+/// Open `url` in the browser.
+fn open_url(url: &str) -> Result<(), String> {
+    let status = Command::new("open")
+        .arg(url)
+        .status()
+        .map_err(|error| format!("Opening {url} failed: {error}"))?;
+
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("Opening {url} failed: {status}"))
 }
 
 /// Create a worktree on a background thread, open a tab in it, and trigger a
@@ -302,33 +311,39 @@ fn paint(out: &mut impl Write, lines: &[Line]) -> io::Result<()> {
         queue!(out, MoveTo(0, row))?;
 
         for span in &line.spans {
-            queue!(out, SetAttribute(Attribute::Reset))?;
-            if span.style.bold {
-                queue!(out, SetAttribute(Attribute::Bold))?;
-            }
-            if span.style.dim {
-                queue!(out, SetAttribute(Attribute::Dim))?;
-            }
-            if span.style.reversed {
-                queue!(out, SetAttribute(Attribute::Reverse))?;
-            }
-            if let Some(color) = span.style.fg {
-                queue!(out, SetForegroundColor(color))?;
-            }
-
-            // OSC 8 escapes take no columns, so the layout's widths still hold.
-            match &span.link {
-                Some(url) => queue!(
-                    out,
-                    Print(format!("\x1b]8;;{url}\x1b\\{}\x1b]8;;\x1b\\", span.text))
-                )?,
-                None => queue!(out, Print(&span.text))?,
-            }
+            queue_span(out, span)?;
         }
     }
 
     queue!(out, SetAttribute(Attribute::Reset))?;
     out.flush()
+}
+
+/// Queue `span`'s text in its style, resetting the style the previous span left
+/// first.
+fn queue_span(out: &mut impl Write, span: &Span) -> io::Result<()> {
+    queue!(out, SetAttribute(Attribute::Reset))?;
+    if span.style.bold {
+        queue!(out, SetAttribute(Attribute::Bold))?;
+    }
+    if span.style.dim {
+        queue!(out, SetAttribute(Attribute::Dim))?;
+    }
+    if span.style.reversed {
+        queue!(out, SetAttribute(Attribute::Reverse))?;
+    }
+    if let Some(color) = span.style.fg {
+        queue!(out, SetForegroundColor(color))?;
+    }
+
+    // OSC 8 escapes take no columns, so the layout's widths still hold.
+    let Some(url) = &span.link else {
+        return queue!(out, Print(&span.text));
+    };
+    queue!(
+        out,
+        Print(format!("\x1b]8;;{url}\x1b\\{}\x1b]8;;\x1b\\", span.text))
+    )
 }
 
 /// Run `task` on a background thread and report any error as a status notice.

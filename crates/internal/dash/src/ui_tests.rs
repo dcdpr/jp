@@ -147,7 +147,7 @@ fn test_screen_shows_one_line_per_worktree_until_expanded() {
 #[test]
 fn test_screen_shows_how_long_ago_jp_ran_in_an_idle_worktree() {
     let mut app = queue_and_review();
-    let mut jp = app.jp.data.clone().unwrap();
+    let mut jp = app.feeds.jp.data.clone().unwrap();
     jp.recent = vec![JpRecent {
         cwd: Utf8PathBuf::from("/repo/review"),
         last_event_at: Some(at(9, 55)),
@@ -214,7 +214,7 @@ fn test_conversation_titles_hold_still_as_ages_tick() {
     // Where the active conversation's title starts, `seconds` after its last
     // event, with `status`.
     let mut title_column = |seconds: i64, status: Status| {
-        let mut jp = app.jp.data.clone().unwrap();
+        let mut jp = app.feeds.jp.data.clone().unwrap();
         let conversation = &mut jp.sessions[0].conversations[0];
         conversation.last_event_at = Some(at(10, 0) - chrono::Duration::seconds(seconds));
         conversation.status = status;
@@ -357,7 +357,7 @@ fn test_screen_draws_the_sort_menu_over_the_table() {
 #[test]
 fn test_header_names_a_sort_other_than_the_default() {
     let mut app = queue_and_review();
-    app.sort = Sort::Checks;
+    app.table.sort = Sort::Checks;
 
     let screen = render(&app, 120, 5);
     assert!(
@@ -460,7 +460,7 @@ fn test_screen_shows_rows_from_the_scroll_offset() {
         worktree("/repo/c", "c"),
     ])));
     app.handle(key('a'));
-    app.scroll = 1;
+    app.cursor.scroll = 1;
 
     let names: Vec<String> = render(&app, 40, 5)[2..4]
         .iter()

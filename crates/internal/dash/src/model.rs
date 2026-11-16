@@ -155,7 +155,9 @@ pub struct PullRequest {
     pub title: String,
     pub url: String,
 
-    /// The branch the pull request merges from.
+    /// The local branch `gh pr checkout` gives the pull request: its head
+    /// branch, or `<owner>/<branch>` for a fork's branch named like the default
+    /// branch.
     pub head: String,
     pub draft: bool,
     pub checks: Checks,
@@ -163,7 +165,8 @@ pub struct PullRequest {
     /// Review threads on the pull request, pending ones included.
     pub threads: u32,
 
-    /// Review threads with at least one reply.
+    /// Review threads with at least one reply, among the first few read; more
+    /// threads than that leave `answered` short of `threads`.
     pub answered: u32,
 }
 
@@ -225,6 +228,43 @@ pub struct Row {
 }
 
 impl Row {
+    /// The row of `worktree`, with the pull request among `prs` whose head is
+    /// its branch, and nothing else attached yet.
+    fn for_worktree(worktree: &Worktree, prs: &[PullRequest]) -> Self {
+        Self {
+            name: worktree
+                .path
+                .file_name()
+                .unwrap_or(worktree.path.as_str())
+                .to_owned(),
+            id: RowId::Worktree(worktree.path.clone()),
+            branch: worktree.branch.clone(),
+            terminals: vec![],
+            runs: vec![],
+            sessions: vec![],
+            last_run: None,
+            pr: worktree
+                .branch
+                .as_deref()
+                .and_then(|branch| prs.iter().find(|pr| pr.head == branch))
+                .cloned(),
+        }
+    }
+
+    /// The row of a pull request no worktree has checked out.
+    fn for_pull_request(pr: &PullRequest) -> Self {
+        Self {
+            id: RowId::PullRequest(pr.number),
+            name: String::new(),
+            branch: Some(pr.head.clone()),
+            terminals: vec![],
+            runs: vec![],
+            sessions: vec![],
+            last_run: None,
+            pr: Some(pr.clone()),
+        }
+    }
+
     /// Return `true` if `tab` unambiguously hosts `session`'s shell.
     ///
     /// When Ghostty reports the tab's TTY, matches by TTY device.
@@ -296,24 +336,7 @@ pub fn rows(
 ) -> Vec<Row> {
     let mut rows: Vec<Row> = worktrees
         .iter()
-        .map(|worktree| Row {
-            name: worktree
-                .path
-                .file_name()
-                .unwrap_or(worktree.path.as_str())
-                .to_owned(),
-            id: RowId::Worktree(worktree.path.clone()),
-            branch: worktree.branch.clone(),
-            terminals: vec![],
-            runs: vec![],
-            sessions: vec![],
-            last_run: None,
-            pr: worktree
-                .branch
-                .as_deref()
-                .and_then(|branch| prs.iter().find(|pr| pr.head == branch))
-                .cloned(),
-        })
+        .map(|worktree| Row::for_worktree(worktree, prs))
         .collect();
 
     for terminal in terminals {
@@ -353,16 +376,7 @@ pub fn rows(
         .collect();
     unclaimed.sort_by_key(|pr| pr.number);
 
-    rows.extend(unclaimed.into_iter().map(|pr| Row {
-        id: RowId::PullRequest(pr.number),
-        name: String::new(),
-        branch: Some(pr.head.clone()),
-        terminals: vec![],
-        runs: vec![],
-        sessions: vec![],
-        last_run: None,
-        pr: Some(pr.clone()),
-    }));
+    rows.extend(unclaimed.into_iter().map(Row::for_pull_request));
     rows
 }
 

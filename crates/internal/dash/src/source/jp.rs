@@ -53,6 +53,14 @@ const LISTED: usize = 10;
 /// A conversation that is running, or was at the last read, is read every time.
 const METADATA_TTL: Duration = Duration::from_mins(1);
 
+/// Ancestors of a process searched for a Ghostty process.
+/// Bounds the walk in case a concurrent process-table change introduces a
+/// cycle.
+const MAX_ANCESTORS: usize = 64;
+
+/// Session overviews, by the PID of the session's leader.
+type Overviews = Vec<(u32, SessionOverview)>;
+
 /// Snapshot of running `jp` processes, active shell sessions, and recent runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JpState {
@@ -135,31 +143,10 @@ impl Jp {
     }
 
     pub fn read(&mut self) -> Result<JpState, Error> {
-        if self.opened.is_none() {
-            let workspace = Workspace::open_read_only(&self.dir)?;
-            let storage = workspace.fs_storage().cloned().ok_or(Error::NoStorage)?;
-            self.opened = Some((workspace, storage));
-        }
-        let Some((workspace, storage)) = &self.opened else {
-            return Err(Error::NoStorage);
-        };
-
-        let holders: Vec<(ConversationId, u32)> = storage
-            .load_conversation_ids(ConversationFilter::default())
-            .into_iter()
-            .filter_map(|id| Some((id, storage.lock_info(&id.to_string())?.pid)))
-            .collect();
+        let (holders, overviews) = self.locks_and_sessions()?;
 
         // Each session is placed by its shell, the leader's child when the
         // leader is `login` (as Ghostty starts shells), or the leader itself.
-        let overviews: Vec<_> = workspace
-            .session_overviews()
-            .into_iter()
-            .filter_map(|overview| {
-                let pid = u32::try_from(overview.session.leader_pid()?).ok()?;
-                Some((pid, overview))
-            })
-            .collect();
         let table = process_table()?;
         let shells: Vec<(u32, u32)> = overviews
             .iter()
@@ -172,39 +159,12 @@ impl Jp {
             .chain(shells.iter().map(|(_, shell)| *shell))
             .collect();
         let processes = processes(&pids)?;
-
-        // A lock file outlives a holder killed with SIGKILL, and its PID may
-        // since belong to something else, so only a `jp` process counts.
-        let mut running: HashMap<ConversationId, Held> = holders
-            .into_iter()
-            .filter_map(|(id, pid)| {
-                let process = processes.get(&pid)?;
-                (process.command == "jp").then(|| {
-                    (id, Held {
-                        pid,
-                        cwd: process.cwd.clone(),
-                        waiting_since: None,
-                    })
-                })
-            })
-            .collect();
+        let mut running = held(holders, &processes);
 
         let seen = running.iter().map(|(id, held)| (held.cwd.as_str(), *id));
         self.dirty |= remember(&mut self.ran, seen);
 
-        let listed: HashSet<ConversationId> = overviews
-            .iter()
-            .flat_map(|(_, overview)| {
-                overview
-                    .conversations
-                    .iter()
-                    .take(CONSIDERED)
-                    .chain(overview.active.as_ref())
-            })
-            .chain(running.keys())
-            .chain(self.ran.values())
-            .copied()
-            .collect();
+        let listed = listed(&overviews, &running, &self.ran);
         self.refresh_metadata(&listed, &running.keys().copied().collect());
         self.refresh_waiting(&mut running);
 
@@ -241,6 +201,38 @@ impl Jp {
             sessions,
             recent,
         })
+    }
+
+    /// Every conversation whose lock records a holder, with the holder's PID,
+    /// and every session that has a leader, by the leader's PID.
+    ///
+    /// Opens the workspace on the first call.
+    fn locks_and_sessions(&mut self) -> Result<(Vec<(ConversationId, u32)>, Overviews), Error> {
+        if self.opened.is_none() {
+            let workspace = Workspace::open_read_only(&self.dir)?;
+            let storage = workspace.fs_storage().cloned().ok_or(Error::NoStorage)?;
+            self.opened = Some((workspace, storage));
+        }
+        let Some((workspace, storage)) = &self.opened else {
+            return Err(Error::NoStorage);
+        };
+
+        let holders = storage
+            .load_conversation_ids(ConversationFilter::default())
+            .into_iter()
+            .filter_map(|id| Some((id, storage.lock_info(&id.to_string())?.pid)))
+            .collect();
+
+        let overviews = workspace
+            .session_overviews()
+            .into_iter()
+            .filter_map(|overview| {
+                let pid = u32::try_from(overview.session.leader_pid()?).ok()?;
+                Some((pid, overview))
+            })
+            .collect();
+
+        Ok((holders, overviews))
     }
 
     /// Write `ran` to its file when it changed.
@@ -341,6 +333,52 @@ impl Jp {
             });
         }
     }
+}
+
+/// The conversations of `holders` whose holder is a live `jp` process, by
+/// conversation.
+///
+/// A lock file outlives a holder killed with SIGKILL, and its PID may since
+/// belong to something else, so only a `jp` process counts.
+fn held(
+    holders: Vec<(ConversationId, u32)>,
+    processes: &HashMap<u32, Process>,
+) -> HashMap<ConversationId, Held> {
+    holders
+        .into_iter()
+        .filter_map(|(id, pid)| {
+            let process = processes.get(&pid)?;
+            (process.command == "jp").then(|| {
+                (id, Held {
+                    pid,
+                    cwd: process.cwd.clone(),
+                    waiting_since: None,
+                })
+            })
+        })
+        .collect()
+}
+
+/// The conversations whose metadata a read needs: those each session lists,
+/// those `running`, and those that `ran` last in some directory.
+fn listed(
+    overviews: &[(u32, SessionOverview)],
+    running: &HashMap<ConversationId, Held>,
+    ran: &BTreeMap<String, ConversationId>,
+) -> HashSet<ConversationId> {
+    overviews
+        .iter()
+        .flat_map(|(_, overview)| {
+            overview
+                .conversations
+                .iter()
+                .take(CONSIDERED)
+                .chain(overview.active.as_ref())
+        })
+        .chain(running.keys())
+        .chain(ran.values())
+        .copied()
+        .collect()
 }
 
 /// Record the active conversation for each working directory in `running`,
@@ -507,9 +545,7 @@ fn shell_of(table: &HashMap<u32, Entry>, leader: u32) -> Option<u32> {
 /// Whether `pid` descends from a Ghostty process.
 fn under_ghostty(table: &HashMap<u32, Entry>, pid: u32) -> bool {
     let mut current = pid;
-    // Bound parent traversal in case a concurrent process-table change
-    // introduces a cycle.
-    for _ in 0..64 {
+    for _ in 0..MAX_ANCESTORS {
         let Some(entry) = table.get(&current) else {
             return false;
         };

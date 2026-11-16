@@ -28,10 +28,13 @@ fn test_a_missing_or_broken_file_is_empty() {
 #[test]
 fn test_home_follows_xdg() {
     let user = Some("/Users/jean".to_owned());
+    // A temporary directory is absolute on every platform; `/tmp/cache` has no
+    // drive prefix, so Windows treats it as relative.
+    let xdg = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        home(Some("/tmp/cache".to_owned()), user.clone()),
-        Some(Utf8PathBuf::from("/tmp/cache"))
+        home(Some(xdg.path().to_string()), user.clone()),
+        Some(xdg.path().to_owned())
     );
     // A relative `XDG_CACHE_HOME` is invalid and ignored.
     assert_eq!(

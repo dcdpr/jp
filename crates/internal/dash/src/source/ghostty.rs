@@ -50,13 +50,17 @@ on run argv
 end run
 "#;
 
-/// Focuses the terminal with ID `item 1 of argv`, pastes `item 2 of argv` at
-/// its prompt, and presses enter.
+/// Focuses the terminal with ID `item 1 of argv`, cancels whatever is typed at
+/// its prompt, pastes `item 2 of argv` there, and presses enter.
+///
+/// Without the cancel, the paste would be appended to a half-typed command, and
+/// enter would run both.
 const RUN_IN: &str = r#"
 on run argv
     tell application "Ghostty"
         set t to terminal id (item 1 of argv)
         focus t
+        send key "c" modifiers "control" to t
         input text (item 2 of argv) to t
         send key "enter" to t
     end tell
@@ -134,6 +138,7 @@ pub fn open_tab(dir: &Utf8Path, command: Option<&str>) -> Result<(), Error> {
 /// Focus the terminal with ID `id`, and run `command` at its shell's prompt, as
 /// if typed there.
 ///
+/// Anything already typed at the prompt is discarded first.
 /// Whatever program is in the terminal's foreground gets the input, so the
 /// caller makes sure that is the shell.
 pub fn run_in(id: &str, command: &str) -> Result<(), Error> {

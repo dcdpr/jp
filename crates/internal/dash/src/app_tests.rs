@@ -3,7 +3,7 @@ use chrono::TimeZone as _;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
-use crate::model::{Checks, JpRecent, JpRun, Status};
+use crate::model::{Checks, JpRecent, JpRun, JpSession, SessionConversation, Status};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -93,7 +93,8 @@ fn jp(app: &mut App, runs: Vec<JpRun>, sessions: Vec<JpSession>) {
 /// `worktree/tab id/conversation id`, or `worktree/tab id/conversation
 /// id/operation`.
 fn lines(app: &App) -> Vec<String> {
-    app.items()
+    app.table
+        .items()
         .iter()
         .map(|item| match item {
             Item::Row(row) if row.is_worktree() => row.name.clone(),
@@ -127,7 +128,8 @@ fn lines(app: &App) -> Vec<String> {
 }
 
 fn notes(app: &App) -> Vec<String> {
-    app.display()
+    app.table
+        .display()
         .into_iter()
         .filter_map(|line| match line {
             Display::Note { text, .. } => Some(text),
@@ -185,7 +187,7 @@ fn tall_app() -> App {
 fn test_only_active_worktrees_show_until_all_are_asked_for() {
     let mut app = app();
     assert_eq!(lines(&app), ["a", "c"]);
-    assert_eq!(app.total(), 3);
+    assert_eq!(app.table.total(), 3);
 
     assert_eq!(app.handle(key(KeyCode::Char('a'))), Action::None);
     assert_eq!(lines(&app), ["a", "b", "c"]);
@@ -225,7 +227,7 @@ fn test_ctrl_a_and_ctrl_d_jump_half_a_screen_and_stop_at_the_ends() {
     assert_eq!(app.selected_index(), Some(0));
 
     // Plain `a` still toggles the idle worktrees.
-    assert!(app.show_all);
+    assert!(app.table.show_all);
 }
 
 #[test]
@@ -505,7 +507,7 @@ fn test_enter_on_an_operation_runs_its_command_in_the_conversations_tab() {
     });
     assert_eq!(
         app.notice.as_deref(),
-        Some("Running `jp query --id=jp-c2` in its tab.")
+        Some("Running `jp query --id=jp-c2` in its tab, after clearing its prompt.")
     );
 
     type_keys(&mut app, "jj");
@@ -813,11 +815,11 @@ fn test_slash_filters_as_you_type_and_includes_idle_worktrees() {
 
     app.handle(key(KeyCode::Enter));
     assert_eq!(lines(&app), ["w17"]);
-    assert!(!app.filter.as_ref().unwrap().editing);
+    assert!(!app.table.filter.as_ref().unwrap().editing);
 
     // Esc clears a filter in force, and quits only once none is.
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::None);
-    assert!(app.filter.is_none());
+    assert!(app.table.filter.is_none());
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Quit);
 }
 
@@ -841,7 +843,7 @@ fn test_filter_matches_branch_names_and_esc_restores_the_previous_filter() {
     type_keys(&mut app, "/s-f");
     assert_eq!(lines(&app), ["#9"]);
     app.handle(key(KeyCode::Esc));
-    assert_eq!(app.filter.as_ref().unwrap().query, "STACK");
+    assert_eq!(app.table.filter.as_ref().unwrap().query, "STACK");
     assert_eq!(lines(&app), ["one", "#9"]);
 }
 
@@ -860,16 +862,16 @@ fn test_sort_menu_chooses_the_order() {
     assert_eq!(app.sort_menu, Some(2));
     app.handle(key(KeyCode::Enter));
 
-    assert_eq!(app.sort, Sort::PullRequest);
+    assert_eq!(app.table.sort, Sort::PullRequest);
     assert_eq!(app.sort_menu, None);
     assert_eq!(lines(&app), ["c", "#5", "a"]);
 
     // A digit picks straight away; esc closes without changing anything.
     type_keys(&mut app, "s5");
-    assert_eq!(app.sort, Sort::Checks);
+    assert_eq!(app.table.sort, Sort::Checks);
     app.handle(key(KeyCode::Char('s')));
     app.handle(key(KeyCode::Esc));
-    assert_eq!(app.sort, Sort::Checks);
+    assert_eq!(app.table.sort, Sort::Checks);
     assert_eq!(app.sort_menu, None);
 }
 
@@ -893,7 +895,7 @@ fn test_sort_by_activity_puts_a_turn_waiting_on_the_user_first() {
         )])],
     );
 
-    app.sort = Sort::Activity;
+    app.table.sort = Sort::Activity;
     assert_eq!(lines(&app), ["c", "a", "b"]);
 }
 
@@ -901,7 +903,7 @@ fn test_sort_by_activity_puts_a_turn_waiting_on_the_user_first() {
 fn test_sort_by_activity_keeps_a_finished_run_where_it_was() {
     let mut app = app();
     app.handle(key(KeyCode::Char('a')));
-    app.sort = Sort::Activity;
+    app.table.sort = Sort::Activity;
     // `b`'s shell last worked on a conversation at 10:00.
     let sessions = vec![session(10, "/repo/b", vec![conversation(
         "jp-c1",
@@ -952,7 +954,7 @@ fn test_sort_by_checks_puts_failing_first() {
     };
     prs(&mut app, vec![failing, running]);
 
-    app.sort = Sort::Checks;
+    app.table.sort = Sort::Checks;
     assert_eq!(lines(&app), ["c", "b", "a"]);
 }
 
@@ -1077,12 +1079,12 @@ fn test_fit_scroll_keeps_the_selection_on_screen() {
 
     // Three rows, room for two.
     app.fit_scroll(2);
-    assert_eq!(app.scroll, 0);
+    assert_eq!(app.cursor.scroll, 0);
 
     app.handle(key(KeyCode::Down));
     app.handle(key(KeyCode::Down));
     app.fit_scroll(2);
-    assert_eq!(app.scroll, 1);
+    assert_eq!(app.cursor.scroll, 1);
 
     // `a`'s tab, once expanded, pushes `c` further down the drawn lines.
     app.handle(key(KeyCode::Char('g')));
@@ -1091,12 +1093,12 @@ fn test_fit_scroll_keeps_the_selection_on_screen() {
     app.handle(key(KeyCode::Char('G')));
     app.fit_scroll(2);
     // 0 `a`, 1 TA, 2 `b`, 3 `c`.
-    assert_eq!(app.scroll, 2);
+    assert_eq!(app.cursor.scroll, 2);
 
     app.handle(key(KeyCode::Char('g')));
     app.handle(key(KeyCode::Char('g')));
     app.fit_scroll(2);
-    assert_eq!(app.scroll, 0);
+    assert_eq!(app.cursor.scroll, 0);
 }
 
 #[test]
@@ -1106,7 +1108,10 @@ fn test_a_failed_read_keeps_the_last_good_data() {
     app.apply(Update::Terminals(Err("osascript failed".to_owned())));
 
     assert_eq!(lines(&app), ["a", "c"]);
-    assert_eq!(app.terminals.error.as_deref(), Some("osascript failed"));
+    assert_eq!(
+        app.feeds.terminals.error.as_deref(),
+        Some("osascript failed")
+    );
 }
 
 #[test]

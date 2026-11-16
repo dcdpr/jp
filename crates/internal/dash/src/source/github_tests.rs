@@ -190,10 +190,10 @@ fn test_reviews_query_has_one_alias_per_pull_request() {
         reviews_query(&[1132, 1193]),
         "query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
-    pr1132: pullRequest(number: 1132) { reviewThreads(first: 30) { nodes { comments(first: 2) { \
-         nodes { id } } } } }
-    pr1193: pullRequest(number: 1193) { reviewThreads(first: 30) { nodes { comments(first: 2) { \
-         nodes { id } } } } }
+    pr1132: pullRequest(number: 1132) { reviewThreads(first: 30) { totalCount nodes { \
+         comments(first: 2) { nodes { id } } } } }
+    pr1193: pullRequest(number: 1193) { reviewThreads(first: 30) { totalCount nodes { \
+         comments(first: 2) { nodes { id } } } } }
   }
 }"
     );
@@ -203,8 +203,8 @@ fn test_reviews_query_has_one_alias_per_pull_request() {
 fn test_parse_reviews_counts_threads_with_a_reply() {
     let json = r#"{"data": {
         "repository": {
-            "pr1193": {"reviewThreads": {"nodes": []}},
-            "pr1132": {"reviewThreads": {"nodes": [
+            "pr1193": {"reviewThreads": {"totalCount": 0, "nodes": []}},
+            "pr1132": {"reviewThreads": {"totalCount": 3, "nodes": [
                 {"comments": {"nodes": [{"id": "a"}, {"id": "b"}]}},
                 {"comments": {"nodes": [{"id": "c"}]}},
                 {"comments": {"nodes": [{"id": "d"}, {"id": "e"}]}}
@@ -217,6 +217,43 @@ fn test_parse_reviews_counts_threads_with_a_reply() {
         parse_reviews(json).unwrap(),
         HashMap::from([(1132, (3, 2)), (1193, (0, 0))])
     );
+}
+
+#[test]
+fn test_parse_reviews_counts_threads_past_the_ones_read() {
+    // Two threads were read, both answered; the third, past the limit, was
+    // not, so the counts must not read as everything answered.
+    let json = r#"{"data": {"repository": {
+        "pr1132": {"reviewThreads": {"totalCount": 3, "nodes": [
+            {"comments": {"nodes": [{"id": "a"}, {"id": "b"}]}},
+            {"comments": {"nodes": [{"id": "c"}, {"id": "d"}]}}
+        ]}}
+    }}}"#;
+
+    assert_eq!(
+        parse_reviews(json).unwrap(),
+        HashMap::from([(1132, (3, 2))])
+    );
+}
+
+#[test]
+fn test_local_branch_names_a_forks_default_branch_after_its_owner() {
+    let pull = |head_ref: &str, head_repo: &str| -> RestPull {
+        parse_json(&format!(
+            r#"{{"number": 1, "title": "t", "html_url": "u",
+                "head": {{"ref": "{head_ref}", "sha": "a", "user": {{"login": "octo"}}, "repo": {head_repo}}},
+                "base": {{"repo": {{"full_name": "dcdpr/jp", "default_branch": "main"}}}}}}"#
+        ))
+        .unwrap()
+    };
+    let fork = r#"{"full_name": "octo/jp"}"#;
+    let same = r#"{"full_name": "dcdpr/jp"}"#;
+
+    assert_eq!(local_branch(&pull("main", fork)), "octo/main");
+    assert_eq!(local_branch(&pull("feature", fork)), "feature");
+    // A deleted fork still came from another repository.
+    assert_eq!(local_branch(&pull("main", "null")), "octo/main");
+    assert_eq!(local_branch(&pull("main", same)), "main");
 }
 
 #[test]
