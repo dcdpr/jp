@@ -185,6 +185,9 @@ footer = ".config/release/github.md"
 Each GitHub Release description consists of the release notes rendered from the
 current checkout, followed by the contents of `footer` (with `{version}` and
 `{download}` substituted).
+The notes leave each entry's credits out, as the built site does, since a
+Release is read by people deciding whether to upgrade; highlights keep their
+bylines ([RFD 122]).
 When `upgrade_guide` is configured (as a URL template containing `{version}`),
 breaking entries link to that external URL because GitHub Release descriptions
 do not generate heading anchors ([GitHub discussion 48311]).

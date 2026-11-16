@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+    creditFlags,
     drafting,
     missingRenderer,
     notesContent,
@@ -105,6 +106,13 @@ test('only a release a tag has made gets pages of its own', () => {
 test('only the dev server shows drafts', () => {
     assert.equal(drafting({ JP_VITE_SERVE: '/work' }), true)
     assert.equal(drafting({}), false)
+})
+
+// The built site is read by people using the project; the dev server is where
+// the notes are prepared.
+test('only the dev server shows who made each change', () => {
+    assert.deepEqual(creditFlags({ JP_VITE_SERVE: '/work' }), [])
+    assert.deepEqual(creditFlags({}), ['--no-credits'])
 })
 
 // `jp vite serve` and `jp vite build` name their own binary in `JP_VITE_BIN`.

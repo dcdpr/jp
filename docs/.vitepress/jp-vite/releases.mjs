@@ -22,6 +22,10 @@ import { SETTINGS_FILE, SRC_DIR, readSettings } from './settings.mjs'
 // draft, so its notes can be read as they will appear; the built site never
 // has them.
 //
+// The built site is read by people who use the project, so its release pages
+// leave each entry's credits out; `jp vite serve`, where the notes are
+// prepared, keeps them.
+//
 // Under `jp vite serve` and `jp vite build`, `changelog` is the `jp-vite`
 // binary itself, run as `jp-vite changelog`; a `vitepress build` started by
 // hand, as JP's own docs build is, runs the `changelog` binary on `PATH`.
@@ -115,6 +119,13 @@ export function released(releases) {
 // which names the workspace root in `JP_VITE_SERVE` of the environment `env`.
 export function drafting(env = process.env) {
     return Boolean(env.JP_VITE_SERVE)
+}
+
+// The flags that leave each entry's credits out of the pages `changelog`
+// renders: none under `jp vite serve`, which names the workspace root in
+// `JP_VITE_SERVE` of the environment `env`.
+export function creditFlags(env = process.env) {
+    return drafting(env) ? [] : ['--no-credits']
 }
 
 // The releases among `releases` that get pages: each one a tag has made, and
@@ -290,7 +301,10 @@ export function notesPages() {
     const route = ctx.release.route
     return pages(ctx).map(({ version, release }) => {
         const name = version ?? UNRELEASED
-        const view = ['--format', 'markdown', '--page', 'notes', '--upgrade-url', upgradePath(route, name)]
+        const view = [
+            '--format', 'markdown', '--page', 'notes', '--upgrade-url', upgradePath(route, name),
+            ...creditFlags(),
+        ]
         const notes = changelog(ctx, renderArgs(ctx.release, ctx.dir, version, view))
 
         return { params: { version: name }, content: notesContent(release, notes) }
@@ -308,7 +322,7 @@ export function upgradePages() {
     return pages(ctx).flatMap(({ version, release }) => {
         if (!release.entries.some(entry => entry.upgrade)) return []
 
-        const view = ['--format', 'markdown', '--page', 'upgrade']
+        const view = ['--format', 'markdown', '--page', 'upgrade', ...creditFlags()]
         const guide = changelog(ctx, renderArgs(ctx.release, ctx.dir, version, view))
         const draft = Boolean(version) && !release.date
 

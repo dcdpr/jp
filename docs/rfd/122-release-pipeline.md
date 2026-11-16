@@ -608,7 +608,7 @@ read the JSON output:
 
 Both `changelog render` (the standalone crate binary) and `jp release render`
 accept `--format json` or `--format markdown`, plus `--page notes` or `--page
-upgrade` for Markdown output.
+upgrade` and `--no-credits` for Markdown output.
 The `changelog` binary does not read JP configuration; it receives the fragments
 directory, forge, project web address (`repository`), and section headings via
 CLI flags, which `jp release render` populates from the plugin configuration.
@@ -656,6 +656,15 @@ merge commit message does.
 
 Because credit resolution requires Git history, `render` rejects shallow clones
 rather than emitting incomplete credits.
+
+Credits stay in the model, and each place the notes appear decides whether to
+show them.
+The tag message and `jp vite serve`, read by the people working on the project,
+show each entry's and upgrade section's credits.
+The built site and a publisher's release page, read by people deciding whether
+to upgrade, leave them out with `--no-credits`.
+A highlight's byline (`By @author in #1182.`) is part of its story, and always
+names its credits.
 
 ### Release workflow
 

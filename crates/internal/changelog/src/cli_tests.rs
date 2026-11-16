@@ -142,7 +142,8 @@ fn the_release_notes_link_to_an_upgrade_page_beside_them_by_default() {
     assert_eq!(
         render(&[]).view(Format::Markdown),
         Ok(View::Notes {
-            upgrade_guide: "upgrade".to_owned()
+            upgrade_guide: "upgrade".to_owned(),
+            credits: EntryCredits::Shown,
         })
     );
     assert_eq!(
@@ -152,12 +153,32 @@ fn the_release_notes_link_to_an_upgrade_page_beside_them_by_default() {
         ])
         .view(Format::Markdown),
         Ok(View::Notes {
-            upgrade_guide: "https://jp.computer/releases/0.3.0/upgrade".to_owned()
+            upgrade_guide: "https://jp.computer/releases/0.3.0/upgrade".to_owned(),
+            credits: EntryCredits::Shown,
         })
     );
     assert_eq!(
         render(&["--page", "upgrade"]).view(Format::Markdown),
-        Ok(View::UpgradeGuide)
+        Ok(View::UpgradeGuide {
+            credits: EntryCredits::Shown
+        })
+    );
+}
+
+#[test]
+fn the_markdown_can_leave_the_credits_out() {
+    assert_eq!(
+        render(&["--no-credits"]).view(Format::Markdown),
+        Ok(View::Notes {
+            upgrade_guide: "upgrade".to_owned(),
+            credits: EntryCredits::Hidden,
+        })
+    );
+    assert_eq!(
+        render(&["--page", "upgrade", "--no-credits"]).view(Format::Markdown),
+        Ok(View::UpgradeGuide {
+            credits: EntryCredits::Hidden
+        })
     );
 }
 
@@ -193,5 +214,11 @@ fn a_flag_that_does_not_apply_to_what_is_printed_is_refused() {
             .view(Format::Markdown)
             .unwrap_err()
             .starts_with("`--upgrade-url` is where the release notes link to the upgrade guide")
+    );
+    assert!(
+        render(&["--format", "json", "--no-credits"])
+            .view(Format::Markdown)
+            .unwrap_err()
+            .starts_with("`--no-credits` leaves them out of the Markdown")
     );
 }

@@ -13,7 +13,8 @@
 use changelog::{
     NoAddress, ReleaseError,
     directory::{Part, ReadError},
-    markdown, release,
+    markdown::{self, EntryCredits},
+    release,
 };
 use release_options::no_address;
 use semver::Version;
@@ -253,9 +254,10 @@ fn message(
     })?;
 
     // Pass an empty upgrade_guide base path so breaking entries link to
-    // `#<anchor>` within the same tag message.
-    let notes = markdown::notes(&release, &options.notes.headings, "");
-    let guide = markdown::upgrade_guide(&release);
+    // `#<anchor>` within the same tag message. The tag keeps the credits: it is
+    // read with `git show`, by people working on the project.
+    let notes = markdown::notes(&release, &options.notes.headings, "", EntryCredits::Shown);
+    let guide = markdown::upgrade_guide(&release, EntryCredits::Shown);
 
     let body = if guide.is_empty() {
         notes

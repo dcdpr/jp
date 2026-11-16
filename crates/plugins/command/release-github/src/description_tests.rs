@@ -59,6 +59,8 @@ fn headings() -> Headings {
     headings
 }
 
+/// A Release is read by people deciding whether to upgrade, so its entries
+/// leave their credits out.
 #[test]
 fn a_release_without_breaking_changes_is_its_notes() {
     let text = description(
@@ -78,7 +80,6 @@ fn a_release_without_breaking_changes_is_its_notes() {
         ### Bug fixes
 
         - A turn that stalls while idle is retried instead of failing.
-          ([#1207](https://github.com/dcdpr/jp/pull/1207))
     "});
 }
 
@@ -104,12 +105,10 @@ fn breaking_entries_link_to_the_upgrade_guide_at_its_address() {
 
         - JP finds a command plugin by the manifest its binary embeds.
           **Breaking**: see [the upgrade guide](https://jp.computer/releases/0.3.0/upgrade#command-plugins-are-found-by-their-manifest).
-          ([#1216](https://github.com/dcdpr/jp/pull/1216))
 
         ### Bug fixes
 
         - A turn that stalls while idle is retried instead of failing.
-          ([#1207](https://github.com/dcdpr/jp/pull/1207))
     "});
 }
 
@@ -135,13 +134,10 @@ fn without_an_address_the_upgrade_guide_follows_the_notes() {
 
         - JP finds a command plugin by the manifest its binary embeds.
           **Breaking**: see [the upgrade guide](#command-plugins-are-found-by-their-manifest).
-          ([#1216](https://github.com/dcdpr/jp/pull/1216))
 
         # Upgrade guide
 
         ## Command plugins are found by their manifest
-
-        [#1216](https://github.com/dcdpr/jp/pull/1216)
 
         Rebuild the plugin, or reinstall it.
     "});
@@ -177,7 +173,6 @@ fn the_footer_ends_the_description_with_the_release_filled_in() {
         ### Bug fixes
 
         - A turn that stalls while idle is retried instead of failing.
-          ([#1207](https://github.com/dcdpr/jp/pull/1207))
 
         ## Install
 

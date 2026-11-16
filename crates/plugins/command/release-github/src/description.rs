@@ -1,6 +1,9 @@
 //! Formatting and comparison for GitHub Release descriptions.
 
-use changelog::{Headings, Release, markdown};
+use changelog::{
+    Headings, Release,
+    markdown::{self, EntryCredits},
+};
 use semver::Version;
 
 use crate::options::{DOWNLOAD, VERSION};
@@ -9,6 +12,8 @@ const UPGRADE_GUIDE: &str = "Upgrade guide";
 
 /// Render the GitHub Release description for `version`.
 ///
+/// Entries and upgrade sections leave their credits out, since a Release is
+/// read by people deciding whether to upgrade; highlights keep their bylines.
 /// When `upgrade_guide` is `Some`, breaking entries link to that URL (with
 /// `{version}` substituted).
 /// When `None`, the upgrade guide is appended inline under `# Upgrade guide`.
@@ -25,9 +30,14 @@ pub(crate) fn description(
     let version = version.to_string();
     let address = upgrade_guide.map(|address| address.replace(VERSION, &version));
 
-    let mut text = markdown::notes(release, headings, address.as_deref().unwrap_or(""));
+    let mut text = markdown::notes(
+        release,
+        headings,
+        address.as_deref().unwrap_or(""),
+        EntryCredits::Hidden,
+    );
     if address.is_none() {
-        let guide = markdown::upgrade_guide(release);
+        let guide = markdown::upgrade_guide(release, EntryCredits::Hidden);
         if !guide.is_empty() {
             text = format!("{text}\n# {UPGRADE_GUIDE}\n\n{guide}");
         }

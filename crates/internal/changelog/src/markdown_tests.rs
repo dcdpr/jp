@@ -118,7 +118,9 @@ fn the_release_notes_read_as_the_rfd_shows_them() {
         (Type::Fixed, "Bug fixes".to_owned()),
     ]);
 
-    assert_eq!(notes(&jp_0_3_0(), &headings, UPGRADE_GUIDE), indoc! {"
+    assert_eq!(
+        notes(&jp_0_3_0(), &headings, UPGRADE_GUIDE, EntryCredits::Shown),
+        indoc! {"
             JP 0.3.0 lets the assistant call one tool on many inputs at once.
 
             ## Tool calls fan out
@@ -148,7 +150,48 @@ fn the_release_notes_read_as_the_rfd_shows_them() {
               ([#1207](https://github.com/dcdpr/jp/pull/1207))
             - The help for `jp query --tmp` names the right default.
               ([`4e1f0a2`](https://github.com/dcdpr/jp/commit/4e1f0a2c9d8b))
-        "});
+        "}
+    );
+}
+
+/// Hiding the credits leaves each entry's text and its upgrade link; the
+/// highlight's byline stays.
+#[test]
+fn the_release_notes_can_leave_the_entry_credits_out() {
+    let headings = Headings::from_iter([
+        (Type::Added, "New features".to_owned()),
+        (Type::Fixed, "Bug fixes".to_owned()),
+    ]);
+
+    assert_eq!(
+        notes(&jp_0_3_0(), &headings, UPGRADE_GUIDE, EntryCredits::Hidden),
+        indoc! {"
+            JP 0.3.0 lets the assistant call one tool on many inputs at once.
+
+            ## Tool calls fan out
+
+            When the assistant needs the same tool on several inputs, it asks once.
+
+            By @JeanMertz in [#1182](https://github.com/dcdpr/jp/pull/1182) and [#1183](https://github.com/dcdpr/jp/pull/1183).
+
+            ## Changelog
+
+            ### New features
+
+            - The assistant can call one tool on many inputs in a single request.
+            - `jp conversation show` shows the conversation's model.
+
+            ### Changed
+
+            - JP finds a command plugin by the manifest its binary embeds, not by its file name.
+              **Breaking**: see [the upgrade guide](upgrade#command-plugins-are-found-by-their-manifest).
+
+            ### Bug fixes
+
+            - A turn that stalls while idle is retried instead of failing.
+            - The help for `jp query --tmp` names the right default.
+        "}
+    );
 }
 
 #[test]
@@ -179,7 +222,7 @@ fn the_upgrade_guide_has_a_section_for_each_breaking_entry() {
         ),
     ]);
 
-    assert_eq!(upgrade_guide(&release), indoc! {r#"
+    assert_eq!(upgrade_guide(&release, EntryCredits::Shown), indoc! {r#"
         ## Command plugins are found by their manifest
 
         [#1216](https://github.com/dcdpr/jp/pull/1216)
@@ -199,6 +242,24 @@ fn the_upgrade_guide_has_a_section_for_each_breaking_entry() {
 }
 
 #[test]
+fn the_upgrade_guide_can_leave_the_credits_out() {
+    let release = release(vec![breaking(
+        "enable-explicit",
+        Type::Removed,
+        "`enable` no longer accepts `\"explicit\"`.",
+        vec![pull_request(1230)],
+        "`enable = \"explicit\"` is no longer accepted",
+        "Replace it with the table form.",
+    )]);
+
+    assert_eq!(upgrade_guide(&release, EntryCredits::Hidden), indoc! {r#"
+        ## `enable = "explicit"` is no longer accepted
+
+        Replace it with the table form.
+    "#});
+}
+
+#[test]
 fn a_release_without_upgrade_sections_has_no_upgrade_guide() {
     let release = release(vec![entry(
         "retry-idle-turns",
@@ -207,7 +268,7 @@ fn a_release_without_upgrade_sections_has_no_upgrade_guide() {
         vec![pull_request(1207)],
     )]);
 
-    assert_eq!(upgrade_guide(&release), "");
+    assert_eq!(upgrade_guide(&release, EntryCredits::Shown), "");
 }
 
 /// The site numbers a heading whose anchor an earlier heading took, a heading
@@ -233,7 +294,12 @@ fn each_breaking_entry_links_to_the_anchor_its_section_gets() {
         ),
     ]);
 
-    let notes = notes(&release, &Headings::default(), "/releases/0.3.0/upgrade");
+    let notes = notes(
+        &release,
+        &Headings::default(),
+        "/releases/0.3.0/upgrade",
+        EntryCredits::Shown,
+    );
 
     assert!(
         notes.contains("[the upgrade guide](/releases/0.3.0/upgrade#plugins-move)."),
@@ -257,7 +323,12 @@ fn an_entry_of_several_blocks_stays_in_its_item() {
         vec![pull_request(1182)],
     )]);
 
-    let notes = notes(&release, &Headings::default(), UPGRADE_GUIDE);
+    let notes = notes(
+        &release,
+        &Headings::default(),
+        UPGRADE_GUIDE,
+        EntryCredits::Shown,
+    );
 
     assert!(
         notes.ends_with(indoc! {"
@@ -301,7 +372,12 @@ fn a_credit_without_a_page_is_its_label() {
     });
 
     assert_eq!(
-        notes(&release, &Headings::default(), UPGRADE_GUIDE),
+        notes(
+            &release,
+            &Headings::default(),
+            UPGRADE_GUIDE,
+            EntryCredits::Shown
+        ),
         indoc! {"
             JP 0.3.0 calls tools on many inputs.
 
@@ -324,7 +400,12 @@ fn a_credit_without_a_page_is_its_label() {
 #[test]
 fn a_release_without_entries_is_its_overview() {
     assert_eq!(
-        notes(&release(vec![]), &Headings::default(), UPGRADE_GUIDE),
+        notes(
+            &release(vec![]),
+            &Headings::default(),
+            UPGRADE_GUIDE,
+            EntryCredits::Shown
+        ),
         "JP 0.3.0 calls tools on many inputs.\n"
     );
 }

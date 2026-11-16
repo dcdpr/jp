@@ -9,6 +9,9 @@
 //!   with its credits and upgrade instructions, or an empty string if the
 //!   release has no breaking entries.
 //!
+//! [`EntryCredits`] says whether entries and upgrade sections list their
+//! credits; a highlight's byline always does.
+//!
 //! Neither function emits a top-level `#` document title or release date;
 //! callers prepend those for their target surface.
 
@@ -27,12 +30,29 @@ use crate::{
 /// Default relative path from the release notes to the upgrade guide.
 pub const UPGRADE_GUIDE: &str = "upgrade";
 
+/// Whether entries and upgrade sections list the change requests and commits
+/// that made them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryCredits {
+    /// Each entry ends with its credits, and each upgrade section starts with
+    /// them.
+    Shown,
+
+    /// Entries and upgrade sections leave their credits out.
+    Hidden,
+}
+
 /// Render the Markdown release notes for `release`, using `headings` for
 /// changelog section titles and `upgrade_guide` as the base URL/path for
 /// breaking-change upgrade links.
 #[must_use]
-pub fn notes(release: &Release, headings: &Headings, upgrade_guide: &str) -> String {
-    let (_, anchors) = guide(release);
+pub fn notes(
+    release: &Release,
+    headings: &Headings,
+    upgrade_guide: &str,
+    credits: EntryCredits,
+) -> String {
+    let (_, anchors) = guide(release, credits);
     let mut blocks = vec![release.overview.clone()];
 
     for highlight in &release.highlights {
@@ -57,7 +77,7 @@ pub fn notes(release: &Release, headings: &Headings, upgrade_guide: &str) -> Str
             .filter(|entry| entry.file.type_ == type_)
             .map(|entry| {
                 let anchor = anchors.get(entry.slug.as_str()).map(String::as_str);
-                item(entry, anchor, upgrade_guide)
+                item(entry, anchor, upgrade_guide, credits)
             })
             .collect();
         if items.is_empty() {
@@ -74,13 +94,13 @@ pub fn notes(release: &Release, headings: &Headings, upgrade_guide: &str) -> Str
 /// Render the Markdown upgrade guide for `release`, or an empty string if no
 /// entry has an upgrade section.
 #[must_use]
-pub fn upgrade_guide(release: &Release) -> String {
-    guide(release).0
+pub fn upgrade_guide(release: &Release, credits: EntryCredits) -> String {
+    guide(release, credits).0
 }
 
 /// Render the upgrade guide for `release` and map each breaking entry's slug to
 /// its generated heading anchor.
-fn guide(release: &Release) -> (String, HashMap<&str, String>) {
+fn guide(release: &Release, credits: EntryCredits) -> (String, HashMap<&str, String>) {
     let mut guide = String::new();
     let mut sections = vec![];
 
@@ -94,7 +114,7 @@ fn guide(release: &Release) -> (String, HashMap<&str, String>) {
 
         sections.push((entry.slug.as_str(), guide.matches('\n').count()));
         guide.push_str(&format!("## {}\n\n", upgrade.title));
-        if !entry.credits.is_empty() {
+        if credits == EntryCredits::Shown && !entry.credits.is_empty() {
             guide.push_str(&format!("{}\n\n", links(&entry.credits).join(", ")));
         }
         guide.push_str(&upgrade.body);
@@ -115,7 +135,12 @@ fn guide(release: &Release) -> (String, HashMap<&str, String>) {
 
 /// Render `entry` as a bullet list item with an optional upgrade-guide link and
 /// credit list.
-fn item(entry: &Credited<Fragment>, anchor: Option<&str>, upgrade_guide: &str) -> String {
+fn item(
+    entry: &Credited<Fragment>,
+    anchor: Option<&str>,
+    upgrade_guide: &str,
+    credits: EntryCredits,
+) -> String {
     let mut tail = vec![];
     if entry.file.upgrade.is_some() {
         let link = match anchor {
@@ -124,7 +149,7 @@ fn item(entry: &Credited<Fragment>, anchor: Option<&str>, upgrade_guide: &str) -
         };
         tail.push(format!("**Breaking**: see [the upgrade guide]({link})."));
     }
-    if !entry.credits.is_empty() {
+    if credits == EntryCredits::Shown && !entry.credits.is_empty() {
         tail.push(format!("({})", links(&entry.credits).join(", ")));
     }
 

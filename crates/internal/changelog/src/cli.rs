@@ -21,7 +21,7 @@ use crate::{
     directory::{self, Part},
     forge::Forge,
     fragment::Type,
-    markdown::{self, UPGRADE_GUIDE},
+    markdown::{self, EntryCredits, UPGRADE_GUIDE},
     release::{self, Headings, Release, ReleaseError},
 };
 
@@ -118,6 +118,13 @@ pub struct Render {
     /// Defaults to `upgrade`.
     #[arg(long, value_name = "URL")]
     pub upgrade_url: Option<String>,
+
+    /// Leave the credits out of each entry and upgrade section, for readers who
+    /// use JP rather than work on it.
+    ///
+    /// Highlights keep their bylines.
+    #[arg(long)]
+    pub no_credits: bool,
 }
 
 /// Output format for `render`.
@@ -141,10 +148,13 @@ pub enum View {
     Json,
 
     /// Markdown release notes linking to the upgrade guide at `upgrade_guide`.
-    Notes { upgrade_guide: String },
+    Notes {
+        upgrade_guide: String,
+        credits: EntryCredits,
+    },
 
     /// Markdown upgrade guide.
-    UpgradeGuide,
+    UpgradeGuide { credits: EntryCredits },
 }
 
 impl Render {
@@ -159,9 +169,15 @@ impl Render {
     ///
     /// # Errors
     ///
-    /// Returns an error if `--page` or `--upgrade-url` is combined with an
-    /// incompatible format or page.
+    /// Returns an error if `--page`, `--upgrade-url`, or `--no-credits` is
+    /// combined with an incompatible format or page.
     pub fn view(&self, default: Format) -> Result<View, String> {
+        let credits = if self.no_credits {
+            EntryCredits::Hidden
+        } else {
+            EntryCredits::Shown
+        };
+
         match (self.format.unwrap_or(default), self.page) {
             (Format::Json, Some(_)) => Err("`--page` names a Markdown document; JSON holds the \
                                             whole release, so drop it or add `--format markdown`."
@@ -171,18 +187,24 @@ impl Render {
                                                                        notes link to; drop it or \
                                                                        add `--format markdown`."
                 .to_owned()),
+            (Format::Json, None) if self.no_credits => Err("`--no-credits` leaves them out of \
+                                                            the Markdown; JSON holds the whole \
+                                                            release, so drop it or add `--format \
+                                                            markdown`."
+                .to_owned()),
             (Format::Json, None) => Ok(View::Json),
             (Format::Markdown, Some(Page::Upgrade)) if self.upgrade_url.is_some() => Err(
                 "`--upgrade-url` is where the release notes link to the upgrade guide; it has no \
                  use for the upgrade guide itself."
                     .to_owned(),
             ),
-            (Format::Markdown, Some(Page::Upgrade)) => Ok(View::UpgradeGuide),
+            (Format::Markdown, Some(Page::Upgrade)) => Ok(View::UpgradeGuide { credits }),
             (Format::Markdown, Some(Page::Notes) | None) => Ok(View::Notes {
                 upgrade_guide: self
                     .upgrade_url
                     .clone()
                     .unwrap_or_else(|| UPGRADE_GUIDE.to_owned()),
+                credits,
             }),
         }
     }
@@ -206,8 +228,11 @@ impl View {
                     .map_err(|error| format!("failed to write the release as JSON: {error}"))?;
                 json + "\n"
             }
-            Self::Notes { upgrade_guide } => markdown::notes(release, headings, upgrade_guide),
-            Self::UpgradeGuide => markdown::upgrade_guide(release),
+            Self::Notes {
+                upgrade_guide,
+                credits,
+            } => markdown::notes(release, headings, upgrade_guide, *credits),
+            Self::UpgradeGuide { credits } => markdown::upgrade_guide(release, *credits),
         })
     }
 }

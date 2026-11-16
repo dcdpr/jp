@@ -701,7 +701,7 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
     .map_err(|error| unreadable(fragments, error))?;
     let text = view.render(&release, &ctx.options.notes.headings)?;
 
-    let no_guide = text.is_empty() && view == View::UpgradeGuide;
+    let no_guide = text.is_empty() && matches!(view, View::UpgradeGuide { .. });
     let note = no_guide.then(|| match &render.version {
         Some(version) => {
             format!("{version} has no upgrade guide: none of its entries has an upgrade section.\n")
