@@ -329,10 +329,9 @@ single-request wire streaming:
   false` setting and freezes its feature names, `Event`, `StreamError`, and
   per-shape request types as public API.
   `elelem` should not be published until at least two non-chat shapes are
-  migrated so the public surface is not biased toward chat completions.
-  It should also not be published before `Event` carries [RFD 118]'s hosted
-  activity and attribution: a model published without them breaks on the first
-  hosted tool, or routes it through generic metadata.
+  migrated (so the public surface is not biased toward chat completions) and
+  `Event` carries [RFD 118]'s hosted activity and attribution (so hosted-tool
+  events do not force a breaking change or fall back to untyped metadata).
 
 ## Implementation Plan
 

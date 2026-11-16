@@ -11,26 +11,26 @@
 
 ## Summary
 
-Some LLM providers execute tools on their own infrastructure: Anthropic's
-`web_search` and `code_execution`, OpenAI's `web_search`, Google's Search
-grounding.
-This RFD exposes them as **provider-hosted tools**, configured inside each
-provider's own config block and translated entirely by that provider's adapter.
-Anthropic web search is the first vertical slice.
-It ships on every flow the `anthropic` provider serves: API key, direct
-subscription, and the ACP subscription flow.
-
-JP core gains no vocabulary for hosted tools.
+This RFD exposes provider-executed server tools (such as Anthropic's
+`web_search` and `code_execution`, OpenAI's `web_search`, and Google Search
+grounding) as **provider-hosted tools** configured inside each provider's
+settings block.
+Each provider adapter translates its hosted-tool settings into wire requests and
+maps the resulting activity onto [RFD 118]'s response artifacts without adding
+hosted-tool vocabulary to `jp_llm` core.
+Anthropic web search is the first vertical slice and ships across all three
+`anthropic` flows: API key, direct subscription, and the ACP subscription flow
+([RFD 110]).
 
 ## Motivation
 
-Users want current information in a conversation without wiring up a search MCP
-server, and the provider already offers it — Anthropic charges $10 per 1,000
-searches and returns cited sources.
+Users want current web information in a conversation without setting up a search
+MCP server.
+Model providers already offer built-in search: Anthropic, for example, charges
+$10 per 1,000 searches and returns cited sources.
 
-The obvious approach is to make these tools appear as another tool source
-alongside `builtin`, `local`, and `mcp`.
-That is wrong, and the reason matters enough to state up front.
+Treating these tools as another tool source alongside `builtin`, `local`, and
+`mcp` conflates tool definition with tool execution.
 
 ### Definition ownership and execution ownership are separate axes
 
@@ -44,28 +44,27 @@ That is wrong, and the reason matters enough to state up front.
 | OpenAI `web_search`           | OpenAI       | OpenAI        | OpenAI      |
 | Google Search                 | Google       | Google        | Google      |
 
-Anthropic's own documentation splits these: `bash` and `text_editor` are
-*client* tools whose schema Anthropic supplies but which the caller executes;
-`web_search` and `code_execution` are *server* tools Anthropic runs itself.
+Anthropic's documentation separates these two categories: `bash` and
+`text_editor` are *client* tools whose schema Anthropic supplies but which the
+caller executes, whereas `web_search` and `code_execution` are *server* tools
+that Anthropic executes on its own infrastructure.
 
-A `ToolSource::Llm` variant would therefore mean opposite things about who
-dispatches, depending on which tool it named.
-`ToolSource` answers "where does the definition come from?", and folding
-execution into it makes the enum a product of sources times runtimes.
+A single `ToolSource::Llm` variant would cover both categories, leaving it
+ambiguous whether JP or the provider dispatches the call.
+`ToolSource` identifies where a tool's definition comes from, and folding
+execution into it turns the enum into a cross-product of sources and runtimes.
 
-The `bash` row *is* a legitimate future `ToolSource` case: provider-supplied
-schema, JP execution, every `ToolConfig` field meaningful.
-This RFD does not cover it, and does not foreclose it.
-
-The `web_search` row is not a Tool Call at all.
-Neither is the Claude Code row, seen from JP: Anthropic's API treats `WebSearch`
-as a client tool, but the client running it is Claude Code, which the
-`anthropic` provider's ACP flow drives.
-JP never dispatches it.
+Client tools like Anthropic `bash` fit a future `ToolSource` variant because the
+provider supplies the schema while JP owns execution and applies every
+`ToolConfig` field; this RFD leaves that path open.
+Server tools like `web_search`, by contrast, are not JP Tool Calls at all.
+Neither is Claude Code's `WebSearch` on the ACP flow: although Anthropic's API
+treats `WebSearch` as a client tool, the client executing it is Claude Code
+inside the `anthropic` provider's ACP runtime, so JP never dispatches it.
 
 ### Two execution planes
 
-**Client tool** — the existing Tool Call:
+**Client tool** (the existing Tool Call):
 
 ```text
 assistant emits ToolCallRequest
@@ -85,28 +84,32 @@ JP enables the facility on a request
     -> JP records activity and assistant output
 ```
 
-JP observes the second.
-It never dispatches it, and never fabricates a `ToolCallResponse` for it.
+JP only observes provider-hosted tools.
+It never dispatches them or fabricates a `ToolCallResponse` for them.
 
 ### Billing must not decide capability
 
 The `anthropic` provider serves each request through one of three flows: API
 key, direct subscription, or the ACP subscription flow ([RFD 110]).
-The `auth` chain ([RFD 090]) picks the flow per request.
-With `auth = ["subscription", "api_key"]` it moves from the subscription to the
-API key when the allowance runs out, possibly between two requests of one turn.
+The `auth` chain ([RFD 090]) selects the flow per request; with `auth =
+["subscription", "api_key"]`, it falls back from the subscription to the API key
+when the subscription allowance is exhausted, potentially between two requests
+in the same turn.
 
-If web search worked on one flow and not another, whether a query could search
-would depend on which credential the chain picked.
-Under the Validation rule below, an enabled search on a flow that cannot serve
-it is a hard error, so the gap would show up as failed queries, not a quiet
-absence.
-Web search therefore ships on all three flows, with the same consent and budget
-semantics on each.
+If web search worked on only a subset of flows, whether a query could search
+would depend on which credential the `auth` chain selected.
+Because enabling web search on a flow that cannot serve it is a hard validation
+error, an unsupported flow in the fallback chain would cause queries to fail
+rather than silently omit search.
+Web search therefore ships on all three flows with consistent consent and budget
+semantics.
 
 ## Design
 
 ### Configuration lives in the provider block
+
+Hosted tools are configured under each provider's settings block and default to
+**disabled**:
 
 ```toml
 [providers.llm.anthropic.hosted_tools.web_search]
@@ -115,30 +118,28 @@ max_searches = 5
 blocked_domains = ["reddit.com"]
 ```
 
-Typed, defined in `jp_config::providers::llm::anthropic`, validated by the
-Anthropic adapter, invisible to `jp_llm` core.
+These settings are typed in `jp_config::providers::llm::anthropic` and validated
+by the Anthropic adapter; `jp_llm` core does not inspect them.
 
-OpenAI's block has its own fields under its own names.
-No shared capability vocabulary is negotiated, because the knobs are not shared:
-`max_searches` has no OpenAI equivalent and `search_context_size` has no
-Anthropic one.
+Each provider defines its own fields without a shared capability vocabulary
+because the underlying parameters differ: `max_searches` has no OpenAI
+equivalent, and `search_context_size` has no Anthropic equivalent.
 
-Consequences of this placement:
+Placing configuration under the provider block has four consequences:
 
-- **No `source`, no aliases, no fallback ordering.** The provider serving the
-  request is already selected by `assistant.model.id`, and the config key is
-  scoped to that provider.
+- **No `source`, aliases, or fallback ordering.** `assistant.model.id` already
+  selects the active provider, and the config key is scoped to that provider.
 - **No `run`, `result`, `access`, `questions`, `command`, or `parameters`.**
-  None of them apply: there is no local execution and no approval point, because
-  the work has already happened by the time JP sees it.
-- **`ChatQuery` is unchanged.** `Anthropic` is built via
+  These `ToolConfig` fields do not apply because the provider executes the tool
+  before JP receives the event, leaving no local execution or interactive
+  approval step.
+- **`ChatQuery` is unchanged.** `Anthropic` is constructed via
   `TryFrom<&AnthropicConfig>` and `convert_events` already reads per-event
-  provider config, so hosted-tool settings arrive through the existing path with
-  no new plumbing.
-- **A plugin provider needs nothing from core.** Its config subtree is already
-  opaque to JP; its hosted tools ride along inside it.
-
-Hosted tools default to **disabled**.
+  provider config, so hosted-tool settings arrive through the existing config
+  path.
+- **Plugin providers require no core changes.** A plugin provider's config
+  subtree is already opaque to JP, so its hosted-tool settings pass through
+  untouched.
 
 ### Settings
 
@@ -148,242 +149,247 @@ Hosted tools default to **disabled**.
 | `max_searches`                       | Caps searches per turn. Unset leaves the provider's limit. |
 | `allowed_domains`, `blocked_domains` | Restricts results by domain. At most one may be set.       |
 
-`max_searches` counts per turn because that is the unit a user budgets.
-Anthropic's `max_uses` applies to one request, and a JP turn sends one request
-per tool cycle.
-The adapter sets each request's `max_uses` to the budget minus the searches
-completed in the turn, read from the stream.
-A search deferred by a client call runs in the next request and counts against
-that request's `max_uses`, even when it was called under a different one, so
-deferred searches beyond the remaining budget fail with `max_uses_exceeded`,
-which Anthropic does not bill.
-Anthropic rejects `max_uses = 0`, so once the budget is spent the adapter stops
-declaring the tool and abandons any search still pending (see Continuation).
-Completed searches still replay natively: Anthropic accepts them in history when
-the request does not declare the tool.
+`max_searches` is a per-turn budget rather than a per-request limit.
+Anthropic's `max_uses` parameter applies to a single HTTP request, while a JP
+turn sends one request per tool cycle.
+On each request, the adapter sets `max_uses` to `max_searches` minus the number
+of searches already completed in the turn (read from the conversation stream).
+When a client tool call defers a search to the next request, that search counts
+against the follow-up request's `max_uses`; any deferred search beyond the
+remaining budget fails with `max_uses_exceeded`, which Anthropic does not bill.
+Because Anthropic rejects `max_uses = 0`, once the turn's budget is exhausted
+the adapter omits the web search tool declaration and abandons any pending
+search (see Continuation).
+Completed searches remain in the native history, as Anthropic accepts historical
+search blocks even when the current request does not declare the tool.
 
-`user_location` and the dynamic-filtering versions of the tool are outside the
-first slice.
+`user_location` and the dynamic-filtering versions of the tool are out of scope
+for the initial slice.
 
 ### Configuration is the consent boundary
 
-The provider executes the work before JP can prompt, so per-call approval is
-impossible.
-`enable = true` is therefore blanket consent for that facility: its network
-access, its spend, and its provider-side execution behavior for every matching
-request.
+Because the provider executes a hosted tool before JP can prompt the user,
+per-call approval is impossible on the HTTP flows.
+Setting `enable = true` grants blanket consent for that facility's network
+access, billing, and provider-side execution on every matching request.
+That consent boundary matters even more for code execution and provider-side MCP
+connectors than for web search, which is why hosted tools default to disabled.
 
-This matters more for code execution and provider-side MCP connectors than for
-web search, and it is why the default is off.
+Although Claude Code prompts for permission before each `WebSearch` call on the
+ACP flow, JP answers that prompt automatically from configuration so `enable =
+true` has identical consent semantics across all flows.
 
-The ACP flow could prompt, since Claude Code asks before each `WebSearch` call.
-JP answers that request from configuration instead, so `enable = true` means the
-same thing on every flow.
-
-Search results reach the model without passing through JP.
-On the HTTP flows Anthropic returns them encrypted, and on the ACP flow Claude
-Code hands them to the model inside its own loop, so JP has no point at which to
-filter what the model reads.
-Prompt injection through search results is part of what `enable = true` consents
-to.
-JP's own exposure is what it renders, the queries, titles, URLs, and cited text,
-which [RFD 096] sanitizes.
+Search results also reach the model without passing through JP: Anthropic
+returns them encrypted on the HTTP flows, and Claude Code feeds them to the
+model inside its own loop on the ACP flow.
+JP cannot filter what the model reads, so `enable = true` also accepts the
+prompt-injection surface of raw search results.
+JP sanitizes all fields it renders to the terminal (queries, titles, URLs, and
+cited text) under [RFD 096].
 
 ### HTTP flows: the native server tool
 
 The API-key and direct subscription flows share `create_request` and `call` in
-`anthropic.rs`, and differ only in the credential.
+`anthropic.rs` and differ only in their credentials.
 Both declare Anthropic's server tool.
+All HTTP protocol handling lives in `anthropic.rs`; core sees only the
+normalized hosted-activity event from [RFD 118].
 
-**Request.** `convert_tools` gains a branch emitting
-`types::Tool::WebSearch(ToolWebSearch::WebSearch20250305(..))`.
-The first slice pins `web_search_20250305`.
-Later versions filter results by running code first: responses then carry
-code-execution blocks, nested search blocks with a `caller`, and a container id
-to pass back, and that filtering is not eligible for Zero Data Retention.
-The adapter records the version in the payload, so a JP upgrade does not
-continue an activity under a contract it did not begin under.
-The version is not user-configurable.
+**Request.** `convert_tools` emits
+`types::Tool::WebSearch(ToolWebSearch::WebSearch20250305(..))`, pinned to
+`web_search_20250305` for the initial slice.
+Later versions filter results by executing code first, which returns
+code-execution blocks, nested search blocks with a `caller` field, and a
+container ID to replay, and makes requests ineligible for Zero Data Retention.
+The adapter records the wire version in `ProviderPayload` so a JP upgrade does
+not continue an activity under a different wire contract.
+The wire version is not user-configurable.
 
 **Validation.** Enabling web search on a model or flow that cannot serve it, or
-with a setting the flow cannot honor, is a hard error raised by the adapter
-before the request goes out.
-Silently dropping it would let an A/B run compare a model with search against
-one without while claiming to compare models.
-An account that cannot search is reported as such, not as a generic rejection:
-Anthropic answers a request from an organization with web search disabled with a
-400 that says so, and on the ACP flow an inventory missing only `WebSearch`
-means the login does not offer it.
+with a setting the flow cannot honor, is a hard error returned by the adapter
+before sending the request.
+Silently dropping the tool would invalidate A/B evaluations by running one model
+with search and another without.
+When an account cannot use search, the adapter reports that cause directly
+rather than returning a generic rejection: Anthropic responds with a specific
+400 error when an organization disables web search, and on the ACP flow a
+startup tool inventory missing only `WebSearch` indicates that the active login
+does not offer search.
 
-**Response.** Stream translation becomes stateful per content block.
-A `server_tool_use` block opens a hosted-activity part.
-Its query arrives as `input_json_delta`, which `map_content_delta` today turns
-into client tool-call arguments; that path also marks the turn as having
-requested client tools, which disables max-token chaining.
-The result arrives as one complete `web_search_tool_result` block, so the
-adapter keeps the activity open across its `ContentBlockStop`, which `map_event`
-flushes unconditionally today, and emits it with the native payload once the
-result lands.
-The user sees the activity line stay up while the search runs.
-Anthropic documents the result block as complete for the pinned version; a
-version that streamed results would be adopted deliberately, with its own
-accumulation.
+**Response.** Stream translation tracks state per content block.
+A `server_tool_use` block opens a hosted-activity part; its query arrives as
+`input_json_delta` chunks, which `map_content_delta` currently routes into
+client tool-call arguments (marking the turn as having requested client tools
+and disabling max-token chaining).
+Because the result arrives as a single complete `web_search_tool_result` block,
+the adapter holds the activity open across the `server_tool_use` block's
+`ContentBlockStop` (which `map_event` currently flushes unconditionally) and
+emits the completed activity with its native payload once the result block
+arrives.
+This keeps the activity line visible in the terminal while the search runs.
+Anthropic documents `web_search_tool_result` as a single complete block for
+`web_search_20250305`; adopting a future version that streams result deltas
+requires dedicated accumulation.
 
-**Replay.** `convert_events` reconstitutes both native blocks from the persisted
-payload, `server_tool_use` and `web_search_tool_result`, with
-`encrypted_content` byte-identical, since Anthropic rejects a modified or
-missing value.
-An activity whose payload is absent, or written by another flow, has neither
-block emitted.
-A `started` activity is replayed only under the continuation rule below.
+**Replay.** `convert_events` reconstructs both the `server_tool_use` and
+`web_search_tool_result` blocks from the persisted payload, preserving
+`encrypted_content` byte-for-byte because Anthropic rejects modified or missing
+values.
+If an activity has no payload or its payload was written by another flow, the
+adapter omits both blocks.
+A `started` activity is replayed only when it satisfies the continuation rule
+below.
 
-**`pause_turn`.** A paused turn is continued by resending the request with the
-paused assistant message appended unchanged and the same tools, until another
-stop reason arrives, within a bounded number of continuations.
-It cannot reuse max-token chaining: `chain` appends a user message asking the
-model to continue, and `create_request` rewrites trailing thinking as text and
-appends a synthetic continue message for models without prefill.
-Anthropic rejects a user text block after an unfinished `server_tool_use`.
-The continuation therefore runs inside the adapter's request loop and bypasses
-both.
-Max-token chaining still applies within a turn that contains searches, since
-Anthropic accepts the user text it appends after completed search blocks, but
-`should_chain` refuses while a search is pending.
-A turn that stops at `max_tokens` with a search pending ends there, and the next
-request abandons the search.
-
-Every one of these lives in `anthropic.rs`.
-Core sees only the normalized hosted-activity event from [RFD 118].
+**`pause_turn`.** When the API stops with `pause_turn`, the adapter continues
+the turn inside its request loop by resending the request with the paused
+assistant message appended unchanged and the same tools, repeating until another
+stop reason arrives (up to a bounded continuation limit).
+This continuation cannot reuse max-token chaining: `chain` appends a user
+message asking the model to continue, and `create_request` rewrites trailing
+thinking blocks as text and appends a synthetic continuation prompt for models
+without prefill, whereas Anthropic rejects any user text block immediately after
+an unfinished `server_tool_use`.
+Max-token chaining still applies once searches complete, because Anthropic
+accepts trailing user text after completed search blocks, but `should_chain`
+returns `false` while a search is pending.
+If a turn hits `max_tokens` with a search still pending, the turn stops and the
+next request abandons the pending search.
 
 ### Mixed client and hosted calls
 
 When Claude calls web search and a client tool in the same parallel batch, the
-API returns `stop_reason: "tool_use"` and does *not* run the search yet:
+API returns `stop_reason: "tool_use"` and defers the search:
 
 1. JP persists the hosted activity in `started` state with its native payload.
 2. JP emits `ToolCallRequest` events for the client tools only.
-3. JP executes those normally.
-4. On the next request the adapter replays the pending activity and the client
-   results in the native order Anthropic requires.
-5. Anthropic runs the deferred search and resumes.
+3. JP executes the client tools as usual.
+4. On the next request, the adapter replays the pending activity and the client
+   tool results in the native block order that Anthropic requires.
+5. Anthropic executes the deferred search and resumes generation.
 
-The core invariant holds throughout: every `ToolCallRequest` is work JP must
-dispatch.
+The core invariant holds throughout: every `ToolCallRequest` represents work
+that JP dispatches.
 
 ### Continuation is stateless; abandonment is explicit
 
-Step 4 reads from the **conversation stream**, not adapter memory.
-The payload is persisted, so the adapter reconstitutes it on every request —
-exactly as it does for thinking signatures today.
-Retry, restart, and resumption after interrupt all rebuild the request from the
-stream, and adapter-held state would break all three.
+Replaying a deferred activity in step 4 reads from the **conversation stream**,
+not from adapter memory.
+Because the payload is persisted in the stream, the adapter reconstructs it on
+every request, just as it does for thinking signatures.
+Retries, process restarts, and resumptions after an interrupt all rebuild the
+request from the stream; holding continuation state in adapter memory would
+break all three.
 
-A `started` activity is replayed natively only when the request continues the
-tool cycle that left it pending, and the turn has search budget left.
-The request continues the cycle when the activity is in the last assistant
-message and every event after it answers that message's client tool calls.
-The adapter then keeps declaring the tool, even when [RFD 078] changed the
-declaration between cycles, because the transcript depends on it.
+The adapter replays a `started` activity natively only when the request
+continues the tool cycle that left it pending and the turn has remaining search
+budget.
+A request continues that cycle when the activity belongs to the last assistant
+message and every subsequent event is a `ToolCallResponse` for that message's
+client tool calls.
+When continuing a pending search, the adapter keeps declaring the web search
+tool even if a tool mutated the configuration between cycles ([RFD 078]),
+because the provider transcript requires the declaration.
 
-Every other request abandons the activity:
+Every other request abandons the pending activity by omitting the unfinished
+`server_tool_use` block from the native request:
 
-- **Budget spent.** No `max_uses` admits the pending search without admitting it
-  past the budget.
-- **Interrupted turn.** The user stops the turn after the client tools ran, then
-  sends a new message.
-  `convert_events` merges consecutive user-role events, so replaying the pending
-  block would put text after the `tool_result`, which Anthropic rejects.
-- **Interrupted pause.** A `pause_turn` continuation that did not finish is not
-  resumed from a rebuilt request.
+- **Budget exhausted.** No positive `max_uses` value can allow the pending
+  search without exceeding `max_searches`.
+- **Interrupted turn.** If the user interrupts the turn after client tools
+  execute and sends a new user message, `convert_events` merges consecutive
+  user-role events; replaying the pending `server_tool_use` would place user
+  text after `tool_result`, which Anthropic rejects.
+- **Interrupted `pause_turn`.** An interrupted `pause_turn` continuation is not
+  resumed when rebuilding a later request.
 - **Flow or provider switched.** [RFD 078] can change the active model between
-  cycles, and the `auth` chain can change the flow.
-  The new adapter or flow preserves and ignores a payload format it did not
-  write ([RFD 118]'s contract).
+  cycles, and the `auth` chain can switch flows.
+  Per [RFD 118], the new adapter or flow preserves and ignores a payload format
+  it did not write.
 
-Abandoning omits the pending `server_tool_use` from the native request.
-Nothing is written: the activity stays `started` with no terminal transition,
-which [RFD 118] defines as begun and never finished, and since the rule reads
-only the stream, every later request reaches the same decision.
-No config delta is rejected, and no capability [RFD 078] promises is blocked to
-protect a transcript detail.
+Abandonment writes no new event: the activity remains in `started` state with no
+terminal transition (which [RFD 118] defines as an unfinished activity), and
+because the rule inspects only the stream, every subsequent request reaches the
+same decision.
+Config deltas are never rejected, and [RFD 078] config mutations are never
+blocked to protect provider transcript state.
 
 ### `tool_choice` must not broaden silently
 
-Hosted tools go into the same native `tools` array as client tools, which is the
-wire shape.
-Two existing sites in `anthropic.rs` change behavior as a result, and both must
-be handled:
+Anthropic's wire format places hosted tools and client tools in the same `tools`
+array.
+Adding hosted tools to that array affects two places in `anthropic.rs`:
 
-- `convert_tool_choice` maps `ToolChoice::Required` to Anthropic's `any`,
-  meaning "use one of the provided tools."
-  Once `web_search` is in that array, a user who asked the model to call one of
-  *their* tools can have that satisfied by a search instead.
+- `convert_tool_choice` maps `ToolChoice::Required` to Anthropic's `any` ("use
+  one of the provided tools").
+  Once `web_search` is in the `tools` array, a `Required` constraint intended
+  for the user's client tools could be satisfied by a web search instead.
 - The documented single-tool quirk workaround (`tools.len() == 1 &&
   matches!(tool_choice, ToolChoice::Function(_))` downgrading to `Required`)
-  stops firing when a hosted tool makes the array length 2.
+  stops firing when a hosted tool brings the array length to 2.
 
-Policy: `assistant.tool_choice` stays scoped to JP-dispatched tools.
-The adapter ensures the native request does not extend it to hosted tools, and
-forcing a hosted tool is unsupported.
+`assistant.tool_choice` remains scoped to JP-dispatched client tools.
+The adapter excludes hosted tools when applying `tool_choice`, and forcing a
+hosted tool is unsupported.
 
 ### ACP flow: Claude Code's `WebSearch`
 
-The ACP flow cannot declare a server tool.
-Claude Code builds the API request, and its options take built-in tool names,
-not tool definitions.
-Its own `WebSearch` tool runs each search in a separate request on a smaller
-model (Claude Haiku 4.5 on Claude Code 2.1.280), and returns that model's
-summary of the results with their titles and URLs.
-Enabling web search on this flow enables that tool.
+The ACP flow cannot declare Anthropic's HTTP server tool because Claude Code
+constructs the API request and accepts built-in tool names rather than raw tool
+definitions in its options.
+Instead, enabling web search on the ACP flow enables Claude Code's built-in
+`WebSearch` tool, which executes each search in a separate sub-request on a
+smaller model (Claude Haiku 4.5 in Claude Code 2.1.280) and returns a summary
+with result titles and URLs.
 
-The API sees `WebSearch` as a client tool, executed by Claude Code.
-JP sees what it sees on the HTTP flows: work the provider adapter's runtime runs
-and JP observes.
-It is recorded as a `HostedActivity`, never as a `ToolCallRequest`.
+Although Anthropic's API sees `WebSearch` as a client tool executed by Claude
+Code, from JP's perspective it is work executed by the provider adapter's
+runtime and observed by JP.
+JP therefore records it as a `HostedActivity` and never as a `ToolCallRequest`:
 
-- **Request.** `options.tools` names `WebSearch`, and the inventory JP checks
-  against Claude Code's `init` message includes it.
-  It is the only native tool this flow enables, and it comes from typed
-  configuration; [RFD 110]'s rule that native side-effectful tools stay disabled
-  is unchanged.
-- **Permission.** Claude Code asks before each `WebSearch` call in its default
-  permission mode, which the ACP flow runs it in, and the qualified adapter
-  sends that as `session/request_permission`, with the same allow-once option JP
-  selects for its own tools.
-  JP allows it while the turn's `max_searches` budget remains and denies it once
-  the budget is spent.
-  The permission path rejects any tool that is not a JP tool today, and for this
-  one it must not emit a Tool Call.
-- **Response.** The `WebSearch` tool-use block arrives on the SDK stream JP
-  already reads, which today ignores tool-use blocks for tools JP did not
-  configure.
-  Its result arrives in the SDK user message, which the qualified adapter
-  forwards whole.
-  Beside the model-visible `tool_result`, which is formatted text, the message
-  carries a structured `tool_use_result`: the `query`, a `searchCount`, and
-  `results` holding each backend search's links as `{title, url}`, followed by
-  the summary.
-  JP's typed SDK message drops that field today.
-  The adapter records the query from the tool-use block, the sources from
-  `tool_use_result`, and the `tool_result` text in the payload.
-  The payload format is Claude Code's, versioned by the qualified runtime.
-- **Replay.** The transcript encoder emits a `WebSearch` `tool_use` and its
-  `tool_result`, with the text the model saw, from the payload.
-  The `mcp__jp__` renaming in `PreparedRequest::new` applies to JP tools only.
-  Only completed activities are replayed: Claude Code finishes a search before
-  the model continues, so a `started` one was interrupted.
-- **Decoding.** Claude Code does not forward the stream of its nested search
-  request.
-  The SDK stream carries only the `text` and `tool_use` blocks JP already
-  decodes, so this flow needs none of the block types [RFD 118] phase 1 adds.
+- **Request.** `options.tools` includes `WebSearch`, and JP's startup inventory
+  check against Claude Code's `init` message verifies its presence.
+  `WebSearch` is the only native Claude Code tool enabled on the ACP flow and is
+  controlled by typed configuration; [RFD 110]'s rule disabling native
+  side-effectful tools is unchanged.
+- **Permission.** In its default permission mode (used by the ACP flow), Claude
+  Code requests permission before each `WebSearch` call, which
+  `claude-agent-acp` forwards as `session/request_permission`.
+  While the turn's `max_searches` budget remains, JP responds with the same
+  allow-once option it uses for JP tools; once the budget is exhausted, JP
+  denies the request.
+  Unlike JP tool permissions, handling `WebSearch` permission must not emit a
+  `ToolCallRequest`.
+- **Response.** The `WebSearch` `tool_use` block arrives on the SDK stream that
+  JP already reads (which currently ignores `tool_use` blocks for non-JP tools),
+  and its result arrives in the SDK user message forwarded by the adapter.
+  Alongside the model-visible formatted text in `tool_result`, the SDK user
+  message carries a structured `tool_use_result` field containing `query`,
+  `searchCount`, and `results` (each backend search's `{title, url}` links
+  followed by the summary), which JP's typed SDK message currently drops.
+  The adapter records the query from the `tool_use` block, the sources from
+  `tool_use_result`, and the `tool_result` text inside `ProviderPayload`,
+  versioned by the qualified Claude Code runtime.
+- **Replay.** When encoding a native transcript, the adapter reconstructs the
+  `WebSearch` `tool_use` and `tool_result` blocks (with the model-visible text)
+  from the payload.
+  The `mcp__jp__` tool-name prefix applied in `PreparedRequest::new` remains
+  restricted to JP tools.
+  Only `completed` activities are replayed: because Claude Code completes each
+  search before returning control to the model, any `started` activity on the
+  ACP flow was interrupted.
+- **Decoding.** Because Claude Code does not forward the stream of its internal
+  search sub-request, the SDK stream contains only the standard `text` and
+  `tool_use` blocks that JP already decodes, and does not require the
+  `async-anthropic` block types added in [RFD 118] Phase 1.
 
-Domain lists cannot be honored here.
-Claude Code's `WebSearch` takes `allowed_domains` and `blocked_domains` from the
-model on each call, which sets them for its own purposes, and its permission
-rule accepts no domain specifier, so JP has nowhere to impose a list.
-Setting either list makes an ACP request a hard error before it starts, by the
-Validation rule: ignoring a blocked domain is a policy breach, not a degraded
-search.
+Domain filtering (`allowed_domains` and `blocked_domains`) cannot be enforced on
+the ACP flow.
+Claude Code's `WebSearch` tool takes `allowed_domains` and `blocked_domains` as
+model-supplied call arguments rather than runtime configuration, and its
+permission rules do not support domain constraints.
+Because ignoring a configured `blocked_domains` list would violate user policy
+rather than merely degrade search quality, setting either domain list on an ACP
+request fails validation before the request starts.
 
 | Setting                              | API key and direct                        | ACP                          |
 | ------------------------------------ | ----------------------------------------- | ---------------------------- |
@@ -393,209 +399,211 @@ search.
 
 ### Activation
 
-Hosted tools sit outside `conversation.tools`, so `-T`, `--no-tool`, and tool
-groups do not apply to them — correctly, since they are not tools.
+Because hosted tools live outside `conversation.tools`, `-T`, `--no-tool`, and
+tool groups do not apply to them.
 
-For a single query, `--cfg` carries the override.
-The full path is long, so the documented form uses a config fragment resolved
-against `config_load_paths`:
+To enable a hosted tool for a single query, pass `--cfg` with either the full
+config path or a config fragment resolved against `config_load_paths`:
 
 ```sh
 jp query --cfg providers.llm.anthropic.hosted_tools.web_search.enable=true "..."
 jp query --cfg websearch "..."   # a websearch.toml fragment
 ```
 
-No new flag.
-If the pattern proves common enough, a dedicated selector can be added later.
+This RFD introduces no dedicated CLI flag; a shorthand selector can be added
+later if one-off activation proves common.
 
 ### Rendering
 
-Terminal output shows the activity while it runs and its outcome afterward:
+Terminal output displays the activity while it runs and its outcome when it
+completes:
 
 ```text
 ⚒ web search: "rust async trait object safety"
   3 results
 ```
 
-**Sources are a release gate, not a follow-up.** Anthropic, OpenAI, and Google
-all impose attribution or display obligations on search-backed output.
-Rendering search-backed assistant text without its sources is not an incomplete
-feature, it is a non-compliant one.
-On the HTTP flows the API anchors citations in the assistant text, and the typed
-attributions from [RFD 118] render inline or as a source list.
-On the ACP flow there are no anchored citations, so JP renders the activity's
-`sources` under the turn.
-Web rendering in the `serve-web` plugin follows the same rule.
+**Source rendering is a release gate.** Anthropic, OpenAI, and Google all impose
+attribution display requirements on search-backed output, so shipping
+search-backed responses without sources violates provider terms.
+On the HTTP flows, the API anchors citations in the assistant text, and JP
+renders the typed attributions from [RFD 118] inline or as a source list.
+On the ACP flow, where citations are not anchored in text, JP renders the
+activity's `sources` under the turn.
+The `serve-web` plugin follows the same rules.
 
-Hosted-activity spend is shown as the number of searches in the turn, counted
-from the recorded `HostedActivity` events.
-[RFD 118] persists no usage counters, so the provider's own count
-(`usage.server_tool_use.web_search_requests`) is a diagnostic, not a display
-source.
+Hosted-activity usage is displayed as the number of searches in the turn,
+counted from the recorded `HostedActivity` events.
+Because [RFD 118] does not persist provider usage counters, the provider's
+reported count (`usage.server_tool_use.web_search_requests`) is used only as a
+diagnostic.
 
 ## Drawbacks
 
-**Two configuration idioms for things users think of as tools.** Someone who
-enabled web search will look for it under `conversation.tools` and not find it.
-The split is honest — they are different execution planes — but it is a real
-learning cost, and the ubiquitous-language entries are the mitigation rather
-than a fix.
+**Two configuration locations for tool-like features.** Users who enable web
+search may look for it under `conversation.tools` and not find it.
+Separating client tools from provider-hosted tools reflects their different
+execution planes, but it adds a learning cost that ubiquitous-language
+definitions only partially mitigate.
 
-**Switching provider silently changes capability.** Configure Anthropic's web
-search, run a query on OpenAI, and that query has no search.
-This is deliberate: under this placement it is an *absent capability on an
-unconfigured provider*, not a degraded explicit setting, which matches how
-reasoning support already behaves.
-`adaptive_effort` warns when it clamps an explicitly requested level; nothing
-warns when a model simply does not reason.
+**Switching providers silently changes capability.** If a user configures
+Anthropic's web search and runs a query on OpenAI, that query runs without
+search.
+Under provider-scoped placement, OpenAI treats this as an unconfigured
+capability rather than a degraded cross-provider setting.
+This matches how reasoning support works: `adaptive_effort` warns when it clamps
+an explicitly requested level, whereas a model that does not support reasoning
+simply runs without it.
 
-**`--cfg providers.llm.anthropic.hosted_tools.web_search.enable=true` is long.**
-A direct cost of provider-scoped placement, mitigated by config fragments rather
-than removed.
+**Verbose `--cfg` overrides.** Passing `--cfg
+providers.llm.anthropic.hosted_tools.web_search.enable=true` on the command line
+is long, though config fragments (`--cfg websearch`) mitigate the typing cost.
 
-**Domain lists are not available on the ACP flow.** Search itself has parity;
-this refinement does not.
-A user who needs a blocked domain and lists a subscription in `auth` gets an
-error on that flow, and has to choose between the list and the subscription.
+**Domain lists are unsupported on the ACP flow.** While web search itself works
+across all three flows, domain filtering does not.
+Users who configure `allowed_domains` or `blocked_domains` alongside
+`subscription` in `auth` receive a validation error on the ACP flow and must
+choose between domain filtering and subscription billing.
 
-**A search is a different unit on each flow.** On the ACP flow one `WebSearch`
-call can run up to eight backend searches, which Claude Code reports as
-`searchCount`.
-`max_searches` counts calls, because a call is what JP can allow or deny; the
-calls checked while writing this ran one search each.
-The model there reads a smaller model's summary and the result titles and URLs,
-not the page content the HTTP flows replay.
+**`max_searches` measures different units across flows.** On the ACP flow, a
+single `WebSearch` call can execute up to eight backend searches (reported as
+`searchCount` by Claude Code), and the primary model receives only the smaller
+model's summary and result links rather than the full page content replayed on
+the HTTP flows.
+Because JP can only allow or deny each `WebSearch` invocation, `max_searches`
+counts `WebSearch` calls rather than backend queries (though observed probes
+executed one backend search per call).
 
-**Switching flows loses search context.** When the `auth` chain falls back
-mid-conversation, searches written by the other flow keep their portable
-projection, the answer and its sources, but the model no longer sees their
-results.
-With search enabled, it may search again for what it already found.
+**Switching flows mid-conversation drops native search context.** When the
+`auth` chain falls back between flows mid-conversation, searches recorded by the
+earlier flow retain their portable projection (assistant answer and sources),
+but their native search results are not replayed.
+If search remains enabled, the model may repeat searches it already ran.
 
-**What a subscription search costs is opaque.** Each `WebSearch` call runs its
-own request on the smaller model, about 15,000 input tokens when this was
-checked, and Claude Code reports that request's tokens and search count in the
-result's per-model usage.
-Anthropic reports no allowance consumption per request, so JP can show how many
-searches a turn ran and the tokens they used, but not what they cost a
-subscription.
-How the allowance prices searches is Anthropic's policy and can change.
+**Subscription search cost is opaque.** Each ACP `WebSearch` call runs a
+separate sub-request on the smaller model (roughly 15,000 input tokens in
+verification probes), and Claude Code reports that sub-request's token usage and
+search count in per-model usage metadata.
+Because Anthropic does not report subscription allowance deduction per request,
+JP can display search counts and token usage but not subscription quota cost.
 
-**Per-provider configuration duplicates intent.** Wanting web search on both
-Anthropic and OpenAI means two config blocks.
-The knobs genuinely differ, so some duplication is inherent, but the `enable`
-flag is duplicated for no reason other than placement.
+**Duplicated configuration across providers.** Enabling web search on both
+Anthropic and OpenAI requires two config blocks.
+Although the provider-specific parameters differ, the `enable` flag is
+duplicated across providers.
 
 ## Alternatives
 
-**`ToolSource::Llm` plus a no-op executor.** Rejected.
-`llm.bash` and `llm.web_search` would differ in who executes, so one source
-variant cannot describe both; and it requires exceptions in the turn loop, the
-execution plan, and orphan sanitization.
+**`ToolSource::Llm` with a no-op executor.** Because `llm.bash` is executed by
+JP and `llm.web_search` is executed by the provider, a single `ToolSource::Llm`
+variant cannot describe both.
+Routing server tools through `ToolSource` would also require special cases in
+the turn loop, the execution plan, and orphan sanitization.
 
-**`assistant.request.hosted_tools.<capability>.<provider>`,** with a
-provider-agnostic capability key and per-provider sub-blocks.
-Genuinely attractive: one `enable` per capability, symmetric A/B arms, and the
-tool stays enabled across a model switch.
-Rejected because core would have to hold a capability namespace and a
-`ChatQuery.hosted_tools` field, and a plugin provider's hosted tools would need
-names core recognizes.
-Provider-scoped placement is a step toward providers-as-plugins; this is a step
-away.
-The earlier arguments for it — that provider config is not conversation-scoped,
-and that grants would sit next to credentials — do not hold:
-`PartialAppConfig::delta` covers `providers`, the tree holds only `api_key_env`
-rather than a secret, and [RFD 078] grants are per-path rather than per-section.
-This flips if keeping one capability enabled across a credential fallback ever
-requires the same `enable` in two provider blocks.
+**`assistant.request.hosted_tools.<capability>.<provider>`.** A
+provider-agnostic capability key with per-provider sub-blocks would provide one
+`enable` flag per capability, symmetric A/B test configurations, and persistent
+activation across model switches.
+However, it requires core to maintain a capability namespace and a
+`ChatQuery.hosted_tools` field, and it forces plugin providers to use capability
+names that core recognizes.
+Provider-scoped placement aligns with moving providers into plugins.
+Earlier objections to provider-scoped placement do not hold:
+`PartialAppConfig::delta` covers `providers`, the config tree stores
+`api_key_env` rather than raw secrets, and [RFD 078] grants are scoped per path
+rather than per section.
+This trade-off would change only if credential fallback ever crossed provider
+blocks and required duplicating `enable` to preserve a capability.
 
-**A `provider_alias` map on the tool entry**, or a provider-side `tools.<native>
-= "<jp name>"` map.
-Rejected with the tool-entry model itself.
-The provider-side form also reads backwards: understanding a tool would mean
-grepping every provider block for a reverse mapping, and it puts JP-namespace
-names inside a block that should describe the provider.
+**A `provider_alias` map on the tool entry, or a provider-side `tools.<native> =
+"<jp name>"` map.** Both rely on the rejected tool-entry model.
+The provider-side form also inverts lookup direction: understanding a tool would
+require searching every provider block for a reverse mapping, and provider
+config would contain JP-namespace tool names.
 
-**Ordered fallback variants** — one tool name resolving to a provider-hosted
-search, else an MCP search, else a local one.
-Rejected here.
-Their schemas, invocation protocols, pricing, security posture, and citation
-obligations all differ, and one runs inside the provider's loop while the other
-stops it for JP execution.
-Ordered fallback would hide those differences behind a single name.
-Capability routing is a separate feature; issue [#208] covers adjacent
-multi-exposure requirements and should not be mixed in.
+**Ordered fallback variants.** Resolving a single tool name to a provider-hosted
+search, then an MCP search, and then a local tool hides major operational
+differences behind one name.
+Provider-hosted and client-executed tools differ in schema, invocation protocol,
+pricing, security posture, and citation obligations, and one runs inside the
+provider's loop while the other pauses generation for JP execution.
+Capability routing and multi-exposure (tracked in [#208]) belong in a separate
+feature.
 
-**Automatic discovery** via a `Provider::executed_tools()` capability list.
-Rejected as premature — it exists to serve a discovery caller this design does
-not have.
-Typed fields inside each provider's config block give in-tree providers better
-diagnostics, and a plugin provider's own schema covers the open case without
-core arbitrating.
+**Automatic discovery via `Provider::executed_tools()`.** Nothing in this design
+queries a runtime capability list.
+Typed fields inside each provider's config block give built-in providers
+compile-time and schema diagnostics, and a plugin provider's own schema covers
+external providers without core arbitrating.
 
-**Silently dropping an unsupported hosted tool** with a warning, mirroring how
-an MCP tool whose server is down is skipped.
-Rejected: see Validation above.
+**Silently dropping an unsupported hosted tool with a warning.** Skipping an MCP
+tool when its server is unreachable is a runtime availability fallback, whereas
+enabling a hosted tool on an unsupported model or flow is a configuration error
+(see Validation above).
 
-**Ship on the HTTP flows first and the ACP flow later.** Rejected: see "Billing
-must not decide capability".
-The HTTP phases can merge first, but until the ACP phase lands, enabling search
-on an ACP request is a hard error, and the feature is not announced.
+**Shipping on the HTTP flows before the ACP flow.** Because billing must not
+determine capability, the feature cannot be announced until all three flows
+support web search.
+The HTTP implementation phases can merge first, provided that enabling web
+search on an ACP request returns a hard error until Phase 4 lands.
 
-**A JP tool that calls the Messages API with web search.** Would give search to
-every provider and flow alike.
-Rejected: it needs an API credential, which a subscription-only setup does not
-have, and it is the capability routing this RFD leaves out.
+**A JP client tool that calls the Anthropic Messages API with web search.**
+While a JP-dispatched wrapper tool would work uniformly across providers and
+flows, it requires an API key (which subscription-only setups lack) and
+reintroduces the cross-provider capability routing excluded from this RFD.
 
-**Sending search requests through the direct flow.** Rejected: [RFD 110] never
-selects the direct flow automatically, because it carries account-policy risk
-the user did not choose.
+**Routing subscription search requests through the `direct` flow.** Per [RFD
+110], JP never falls back to the `direct` subscription flow automatically
+because direct OAuth replay carries account-policy risks that require explicit
+opt-in.
 
-**Prompting per call on the ACP flow.** Possible, since Claude Code asks before
-each `WebSearch`.
-Rejected: the HTTP flows cannot prompt, and consent that depends on the flow is
-the inconsistency this RFD avoids.
+**Prompting per call on the ACP flow.** Although Claude Code requests permission
+before each `WebSearch` call, the HTTP flows cannot prompt per call.
+Prompting only on the ACP flow would make consent semantics depend on the active
+billing flow.
 
-**Enforcing domain lists through permission answers on the ACP flow.** JP sees
-each `WebSearch` call's input when Claude Code asks, so it could deny calls
-whose lists do not match the configuration.
-Rejected: the model chooses those lists and does not know the policy, so
-enforcement would mean instructing it through the prompt and denying until it
-complies, and an ACP permission answer cannot rewrite the input.
+**Enforcing domain lists through ACP permission responses.** Although JP
+inspects each `WebSearch` call's arguments during permission handling, the model
+chooses `allowed_domains` and `blocked_domains` without knowing JP's policy, and
+ACP permission responses cannot rewrite tool arguments.
+Enforcing domain lists through permission denials would require injecting prompt
+instructions and repeatedly denying non-compliant calls.
 
 ## Non-Goals
 
 - **Provider-supplied client tools** (Anthropic `bash`, `text_editor`,
   `computer_use`).
-  Provider-owned schema, JP execution — a `ToolSource` question, deliberately
-  separate.
+  These tools use a provider-owned schema with JP execution, which is a separate
+  `ToolSource` design.
 - **Forcing a hosted tool** via `assistant.tool_choice`.
 - **Fallback or capability routing** across hosted, MCP, and local
   implementations of one capability.
-- **A shared cross-provider capability vocabulary.** Each provider names its
-  own.
+- **A shared cross-provider capability vocabulary.** Each provider defines its
+  own hosted-tool names and parameters.
 - **Provider-hosted tools beyond web search** in the first slice.
-  OpenAI follows as the test that the boundary generalizes.
-- **Google Search grounding.** Google requires its Search Suggestions, HTML and
-  CSS, to be displayed with every grounded answer, and [RFD 118] leaves that
-  display content to the RFD that adds Google.
-  Whether a terminal client can meet the requirement decides whether Google
-  search fits JP at all.
+  OpenAI follows in Phase 6 to verify that the boundary generalizes.
+- **Google Search grounding.** Google requires displaying its HTML and CSS
+  Search Suggestions alongside every grounded answer, and [RFD 118] defers that
+  display content to a future Google Search RFD.
+  Whether a terminal client can satisfy Google's display terms determines
+  whether Google Search fits JP.
 - **Web search versions with dynamic filtering** (`web_search_20260209` and
-  later), and `user_location`.
+  later) and `user_location`.
 - **Claude Code native tools other than `WebSearch`** on the ACP flow, including
   `WebFetch`.
 
 ## Risks and Open Questions
 
-- **Claude Code's `WebSearch` is observed, not documented.** The nested request
-  and its model, the shape of `tool_use_result`, and `searchCount` are what
-  Claude Code 2.1.280 does, not a published contract.
-  [RFD 110]'s runtime qualification re-checks them for each qualified release,
-  against the phase 4 fixture.
-- **`pause_turn` is documented, not observed.** No prompt reliably produces it,
-  so the continuation follows Anthropic's documentation, and phase 3 tests it
-  against a constructed response.
+- **Claude Code's `WebSearch` behavior is observed rather than documented.** The
+  nested sub-request model, the structure of `tool_use_result`, and
+  `searchCount` reflect observed behavior in Claude Code 2.1.280 rather than a
+  published specification.
+  [RFD 110]'s runtime qualification must re-verify these details against the
+  Phase 4 fixture on each qualified release.
+- **`pause_turn` is documented rather than observed.** Because no test prompt
+  reliably triggers `pause_turn`, the continuation implementation follows
+  Anthropic's documentation and is tested in Phase 3 against a synthetic
+  response fixture.
 
 ## Implementation Plan
 
@@ -603,63 +611,61 @@ Requires [RFD 118] phases 1 through 4.
 
 ### Phase 1: Typed configuration
 
-`hosted_tools` on `AnthropicConfig` with the web-search fields, defaulting to
-disabled.
-Schema, delta, fill, and partial support.
-Independently mergeable; nothing reads it yet.
+Add `hosted_tools` to `AnthropicConfig` with the web-search fields (defaulting
+to disabled), along with schema, delta, fill, and partial support.
+This phase is independently mergeable before the adapter reads the new fields.
 
 ### Phase 2: HTTP request translation and validation
 
-`convert_tools` branch pinned to `web_search_20250305`, model and setting
-validation, each request's `max_uses` from the turn budget, and the two
-`tool_choice` corrections.
-Enabling search on an ACP request is a hard error until phase 4.
-At this point the tool is declared and the model can call it, but the response
-path drops the blocks.
+Add the `convert_tools` branch pinned to `web_search_20250305`, model and
+setting validation, per-request `max_uses` calculation from the turn budget, and
+the two `tool_choice` adjustments in `anthropic.rs`.
+Enabling web search on an ACP request returns a hard error until Phase 4.
+At this point the tool is declared and the model can call it, while the response
+path still drops returned server-tool blocks.
 
 ### Phase 3: HTTP response path
 
-Per-block stream state, deferred flush with payload attachment, `convert_events`
-replay of both native blocks, the `pause_turn` continuation, and the
-continuation and abandonment rules.
-Web search works end to end on the API-key and direct flows, each with a
-recorded fixture.
-The direct flow's is the first JP request to send the server tool with a
-subscription credential; Claude Code's own searches already run Anthropic's
-server search tool on one.
+Implement per-block stream state, deferred activity flush with native payload
+attachment, `convert_events` replay of both native blocks, `pause_turn`
+continuation, and the stateless continuation and abandonment rules.
+This completes end-to-end web search on the API-key and direct subscription
+flows, each backed by a recorded cassette fixture (verifying server-tool
+requests with a subscription credential on the direct flow).
 
 ### Phase 4: ACP flow
 
-A recorded `WebSearch` run against the qualified adapter and runtime first, as
-the fixture for the rest of the phase.
-Then `WebSearch` in the options and the expected inventory, permission answers
-from the budget, `tool_use_result` on the typed SDK user message, recording from
-the SDK stream and user message, transcript replay, and the domain-list error.
+Record a `WebSearch` session against the qualified adapter and runtime as the
+test fixture for the phase.
+Then add `WebSearch` to the ACP options and expected startup inventory, answer
+permission requests from the per-turn budget, parse `tool_use_result` on the
+typed SDK user message, record `HostedActivity` events from the SDK stream and
+user message, replay searches in native transcripts, and reject domain lists on
+ACP requests.
 
 ### Phase 5: Rendering and usage
 
-Activity display, sources in terminal and `serve-web` for both flows, and the
-per-turn search count.
-Release requires phases 3 through 5, per "Billing must not decide capability"
-and Rendering above.
+Implement terminal activity display, source rendering in the terminal and
+`serve-web` across both HTTP and ACP flows, and the per-turn search count.
+Releasing the feature requires completing Phases 3 through 5.
 
 ### Phase 6: OpenAI
 
-OpenAI web search, as the test that provider-owned translation generalizes
-without touching core.
-Its search call and annotations already fit [RFD 118]'s model.
+Implement OpenAI web search to verify that provider-owned translation
+generalizes without changes to `jp_llm` core.
+OpenAI's search call items and text annotations already fit [RFD 118]'s model.
 
 ## References
 
-- `crates/jp_llm/src/provider/anthropic.rs` — `convert_tools`,
+- `crates/jp_llm/src/provider/anthropic.rs`: `convert_tools`,
   `convert_tool_choice`, `convert_events`, `map_event`, chaining
-- `crates/jp_llm/src/provider/anthropic/acp/options.rs` — Claude Code tool
+- `crates/jp_llm/src/provider/anthropic/acp/options.rs`: Claude Code tool
   options
-- `crates/jp_llm/src/provider/anthropic/acp/protocol.rs` — inventory check,
+- `crates/jp_llm/src/provider/anthropic/acp/protocol.rs`: inventory check,
   permission answers, SDK message translation
-- `crates/jp_llm/src/provider/anthropic/acp/transcript.rs` — native transcript
+- `crates/jp_llm/src/provider/anthropic/acp/transcript.rs`: native transcript
   encoding
-- `crates/jp_config/src/providers/llm/anthropic.rs` — `AnthropicConfig`
+- `crates/jp_config/src/providers/llm/anthropic.rs`: `AnthropicConfig`
 - <https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools>
 - <https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool>
 - <https://code.claude.com/docs/en/tools-reference#websearch-tool-behavior>

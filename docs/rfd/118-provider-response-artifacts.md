@@ -49,8 +49,6 @@ is sent back.
 Without structured attribution on `ChatResponse`, JP cannot render search-backed
 text with the required citations.
 
-### If nothing is done
-
 Without a stream representation for hosted-tool output and citations,
 provider-hosted tools cannot be exposed, the OpenAI adapter continues dropping
 these artifacts, and each new provider adapter adds another discard site.
@@ -69,13 +67,12 @@ for any request lacking one, and the restart path scans for unresponded
 requests.
 
 Provider-hosted activity does not follow this contract.
+It runs on the provider's side of JP's provider boundary, either on the vendor's
+servers or in a runtime driven by the provider adapter (such as Claude Code on
+Anthropic's ACP subscription flow).
 The provider executes the tool inside its own agent loop and continues
-generating while JP only observes the resulting events.
-
-Hosted activity is work done on the provider's side of JP's provider boundary:
-on the vendor's servers, or in a runtime the provider adapter drives, such as
-Claude Code on Anthropic's ACP subscription flow.
-What makes it hosted is that JP never dispatches it, not where it runs.
+generating while JP only observes the resulting events; what makes the activity
+hosted is that JP never dispatches it, not where it executes.
 
 Recording hosted activity as a `ToolCallRequest` would falsely assert in the
 durable stream that JP dispatched the work and would force every
@@ -95,8 +92,8 @@ HostedActivity
     payload     ProviderPayload (see below), optional
 ```
 
-`sources` is portable: a renderer shows it when the provider returns no
-citations anchored in the assistant text.
+`sources` is a portable fallback: renderers display it when the provider does
+not return citations anchored in the assistant text.
 
 State changes are recorded as **append-only transitions** linked by `id` rather
 than mutating an event in place.
@@ -108,18 +105,19 @@ An activity with a `started` transition and no terminal (`completed` or
 finished, which a stream reader can detect and a provider adapter can handle on
 continuation.
 
-One activity can span two provider responses.
-When Claude calls web search and a client tool in the same step, the response
-ends with the search unrun; the next response, sent with the client tool's
-result, opens with the search result, linked to the call by `id`.
+A single activity can span two provider responses.
+When Claude invokes web search alongside a client tool in the same step, the
+first response ends before the search runs; the follow-up response carrying the
+client tool result opens with the search result, correlated to the initial call
+by `id`.
 
-An activity's first transition can also be its terminal one.
-Anthropic and OpenAI identify each search and report it while it runs, so their
-adapters record `started` and then `completed` or `failed`.
+An activity can also record its terminal transition first.
+Anthropic and OpenAI assign an ID to each search and stream progress while it
+runs, so their adapters emit `started` followed by `completed` or `failed`.
 Google's `generateContent` reports search only as grounding metadata in the
-response's last chunk, with no id and several queries per response.
-Its adapter records one `completed` activity per response, with every query as
-its input and an id derived from the response's `responseId`.
+final response chunk, with multiple queries per response and no activity ID.
+Its adapter emits a single `completed` activity per response, using all queries
+as `input` and deriving `id` from `responseId`.
 
 Because `sanitize_orphaned_tool_calls` matches on `EventKind::ToolCallResponse`
 and `as_tool_call_request()`, `HostedActivity` is ignored during orphan repair
@@ -140,11 +138,11 @@ ProviderPayload
 
 The envelope enforces six rules:
 
-- **Interpreted only by its writer.** The adapter that produced a `format`
-  replays it; every other adapter preserves the payload in the stream and
-  ignores it.
-  This includes other flows of the same provider: Anthropic's HTTP and ACP flows
-  write different formats and replay only their own.
+- **Interpreted only by its writer.** Only the adapter that produced a given
+  `format` replays it; every other adapter preserves the payload in the stream
+  and ignores it.
+  Different flows of the same provider use distinct `format` values: Anthropic's
+  HTTP and ACP flows each replay only their own format.
 - **Immutable.** No consumer rewrites a stored payload.
   Because compaction is non-destructive ([RFD 064]) and applies overlays rather
   than mutating events, payloads remain unchanged by construction.
@@ -183,38 +181,38 @@ Attribution
     replay      ProviderPayload carrying the provider's opaque replay value
 ```
 
-The content event itself is the answer-side anchor.
+The content event is the answer-side anchor.
 Anthropic emits each cited passage as its own text block (and therefore its own
-event), so the block is the anchor and `range` is absent.
-OpenAI's `url_citation` and Google's grounding supports carry offsets into the
-response text, which populate `range`.
-A Google support can cite several sources, which becomes one attribution per
-source with the same `range`.
-`excerpt` always holds text quoted from the source and never substitutes for
-`range`, so the answer text Google repeats in each support is not an excerpt.
-Only Anthropic supplies an excerpt.
+event), so the block itself is the anchor and `range` is omitted.
+OpenAI's `url_citation` and Google's grounding supports supply offsets into the
+response text, which populate `range`; when a Google grounding support cites
+multiple sources, the adapter emits one `Attribution` per source with the same
+`range`.
+`excerpt` always holds text quoted from the cited source and never substitutes
+for `range`: the assistant text that Google repeats inside each grounding
+support is omitted rather than stored as `excerpt`.
+Only Anthropic supplies `excerpt`.
 
-`range` indexes into the event's final stored text, counted in Unicode code
-points.
-OpenAI counts in code points, and Google in UTF-8 bytes, which its adapter
-converts.
-A code point is a property of the text rather than of an encoding, so a reader
-in Rust, in the web client's JavaScript, or in Swift applies a range to the
-string it decoded without re-encoding it first.
-The cost falls on Rust, where finding a code-point offset walks the string.
+`range` indexes into the event's final stored text in Unicode code points.
+OpenAI reports offsets in code points, and the Google adapter converts Google's
+UTF-8 byte offsets into code points.
+Because code points are independent of string encoding, Rust, JavaScript (in the
+web client), and Swift consumers can slice decoded strings directly without
+re-encoding, at the cost of a linear scan when indexing in Rust.
 An adapter that modifies text after citations arrive (such as Anthropic's
 max-token continuation trimming overlapping text) must remap or drop affected
 ranges so stale offsets are never persisted.
 
 #### Streaming lifecycle
 
-Citations arrive before the text they annotate is complete.
-Anthropic opens a cited block with an empty `citations` list and sends its
+Citations arrive at different points in the stream before the text block is
+flushed.
+Anthropic opens a cited block with an empty `citations` list and streams each
 `citations_delta` before the block's text.
-OpenAI sends each `response.output_text.annotation.added` after the text it
-covers and before `response.output_text.done`.
-Google sends all grounding in the response's last chunk, after the text, so its
-adapter holds the text event's flush until that chunk arrives.
+OpenAI emits each `response.output_text.annotation.added` after the covered text
+and before `response.output_text.done`.
+Google delivers all grounding metadata in the final response chunk after the
+text, so its adapter defers flushing the text event until that chunk arrives.
 As each citation arrives, the adapter forwards it with its block index,
 `EventBuilder` appends it to that block's attribution list, and `Flush`
 finalizes the event.
@@ -230,11 +228,10 @@ signatures, because partial reasoning is resent unsigned.
 ### Usage
 
 Anthropic reports hosted-activity counters
-(`usage.server_tool_use.web_search_requests`), which are billed separately from
-tokens and reported in the final `message_delta` of the response that ran the
-searches.
-A search left unrun by one response is counted by the next response, which runs
-it.
+(`usage.server_tool_use.web_search_requests`) in the final `message_delta` of
+the response that executed the searches, and bills them separately from tokens.
+If a response defers a search, the follow-up response that executes the search
+reports it in its usage counter.
 
 JP does not persist token usage: no HTTP provider adapter reads its usage
 counters, and the ACP adapter keeps usage out of event metadata and logs it as a
@@ -244,12 +241,12 @@ without writing them to the conversation stream.
 
 Consumers can still count searches from the `HostedActivity` events in the
 durable stream.
-On Anthropic's HTTP flows, the number of `completed` activities equals the
-number of billed searches: each completed search is billed once, and a search
-that ends in an error, such as `max_uses_exceeded`, is not billed.
-The count is not a billing figure on every flow: one activity on the ACP flow
-can run several backend searches.
-Persisting usage counters requires provider-response identity; see Non-Goals.
+On Anthropic's HTTP flows, the number of `completed` activities matches the
+number of billed searches: each completed search is billed once, while failed
+searches (such as `max_uses_exceeded`) are not billed.
+On the ACP flow, a single `HostedActivity` can execute multiple backend
+searches, so the activity count is not a direct billing count.
+Persisting usage counters requires provider-response identity (see Non-Goals).
 
 ### Two projections
 
@@ -262,25 +259,28 @@ A conversation carrying hosted activity supports two projections:
 - **Provider-native**: the `ProviderPayload`, which only the adapter that wrote
   it reads for exact multi-turn replay.
 
-Anthropic and OpenAI accept either projection when the history is sent back.
-Anthropic's native blocks are valid as long as they are unmodified: it rejects a
-changed `encrypted_content` or `encrypted_index`.
-The portable projection, with search blocks and citations removed, is valid too,
-and so is any mix: citations without the search blocks they came from, or search
-blocks without citations.
-OpenAI, with `store: false`, accepts its `web_search_call` items replayed or
-dropped, and annotations kept or cleared.
-Dropping native data is safe; rewriting it is not.
+Both Anthropic and OpenAI accept either projection when replaying history:
 
-Dropping it is not free.
-In requests made against both APIs while checking this design, every replay that
-kept the search's native record (Anthropic's search blocks, OpenAI's
-`web_search_call` item) was answered without a new search, and every replay that
-dropped it searched again: two of each on Anthropic, one kept and three dropped
-on OpenAI.
-The payload is what saves a repeat search, not only what makes replay exact, so
-an OpenAI adapter has reason to keep its `web_search_call` items as payloads
-even though OpenAI does not require them.
+- Anthropic accepts native search blocks and citations when `encrypted_content`
+  and `encrypted_index` are unmodified, and rejects requests that alter either
+  field.
+  It also accepts the portable projection with search blocks and citations
+  stripped, or any partial combination (citations without their originating
+  search blocks, or search blocks without citations).
+- OpenAI (with `store: false`) accepts history whether `web_search_call` items
+  are replayed or omitted and whether annotations are retained or stripped.
+
+Dropping native replay data is therefore valid on both APIs, whereas modifying
+it is not.
+However, dropping the native record has a cost: in verification probes against
+both APIs, every follow-up request that replayed the native search record
+(Anthropic's search blocks or OpenAI's `web_search_call` item) answered from
+history without running a new search, whereas every request that omitted the
+native record executed a repeat search (two of each on Anthropic; one retained
+and three omitted on OpenAI).
+Preserving `web_search_call` items in `ProviderPayload` therefore avoids
+redundant searches on OpenAI even though the API does not require replaying
+them.
 
 ## Drawbacks
 
@@ -353,21 +353,21 @@ request translation, or provider capability list.
 
 **Portable native state.** See Alternatives.
 
-**Provider-mandated display content.** Google requires a grounded answer to be
-shown with its Search Suggestions, delivered as HTML and CSS in
+**Provider-mandated display content.** Google requires clients to display Search
+Suggestions alongside grounded answers, delivered as HTML and CSS in
 `searchEntryPoint.renderedContent`.
-Nothing here models content a provider requires a client to render, and a
-payload is never rendered.
-The RFD that adds Google search adds that field, and decides whether a terminal
-client can meet the requirement at all.
+Because `ProviderPayload` is never rendered, this RFD does not model
+provider-mandated display content; a future RFD for Google search will define
+that field and evaluate whether a terminal client can satisfy Google's display
+terms.
 
 ## Risks and Open Questions
 
-- **The model is fitted to web search.** `HostedActivity` and `Attribution` are
-  checked against the search responses of Anthropic, OpenAI, and Google.
-  Other hosted tools return other artifacts: code execution, for example,
-  returns files and a container to continue in.
-  The RFD that exposes one of them checks it against this model first.
+- **Generalizing beyond web search.** `HostedActivity` and `Attribution` are
+  validated against the web search responses of Anthropic, OpenAI, and Google.
+  Other hosted tools produce different artifacts (for example, code execution
+  returns output files and a container ID for continuation), so future RFDs for
+  those tools must verify that they fit this model.
 
 ## Implementation Plan
 
@@ -376,11 +376,10 @@ client can meet the requirement at all.
 Extend the `async-anthropic` fork with `server_tool_use` and
 `web_search_tool_result` content blocks, `Text::citations`, the
 `citations_delta` stream delta, and `Usage::server_tool_use`.
-The fork's `MessageContent` and `ContentBlockDelta` have no catch-all, so each
-gains a final `#[serde(untagged)] Unknown(serde_json::Value)` variant, the
-mechanism `types::Tool` already uses for its untagged variants.
-A block the fork does not model is then carried and sent back unchanged instead
-of failing the stream.
+Because `MessageContent` and `ContentBlockDelta` lack fallback variants, add a
+trailing `#[serde(untagged)] Unknown(serde_json::Value)` variant to each
+(matching the untagged fallback pattern in `types::Tool`) so unrecognized blocks
+round-trip unchanged instead of aborting deserialization.
 This phase makes no changes to JP crates, is independently mergeable, and is a
 prerequisite for observing the artifacts below.
 
