@@ -317,8 +317,8 @@ The renderer maps `rows` onto the printer's `OutputLines` using the existing
 
 > [!TIP]
 > [RFD 132] routes `-v`, `--log`, and `--log-file=-` tracing through the
-> printer, so they no longer disable status regions and the window; a
-> non-terminal stderr and a non-pretty format still do.
+> printer, so stderr tracing no longer disables status regions or the reasoning
+> window; a non-terminal stderr or non-pretty output format still disables them.
 
 ## Alternatives
 

@@ -124,10 +124,11 @@ reaches the second rung.
 `kill -QUIT` remains an immediate exit.
 
 > [!TIP]
-> [RFD 132] adds a second way for a press to arrive: in raw mode Ctrl-C is a
-> key, which its input field forwards to the `SignalRouter`.
-> Only presses no prompt reads count toward the second rung, so presses that
-> back out of nested prompts climb one level each.
+> [RFD 132] adds a second delivery path for Ctrl-C: in raw mode, Ctrl-C arrives
+> as a keystroke (`0x03`) that the input field or event pump forwards to
+> `SignalRouter`.
+> Only presses not consumed by an open prompt count toward rung 2, so pressing
+> Ctrl-C inside nested prompts backs out one level per press.
 
 **Menu cancel contract.** In every interrupt menu, ESC means "continue": it
 closes the menu and resumes the interrupted work, matching `[c]`.
@@ -271,8 +272,8 @@ Reply option, no straight-to-editor path, and no configuration surface; allowing
 an `action` override here would reintroduce silent first-press exits.
 
 > [!TIP]
-> In [RFD 132]'s idle input field, Ctrl-C opens this menu whatever the field
-> holds; `Ctrl+U` clears the line.
+> In [RFD 132]'s idle input field, pressing Ctrl-C opens this fallback menu
+> regardless of whether the buffer contains text; `Ctrl+U` clears the line.
 
 **Menu erase-on-close.** Menus erase themselves after a choice.
 `inquire` prompts clear their body and write a one-line answered summary that
@@ -286,27 +287,27 @@ remained on screen).
 
 ### No Abort
 
-The streaming menu's `[a] Abort (discard & exit)` is removed, along with `abort`
-as a value of `interrupt.streaming.action`.
-The turn menu never had it, for the reason that now holds in every scope: the
-turn loop writes each event to disk as it commits, so committed work is already
-saved.
-All Abort can still discard is the block the provider has not closed yet, the
-reasoning or message streaming at that moment, which is neither what "discard &
-exit" promises nor anything a user asks for.
-Replacing or removing a response is a history edit (`jp query --replay`, `jp
-conversation edit`), not an interrupt action.
-The tool menu has no Abort to remove.
+The streaming menu's `[a] Abort (discard & exit)` option is removed, along with
+`abort` as a documented value of `interrupt.streaming.action`.
+The turn menu never included Abort for the same reason that now applies across
+every scope: the turn loop persists each event to disk as it commits, so
+completed blocks are already saved.
+Abort can discard only the currently streaming reasoning or message block that
+the provider has not yet closed, which does not match what "discard & exit"
+implies.
+Replacing or removing a committed response is a conversation-history operation
+(`jp query --replay` or `jp conversation edit`), not an interrupt action.
+The tool menu already has no Abort option.
 
-`abort` stays accepted as an undocumented value that behaves as `stop`.
-Conversations record their config deltas permanently, so a conversation that
-once recorded `action = "abort"` has to keep loading, and its user cannot edit
-the recorded value away.
-For the same reason accepting it is silent: a warning would repeat on every load
-of that conversation with nothing the user could do about it.
-The value is absent from the doc comment, the generated `config.toml`, and the
-JSON schema, hidden the way `ProviderId::Test` is (`#[variant(hidden)]`), and JP
-never writes it.
+`abort` remains accepted as a hidden alias that resolves to `stop`.
+Because conversations record config deltas permanently, any conversation that
+recorded `action = "abort"` must continue to load, and the user cannot edit that
+historical delta out of the stream.
+Accepting `abort` is silent for the same reason: emitting a warning would repeat
+on every load of that conversation with no way for the user to clear it.
+The variant is omitted from doc comments, generated `config.toml` files, and the
+JSON Schema via `#[variant(hidden)]` (matching `ProviderId::Test`), and JP never
+writes it.
 
 ### Handler policy
 
@@ -411,13 +412,14 @@ pending interrupt notification before displaying a prompt, and the in-tree
 widgets poll a cancellation source between terminal events so an active prompt
 reacts immediately when a signal arrives.
 
-The `inquire`-based prompts get the same split at the `PromptBackend` seam: a
-Ctrl-C is reported as an `Interrupted` outcome rather than passed through as
-`InquireError::OperationInterrupted`, so an arm that handles errors cannot
-absorb it.
-Three call sites fold it into a cancel today (`classify_prompt_exit` in the
-interrupt handler, the tool coordinator's `prompt_cancellation_reason`, and
-`declined_or_failed` in `cmd/target.rs`); phase 5 classifies each.
+`inquire`-based prompts make the same distinction at the `PromptBackend`
+boundary: Ctrl-C returns an `Interrupted` outcome rather than propagating as
+`InquireError::OperationInterrupted`, preventing generic error-handling arms
+from swallowing the interrupt.
+Three call sites currently fold `OperationInterrupted` into a cancellation
+(`classify_prompt_exit` in the interrupt handler, `prompt_cancellation_reason`
+in the tool coordinator, and `declined_or_failed` in `cmd/target.rs`); Phase 5
+updates each call site to handle `Interrupted` explicitly.
 
 **Relationship to [RFD 088].** [RFD 088] states that Ctrl-C inside `InlineReply`
 is always a local reply cancellation rather than [RFD 045] escalation.
@@ -568,16 +570,17 @@ Independent of the other phases.
 
 ### Phase 8: Remove Abort
 
-Remove `[a]` from the streaming menu.
-Hide `abort` in `interrupt.streaming.action` and resolve it as `stop`, with a
-test that a recorded `abort` still loads.
-The command-plugin protocol's interrupt request carries the same value
-(`jp_plugin::message::InterruptAction::Abort`); the host keeps accepting it from
-plugins as `stop`, and its doc comments stop describing it as a discard.
+Remove `[a] Abort` from the streaming interrupt menu.
+Hide `abort` on `interrupt.streaming.action` and resolve it to `stop`, with a
+test verifying that a recorded `abort` config delta still loads.
+In the command-plugin protocol, continue accepting
+`jp_plugin::message::InterruptAction::Abort` from plugins by mapping it to
+`stop`, and update its doc comments so they no longer describe it as discarding
+the turn.
 Remove `InterruptAction::Abort`, `TurnPhase::Aborted`, and
-`StreamingInterruptResult::Abort`, and update the action's doc comment and the
-query stream pipeline page (W-00dxyb6).
-Independent.
+`StreamingInterruptResult::Abort`, and update the `action` doc comment and the
+query stream pipeline wiki page (W-00dxyb6).
+Independent of the other phases.
 
 ## References
 

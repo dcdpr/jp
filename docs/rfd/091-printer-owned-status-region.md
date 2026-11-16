@@ -501,9 +501,9 @@ Logging setup runs before printer construction and passes this flag into the
 printer constructor alongside condition 2.
 
 > [!TIP]
-> [RFD 132] routes the opt-in stderr tracing layer through the printer, so trace
-> lines are erased around like any other chrome and condition 3 is retired:
-> regions render under `-v` as well.
+> [RFD 132] routes the opt-in stderr tracing layer through the printer so the
+> worker erases and redraws the status region around trace lines like any other
+> chrome, retiring condition 3 and enabling status regions under `-v`.
 
 To make condition 2 explicit and testable, `Printer::terminal` captures stderr
 tty status and the terminal's row and column counts at construction.
@@ -839,10 +839,10 @@ responsibilities belong to the status region and the client.
   prompt widget.
 
 > [!TIP]
-> [RFD 132] makes the region interactive: it adds an input field, a reedline row
-> that owns the cursor, and in runs with `query.live_input` draws menu and reply
-> prompts inside the region, so the status row stays visible while they are
-> open.
+> [RFD 132] extends the status region with interactive rows: a reedline input
+> field that owns the cursor, and (when `query.live_input` is enabled) menu and
+> reply prompts rendered inside the region so the status row stays visible while
+> prompts are open.
 
 ## Risks and Open Questions
 

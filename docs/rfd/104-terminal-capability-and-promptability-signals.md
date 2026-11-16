@@ -497,27 +497,31 @@ This proposal requires both read and write access and errors under
 
 ### A pipe reader that writes to the same terminal
 
-Resolving `auto` per channel turns stderr repaints on when stdout is a pipe, but
-most programs at the other end of a pipe write to the same terminal: `tee`,
-`jq`, `bat`, a pager.
-Their output lands wherever the cursor is, which is inside a status region ([RFD
-091]) when one is drawn, so the region's next erase clears part of that output
-and leaves region rows behind.
-`less`, the example in Observable behaviour changes, also switches to the
-alternate screen, which the region then draws over.
+Resolving `auto` per channel enables stderr status-region repaints even when
+stdout is a pipe, but most downstream pipe commands write to the same terminal
+(`tee`, `jq`, `bat`, or a pager).
+Their output lands at the current cursor position (inside the drawn status
+region from [RFD 091]), so the region's next erase clears part of the piped
+program's output and leaves stale region rows on screen.
+Pagers such as `less` (used as an example in [Observable behaviour
+changes](#observable-behaviour-changes)) also switch to the alternate screen,
+which the status region then draws over.
 
-JP can tell a pipe from a file by the stream's file type, but not whether the
-program reading it writes to the terminal, and readers that do not (`| gzip >
-out.gz`) are unaffected.
-This is accepted and documented rather than prevented, the trade `curl` and `pv`
-make for the progress they draw on stderr while stdout feeds a pipe; the `show`
-key of each region's config turns it off.
-If it proves common, the alternative is keeping repaints off whenever stdout is
-a pipe, at the cost of the repaints this RFD restores for that case.
+JP can distinguish a pipe from a regular file by inspecting the file descriptor
+type, but it cannot detect whether the process reading the pipe writes to the
+terminal, and pipe readers that do not write to the terminal (such as `| gzip >
+out.gz`) work without issue.
+This trade-off is documented rather than blocked, matching `curl` and `pv` when
+they render progress on stderr while stdout feeds a pipe; users can disable
+individual status regions via each region's `show` config key.
+If terminal collisions prove common in practice, the fallback is disabling
+stderr repaints whenever stdout is a pipe, at the cost of losing progress
+indicators on non-displaying pipes.
 
 > [!TIP]
-> [RFD 132] makes the same trade for its input field: a run that shows the field
-> with a pipe on stdout or stderr prints one notice and proceeds.
+> [RFD 132] makes the same trade-off for its interactive input field: when the
+> field is active and stdout or stderr is a pipe, JP prints a one-time warning
+> on the terminal and proceeds.
 
 ## Implementation Plan
 

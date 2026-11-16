@@ -9,47 +9,48 @@
 - **Label**: relevant-rfd=131
 - **Label**: type=bug
 
-A query sent without composing (`jp q <query>`, piped stdin, or `--no-edit`)
-destroys an unsent `QUERY_MESSAGE.md` draft: the draft is replaced before the
-turn starts, and the file is removed after the turn succeeds.
-The draft is lost even when the turn fails.
+Sending a query that bypasses composition (`jp q <query>`, piped stdin, or
+`--no-edit`) destroys any unsent `QUERY_MESSAGE.md` draft: JP overwrites the
+draft before the turn starts and deletes the file after the turn succeeds.
+Even if the turn fails, the previous draft text is already overwritten.
 
 ## Reproduce
 
-1. Leave a draft behind: compose with `jp q --edit` and interrupt before the
-   turn starts, or have the turn fail.
+1. Leave an unsent draft on disk by composing with `jp q --edit` and
+   interrupting before the turn starts, or by letting a turn fail.
 2. Run `jp q "something else"` on the same conversation.
-3. `QUERY_MESSAGE.md` now holds `something else`, and after a successful turn it
-   is gone.
+3. `QUERY_MESSAGE.md` is overwritten with `something else`, and once the turn
+   succeeds the file is deleted.
 
-Requires user-local storage; without it no recovery copy is written.
+Requires user-local storage; without it, JP does not write `QUERY_MESSAGE.md`.
 
 ## Cause
 
 In `Query::run` (`crates/jp_cli/src/cmd/query.rs`):
 
-- For any query not composed in the editor, `preserve_query_message_file` writes
-  the request text over `QUERY_MESSAGE.md` as a recovery copy for a pre-turn
-  interrupt.
-- `draft_fingerprint` is taken after that write, so the cleanup after a
-  successful turn (`DraftRemoval::IfUnchanged`) matches the overwritten file and
-  removes it.
+- For any query not composed in the editor, `preserve_query_message_file`
+  overwrites `QUERY_MESSAGE.md` with the new request text as a recovery copy for
+  pre-turn interrupts.
+- `draft_fingerprint` is computed after that write, so post-turn cleanup
+  (`DraftRemoval::IfUnchanged`) sees a matching fingerprint and deletes the
+  file.
 
-[RFD 093] states the opposite: a direct send leaves the draft neither modified
-nor consumed.
+[RFD 093] specifies the opposite: a direct send must neither modify nor consume
+an existing draft.
 
 ## Fix
 
-[RFD 131] Phase 6, independent of the rest of that RFD:
+Implemented as [RFD 131] Phase 6 (independent of the rest of [RFD 131]):
 
-- [ ] Skip the recovery copy while an unsent draft exists; the query came from
-      the command line or a pipe, so the user still has it.
-- [ ] On an interactive terminal, ask: `[s]` send and discard the draft, `[k]`
-      send and keep it, `[e]` edit the draft with the query appended, `[x]`
-      cancel.
-- [ ] Without an interactive terminal, send and keep the draft.
-- [ ] Tests: the draft survives a direct send whose turn fails, and one whose
-      turn succeeds with `[k]`.
+- [ ] Skip writing the pre-turn recovery copy when an unsent draft already
+      exists; the direct query came from CLI arguments or stdin that the caller
+      still holds.
+- [ ] On an interactive terminal, prompt before sending: `[s]` send and discard
+      the draft, `[k]` send and keep the draft, `[e]` edit the draft with the
+      query appended, or `[x]` cancel.
+- [ ] Without an interactive terminal, send the query and keep the draft.
+- [ ] Add tests verifying that an unsent draft survives both a direct send whose
+      turn fails and a direct send that succeeds with `[k]`.
 
 [RFD 093]: ../rfd/093-inline-first-query-composition.md
 [RFD 131]: ../rfd/131-queued-replies.md

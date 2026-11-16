@@ -130,8 +130,9 @@ going through `Printer`.
 
 > [!TIP]
 > [RFD 132] routes the opt-in stderr tracing layer (`-v`, `--log`,
-> `--log-file=-`) through the `Printer`, so status regions and the input field
-> can be erased around it; the log file layer keeps writing directly.
+> `--log-file=-`) through `Printer` so the worker erases and redraws status
+> regions and the input field around trace lines; the log-file layer continues
+> writing directly to disk.
 
 ### Standard Input
 

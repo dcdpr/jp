@@ -11,51 +11,57 @@
 
 ## Summary
 
-`jp q --repl` turns a run into a REPL: when a turn ends, the input field stays
-on screen and takes the next query instead of the process exiting.
-The field is also there while the turn runs, pinned to the bottom of the
-terminal as output scrolls above it into native scrollback, so typing and
-pressing Enter redirects the assistant without `Ctrl+C` first.
+`jp q --repl` runs `jp query` as a REPL: when a turn finishes, an input field
+remains on screen to accept the next query instead of exiting the process.
+The input field also stays visible while a turn runs, pinned to the bottom of
+the terminal as output scrolls above it into native scrollback, so the user can
+type a message and press `Enter` to redirect the assistant without pressing
+`Ctrl+C` first.
 
-The run's turn loop is [RFD 131]'s.
-This RFD adds two settings that combine freely: `query.loop = "always"`, which
-waits in the field for the next query at every turn end, and `query.live_input`,
-which keeps the field on screen while turns run.
-`--repl` sets both.
-The field is reedline's editor and painter, drawn inside the printer's status
-region ([RFD 091]) on the controlling terminal, which also hosts the status row
-and the prompts a turn opens.
-Outside a run with a field, the one change is that live tracing goes through the
-printer.
+The REPL builds on the turn loop from [RFD 131] and adds two independent
+configuration settings: `query.loop = "always"`, which waits in the input field
+for the next query at the end of every turn, and `query.live_input`, which keeps
+the input field visible while turns run.
+Passing `--repl` enables both settings for that invocation.
+The input field uses reedline's editor and painter, rendered inside the
+printer's status region ([RFD 091]) on the controlling terminal alongside the
+status row and any active prompts.
+When no input field is active, the only behavior change is routing live stderr
+tracing through the printer.
 
 ## Motivation
 
-Two frictions in the flagship command:
+Two points of friction slow down iterative `jp q` workflows:
 
-1. **Re-running `jp q` per turn.** Iterative work pays a process start, config
-   load, and compose round-trip for every follow-up.
-2. **Redirecting a streaming response is a detour.** Today the user presses
-   `Ctrl+C`, waits for the interrupt menu, chooses `r`, then types ([RFD 088]).
-   An input line that is always there collapses that to: type, press Enter.
+1. **Re-running `jp q` for every turn.** Each follow-up query pays the cost of
+   process startup, configuration loading, and query composition.
+2. **Redirecting a streaming response requires a multi-step detour.** Today, the
+   user must press `Ctrl+C`, wait for the interrupt menu, select `r`, and then
+   type their reply ([RFD 088]).
+   Keeping an input field on screen reduces that to typing a reply and pressing
+   `Enter`.
 
-[RFD 131] already makes a run hold more than one turn, and names `query.loop =
-"always"` as REPL mode.
-What it cannot provide is a way to type while a turn runs: reedline's
-`read_line`, the blocking loop behind today's prompts, owns the keyboard until
-it returns and cannot be one branch of the streaming event loop.
-The field therefore needs a polled entry point into the same reedline machinery,
-and the idle field between turns uses that same entry point, so it looks and
-behaves identically whether or not a turn is running.
+[RFD 131] introduces the multi-turn loop and reserves `query.loop = "always"`
+for REPL mode, but it cannot accept input while a turn is running.
+Reedline's `read_line` (the blocking loop behind existing prompts) owns the
+keyboard until submission and cannot run as one branch of the streaming `select`
+loop.
+Supporting live input requires a polled entry point into the same reedline
+engine.
+Using that same engine and painter for the idle prompt between turns guarantees
+that the input field looks and behaves identically whether a turn is running or
+idle.
 
 ## Design
 
-### User-facing behavior
+### User-Facing Behavior
 
-`jp q --repl` composes and sends the first query as usual and runs the turn.
-When the turn ends, the field takes the next query; the run continues until the
-user ends it.
+`jp q --repl` composes and sends the initial query as usual and executes the
+first turn.
+When that turn ends, the input field waits for the next query, and the run
+continues until the user exits.
 
-Two settings decide this, each answering its own question:
+Two orthogonal settings control this behavior:
 
 ```toml
 [query]
@@ -63,49 +69,57 @@ loop = "always"   # never | if_pending | always
 live_input = true # show the field while turns run
 ```
 
-- `query.loop` ([RFD 131]) decides whether the run goes on at a turn end.
-  This RFD adds `always`: wait in the field for the next query.
-- `query.live_input` decides whether the field is on screen while a turn runs,
-  so the user can type during it.
+- `query.loop` ([RFD 131]) controls whether the run continues after a turn ends.
+  This RFD adds the `always` variant, which waits in the input field for the
+  next query.
+- `query.live_input` controls whether the input field stays on screen while a
+  turn runs so the user can type ahead or redirect the assistant.
   Defaults to `false`.
 
-`--repl` sets `loop = "always"` and `live_input = true` for this invocation.
-Like `--edit`, it stays out of `apply_cli_config` and is never recorded on the
-conversation, so the next plain `jp q` on the same conversation is not a REPL.
-`--cfg query.live_input=true` is recorded like any other `--cfg`.
+Passing `--repl` sets `loop = "always"` and `live_input = true` for the current
+invocation.
+Like `--edit`, `--repl` is excluded from `apply_cli_config` and is not recorded
+in the conversation's config deltas, so a subsequent bare `jp q` on the same
+conversation does not enter REPL mode.
+By contrast, `--cfg query.live_input=true` is recorded like any other `--cfg`
+override.
 
-Text typed into the field is a second thing that can be pending in 131's sense,
-beside a queued reply, so `if_pending` with the field on keeps the run going
-while the field holds text, and ends it at a turn end with an empty field, as a
-one-shot `jp q` ends.
-Every combination means something:
+Text typed into the live input field counts as pending input alongside a queued
+reply ([RFD 131]).
+When `query.loop = "if_pending"` and `live_input = true`, the run continues at
+turn end if the input field contains text, and exits if both the queue slot and
+the input field are empty.
+All six combinations of the two settings have distinct behavior:
 
-| `query.loop`           | `live_input = false` (default)                 | `live_input = true`                                                                                      |
-| ---------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `never`                | Today's `jp q`.                                | Type while the turn runs; the run ends when the turn ends, and text left in the field goes to the draft. |
-| `if_pending` (default) | Today's `jp q`, plus 131's queued replies.     | The run goes on while anything is waiting to be sent: a queued reply, or text in the field.              |
-| `always`               | A REPL whose field appears only between turns. | A REPL with the field always on screen: what `--repl` sets.                                              |
+| `query.loop`           | `live_input = false` (default)                           | `live_input = true`                                                                                             |
+| ---------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `never`                | Single-turn `jp q`.                                      | Type while the turn runs; when the turn ends, the run exits and any unsent text in the field is saved as draft. |
+| `if_pending` (default) | Single-turn `jp q`, continuing only for queued replies.  | Continue at turn end while either a queued reply or text in the input field is pending.                         |
+| `always`               | REPL mode with the input field shown only between turns. | Full REPL mode with the input field always on screen (equivalent to `--repl`).                                  |
 
-Without `live_input`, the field and raw mode exist only while the run waits
-between turns; during a turn, keys and `Ctrl+C` behave as in today's `jp q`.
+When `live_input = false`, the input field and raw terminal mode are active only
+while waiting between turns; during a turn, keystrokes and `Ctrl+C` behave as in
+a standard `jp q` run.
 
-Both settings apply only to interactive runs (see
-[Requirements](#requirements)): in one that is not, `always` acts as
-`if_pending` and the field stays off.
-`--repl` in a run that is not interactive fails before the first turn.
-Set as a default, `live_input = true` puts the field, and raw mode, on every
-interactive `jp q`, which is why it defaults to `false`.
+Both settings take effect only in interactive runs (see
+[Requirements](#requirements)).
+In a non-interactive run, `always` degrades to `if_pending` and the input field
+remains disabled, whereas passing `--repl` explicitly fails before the first
+turn starts.
+Enabling `live_input = true` by default would place every interactive `jp q` in
+raw terminal mode, so `live_input` defaults to `false`.
 
-Whether the field is up during turns is decided once, at run start, from
-`--repl` or the first turn's config.
-A later turn's config can change when the run ends, not whether the field shows
-during turns.
+Whether the live input field is active during turns is decided once at the start
+of the run from `--repl` or the first turn's configuration.
+Per-turn config changes on subsequent turns can update `query.loop` (changing
+when the run exits), but cannot toggle `live_input` mid-run.
 
-Keys differ by phase because the turn transitions underneath them differ: a
-streaming reply continues the turn, while input during tool execution has to
-resolve the running tools first.
-Every mapping reuses a transition the interrupt menus already have.
-The streaming and tool-execution columns apply with `live_input` on.
+Keybindings in the input field depend on the current phase because the
+underlying turn transitions differ: replying during LLM streaming continues the
+current turn, whereas submitting during tool execution must cancel the running
+tools first.
+Every keybinding reuses an existing interrupt-menu transition.
+The streaming and tool-execution columns apply when `live_input = true`:
 
 | Key                                        | Idle (between turns)                                            | LLM streaming                                                               | Tool execution                                                                                                   |
 | ------------------------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -118,129 +132,155 @@ The streaming and tool-execution columns apply with `live_input` on.
 | `Ctrl+D`                                   | End the run when the buffer is empty; forward-delete otherwise. | Forward-delete.                                                             | Forward-delete.                                                                                                  |
 | `Ctrl+C`                                   | See [Interrupts](#interrupts-one-ladder-two-entry-points).      | Same.                                                                       | Same.                                                                                                            |
 
-Enter therefore does something different in each phase.
-Making it always start a new turn needs its own design and is tracked in
-T-1f6wn02; until then the field reuses these transitions as they are.
+`Enter` therefore triggers a different transition in each phase.
+Making `Enter` always start a new turn requires a separate design (tracked in
+T-1f6wn02); until then, the input field reuses the existing phase transitions.
 
-There is no Abort: [RFD 092] removes it from the interrupt menus, because
-streamed content is saved as it commits.
+There is no Abort keybinding: [RFD 092] removes Abort from the interrupt menus
+because streamed events are persisted as they commit.
 
-**Turn ends.** A turn that completes, is stopped, or fails recoverably returns
-to the idle field under `always`, and under `if_pending` when the field holds
-text; otherwise the run ends.
-A pending queued reply ([RFD 131]) is sent first, through its countdown.
-Escalation and run-fatal failures end the run, as they do under 131.
+**Turn completion and error recovery.** When a turn completes, is stopped via
+`Ctrl+S` or `[s] Stop`, or fails with a recoverable error, the run returns to
+the idle input field if `query.loop = "always"`, or if `query.loop =
+"if_pending"` and the input field holds text; otherwise, the run exits.
+If a queued reply ([RFD 131]) is pending, its countdown runs and sends that
+reply before returning to the idle input field.
+Interrupt escalation and fatal run errors exit the run immediately, as in [RFD
+131].
 
-A failure after the request is committed (provider transport exhausted after
-retries) keeps the failed turn in the conversation and reports the error on the
-chrome channel; the sent text does not come back to the field, because the turn
-already holds it.
-It comes back only after failures before the request enters the stream: a draft
-preamble that does not parse, an editor that does not spawn.
-Authentication, config resolution, persistence, and terminal failures end the
-run with a non-zero exit.
-`cmd::Error` has no recoverable/fatal axis today; the implementation adds one
-rather than matching ad hoc.
-A failed tool is not a turn error: it returns `Err` to the assistant as today.
+When a turn fails after its `ChatRequest` has been committed to the conversation
+stream (for example, when provider transport retries are exhausted), the failed
+turn remains in the conversation and the error is printed on the chrome channel;
+the submitted query is not restored to the input field because it is already
+recorded in the turn.
+Submitted text returns to the input field only when a failure occurs before the
+request is committed to the stream (such as a malformed draft preamble or an
+external editor that fails to spawn).
+Authentication, config resolution, persistence, and terminal errors are fatal
+and exit the run with a non-zero status.
+`cmd::Error` gains an explicit recoverable-versus-fatal classification rather
+than relying on ad-hoc matching at the call site.
+Tool execution failures are not turn errors: a failed tool returns `Err` to the
+assistant as part of the turn.
 
-**Unsent text.** A turn end never moves the field's text while the run goes on:
-under `always` it stays in the field, and under `if_pending` it is what keeps
-the run going.
-Text still in the field when the run ends gracefully (a turn end under `never`,
-the fallback menu's Quit, the second `Ctrl+C`, SIGTERM) is written to the
-conversation's `QUERY_MESSAGE.md` under [RFD 131]'s draft rules, after a blank
-line when a queued reply already holds the draft.
-The next bare `jp q` seeds from it; a `jp q <query>` meets 131's unsent-draft
-prompt.
-There is no setting to discard it instead: 131's rule is that no path destroys
-text the user typed.
-An immediate exit (the third `Ctrl+C`, SIGQUIT) does no file I/O and loses it.
+**Unsent text in the input field.** Ending a turn never clears or moves text
+already typed into the input field while the run continues: under `always`, the
+buffer stays in the idle field, and under `if_pending`, the non-empty buffer is
+what keeps the run going.
+If the input field still contains text when the run exits gracefully (at turn
+end under `never`, via Quit in the fallback menu, on a second `Ctrl+C`, or on
+`SIGTERM`), that text is persisted to `QUERY_MESSAGE.md` under [RFD 131]'s draft
+rules, appended after a blank line if a queued reply is already stored in the
+draft.
+A subsequent bare `jp q` seeds from that draft, and a direct `jp q <query>`
+triggers [RFD 131]'s unsent-draft prompt.
+Following [RFD 131], no graceful exit path discards user-authored text.
+Immediate termination (a third `Ctrl+C` or `SIGQUIT`) performs no file I/O and
+loses the unpersisted buffer.
 
-**`Ctrl+X`.** During a turn it opens the external editor on the field's text
-alone, as the inline reply widget's escape does today: saving puts the edited
-text back in the field, and a cancelled editor leaves the field as it was.
-In the idle field, where the text becomes a query, it opens the conversation's
-query document instead: `QUERY_MESSAGE.md`, the file `jp q --edit` opens, config
-section included.
-Its query text is whatever query text the document already holds (a draft left
-by an earlier run, or a queued reply kept with `[k]`), a blank line, and the
-field's text, as [RFD 131]'s `[e]` seeds it, so no draft text is lost.
-Saving puts the document's query text back in the field.
-The config section is recorded on the conversation when that text is sent, as
-`jp q --edit` records it, and the send consumes the draft.
-A cancelled editor leaves the field and the document as they were.
-Once the field has taken in the draft's text this way, the unsent-text rule
-replaces the draft's query text on exit rather than adding the field's text
-after it.
+**`Ctrl+X` (external editor).** During an active turn, pressing `Ctrl+X` opens
+the external editor with only the input field's buffer, matching the `Ctrl+X`
+escape in the inline reply widget ([RFD 088]): saving updates the input field's
+buffer, and cancelling leaves the buffer unchanged.
+When idle between turns, the buffer represents the next turn's query, so
+`Ctrl+X` opens the conversation's full `QUERY_MESSAGE.md` `QueryDocument`
+(including the config preamble, just like `jp q --edit`).
+To avoid losing an existing draft, the document's query body is seeded with any
+existing `QUERY_MESSAGE.md` text (from an earlier failed run or a queued reply
+kept with `[k]`), a blank line, and the input field's current buffer, matching
+`[e]` in [RFD 131].
+Saving in the external editor loads the edited query body back into the input
+field; when the user submits that text, the edited config preamble is recorded
+as a conversation config delta (matching `jp q --edit`) and the draft is
+consumed.
+Cancelling the external editor leaves both the input field and
+`QUERY_MESSAGE.md` unchanged.
+Once `Ctrl+X` has merged the existing draft into the input field, a graceful
+exit writes the input field's buffer over the draft's query body rather than
+appending it a second time.
 
-Configuration lifetime, argument scopes, background tasks, and the lock are [RFD
-131]'s: each turn is a config epoch, and the REPL adds no rule of its own.
+Configuration resolution, CLI argument lifetimes, background-task draining, and
+conversation locking follow [RFD 131] without change: each turn resolves its own
+config epoch.
 
-### One field, one polled line editor
+### Shared Engine and Polled Line Editor
 
-- **One engine.** reedline's editor state: `LineBuffer`, the emacs/vi keymaps
-  and mode machine, undo/redo, kill-ring.
-- **One painter.** reedline's `Painter` draws the prompt and buffer.
-- **Two drivers.** A blocking driver parks on the keyboard until an outcome (the
-  idle field); a polled driver takes keyboard events as one branch of the turn's
-  select (the live field).
-  Both step the same editor and paint through the same painter, so the field is
-  identical in both states.
+The input field and the existing inline reply widget share a single reedline
+implementation:
 
-Existing prompts keep `read_line`.
-`read_line` and the polled entry point are two doors into one reedline engine
-and painter; rendering them identically is the fork's contract, not something JP
-synchronizes.
+- **One engine**: reedline's editor state (`LineBuffer`, emacs and vi keymaps
+  and mode state machines, undo/redo stacks, and kill-ring).
+- **One painter**: reedline's `Painter`, which renders the prompt and buffer.
+- **Two drivers**: a blocking driver that reads keyboard input until completion
+  (used by the idle input field between turns), and a polled driver that accepts
+  individual keyboard events as one branch of the turn's `select!` loop (used by
+  the live input field during turns).
+  Because both drivers step the same editor state and draw through the same
+  painter, the input field behaves identically in both modes.
 
-### Concurrency
+Existing standalone prompts continue using `Reedline::read_line`.
+Both `read_line` and the polled interface drive the same reedline engine and
+painter, so visual and behavioral parity is maintained inside the reedline fork
+rather than duplicated in JP.
 
-Driving reedline's `Editor` type directly is not an option: the keymaps, the
-vi/emacs mode machine, event batching, and paste handling live in `Reedline` and
-its `EditMode` (`read_line_helper`, `process_input_batch`, `handle_editor_event`
-in the fork's `engine.rs`), and stepping around them would reimplement the
-editor in JP.
+### Polled Editor Interface
 
-The fork instead exposes a **polled line editor** over `Reedline`:
+JP cannot drive reedline's inner `Editor` struct directly: keymap lookup, the vi
+and emacs mode machines, event batching, and bracketed-paste handling all live
+in `Reedline` and `EditMode` (`read_line_helper`, `process_input_batch`, and
+`handle_editor_event` in the fork's `engine.rs`), and bypassing them would force
+JP to reimplement that input layer.
 
-- begin (raw mode, prompt state);
-- accept one terminal event, processed by the existing edit-mode and event
-  machinery;
-- repaint at an origin the caller supplies, and report where the caret belongs;
-- suspend and resume, keeping the buffer;
-- finish with an outcome (submit, cancel, host command).
+Instead, the reedline fork exposes a **polled line editor** API on `Reedline`
+with five operations:
 
-Both drivers call it.
-`jp_inquire` owns the field built on it, with a mock for tests.
+- Enter raw mode and initialize prompt state.
+- Process a single terminal event through the existing edit-mode and event
+  machinery.
+- Repaint at a caller-supplied row origin and return the cursor's target
+  coordinates (caret position).
+- Suspend and resume while preserving the buffer.
+- Finish and return an outcome (submit, cancel, or host command).
 
-### The field lives in the status region
+Both the blocking driver and the polled driver use this API.
+`jp_inquire` wraps the polled editor in an input-field abstraction and provides
+a mock implementation for tests.
 
-[RFD 091] built the region this design needs: a block of rows at the bottom of
-the terminal, drawn by the printer's worker and erased before every
-printer-managed write, with relative row accounting, the terminal re-measured on
-every draw, width truncation, row backgrounds, a claim stack, and suspension for
-writers outside the printer.
-[RFD 120]'s reasoning window already streams into it.
-The worker remains the single serialized terminal writer ([RFD 048]); this RFD
-adds what an editable row needs.
+### Rendering the Input Field in the Status Region
 
-**Where it draws.** 091 draws regions on stderr, as chrome.
-A run with a field draws its region on the controlling terminal instead: the
-field is interactive input, which [RFD 048] puts on `/dev/tty`, and the status
-row and prompts draw with it because the region is one block with one row count.
-So the region gains a target, stderr by default, switched by a worker command
-that erases on the old target and redraws on the new.
-With `live_input` the region stays on the controlling terminal for the whole
-run; without it, only while the field waits between turns.
-The target covers every claim, [RFD 120]'s reasoning window included.
-The stderr target keeps 091's enabling predicate; the controlling-terminal
-target needs only an interactive run.
-The worker erases and redraws around a write only when its stream reaches this
-screen (see [Requirements](#requirements)): a write to a file neither moves the
-screen nor leaves a line open on it.
+[RFD 091] introduced the status-region primitive that this design builds on: a
+block of rows at the bottom of the terminal drawn by the printer's worker and
+erased before every printer-managed write, complete with relative row
+accounting, per-draw terminal size measurement, width truncation, row
+backgrounds, a claim stack, and suspension for external writers.
+[RFD 120]'s reasoning window already streams into that region.
+The printer worker remains the single serialized terminal writer ([RFD 048]);
+this RFD extends the status region to support editable, cursor-owning rows.
 
-**Layout.** With `live_input` the region renders, top to bottom: the rows of an
-open prompt (see [Prompts inside the region](#prompts-inside-the-region)), the
-top claim's window and status row (091, unchanged), and the field.
+**Output target.** [RFD 091] draws status regions on stderr as chrome.
+When an input field is active, the status region renders on the controlling
+terminal instead: interactive input belongs on `/dev/tty` ([RFD 048]), and the
+status row and prompts render alongside the input field because the region is a
+single contiguous block of rows.
+The status region therefore gains a configurable output target (`stderr` by
+default), switched via a worker command that erases the region on the previous
+target and redraws it on the new one.
+When `live_input = true`, the region stays on the controlling terminal for the
+entire run; when `live_input = false`, it switches to the controlling terminal
+only while the idle input field waits between turns.
+This target applies to every active region claim, including [RFD 120]'s
+reasoning window.
+The `stderr` target retains [RFD 091]'s enabling predicate, whereas the
+controlling-terminal target requires only an interactive run.
+The worker erases and redraws the region around a write only when that write's
+stream reaches the terminal screen (see [Requirements](#requirements)); writes
+redirected to a regular file neither move the screen cursor nor leave a line
+open on the terminal.
+
+**Layout.** When `live_input = true`, the region renders from top to bottom: any
+active prompt rows (see [Prompts Inside the
+Region](#prompts-inside-the-region)), the top claim's output window and status
+row ([RFD 091]), and the input field:
 
 ```
 ┌──────────────────────────────────────────┐
@@ -252,92 +292,108 @@ top claim's window and status row (091, unchanged), and the field.
 └──────────────────────────────────────────┘
 ```
 
-Rows are budgeted field first (one row at least), then the prompt, then the
-status row; 091's window gives up rows before any of them, being a preview.
+Terminal rows are allocated to the input field first (at least one row), then to
+any active prompt, and then to the status row; [RFD 091]'s preview window yields
+rows before any of those three.
 
-**Interactive rows own the cursor.** A status row has no caret; the field and an
-open prompt do.
-The polled line editor paints at the origin the worker gives it and reports
-where its caret belongs, a position it computes today to place the cursor.
-After every frame the worker moves the cursor there with relative moves.
-Before a content write it hides the cursor, walks to the region's last row and
-erases as 091 does, writes, redraws, and returns the cursor to the caret.
-Multi-line line editors already place their caret this way; the worker has the
-row accounting to do it from outside.
+**Cursor ownership.** Unlike a passive status row, the input field and an active
+prompt own the terminal cursor (caret).
+The polled line editor renders at the row origin supplied by the worker and
+returns its caret coordinates (which reedline already computes to position the
+cursor).
+After rendering each frame, the worker positions the terminal cursor at those
+coordinates using relative cursor moves.
+Before writing persistent content, the worker hides the cursor, moves to the
+region's bottom row, erases the region as in [RFD 091], writes the content,
+redraws the region, and restores the cursor to the caret position.
 
-**Staying drawn below an unfinished line.** 091 hides the region while content
-has left a line open (`content_open`), because the region's first row would be
-drawn over that line, and a long typewriter task hides it until the task ends.
-For a timer that is a blink; for a field the user is typing into, it is the
-field vanishing on every line.
-Interactive rows are drawn starting one row below the open line instead.
-Text continuing that line is written with a relative move up and back, leaving
-the region untouched, and the region is erased and redrawn only when the line
-ends or would wrap.
-Typewriter tasks yield repaints between batches, 091's documented refinement, so
-typed keys echo while a long line types out.
+**Coexisting with an unfinished content line.** In [RFD 091], the worker hides
+the status region whenever persistent output leaves a line open without a
+trailing newline (`content_open`), because drawing the region at column 0 would
+overwrite that unfinished line, and multi-batch typewriter tasks keep the region
+hidden until the task completes.
+While brief hiding is barely noticeable for a timer, hiding the input field on
+every streaming line would make the field flicker out of view while the user is
+typing.
+Instead, interactive rows render starting one row below the unfinished content
+line.
+Subsequent chunks that continue the unfinished line move the cursor up and back
+to append in place without touching the region; the worker erases and redraws
+the region only when the content line finishes with a newline or wraps to the
+next row.
+Typewriter tasks yield between batches to allow region repaints (the refinement
+noted in [RFD 091]), so typed characters echo promptly while a long line streams
+out.
 
-**No prompt-writer suspension with `live_input`.** 091 suspends the region
-whenever a prompt writer is taken.
-A run with `live_input` hosts its prompts in the region, so nothing takes a
-prompt writer and the status row and field stay drawn.
-The region suspends only for the external editor and for the prompt kinds the
-region does not host yet.
+**Prompt suspension.** [RFD 091] suspends the status region whenever a caller
+acquires a prompt writer.
+When `live_input = true`, prompts render inside the status region itself rather
+than acquiring an external prompt writer, so the status row and input field stay
+visible.
+The region suspends only for the external editor and for prompt types not yet
+hosted in the region (`select` and `text`).
 
-**What the worker repairs.** Region repaints are atomic worker commands, cursor
-operations go only to the controlling terminal, and after untrusted content the
-worker re-asserts cursor visibility, margins, and the modes the terminal lease
-owns.
-It cannot undo destructive sequences such as scrollback erasure or an
-alternate-screen switch, which stay possible in unsanitized content exactly as
-outside `--repl`; [RFD 096] mitigates that class and is not a prerequisite.
+**Terminal state recovery.** Region repaints execute as atomic worker commands,
+cursor movements are emitted only to the controlling terminal, and after writing
+untrusted content the worker re-asserts cursor visibility, scroll margins, and
+the terminal modes owned by the terminal lease.
+The worker cannot undo destructive escape sequences such as scrollback erasure
+or alternate-screen switches emitted in unsanitized output; [RFD 096] mitigates
+those sequences independently and is not a prerequisite here.
 
-**Redraw churn** is bounded by coalescing (one repaint per batch of queued
-writes) and, on terminals with synchronized output (BSU/ESU), wrapped to remove
-flicker.
+**Bounding redraw churn.** The worker coalesces region repaints to at most one
+repaint per batch of queued writes and wraps redraws in synchronized-output
+sequences (BSU/ESU) on terminals that support them to prevent flicker.
 
-The painter change is bounded: render bottom-anchored at the worker's origin,
-report the caret, never scroll the screen itself.
-Narrowing a terminal that reflows its contents (T-1d23tmt) affects these rows as
-it affects every region row; it is not a blocker.
+Changes to reedline's painter are limited to rendering bottom-anchored at the
+worker's row origin, reporting caret coordinates, and never scrolling the
+terminal directly.
+Terminal reflow artifacts when narrowing the window (T-1d23tmt) affect these
+rows the same way they affect other status-region rows and do not block this
+design.
 
-### Prompts inside the region
+### Prompts Inside the Region
 
-Prompts already reach the terminal through one seam: a turn takes an `Arc<dyn
-PromptBackend>`, and the tool prompter and interrupt handler call it.
-A run with `live_input` passes a second implementation that renders into the
-region; no prompt call site changes.
+All prompts in a turn already route through a single trait boundary: the turn
+receives an `Arc<dyn PromptBackend>`, which both the tool prompter and the
+interrupt handler call.
+When `live_input = true`, the run supplies a region-backed `PromptBackend`
+implementation, requiring no changes at prompt call sites:
 
-- `inline_select` (permission prompts, interrupt menus) and `inline_reply`
-  (replies, argument and result editing) render in the region's prompt rows.
-  `inline_reply` uses the field's own polled line editor, so the two look and
-  edit identically.
-- `select` and `text` suspend the region and use the terminal widgets, as today.
-  During a turn only tool questions with fixed options use `select`; moving it
-  into the region is later work.
-- The region backend returns exactly the outcomes the terminal backend returns
-  for the same keys, and [RFD 092]'s split of `Interrupted` from `Cancelled`
-  lands in both.
-- An answered prompt's rows leave with it; the backend writes the same answered
-  line the terminal widget leaves today, so scrollback reads as it does now.
-- While a prompt is open it owns the keyboard, and the field stays drawn,
-  inactive, buffer intact.
+- `inline_select` (permission prompts and interrupt menus) and `inline_reply`
+  (mid-turn replies and tool argument or result edits) render in the status
+  region's prompt rows.
+  `inline_reply` reuses the polled line editor, giving it the same appearance
+  and editing behavior as the input field.
+- `select` and `text` suspend the status region and use the existing terminal
+  widgets.
+  During a turn, only tool questions with fixed option lists use `select`;
+  moving `select` into the region is deferred to future work.
+- The region backend returns the exact same outcome values for each keystroke as
+  the terminal backend, including [RFD 092]'s separation of `Interrupted` from
+  `Cancelled`.
+- When a prompt is answered, its region rows are removed and the backend writes
+  the same one-line answered summary that the terminal widget writes today,
+  preserving scrollback output.
+- While a prompt is open, it owns keyboard input; the input field remains drawn
+  below it in an inactive state with its buffer preserved.
 
-A run without `live_input` keeps the terminal backend, its field being up only
-between turns, when no prompt opens.
-Using the region backend whenever a region is active would change every prompt
-in the default workflow, so it is future work.
+When `live_input = false`, the run uses the standard terminal `PromptBackend`,
+since the input field is active only between turns when no other prompts open.
+Using the region backend whenever a status region is active would alter prompt
+rendering across default single-turn runs and is left as future work.
 
-### Input ownership: the event pump
+### Input Ownership and the Event Pump
 
-Raw mode stops the terminal from turning `Ctrl+C` into SIGINT: while the field
-is up it is byte `0x03` on the input stream, and a byte nobody reads is a dead
-interrupt.
-Without `live_input`, raw mode is held only while the field waits between turns,
-and the field's blocking driver reads every key, forwarding `0x03` to the
-`SignalRouter` itself.
-With it, a run-owned **event pump** reads terminal events for the run's lifetime
-and routes them by owner:
+Enabling raw terminal mode prevents the terminal driver from translating
+`Ctrl+C` into `SIGINT`: while the input field is active, `Ctrl+C` arrives as raw
+byte `0x03` on the input stream, and if nothing reads that stream, interrupts
+stop working.
+When `live_input = false`, raw mode is active only while the idle input field
+waits between turns, and the blocking driver reads every keystroke and forwards
+`0x03` to `SignalRouter` directly.
+When `live_input = true`, a run-scoped **event pump** reads terminal events for
+the lifetime of the run and routes them to the active owner:
 
 | Owner  | When                                | Behavior                                                                                         |
 | ------ | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -345,13 +401,16 @@ and routes them by owner:
 | Prompt | a prompt is open                    | The prompt takes the events and handles `Ctrl+C` per its own contract.                           |
 | Pump   | phases with neither                 | `0x03` is forwarded immediately; other keys queue (bounded) and reach the field when it resumes. |
 
-The field is ambient input, not a prompt: it never consumes `Ctrl+C`.
-Interrupt bytes never queue, so a large paste cannot delay one.
-On overflow the newest input is dropped, with a bell and a chrome notice;
-dropping the oldest would corrupt the middle of what was typed.
-Queued input is interpreted when it is delivered: a redirect typed during
-provider connection setup stops the stream it was typed ahead of, which is what
-the user typing it meant.
+Because the input field is ambient input rather than a modal prompt, it never
+consumes `Ctrl+C` itself.
+`0x03` bytes bypass the input queue and are forwarded immediately so a large
+paste cannot delay an interrupt.
+If the bounded key queue fills during an ownerless phase, the pump drops the
+newest keystrokes, rings the terminal bell, and prints a chrome notice (dropping
+the oldest keystrokes would corrupt the middle of typed text).
+Queued keystrokes are interpreted when delivered to the input field: a reply
+typed during provider connection setup stops the stream once streaming begins,
+matching the user's intent.
 
 | Phase                                                      | Field           | Status row             | Keyboard           |
 | ---------------------------------------------------------- | --------------- | ---------------------- | ------------------ |
@@ -363,121 +422,131 @@ the user typing it meant.
 | Retry backoff, provider setup, persistence, thread rebuild | drawn, inactive | visible                | pump               |
 | External editor                                            | suspended       | suspended              | the editor process |
 
-Releasing and re-entering raw mode around each ownerless phase was rejected:
-mode changes race with keys in flight and thrash on short, frequent windows.
+Leaving and re-entering raw mode around each ownerless phase was rejected
+because mode transitions race with in-flight keystrokes and thrash during short,
+frequent phase transitions.
 
-### Interrupts: one ladder, two entry points
+### Interrupts: One Ladder, Two Entry Points
 
-[RFD 092] sets what `Ctrl+C` does across JP; this RFD adds a second way for the
-press to arrive.
-While the field is up, the field or the pump forwards `0x03` into the same
-`SignalRouter` that receives SIGINT outside one, so the escalation ladder ([RFD
-045], refined by 092) is identical however the press arrived.
+[RFD 092] defines what `Ctrl+C` does across JP; this RFD adds a second delivery
+path for that keystroke.
+While raw mode is active, the input field or the event pump forwards `0x03` to
+the same `SignalRouter` that receives `SIGINT` outside raw mode, so the
+escalation ladder ([RFD 045], refined by [RFD 092]) behaves identically
+regardless of how `Ctrl+C` arrived.
 
-**Which presses count toward escalation.** The router counts a press only when
-it arrives with nobody else reading the keyboard: a SIGINT outside raw mode, or
-a `0x03` forwarded by the field or the pump.
-A press read by an open prompt never reaches the counter.
-The prompt turns it into an outcome, and 092's context table, applied where
-prompts are hosted (the interrupt handler and the tool prompter), decides what
-it means: on an interrupt menu it escalates to the second rung, in a reply
-opened from a menu it returns to that menu, in any other prompt it swaps to the
-scope's menu.
-Nothing is configured per prompt.
-Two presses inside a nested prompt climb two levels, and the run exits only when
-the second level was the interrupt menu.
+**Which presses count toward escalation.** `SignalRouter` increments its
+escalation counter only when `Ctrl+C` arrives while no modal prompt owns the
+keyboard (either as `SIGINT` outside raw mode, or as `0x03` forwarded by the
+input field or event pump).
+A `Ctrl+C` read by an open prompt is not counted by the router.
+Instead, the prompt returns an `Interrupted` outcome, and the caller hosting the
+prompt (the interrupt handler or tool prompter) applies [RFD 092]'s context
+rules: on an interrupt menu it escalates to rung 2, in a reply opened from an
+interrupt menu it returns to that menu, and in any other prompt it swaps to the
+current scope's interrupt menu.
+No per-prompt configuration is needed.
+Pressing `Ctrl+C` twice inside a nested prompt backs out one level per press,
+exiting the run only when a press lands on the interrupt menu itself.
 
-**Idle.** In the idle field, `Ctrl+C` reaches the router and opens 092's
-fallback menu (`[c] Continue`, `[q] Quit gracefully`) whatever the buffer holds;
-`Ctrl+U` clears the line.
-Until 092 lands, an unhandled first press is a graceful shutdown, which saves
-the buffer as described under unsent text.
+**Idle behavior.** Pressing `Ctrl+C` in the idle input field forwards `0x03` to
+the router and opens [RFD 092]'s fallback menu (`[c] Continue`, `[q] Quit
+gracefully`) regardless of whether the buffer contains text; `Ctrl+U` clears the
+line.
+Until [RFD 092] lands, an unhandled first `Ctrl+C` triggers a graceful shutdown,
+persisting any unsent buffer text to `QUERY_MESSAGE.md`.
 
-**Exit.** `Ctrl+D` on an empty idle buffer ends the run cleanly.
+**Clean exit.** Pressing `Ctrl+D` on an empty idle buffer exits the run cleanly.
 
-**Terminal lease.** One process-wide owner of terminal-mode state (raw mode,
-bracketed paste, keyboard-enhancement flags, cursor visibility, margins) with an
-idempotent `emergency_reset()`.
-It runs on every immediate-exit path: today the router's `std::process::exit`,
-and after 092 its SIGINT re-raise, neither of which runs destructors.
-The lease also releases and restores the terminal around the external editor.
-`Drop` stays the normal cleanup path; the reset is the guarantee.
+**Terminal lease.** A single process-wide terminal lease tracks terminal-mode
+state (raw mode, bracketed paste, keyboard-enhancement flags, cursor visibility,
+and scroll margins) and exposes an idempotent `emergency_reset()` method.
+`emergency_reset()` runs on every immediate-exit path (today's
+`std::process::exit` in `SignalRouter`, and [RFD 092]'s `SIGINT` re-raise,
+neither of which runs Rust destructors).
+The lease also suspends and restores terminal state around external editor
+invocations.
+`Drop` remains the normal cleanup path, while `emergency_reset()` guarantees
+restoration on forced exits.
 
-### Live tracing routes through the printer
+### Routing Live Tracing Through the Printer
 
-The opt-in stderr tracing layer (`-v`, `--log`, `--log-file=-`) writes to stderr
-directly, which is why 091 turns regions off while it is active
-(`TerminalCapability::with_stderr_logging`).
-A REPL cannot turn its field off, so the layer moves onto a printer-routed
-writer: each event becomes an `Err` task and is erased around like any chrome.
-Two guards keep what the direct path gave:
+The opt-in stderr tracing layer (`-v`, `--log`, `--log-file=-`) currently writes
+directly to stderr, which is why [RFD 091] disables status regions whenever
+stderr logging is active (`TerminalCapability::with_stderr_logging`).
+Because a REPL cannot disable its input field when `-v` is passed, the stderr
+tracing layer is routed through a printer-backed writer: each trace event is
+queued as an `Err` print task so the worker erases and redraws the status region
+around it like any other chrome output.
+Two safeguards preserve the reliability of tracing:
 
-- `jp_printer`'s own targets stay file-only, so a failing printer never logs
-  through itself.
-- The file layer stays direct and complete, the record that survives a wedged
-  worker or a hard exit.
+- `jp_printer`'s own tracing targets remain file-only, preventing recursive
+  logging if the printer itself fails.
+- The log-file tracing layer continues writing directly to disk, preserving a
+  complete trace even if the printer worker hangs or the process exits abruptly.
 
-With every terminal writer worker-arbitrated, 091's stderr-logging condition has
-nothing left to protect, so regions also render under `-v` outside REPL runs.
+Once every terminal writer is serialized through the printer worker, [RFD 091]'s
+stderr-logging restriction is removed, so status regions also render under `-v`
+outside REPL mode.
 
 ### Requirements
 
-A run hosts the field only when it is interactive, by the signal every prompt
-uses: [RFD 104]'s promptability, which holds when a controlling terminal is
+A run hosts the input field only when the session is interactive, using the same
+promptability signal as every prompt ([RFD 104]): a controlling terminal is
 available and neither `--no-interactive` nor `JP_NONINTERACTIVE` is set.
-Redirecting or piping stdout does not change it.
-Nothing else decides it, whether the field was asked for with `--repl` or in
-config.
+Redirecting or piping stdout does not disable promptability, and no other
+condition governs whether the input field can be shown.
 
-`--repl` in a run that is not interactive fails before the first turn, the way
-`jp q --edit` and `--quote` already do, with an error naming the reason: the
-flag, the variable, or no terminal.
-The check runs after `JP_NONINTERACTIVE` is folded into the flag, so one rule
-covers all three; a clap conflict with `--no-interactive` would catch only the
-flag spelled out.
-`always` and `live_input` from config never fail a run: in one that is not
-interactive, `always` acts as `if_pending` and the field stays off.
+Passing `--repl` in a non-interactive session fails before the first turn
+starts, matching `jp q --edit` and `--quote`, with an error message naming the
+cause (`--no-interactive`, `JP_NONINTERACTIVE`, or no controlling terminal).
+This check runs after `JP_NONINTERACTIVE` is folded into the flag so a single
+check covers all three cases (a clap conflict with `--no-interactive` would
+catch only the explicit CLI flag).
+By contrast, setting `query.loop = "always"` or `query.live_input = true` in
+configuration never fails a non-interactive run: `always` degrades to
+`if_pending` and the input field stays disabled.
 
-Today interactivity follows whether stdout is a terminal, so a run with stdout
-redirected is treated as having nobody to ask; [RFD 104], which this RFD
-requires, moves it to the controlling terminal.
+Today, interactivity checks whether stdout is a terminal, treating redirected
+stdout as non-interactive; [RFD 104] (a prerequisite for this RFD) moves that
+check to the controlling terminal.
 
-The output format does not matter.
-The region draws on the controlling terminal, whose bytes are never stripped
-([RFD 048]), and `--format` decides how content and chrome are encoded, not
-whether a field exists: [RFD 092]'s split between being interactive and printing
-pretty output.
+The `--format` flag does not affect the input field.
+The status region renders on the controlling terminal, where ANSI escape
+sequences are never stripped ([RFD 048]), while `--format` controls how stdout
+content and stderr chrome are encoded (matching [RFD 092]'s separation between
+interactivity and pretty output).
 
-The worker keeps its row count only if it sees every byte that reaches the
-screen.
-At run start JP classifies stdout and stderr, checking for a terminal first and
-then the stream's file type (`is_fifo` and `is_socket` on Unix, `GetFileType` on
-Windows):
+Maintaining accurate row accounting requires the printer worker to know which
+writes reach the terminal screen.
+At startup, JP classifies stdout and stderr by checking `is_terminal` first and
+then inspecting the file descriptor type (`is_fifo` and `is_socket` on Unix,
+`GetFileType` on Windows):
 
-- **A terminal.** The worker writes it, and erases and redraws around each
-  write.
-- **A file, or a device such as `/dev/null`.** Nothing written there reaches the
-  screen, so the worker writes it without erasing.
-- **A pipe or a socket.** Written like a file, since JP's own write never
-  reaches the screen.
-  The program reading it, though, may write to this terminal at any moment, and
-  nothing about the pipe says whether it will.
+- **Terminal**: the worker erases the status region before each write and
+  redraws it afterward.
+- **Regular file or device (such as `/dev/null`)**: output never reaches the
+  terminal screen, so the worker writes without erasing or redrawing the region.
+- **Pipe or socket**: JP's own writes do not reach the screen and are written
+  without erasing the region, but the downstream process reading the pipe may
+  write to the same terminal at any time.
 
-The terminal check comes first because an MSYS terminal on Windows (mintty, Git
-Bash) is itself a named pipe; Rust's `is_terminal` already recognizes it.
+`is_terminal` runs before file-type inspection because MSYS terminals on Windows
+(mintty and Git Bash) are implemented as named pipes that Rust's `is_terminal`
+already detects.
 
-Most programs put after a REPL do write to the terminal, since otherwise the
-answers never reach the screen: `tee`, `cat`, `jq`, `bat`, a pager.
-`tee` prints each chunk wherever the cursor is, which is the caret inside the
-field, and the next redraw erases from the wrong row; a pager also competes for
-keystrokes and switches to the alternate screen.
-Programs that do not write to the terminal (`| gzip > log.gz`, `| pbcopy`) work,
-and leave the answers off the screen exactly as `> file` does.
+Most programs piped after a REPL write to the terminal so the user can see the
+output (`tee`, `cat`, `jq`, `bat`, or a pager).
+For example, `tee` writes each chunk at the current cursor position (inside the
+input field), causing the next region redraw to erase from the wrong row, while
+a pager also competes for keystrokes and switches to the alternate screen.
+Programs that do not write to the terminal (`| gzip > log.gz` or `| pbcopy`)
+work cleanly and keep output off the screen just like `> file`.
 
-JP cannot tell the two kinds apart, so a pipe is the user's call.
-A run that shows the field (`always`, or `live_input`) with a pipe on stdout or
-stderr proceeds, after one notice on the terminal per piped stream, before the
-first turn:
+Because JP cannot tell whether the downstream reader writes to the terminal, a
+run with an active input field (`always` or `live_input`) and a piped stdout or
+stderr prints a one-time warning on the controlling terminal per piped stream
+before the first turn and then proceeds:
 
 ```
 ⚠ stdout is a pipe. A program reading it that writes to this terminal (tee,
@@ -485,10 +554,10 @@ first turn:
   is unaffected. `> file`, or `jp conversation print` afterwards, avoids it.
 ```
 
-A pipe never turns the field off by itself.
-Reading "nobody is there" from a redirected or piped stdout is the heuristic
-[RFD 104] removes from prompts, and a script that wants no field says so with
-`--no-interactive`, as it does to avoid prompts.
+Piping stdout or stderr never disables the input field automatically.
+Inferring non-interactivity from a piped stdout is the heuristic [RFD 104]
+removes from prompts; scripts that want non-interactive behavior pass
+`--no-interactive`.
 
 | Invocation                                                                   | Result                                                                             |
 | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -503,226 +572,263 @@ Reading "nobody is there" from a redirected or piped stdout is the heuristic
 | `jp q "…" > out.md` from a terminal, with `always` configured                | Hosts the field and waits for the next query, like any interactive run.            |
 | The same with `--no-interactive`                                             | Acts as `if_pending`: the turn runs and the run ends.                              |
 
-If the terminal is too small to hold content and region, the field suspends
-while a turn runs and returns between turns.
+If the terminal height is too small to fit both persistent content and the
+status region, the input field suspends while a turn runs and reappears between
+turns.
 
 ### Naming
 
-"REPL" is not yet in JP's vocabulary; a run ([RFD 131]) holds turns, and a REPL
-is a run that waits for its next query at every turn end (`query.loop =
-"always"`).
-The **input field** is where that query is typed, and with `live_input` it is
-also on screen while turns run.
-The glossary gains both entries.
+A **run** ([RFD 131]) is a single `jp` invocation executing one or more turns,
+and a **REPL** is a run that waits for the next query at the end of every turn
+(`query.loop = "always"`).
+The **input field** is the line editor where that query is composed, and when
+`query.live_input = true` it remains on screen while turns run.
+Both **REPL** and **Input Field** are added to the ubiquitous-language glossary.
 
 ## Drawbacks
 
-- **Raw mode while the field is up**, which with `live_input` is the whole run.
-  Restoring the terminal on hard exits depends on the terminal lease, a
-  process-wide invariant every exit path has to honor.
-- **An always-on event pump** with `live_input`.
-  Keyboard routing gains a run-lifetime task whose owner table has to stay right
-  across every phase transition.
-- **One more config key.** `query.live_input` sits beside `query.loop`, and the
-  docs have six combinations to explain; each of them is a mode someone wants,
-  which is why the field is a key of its own.
-- **Redraw churn.** Every content write erases and repaints the region; slow
-  terminals may flicker where they do not today.
-- **The region becomes interactive.** Field, prompts, and status row now share
-  one primitive, so a bug in it hits all three at once (Tesler: the complexity
-  moves into one place rather than disappearing).
-- **Two prompt backends to keep equivalent.** Every outcome the terminal backend
-  returns, the region backend must return for the same keys.
-- **Live stderr traces share the worker queue** and can lag behind content; the
-  file layer stays immediate.
-- **The reedline fork grows** by the polled entry point and the bottom-anchored
-  painter, on top of [RFD 088]'s I/O patches (Lehman's Law).
-- **Pipes are not protected.** JP can see that stdout is a pipe but not what
-  reads it, so a piped `--repl` warns and runs, and a reader that writes to the
-  terminal garbles the screen.
+- **Raw terminal mode for the duration of the field**, which under `live_input`
+  spans the entire run.
+  Restoring the terminal on forced exits depends on every exit path calling the
+  terminal lease's `emergency_reset()`.
+- **An always-on event pump** when `live_input = true`.
+  Keyboard routing requires a run-scoped task whose ownership table must stay
+  synchronized across every turn phase transition.
+- **Additional configuration surface.** Adding `query.live_input` alongside
+  `query.loop` creates six configuration combinations to document, though each
+  combination represents a distinct user-facing mode.
+- **Redraw churn.** Every persistent content write erases and redraws the status
+  region, which can cause visible flicker on slow terminals without synchronized
+  output.
+- **Interactive status region complexity.** The input field, prompts, and status
+  row all share the status-region primitive, so a bug in region row accounting
+  affects all three surfaces.
+- **Two prompt backends to maintain in lockstep.** The region `PromptBackend`
+  must return the exact same outcomes as the terminal `PromptBackend` for every
+  keystroke.
+- **Queued stderr trace output.** Routing live stderr tracing through the
+  printer worker means stderr trace lines share the worker queue and can lag
+  behind content, though log-file writes remain immediate.
+- **Larger reedline fork surface.** The fork gains the polled line editor API
+  and bottom-anchored painter on top of [RFD 088]'s I/O patches.
+- **Unprotected terminal output from pipe readers.** Because JP cannot inspect
+  what a downstream pipe reader does, piping `--repl` to a command that writes
+  to the same terminal (such as `tee`) garbles the screen after printing a
+  warning.
 
 ## Alternatives
 
-- **A turn loop of the REPL's own.** Rejected: [RFD 131]'s loop already runs
-  several turns per run, and `always` is a value on its axis.
-- **A fourth `query.loop` value for "go on while text is typed".** Rejected: it
-  bundles two independent choices, when the run goes on and whether the field
-  shows during turns.
-  `always` without the field during turns, and the field during turns with
-  `never`, would each need yet another value.
-- **Showing the field under `if_pending`.** Rejected: `if_pending` is the
-  default, so every interactive `jp q` would hold raw mode, and `jp q | less`
-  would garble by default.
-- **JP renders the field itself, reedline as a headless engine.** Rejected: it
-  reimplements the painter (width-aware wrapping, multi-line caret placement,
-  repaint, resize) that [RFD 088] chose reedline to avoid writing.
-- **A fork-exposed `Editor` step.** Rejected: the keymaps and mode machine live
-  above `Editor`, so JP would reimplement the translation layer.
-- **Suspending the region for every prompt, as 091 does today.** Rejected for
-  REPL runs: the field and status row would vanish on every permission prompt.
-- **Drawing the region on stderr and requiring both streams to be the
-  terminal.** Rejected: it refuses `> file` and `2> file`, which never touch the
-  screen, and contradicts [RFD 048], which puts interactive input on `/dev/tty`.
-- **Hosting a configured field only when stdout is the terminal.** Rejected: it
-  reads "nobody is there" from a redirected stdout, the heuristic [RFD 104]
-  removes, and gives the field a different idea of interactive than every prompt
-  has.
-  `--no-interactive` is the signal a script gives.
-- **Refusing pipes.** Rejected: it also refuses readers that never touch the
-  terminal, JP cannot tell those apart from the ones that do, and it would make
-  `--repl` the one place JP rejects a pipe.
-- **Hiding the field during turns when stdout is a pipe.** Rejected: the reader
-  drains the pipe after JP's last write, so its final output can still land in
-  the idle field.
-- **Redrawing only once the pipe is empty.** Rejected: an empty pipe says the
-  reader has read, not that it has written.
-- **A DECSTBM scroll region** (content scrolled inside margins, region rows
-  pinned).
-  Fewer redraws, but lines scrolled within a partial region do not enter
-  scrollback on most terminals.
-  Kept only as a spike fallback if redraw flicker is unacceptable.
-- **reedline owns the terminal and the printer feeds it** (the `ExternalPrinter`
-  model generalized to partial styled chunks).
-  Keeps the painter but inverts terminal ownership and drags typewriter pacing,
-  status regions, and channel routing through reedline.
-  The fallback if the region fails outright.
-- **Migrating every prompt to the polled line editor now.** Rejected as
-  unnecessary: both entry points share one engine and painter, so it buys no
-  consistency and risks long-stable prompt flows.
+- **A separate REPL turn loop.** Rejected because [RFD 131]'s turn loop already
+  executes multiple turns per run, and `always` is a third variant on its
+  `query.loop` axis.
+- **A fourth `query.loop` variant for live input.** Rejected because it
+  conflates two independent choices: when the run continues after a turn ends
+  and whether the input field is visible during turns.
+  Supporting `always` without live input during turns, or live input with
+  `never`, would require still more enum variants.
+- **Enabling the live input field under `if_pending` by default.** Rejected
+  because `if_pending` is the default `query.loop` setting, so every interactive
+  `jp q` would enter raw mode and `jp q | less` would break by default.
+- **Rendering the input field in JP with reedline as a headless state machine.**
+  Rejected because it would reimplement reedline's `Painter` (width-aware line
+  wrapping, multi-line caret placement, repainting, and resize handling), which
+  [RFD 088] adopted reedline to avoid maintaining.
+- **Stepping reedline's inner `Editor` directly.** Rejected because keybindings,
+  vi/emacs mode transitions, and paste handling live above `Editor` in
+  `Reedline` and `EditMode`.
+- **Suspending the status region for every prompt, as [RFD 091] does today.**
+  Rejected for `live_input` runs because the input field and status row would
+  disappear on every tool permission prompt.
+- **Drawing the interactive region on stderr and requiring both stdout and
+  stderr to be terminals.** Rejected because it would break `> file` and `2>
+  file` (which never write to the screen) and would contradict [RFD 048], which
+  places interactive I/O on `/dev/tty`.
+- **Showing a configured input field only when stdout is a terminal.** Rejected
+  because inferring non-interactivity from a redirected stdout is the heuristic
+  [RFD 104] removes, and scripts that want non-interactive execution use
+  `--no-interactive`.
+- **Refusing to run when stdout or stderr is a pipe.** Rejected because
+  downstream readers that never write to the terminal (such as `| gzip >
+  log.gz`) work cleanly, and JP cannot distinguish them from readers that write
+  to the terminal.
+- **Hiding the input field during turns when stdout is a pipe.** Rejected
+  because the downstream reader drains the pipe asynchronously after JP's final
+  write, so its output can still collide with the idle input field between
+  turns.
+- **Redrawing only when the pipe buffer is empty.** Rejected because an empty
+  pipe only indicates that the downstream process has read the bytes, not that
+  it has finished writing to the terminal.
+- **Using a `DECSTBM` scroll region** (scrolling content within top/bottom
+  margins while keeping region rows pinned).
+  This reduces redraws, but lines scrolled inside a partial scroll region do not
+  enter native scrollback on most terminals.
+  Retained only as a fallback if redraw flicker proves unacceptable during the
+  Phase 4 spike.
+- **Having reedline own the terminal while `Printer` feeds it** (generalizing
+  reedline's `ExternalPrinter` to arbitrary styled chunks).
+  This preserves reedline's painter but inverts terminal ownership, routing
+  typewriter pacing, status regions, and channel serialization through reedline.
+  Retained as a fallback if status-region hosting fails the Phase 0 spike.
+- **Migrating all standalone prompts to the polled line editor immediately.**
+  Rejected as unnecessary churn: `read_line` and the polled interface share the
+  same engine and painter, so migrating stable standalone prompts provides no
+  consistency benefit.
 
 ## Non-Goals
 
-- **Opening the field on the first keystroke.** Doing it for every `jp q` would
-  put every query in raw mode, take keys the shell would otherwise receive, and
-  conflict with pagers reading the same terminal.
-  A run shows the field during turns only when `query.live_input` asks for it.
-- **Prefilling the shell's command line** with unsent text on exit.
-  A child process cannot write to its parent shell's input line without
-  per-shell integration; the draft file is the shell-independent stand-in.
-- **Region-hosted prompts in runs without `live_input`.**
-- **One meaning for Enter in every phase.** Making Enter always start a new turn
-  is tracked in T-1f6wn02.
-- **An alternate screen or a TUI.** The conversation stays in native scrollback.
-- **Caller-contract changes.** `PromptBackend`'s outcomes and every call site's
-  empty-Enter policy are unchanged.
-- **Non-interactive runs** ([RFD 049]); a REPL needs a terminal.
-- **New editing capability.** One external editor, the existing edit modes.
+- **Opening the input field on the first keystroke during a standard `jp q`.**
+  Detecting that first keystroke would require placing every `jp q` in raw mode,
+  capturing keystrokes meant for the shell and conflicting with pagers.
+  The input field appears during turns only when `query.live_input = true`.
+- **Pre-filling the parent shell's command line** with unsent text on exit.
+  A child process cannot populate its parent shell's input buffer without
+  shell-specific integration; saving to `QUERY_MESSAGE.md` provides
+  shell-independent recovery.
+- **Hosting prompts inside the status region when `live_input = false`.**
+- **Unifying `Enter` behavior across all phases.** Making `Enter` always start a
+  new turn is tracked separately in T-1f6wn02.
+- **Alternate-screen or full-screen TUI mode.** Conversation output remains in
+  the terminal's native scrollback.
+- **Changing `PromptBackend` caller contracts.** `PromptBackend` outcome types
+  and per-call-site empty-`Enter` policies remain unchanged.
+- **Supporting REPL mode in non-interactive runs** ([RFD 049]).
+- **New line-editing features** beyond the existing edit modes and external
+  editor integration.
 
 ## Risks and Open Questions
 
-- **Two spikes gate the work.** Phase 0 gates the field itself: drawn on the
-  controlling terminal, the caret returned after every repaint, a multi-line
-  buffer growing and shrinking, and resize.
-  Phase 4's spike gates typing during turns: interactive rows kept coherent
-  below an open content line and through long typewriter tasks, the caret
-  returned after every content write, and prompt rows above the status row, with
-  native scrollback intact and flicker acceptable with and without synchronized
-  output.
-  DECSTBM is the fallback for flicker in Phase 4; reedline owning the terminal
-  is the fallback if the region fails outright.
-  A Phase 4 failure leaves Phase 3's `always` standing.
-- **Where a write leaves the cursor.** Terminals differ at the last column
-  (deferred wrap); where the worker cannot be sure, it redraws from a known
-  position after a newline.
-  Phase 4's spike checks this per terminal.
-- **[RFD 092] is not implemented.** Idle `Ctrl+C` falls back to a graceful
-  shutdown until its fallback menu exists, and the `Interrupted` outcome split
-  lands with it.
-- **Backend parity.** Outcome tests have to run against both prompt backends.
-- **Windows.** Raw-mode input, relative cursor movement, synchronized output,
-  and stream classification need the same console verification 091 got.
-- **[Issue #829].** The mid-stream reply replays unsigned partial reasoning;
-  re-check against the recovery work before Phase 4.
+- **Two prototype spikes gate implementation.** Phase 0 gates the input field
+  itself: rendering on the controlling terminal, restoring the caret after every
+  repaint, growing and shrinking a multi-line buffer, and handling terminal
+  resize.
+  Phase 4's spike gates live input during turns: keeping interactive rows
+  aligned below an unfinished content line and across multi-batch typewriter
+  tasks, restoring the caret after every content write, and stacking prompt rows
+  above the status row and input field while preserving native scrollback and
+  avoiding unacceptable flicker.
+  `DECSTBM` scroll margins are the fallback for flicker in Phase 4, and
+  reedline-owned terminal rendering is the fallback if status-region hosting
+  fails in Phase 0.
+  If Phase 4's spike fails, Phase 3 (`query.loop = "always"` with the field
+  shown between turns) still ships on its own.
+- **Cursor position at the right margin.** Terminals differ in how they handle a
+  cursor at the last column (deferred wrap); when the cursor position is
+  ambiguous, the worker redraws from a known column after emitting a newline.
+  The Phase 4 spike verifies this behavior across target terminals.
+- **Dependency on [RFD 092].** Until [RFD 092]'s fallback menu lands, pressing
+  `Ctrl+C` in the idle input field triggers a graceful shutdown (saving any
+  unsent buffer text).
+  The separation of `Interrupted` from `Cancelled` prompt outcomes also lands
+  with [RFD 092].
+- **Prompt backend parity.** Prompt outcome tests must run against both the
+  terminal and region `PromptBackend` implementations.
+- **Windows console compatibility.** Raw-mode input, relative cursor movement,
+  synchronized output, and stream file-type classification require the same
+  Windows console verification performed for [RFD 091].
+- **[Issue #829].** Mid-stream replies replay unsigned partial reasoning blocks;
+  verify interaction with partial-reasoning recovery before Phase 4.
 
 ## Implementation Plan
 
-### Phase 0: region spike (gate)
+### Phase 0: Region Spike (Gate)
 
-On a real terminal through `region_probe` and the `jp_pty` screen model, on Unix
-and then Windows: the region drawn on the controlling terminal; the painter
-rendering at a worker-supplied origin and reporting its caret; the caret
-returned after every repaint; a multi-line buffer growing and shrinking; resize.
-Go/no-go for the rest.
-What only typing during turns needs is spiked at the start of Phase 4.
+Validate status-region input-field rendering on real terminals (Unix and
+Windows) using `region_probe` and the `jp_pty` screen model: drawing on the
+controlling terminal, painting at a worker-supplied row origin, reporting and
+restoring caret coordinates after every repaint, growing and shrinking a
+multi-line buffer, and resizing the terminal.
+This spike is a go/no-go gate for subsequent phases; live-input coexistence
+during turns is spiked separately at the start of Phase 4.
 
-### Phase 1: printer
+### Phase 1: Printer Support
 
-Interactive rows in the region: the region target, caret placement, the row
-budget, and the suspension rules.
-The printer-routed stderr tracing writer.
-The terminal lease, with `emergency_reset()` on the router's exit path.
-Tested against `Printer::memory` and the `jp_pty` model.
+Add interactive row support to the status region in `jp_printer`: configurable
+output target (`stderr` vs. controlling terminal), caret placement, row
+budgeting, and prompt suspension rules.
+Route the opt-in stderr tracing layer through the printer worker, and add the
+process-wide terminal lease with `emergency_reset()` wired into `SignalRouter`'s
+forced-exit paths.
+Test against `Printer::memory` and the `jp_pty` screen model.
 Depends on Phase 0.
 
-### Phase 2: fork and widgets
+### Phase 2: Reedline Fork and `jp_inquire` Field
 
-The polled line editor over `Reedline`.
-The field in `jp_inquire`, with both drivers and a mock.
-No existing prompt changes.
-Depends on Phases 0–1.
+Expose the polled line editor API on `Reedline` in the reedline fork, and build
+the input-field abstraction in `jp_inquire` with blocking and polled drivers
+plus a test mock.
+Existing standalone prompts remain unchanged.
+Depends on Phases 0 and 1.
 
-### Phase 3: `always`, with the field between turns
+### Phase 3: `query.loop = "always"` (Input Field Between Turns)
 
-`query.loop = "always"` with the field up only between turns: the blocking
-driver, the idle keys and `Ctrl+X`, the `Ctrl+D` exit, idle `Ctrl+C` forwarded
-to the router, the turn-end, error, and unsent-text rules, and the fallback in
-runs that are not interactive.
-In the printer, erasing only around streams that reach the screen; stream
-classification and the pipe notice.
-Shippable on its own: a REPL set in config, without typing during turns, and
-without the open-line work, region-hosted prompts, or event pump that typing
-during turns needs.
-Depends on Phase 2, on [RFD 131]'s turn loop and Run scope (its phases 1–2),
-and on [RFD 104]'s promptability (its phase 2).
+Implement `query.loop = "always"` with the input field active between turns: the
+blocking driver, idle keybindings and `Ctrl+X`, `Ctrl+D` exit, forwarding idle
+`Ctrl+C` to `SignalRouter`, turn-end and error-recovery rules, unsent-buffer
+draft persistence, and non-interactive fallback to `if_pending`.
+In `jp_printer`, add stream classification so the worker erases the region only
+around streams that reach the screen, and emit the one-time warning when stdout
+or stderr is a pipe.
+This phase is shippable on its own as a config-driven REPL without live input
+during turns, unfinished-line coexistence, region-hosted prompts, or the event
+pump.
+Depends on Phase 2, [RFD 131] Phases 1 and 2 (turn loop and `Run` scope), and
+[RFD 104] Phase 2 (controlling-terminal promptability).
 
-### Phase 4: `live_input` and `--repl`
+### Phase 4: `query.live_input` and `--repl`
 
-Opens with a spike on a real terminal, Unix and then Windows: interactive rows
-below an open content line and through a long typewriter task, the caret
-returned after every content write, and a prompt row above the status row above
-the field.
-Go/no-go for this phase only; a failure leaves Phase 3 standing.
+Start with a real-terminal spike on Unix and Windows covering interactive rows
+below an unfinished content line and across multi-batch typewriter tasks, caret
+restoration after every content write, and stacked prompt, status, and input
+rows.
+This spike gates Phase 4 only; if it fails, Phase 3 remains complete.
 
-In the printer: open-line coexistence and typewriter yields.
-The region `PromptBackend` (`inline_select` and `inline_reply` in the region;
-`select` and `text` through suspension), with outcome tests run against both
-backends.
-The event pump; the keyboard branch in the streaming select and the
-tool-execution wait; the phase matrix and per-phase keys; `Ctrl+C` forwarding
-and the counting rule.
-`query.live_input` and `--repl`, with its refusal in runs that are not
-interactive.
+Implement unfinished-line coexistence and typewriter repaint yields in
+`jp_printer`.
+Add the region `PromptBackend` (`inline_select` and `inline_reply` rendered in
+the region; `select` and `text` suspending the region) and run outcome tests
+against both prompt backends.
+Add the run-scoped event pump, the keyboard branches in the streaming `select!`
+loop and tool-execution wait, per-phase keybindings, and `Ctrl+C` forwarding and
+escalation counting.
+Expose `query.live_input` and `--repl`, failing before the first turn when
+`--repl` is passed in a non-interactive session.
 Depends on Phase 3.
 
-### Phase 5: documentation and glossary
+### Phase 5: Documentation and Glossary
 
-`--repl`, `query.live_input`, the keys, phases, and requirements in the usage
-docs; **REPL** and **Input Field** glossary entries relating them to runs and
-turns.
+Document `--repl`, `query.live_input`, keybindings, phase behavior, and terminal
+requirements in the user documentation, and add **REPL** and **Input Field**
+entries to the ubiquitous-language glossary.
 
 ## References
 
-- [RFD 131]: the turn loop, Run scope, config epochs, argument lifetimes, and
-  draft rules this RFD builds on.
-- [RFD 091]: the status region this RFD makes interactive.
-- [RFD 120]: the reasoning window, another client of the same region.
-- [RFD 088]: the inline editor widget and the reedline fork.
-- [RFD 092] and [RFD 045]: the interrupt model both `Ctrl+C` entry points feed.
-- [RFD 048]: the four-channel output model the worker serializes.
-- [RFD 096]: sanitization for the destructive sequences the region cannot
-  repair.
-- [RFD 104]: promptability from the controlling terminal, the signal that
-  decides whether a run hosts the field.
-- [RFD 049]: non-interactive mode, untouched.
-- [Issue #829]: partial-reasoning replay refusals the reply path inherits.
-- `crates/jp_printer/src/region.rs`: the region and its row accounting.
-- `crates/jp_printer/src/bin/region_probe.rs`: the real-terminal probe.
-- `crates/jp_inquire/src/inline_reply.rs`: the `read_line` widget, untouched.
-- `crates/jp_inquire/src/prompt.rs`: `PromptBackend`, the seam the region
-  backend implements.
-- `crates/jp_cli/src/cmd/query/turn_loop.rs`: the streaming select the keyboard
-  branch joins.
-- `crates/jp_cli/src/signals.rs`: the `SignalRouter` and its exit path.
+- [RFD 131]: Turn loop, `Run` scope, per-turn config epochs, CLI argument
+  lifetimes, and `QUERY_MESSAGE.md` draft rules that this RFD builds on.
+- [RFD 091]: Printer-owned status region that this RFD extends with interactive
+  rows.
+- [RFD 120]: Ephemeral reasoning window sharing the status region.
+- [RFD 088]: Inline editor widget and the reedline fork.
+- [RFD 092] and [RFD 045]: Interrupt escalation model fed by both `Ctrl+C`
+  delivery paths.
+- [RFD 048]: Four-channel output model serialized by the printer worker.
+- [RFD 096]: Terminal output sanitization for destructive escape sequences that
+  the status region cannot undo.
+- [RFD 104]: Controlling-terminal promptability signal that determines whether a
+  run can host the input field.
+- [RFD 049]: Non-interactive mode, which remains unchanged.
+- [Issue #829]: Partial-reasoning replay refusals inherited by mid-stream
+  replies.
+- `crates/jp_printer/src/region.rs`: Status-region implementation and row
+  accounting.
+- `crates/jp_printer/src/bin/region_probe.rs`: Real-terminal status-region probe
+  binary.
+- `crates/jp_inquire/src/inline_reply.rs`: Existing `read_line`-based inline
+  reply widget.
+- `crates/jp_inquire/src/prompt.rs`: `PromptBackend` trait implemented by the
+  region backend.
+- `crates/jp_cli/src/cmd/query/turn_loop.rs`: Streaming `select!` loop that the
+  polled keyboard branch joins.
+- `crates/jp_cli/src/signals.rs`: `SignalRouter` and its exit path.
 
 [Issue #829]: https://github.com/dcdpr/jp/issues/829
 [RFD 045]: 045-layered-interrupt-handler-stack.md

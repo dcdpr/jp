@@ -11,8 +11,8 @@
 - **Label**: relevant-rfd=131
 - **Label**: type=pre-rfd
 
-RFD 132's live input field maps Enter to a different transition in each phase,
-each reused from an existing interrupt action:
+In [RFD 132], pressing `Enter` in the live input field triggers a different
+transition in each phase, reusing the existing interrupt actions:
 
 | Phase          | Enter                                                                                                                        |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -20,35 +20,41 @@ each reused from an existing interrupt action:
 | LLM streaming  | Stops the response and replies within the current turn (`InterruptAction::Reply`).                                           |
 | Tool execution | Cancels the running tools and sends the text as their response (`ToolInterruptResult::Cancelled { response, exit: false }`). |
 
-The same key in the same field does three things, depending on timing the user
-does not control.
-The direction: Enter always starts a new turn.
-Mid-turn that is Stop followed by sending the text as the next turn's request,
-which makes it the immediate counterpart of a queued reply (RFD 131): one stops
-now, the other lets the turn finish, and both start the next turn.
+Pressing the same key in the same field does three different things depending on
+phase timing that the user does not control.
+Instead, `Enter` should always start a new turn.
+Mid-turn, pressing `Enter` would stop the current turn and send the buffer as
+the next turn's request, making it the immediate counterpart of a queued reply
+([RFD 131]): one stops the current turn immediately, the other lets it finish,
+and both start the next turn.
 
-The turn boundary is visible, so this needs a design before it changes:
+Because the turn boundary is user-visible, changing this requires a design
+decision on several points:
 
-- **Streaming.** The partial response is committed as Stop commits it, and the
-  text opens a new turn instead of continuing the current one.
-  The provider sees much the same thread, but turn-scoped behavior moves: turn
-  summaries ([RFD 126]), the config epoch (RFD 131: a new turn resolves its
-  config again), `--fork N`, and anything else that counts or edits turns.
-- **Tool execution.** The tools record their cancellation responses, and the
-  text becomes a user request rather than the tools' result.
-  Decide whether anything is lost when the assistant no longer reads the text as
-  the tools' answer.
-- **`query.loop = "never"`.** Mid-turn Enter would start a second turn in a run
-  configured to end after one.
-  Decide whether an explicit Enter overrides the loop setting.
-- **The interrupt menus.** RFD 132 presents mid-stream Enter as `Ctrl+C`, `r` in
-  one gesture.
-  Either the menus' Reply and "Stop & respond" change the same way ([RFD 092]
-  owns the menus), or the live input stops matching them.
-- **Partial reasoning.** The replay refusals in [#829] apply to the new turn's
-  thread as they do to today's reply.
+- **LLM streaming.** Partial output is committed just as Stop commits it, and
+  the submitted text opens a new turn instead of continuing the current one.
+  The provider sees nearly the same thread, but turn-scoped behavior changes:
+  turn summaries ([RFD 126]), per-turn config resolution ([RFD 131]), `--fork
+  N`, and any other operation that counts or edits turns.
+- **Tool execution.** Running tools record their cancellation responses, and the
+  submitted text becomes a new user `ChatRequest` rather than the tools' result
+  payload.
+  Determine whether the assistant loses useful context when the text is no
+  longer attached to the cancelled tool calls.
+- **`query.loop = "never"`.** Pressing `Enter` mid-turn would start a second
+  turn in a run configured to exit after one turn.
+  Determine whether an explicit mid-turn `Enter` overrides `query.loop =
+  "never"`.
+- **Interrupt menus.** [RFD 132] models mid-stream `Enter` as the single-step
+  equivalent of `Ctrl+C` followed by `[r] Reply`.
+  Decide whether `[r] Reply` and `[r] Stop & respond` in the interrupt menus
+  ([RFD 092]) also change to start a new turn, or whether live input diverges
+  from the menu actions.
+- **Partial reasoning.** The partial-reasoning replay refusals in [#829] apply
+  to the new turn's thread just as they apply to mid-turn replies today.
 
-Until this lands, RFD 132 keeps the three transitions.
+Until these questions are resolved, [RFD 132] retains the per-phase transitions
+above.
 
 ## Comments
 
@@ -57,28 +63,31 @@ Until this lands, RFD 132 keeps the three transitions.
 - **From**: jp
 - **Date**: 2026-11-07T12:57:32Z
 
-Suggestion: make what Enter does a setting rather than replacing today's
-behavior.
+Suggestion: make `Enter` behavior configurable rather than replacing the
+per-phase behavior outright:
 
-| Value        | Enter in the live input field                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `contextual` | Today's behavior: a new turn when idle, Reply within the turn while streaming, the tools' response while tools run. |
-| `new_turn`   | Always a new turn: stop whatever is running, then send the text as the next turn's query.                           |
+| Value        | Enter in the live input field                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `contextual` | Per-phase behavior: start a new turn when idle, reply within the turn while streaming, or respond to cancelled tools |
+| `new_turn`   | Always start a new turn: stop the active turn, then send the buffer as the next turn's query.                        |
 
-Keeping `contextual` as the default means `new_turn` can ship opt-in, so the
-questions above need answers only for the users who choose it, and the default's
-behavior stays matched to the interrupt menus.
+Keeping `contextual` as the default allows `new_turn` to ship as an opt-in
+setting, scoping the open questions above to users who enable `new_turn` while
+keeping the default aligned with the interrupt menus.
 
-Open points:
+Open questions for this setting:
 
-- **Where the key lives.** A sibling key such as `query.live_input_enter`, or
-  `query.live_input` becoming a table (`enabled`, `enter`) in RFD 132 before it
-  is accepted, while that is still free.
-- **The interrupt menus.** Whether the setting also governs the menus' Reply and
-  "Stop & respond" ([RFD 092] owns them), or stays specific to the field.
-- **`query.loop = "never"`** still needs a rule under `new_turn`.
+- **Config key placement.** Add a sibling key such as `query.live_input_enter`,
+  or make `query.live_input` a table (`enabled`, `enter`) in [RFD 132] before it
+  is accepted.
+- **Interrupt menus.** Decide whether the setting also governs `[r] Reply` and
+  `[r] Stop & respond` in the interrupt menus ([RFD 092]) or applies only to the
+  live input field.
+- **`query.loop = "never"`.** Define how `new_turn` interacts with `query.loop =
+  "never"`.
 
 [#829]: https://github.com/dcdpr/jp/issues/829
 [RFD 092]: ../rfd/092-predictable-and-responsive-interrupt-escalation.md
-[RFD 092]: ../rfd/092-predictable-and-responsive-interrupt-escalation.md
 [RFD 126]: ../rfd/126-turn-summaries.md
+[RFD 131]: ../rfd/131-queued-replies.md
+[RFD 132]: ../rfd/132-repl-mode-with-live-streaming-input.md

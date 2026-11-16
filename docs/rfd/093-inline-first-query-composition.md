@@ -217,9 +217,10 @@ parsed partial in full (and will adopt same-turn config resolution from [RFD
    (step 4), and replaced query text was already reported (step 1).
 
 > [!TIP]
-> [RFD 131] replaces item 1's direct-send rule while a draft is unsent: the send
-> asks whether to discard the draft, keep it, or edit it with the query
-> appended, and keeps it when nobody can answer.
+> [RFD 131] replaces step 1's direct-send rule when an unsent draft exists: on
+> an interactive terminal it prompts whether to discard the draft, keep it, or
+> edit it with the query appended, and in non-interactive runs it keeps the
+> draft.
 
 ### Composition loop
 
