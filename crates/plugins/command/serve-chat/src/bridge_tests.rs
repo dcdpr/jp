@@ -1022,7 +1022,7 @@ fn injecting(
     };
     let runner = Arc::new(runner);
     let injector = Injector::new(inject, Arc::clone(&runner) as Arc<dyn Run>);
-    f.bridge.injector = Some(Arc::new(injector));
+    f.bridge.intake.inject_with(Some(Arc::new(injector)));
 
     (f, runner)
 }
@@ -1049,8 +1049,8 @@ fn deciding_after(
         instructions: "What should the assistant do?".to_owned(),
     });
     f.bridge
-        .inbox
-        .decide_with(Some(Arc::clone(&decider) as Arc<dyn Decide>));
+        .intake
+        .decide_with(Some(Arc::clone(&decider) as Arc<dyn Decide>), 0.5);
 
     (f, decider)
 }

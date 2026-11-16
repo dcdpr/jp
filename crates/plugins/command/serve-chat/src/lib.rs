@@ -25,6 +25,7 @@ mod decide;
 mod host;
 mod inbox;
 mod inject;
+mod intake;
 mod options;
 mod queue;
 mod signal;
