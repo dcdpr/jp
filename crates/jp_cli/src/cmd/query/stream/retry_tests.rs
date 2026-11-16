@@ -610,8 +610,6 @@ async fn interrupt_during_backoff_cuts_wait_short() {
     assert_eq!(retry_state.consecutive_failures, 1);
 }
 
-/// A retry state whose backoff honours a provider's `Retry-After` of a minute,
-/// far longer than any test timeout.
 fn make_long_backoff_retry_state() -> StreamRetryState {
     StreamRetryState::new(RequestConfig {
         max_retries: 3,
@@ -623,9 +621,6 @@ fn make_long_backoff_retry_state() -> StreamRetryState {
     })
 }
 
-// A plugin's `stop` sent while the turn waits out a rate limit must be answered
-// at once, not after the wait: `jp serve-chat` shows it as hanging otherwise,
-// and graceful shutdown aborts the turn after its grace period instead.
 #[tokio::test]
 async fn client_stop_during_backoff_cuts_wait_short() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
@@ -639,9 +634,8 @@ async fn client_stop_during_backoff_cuts_wait_short() {
     });
 
     let (sender, mut interrupts) = TurnInterrupts::channel();
-    // On the current-thread runtime this task first runs only after the test
-    // task yields, which it does at the backoff select!, so the stop is sent
-    // while the wait is in progress. The task ends once the turn takes it.
+    // On the current-thread runtime, the spawned task runs once
+    // `handle_stream_error` yields at the backoff `select!`.
     let send = tokio::spawn(async move {
         let delivery = sender.try_send(InterruptAction::Stop).unwrap();
         delivery.await
@@ -676,9 +670,9 @@ async fn client_stop_during_backoff_cuts_wait_short() {
     assert_eq!(retry_state.consecutive_failures, 1);
 }
 
-// The retry has already committed the partial response and reset the
-// coordinator by the time a reply arrives, so the reply must follow the partial
-// response exactly once and lead to a fresh request.
+// By the time backoff starts, `handle_stream_error` has already committed the
+// partial response and reset the coordinator, so `apply_streaming_interrupt`
+// must append the reply once after the partial response without duplicating it.
 #[tokio::test]
 async fn client_reply_during_backoff_follows_the_committed_partial_response() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);

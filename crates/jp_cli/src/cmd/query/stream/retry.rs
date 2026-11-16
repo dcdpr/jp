@@ -373,12 +373,11 @@ pub enum StreamErrorOutcome {
     /// menu, knows whether it was answered.
     Interrupted(InterruptNotice),
 
-    /// A client's interrupt arrived during the backoff wait.
-    /// The wait was cut short and the retry notification line cleared; the
-    /// caller applies the action as it would one received while streaming.
+    /// A client interrupt arrived during the backoff wait.
     ///
-    /// The interrupt has already been taken, so its sender has been told it was
-    /// delivered.
+    /// The wait was cut short, the retry notification line was cleared, and the
+    /// sender was notified of delivery.
+    /// The caller should apply the action as a streaming interrupt.
     ClientInterrupt(InterruptAction),
 }
 
@@ -405,8 +404,8 @@ pub(crate) fn agent_restart_is_safe(events: &ConversationStream) -> bool {
 /// A Ctrl-C during the wait cuts it short and surfaces as
 /// [`StreamErrorOutcome::Interrupted`] so the interrupt menu opens immediately
 /// instead of after the wait.
-/// A client's interrupt taken from `interrupts` during the wait cuts it short
-/// the same way, as [`StreamErrorOutcome::ClientInterrupt`].
+/// A client interrupt from `interrupts` likewise cuts the wait short and
+/// returns [`StreamErrorOutcome::ClientInterrupt`].
 pub async fn handle_stream_error(
     error: StreamError,
     retry_state: &mut StreamRetryState,
@@ -473,8 +472,8 @@ pub async fn handle_stream_error(
     // 5. Backoff. A Ctrl-C during the wait cuts it short: a temporary handler
     // scope (stacked above the streaming handler for the duration of the
     // wait) catches the press, so the caller can show the interrupt menu
-    // immediately instead of after the wait. A client's interrupt cuts it short
-    // too, so a stop sent during a rate-limit wait is answered at once.
+    // immediately instead of after the wait. A client interrupt also cuts the
+    // wait short, so a stop sent during a rate-limit wait is answered at once.
     let delay = retry_state.backoff_duration(&error);
     let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
     let outcome = tokio::select! {
@@ -483,8 +482,8 @@ pub async fn handle_stream_error(
             Some(notice) => StreamErrorOutcome::Interrupted(notice),
             None => StreamErrorOutcome::Retry,
         },
-        // `next` yields `None` at once for a turn no client can reach, which
-        // disables this branch and leaves the sleep to end the wait.
+        // `TurnInterrupts::none()` returns `None` immediately, which disables
+        // this branch in `select!` and lets `sleep` complete.
         Some(action) = interrupts.next() => StreamErrorOutcome::ClientInterrupt(action),
         () = tokio::time::sleep(delay) => StreamErrorOutcome::Retry,
     };

@@ -791,15 +791,18 @@ async fn drive_turn(
                                                 }
                                             }
                                         }
-                                        // A client's interrupt cut the backoff
-                                        // wait short. The partial response was
-                                        // committed before the wait, so a reply
-                                        // lands after it and is sent with the
-                                        // fresh request the break leads to.
+                                        // The partial response was already
+                                        // committed before the backoff wait, so
+                                        // `apply_streaming_interrupt` only
+                                        // records the interrupt action (e.g.
+                                        // appending a reply or completing the
+                                        // turn).
                                         StreamErrorOutcome::ClientInterrupt(action) => {
-                                            // The retry flush kept the reasoning
-                                            // region open for the resent request;
-                                            // this response ends here instead.
+                                            // `commit_partial_response` flushed
+                                            // with `ResponseBoundary::Continuation`,
+                                            // leaving any open reasoning region
+                                            // pending for the retry; close it
+                                            // before applying the interrupt.
                                             turn_coordinator.flush_renderer();
                                             printer.flush_instant();
 
@@ -817,9 +820,9 @@ async fn drive_turn(
                                             });
 
                                             match result {
-                                                // The stream is dead, so there is
-                                                // nothing to keep polling: every
-                                                // non-ending result sends a fresh
+                                                // The stream has already ended,
+                                                // so there is nothing left to
+                                                // poll; break to start a fresh
                                                 // request.
                                                 StreamingInterruptResult::Continue
                                                 | StreamingInterruptResult::PromptFailed
