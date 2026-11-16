@@ -102,7 +102,7 @@ impl ToolDefinition {
 /// summary with no remaining description.
 ///
 /// Otherwise, the first sentence is extracted as the summary.
-/// A sentence ends at ` .  ` or `.\n`.
+/// A sentence ends at `. ` or `.\n`.
 /// The remainder becomes the description.
 #[must_use]
 pub fn split_description(text: &str) -> (String, Option<String>) {

@@ -137,6 +137,11 @@ Tracing logs are handled separately via the `tracing` subscriber, configured to
 write to the log file.
 They do not flow through `Printer`.
 
+> [!TIP]
+> [RFD 132] routes the opt-in stderr tracing layer (`-v`, `--log`,
+> `--log-file=-`) through the `Printer`, so status regions and the input field
+> can be erased around it; the log file layer keeps writing directly.
+
 ### Standard Input
 
 `stdin` is exclusively for query content and context injection (e.g., `cat
@@ -264,3 +269,4 @@ Independent of Phases 1-2.
 [RFD 091]: 091-printer-owned-status-region.md
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
 [RFD 104]: 104-terminal-capability-and-promptability-signals.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md

@@ -222,6 +222,11 @@ uniformly whatever [RFD 080] changes that to when it lands.
    escape it round-tripped through the editor (item 4).
    Displaced query text is covered by the notice rule in item 1.
 
+> [!TIP]
+> [RFD 131] replaces item 1's direct-send rule while a draft is unsent: the send
+> asks whether to discard the draft, keep it, or edit it with the query
+> appended, and keeps it when nobody can answer.
+
 ### Composition loop
 
 A `compose_query` function in `jp_cli` (next to the existing `edit_query`)
@@ -388,3 +393,4 @@ Update `docs/configuration.md` and the usage docs for the new default, the
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 080]: 080-editor-as-a-config-source.md
 [RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 131]: 131-queued-replies.md

@@ -133,7 +133,7 @@ fn git_list_patches_impl<R: ProcessRunner>(
 
 /// Pretty print a git diff hunk with numbered change lines.
 ///
-/// Context lines (from the source file) get padding to align with the ` [N]  `
+/// Context lines (from the source file) get padding to align with the `[N] `
 /// prefix on diff lines.
 /// Actual diff lines (`-`/`+`) are prefixed with `[N]` where N is a sequential
 /// index used by `git_stage_patch_lines` to select individual lines for

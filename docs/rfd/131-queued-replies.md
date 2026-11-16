@@ -1,10 +1,14 @@
-# RFD D46: Queued Replies
+# RFD 131: Queued Replies
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-31
 - **Extends**: [RFD 045]
+- **Requires**: [RFD 104]
+- **Extended by**: [RFD 132]
+- **Summary**: Adds a Queue reply interrupt action and a turn loop that sends
+  the queued text as the next turn.
 
 ## Summary
 
@@ -14,6 +18,8 @@ The turn runs to completion, a countdown gives one last chance to cancel, and
 the queued text then starts a new turn in the same `jp` invocation.
 The queued text lives in the conversation's `QUERY_MESSAGE.md` draft, so a
 failed run leaves it recoverable with a bare `jp q`.
+A run of several turns resolves its configuration once per turn, and a query
+sent over an unsent draft asks before it touches the draft.
 
 ## Motivation
 
@@ -41,7 +47,7 @@ Both interrupt menus gain one entry:
 ```
 Interrupted
 [c] Continue  [r] Reply (stop & respond)  [q] Queue reply (finish, then respond)
-[s] Stop (save & exit)  [a] Abort (discard & exit)
+[s] Stop (save & exit)
 ```
 
 ```
@@ -97,10 +103,41 @@ Two rules govern its lifetime:
 - The file is deleted only when the queued reply is **sent** as a new turn, or
   when the user **explicitly discards** it.
 
-Every other path — fatal provider error, `[s] Stop`, `[a] Abort`, escalation,
-`query.loop = "never"` — leaves the file alone.
+Every other path (fatal provider error, `[s] Stop`, escalation, `query.loop =
+"never"`) leaves the file alone.
 Nothing on an abnormal path destroys text the user typed, and manual resumption
 comes for free: after any failure, a bare `jp q` seeds from the draft.
+
+**A query sent over an unsent draft.** A query that bypasses composition (a
+positional query, piped stdin, or `--no-edit`) writes its own text over
+`QUERY_MESSAGE.md` before the turn starts (the recovery copy
+`preserve_query_message_file` keeps for a pre-turn interrupt) and removes the
+file after a successful turn.
+An unsent draft is lost either way: replaced if the turn fails, deleted if it
+succeeds.
+That breaks the deletion rule above, so such a query no longer writes over an
+unsent draft.
+On an interactive terminal it asks first, interactive meaning [RFD 104]'s
+promptability (a controlling terminal, whatever stdout is), so `jp q foo >
+out.md` asks too:
+
+```
+QUERY_MESSAGE.md holds an unsent draft.
+[s] Send, discard draft  [k] Send, keep draft  [e] Edit draft with query appended  [x] Cancel
+```
+
+- `s` sends the query and deletes the draft: the explicit discard.
+- `k` sends the query and leaves the draft for a later `jp q`.
+- `e` opens the composer `jp q --edit` opens, seeded with the draft, a blank
+  line, and the query; submitting sends and consumes the draft like any composed
+  query.
+- `x` (or Esc) changes nothing and ends the invocation.
+
+Without an interactive terminal nobody can answer, so the query is sent and the
+draft is kept: the one choice that cannot lose text.
+In every case the query skips its recovery copy while an unsent draft exists.
+It came from the command line or a pipe, so the user still has it; the draft is
+the text that exists nowhere else.
 
 Two existing behaviors need care here, and they are where a data-loss bug would
 come from:
@@ -139,24 +176,28 @@ the phase reaches `Complete`, and nothing above it loops.
 A queued reply needs a driver that runs one *or more* turns, which is the
 structural part of this proposal.
 
-The turn loop goes above the phase machine, in `handle_turn`.
+The turn loop goes above the phase machine, in `Query::run`, around the
+`TurnInputs::collect` / `TurnInputs::run` pair that runs one turn today.
 That makes `run_turn_loop` a misnomer — it drives the phases within one turn
 (Idle → Streaming → Executing → Complete), not a loop over turns — so it
 becomes `run_turn_phases` and `turn_loop.rs` becomes `turn_phases.rs`.
 "Turn loop" then names the outer driver, matching the `query.loop` config key.
 
-Each iteration rebuilds the per-turn pieces that are already constructed there
-or inside the phase machine (turn coordinator, tool coordinator, renderer, retry
+Each iteration collects a fresh `TurnInputs` and rebuilds the per-turn pieces
+inside the phase machine (turn coordinator, tool coordinator, renderer, retry
 budget), so the turn boundary the state machine is built around stays intact.
+`TurnInputs` already describes its config as "the effective configuration for
+this turn"; [Each turn is a config epoch](#each-turn-is-a-config-epoch) makes
+that literal.
 The queued reply becomes the next turn's `ChatRequest`, author-stamped for
 transcript attribution the way an interrupt reply is today.
 
-`run_turn_phases` gains a `TurnEnd { Completed, Stopped, Aborted }` return.
-Today its caller cannot tell a natural completion from a user Stop or Abort —
-all three are `Ok(())` — and the consumption policy needs that distinction in
-one place rather than scattered across two interrupt handlers.
+`run_turn_phases` gains a `TurnEnd { Completed, Stopped }` return.
+Today its caller cannot tell a natural completion from a user Stop (both are
+`Ok(())`), and the consumption policy needs that distinction in one place rather
+than scattered across two interrupt handlers.
 
-**A new turn starts only when the previous turn ended on its own.** Stop, Abort,
+**A new turn starts only when the previous turn ended on its own.** Stop,
 escalation, a between-phase interrupt, and fatal errors end the run with the
 draft intact.
 
@@ -175,8 +216,9 @@ This RFD makes them differ, and resolves it by renaming rather than adding:
 pub enum PersistLevel { None, Run }
 ```
 
-`TurnState::persisted_inquiry_responses` moves to the turn-loop driver, and the
-two prompt labels become "remember for this run".
+The permissions and answers `TurnState` remembers today (`remember_permission`,
+`remembered_answer`) move to the turn-loop driver, and the two prompt labels
+become "remember for this run".
 A permission approved with `[Y]` in the first turn therefore holds for the
 queued turn, which is the point: an unattended run that stops at "are you sure?"
 defeats the feature.
@@ -184,6 +226,72 @@ defeats the feature.
 Adding `Run` alongside `Turn` was rejected — nothing would emit it without also
 adding a prompt option asking users to distinguish two scopes they have never
 been able to distinguish.
+
+### Each turn is a config epoch
+
+The resolved `AppConfig` stays immutable; that invariant does not change.
+What changes is how long it lives: a run of several turns resolves it once per
+turn rather than once per process.
+
+At each turn start the loop builds that turn's config through the existing
+pipeline (the cached base layers, a fresh conversation layer from
+`ConfigPipeline::partial_with_conversation`, the cached `--cfg` arguments, and
+the invocation's `apply_cli_config`) and hands it to `TurnInputs::collect`.
+Within the turn nothing re-resolves and nothing mutates.
+A config delta recorded during or between turns (a tool's config mutation, a
+draft preamble) applies from the next turn, exactly as it would to the next `jp
+q` today.
+
+Services the run builds once are valid for a turn only while the config they
+were built from is unchanged, and are rebuilt at turn start otherwise:
+
+- Provider clients are cached by provider id **and** that provider's resolved
+  config, so a delta that changes its endpoint or credential source under the
+  same id rebuilds the client.
+- MCP servers are reconciled against each turn's config:
+  `configure_active_mcp_servers` runs per turn and yields that turn's
+  `StartupSet`.
+- `TurnInputs::collect` already admits command plugins and loads attachments
+  from the config it is given, so per-turn collection keeps both current.
+
+Settings that cannot change mid-process are named rather than implied.
+There is one: `interrupt.escalation_cooldown_secs`, which the `SignalRouter`
+captures when it is built.
+
+### Background tasks
+
+The run holds the conversation lock across all of its turns, as the single-turn
+command holds it today.
+Two background tasks write to the conversation: the title generator and turn
+summaries ([RFD 126]).
+Both take the lock themselves when they sync and skip their update on
+`AlreadyLocked`, because today they sync after the command returns and the
+query's lock is gone.
+Under a lock held across turns, both would skip every time.
+
+So the turn loop gives them a per-turn boundary.
+At each turn end, before the next turn starts, completed tasks are drained, and
+a task targeting the run's conversation syncs through the lock the run already
+holds instead of taking its own.
+Still-running tasks are left alone between turns; the run's exit keeps today's
+drain, cancellation, and grace period.
+
+### Argument lifetime
+
+A run of several turns has to say what each `jp q` argument applies to:
+
+| Scope           | Arguments                                                                                                                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Run setup, once | `--new`, `--fork`, `--id`, `--local` / `--no-local`, `--title` / `--no-title`, `--tmp`, pre-query compaction, and `--mount`'s symlinks and approvals                                                                                                                                        |
+| First turn only | the positional query, piped stdin, `--replay`, `--quote`, `--template`, `--edit` / `--no-edit`                                                                                                                                                                                              |
+| Every turn      | `--schema`, and everything `apply_cli_config` maps to config: `--model`, `--auth`, `--param`, `--reasoning` / `--no-reasoning`, `--tier` / `--no-tier`, `--hide-reasoning`, `--hide-tool-calls`, `-t` / `-T`, `--tool-use` / `--no-tool-use`, `--attachment`, and `--mount`'s access grants |
+
+`--schema` is not config (`apply_cli_config` ignores it): the loop stamps it on
+each turn's request, which is what repeated invocations would do.
+`--mount` appears twice on purpose: its filesystem side effects run once, and
+its access grants take part in every turn's config.
+`--edit` and `--no-edit` decide how the first query is composed; later turns are
+composed by whatever produced them.
 
 ### The send countdown
 
@@ -193,10 +301,11 @@ Before a queued reply is sent, a countdown runs on the chrome channel:
 ⏳ Sending queued reply in 7s… (^C to review)
 ```
 
-`spawn_line_timer` drives it: `delay = 0`, a short interval, and a format
-closure rendering `duration_secs - elapsed`.
-The window is a `select!` over the completion sleep, the timer ticks, and an
-interrupt notification from its own `signals.push_handler()` scope, matching the
+It is a status region ([RFD 091]) claimed with `delay = 0`, a short interval,
+and a format closure rendering `duration_secs - elapsed`, the countdown shape
+the lock-wait region already uses.
+The region ticks itself; the window is a `select!` over the completion sleep and
+an interrupt notification from the countdown's own handler scope, matching the
 shape of the streaming loop.
 It runs between turns, after the previous turn is flushed, so an interrupt there
 cannot lose committed work.
@@ -231,8 +340,8 @@ Ctrl-C on this menu escalates ([RFD 045]): keep the draft and begin a graceful
 shutdown.
 Escalation never takes the destructive branch.
 
-Without a tty the countdown is skipped and the reply is sent immediately,
-matching how `spawn_waiting_indicator` behaves.
+Without an interactive terminal ([RFD 104]) the countdown is skipped and the
+reply is sent immediately.
 
 ### Configuration
 
@@ -255,9 +364,16 @@ the invocation rather than of Ctrl-C:
 #
 # - `never`: end the invocation. A queued reply stays as a draft for the next
 #   `jp q`.
-# - `if_pending`: run another turn when a reply is queued (default).
+# - `if_pending`: keep the run going while something is waiting to be sent,
+#   such as a queued reply (default).
 loop = "if_pending"
 ```
+
+"Pending" means waiting to be sent, and nothing else.
+A queued reply is the one thing this RFD can leave pending, and keeping the run
+going for it means sending it as the next turn.
+A later source of unsent text extends what `if_pending` waits for without
+changing the rule.
 
 The values answer one question — when do you loop? — so they order on a single
 axis, and `never` reads unambiguously where a key named `run` with a value
@@ -271,8 +387,8 @@ survived.
 
 Nothing writes `query.loop` at runtime.
 It is a preference read at each turn boundary and layered like any other config
-key, so a workspace can default it and `--cfg query.loop=never` can override one
-invocation.
+key: a workspace can default it, and `--cfg query.loop=never` is recorded on the
+conversation like any other `--cfg`, so it holds for later runs too.
 Per-instance control lives in the countdown menu instead: `[k] Keep draft`
 declines one specific send, the way `y` approves one specific tool call where
 `Y` remembers.
@@ -352,10 +468,10 @@ independent keys within it.
   Bounded by the invocation, not durable, and narrowing it is the job of access
   grants ([RFD 076]) and argument-conditional policy, not this axis.
 - **A third interrupt menu** to learn, seconds after the first two.
-- **The turn loop reuses the resolved `AppConfig`.** A tool that mutated
-  conversation config mid-turn does not affect the queued turn.
-  Consistent with how `[r] Reply` behaves within a turn today, but it is a known
-  gap.
+- **Each turn re-collects its inputs.** Attachments reload, plugins are
+  re-admitted, and MCP servers are reconciled every turn, as they would be for
+  repeated invocations; an attachment that fetches over the network pays that
+  cost once per turn.
 
 ## Alternatives
 
@@ -416,27 +532,36 @@ independent keys within it.
 
 ## Non-Goals
 
-- **Type-ahead.** Typing while the assistant streams, with no interrupt at all,
-  is the natural end state.
-  This RFD builds the slot and the turn loop it would need, but adds only the
-  interrupt-menu writer.
+- **Type-ahead.** Typing while the assistant streams, with no interrupt at all.
+  A follow-up RFD adds it as an opt-in setting, with an input field kept on
+  screen during turns; text typed there is one more thing `if_pending` waits
+  for.
+  It stays opt-in because, on by default, it would put every `jp q` in raw mode
+  and take keystrokes the shell would otherwise receive.
+  This RFD adds only the interrupt-menu writer.
 - **Composing without pausing output.** Rendering assistant output while taking
-  line input needs a printer-owned status region ([RFD 091]).
+  line input needs an input field drawn in the printer's status region ([RFD
+  091]), which is the REPL follow-up's subject.
   Silence during compose is the intended behavior here, not a limitation to fix.
 - **Assistant-initiated messages.** [RFD 083] and [RFD 094] cover the assistant
   addressing the user mid-turn; unrelated mechanism.
 - **System notification delivery.** [RFD 011]'s queue injects system messages
   into an existing turn's thread.
   A queued reply is a user-authored `ChatRequest` that starts a new turn.
-- **`query.loop = "always"`.** The third value on the axis — always run another
-  turn, prompting when nothing is pending — is REPL mode.
-  It is a new *value* on the axis this RFD introduces, not a new axis, and it
-  brings the only prompting path with it.
+- **`always`.** A run that waits for the user's next query at every turn end is
+  REPL mode.
+  It needs an input field to wait in, so it is a new *value* on this axis, added
+  with that field by a follow-up RFD, and it brings the only prompting path with
+  it.
 - **A `Cancel queued reply` entry in the interrupt menus.** Shown only while a
   reply is pending, it would be a one-keystroke withdraw.
   Deferred until emptying the buffer proves to be a common gesture.
 - **Bounding the number of chained queued turns.** Each one requires an explicit
   interrupt and compose, so there is no runaway.
+
+> [!TIP]
+> [RFD 132] adds type-ahead as `query.live_input`, an input field kept on screen
+> while turns run, and `always` with the field it waits in; `--repl` sets both.
 
 ## Risks and Open Questions
 
@@ -447,9 +572,9 @@ independent keys within it.
 - **Re-showing the menu after an emptied submit.** Proposed: return to the
   interrupt menu, matching how `Empty | Cancelled if menu` behaves today.
   `Ctrl+C` returns to the same place without touching the slot.
-- **Countdown legibility.** A `\r`-based countdown line immediately after the
-  assistant's final output, and immediately before a new turn's header, needs a
-  look on a real terminal.
+- **Countdown legibility.** A countdown row immediately after the assistant's
+  final output, and immediately before a new turn's header, needs a look on a
+  real terminal.
 - **Interaction with [RFD 093].** Active work there reshapes query composition
   and the draft's role.
   The queued reply writes the same file 093 reads, so the two need to agree on
@@ -466,7 +591,9 @@ Rename `run_turn_loop` to `run_turn_phases` and `turn_loop.rs` to
 Droppable without affecting the rest of the phase.
 
 Add `TurnEnd` to `run_turn_phases`'s return.
-Add the turn loop in `handle_turn`, driving exactly one turn.
+Add the turn loop in `Query::run`, driving exactly one turn: each iteration
+builds its config epoch and collects its `TurnInputs`, and background tasks
+drain at the turn boundary, syncing through the run's lock.
 Move `QUERY_MESSAGE.md` cleanup from per-turn to post-loop.
 No user-visible change; mergeable alone.
 
@@ -483,12 +610,13 @@ Depends on phase 1.
 The slot, the draft-file rules, `[q]` in both menus, seeded compose, the
 `queue_reply` value on both action enums, and `query.loop` with `never` and
 `if_pending`.
+The argument-lifetime rules, which first matter once a run holds a second turn.
 Sends immediately at turn end (no countdown yet).
 Depends on phases 1–2.
 
 ### Phase 4: the countdown
 
-`interrupt.loop_countdown` with all three keys, the countdown timer, and the
+`interrupt.loop_countdown` with all three keys, the countdown region, and the
 third interrupt menu (`[n]`, `[e]`, `[k]`, `[d]`) with its escalation rule.
 `[e]` cancels the timer on entry and returns to a menu with no countdown
 running; the configured `edit` action restarts it instead, having no menu to
@@ -504,6 +632,14 @@ this RFD forces into existence.
 The entry names which loop is which: the turn loop runs Turns within a Run,
 `run_turn_phases` runs phases within a Turn.
 
+### Phase 6: unsent drafts on direct sends
+
+A query sent without composing no longer writes over an unsent draft: the prompt
+on an interactive terminal, keep-the-draft without one, and no recovery copy
+while an unsent draft exists.
+Independent of every other phase, since it fixes a loss that exists today, so it
+can land first.
+
 ## References
 
 - [RFD 045] — the layered interrupt handler stack this builds on, including the
@@ -514,14 +650,22 @@ The entry names which loop is which: the turn loop runs Turns within a Run,
   RFD writes into.
 - [RFD 076] — tool access grants, the axis for narrowing what run-scoped
   approvals cover.
+- [RFD 091]: the printer status region the countdown renders in.
+- [RFD 104]: promptability, which decides whether the unsent-draft prompt and
+  the send countdown are shown.
+- [RFD 126]: turn summaries, one of the two background tasks the per-turn
+  boundary drains.
 
-[RFD 011]: ../011-system-notification-queue.md
-[RFD 045]: ../045-layered-interrupt-handler-stack.md
-[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 070]: ../070-negative-config-deltas.md
-[RFD 076]: ../076-tool-access-grants.md
-[RFD 083]: ../083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
-[RFD 088]: ../088-unified-editor-service-and-inline-reply-widget.md
-[RFD 091]: ../091-printer-owned-status-region.md
-[RFD 093]: ../093-inline-first-query-composition.md
-[RFD 094]: ../094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md
+[RFD 011]: 011-system-notification-queue.md
+[RFD 045]: 045-layered-interrupt-handler-stack.md
+[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 070]: 070-negative-config-deltas.md
+[RFD 076]: 076-tool-access-grants.md
+[RFD 083]: 083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
+[RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 091]: 091-printer-owned-status-region.md
+[RFD 093]: 093-inline-first-query-composition.md
+[RFD 094]: 094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md
+[RFD 104]: 104-terminal-capability-and-promptability-signals.md
+[RFD 126]: 126-turn-summaries.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md

@@ -190,8 +190,8 @@ pub(crate) struct Query<S: Stage = Settled> {
     /// The query words, in the order they were given.
     query: S::Text<QueryText>,
 
-    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
-    /// seeds it verbatim, `None` means `--quote` was not given.
+    /// `Some(true)` prefixes the quoted message with `> `, `Some(false)` seeds
+    /// it verbatim, `None` means `--quote` was not given.
     quote: Option<bool>,
     model: Option<String>,
     auth: Vec<AuthEntry>,
@@ -1659,7 +1659,7 @@ fn last_assistant_message(stream: &ConversationStream) -> Option<&str> {
         .find_map(|r| r.as_message())
 }
 
-/// Prefix each line of `text` with ` >  ` for use as a markdown blockquote.
+/// Prefix each line of `text` with `> ` for use as a markdown blockquote.
 ///
 /// Empty lines are emitted as just `>` (no trailing space) so the blockquote
 /// stays visually continuous across paragraph breaks while avoiding

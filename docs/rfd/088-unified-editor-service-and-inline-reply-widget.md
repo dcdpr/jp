@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-08
 - **Extends**: [RFD 048]
-- **Extended by**: [RFD 092], [RFD 093]
+- **Extended by**: [RFD 092], [RFD 093], [RFD 132]
 - **Summary**: Unify editor invocation through EditorBackend trait; add an
   InlineReply widget, built on a patched reedline fork, for interrupt menu
   replies.
@@ -901,5 +901,6 @@ Reviewable independently after Phase 3.
 [RFD 080]: 080-editor-as-a-config-source.md
 [RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md
 [RFD 093]: 093-inline-first-query-composition.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md
 [cmd-cfg]: ../wiki/00dxybd-ubiquitous-language.md#commandconfig
 [reedline]: https://crates.io/crates/reedline

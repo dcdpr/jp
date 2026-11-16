@@ -147,7 +147,7 @@ pub(crate) fn parse(json: &str) -> Result<Profile, serde_json::Error> {
 }
 
 /// Clean up a dhat frame string: strip the leading instruction-address prefix
-/// (` 0xADDR:  `), demangle the symbol if needed, and shorten common stdlib
+/// (`0xADDR: `), demangle the symbol if needed, and shorten common stdlib
 /// paths.
 ///
 /// dhat-rs writes frames already demangled — the `_` check is here for
@@ -287,7 +287,7 @@ fn is_dispatch_noise(symbol: &str) -> bool {
     false
 }
 
-/// Strip a leading ` 0xHEX:  ` prefix from a frame string.
+/// Strip a leading `0xHEX: ` prefix from a frame string.
 /// The instruction address is useful to a debugger and noise to a reader, so we
 /// drop it.
 fn strip_address_prefix(raw: &str) -> &str {

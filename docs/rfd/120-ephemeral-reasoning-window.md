@@ -309,6 +309,11 @@ The renderer maps `rows` onto the printer's `OutputLines` with the existing
   soft-wraps; in the window it is truncated at the edge, because a soft-wrapped
   row would break the region's row count ([RFD 091]).
 
+> [!TIP]
+> [RFD 132] routes `-v`, `--log`, and `--log-file=-` tracing through the
+> printer, so they no longer disable status regions and the window; a
+> non-terminal stderr and a non-pretty format still do.
+
 ## Alternatives
 
 **An object-valued `display`.** For example
@@ -423,3 +428,4 @@ proposed on those merits.
 [RFD 091]: 091-printer-owned-status-region.md
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
 [RFD 104]: 104-terminal-capability-and-promptability-signals.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md

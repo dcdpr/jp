@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-04
 - **Extends**: [RFD 048]
-- **Required by**: [RFD 049]
+- **Required by**: [RFD 049], [RFD 131], [RFD 132]
 - **Summary**: Separate four terminal-capability questions onto different
   signals to fix prompts and repaints in piped and redirected runs.
 
@@ -496,6 +496,30 @@ capability.
 The proposal requires both and errors otherwise, which is the conservative
 reading; whether any real environment produces that state is unknown.
 
+### A pipe reader that writes to the same terminal
+
+Resolving `auto` per channel turns stderr repaints on when stdout is a pipe, but
+most programs at the other end of a pipe write to the same terminal: `tee`,
+`jq`, `bat`, a pager.
+Their output lands wherever the cursor is, which is inside a status region ([RFD
+091]) when one is drawn, so the region's next erase clears part of that output
+and leaves region rows behind.
+`less`, the example in Observable behaviour changes, also switches to the
+alternate screen, which the region then draws over.
+
+JP can tell a pipe from a file by the stream's file type, but not whether the
+program reading it writes to the terminal, and readers that do not (`| gzip >
+out.gz`) are unaffected.
+This is accepted and documented rather than prevented, the trade `curl` and `pv`
+make for the progress they draw on stderr while stdout feeds a pipe; the `show`
+key of each region's config turns it off.
+If it proves common, the alternative is keeping repaints off whenever stdout is
+a pipe, at the cost of the repaints this RFD restores for that case.
+
+> [!TIP]
+> [RFD 132] makes the same trade for its input field: a run that shows the field
+> with a pipe on stdout or stderr prints one notice and proceeds.
+
 ## Implementation Plan
 
 ### Phase 1: Channel capability on `Printer`
@@ -557,4 +581,6 @@ the mechanical ones bisect apart.
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 087]: 087-session-scoped-active-workspace.md
 [RFD 091]: 091-printer-owned-status-region.md
+[RFD 131]: 131-queued-replies.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md
 [\#1068]: https://github.com/dcdpr/jp/issues/1068

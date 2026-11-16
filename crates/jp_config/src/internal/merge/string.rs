@@ -9,7 +9,7 @@ use crate::types::string::{
     MergedStringStrategy, PartialMergeableString, PartialMergedString, StringDedup,
 };
 
-/// Merge two ` PartialMergeableString  ` values.
+/// Merge two `PartialMergeableString ` values.
 pub fn string_with_strategy(
     prev: PartialMergeableString,
     next: PartialMergeableString,

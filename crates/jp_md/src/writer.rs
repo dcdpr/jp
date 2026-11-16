@@ -393,7 +393,7 @@ impl<'w> TerminalWriter<'w> {
         Ok(())
     }
 
-    /// Write the accumulated prefix (blockquote ` >  `, list indent, etc.).
+    /// Write the accumulated prefix (blockquote `> `, list indent, etc.).
     fn write_prefix(&mut self) -> fmt::Result {
         if self.prefix.is_empty() {
             return Ok(());

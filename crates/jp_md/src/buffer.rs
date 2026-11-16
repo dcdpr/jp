@@ -1298,8 +1298,7 @@ impl Iterator for Buffer {
 
 /// Check if content (after indent stripping) starts with a list marker.
 ///
-/// Matches unordered (` -  `, ` *  `, ` +  `) and ordered (` 1.  `, ` 2)  `)
-/// markers.
+/// Matches unordered (`- `, `* `, `+ `) and ordered (`1. `, `2) `) markers.
 fn is_list_marker(content: &str) -> bool {
     parse_list_marker(content).is_some()
 }
@@ -1308,7 +1307,7 @@ fn is_list_marker(content: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ListMarker {
     /// Visual width of the marker including the trailing space, e.g. 2 for `-`,
-    /// 3 for ` 1.  `, 4 for ` 10.  `.
+    /// 3 for `1. `, 4 for `10. `.
     marker_width: usize,
     /// Whether the marker is ordered (digits + delimiter).
     is_ordered: bool,
@@ -1859,7 +1858,7 @@ fn update_emphasis_stack(stack: &mut Vec<u8>, bytes: &[u8], i: usize, b: u8, run
 
 /// Outcome of scanning a `$` run starting at `start` within `bytes[..limit]`.
 enum MathScan {
-    /// Not a valid math opener (e.g. `$$$`, ` $  `, or aborted by space before
+    /// Not a valid math opener (e.g. `$$$`, `$ `, or aborted by space before
     /// the next `$` or a digit after it); advance past `usize` bytes as plain
     /// text.
     Literal(usize),

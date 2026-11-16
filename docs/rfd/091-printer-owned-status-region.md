@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 048]
-- **Extended by**: [RFD 120]
+- **Extended by**: [RFD 120], [RFD 132]
 - **Summary**: Consolidates nine ephemeral terminal indicators into a
   printer-owned status region primitive, showing live child-process output with
   multi-row windows and standardized chrome lifecycle.
@@ -533,6 +533,11 @@ a persistent stream where an ephemeral line cannot survive.
 The shell knows this at logging setup, before the printer is constructed, so it
 feeds the same constructor input as condition 2.
 
+> [!TIP]
+> [RFD 132] routes the opt-in stderr tracing layer through the printer, so trace
+> lines are erased around like any other chrome and condition 3 is retired:
+> regions render under `-v` as well.
+
 To make condition 2 explicit and testable, terminal capability is a constructor
 input: `Printer::terminal` captures stderr's tty-ness *and the terminal's row
 and column count* at construction, and the memory constructor accepts an
@@ -896,6 +901,12 @@ all four are the region's or the client's job.
   rather than coexisting with it; rendering chrome alongside an active prompt
   widget is out of scope.
 
+> [!TIP]
+> [RFD 132] makes the region interactive: it adds an input field, a reedline row
+> that owns the cursor, and in runs with `query.live_input` draws menu and reply
+> prompts inside the region, so the status row stays visible while they are
+> open.
+
 ## Risks and Open Questions
 
 - **Row accounting under resize.** The window budget is resolved from a height
@@ -1096,6 +1107,7 @@ contracts commits to.
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
 [RFD 096]: 096-terminal-output-sanitization-for-untrusted-content.md
 [RFD 120]: 120-ephemeral-reasoning-window.md
+[RFD 132]: 132-repl-mode-with-live-streaming-input.md
 [Tesler]: https://en.wikipedia.org/wiki/Law_of_conservation_of_complexity
 [`ErrChannel`]: https://github.com/dcdpr/jp/blob/main/crates/jp_printer/src/printer.rs
 [`InlineResults`]: https://github.com/dcdpr/jp/blob/main/crates/jp_config/src/conversation/tool/style.rs

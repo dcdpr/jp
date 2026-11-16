@@ -360,20 +360,20 @@ surrounding context.
 The table below pins the contract so config behavior is stable before users
 build themes against it.
 
-| Slot                    | Applies to                                                           | Overlays                                                                                     |
-| ----------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `inline_code.body`      | code-span literal and span background                                | surrounding context                                                                          |
-| `inline_code.delim`     | opening / closing backticks                                          | `inline_code.body`                                                                           |
-| `task_checkbox.base`    | `[ ]` / `[x]` marker (both states)                                   | surrounding context                                                                          |
-| `task_checkbox.checked` | the marker when checked                                              | `task_checkbox.base`                                                                         |
-| `blockquote.marker`     | `>` glyph (including on wrapped continuation lines)                  | surrounding context                                                                          |
-| `blockquote.body`       | quote text                                                           | surrounding context (inline element styles overlay on top)                                   |
-| `link.text`             | the visible label                                                    | surrounding context                                                                          |
-| `link.url`              | URL and title text                                                   | surrounding context                                                                          |
-| `link.delimiters`       | `[`, `](`, `  " `, `"`, `)` for inline links; `<`, `>` for autolinks | surrounding context                                                                          |
-| `table.border`          | grid characters, padding, separator rows                             | surrounding context                                                                          |
-| `table.header`          | header cell content only                                             | surrounding context (does not affect padding or separators, which stay under `table.border`) |
-| `code_fence`            | ` ` \`\`` glyphs and info string                                     | surrounding context                                                                          |
+| Slot                    | Applies to                                                         | Overlays                                                                                     |
+| ----------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `inline_code.body`      | code-span literal and span background                              | surrounding context                                                                          |
+| `inline_code.delim`     | opening / closing backticks                                        | `inline_code.body`                                                                           |
+| `task_checkbox.base`    | `[ ]` / `[x]` marker (both states)                                 | surrounding context                                                                          |
+| `task_checkbox.checked` | the marker when checked                                            | `task_checkbox.base`                                                                         |
+| `blockquote.marker`     | `>` glyph (including on wrapped continuation lines)                | surrounding context                                                                          |
+| `blockquote.body`       | quote text                                                         | surrounding context (inline element styles overlay on top)                                   |
+| `link.text`             | the visible label                                                  | surrounding context                                                                          |
+| `link.url`              | URL and title text                                                 | surrounding context                                                                          |
+| `link.delimiters`       | `[`, `](`, ` "`, `"`, `)` for inline links; `<`, `>` for autolinks | surrounding context                                                                          |
+| `table.border`          | grid characters, padding, separator rows                           | surrounding context                                                                          |
+| `table.header`          | header cell content only                                           | surrounding context (does not affect padding or separators, which stay under `table.border`) |
+| `code_fence`            | ` ` \`\`` glyphs and info string                                   | surrounding context                                                                          |
 
 ### Renderer changes
 
@@ -436,7 +436,7 @@ would inherit body styling, not `blockquote.marker`.
 To honor the marker / body split, `prefix` becomes a sequence of styled spans
 (`Vec<PrefixSpan>`, each carrying an optional `Style`).
 `write_prefix` walks the spans and emits `push_style` / `pop_style` around each.
-`format_block_quote` pushes a ` >  ` span styled as `blockquote.marker`; list
+`format_block_quote` pushes a `> ` span styled as `blockquote.marker`; list
 items push their indentation span with no style.
 The continuation-line styling now matches the first line by construction.
 
