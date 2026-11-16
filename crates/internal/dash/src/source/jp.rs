@@ -9,22 +9,27 @@
 //!
 //! A session is a shell's conversation history, recorded under the shell's
 //! session-leader PID.
-//! That PID leads, through the process table, to the shell and its working
+//! That PID resolves via the process table to the shell and its working
 //! directory, which places the session in a worktree.
-//! Sessions named some other way (`$JP_SESSION`, `$TMUX_PANE`) name no process,
-//! and are left out.
+//! Environment-derived sessions (`$JP_SESSION`, `$TMUX_PANE`) have no
+//! session-leader PID and are omitted.
 //!
 //! Every worktree of the repository shares one user-local store, so the locks
 //! and sessions of all of them are found from any one.
+//!
+//! Because conversations do not record a working directory and session mappings
+//! resolve to a directory only while their shell is alive, `Jp` caches the last
+//! conversation observed running in each directory on disk (see
+//! [`super::cache`]).
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     process::Command,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use jp_conversation::ConversationId;
@@ -33,8 +38,8 @@ use jp_storage::backend::{
 };
 use jp_workspace::{SessionOverview, Workspace};
 
-use super::{Error, canonical, ghostty::tty_name, output, stdout};
-use crate::model::{JpRun, JpSession, SessionConversation, Status};
+use super::{Error, cache, canonical, ghostty::tty_name, output, stdout};
+use crate::model::{JpRecent, JpRun, JpSession, SessionConversation, Status};
 
 /// Conversations considered per session: the most recently activated ones.
 /// Their metadata is read to order them by activity.
@@ -48,11 +53,14 @@ const LISTED: usize = 10;
 /// A conversation that is running, or was at the last read, is read every time.
 const METADATA_TTL: Duration = Duration::from_mins(1);
 
-/// What the JP source reports on each read.
+/// Snapshot of running `jp` processes, active shell sessions, and recent runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JpState {
     pub runs: Vec<JpRun>,
     pub sessions: Vec<JpSession>,
+
+    /// The conversation last seen running in each directory.
+    pub recent: Vec<JpRecent>,
 }
 
 /// Reads the running conversations and sessions of the JP workspace containing
@@ -60,8 +68,7 @@ pub struct JpState {
 pub struct Jp {
     dir: Utf8PathBuf,
 
-    /// Opened on the first successful read and kept: every read it is used for
-    /// goes to disk, so it never serves a stale answer.
+    /// Opened lazily on the first successful poll and reused across reads.
     opened: Option<(Workspace, Arc<FsStorageBackend>)>,
 
     /// Conversation metadata from earlier reads.
@@ -69,13 +76,23 @@ pub struct Jp {
     /// conversation every read.
     metadata: HashMap<ConversationId, Metadata>,
 
-    /// For each conversation a live `jp` holds, whether it waits on the user,
-    /// as of the stream it was last worked out from.
+    /// Cached pending-inquiry state for each currently locked conversation.
     waiting: HashMap<ConversationId, Waiting>,
+
+    /// The conversation last seen running in each directory, by the directory's
+    /// path.
+    ran: BTreeMap<String, ConversationId>,
+
+    /// Where `ran` is kept between runs; `None` when there is no cache
+    /// directory.
+    file: Option<Utf8PathBuf>,
+
+    /// Whether `ran` changed since it was last written to `file`.
+    dirty: bool,
 }
 
-/// Whether a held conversation waits on the user, and the stream it was worked
-/// out from, known by its event count and last event.
+/// Cached inquiry-wait state for a locked conversation, keyed by event count
+/// and last-event timestamp.
 #[derive(Debug, Clone, Copy)]
 struct Waiting {
     events: usize,
@@ -94,13 +111,26 @@ struct Metadata {
 }
 
 impl Jp {
+    /// Read the workspace containing `dir`, starting from the runs the last
+    /// dashboard remembered.
     #[must_use]
     pub fn new(dir: Utf8PathBuf) -> Self {
+        let file = cache::file(&dir, "jp");
+        let mut ran: BTreeMap<String, ConversationId> =
+            file.as_deref().map(cache::load).unwrap_or_default();
+
+        // A directory that is gone, such as a removed worktree, has no row.
+        let remembered = ran.len();
+        ran.retain(|cwd, _| Utf8Path::new(cwd).exists());
+
         Self {
             dir,
             opened: None,
             metadata: HashMap::new(),
             waiting: HashMap::new(),
+            dirty: ran.len() != remembered,
+            ran,
+            file,
         }
     }
 
@@ -159,6 +189,9 @@ impl Jp {
             })
             .collect();
 
+        let seen = running.iter().map(|(id, held)| (held.cwd.as_str(), *id));
+        self.dirty |= remember(&mut self.ran, seen);
+
         let listed: HashSet<ConversationId> = overviews
             .iter()
             .flat_map(|(_, overview)| {
@@ -169,6 +202,7 @@ impl Jp {
                     .chain(overview.active.as_ref())
             })
             .chain(running.keys())
+            .chain(self.ran.values())
             .copied()
             .collect();
         self.refresh_metadata(&listed, &running.keys().copied().collect());
@@ -199,15 +233,34 @@ impl Jp {
             })
             .collect();
 
-        Ok(JpState { runs, sessions })
+        let recent = recent(&self.ran, &self.metadata);
+        self.persist();
+
+        Ok(JpState {
+            runs,
+            sessions,
+            recent,
+        })
     }
 
-    /// Work out which held conversations wait on the user: those with an
-    /// unanswered question, which `jp` writes before it prompts for it.
+    /// Write `ran` to its file when it changed.
+    fn persist(&mut self) {
+        let Some(file) = &self.file else {
+            return;
+        };
+
+        // Ignore cache write errors; a failed write only drops cached recent
+        // runs on the next start.
+        if self.dirty && cache::store(file, &self.ran).is_ok() {
+            self.dirty = false;
+        }
+    }
+
+    /// Update `waiting_since` for each locked conversation by checking for
+    /// unanswered inquiries in its last turn.
     ///
-    /// A conversation's stream is loaded again only when its event count or
-    /// last event moved since it was last loaded; while a turn waits on the
-    /// user, neither does.
+    /// Reloads a conversation's event stream only when its `events_count` or
+    /// `last_event_at` changes.
     fn refresh_waiting(&mut self, running: &mut HashMap<ConversationId, Held>) {
         let Some((_, storage)) = &self.opened else {
             return;
@@ -290,6 +343,34 @@ impl Jp {
     }
 }
 
+/// Record the active conversation for each working directory in `running`,
+/// returning `true` if `ran` changed.
+fn remember<'a>(
+    ran: &mut BTreeMap<String, ConversationId>,
+    running: impl IntoIterator<Item = (&'a str, ConversationId)>,
+) -> bool {
+    let mut changed = false;
+    for (cwd, id) in running {
+        changed |= ran.insert(cwd.to_owned(), id) != Some(id);
+    }
+
+    changed
+}
+
+/// Build [`JpRecent`] entries from `ran` and the loaded conversation
+/// `metadata`.
+fn recent(
+    ran: &BTreeMap<String, ConversationId>,
+    metadata: &HashMap<ConversationId, Metadata>,
+) -> Vec<JpRecent> {
+    ran.iter()
+        .map(|(cwd, id)| JpRecent {
+            cwd: Utf8PathBuf::from(cwd),
+            last_event_at: metadata.get(id).and_then(|metadata| metadata.last_event_at),
+        })
+        .collect()
+}
+
 /// A conversation's title, or its ID when it has none or its metadata is not
 /// loaded.
 fn title(metadata: &HashMap<ConversationId, Metadata>, id: &ConversationId) -> String {
@@ -315,7 +396,7 @@ struct Shell {
     cwd: Utf8PathBuf,
 }
 
-/// The session `overview` describes, whose shell is `shell`.
+/// Build a [`JpSession`] from `shell` and `overview`.
 ///
 /// Lists the active conversation first, then the others by most recent
 /// activity, up to [`LISTED`].
@@ -426,7 +507,8 @@ fn shell_of(table: &HashMap<u32, Entry>, leader: u32) -> Option<u32> {
 /// Whether `pid` descends from a Ghostty process.
 fn under_ghostty(table: &HashMap<u32, Entry>, pid: u32) -> bool {
     let mut current = pid;
-    // Bounded, so a table read mid-change cannot loop forever.
+    // Bound parent traversal in case a concurrent process-table change
+    // introduces a cycle.
     for _ in 0..64 {
         let Some(entry) = table.get(&current) else {
             return false;
@@ -442,12 +524,8 @@ fn under_ghostty(table: &HashMap<u32, Entry>, pid: u32) -> bool {
     false
 }
 
-/// Whether the shell `pid` sits at its prompt: it is the foreground process
-/// group of its terminal, so nothing it started is running in front of it.
-///
-/// Asked right before typing into the shell's tab.
-/// Anything typed while another program runs in the foreground goes to that
-/// program.
+/// Return `true` if `pid`'s process group is the foreground process group of
+/// its controlling terminal.
 pub fn shell_is_idle(pid: u32) -> Result<bool, Error> {
     let out = stdout(
         "ps",

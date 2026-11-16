@@ -191,8 +191,8 @@ pub fn remove_worktree(dir: &Utf8Path, path: &Utf8Path) -> Result<(), Error> {
 
 /// Parse `git worktree list --porcelain` output.
 ///
-/// A bare repository has no working directory and is left out, as is a worktree
-/// `git` reports as prunable, whose directory is gone.
+/// Bare repositories and prunable worktrees (whose working directories no
+/// longer exist) are omitted.
 fn parse(porcelain: &str) -> Vec<Worktree> {
     porcelain
         .split("\n\n")

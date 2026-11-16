@@ -7,9 +7,8 @@
 //! Polling costs nothing until something changes; a running CI build costs a
 //! point per poll while its checks move.
 //!
-//! Review threads come from GraphQL, because the REST API leaves out pending
-//! review comments, and those are what `just pr-review` and `just pr-triage`
-//! write.
+//! Review threads come from GraphQL, because the REST API omits pending review
+//! comments, and those are what `just pr-review` and `just pr-triage` write.
 //! GraphQL has no conditional requests and charges for every thread's comment
 //! list, so each pull request's threads are read again only once they are older
 //! than [`LOCAL_REVIEWS_INTERVAL`] (its branch has a local worktree) or
@@ -28,23 +27,21 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    env, fs, io,
-    process::{self, Command},
+    env,
+    process::Command,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use super::{Error, failure, git, output, stdout};
+use super::{Error, cache, failure, git, output, stdout};
 use crate::model::{Checks, PullRequest};
 
-/// How old a pull request's review threads get before they are read again, when
-/// its branch has a local worktree.
+/// Review-thread refresh interval for pull requests with a local worktree.
 const LOCAL_REVIEWS_INTERVAL: Duration = Duration::from_mins(3);
 
-/// The same, for a pull request with no local worktree: nobody is working on it
-/// here, and there are more of them.
+/// Review-thread refresh interval for pull requests without a local worktree.
 const REMOTE_REVIEWS_INTERVAL: Duration = Duration::from_mins(15);
 
 /// Review threads counted per pull request.
@@ -86,7 +83,7 @@ pub struct GitHub {
     requested: HashSet<String>,
 }
 
-/// What one read leaves for the next, in memory and on disk.
+/// Cached GitHub state persisted across polls and dashboard runs.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct State {
     /// `owner/name`, looked up on the first successful read.
@@ -120,8 +117,8 @@ impl GitHub {
     /// left in the cache.
     #[must_use]
     pub fn open(dir: Utf8PathBuf) -> Self {
-        let file = cache_file(&dir);
-        let state = file.as_deref().map(load_state).unwrap_or_default();
+        let file = cache::file(&dir, "github");
+        let state = file.as_deref().map(cache::load).unwrap_or_default();
 
         Self {
             dir,
@@ -132,12 +129,13 @@ impl GitHub {
         }
     }
 
-    /// The pull requests as the cache last saw them, without touching the
-    /// network.
-    /// `None` when the cache has nothing to show.
+    /// Build the pull request list from cached responses without making network
+    /// requests.
     ///
-    /// A pull request whose checks are not cached (its branch got a worktree
-    /// since the last run) is left out until the first network read.
+    /// Returns `None` if the repository name or pull request list is not
+    /// cached.
+    /// Pull requests without cached check responses are omitted until the first
+    /// network poll.
     pub fn cached(&mut self) -> Option<Vec<PullRequest>> {
         self.read(Mode::Offline).ok()
     }
@@ -229,8 +227,7 @@ impl GitHub {
         Ok(prs)
     }
 
-    /// Read the review threads of the pull requests `numbers`, which is not
-    /// empty.
+    /// Fetch and update review-thread counts for `numbers` (must be non-empty).
     fn read_reviews(&mut self, repo: &str, numbers: &[u64], now: u64) -> Result<(), Error> {
         let counts = parse_reviews(&self.graphql(repo, &reviews_query(numbers))?)?;
 
@@ -259,10 +256,9 @@ impl GitHub {
             return;
         };
 
-        // A cache that cannot be written costs the next start its head start
-        // and nothing else; the read it follows succeeded or failed on its own,
-        // so the failure is not reported.
-        if self.dirty && store_state(file, &self.state).is_ok() {
+        // Ignore cache write errors; a failed write only prevents the next run
+        // from starting warm.
+        if self.dirty && cache::store(file, &self.state).is_ok() {
             self.dirty = false;
         }
     }
@@ -400,9 +396,8 @@ pub fn checkout(worktree: &Utf8Path, number: u64) -> Result<(), Error> {
     stdout("gh", git::noninteractive(&mut command, worktree)).map(drop)
 }
 
-/// The pull requests whose review threads should be read now: every one when
-/// `asked`, otherwise those never read and those read longer ago than their
-/// interval.
+/// Return PR numbers whose review threads need refreshing: all PRs when `asked`
+/// is true, or those with missing or expired review cache entries.
 fn due_reviews(
     prs: &[PullRequest],
     local: &HashSet<u64>,
@@ -424,64 +419,6 @@ fn due_reviews(
                 })
         })
         .collect()
-}
-
-/// The cache file for the repository containing `dir`.
-fn cache_file(dir: &Utf8Path) -> Option<Utf8PathBuf> {
-    let home = cache_home(env::var("XDG_CACHE_HOME").ok(), env::var("HOME").ok())?;
-    let repository = git::common_dir(dir).ok()?;
-    Some(cache_path(&home, &repository))
-}
-
-/// The XDG cache directory: `$XDG_CACHE_HOME`, or `$HOME/.cache` when that is
-/// unset or not absolute, as the XDG spec asks.
-fn cache_home(xdg: Option<String>, home: Option<String>) -> Option<Utf8PathBuf> {
-    xdg.map(Utf8PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            let home = home.filter(|home| !home.is_empty())?;
-            Some(Utf8PathBuf::from(home).join(".cache"))
-        })
-}
-
-/// The cache file under `home` for the repository whose common git directory is
-/// `repository`.
-/// Every worktree of a repository shares that directory, so they share the
-/// file.
-fn cache_path(home: &Utf8Path, repository: &Utf8Path) -> Utf8PathBuf {
-    let name: String = repository
-        .as_str()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-
-    home.join("jp")
-        .join("dash")
-        .join(format!("{}.json", name.trim_matches('-')))
-}
-
-/// Read a cache file.
-///
-/// A missing, unreadable, or outdated file is the same as no cache: the next
-/// read starts from nothing and writes a fresh one.
-fn load_state(file: &Utf8Path) -> State {
-    fs::read_to_string(file)
-        .ok()
-        .and_then(|json| serde_json::from_str(&json).ok())
-        .unwrap_or_default()
-}
-
-fn store_state(file: &Utf8Path, state: &State) -> io::Result<()> {
-    if let Some(parent) = file.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string(state).map_err(io::Error::other)?;
-
-    // Written aside and renamed into place, so another `dash` starting at the
-    // same moment never reads half a file.
-    let partial = file.with_extension(format!("{}.tmp", process::id()));
-    fs::write(&partial, json)?;
-    fs::rename(&partial, file)
 }
 
 fn now() -> u64 {

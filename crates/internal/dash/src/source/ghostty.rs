@@ -159,8 +159,8 @@ struct RawTerminal {
 
 /// Parse the output of [`LIST_TERMINALS`].
 ///
-/// A terminal whose shell never reported a working directory cannot be matched
-/// to a worktree, and is left out.
+/// Terminals without a reported working directory cannot be matched to a
+/// worktree and are omitted.
 fn parse(json: &str) -> Result<Vec<Terminal>, Error> {
     let raw: Vec<RawTerminal> = serde_json::from_str(json).map_err(|source| Error::Parse {
         program: "osascript",
@@ -181,9 +181,10 @@ fn parse(json: &str) -> Result<Vec<Terminal>, Error> {
         .collect())
 }
 
-/// A terminal device's name as `ps` prints it (`ttys001`), from the path
-/// Ghostty reports (`/dev/ttys001`).
-/// `None` for no device.
+/// Normalize a TTY path (such as `/dev/ttys001`) to the short device name
+/// printed by `ps` (`ttys001`).
+///
+/// Returns `None` if `path` is empty or `??`.
 #[must_use]
 pub fn tty_name(path: &str) -> Option<String> {
     let name = path.trim().trim_start_matches("/dev/");

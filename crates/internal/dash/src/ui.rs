@@ -48,8 +48,7 @@ const SPACING: usize = 2;
 /// the status line.
 const CHROME: usize = 3;
 
-/// The widest a worktree or branch column gets, so one long name cannot push
-/// the conversation off screen.
+/// Maximum width of the worktree and branch columns.
 const MAX_NAME_WIDTH: usize = 36;
 
 /// How a run of text is drawn.
@@ -73,7 +72,7 @@ const BOLD: Style = Style {
     ..PLAIN
 };
 
-/// A turn waiting on the user: the one thing on screen that asks for action.
+/// Style for a turn waiting on user input.
 const WAITING: Style = Style {
     fg: Some(Color::Magenta),
     bold: true,
@@ -118,8 +117,8 @@ impl Line {
         self.spans.iter().map(|span| span.text.as_str()).collect()
     }
 
-    /// Cut the line to `width` terminal columns, then pad it with blanks to
-    /// exactly that width.
+    /// Truncate the line to `width` terminal columns and right-pad it with
+    /// spaces.
     fn fit(self, width: usize) -> Self {
         let mut used = 0;
         let mut line = Self::default();
@@ -222,10 +221,11 @@ pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
     lines.into_iter().map(|line| line.fit(width)).collect()
 }
 
-/// What a mouse press at column `x`, row `y` of a `width` by `height` screen
-/// landed on: a line of the table, by its position in [`App::display`], and the
-/// part of it that was hit.
-/// `None` outside the table, or while the sort menu covers it.
+/// Map a mouse click at column `x`, row `y` to a [`App::display`] index and
+/// [`Target`].
+///
+/// Returns `None` if the click is outside the table body or while the sort menu
+/// is open.
 #[must_use]
 pub fn hit(app: &App, width: u16, height: u16, x: u16, y: u16) -> Option<(usize, Target)> {
     if app.sort_menu.is_some() {
@@ -262,8 +262,8 @@ pub fn hit(app: &App, width: u16, height: u16, x: u16, y: u16) -> Option<(usize,
     Some((index, target))
 }
 
-/// Cut `text` to at most `width` terminal columns, returning what is left and
-/// how many columns it takes.
+/// Truncate `text` to at most `width` terminal columns, returning the truncated
+/// string and its display width.
 fn clip(text: &str, width: usize) -> (String, usize) {
     let mut used = 0;
     let mut clipped = String::new();
@@ -333,10 +333,10 @@ fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
     widths
 }
 
-/// One table line: each cell cut or padded to its column's width.
+/// Format a table row, truncating or padding each cell to its column width.
 ///
-/// `link` makes the text of one column, by index, a hyperlink to a URL.
-/// Only the text links, not the padding after it.
+/// If `link` is `Some((col, url))`, wraps the text of column `col` (excluding
+/// trailing padding) in an OSC 8 hyperlink.
 fn table_line(
     cells: [(String, Style); 7],
     widths: &[usize; 7],
@@ -379,8 +379,7 @@ fn guide(indent: Option<Indent>) -> &'static str {
     }
 }
 
-/// An operation below its conversation: what it does, then the command that
-/// does it, dimmed, so what will run in the tab is on screen before it runs.
+/// Format an operation line showing its label and the dimmed CLI command.
 fn operation_line(operation: Operation, id: &str, indent: Option<Indent>) -> Line {
     let widest = Operation::ALL
         .iter()
@@ -466,9 +465,10 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
         .filter(|_| row.is_worktree())
         .unwrap_or_else(|| {
             let waiting = row.runs.iter().filter_map(|run| run.waiting_since).min();
-            match waiting {
-                Some(since) => status_cell(Status::Waiting { since }, app.now),
-                None => running(row.runs.len()),
+            match (waiting, row.runs.len()) {
+                (Some(since), _) => status_cell(Status::Waiting { since }, app.now),
+                (None, 0) => idle(row, app.now),
+                (None, count) => running(count),
             }
         });
 
@@ -499,13 +499,20 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
 
 fn running(count: usize) -> (String, Style) {
     match count {
-        0 => (String::new(), PLAIN),
         1 => ("running".to_owned(), BOLD),
         n => (format!("running ×{n}"), BOLD),
     }
 }
 
-/// A status as a cell: `waiting 2m`, `running`, or nothing when idle.
+/// Format the time since JP's last activity in an idle worktree (for example,
+/// `5m ago`), or an empty cell if none.
+fn idle(row: &Row, now: DateTime<Utc>) -> (String, Style) {
+    row.last_activity().map_or((String::new(), PLAIN), |at| {
+        (format!("{} ago", age(now, at)), DIM)
+    })
+}
+
+/// Format a [`Status`] cell (`waiting 2m`, `running`, or empty when idle).
 fn status_cell(status: Status, now: DateTime<Utc>) -> (String, Style) {
     match status {
         Status::Idle => (String::new(), PLAIN),
@@ -670,7 +677,7 @@ fn activity(conversation: &SessionConversation, now: DateTime<Utc>) -> String {
         .unwrap_or_default()
 }
 
-/// How long before `now` `then` was, as `12s`, `5m`, `3h`, or `2d`.
+/// Format the elapsed time from `then` to `now` as `12s`, `5m`, `3h`, or `2d`.
 fn age(now: DateTime<Utc>, then: DateTime<Utc>) -> String {
     let seconds = (now - then).num_seconds().max(0);
     match seconds {

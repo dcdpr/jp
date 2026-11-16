@@ -1,6 +1,18 @@
 use camino::Utf8PathBuf;
+use chrono::TimeZone as _;
 
 use super::*;
+
+fn at(minute: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 9, 23, 10, minute, 0).unwrap()
+}
+
+fn ran(cwd: &str, last_event_at: Option<DateTime<Utc>>) -> JpRecent {
+    JpRecent {
+        cwd: Utf8PathBuf::from(cwd),
+        last_event_at,
+    }
+}
 
 fn worktree(path: &str, branch: &str) -> Worktree {
     Worktree {
@@ -18,7 +30,6 @@ fn terminal(id: &str, cwd: &str) -> Terminal {
     }
 }
 
-/// A terminal on `tty`, as a Ghostty build that reports devices lists it.
 fn on_tty(id: &str, cwd: &str, tty: &str) -> Terminal {
     Terminal {
         tty: Some(tty.to_owned()),
@@ -74,7 +85,7 @@ fn test_rows_attach_every_source_to_its_worktree() {
     let runs = [run(42, "/repo/queue", "Merge queue")];
     let prs = [pr(1200, "gh-merge-queue")];
 
-    let rows = rows(&worktrees, &terminals, &runs, &[], &prs);
+    let rows = rows(&worktrees, &terminals, &runs, &[], &[], &prs);
 
     assert_eq!(rows, vec![
         Row {
@@ -84,6 +95,7 @@ fn test_rows_attach_every_source_to_its_worktree() {
             terminals: vec![],
             runs: vec![],
             sessions: vec![],
+            last_run: None,
             pr: None,
         },
         Row {
@@ -93,6 +105,7 @@ fn test_rows_attach_every_source_to_its_worktree() {
             terminals: vec![terminal("T1", "/repo/queue")],
             runs: vec![run(42, "/repo/queue", "Merge queue")],
             sessions: vec![],
+            last_run: None,
             pr: Some(pr(1200, "gh-merge-queue")),
         },
     ]);
@@ -103,7 +116,7 @@ fn test_rows_count_a_terminal_in_a_subdirectory() {
     let worktrees = [worktree("/repo/queue", "q")];
     let terminals = [terminal("T1", "/repo/queue/crates/jp_cli")];
 
-    let rows = rows(&worktrees, &terminals, &[], &[], &[]);
+    let rows = rows(&worktrees, &terminals, &[], &[], &[], &[]);
 
     assert_eq!(ids(&rows[0]), ["T1"]);
 }
@@ -115,7 +128,7 @@ fn test_rows_give_a_path_to_the_deepest_worktree() {
     let worktrees = [worktree("/repo", "main"), worktree("/repo/nested", "n")];
     let terminals = [terminal("T1", "/repo/nested/src")];
 
-    let rows = rows(&worktrees, &terminals, &[], &[], &[]);
+    let rows = rows(&worktrees, &terminals, &[], &[], &[], &[]);
 
     assert_eq!(rows[0].name, "nested");
     assert_eq!(ids(&rows[0]), ["T1"]);
@@ -129,7 +142,7 @@ fn test_rows_do_not_match_a_sibling_sharing_a_name_prefix() {
     let worktrees = [worktree("/repo/fix", "fix")];
     let terminals = [terminal("T1", "/repo/fix-2")];
 
-    let rows = rows(&worktrees, &terminals, &[], &[], &[]);
+    let rows = rows(&worktrees, &terminals, &[], &[], &[], &[]);
 
     assert_eq!(ids(&rows[0]), Vec::<&str>::new());
 }
@@ -140,7 +153,7 @@ fn test_rows_drop_terminals_and_runs_no_worktree_owns() {
     let terminals = [terminal("T1", "/elsewhere")];
     let runs = [run(1, "/elsewhere", "x")];
 
-    let rows = rows(&worktrees, &terminals, &runs, &[], &[]);
+    let rows = rows(&worktrees, &terminals, &runs, &[], &[], &[]);
 
     assert_eq!(rows, vec![Row {
         id: RowId::Worktree(Utf8PathBuf::from("/repo/queue")),
@@ -149,6 +162,7 @@ fn test_rows_drop_terminals_and_runs_no_worktree_owns() {
         terminals: vec![],
         runs: vec![],
         sessions: vec![],
+        last_run: None,
         pr: None,
     }]);
 }
@@ -158,7 +172,7 @@ fn test_rows_list_pull_requests_without_a_worktree_last() {
     let worktrees = [worktree("/repo/zed", "zed"), worktree("/repo/alpha", "a")];
     let prs = [pr(9, "nine"), pr(1200, "zed"), pr(3, "three")];
 
-    let rows = rows(&worktrees, &[], &[], &[], &prs);
+    let rows = rows(&worktrees, &[], &[], &[], &[], &prs);
 
     assert_eq!(rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>(), [
         RowId::Worktree(Utf8PathBuf::from("/repo/alpha")),
@@ -173,6 +187,7 @@ fn test_rows_list_pull_requests_without_a_worktree_last() {
         terminals: vec![],
         runs: vec![],
         sessions: vec![],
+        last_run: None,
         pr: Some(pr(3, "three")),
     });
     assert!(rows[2].is_active());
@@ -187,7 +202,7 @@ fn test_rows_leave_a_detached_worktree_without_a_pull_request() {
     }];
     let prs = [pr(7, "detached")];
 
-    let rows = rows(&worktrees, &[], &[], &[], &prs);
+    let rows = rows(&worktrees, &[], &[], &[], &[], &prs);
 
     assert_eq!(rows[0].pr, None);
     assert_eq!(rows[1].id, RowId::PullRequest(7));
@@ -202,11 +217,64 @@ fn test_rows_attach_sessions_by_shell_directory() {
         session(3, "/elsewhere"),
     ];
 
-    let rows = rows(&worktrees, &[], &[], &sessions, &[]);
+    let rows = rows(&worktrees, &[], &[], &sessions, &[], &[]);
 
     assert_eq!(rows[0].name, "main");
     assert_eq!(rows[0].sessions, [session(2, "/repo/main")]);
     assert_eq!(rows[1].sessions, [session(1, "/repo/queue/crates")]);
+}
+
+#[test]
+fn test_rows_keep_the_latest_run_in_a_worktree() {
+    // Two directories of `/repo/a` each had a run, and the later one counts. A
+    // run outside every worktree has no row.
+    let worktrees = [worktree("/repo/a", "a"), worktree("/repo/b", "b")];
+    let recent = [
+        ran("/repo/a", Some(at(5))),
+        ran("/repo/a/crates", Some(at(9))),
+        ran("/elsewhere", Some(at(30))),
+        ran("/repo/b", None),
+    ];
+
+    let rows = rows(&worktrees, &[], &[], &[], &recent, &[]);
+
+    assert_eq!(rows[0].last_run, Some(at(9)));
+    assert_eq!(rows[1].last_run, None);
+}
+
+#[test]
+fn test_last_activity_is_the_latest_of_the_sessions_and_the_last_run() {
+    let worktrees = [worktree("/repo/a", "a")];
+    let conversation = |minute| SessionConversation {
+        id: format!("jp-c{minute}"),
+        title: None,
+        active: false,
+        pinned: false,
+        events: 1,
+        last_event_at: Some(at(minute)),
+        status: Status::Idle,
+    };
+    let sessions = [JpSession {
+        conversations: vec![conversation(3), conversation(7)],
+        ..session(10, "/repo/a")
+    }];
+
+    let listed = rows(&worktrees, &[], &[], &sessions, &[], &[]);
+    assert_eq!(listed[0].last_activity(), Some(at(7)));
+
+    // A run no session lists any more, later still.
+    let both = rows(
+        &worktrees,
+        &[],
+        &[],
+        &sessions,
+        &[ran("/repo/a", Some(at(8)))],
+        &[],
+    );
+    assert_eq!(both[0].last_activity(), Some(at(8)));
+
+    let neither = rows(&worktrees, &[], &[], &[], &[], &[]);
+    assert_eq!(neither[0].last_activity(), None);
 }
 
 #[test]
@@ -225,7 +293,7 @@ fn test_place_puts_each_session_in_the_tab_in_its_directory() {
         session(10, "/repo/a"),
         session(40, "/repo/a/docs"),
     ];
-    let rows = rows(&worktrees, &terminals, &[], &sessions, &[]);
+    let rows = rows(&worktrees, &terminals, &[], &sessions, &[], &[]);
 
     let placed = place(&rows[0]);
 
@@ -248,7 +316,7 @@ fn test_place_puts_a_shell_outside_ghostty_in_no_tab() {
         ghostty: false,
         ..session(10, "/repo/a")
     }];
-    let rows = rows(&worktrees, &terminals, &[], &sessions, &[]);
+    let rows = rows(&worktrees, &terminals, &[], &sessions, &[], &[]);
 
     let placed = place(&rows[0]);
 
@@ -260,7 +328,7 @@ fn test_place_puts_a_shell_outside_ghostty_in_no_tab() {
 fn test_owns_only_the_sole_tab_of_the_sole_ghostty_shell_in_a_directory() {
     let worktrees = [worktree("/repo/a", "a")];
     let owns = |terminals: &[Terminal], sessions: &[JpSession]| {
-        let rows = rows(&worktrees, terminals, &[], sessions, &[]);
+        let rows = rows(&worktrees, terminals, &[], sessions, &[], &[]);
         rows[0].owns(&rows[0].terminals[0], &rows[0].sessions[0])
     };
     let outside = JpSession {
@@ -309,7 +377,7 @@ fn test_place_matches_by_tty_whatever_the_directories() {
     };
     // The older session is in the second tab, the opposite of the guess.
     let sessions = [in_tty(10, "ttys002"), in_tty(20, "ttys001")];
-    let rows = rows(&worktrees, &terminals, &[], &sessions, &[]);
+    let rows = rows(&worktrees, &terminals, &[], &sessions, &[], &[]);
     let row = &rows[0];
 
     let placed = place(row);
@@ -335,7 +403,7 @@ fn test_place_puts_a_session_no_tty_matches_in_no_tab() {
         tty: Some("ttys009".to_owned()),
         ..session(10, "/repo/a")
     }];
-    let rows = rows(&worktrees, &terminals, &[], &sessions, &[]);
+    let rows = rows(&worktrees, &terminals, &[], &sessions, &[], &[]);
 
     let placed = place(&rows[0]);
 
@@ -346,10 +414,11 @@ fn test_place_puts_a_session_no_tty_matches_in_no_tab() {
 
 #[test]
 fn test_row_is_active_with_any_one_source() {
-    let idle = rows(&[worktree("/repo/a", "a")], &[], &[], &[], &[]);
+    let idle = rows(&[worktree("/repo/a", "a")], &[], &[], &[], &[], &[]);
     let with_terminal = rows(
         &[worktree("/repo/a", "a")],
         &[terminal("T", "/repo/a")],
+        &[],
         &[],
         &[],
         &[],
@@ -360,8 +429,11 @@ fn test_row_is_active_with_any_one_source() {
         &[run(1, "/repo/a", "c")],
         &[],
         &[],
+        &[],
     );
-    let with_pr = rows(&[worktree("/repo/a", "a")], &[], &[], &[], &[pr(1, "a")]);
+    let with_pr = rows(&[worktree("/repo/a", "a")], &[], &[], &[], &[], &[pr(
+        1, "a",
+    )]);
 
     assert!(!idle[0].is_active());
     assert!(with_terminal[0].is_active());

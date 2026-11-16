@@ -3,7 +3,7 @@ use chrono::TimeZone as _;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
-use crate::model::{Checks, JpRun, Status};
+use crate::model::{Checks, JpRecent, JpRun, Status};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -82,7 +82,11 @@ fn session(pid: u32, cwd: &str, conversations: Vec<SessionConversation>) -> JpSe
 }
 
 fn jp(app: &mut App, runs: Vec<JpRun>, sessions: Vec<JpSession>) {
-    app.apply(Update::Jp(Ok(JpState { runs, sessions })));
+    app.apply(Update::Jp(Ok(JpState {
+        runs,
+        sessions,
+        recent: vec![],
+    })));
 }
 
 /// Each selectable line as `worktree`, `#number`, `worktree/tab id`,
@@ -122,7 +126,6 @@ fn lines(app: &App) -> Vec<String> {
         .collect()
 }
 
-/// The notes on screen, in order.
 fn notes(app: &App) -> Vec<String> {
     app.display()
         .into_iter()
@@ -168,8 +171,6 @@ fn two_tabs() -> App {
     app
 }
 
-/// Every worktree `w00`..
-/// `w19` shown, with a screen of ten table lines.
 fn tall_app() -> App {
     let mut app = App::default();
     app.apply(Update::Worktrees(Ok((0..20)
@@ -894,6 +895,39 @@ fn test_sort_by_activity_puts_a_turn_waiting_on_the_user_first() {
 
     app.sort = Sort::Activity;
     assert_eq!(lines(&app), ["c", "a", "b"]);
+}
+
+#[test]
+fn test_sort_by_activity_keeps_a_finished_run_where_it_was() {
+    let mut app = app();
+    app.handle(key(KeyCode::Char('a')));
+    app.sort = Sort::Activity;
+    // `b`'s shell last worked on a conversation at 10:00.
+    let sessions = vec![session(10, "/repo/b", vec![conversation(
+        "jp-c1",
+        true,
+        Status::Idle,
+    )])];
+    let running = JpRun {
+        pid: 1,
+        cwd: Utf8PathBuf::from("/repo/c"),
+        conversation: "t".to_owned(),
+        waiting_since: None,
+    };
+    jp(&mut app, vec![running], sessions.clone());
+    assert_eq!(lines(&app), ["c", "b", "a"]);
+
+    // The run ends at 10:09, and no session lists its conversation: the
+    // process that ran it was its own session, now gone.
+    app.apply(Update::Jp(Ok(JpState {
+        runs: vec![],
+        sessions,
+        recent: vec![JpRecent {
+            cwd: Utf8PathBuf::from("/repo/c"),
+            last_event_at: Some(at(9)),
+        }],
+    })));
+    assert_eq!(lines(&app), ["c", "b", "a"]);
 }
 
 #[test]

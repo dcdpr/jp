@@ -95,8 +95,7 @@ pub enum Action {
     },
 }
 
-/// Something to do with a conversation, done by the `jp` command that does it,
-/// run in the conversation's tab so its prompts and confirmations show there.
+/// Action that can be run on a conversation in its terminal tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operation {
     Query,
@@ -105,7 +104,6 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// Every operation, as a conversation lists them.
     pub const ALL: [Self; 3] = [Self::Query, Self::Archive, Self::Delete];
 
     #[must_use]
@@ -117,7 +115,7 @@ impl Operation {
         }
     }
 
-    /// The command that does it to the conversation `id`.
+    /// Return the `jp` command for this operation on conversation `id`.
     #[must_use]
     pub fn command(self, id: &str) -> String {
         match self {
@@ -175,15 +173,14 @@ pub enum Item<'a> {
         index: usize,
     },
 
-    /// A conversation of a JP session in an expanded worktree: in one of its
-    /// tabs, or in a shell no tab could be found for.
+    /// A conversation belonging to a JP session in an expanded worktree.
     Conversation {
         row: &'a Row,
         tab: Option<&'a Terminal>,
         conversation: &'a SessionConversation,
     },
 
-    /// Something to do with a conversation, listed below it once opened.
+    /// An [`Operation`] entry listed under an expanded conversation.
     Operation {
         row: &'a Row,
         tab: Option<&'a Terminal>,
@@ -194,7 +191,6 @@ pub enum Item<'a> {
 }
 
 impl<'a> Item<'a> {
-    /// The row the line belongs to.
     #[must_use]
     pub const fn row(&self) -> &'a Row {
         match *self {
@@ -279,7 +275,6 @@ pub enum Indent {
 }
 
 impl Indent {
-    /// The indent of an operation below a conversation indented `self`.
     const fn operation(self) -> Self {
         match self {
             Self::InTab { last_tab } => Self::Operation {
@@ -373,12 +368,11 @@ pub struct Filter {
     /// Whether the query is still being typed.
     pub editing: bool,
 
-    /// The query in force before this one was started, restored when typing is
-    /// cancelled.
+    /// Previous filter query, restored if editing is cancelled.
     previous: Option<String>,
 }
 
-/// Identifies a table line across refreshes, as its position does not.
+/// Stable identifier for a selectable table item across refreshes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
     row: RowId,
@@ -439,8 +433,8 @@ pub struct App {
     /// Conversations whose operations are listed below them.
     opened: HashSet<Key>,
 
-    /// For a row `space` closed, the line that was selected when it did, so
-    /// `space` opening it again goes back there.
+    /// Selected item inside a row when it was collapsed with `Space`, restored
+    /// on re-expand.
     last_selected: HashMap<RowId, Key>,
 
     /// The row `enter` last focused a tab of, and which of its tabs the next
@@ -511,8 +505,8 @@ impl App {
         rows
     }
 
-    /// The lines as drawn: every visible row, followed by what it lists when it
-    /// is expanded.
+    /// Build the display lines for all visible rows and their expanded
+    /// children.
     #[must_use]
     pub fn display(&self) -> Vec<Display<'_>> {
         let mut lines = Lines {
@@ -645,6 +639,7 @@ impl App {
             self.terminals.data.as_deref().unwrap_or_default(),
             jp.map(|jp| jp.runs.as_slice()).unwrap_or_default(),
             jp.map(|jp| jp.sessions.as_slice()).unwrap_or_default(),
+            jp.map(|jp| jp.recent.as_slice()).unwrap_or_default(),
             self.prs.data.as_deref().unwrap_or_default(),
         );
 
@@ -763,9 +758,7 @@ impl App {
         self.sort_menu = None;
     }
 
-    /// Handle a key while a filter is being typed: characters narrow the rows
-    /// as they are typed, `enter` keeps the filter, and `esc` puts back the one
-    /// before it.
+    /// Handle a key event while editing the filter query.
     fn filter_key(&mut self, key: KeyEvent) {
         let Some(filter) = &mut self.filter else {
             return;
@@ -880,8 +873,7 @@ impl App {
         }
     }
 
-    /// `←`: close what the selection sits in, one level at a time: an
-    /// operation's list, then the row.
+    /// `←`: collapse or step out of the current selection one level at a time.
     fn ascend(&mut self) {
         let Some(item) = self.selected_item() else {
             return;
@@ -915,11 +907,8 @@ impl App {
         }
     }
 
-    /// `space`: close the selected line's row, selecting the row, or open it
-    /// again, selecting the line that was selected when it closed.
-    ///
-    /// Closing this way keeps the row's open conversations open, so that line
-    /// is there to go back to.
+    /// `Space`: toggle expansion of the selected item's row, preserving and
+    /// restoring the inner selection.
     fn toggle(&mut self) {
         let Some(item) = self.selected_item() else {
             return;
@@ -946,17 +935,16 @@ impl App {
         self.selected = Some(back.unwrap_or(row));
     }
 
-    /// Stop listing the row's tabs and conversations, close whatever
-    /// conversations of it were open, and forget where `space` left off.
+    /// Collapse row `id`, closing any expanded conversations within it and
+    /// clearing its saved selection.
     fn collapse(&mut self, id: &RowId) {
         self.expanded.remove(id);
         self.opened.retain(|key| key.row != *id);
         self.last_selected.remove(id);
     }
 
-    /// Run the selected operation in the conversation's tab: the tab it
-    /// certainly runs in, or a new tab in its shell's directory when that is
-    /// not certain.
+    /// Run the selected operation in the session's tab if unambiguously
+    /// matched, or in a new tab otherwise.
     fn run(&mut self) -> Action {
         let (action, notice) = {
             let Some(Item::Operation {
@@ -1011,11 +999,11 @@ impl App {
         self.keep_selection_visible();
     }
 
-    /// Act on the selected line: focus a tab, open one, or create a worktree.
+    /// Execute the primary action for the selected item: focus or open a tab,
+    /// run an operation, or create a worktree.
     ///
-    /// On a worktree with several tabs, the first `enter` focuses its first
-    /// tab, and each `enter` after it, with the selection left where it is, the
-    /// next.
+    /// Pressing `Enter` repeatedly on a worktree with multiple tabs cycles
+    /// through its tabs.
     fn enter(&mut self, cycle: Option<(RowId, usize)>) -> Action {
         enum Outcome {
             Focus(String, Option<(RowId, usize)>, Option<String>),
@@ -1269,8 +1257,6 @@ struct Lines<'a> {
     opened: &'a HashSet<Key>,
 
     lines: Vec<Display<'a>>,
-
-    /// The number of items added so far.
     items: usize,
 }
 
@@ -1342,10 +1328,8 @@ fn matches(row: &Row, query: &str) -> bool {
             .is_some_and(|branch| branch.to_lowercase().contains(query))
 }
 
-/// Order `rows` by `by`.
-/// Rows the order says nothing about (no branch, no pull request, no activity)
-/// go last, and ties are broken by worktree name, with pull requests without a
-/// worktree after the worktrees, by number.
+/// Sort `rows` according to `by`, placing rows without the sort key last and
+/// breaking ties by worktree name and PR number.
 fn sort(rows: &mut [&Row], by: Sort) {
     let pr_number = |row: &Row| row.pr.as_ref().map(|pr| pr.number);
     let tiebreak = |row: &Row| (!row.is_worktree(), row.name.clone(), pr_number(row));
@@ -1376,12 +1360,7 @@ fn sort(rows: &mut [&Row], by: Sort) {
 fn activity(row: &Row) -> Option<(bool, bool, Option<DateTime<Utc>>)> {
     let waiting = row.runs.iter().any(|run| run.waiting_since.is_some());
     let running = !row.runs.is_empty();
-    let last = row
-        .sessions
-        .iter()
-        .flat_map(|session| &session.conversations)
-        .filter_map(|conversation| conversation.last_event_at)
-        .max();
+    let last = row.last_activity();
 
     (running || last.is_some()).then_some((waiting, running, last))
 }

@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::*;
 use crate::{
     app::Update,
-    model::{JpRun, JpSession, Terminal, Worktree},
+    model::{JpRecent, JpRun, JpSession, Terminal, Worktree},
     source::jp::JpState,
 };
 
@@ -60,7 +60,6 @@ fn at(hour: u32, minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 9, 23, hour, minute, 0).unwrap()
 }
 
-/// The screen's text, one string per row, without trailing blanks.
 fn render(app: &App, width: u16, height: u16) -> Vec<String> {
     screen(app, width, height)
         .iter()
@@ -117,6 +116,7 @@ fn queue_and_review() -> App {
             ],
             more: 3,
         }],
+        recent: vec![],
     })));
     app.apply(Update::PullRequests(Ok(vec![pr(
         1132,
@@ -142,6 +142,32 @@ fn test_screen_shows_one_line_per_worktree_until_expanded() {
         "",
         "",
     ]);
+}
+
+#[test]
+fn test_screen_shows_how_long_ago_jp_ran_in_an_idle_worktree() {
+    let mut app = queue_and_review();
+    let mut jp = app.jp.data.clone().unwrap();
+    jp.recent = vec![JpRecent {
+        cwd: Utf8PathBuf::from("/repo/review"),
+        last_event_at: Some(at(9, 55)),
+    }];
+    app.apply(Update::Jp(Ok(jp)));
+
+    let lines = screen(&app, 110, 6);
+
+    assert_eq!(
+        lines[3].text().trim_end(),
+        "review          fix-replies     5m ago                                            #1132   \
+         ✓ 14/14       3/3"
+    );
+    // Dimmed, so it reads as a time rather than a status.
+    assert!(
+        lines[3]
+            .spans
+            .iter()
+            .any(|span| span.text == "5m ago" && span.style.dim)
+    );
 }
 
 #[test]

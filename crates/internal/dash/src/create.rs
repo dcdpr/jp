@@ -16,12 +16,12 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::source::{git, github};
 
-/// A worktree that was created.
+/// Result of creating a worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Created {
     pub path: Utf8PathBuf,
 
-    /// Why the default branch could not be updated first, if it could not.
+    /// Reason why fast-forwarding the default branch failed, if it did.
     pub stale: Option<String>,
 }
 
@@ -76,8 +76,7 @@ pub fn for_branch(dir: &Utf8Path, branch: &str) -> Result<Created, String> {
     Ok(Created { path, stale })
 }
 
-/// The directory new worktrees go in: the parent of the worktree containing
-/// `dir`.
+/// Return the parent directory of the worktree containing `dir`.
 fn parent(dir: &Utf8Path) -> Result<Utf8PathBuf, String> {
     let root =
         git::toplevel(dir).map_err(|error| format!("Finding the worktree failed: {error}"))?;
@@ -86,8 +85,8 @@ fn parent(dir: &Utf8Path) -> Result<Utf8PathBuf, String> {
         .ok_or_else(|| format!("{root} has no parent directory for a new worktree."))
 }
 
-/// Bring the default branch up to date, and return it with why that failed, if
-/// it did.
+/// Fast-forward the default branch and return its name along with any update
+/// error.
 fn update_base(dir: &Utf8Path) -> (String, Option<String>) {
     let base = git::default_branch(dir);
     let stale = git::update_branch(dir, &base)
@@ -96,9 +95,10 @@ fn update_base(dir: &Utf8Path) -> (String, Option<String>) {
     (base, stale)
 }
 
-/// A directory name for `branch`: path separators and anything else outside
-/// letters, digits, `-`, `_` and `.` become `-`.
-/// `None` when nothing but separators and dots is left.
+/// Sanitize `branch` into a directory name, replacing characters outside
+/// `[A-Za-z0-9._-]` with `-` and trimming leading or trailing `-` and `.`.
+///
+/// Returns `None` if the resulting name is empty.
 fn directory_name(branch: &str) -> Option<String> {
     let name: String = branch
         .chars()

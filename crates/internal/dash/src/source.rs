@@ -1,4 +1,4 @@
-//! Everything that reads the outside world.
+//! Background data sources for the dashboard.
 //!
 //! Each source runs on its own thread and interval, and sends the UI an
 //! [`Update`] after every read: the fresh snapshot, or the error the read hit.
@@ -8,6 +8,7 @@
 //! [`spawn`] starts them all and returns a [`Refresher`] that makes every
 //! source read again straight away.
 
+pub mod cache;
 pub mod ghostty;
 pub mod git;
 pub mod github;
@@ -79,7 +80,8 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
     let git_dir = dir.to_owned();
     let base_dir = dir.to_owned();
 
-    // What the last run saw, on screen before the first network read returns.
+    // Emit cached pull requests immediately before the first network poll
+    // completes.
     if let Some(cached) = github.cached() {
         let _gone = updates.send(Update::PullRequests(Ok(cached)));
     }
@@ -155,8 +157,7 @@ fn stdout(program: &'static str, command: &mut Command) -> Result<String, Error>
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// The error for a command that failed, from the first line of its standard
-/// error.
+/// Build an [`Error::Failed`] from the first non-empty line of `stderr`.
 fn failure(program: &'static str, stderr: &[u8]) -> Error {
     let stderr = String::from_utf8_lossy(stderr);
     let message = stderr
@@ -169,7 +170,7 @@ fn failure(program: &'static str, stderr: &[u8]) -> Error {
     Error::Failed { program, message }
 }
 
-/// Run a command and return what it produced, whatever its exit status.
+/// Run `command` and return its [`Output`] regardless of exit status.
 fn output(program: &'static str, command: &mut Command) -> Result<Output, Error> {
     command
         .output()

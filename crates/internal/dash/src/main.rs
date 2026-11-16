@@ -1,6 +1,6 @@
-//! `dash`: a live table of the repository's worktrees and what is going on in
-//! each one — open terminals, running `jp` processes, pull requests, CI, and
-//! review threads.
+//! `dash`: a live terminal dashboard of the repository's worktrees, showing
+//! open terminals, running `jp` processes, pull requests, CI status, and review
+//! threads.
 //!
 //! Run it from any worktree of the repository with `just dash`.
 //! The sources are read on background threads (see [`source`]); the main thread
@@ -42,7 +42,7 @@ use crate::{
     ui::Line,
 };
 
-/// How long to wait for a key before redrawing with whatever the sources sent.
+/// Poll timeout before redrawing with any pending source updates.
 const TICK: Duration = Duration::from_millis(250);
 
 fn main() -> ExitCode {
@@ -61,8 +61,8 @@ fn run() -> io::Result<()> {
     let (updates, received) = mpsc::channel();
     let refresher = source::spawn(&dir, &updates);
 
-    // A panic message printed on the alternate screen vanishes with it, so the
-    // terminal is put back before the message is printed.
+    // Restore the terminal before printing panic output so the message is not
+    // lost when leaving the alternate screen.
     let report = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         restore();
@@ -73,22 +73,22 @@ fn run() -> io::Result<()> {
     event_loop(&dir, &received, &updates, &refresher)
 }
 
-/// The terminal in raw mode on the alternate screen, until dropped.
+/// RAII guard that keeps the terminal in raw mode on the alternate screen.
 struct Screen;
 
 impl Screen {
     fn enter() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
-        // Created before anything else can fail, so raw mode is undone on
-        // every path out.
+        // Construct the guard immediately so Drop disables raw mode if a later
+        // setup step fails.
         let screen = Self;
-        // The title marks the dashboard's own window, which new tabs avoid.
+        // The title marks the dashboard's own window so new tabs open in a
+        // different window.
         //
-        // Without mouse capture, the terminal turns the scroll wheel into
-        // arrow keys on the alternate screen, which wrap around the table.
-        // Captured, a wheel turn arrives as its own event and stops at the
-        // ends. It also turns clicks into events, so the PR number's link is
-        // opened here rather than by the terminal.
+        // Without mouse capture, the terminal translates scroll-wheel events
+        // into arrow keys on the alternate screen, which wrap around the table.
+        // Capturing mouse events lets scroll events clamp at the table bounds
+        // and routes clicks through the app's hit-testing.
         execute!(
             io::stdout(),
             EnterAlternateScreen,
@@ -180,8 +180,7 @@ fn event_loop(
     }
 }
 
-/// Do what a key press or click asked for, off the UI thread when it takes a
-/// process or two.
+/// Execute `action`, spawning a background thread for subprocess calls.
 fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher: &Refresher) {
     match action {
         Action::None | Action::Quit => {}
@@ -246,9 +245,8 @@ fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher
     }
 }
 
-/// Create a worktree with `create` and open a tab in it, off the UI thread,
-/// then have the sources read again so the new worktree and its tab show up.
-/// `pr` is the pull request it is for, if any.
+/// Create a worktree on a background thread, open a tab in it, and trigger a
+/// source refresh.
 fn create_worktree(
     dir: &Utf8Path,
     pr: Option<u64>,
@@ -276,9 +274,10 @@ fn create_worktree(
     });
 }
 
-/// Run `command` at the prompt of `shell` in the terminal `terminal`, but only
-/// if the shell sits idle there: typed while something else runs in front of
-/// it, the command would go to that program instead.
+/// Send `command` to `terminal` only if `shell` is the foreground process.
+///
+/// If another process is in the foreground, keystrokes sent to the terminal
+/// would go to that process instead of the shell.
 fn run_in_tab(terminal: &str, shell: u32, command: &str) -> Result<(), String> {
     match jp::shell_is_idle(shell) {
         Ok(true) => {}
@@ -332,10 +331,10 @@ fn paint(out: &mut impl Write, lines: &[Line]) -> io::Result<()> {
     out.flush()
 }
 
-/// Run `task` off the UI thread, reporting its failure on the status line.
+/// Run `task` on a background thread and report any error as a status notice.
 ///
-/// Focusing a terminal goes through `osascript`, which takes long enough to
-/// make the keyboard feel stuck if it ran inline.
+/// Subprocess calls such as `osascript` are slow enough to block key handling
+/// if run on the UI thread.
 fn in_background<F>(updates: &Sender<Update>, task: F)
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,

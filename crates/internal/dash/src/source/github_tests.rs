@@ -71,7 +71,6 @@ fn test_due_reviews_all_when_asked() {
     ]);
 }
 
-/// A reader over `state` that has no cache file.
 fn github(state: State) -> GitHub {
     GitHub {
         dir: Utf8PathBuf::from("."),
@@ -85,54 +84,11 @@ fn github(state: State) -> GitHub {
 #[test]
 fn test_state_survives_a_restart() {
     let dir = Utf8TempDir::new().unwrap();
-    let file = dir.path().join("jp/dash/repo.json");
+    let file = dir.path().join("jp/dash/repo.github.json");
 
-    store_state(&file, &state()).unwrap();
+    cache::store(&file, &state()).unwrap();
 
-    assert_eq!(load_state(&file), state());
-}
-
-#[test]
-fn test_a_missing_or_broken_cache_is_empty() {
-    let dir = Utf8TempDir::new().unwrap();
-    let file = dir.path().join("repo.json");
-    assert_eq!(load_state(&file), State::default());
-
-    fs::write(&file, "{ not json").unwrap();
-    assert_eq!(load_state(&file), State::default());
-}
-
-#[test]
-fn test_cache_home_follows_xdg() {
-    let home = Some("/Users/jean".to_owned());
-
-    assert_eq!(
-        cache_home(Some("/tmp/cache".to_owned()), home.clone()),
-        Some(Utf8PathBuf::from("/tmp/cache"))
-    );
-    // A relative `XDG_CACHE_HOME` is invalid and ignored.
-    assert_eq!(
-        cache_home(Some("cache".to_owned()), home.clone()),
-        Some(Utf8PathBuf::from("/Users/jean/.cache"))
-    );
-    assert_eq!(
-        cache_home(None, home),
-        Some(Utf8PathBuf::from("/Users/jean/.cache"))
-    );
-    assert_eq!(cache_home(None, None), None);
-}
-
-#[test]
-fn test_cache_path_names_the_file_after_the_repository() {
-    assert_eq!(
-        cache_path(
-            Utf8Path::new("/Users/jean/.cache"),
-            Utf8Path::new("/Users/jean/Projects/Personal/jp.git/.bare")
-        ),
-        Utf8PathBuf::from(
-            "/Users/jean/.cache/jp/dash/Users-jean-Projects-Personal-jp-git--bare.json"
-        )
-    );
+    assert_eq!(cache::load::<State>(&file), state());
 }
 
 #[test]

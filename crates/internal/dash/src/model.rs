@@ -1,4 +1,4 @@
-//! What the dashboard knows, and how the sources join into rows.
+//! Data model for dashboard rows and source snapshots.
 //!
 //! Every source reports paths or branch names; [`rows`] attaches each report to
 //! the git worktree it belongs to.
@@ -41,18 +41,25 @@ pub struct Terminal {
 /// A `jp` process holding a conversation lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JpRun {
-    /// The process that holds the lock.
     pub pid: u32,
-
-    /// The process's working directory.
     pub cwd: Utf8PathBuf,
 
     /// The locked conversation's title, or its ID when it has none.
     pub conversation: String,
 
-    /// When the turn started waiting on the user to answer a question, if it
-    /// is.
+    /// Timestamp of the earliest unanswered inquiry in the current turn, if
+    /// any.
     pub waiting_since: Option<DateTime<Utc>>,
+}
+
+/// Most recent conversation observed running in a working directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JpRecent {
+    pub cwd: Utf8PathBuf,
+
+    /// Timestamp of the conversation's last recorded event, or `None` if the
+    /// conversation is empty or its metadata cannot be read.
+    pub last_event_at: Option<DateTime<Utc>>,
 }
 
 /// A shell's JP session: the conversations `jp` activated in it.
@@ -71,7 +78,6 @@ pub struct JpSession {
     /// The shell's terminal device, as `ps` names it (`ttys001`).
     pub tty: Option<String>,
 
-    /// The shell's working directory.
     pub cwd: Utf8PathBuf,
 
     /// The session's conversations: the active one first, then the rest by most
@@ -83,7 +89,6 @@ pub struct JpSession {
 }
 
 impl JpSession {
-    /// The session's active conversation.
     #[must_use]
     pub fn active(&self) -> Option<&SessionConversation> {
         self.conversations
@@ -92,48 +97,38 @@ impl JpSession {
     }
 }
 
-/// A conversation a session activated: what `jp conversation ls` lists for it.
+/// Conversation entry in a session's history.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionConversation {
-    /// The conversation's ID, as `jp` prints it.
     pub id: String,
-
     pub title: Option<String>,
-
-    /// Whether it is the session's active conversation.
     pub active: bool,
-
     pub pinned: bool,
-
-    /// The number of events in the conversation.
     pub events: usize,
 
-    /// When its last event was recorded.
-    /// For a finished turn that is the assistant's reply.
-    /// `None` for an empty conversation.
+    /// Timestamp of the last recorded event, or `None` if the conversation is
+    /// empty.
     pub last_event_at: Option<DateTime<Utc>>,
 
     pub status: Status,
 }
 
-/// What a `jp` process is doing with a conversation.
+/// Execution state of a conversation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Status {
-    /// No `jp` process holds it.
+    /// No `jp` process holds the conversation lock.
     #[default]
     Idle,
 
-    /// A `jp` process holds it, working on a turn.
+    /// A `jp` process holds the conversation lock.
     Running,
 
-    /// A `jp` process holds it, and has asked the user a question that is not
-    /// answered yet.
+    /// A `jp` process holds the lock and is waiting for a response to an
+    /// inquiry.
     Waiting { since: DateTime<Utc> },
 }
 
 impl Status {
-    /// The status of a conversation a `jp` process holds, waiting on the user
-    /// since `waiting_since`, if it is.
     #[must_use]
     pub const fn held(waiting_since: Option<DateTime<Utc>>) -> Self {
         match waiting_since {
@@ -187,14 +182,13 @@ impl Checks {
     }
 }
 
-/// What a row stands for, and what identifies it across refreshes.
+/// Stable identifier for a table row across refreshes.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RowId {
     /// A worktree, by its root directory.
     Worktree(Utf8PathBuf),
 
-    /// An open pull request whose branch no worktree has checked out, by its
-    /// number.
+    /// An open pull request with no local worktree, identified by PR number.
     PullRequest(u64),
 }
 
@@ -221,18 +215,22 @@ pub struct Row {
     /// JP sessions of shells inside the worktree.
     pub sessions: Vec<JpSession>,
 
+    /// Timestamp of the last event on the conversation most recently run in the
+    /// worktree.
+    pub last_run: Option<DateTime<Utc>>,
+
     /// The open pull request whose head is the worktree's branch.
     /// Always set for a pull request without a worktree.
     pub pr: Option<PullRequest>,
 }
 
 impl Row {
-    /// Whether `tab` certainly runs `session`'s shell.
+    /// Return `true` if `tab` unambiguously hosts `session`'s shell.
     ///
-    /// Certain when the two share a terminal device.
-    /// A Ghostty build that does not report the tab's device leaves only the
-    /// directory to go on, which is certain only when the tab is the only one
-    /// in its directory and the session the only Ghostty shell there.
+    /// When Ghostty reports the tab's TTY, matches by TTY device.
+    /// Otherwise, falls back to matching by working directory only when `tab`
+    /// is the sole tab in that directory and `session` is the sole Ghostty
+    /// shell there.
     #[must_use]
     pub fn owns(&self, tab: &Terminal, session: &JpSession) -> bool {
         if tab.tty.is_some() {
@@ -259,8 +257,20 @@ impl Row {
         matches!(self.id, RowId::Worktree(_))
     }
 
-    /// Whether the worktree has anything going on: an open terminal, a running
-    /// `jp`, or an open pull request.
+    /// Return the latest event timestamp across the worktree's sessions and its
+    /// most recent run.
+    #[must_use]
+    pub fn last_activity(&self) -> Option<DateTime<Utc>> {
+        self.sessions
+            .iter()
+            .flat_map(|session| &session.conversations)
+            .filter_map(|conversation| conversation.last_event_at)
+            .chain(self.last_run)
+            .max()
+    }
+
+    /// Return `true` if the row has an open terminal, a running `jp` process,
+    /// or an open pull request.
     #[must_use]
     pub fn is_active(&self) -> bool {
         !self.terminals.is_empty() || !self.runs.is_empty() || self.pr.is_some()
@@ -271,9 +281,9 @@ impl Row {
 /// followed by one row per pull request whose branch no worktree has checked
 /// out, sorted by number.
 ///
-/// A terminal, process, or session belongs to the worktree whose path is the
-/// longest prefix of its working directory, so one sitting in a subdirectory
-/// still counts.
+/// A terminal, process, session, or last run belongs to the worktree whose path
+/// is the longest prefix of its working directory, so one sitting in a
+/// subdirectory still counts.
 /// Those outside every worktree are dropped.
 #[must_use]
 pub fn rows(
@@ -281,6 +291,7 @@ pub fn rows(
     terminals: &[Terminal],
     runs: &[JpRun],
     sessions: &[JpSession],
+    recent: &[JpRecent],
     prs: &[PullRequest],
 ) -> Vec<Row> {
     let mut rows: Vec<Row> = worktrees
@@ -296,6 +307,7 @@ pub fn rows(
             terminals: vec![],
             runs: vec![],
             sessions: vec![],
+            last_run: None,
             pr: worktree
                 .branch
                 .as_deref()
@@ -322,6 +334,13 @@ pub fn rows(
         }
     }
 
+    for recent in recent {
+        if let Some(index) = owner(&recent.cwd, worktrees) {
+            let row = &mut rows[index];
+            row.last_run = row.last_run.max(recent.last_event_at);
+        }
+    }
+
     rows.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
 
     let claimed: HashSet<u64> = rows
@@ -341,6 +360,7 @@ pub fn rows(
         terminals: vec![],
         runs: vec![],
         sessions: vec![],
+        last_run: None,
         pr: Some(pr.clone()),
     }));
     rows
@@ -352,20 +372,18 @@ pub struct Placed<'a> {
     /// The sessions of each of the row's tabs, in the row's tab order.
     pub tabs: Vec<Vec<&'a JpSession>>,
 
-    /// Sessions no tab could be found for.
+    /// Sessions that could not be matched to an open tab.
     pub other: Vec<&'a JpSession>,
 }
 
-/// Place each of the row's sessions in the tab its shell runs in: the tab on
-/// the same terminal device.
+/// Match each session in `row` to the terminal tab running its shell.
 ///
-/// A tab whose device Ghostty does not report (an older build) is matched by
-/// directory instead: a session of a shell inside Ghostty goes to such a tab in
-/// the same directory, several of them taking its sessions in order, the oldest
-/// session (lowest leader PID) to the first.
-/// That guess is wrong when tabs were reordered; [`Row::owns`] says when there
-/// was no guessing.
-/// A session no tab matches goes to no tab.
+/// Prefers an exact TTY match.
+/// For tabs without a reported TTY, assigns Ghostty sessions in the same
+/// working directory in ascending PID order across the tabs with the fewest
+/// assigned sessions.
+/// [`Row::owns`] reports whether the match is unambiguous.
+/// Unmatched sessions are placed in [`Placed::other`].
 #[must_use]
 pub fn place(row: &Row) -> Placed<'_> {
     let mut tabs = vec![vec![]; row.terminals.len()];

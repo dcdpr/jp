@@ -1,6 +1,67 @@
 use camino::Utf8PathBuf;
+use chrono::TimeZone as _;
 
 use super::*;
+
+fn at(minute: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 9, 23, 10, minute, 0).unwrap()
+}
+
+fn conversation(minute: u32) -> ConversationId {
+    ConversationId::try_from(at(minute)).unwrap()
+}
+
+#[test]
+fn test_remember_keeps_the_conversation_last_run_in_each_directory() {
+    let mut ran = BTreeMap::new();
+
+    assert!(remember(&mut ran, [
+        ("/repo/a", conversation(1)),
+        ("/repo/b", conversation(2))
+    ]));
+    // The same run seen again changes nothing; another run in `/repo/a`
+    // replaces the one before it.
+    assert!(!remember(&mut ran, [("/repo/a", conversation(1))]));
+    assert!(remember(&mut ran, [("/repo/a", conversation(3))]));
+    // With nothing running, every directory keeps what last ran there.
+    assert!(!remember(&mut ran, []));
+
+    assert_eq!(
+        ran,
+        BTreeMap::from([
+            ("/repo/a".to_owned(), conversation(3)),
+            ("/repo/b".to_owned(), conversation(2)),
+        ])
+    );
+}
+
+#[test]
+fn test_recent_reports_the_last_event_of_each_directorys_conversation() {
+    let ran = BTreeMap::from([
+        ("/repo/a".to_owned(), conversation(1)),
+        ("/repo/b".to_owned(), conversation(2)),
+    ]);
+    // `/repo/b`'s conversation has no metadata: deleted, or not read yet.
+    let metadata = HashMap::from([(conversation(1), Metadata {
+        title: None,
+        pinned: false,
+        events: 3,
+        last_event_at: Some(at(30)),
+        read_at: Instant::now(),
+        running: false,
+    })]);
+
+    assert_eq!(recent(&ran, &metadata), [
+        JpRecent {
+            cwd: Utf8PathBuf::from("/repo/a"),
+            last_event_at: Some(at(30)),
+        },
+        JpRecent {
+            cwd: Utf8PathBuf::from("/repo/b"),
+            last_event_at: None,
+        },
+    ]);
+}
 
 #[test]
 fn test_parse_lsof_reads_command_and_cwd_per_process() {
