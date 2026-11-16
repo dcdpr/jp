@@ -50,8 +50,9 @@ pub(crate) async fn github_pr_edit(
 
 /// A requested change to a pull request's title and description.
 ///
-/// At least one field is set, and a set title is a single non-empty line with
-/// surrounding whitespace trimmed.
+/// At least one field is set.
+/// When `title` is set, it is a single non-empty line with surrounding
+/// whitespace trimmed.
 #[derive(Debug, PartialEq)]
 struct Edit {
     title: Option<String>,
@@ -100,9 +101,9 @@ struct PullText {
 }
 
 async fn format_for_approval(pull_number: u64, edit: &Edit) -> String {
-    // Fetched at approval time rather than trusting what the assistant read
-    // earlier, so the diff shows what the edit overwrites right now, including
-    // any change someone made on GitHub in the meantime.
+    // Fetch the current PR text at approval time rather than relying on the
+    // assistant's earlier read, so the diff reflects any concurrent edits on
+    // GitHub.
     match fetch_pull_text(pull_number).await {
         Ok(current) => render_edit_preview(pull_number, &current, edit),
         Err(e) => render_unverified_preview(pull_number, edit, &e.to_string()),
@@ -155,7 +156,7 @@ fn render_field_diff(label: &str, old: &str, new: &str) -> String {
     colored_diff(&diff, &unified, label)
 }
 
-/// Convert CRLF line endings to LF and end the text with a newline.
+/// Convert CRLF line endings to LF and ensure a trailing newline.
 ///
 /// Descriptions edited in GitHub's web UI are stored with CRLF line endings.
 /// Without this, every line of such a description would show as changed.
@@ -167,9 +168,10 @@ fn normalize_lines(text: &str) -> String {
     text
 }
 
-/// Lay out the approval preview when the current text could not be fetched: the
-/// new title and description in a blockquote rail, with the fetch error in the
-/// header.
+/// Fallback approval preview when the current PR text cannot be fetched.
+///
+/// Renders the new title and description in a blockquote and includes the fetch
+/// error in the header.
 fn render_unverified_preview(pull_number: u64, edit: &Edit, reason: &str) -> String {
     let text = [edit.title.as_deref(), edit.description.as_deref()]
         .into_iter()

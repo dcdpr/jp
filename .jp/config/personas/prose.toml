@@ -20,13 +20,14 @@ github_pr_edit = { enable = true }
 
 [style]
 reasoning.display = "full"
+reasoning.window.rows = 6
 
 [assistant]
 name = "Prose Editor"
 
 [assistant.model]
 id = "google/gemini-4-argon"
-parameters.reasoning.effort = "high"
+parameters.reasoning.effort = "medium"
 
 [assistant.system_prompt]
 strategy = "append"

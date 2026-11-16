@@ -821,7 +821,7 @@ impl PullUpdateBuilder {
         self
     }
 
-    /// Set the pull request's description, which the API calls its body.
+    /// Set the pull request's description.
     #[must_use]
     pub fn body(mut self, body: impl Into<String>) -> Self {
         self.body = Some(body.into());

@@ -4,15 +4,15 @@ run = "ask"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 # Render the call ahead of the approval prompt: the user sees a diff of the
-# title and description against what GitHub currently stores before deciding
+# title and description against the PR's current text on GitHub before deciding
 # whether to overwrite them. The formatter is read-only (fetches the PR), so
 # this is safe.
 format = "allow"
 summary = "Replace the title and/or description of a pull request."
 description = """
-Overwrites the title, the description, or both, of a pull request in the
+Overwrites the title, description, or both on a pull request in the
 project's repository, using the token from `JP_GITHUB_TOKEN` or
-`GITHUB_TOKEN`. A field you omit is left unchanged.
+`GITHUB_TOKEN`. Omitted fields are left unchanged.
 
 Each value replaces the stored text entirely; there is no partial edit. To
 change one sentence in a description, read the current description with
@@ -22,8 +22,8 @@ references such as `Closes #123`) byte for byte.
 
 The title must be a single line.
 
-The user approves each call after seeing a diff against the text GitHub
-currently stores, so make every change you intend in one call.
+The user approves each call after seeing a diff against the PR's current text
+on GitHub, so make every change you intend in one call.
 """
 
 examples = """
@@ -40,7 +40,7 @@ Fix both:
 {
   "pull_number": 1234,
   "title": "feat(config): Add `style.reasoning.display`",
-  "description": "Reasoning can now be hidden, truncated, or shown in full.\\n\\nCloses #1200"
+  "description": "Controls whether reasoning is hidden, truncated, or shown in full.\\n\\nCloses #1200"
 }
 ```
 """

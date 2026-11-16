@@ -1,6 +1,5 @@
 use super::*;
 
-/// A preview as a terminal shows it, with the ANSI styling removed.
 fn strip_ansi(rendered: &str) -> String {
     String::from_utf8(strip_ansi_escapes::strip(rendered)).unwrap()
 }
@@ -31,8 +30,8 @@ fn edit_rejects_a_multi_line_title() {
 
 #[test]
 fn edit_trims_the_title() {
-    // A trailing newline is the common shape of a title copied from a commit
-    // message, so it is trimmed rather than rejected as multi-line.
+    // Titles copied from commit messages often end with a newline, so
+    // `Edit::new` trims whitespace before checking for multiple lines.
     assert_eq!(
         Edit::new(Some("  fix: Handle empty input\n".to_owned()), None),
         Ok(Edit {
@@ -93,8 +92,6 @@ fn preview_diffs_the_title_against_the_current_one() {
 
 #[test]
 fn preview_ignores_crlf_line_endings_in_the_current_description() {
-    // GitHub stores descriptions edited in its web UI with CRLF line endings.
-    // Only the second line actually changes, so only it may show as changed.
     let current = PullText {
         title: "feat: Add X".to_owned(),
         description: "First line.\r\nSecond lnie.\r\n".to_owned(),
