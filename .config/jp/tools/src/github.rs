@@ -11,6 +11,7 @@ mod create_issue_rfd_tracking;
 mod issues;
 mod pr_commits;
 mod pr_diff;
+mod pr_edit;
 mod pulls;
 mod repo;
 mod review;
@@ -22,6 +23,7 @@ use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
 use pr_commits::github_pr_commits;
 use pr_diff::github_pr_diff;
+use pr_edit::github_pr_edit;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
 use review::{github_pr_review_add_comment, github_pr_review_add_reply};
@@ -133,6 +135,16 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         .await
         .map(Into::into),
 
+        "pr_edit" => {
+            github_pr_edit(
+                ctx,
+                t.req("pull_number")?,
+                t.opt("title")?,
+                t.opt("description")?,
+            )
+            .await
+        }
+
         "pr_commits" => github_pr_commits(t.opt("repository")?, t.req("number")?, t.opt("page")?)
             .await
             .map(Into::into),
@@ -194,8 +206,9 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
 /// Initialize the GitHub client with a token, verifying it works.
 ///
-/// Use this for tools that modify state (`create_issue_*`, `pr_review_*`) or
-/// that hit endpoints which always require auth (GraphQL, search).
+/// Use this for tools that modify state (`create_issue_*`, `pr_review_*`,
+/// `pr_edit`) or that hit endpoints which always require auth (GraphQL,
+/// search).
 async fn auth() -> Result<()> {
     let token = read_token().ok_or(
         "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token.",

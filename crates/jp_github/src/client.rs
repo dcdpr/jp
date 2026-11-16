@@ -143,6 +143,20 @@ impl Octocrab {
         self.send_json(request).await
     }
 
+    pub(crate) async fn patch_json<T: DeserializeOwned, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let request = self
+            .inner
+            .client
+            .patch(format!("{}{}", self.inner.api_base, path))
+            .json(body);
+
+        self.send_json(request).await
+    }
+
     /// GET a path with a custom `Accept` header, returning the raw response
     /// body as a string.
     /// Used for endpoints that vary their content type by `Accept` (e.g. PR

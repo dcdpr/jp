@@ -277,6 +277,22 @@ impl PullsHandler {
             .await
     }
 
+    /// Begin building an edit of a pull request's title and description.
+    ///
+    /// Only the fields set on the builder are sent; GitHub leaves the others
+    /// unchanged.
+    #[must_use]
+    pub fn update(&self, number: u64) -> PullUpdateBuilder {
+        PullUpdateBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            number,
+            title: None,
+            body: None,
+        }
+    }
+
     /// Begin building a single-page fetch of the files changed in a pull
     /// request.
     ///
@@ -787,6 +803,52 @@ fn parse_diff_side(v: Option<&Value>) -> Option<models::pulls::Side> {
 /// Negative or out-of-range values yield `None`.
 fn parse_full_database_id(v: Option<&Value>) -> Option<u64> {
     v?.as_str()?.parse().ok()
+}
+
+pub struct PullUpdateBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) number: u64,
+    pub(crate) title: Option<String>,
+    pub(crate) body: Option<String>,
+}
+
+impl PullUpdateBuilder {
+    #[must_use]
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Set the pull request's description, which the API calls its body.
+    #[must_use]
+    pub fn body(mut self, body: impl Into<String>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    pub async fn send(self) -> Result<models::pulls::PullRequest> {
+        #[derive(Serialize)]
+        struct UpdatePullBody {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            title: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            body: Option<String>,
+        }
+
+        let payload = UpdatePullBody {
+            title: self.title,
+            body: self.body,
+        };
+
+        self.client
+            .patch_json(
+                &format!("/repos/{}/{}/pulls/{}", self.owner, self.repo, self.number),
+                &payload,
+            )
+            .await
+    }
 }
 
 pub struct PullReviewCreateBuilder {

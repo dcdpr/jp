@@ -1,0 +1,67 @@
+[conversation.tools.github_pr_edit]
+enable = false
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+# Render the call ahead of the approval prompt: the user sees a diff of the
+# title and description against what GitHub currently stores before deciding
+# whether to overwrite them. The formatter is read-only (fetches the PR), so
+# this is safe.
+format = "allow"
+summary = "Replace the title and/or description of a pull request."
+description = """
+Overwrites the title, the description, or both, of a pull request in the
+project's repository, using the token from `JP_GITHUB_TOKEN` or
+`GITHUB_TOKEN`. A field you omit is left unchanged.
+
+Each value replaces the stored text entirely; there is no partial edit. To
+change one sentence in a description, read the current description with
+`github_pulls` and pass the whole description back with that sentence
+changed. Keep everything else (headings, task lists, links, images, issue
+references such as `Closes #123`) byte for byte.
+
+The title must be a single line.
+
+The user approves each call after seeing a diff against the text GitHub
+currently stores, so make every change you intend in one call.
+"""
+
+examples = """
+Fix the title only:
+```json
+{
+  "pull_number": 1234,
+  "title": "fix(cli): Keep the draft when the editor exits non-zero"
+}
+```
+
+Fix both:
+```json
+{
+  "pull_number": 1234,
+  "title": "feat(config): Add `style.reasoning.display`",
+  "description": "Reasoning can now be hidden, truncated, or shown in full.\\n\\nCloses #1200"
+}
+```
+"""
+
+[conversation.tools.github_pr_edit.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.github_pr_edit.parameters.pull_number]
+type = "integer"
+required = true
+summary = "The pull request number to edit."
+
+[conversation.tools.github_pr_edit.parameters.title]
+type = "string"
+summary = "The new title. A single line. Omit to keep the current title."
+
+[conversation.tools.github_pr_edit.parameters.description]
+type = "string"
+summary = "The new description, as GitHub-flavored Markdown. Omit to keep the current one."
+description = """
+Replaces the whole description. An empty string clears it.
+"""
