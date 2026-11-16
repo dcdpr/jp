@@ -7,7 +7,8 @@
 //! events alone, without any of this.
 //! A stream stores config as a base plus a series of deltas, so an event's
 //! config is the base with every delta *before it* folded in: a forward walk
-//! carries that state as it goes, and a reverse walk reconstructs it.
+//! carries that state as it goes, and a reverse walk resolves the config after
+//! each remaining delta once, when it starts, and steps back through them.
 //!
 //! Entries that are not conversation events are stepped over: a config delta is
 //! folded into the running state, and compactions, patch overlays, and entries
@@ -18,8 +19,9 @@
 //! - [`Iter`] borrows, and walks from either end.
 //! - [`IntoIter`] takes ownership, and walks from either end.
 //!
-//! Both share one config between every event they yield until a delta changes
-//! it, so a walk copies the config once per delta rather than once per event.
+//! In either direction, both share one config between every event they yield
+//! until a delta changes it, so a walk copies the config once per delta rather
+//! than once per event.
 //!
 //! Each yields an event's entry ID alongside it.
 
@@ -98,6 +100,7 @@ impl IntoIterator for ConversationStream {
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
             current_config: Arc::new(self.base_config().to_partial()),
+            back_configs: None,
             inner_iter: self.events.into_iter(),
         }
     }
@@ -110,6 +113,10 @@ pub struct IntoIter {
     /// Shared with every event yielded since the last delta; folding a delta
     /// copies it only while a yielded event still holds it.
     current_config: Arc<PartialAppConfig>,
+
+    /// The configs a backward walk steps through, resolved by the first
+    /// `next_back`.
+    back_configs: Option<BackConfigs>,
 
     /// The iterator over the events in the stream.
     inner_iter: std::vec::IntoIter<InternalEvent>,
@@ -146,42 +153,80 @@ impl Iterator for IntoIter {
 
 impl DoubleEndedIterator for IntoIter {
     fn next_back(&mut self) -> Option<Self::Item> {
+        let back = self.back_configs.get_or_insert_with(|| {
+            BackConfigs::new(&self.current_config, self.inner_iter.as_slice())
+        });
+
         loop {
             let InternalEvent { event_id, payload } = self.inner_iter.next_back()?;
 
             match payload {
-                EventPayload::ConfigDelta(_)
-                | EventPayload::Compaction(_)
-                | EventPayload::Overlay(_)
-                | EventPayload::Unknown { .. } => {
-                    // A delta/compaction at the very end of the list affects
-                    // nothing that follows it, and it doesn't affect previous
-                    // items. We simply discard it.
-                    // event at the tail likewise yields no ConversationEvent.
-                }
+                EventPayload::ConfigDelta(_) => back.step_over_delta(),
                 EventPayload::Event(event) => {
-                    // Start with the state currently at the front of the line
-                    let mut config = (*self.current_config).clone();
-
-                    // Scan the remaining items in the middle (without consuming
-                    // them) to apply all pending deltas to our temporary
-                    // config.
-                    for internal_event in self.inner_iter.as_slice() {
-                        if let EventPayload::ConfigDelta(delta) = &internal_event.payload
-                            && let Err(error) = config_delta::fold(&mut config, delta.clone())
-                        {
-                            error!(%error, "Failed to merge config delta.");
-                        }
-                    }
-
                     return Some(ConversationEventWithConfig {
                         event_id,
                         event: *event,
-                        config: Arc::new(config),
+                        config: back.current(),
                     });
                 }
+                EventPayload::Compaction(_)
+                | EventPayload::Overlay(_)
+                | EventPayload::Unknown { .. } => {}
             }
         }
+    }
+}
+
+/// The configs a backward walk steps through.
+///
+/// Resolved once, when the walk starts: the config in effect at the front of
+/// the remaining entries, then the config after each config delta among them,
+/// in stream order.
+/// The last is the config of the event at the back; stepping back over a delta
+/// drops the config it produced.
+/// What the front of the walk folds afterwards does not change these, since an
+/// event's config depends only on the deltas before it.
+pub(super) struct BackConfigs {
+    /// The config in effect before the first remaining delta.
+    front: Arc<PartialAppConfig>,
+
+    /// The config after each remaining delta, in stream order.
+    after_deltas: Vec<Arc<PartialAppConfig>>,
+}
+
+impl BackConfigs {
+    /// Resolve the configs for a backward walk over `entries`, where `front` is
+    /// the config in effect before the first of them.
+    fn new(front: &Arc<PartialAppConfig>, entries: &[InternalEvent]) -> Self {
+        let mut after_deltas: Vec<Arc<PartialAppConfig>> = Vec::new();
+        for entry in entries {
+            let EventPayload::ConfigDelta(delta) = &entry.payload else {
+                continue;
+            };
+
+            let mut config = (**after_deltas.last().unwrap_or(front)).clone();
+            if let Err(error) = config_delta::fold(&mut config, delta.clone()) {
+                error!(%error, "Failed to merge config delta.");
+            }
+            // Pushed even when the fold fails, so each delta the walk steps
+            // back over still has exactly one entry to drop.
+            after_deltas.push(Arc::new(config));
+        }
+
+        Self {
+            front: Arc::clone(front),
+            after_deltas,
+        }
+    }
+
+    /// The config of the next event a backward walk reaches.
+    fn current(&self) -> Arc<PartialAppConfig> {
+        Arc::clone(self.after_deltas.last().unwrap_or(&self.front))
+    }
+
+    /// Step back over a config delta.
+    fn step_over_delta(&mut self) {
+        self.after_deltas.pop();
     }
 }
 
@@ -195,6 +240,10 @@ pub(super) struct Iter<'a> {
     /// Shared with every event yielded since the last delta; folding a delta
     /// copies it only while a yielded event still holds it.
     pub(super) front_config: Arc<PartialAppConfig>,
+
+    /// The configs a backward walk steps through, resolved by the first
+    /// `next_back`.
+    pub(super) back_configs: Option<BackConfigs>,
 
     /// The index of the `next` event in the iterator.
     pub(super) front: usize,
@@ -238,29 +287,29 @@ impl<'a> Iterator for Iter<'a> {
 
 impl DoubleEndedIterator for Iter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
+        let entries = &self.stream.events[self.front..self.back];
+        let back = self
+            .back_configs
+            .get_or_insert_with(|| BackConfigs::new(&self.front_config, entries));
+
         while self.back > self.front {
             self.back -= 1;
             let internal = &self.stream.events[self.back];
             let event_id = &internal.event_id;
 
-            let EventPayload::Event(event) = &internal.payload else {
-                continue;
-            };
-
-            let mut config = self.stream.base_config().to_partial();
-            for internal_event in &self.stream.events[..self.back] {
-                if let EventPayload::ConfigDelta(delta) = &internal_event.payload
-                    && let Err(error) = config_delta::fold(&mut config, delta.clone())
-                {
-                    error!(%error, "Failed to merge config delta.");
+            match &internal.payload {
+                EventPayload::ConfigDelta(_) => back.step_over_delta(),
+                EventPayload::Event(event) => {
+                    return Some(ConversationEventWithConfigRef {
+                        event_id,
+                        event,
+                        config: back.current(),
+                    });
                 }
+                EventPayload::Compaction(_)
+                | EventPayload::Overlay(_)
+                | EventPayload::Unknown { .. } => {}
             }
-
-            return Some(ConversationEventWithConfigRef {
-                event_id,
-                event,
-                config: Arc::new(config),
-            });
         }
 
         None

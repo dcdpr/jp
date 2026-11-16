@@ -3639,14 +3639,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
 /// a config copy per delta rather than per event.
 #[test]
 fn iter_shares_config_between_deltas() {
-    let mut stream = ConversationStream::new_test();
-    stream.push(ChatRequest::from("first"));
-    stream.push(ChatResponse::message("second"));
-
-    let mut partial = PartialAppConfig::empty();
-    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
-    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), partial));
-    stream.push(ChatRequest::from("third"));
+    let stream = two_configs();
 
     let events: Vec<_> = stream.iter_with_config().collect();
 
@@ -3666,14 +3659,7 @@ fn iter_shares_config_between_deltas() {
 /// does, so consuming a stream costs a config copy per delta, not per event.
 #[test]
 fn into_iter_shares_config_between_deltas() {
-    let mut stream = ConversationStream::new_test();
-    stream.push(ChatRequest::from("first"));
-    stream.push(ChatResponse::message("second"));
-
-    let mut partial = PartialAppConfig::empty();
-    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
-    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), partial));
-    stream.push(ChatRequest::from("third"));
+    let stream = two_configs();
 
     let events: Vec<_> = stream.into_iter().collect();
 
@@ -3687,6 +3673,153 @@ fn into_iter_shares_config_between_deltas() {
         events[2].config.conversation.tools.defaults.run,
         Some(RunMode::Allow)
     );
+}
+
+/// Two events, a delta, and a third event; the first two share a config.
+fn two_configs() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ChatRequest::from("first"));
+    stream.push(ChatResponse::message("second"));
+
+    let mut partial = PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), partial));
+    stream.push(ChatRequest::from("third"));
+    stream
+}
+
+/// Deltas before the first event, between events, a reset, and after the last
+/// event.
+fn layered_configs() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+
+    let mut colorless = PartialAppConfig::empty();
+    colorless.style.code.color = Some(false);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), colorless));
+    stream.push(ChatRequest::from("one"));
+    stream.push(ChatResponse::message("two"));
+
+    let mut allow = PartialAppConfig::empty();
+    allow.conversation.tools.defaults.run = Some(RunMode::Allow);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), allow));
+    stream.push(ChatRequest::from("three"));
+
+    let mut fresh = PartialAppConfig::empty();
+    fresh.user.name = Some("fresh".to_owned());
+    stream.add_config_reset(
+        ResetDelta {
+            timestamp: delta_timestamp(),
+        },
+        [ApplyDelta::new(delta_timestamp(), fresh)],
+    );
+    stream.push(ChatRequest::from("four"));
+    stream.push(ChatResponse::message("five"));
+
+    let mut edit = PartialAppConfig::empty();
+    edit.conversation.tools.defaults.run = Some(RunMode::Edit);
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), edit));
+
+    assert_eq!(stream.config_deltas().count(), 5);
+    stream
+}
+
+/// Walk `iter` alternately from the back and the front, and return what it
+/// yielded in stream order.
+fn walk_from_both_ends<I: DoubleEndedIterator>(mut iter: I) -> Vec<I::Item> {
+    let mut front = Vec::new();
+    let mut back = Vec::new();
+    loop {
+        let Some(item) = iter.next_back() else { break };
+        back.push(item);
+        let Some(item) = iter.next() else { break };
+        front.push(item);
+    }
+    front.extend(back.into_iter().rev());
+    front
+}
+
+/// A backward walk shares configs the same way a forward one does, so adding
+/// `.rev()` does not change what a walk costs.
+#[test]
+fn iter_with_config_rev_shares_config_between_deltas() {
+    let stream = two_configs();
+
+    let events: Vec<_> = stream.iter_with_config().rev().collect();
+
+    assert!(Arc::ptr_eq(&events[1].config, &events[2].config));
+    assert!(!Arc::ptr_eq(&events[0].config, &events[1].config));
+    assert_eq!(
+        events[0].config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+    assert_eq!(
+        events[1].config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+}
+
+#[test]
+fn into_iter_rev_shares_config_between_deltas() {
+    let stream = two_configs();
+
+    let events: Vec<_> = stream.into_iter().rev().collect();
+
+    assert!(Arc::ptr_eq(&events[1].config, &events[2].config));
+    assert!(!Arc::ptr_eq(&events[0].config, &events[1].config));
+    assert_eq!(
+        events[0].config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+    assert_eq!(
+        events[1].config.conversation.tools.defaults.run,
+        Some(RunMode::Ask)
+    );
+}
+
+#[test]
+fn iter_with_config_resolves_the_same_configs_in_both_directions() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.iter_with_config().collect();
+    let mut backward: Vec<_> = stream.iter_with_config().rev().collect();
+    backward.reverse();
+
+    assert_eq!(forward.len(), 5);
+    assert_eq!(forward, backward);
+}
+
+#[test]
+fn into_iter_resolves_the_same_configs_in_both_directions() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.clone().into_iter().collect();
+    let mut backward: Vec<_> = stream.into_iter().rev().collect();
+    backward.reverse();
+
+    assert_eq!(forward.len(), 5);
+    assert_eq!(forward, backward);
+}
+
+/// The front of a walk folding deltas the back has already accounted for does
+/// not shift the configs the back resolves.
+#[test]
+fn iter_with_config_resolves_the_same_configs_from_both_ends() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.iter_with_config().collect();
+    let mixed = walk_from_both_ends(stream.iter_with_config());
+
+    assert_eq!(forward, mixed);
+}
+
+#[test]
+fn into_iter_resolves_the_same_configs_from_both_ends() {
+    let stream = layered_configs();
+
+    let forward: Vec<_> = stream.clone().into_iter().collect();
+    let mixed = walk_from_both_ends(stream.into_iter());
+
+    assert_eq!(forward, mixed);
 }
 
 /// Folding a delta into the walk's config leaves configs already yielded

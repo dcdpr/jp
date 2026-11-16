@@ -728,8 +728,8 @@ impl ConversationStream {
     /// at the time the event was added.
     #[must_use]
     pub fn last(&self) -> Option<ConversationEventWithConfigRef<'_>> {
-        // `next_back` folds the deltas before the event once; `Iterator::last`
-        // would walk forward over every event.
+        // `next_back` folds each delta once and yields the last event directly;
+        // `Iterator::last` would yield every event on the way there.
         self.iter_with_config().next_back()
     }
 
@@ -1527,9 +1527,9 @@ impl ConversationStream {
     /// Iterate over the conversation events, each with its entry ID and the
     /// [`PartialAppConfig`] in effect when it was added.
     ///
-    /// Events with no config delta between them share one config allocation.
-    /// Walking backwards folds every delta before each event it yields; prefer
-    /// [`Self::iter`] whenever only event content is needed.
+    /// Events with no config delta between them share one config allocation, in
+    /// either direction.
+    /// Prefer [`Self::iter`] whenever only event content is needed.
     #[must_use]
     pub fn iter_with_config(
         &self,
@@ -1537,6 +1537,7 @@ impl ConversationStream {
         Iter {
             stream: self,
             front_config: Arc::new(self.base_config.to_partial()),
+            back_configs: None,
             front: 0,
             back: self.events.len(),
         }
