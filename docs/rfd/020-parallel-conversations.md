@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
-- **Extended by**: [RFD 069], [RFD 087]
+- **Extended by**: [RFD 069], [RFD 087], [RFD 130]
 - **Summary**: Replaces the workspace-wide active conversation with per-session
   tracking and cross-process locks so multiple terminals can run in parallel.
 
@@ -1089,3 +1089,4 @@ Identity](#session-identity) on both platforms.
 [RFD 061]: 061-interactive-config.md
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
 [RFD 087]: 087-session-scoped-active-workspace.md
+[RFD 130]: 130-session-record-retention-and-read-surface.md
