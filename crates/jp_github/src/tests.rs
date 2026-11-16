@@ -1,4 +1,4 @@
-use jp_test::mock::{DELETE, GET, MockServer, POST};
+use jp_test::mock::{DELETE, GET, MockServer, PATCH, POST};
 use serde_json::{Value, json};
 
 use crate::{Error, Octocrab, params};
@@ -836,6 +836,66 @@ async fn pulls_get_exposes_changed_files_count() {
 
     assert_eq!(pull.changed_files, 17);
     assert_eq!(pull.comments, 3);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_update_sends_title_and_body() {
+    let server = MockServer::start_async().await;
+    let mut pr = pull_json(42);
+    pr["title"] = json!("feat: New title");
+    pr["body"] = json!("New description.");
+
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(PATCH)
+                .path("/repos/acme/widgets/pulls/42")
+                .json_body(json!({
+                    "title": "feat: New title",
+                    "body": "New description."
+                }));
+            then.status(200).json_body(pr);
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let pull = client
+        .pulls("acme", "widgets")
+        .update(42)
+        .title("feat: New title")
+        .body("New description.")
+        .send()
+        .await
+        .expect("update pull");
+
+    assert_eq!(pull.title.as_deref(), Some("feat: New title"));
+    assert_eq!(pull.body.as_deref(), Some("New description."));
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_update_omits_unset_fields() {
+    // GitHub leaves an omitted field unchanged, so a title-only edit must not
+    // send `body` in any form.
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(PATCH)
+                .path("/repos/acme/widgets/pulls/42")
+                .json_body(json!({ "title": "fix: Only the title" }));
+            then.status(200).json_body(pull_json(42));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    client
+        .pulls("acme", "widgets")
+        .update(42)
+        .title("fix: Only the title")
+        .send()
+        .await
+        .expect("update pull");
+
     mock.assert();
 }
 
