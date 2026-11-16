@@ -39,6 +39,7 @@ use crate::{
     decide::{Action, Decide, Verdict},
     host::{Host, Level, ReplyError, fields},
     inbox::{Inbox, Incoming, Next},
+    inject::{Injected, Injector, render},
     options::Options,
     queue::{Queue, Waiting},
     state::{Conversations, State},
@@ -106,10 +107,12 @@ pub(crate) enum Event {
         result: Result<(), String>,
     },
 
-    /// Classification result for the front message in the inbox.
+    /// Classification result for the front message in the inbox, and the
+    /// context looked up for it when it is to be answered.
     Decided {
         result: Result<Verdict, String>,
         took: Duration,
+        injected: Option<Injected>,
     },
 
     /// Compaction of `chat`'s conversation completed.
@@ -142,6 +145,9 @@ pub(crate) struct Bridge<H: Host, C: Checkout> {
 
     inbox: Inbox,
 
+    /// Looks up context for messages to be answered, when `inject` is set.
+    injector: Option<Arc<Injector>>,
+
     events_tx: mpsc::UnboundedSender<Event>,
     events_rx: mpsc::UnboundedReceiver<Event>,
 }
@@ -167,6 +173,7 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             running: None,
             paused: None,
             inbox: Inbox::default(),
+            injector: None,
             events_tx,
             events_rx,
         }
@@ -176,6 +183,20 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     pub(crate) fn with_decider(mut self, decider: Option<Arc<dyn Decide>>) -> Self {
         self.inbox.decide_with(decider);
         self
+    }
+
+    /// Configure the [`Injector`] that looks up context for decided messages.
+    pub(crate) fn with_injector(mut self, injector: Option<Arc<Injector>>) -> Self {
+        self.injector = injector;
+        self
+    }
+
+    /// The probability a decided action needs to be acted on.
+    fn threshold(&self) -> f64 {
+        self.options
+            .decide
+            .as_ref()
+            .map_or(0.0, |decide| decide.threshold)
     }
 
     /// Process inbound messages and turn events until shutdown or transport
@@ -295,14 +316,27 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
         while let Some(next) = self.inbox.next() {
             match next {
                 Next::Take(incoming) => self.route(incoming),
-                Next::Decide(decision) => {
+                Next::Decide(decision, text) => {
                     let events = self.events_tx.clone();
+                    let injector = self.injector.clone();
+                    let threshold = self.threshold();
                     tokio::spawn(async move {
                         let asked = Instant::now();
                         let result = decision.await;
+                        let took = asked.elapsed();
+                        // Lookups run before the message is routed, so the
+                        // inbox stays blocked and later messages can't
+                        // overtake it.
+                        let injected = match injector {
+                            Some(injector) => {
+                                look_up(&injector, &text, result.as_ref().ok(), threshold).await
+                            }
+                            None => None,
+                        };
                         drop(events.send(Event::Decided {
                             result,
-                            took: asked.elapsed(),
+                            took,
+                            injected,
                         }));
                     });
                 }
@@ -314,16 +348,19 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     /// took.
     fn log_decision(&self, result: &Result<Verdict, String>, chat: &Chat, took: Duration) {
         match result {
-            Ok(verdict) => self.host.log_with(
-                Level::INFO,
-                "Message classified.",
-                fields([
+            Ok(verdict) => {
+                let mut data = fields([
                     ("chat", chat.to_string().into()),
                     ("action", verdict.action.key().into()),
                     ("probability", verdict.probability.into()),
                     ("took_ms", millis(took)),
-                ]),
-            ),
+                ]);
+                if let Some(pick) = &verdict.pack {
+                    data.insert("pack".to_owned(), pick.name.clone().into());
+                    data.insert("pack_probability".to_owned(), pick.probability.into());
+                }
+                self.host.log_with(Level::INFO, "Message classified.", data);
+            }
             Err(error) => self.host.log_with(
                 Level::WARN,
                 "Decide failed, answering.",
@@ -337,17 +374,22 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
     }
 
     /// Apply the decision for the front inbox message and advance the inbox.
-    fn decided(&mut self, result: Result<Verdict, String>, took: Duration) {
-        let threshold = self
-            .options
-            .decide
-            .as_ref()
-            .map_or(0.0, |decide| decide.threshold);
-
+    fn decided(
+        &mut self,
+        result: &Result<Verdict, String>,
+        took: Duration,
+        injected: Option<Injected>,
+    ) {
         if let Some(incoming) = self.inbox.decided() {
-            self.log_decision(&result, &incoming.chat, took);
-            match action(result.ok(), threshold) {
-                Action::Answer => self.route(incoming),
+            self.log_decision(result, &incoming.chat, took);
+            match action(result.as_ref().ok(), self.threshold()) {
+                Action::Answer => {
+                    let incoming = match injected {
+                        Some(injected) => self.with_context(incoming, &injected),
+                        None => incoming,
+                    };
+                    self.route(incoming);
+                }
                 Action::Ignore => self.host.log_with(
                     Level::INFO,
                     "Message ignored.",
@@ -392,6 +434,52 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
             }
         }
         self.pump();
+    }
+
+    /// Append the context `injected` produced to `incoming`'s text, and log the
+    /// lookups.
+    fn with_context(&self, mut incoming: Incoming, injected: &Injected) -> Incoming {
+        let chat = incoming.chat.to_string();
+        for (lookup, error) in &injected.failures {
+            self.host.log_with(
+                Level::WARN,
+                "Context lookup failed.",
+                fields([
+                    ("chat", chat.as_str().into()),
+                    ("lookup", lookup.title.as_str().into()),
+                    ("error", error.as_str().into()),
+                ]),
+            );
+        }
+
+        let titles: Vec<&str> = injected
+            .sections
+            .iter()
+            .map(|section| section.lookup.title.as_str())
+            .collect();
+        self.host.log_with(
+            Level::INFO,
+            "Context looked up.",
+            fields([
+                ("chat", chat.as_str().into()),
+                ("lookups", json!(titles)),
+                ("failed", injected.failures.len().into()),
+                ("took_ms", millis(injected.took)),
+            ]),
+        );
+
+        if let Some(injector) = &self.injector
+            && !injected.sections.is_empty()
+        {
+            incoming.text = render(
+                &incoming.text,
+                self.conversations.today(),
+                &injected.sections,
+                injector.max_chars(),
+            );
+        }
+
+        incoming
     }
 
     /// Hand `incoming` to the running turn, or queue it for a turn of its own.
@@ -489,7 +577,11 @@ impl<H: Host, C: Checkout> Bridge<H, C> {
 
             Event::Ended { result } => self.ended(result).await,
 
-            Event::Decided { result, took } => self.decided(result, took),
+            Event::Decided {
+                result,
+                took,
+                injected,
+            } => self.decided(&result, took, injected),
 
             Event::Compacted { chat, result } => self.compacted(&chat, result),
 
@@ -796,10 +888,29 @@ fn phases(running: &Running, ended: Instant, answered: Instant) -> Option<Map<St
 ///
 /// Falls back to [`Action::Answer`] when the request failed or the verdict's
 /// probability is below `threshold`.
-fn action(verdict: Option<Verdict>, threshold: f64) -> Action {
+fn action(verdict: Option<&Verdict>, threshold: f64) -> Action {
     verdict
         .filter(|verdict| verdict.probability >= threshold)
         .map_or(Action::Answer, |verdict| verdict.action)
+}
+
+/// Look up context for the message `text` when `verdict` says to answer it, or
+/// `None` when it isn't answered or nothing is to be looked up.
+async fn look_up(
+    injector: &Injector,
+    text: &str,
+    verdict: Option<&Verdict>,
+    threshold: f64,
+) -> Option<Injected> {
+    if action(verdict, threshold) != Action::Answer {
+        return None;
+    }
+    let lookups = injector.lookups(text, verdict.and_then(|verdict| verdict.pack.as_ref()));
+    if lookups.is_empty() {
+        return None;
+    }
+
+    Some(injector.inject(lookups).await)
 }
 
 /// Spawn a task to compact `conversation` on the host and emit

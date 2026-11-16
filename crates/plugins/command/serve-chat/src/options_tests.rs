@@ -59,6 +59,7 @@ fn unset_options_take_their_defaults() {
                 }),
                 summary: None,
             }],
+            inject: None,
         })
     );
 }
@@ -168,6 +169,138 @@ fn a_decide_threshold_is_a_probability() {
              from 0 to 1."
                 .to_owned()
         )
+    );
+}
+
+/// [`minimal`], deciding with Jev and injecting `inject`.
+fn injecting(inject: Value) -> Value {
+    let mut options = minimal();
+    options["decide"] = json!({});
+    options["inject"] = inject;
+    options
+}
+
+#[test]
+fn inject_reads_packs_and_references() {
+    let inject = read(injecting(json!({
+        "packs": {
+            "oldest": {
+                "when": " The message asks for the oldest tickets. ",
+                "command": ["jp", "ticket", "list", "--order", "filed"]
+            },
+            "in_progress": {
+                "when": "The message asks about work in progress.",
+                "title": "Work in progress",
+                "command": ["jp", "ticket", "list", "--status", "in progress"]
+            }
+        },
+        "references": [
+            { "pattern": "\\bT-[0-9a-z]{7}\\b", "command": ["jp", "ticket", "show", "{0}"] }
+        ]
+    })))
+    .unwrap()
+    .inject
+    .unwrap();
+
+    assert!(
+        inject.threshold.total_cmp(&0.5).is_eq(),
+        "{}",
+        inject.threshold
+    );
+    assert_eq!(inject.max_chars, 8000);
+    assert_eq!(inject.instructions, DEFAULT_INJECT_INSTRUCTIONS);
+    assert_eq!(inject.packs["oldest"], Pack {
+        when: "The message asks for the oldest tickets.".to_owned(),
+        title: "oldest".to_owned(),
+        command: vec![
+            "jp".to_owned(),
+            "ticket".to_owned(),
+            "list".to_owned(),
+            "--order".to_owned(),
+            "filed".to_owned()
+        ],
+    });
+    assert_eq!(inject.packs["in_progress"].title, "Work in progress");
+    assert_eq!(inject.references[0].pattern.as_str(), r"\bT-[0-9a-z]{7}\b");
+}
+
+/// The decide model picks the pack, and the lookups run while a message is
+/// decided, so `inject` without `decide` would never run.
+#[test]
+fn inject_needs_decide() {
+    let mut options = minimal();
+    options["inject"] = json!({});
+
+    assert_eq!(
+        read(options),
+        Err("`plugins.command.serve-chat.options.inject` needs \
+             `plugins.command.serve-chat.options.decide`: the decide model picks the pack, and \
+             the lookups run while a message is being decided."
+            .to_owned())
+    );
+}
+
+#[test]
+fn an_unusable_pack_or_reference_is_refused() {
+    let key = "plugins.command.serve-chat.options.inject";
+    let cases = [
+        (
+            json!({ "packs": { "none": { "when": "x", "command": ["jp"] } } }),
+            format!(
+                "`{key}.packs.none` needs another name: lowercase letters, digits, and `_`, other \
+                 than `none`."
+            ),
+        ),
+        (
+            json!({ "packs": { "Oldest": { "when": "x", "command": ["jp"] } } }),
+            format!(
+                "`{key}.packs.Oldest` needs another name: lowercase letters, digits, and `_`, \
+                 other than `none`."
+            ),
+        ),
+        (
+            json!({ "packs": { "oldest": { "command": ["jp"] } } }),
+            format!(
+                "`{key}.packs.oldest.when` is required: it tells the decide model when to pick \
+                 the pack."
+            ),
+        ),
+        (
+            json!({ "packs": { "oldest": { "when": "x", "command": [] } } }),
+            format!(
+                "`{key}.packs.oldest.command` is required: the program to run and its arguments."
+            ),
+        ),
+        (
+            json!({ "references": [{ "pattern": "T-", "command": [" "] }] }),
+            format!(
+                "`{key}.references[0].command` is required: the program to run and its arguments."
+            ),
+        ),
+        (
+            json!({ "threshold": 2 }),
+            format!("`{key}.threshold` is `2`; it is a probability, from 0 to 1."),
+        ),
+        (
+            json!({ "max_chars": 0 }),
+            format!("`{key}.max_chars` is 0, which keeps nothing; leave it out for the default."),
+        ),
+    ];
+
+    for (inject, error) in cases {
+        assert_eq!(read(injecting(inject.clone())), Err(error), "{inject}");
+    }
+
+    let error = read(injecting(
+        json!({ "references": [{ "pattern": "(", "command": ["jp"] }] }),
+    ))
+    .unwrap_err();
+    assert!(
+        error.starts_with(
+            "`plugins.command.serve-chat.options.inject.references[0].pattern` is not a regular \
+             expression: "
+        ),
+        "{error}"
     );
 }
 

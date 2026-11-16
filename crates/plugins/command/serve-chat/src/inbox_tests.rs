@@ -16,6 +16,7 @@ impl Decide for Recorder {
             Ok(Verdict {
                 action: Action::Answer,
                 probability: 1.0,
+                pack: None,
             })
         })
     }
@@ -44,7 +45,7 @@ fn inbox() -> (Inbox, Arc<Recorder>) {
 fn take(inbox: &mut Inbox) -> Option<Incoming> {
     match inbox.next()? {
         Next::Take(incoming) => Some(incoming),
-        Next::Decide(_) => panic!("expected a message to take, got a decision"),
+        Next::Decide(..) => panic!("expected a message to take, got a decision"),
     }
 }
 
@@ -73,7 +74,7 @@ fn a_message_waits_behind_one_being_decided() {
         "Ada Client (to you): actually second".to_owned(),
     );
 
-    assert!(matches!(inbox.next(), Some(Next::Decide(_))));
+    assert!(matches!(inbox.next(), Some(Next::Decide(..))));
     assert!(inbox.next().is_none(), "a message overtook the decision");
     assert_eq!(recorder.0.lock().unwrap().len(), 1);
 
@@ -84,7 +85,7 @@ fn a_message_waits_behind_one_being_decided() {
             Some("Last message:\nAda Client: rank it first")
         ))
     );
-    assert!(matches!(inbox.next(), Some(Next::Decide(_))));
+    assert!(matches!(inbox.next(), Some(Next::Decide(..))));
     assert_eq!(recorder.0.lock().unwrap().len(), 2);
 }
 

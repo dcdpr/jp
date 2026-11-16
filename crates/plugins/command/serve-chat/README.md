@@ -147,6 +147,61 @@ because the turn holds the conversation lock.
   delivered as an in-turn reply.
 - The persona's `NO_REPLY` sentinel still applies to turns that run.
 
+### Injected context
+
+With `decide` set, the bridge can look things up for a message before its turn
+runs, and append them to the message under an `# Auto-Injected Context`
+heading, so the assistant has them without calling a tool:
+
+- **References**: each id the message names that matches a pattern in
+  `inject.references` runs that reference's command, `{0}` standing for the
+  whole match and `{1}` onwards for its groups. At most five ids are looked up
+  per message.
+- **Packs**: the decide request asks a second question, which of
+  `inject.packs` (or none) the assistant needs, and runs the picked pack's
+  command when its probability is at least `inject.threshold`. Each pack's
+  `when` is the criterion the decide model reads.
+
+```toml
+[[plugins.command.serve-chat.options.inject.references]]
+pattern = '\bT-[0-9a-z]{7}\b'
+command = ["jp", "ticket", "show", "{0}"]
+
+[plugins.command.serve-chat.options.inject.packs.oldest]
+when = "The last message asks which tickets are the oldest, or were filed first."
+title = "Tickets, oldest first"
+command = ["jp", "ticket", "list", "--order", "filed"]
+
+[plugins.command.serve-chat.options.inject.packs.newest]
+when = "The last message asks what was filed recently."
+title = "Tickets, newest first"
+command = ["jp", "ticket", "list", "--order", "filed:desc"]
+
+[plugins.command.serve-chat.options.inject.packs.due]
+when = "The last message asks what is due, overdue, or has a deadline."
+title = "Open tickets, due soonest first"
+command = ["jp", "ticket", "list", "--status", "todo", "--order", "due"]
+
+[plugins.command.serve-chat.options.inject.packs.done]
+when = "The last message asks what was finished or shipped."
+title = "Done"
+command = ["jp", "ticket", "board", "--status", "done", "--limit", "20"]
+```
+
+Adding or removing a pack is a configuration change: the bridge offers the
+decide model whatever packs are configured when it starts.
+
+- Commands run in the workspace root, concurrently, each for at most ten
+  seconds. Each output is truncated to `inject.max_chars` characters.
+- A failed lookup is logged (`Context lookup failed.`) and left out; the
+  message goes on without it.
+- Nothing is looked up for a message that isn't answered.
+- `Message classified.` logs the picked pack and its probability, and
+  `Context looked up.` logs what was looked up, which shows which packs are
+  used, and which questions might need a new one.
+- The context stays in the conversation, dated, so on a later turn the
+  assistant reads it as a snapshot.
+
 Signal mentions may reference the bridge's account by UUID (ACI) instead of
 phone number.
 Set `signal.account_id` to the bridge account's UUID so those mentions are
@@ -304,6 +359,11 @@ turn even within an existing conversation.
 | `decide.api_key_env`     | `JEV_API_KEY`; `""` sends no token     |
 | `decide.threshold`       | `0.5`                                  |
 | `decide.instructions`    | "What should the assistant do...?"     |
+| `inject.threshold`       | `0.5`                                  |
+| `inject.instructions`    | "Which of these would ... need...?"     |
+| `inject.max_chars`       | `8000`                                 |
+| `inject.packs`           | none                                   |
+| `inject.references`      | none                                   |
 | `people.<key>.name`      | required                               |
 | `people.<key>.signal`    | none                                   |
 | `checkout.enabled`       | `true`                                 |

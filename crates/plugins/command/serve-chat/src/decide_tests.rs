@@ -29,6 +29,7 @@ fn a_message_is_offered_every_action() {
         &options(),
         "Last message:\nAda Client (to you): compact please",
         Action::ALL,
+        None,
     );
 
     assert_eq!(body["model"], "jev-latest");
@@ -65,10 +66,11 @@ fn the_answer_is_the_chosen_action_and_its_probability() {
     });
 
     assert_eq!(
-        verdict(&body, Action::ALL),
+        verdict(&body, Action::ALL, None),
         Ok(Verdict {
             action: Action::NewConversation,
             probability: 0.82,
+            pack: None,
         })
     );
 }
@@ -95,7 +97,11 @@ fn an_answer_the_bridge_cant_act_on_is_an_error() {
     ];
 
     for (body, error) in cases {
-        assert_eq!(verdict(&body, Action::ALL), Err(error.to_owned()), "{body}");
+        assert_eq!(
+            verdict(&body, Action::ALL, None),
+            Err(error.to_owned()),
+            "{body}"
+        );
     }
 }
 
@@ -104,7 +110,90 @@ fn a_command_that_wasnt_offered_is_an_error() {
     let body = json!({ "answers": { "action": { "choice": "compact", "probabilities": { "compact": 0.9 } } } });
 
     assert_eq!(
-        verdict(&body, &[Action::Ignore, Action::Answer]),
+        verdict(&body, &[Action::Ignore, Action::Answer], None),
         Err("the decide API chose `compact`, which isn't an option".to_owned())
     );
+}
+
+fn packs() -> PackQuestion {
+    PackQuestion {
+        instructions: "Which of these does the assistant need?".to_owned(),
+        packs: vec![
+            (
+                "in_progress".to_owned(),
+                "The message asks about work in progress.".to_owned(),
+            ),
+            (
+                "oldest".to_owned(),
+                "The message asks for the oldest tickets.".to_owned(),
+            ),
+        ],
+    }
+}
+
+/// With packs configured, the same request asks which one the assistant needs,
+/// offering `none` beside them.
+#[test]
+fn the_request_asks_which_pack_the_assistant_needs() {
+    let body = request_body(&options(), "Last message:\nhi", Action::ALL, Some(&packs()));
+
+    assert_eq!(
+        body["questions"]["pack"],
+        json!({
+            "type": "choice",
+            "instructions": "Which of these does the assistant need?",
+            "criteria": {
+                "none": "The assistant needs none of the other options to answer the last message, \
+                         or the message asks nothing of it.",
+                "in_progress": "The message asks about work in progress.",
+                "oldest": "The message asks for the oldest tickets."
+            }
+        })
+    );
+    assert_eq!(body["questions"]["action"]["type"], "choice");
+}
+
+fn answered(pack: &Value) -> Value {
+    json!({
+        "answers": {
+            "action": { "choice": "answer", "probabilities": { "answer": 0.9 } },
+            "pack": pack
+        }
+    })
+}
+
+#[test]
+fn the_verdict_carries_the_picked_pack() {
+    let body = answered(&json!({
+        "choice": "oldest",
+        "probabilities": { "none": 0.2, "in_progress": 0.1, "oldest": 0.7 }
+    }));
+
+    assert_eq!(
+        verdict(&body, Action::ALL, Some(&packs())).unwrap().pack,
+        Some(Pick {
+            name: "oldest".to_owned(),
+            probability: 0.7
+        })
+    );
+}
+
+/// `none`, an unknown pack, or a malformed pack answer picks no pack, and still
+/// leaves the action to act on.
+#[test]
+fn an_unusable_pack_answer_picks_none_and_keeps_the_action() {
+    for pack in [
+        json!({ "choice": "none", "probabilities": { "none": 0.9 } }),
+        json!({ "choice": "newest", "probabilities": { "newest": 0.9 } }),
+        json!({ "choice": "oldest" }),
+        json!(null),
+    ] {
+        let verdict = verdict(&answered(&pack), Action::ALL, Some(&packs())).unwrap();
+
+        assert_eq!(
+            (verdict.action, verdict.pack),
+            (Action::Answer, None),
+            "{pack}"
+        );
+    }
 }

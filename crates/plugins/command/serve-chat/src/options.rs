@@ -26,6 +26,21 @@
 //! tool_calls = { mode = "strip" }
 //! ```
 //!
+//! `inject` appends looked-up context to a message before its turn runs: the
+//! output of a command for each id the message names (`references`), and of the
+//! one `packs` entry the decide model picks for it.
+//! It needs `decide`:
+//!
+//! ```toml
+//! [[plugins.command.serve-chat.options.inject.references]]
+//! pattern = '\bT-[0-9a-z]{7}\b'
+//! command = ["jp", "ticket", "show", "{0}"]
+//!
+//! [plugins.command.serve-chat.options.inject.packs.oldest]
+//! when = "The last message asks which tickets are the oldest."
+//! command = ["jp", "ticket", "list", "--order", "filed"]
+//! ```
+//!
 //! Only messages from senders in `people` are answered; all other messages are
 //! dropped.
 //! Every option except `people` and `signal.account` is optional.
@@ -36,6 +51,7 @@ use std::{collections::BTreeMap, num::NonZeroI64, time::Duration};
 use camino::Utf8PathBuf;
 use chrono::{Datelike as _, Days, NaiveDate, Weekday};
 use jp_plugin::message::{Compaction, ReasoningCompaction, ToolCallsCompaction, ToolCallsMode};
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -69,6 +85,19 @@ const SECOND_TO_LAST_TURN: NonZeroI64 = NonZeroI64::new(-2).unwrap();
 pub(crate) const DEFAULT_DECIDE_INSTRUCTIONS: &str =
     "What should the assistant do with the last message in this chat?";
 
+/// Default prompt for the pack question when `inject.instructions` is unset.
+pub(crate) const DEFAULT_INJECT_INSTRUCTIONS: &str =
+    "Which of these would the assistant need to answer the last message in this chat?";
+
+const DEFAULT_INJECT_MAX_CHARS: usize = 8000;
+
+/// The pack choice meaning "look nothing up", which no pack may be named.
+pub(crate) const NO_PACK: &str = "none";
+
+/// The most packs one question can offer: System One allows 255 choices, and
+/// [`NO_PACK`] takes one.
+const MAX_PACKS: usize = 254;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Options {
     /// Configuration value passed via `--cfg` on every turn.
@@ -99,6 +128,57 @@ pub(crate) struct Options {
 
     /// Compaction rules sent to the host when a user requests compaction.
     pub compact: Vec<Compaction>,
+
+    /// Context looked up and appended to messages before their turns.
+    pub inject: Option<InjectOptions>,
+}
+
+/// What the bridge looks up and appends to a message before its turn.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InjectOptions {
+    /// Minimum probability for the decide model's pack pick to be looked up.
+    pub threshold: f64,
+
+    /// Question prompt for picking a pack.
+    pub instructions: String,
+
+    /// Characters of one lookup's output kept; the rest is truncated.
+    pub max_chars: usize,
+
+    /// Context packs the decide model picks from, by name.
+    pub packs: BTreeMap<String, Pack>,
+
+    /// Patterns whose matches in a message are looked up.
+    pub references: Vec<Reference>,
+}
+
+/// A context pack the decide model can pick for a message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Pack {
+    /// When to pick it, as the criterion the decide model reads.
+    pub when: String,
+
+    /// Heading of its section; defaults to the pack's name.
+    pub title: String,
+
+    /// Program and arguments whose output is the pack's content.
+    pub command: Vec<String>,
+}
+
+/// A pattern whose matches in a message are looked up with `command`.
+#[derive(Debug, Clone)]
+pub(crate) struct Reference {
+    pub pattern: Regex,
+
+    /// Program and arguments, with `{0}` replaced by the whole match and `{1}`
+    /// onwards by its capture groups.
+    pub command: Vec<String>,
+}
+
+impl PartialEq for Reference {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern.as_str() == other.pattern.as_str() && self.command == other.command
+    }
 }
 
 /// Configuration for the System One decide API.
@@ -205,6 +285,32 @@ struct Raw {
     signal: RawSignal,
     decide: Option<RawDecide>,
     compact: Option<Vec<Compaction>>,
+    inject: Option<RawInject>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RawInject {
+    threshold: Option<f64>,
+    instructions: Option<String>,
+    max_chars: Option<usize>,
+    packs: BTreeMap<String, RawPack>,
+    references: Vec<RawReference>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RawPack {
+    when: String,
+    title: Option<String>,
+    command: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RawReference {
+    pattern: String,
+    command: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -267,6 +373,12 @@ impl Options {
 
         let rollover = rollover(raw.rollover.as_deref())?;
         let conversation_ttl = conversation_ttl(raw.conversation_ttl, rollover)?;
+        if raw.inject.is_some() && raw.decide.is_none() {
+            return Err(format!(
+                "`{KEY}.inject` needs `{KEY}.decide`: the decide model picks the pack, and the \
+                 lookups run while a message is being decided."
+            ));
+        }
 
         Ok(Self {
             persona: raw.persona.filter(|persona| !persona.trim().is_empty()),
@@ -283,6 +395,7 @@ impl Options {
             signal: signal(raw.signal)?,
             decide: raw.decide.map(decide).transpose()?,
             compact: compact(raw.compact)?,
+            inject: raw.inject.map(inject).transpose()?,
         })
     }
 
@@ -365,6 +478,101 @@ fn decide(raw: RawDecide) -> Result<DecideOptions, String> {
             .filter(|instructions| !instructions.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_DECIDE_INSTRUCTIONS.to_owned()),
     })
+}
+
+fn inject(raw: RawInject) -> Result<InjectOptions, String> {
+    let threshold = raw.threshold.unwrap_or(DEFAULT_DECIDE_THRESHOLD);
+    if !(0.0..=1.0).contains(&threshold) {
+        return Err(format!(
+            "`{KEY}.inject.threshold` is `{threshold}`; it is a probability, from 0 to 1."
+        ));
+    }
+    let max_chars = raw.max_chars.unwrap_or(DEFAULT_INJECT_MAX_CHARS);
+    if max_chars == 0 {
+        return Err(format!(
+            "`{KEY}.inject.max_chars` is 0, which keeps nothing; leave it out for the default."
+        ));
+    }
+    if raw.packs.len() > MAX_PACKS {
+        return Err(format!(
+            "`{KEY}.inject.packs` names {} packs; the decide model picks from at most {MAX_PACKS}.",
+            raw.packs.len()
+        ));
+    }
+
+    Ok(InjectOptions {
+        threshold,
+        instructions: raw
+            .instructions
+            .filter(|instructions| !instructions.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_INJECT_INSTRUCTIONS.to_owned()),
+        max_chars,
+        packs: raw
+            .packs
+            .into_iter()
+            .map(|(name, pack)| pack_entry(name, pack))
+            .collect::<Result<_, _>>()?,
+        references: raw
+            .references
+            .into_iter()
+            .enumerate()
+            .map(|(index, reference)| reference_entry(index, reference))
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn pack_entry(name: String, raw: RawPack) -> Result<(String, Pack), String> {
+    let key = format!("{KEY}.inject.packs.{name}");
+    let named = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if !named || name == NO_PACK {
+        return Err(format!(
+            "`{key}` needs another name: lowercase letters, digits, and `_`, other than \
+             `{NO_PACK}`."
+        ));
+    }
+    if raw.when.trim().is_empty() {
+        return Err(format!(
+            "`{key}.when` is required: it tells the decide model when to pick the pack."
+        ));
+    }
+    command(&key, &raw.command)?;
+
+    let title = raw
+        .title
+        .map(|title| title.trim().to_owned())
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| name.clone());
+
+    Ok((name, Pack {
+        when: raw.when.trim().to_owned(),
+        title,
+        command: raw.command,
+    }))
+}
+
+fn reference_entry(index: usize, raw: RawReference) -> Result<Reference, String> {
+    let key = format!("{KEY}.inject.references[{index}]");
+    let pattern = Regex::new(&raw.pattern)
+        .map_err(|error| format!("`{key}.pattern` is not a regular expression: {error}"))?;
+    command(&key, &raw.command)?;
+
+    Ok(Reference {
+        pattern,
+        command: raw.command,
+    })
+}
+
+/// Check `command` at `key` names a program to run.
+fn command(key: &str, command: &[String]) -> Result<(), String> {
+    match command.first() {
+        Some(program) if !program.trim().is_empty() => Ok(()),
+        _ => Err(format!(
+            "`{key}.command` is required: the program to run and its arguments."
+        )),
+    }
 }
 
 /// Validate `conversation_ttl`, defaulting based on `rollover` and rejecting

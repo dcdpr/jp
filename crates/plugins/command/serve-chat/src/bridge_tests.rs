@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env,
     future::{self, Future},
     sync::Mutex,
@@ -13,18 +13,23 @@ use jp_config::{
     util::{build, load_partial_at_path},
 };
 use pretty_assertions::assert_eq;
+use regex::Regex;
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::{
-    decide::{Action, Decision, Verdict},
+    decide::{Action, Decision, Pick, Verdict},
     host::{NewTurn, Turn, tool_names},
-    options::{DecideOptions, Rollover},
+    inject::{Output, Run},
+    options::{DecideOptions, InjectOptions, Pack, Reference, Rollover},
     turn::turn_cfg,
 };
 
 struct HostLog {
     calls: Vec<String>,
+
+    /// The content of each turn started or queried, in full.
+    contents: Vec<String>,
     turns: Vec<oneshot::Sender<Result<(), String>>>,
     conversations: u32,
     refuse_replies: bool,
@@ -47,6 +52,7 @@ impl Default for HostLog {
     fn default() -> Self {
         Self {
             calls: vec![],
+            contents: vec![],
             turns: vec![],
             conversations: 0,
             refuse_replies: false,
@@ -70,6 +76,10 @@ struct FakeHost(Arc<Mutex<HostLog>>);
 impl FakeHost {
     fn calls(&self) -> Vec<String> {
         self.0.lock().unwrap().calls.clone()
+    }
+
+    fn contents(&self) -> Vec<String> {
+        self.0.lock().unwrap().contents.clone()
     }
 
     fn logs(&self) -> Vec<String> {
@@ -143,6 +153,7 @@ impl Host for FakeHost {
                 "start {:?} titled {:?}, expiring in {}, with {:?}",
                 turn.content, turn.title, turn.expires_in, turn.cfg
             ));
+            log.contents.push(turn.content);
             log.cfgs.push(turn.cfg);
             format!("c{}", log.conversations)
         };
@@ -154,6 +165,7 @@ impl Host for FakeHost {
         {
             let mut log = self.0.lock().unwrap();
             log.calls.push(format!("query {conversation} {content:?}"));
+            log.contents.push(content.to_owned());
             log.cfgs.push(cfg);
         }
         self.turn()
@@ -950,7 +962,71 @@ fn verdict(action: Action, probability: f64) -> Verdict {
     Verdict {
         action,
         probability,
+        pack: None,
     }
+}
+
+/// [`verdict`], with `pack` picked at `pack_probability`.
+fn verdict_with_pack(action: Action, pack: &str, pack_probability: f64) -> Verdict {
+    Verdict {
+        pack: Some(Pick {
+            name: pack.to_owned(),
+            probability: pack_probability,
+        }),
+        ..verdict(action, 0.9)
+    }
+}
+
+/// Answers each command with a canned result, and records the commands run.
+#[derive(Default)]
+struct CannedRunner {
+    answers: BTreeMap<String, Result<String, String>>,
+    ran: Mutex<Vec<String>>,
+}
+
+impl Run for CannedRunner {
+    fn run(&self, command: &[String]) -> Output {
+        let command = command.join(" ");
+        self.ran.lock().unwrap().push(command.clone());
+        let result = self
+            .answers
+            .get(&command)
+            .cloned()
+            .unwrap_or_else(|| Err(format!("no answer for `{command}`")));
+
+        Box::pin(future::ready(result))
+    }
+}
+
+fn args(command: &str) -> Vec<String> {
+    command.split(' ').map(ToOwned::to_owned).collect()
+}
+
+/// [`deciding`], with ticket ids and an `oldest` pack looked up by `runner`.
+fn injecting(
+    answers: Vec<Result<Verdict, String>>,
+    runner: CannedRunner,
+) -> (Fixture, Arc<CannedRunner>) {
+    let (mut f, _) = deciding(answers);
+    let inject = InjectOptions {
+        threshold: 0.5,
+        instructions: "Which of these?".to_owned(),
+        max_chars: 8000,
+        packs: BTreeMap::from([("oldest".to_owned(), Pack {
+            when: "The message asks for the oldest tickets.".to_owned(),
+            title: "Oldest tickets".to_owned(),
+            command: args("jp ticket list --order filed"),
+        })]),
+        references: vec![Reference {
+            pattern: Regex::new(r"\bT-[0-9a-z]{7}\b").unwrap(),
+            command: args("jp ticket show {0}"),
+        }],
+    };
+    let runner = Arc::new(runner);
+    let injector = Injector::new(inject, Arc::clone(&runner) as Arc<dyn Run>);
+    f.bridge.injector = Some(Arc::new(injector));
+
+    (f, runner)
 }
 
 fn deciding(answers: Vec<Result<Verdict, String>>) -> (Fixture, Arc<FakeDecider>) {
@@ -1007,6 +1083,119 @@ async fn a_group_message_the_decider_ignores_gets_no_turn() {
         "action": "ignore",
         "probability": 0.9,
         "took_ms": 400,
+    })]);
+}
+
+/// A message to answer carries what it names and what the decide model picked,
+/// looked up before its turn starts, so the assistant needn't call a tool for
+/// them.
+#[tokio::test(start_paused = true)]
+async fn a_message_to_answer_carries_the_context_looked_up_for_it() {
+    let (mut f, runner) = injecting(
+        vec![Ok(verdict_with_pack(Action::Answer, "oldest", 0.8))],
+        CannedRunner {
+            answers: BTreeMap::from([
+                (
+                    "jp ticket show T-005zd01".to_owned(),
+                    Ok("# T-005zd01: Shell-mode commands hardcode sh\n".to_owned()),
+                ),
+                (
+                    "jp ticket list --order filed".to_owned(),
+                    Ok("T-005zd00 Done         2026-08-06 Prepare ticket board\n".to_owned()),
+                ),
+            ]),
+            ..CannedRunner::default()
+        },
+    );
+
+    f.receive(in_group(CLIENT, "Is T-005zd01 the oldest ticket?"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(*runner.ran.lock().unwrap(), [
+        "jp ticket show T-005zd01",
+        "jp ticket list --order filed"
+    ]);
+    assert_eq!(f.host.contents(), ["Ada Client: Is T-005zd01 the oldest \
+                                    ticket?
+
+# Auto-Injected Context
+
+The bridge looked this up on 2026-11-07 because the message above seemed to need it. The sender \
+                                    didn't write it, and it may be \
+                                    incomplete or irrelevant.
+
+## T-005zd01
+
+Output of `jp ticket show T-005zd01`:
+
+```text
+# T-005zd01: Shell-mode commands hardcode sh
+```
+
+## Oldest tickets
+
+Output of `jp ticket list --order filed`:
+
+```text
+T-005zd00 Done         2026-08-06 Prepare ticket board
+```"]);
+    assert_eq!(f.host.logged("Message classified."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+        "action": "answer",
+        "probability": 0.9,
+        "took_ms": 0,
+        "pack": "oldest",
+        "pack_probability": 0.8,
+    })]);
+    assert_eq!(f.host.logged("Context looked up."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+        "lookups": ["T-005zd01", "Oldest tickets"],
+        "failed": 0,
+        "took_ms": 0,
+    })]);
+}
+
+/// Nothing is looked up for a message the bridge won't answer, whatever pack
+/// the decide model picked for it.
+#[tokio::test]
+async fn an_ignored_message_looks_nothing_up() {
+    let (mut f, runner) = injecting(
+        vec![Ok(verdict_with_pack(Action::Ignore, "oldest", 0.9))],
+        CannedRunner::default(),
+    );
+
+    f.receive(in_group(CLIENT, "T-005zd01 is so old, haha"));
+    f.settle().await;
+
+    assert!(runner.ran.lock().unwrap().is_empty());
+    assert!(f.host.calls().is_empty(), "{:?}", f.host.calls());
+}
+
+/// A failed lookup costs its section, not the turn: it is logged and the
+/// message goes on without it.
+#[tokio::test]
+async fn a_failed_lookup_is_logged_and_left_out() {
+    let (mut f, _) = injecting(
+        vec![Ok(verdict(Action::Answer, 0.9))],
+        CannedRunner::default(),
+    );
+
+    f.receive(in_group(CLIENT, "What about T-zzzzzzz?"));
+    f.settle().await;
+    f.settle().await;
+
+    assert_eq!(f.host.contents(), ["Ada Client: What about T-zzzzzzz?"]);
+    assert_eq!(f.host.logged("Context lookup failed."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+        "lookup": "T-zzzzzzz",
+        "error": "no answer for `jp ticket show T-zzzzzzz`",
+    })]);
+    assert_eq!(f.host.logged("Context looked up."), vec![json!({
+        "chat": "group:Z3JvdXA=",
+        "lookups": [],
+        "failed": 1,
+        "took_ms": 0,
     })]);
 }
 
