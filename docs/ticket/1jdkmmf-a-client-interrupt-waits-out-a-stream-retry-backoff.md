@@ -1,6 +1,6 @@
 # A client interrupt waits out a stream retry backoff
 
-- **Status**: In Progress
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-13
 - **Label**: client=cli
