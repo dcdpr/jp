@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-11
 - **Extends**: [RFD 090]
+- **Extended by**: [RFD 119]
 - **Summary**: Routes Anthropic subscription queries through `claude-agent-acp`
   and the official Claude Code runtime by default.
 
@@ -524,6 +525,7 @@ follow-up work.
 [PR 1153]: https://github.com/dcdpr/jp/pull/1153
 [RFD 090]: 090-anthropic-subscription-auth-with-credential-fallback.md
 [RFD 109]: 109-in-process-jp-mcp-server.md
+[RFD 119]: 119-provider-hosted-tools.md
 [documented size override]: https://code.claude.com/docs/en/mcp#raise-the-limit-for-a-specific-tool
 [subscription clarification]: https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
 [usage guidance]: https://code.claude.com/docs/en/costs#why-usage-climbs-in-a-long-session

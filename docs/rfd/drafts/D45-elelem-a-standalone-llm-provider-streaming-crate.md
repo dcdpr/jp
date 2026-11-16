@@ -329,7 +329,9 @@ single-request wire streaming:
   false` setting and freezes its feature names, `Event`, `StreamError`, and
   per-shape request types as public API.
   `elelem` should not be published until at least two non-chat shapes are
-  migrated so the public surface is not biased toward chat completions.
+  migrated (so the public surface is not biased toward chat completions) and
+  `Event` carries [RFD 118]'s hosted activity and attribution (so hosted-tool
+  events do not force a breaking change or fall back to untyped metadata).
 
 ## Implementation Plan
 
@@ -376,3 +378,4 @@ reversible.
 [RFD 012]: ../012-typed-llm-streaming-events.md
 [RFD 043]: ../043-incremental-tool-call-argument-streaming.md
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
+[RFD 118]: ../118-provider-response-artifacts.md
