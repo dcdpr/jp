@@ -304,9 +304,9 @@ Depends on Phase 4.
   `InquiryRequest`/`InquiryResponse` in the persisted stream.
 - [RFD 009: Stateful Tool Protocol][RFD 009]: Future protocol for long-running
   tools (builds on inquiry infrastructure).
-- [RFD 018: Typed Prompt Routing Enum][RFD 018]: Related follow-up work.
+- [RFD 018: Prompts as Inquiry Events][RFD 018]: Related follow-up work.
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md

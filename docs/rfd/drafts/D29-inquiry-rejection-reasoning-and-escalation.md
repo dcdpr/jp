@@ -477,9 +477,9 @@ with a `description` hint produces reliable reasoning.
   recommended rejecting...") explains why the prompt appeared.
 
 - **Interaction with RFD 018 and 049.** Both RFDs are in Discussion status.
-  Escalation is a routing decision that fits into `route_prompt()` from RFD 018,
-  and the detached prompt policy from RFD 049 governs escalation in
-  non-interactive mode.
+  Escalation is a routing decision on the `Prompt` from RFD 018 that fits into
+  `route_prompt()` from RFD 049, and the detached prompt policy from RFD 049
+  governs escalation in non-interactive mode.
   Implementation must coordinate with those RFDs' timelines.
 
 - **`auto` detached policy and escalation.** When the detached policy is `auto`
@@ -540,15 +540,16 @@ Depends on Phase 3.
   extends.
 - [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034]: per-question
   model overrides and cache optimization.
-- [RFD 018: Typed Prompt Routing Enum][RFD 018]: the `Prompt` enum and
-  `route_prompt()` function that escalation integrates with.
-- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049]: detached
-  policy governing escalation in non-interactive mode.
+- [RFD 018: Prompts as Inquiry Events][RFD 018]: the `Prompt` enum that
+  escalation routes on.
+- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049]: the
+  `route_prompt()` function escalation integrates with, and the detached policy
+  governing escalation in non-interactive mode.
 - [RFD 005: First-Class Inquiry Events][RFD 005]: persisted inquiry events that
   gain the `reason` field.
 
 [RFD 005]: ../005-first-class-inquiry-events.md
-[RFD 018]: ../018-typed-prompt-routing-enum.md
+[RFD 018]: ../018-prompts-as-inquiry-events.md
 [RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
 [RFD 034]: ../034-inquiry-specific-assistant-configuration.md
 [RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md

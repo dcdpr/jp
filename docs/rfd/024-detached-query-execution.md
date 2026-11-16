@@ -513,7 +513,7 @@ Targets Unix only initially.
   recorded in incomplete turns.
 
 [RFD 005]: 005-first-class-inquiry-events.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 020]: 020-parallel-conversations.md
 [RFD 023]: 023-resumable-conversation-turns.md
