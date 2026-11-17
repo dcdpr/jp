@@ -1,0 +1,9 @@
+# Written by `yarn install`, which `jp vite serve` runs.
+.pnp.*.json
+.pnp.cjs
+.pnp.loader.mjs
+.yarn/*
+
+.vitepress/cache
+.vitepress/dist
+.vitepress/.temp

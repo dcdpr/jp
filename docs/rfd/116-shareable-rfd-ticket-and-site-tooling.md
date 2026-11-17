@@ -506,7 +506,11 @@ their own tool definitions directly (T-0vmm72y).
 
 `jp vite init` initializes a VitePress setup in the source directory of an empty
 or existing repository, creating `package.json`, `.vitepress/config.mts`, the
-theme entry point, and a homepage.
+theme entry point, a homepage, and a `.gitignore`.
+The `package.json` names Yarn 4 as its `packageManager`, so `jp vite serve`
+installs with `yarn install --immutable` once a `yarn.lock` is committed, and
+the `.gitignore` leaves out the files Yarn's Plug'n'Play install and VitePress
+write.
 It prompts for the site's title and description via the host's composer and
 writes them into `config.mts` and the homepage, so a new site does not start
 with JP's branding.
@@ -575,8 +579,15 @@ CI jobs with `jp` installed can run `jp vite sync --check` to catch
 configuration changes committed without a corresponding `sync`.
 
 `jp vite serve` runs the development server.
-It executes the [Version Skew](#version-skew) checks, spawns `vitepress dev` as
-a child process, and terminates the child process on exit.
+It first installs the site's dependencies with the package manager the site
+uses, read from `packageManager` in `package.json` or from the lockfile present.
+When a lockfile exists, the install is held to it (`npm ci`, `yarn install
+--immutable`, or `--frozen-lockfile`) and fails rather than rewrite it; without
+one, the install writes it.
+`--offline` keeps the install off the network, failing when a dependency is not
+in the package manager's cache.
+It then executes the [Version Skew](#version-skew) checks, spawns `vitepress dev`
+as a child process, and terminates the child process on exit.
 While running, `jp vite serve` polls the host for configuration changes every
 two seconds (`read_config` with `reload`, protocol 10) and updates
 `jp-vite/settings.json` whenever the relevant settings change, propagating

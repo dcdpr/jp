@@ -1,6 +1,7 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
+use crate::serve::{Manager, install};
 
 fn fill() -> Fill {
     Fill {
@@ -31,6 +32,7 @@ fn an_empty_site_is_missing_every_file() {
         ".vitepress/config.mts",
         ".vitepress/theme/index.js",
         "index.md",
+        ".gitignore",
     ]);
 }
 
@@ -39,7 +41,36 @@ fn a_file_that_exists_is_not_missing() {
     let dir = Utf8TempDir::new().unwrap();
     fs::write(dir.path().join("package.json"), "{}").unwrap();
 
-    assert_eq!(missing(dir.path()).len(), 3);
+    assert_eq!(missing(dir.path()).len(), 4);
+}
+
+/// A new site installs with Yarn 4: the first `jp vite serve` writes the
+/// lockfile, and every one after it is held to the lockfile.
+#[test]
+fn a_new_site_installs_with_yarn_held_to_its_lockfile() {
+    let root = Utf8TempDir::new().unwrap();
+    let site = root.path().join("docs");
+    write(root.path(), &site, &plan(&site, &fill()).unwrap(), &fill()).unwrap();
+
+    let first = install(&site, false);
+    assert_eq!(first.manager, Manager::Yarn);
+    assert_eq!(first.to_string(), "yarn install --no-immutable");
+
+    fs::write(site.join("yarn.lock"), "__metadata:\n  version: 8\n").unwrap();
+    assert_eq!(
+        install(&site, false).to_string(),
+        "yarn install --immutable"
+    );
+}
+
+#[test]
+fn the_gitignore_leaves_out_what_yarn_and_vitepress_write() {
+    assert_eq!(
+        render(&template(".gitignore"), &fill()),
+        "# Written by `yarn install`, which `jp vite serve` \
+         runs.\n.pnp.*.json\n.pnp.cjs\n.pnp.loader.mjs\n.yarn/*\n\n.vitepress/cache\n.vitepress/\
+         dist\n.vitepress/.temp\n"
+    );
 }
 
 #[test]
@@ -90,6 +121,7 @@ fn writing_creates_the_files_and_their_directories() {
         "Created docs/.vitepress/config.mts",
         "Created docs/.vitepress/theme/index.js",
         "Created docs/index.md",
+        "Created docs/.gitignore",
     ]);
     let theme = fs::read_to_string(site.join(".vitepress/theme/index.js")).unwrap();
     assert!(
@@ -124,6 +156,7 @@ fn the_plan_says_which_files_writing_changes() {
             (".vitepress/config.mts", Existing::Missing),
             (".vitepress/theme/index.js", Existing::Missing),
             ("index.md", Existing::Same),
+            (".gitignore", Existing::Missing),
         ]
     );
 
@@ -133,6 +166,7 @@ fn the_plan_says_which_files_writing_changes() {
         "Overwrote docs/package.json",
         "Created docs/.vitepress/config.mts",
         "Created docs/.vitepress/theme/index.js",
+        "Created docs/.gitignore",
     ]);
     assert_eq!(
         fs::read_to_string(site.join("package.json")).unwrap(),

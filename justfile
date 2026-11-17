@@ -1995,7 +1995,7 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
 # accept edits from. It checks `jp ticket`, `jp rfd`, and `jp wiki` were built
 # from the same site files as `jp vite`, so all four are installed first.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
+develop-docs *FLAGS="--host --allowedHosts --open": _install-jp _install-site-plugins
     jp vite serve -- {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
@@ -2005,7 +2005,7 @@ develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _i
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage: _docs-install _install-jp _install-site-plugins
+rfd-manage: _install-jp _install-site-plugins
     jp vite serve -- --host --allowedHosts --open /rfd/priority
 
 # Test the documentation site's own tooling.

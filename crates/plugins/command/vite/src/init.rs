@@ -1,8 +1,10 @@
 //! `jp vite init`: initialize a VitePress site in the source directory.
 //!
 //! Writes the project-owned site files (`package.json`,
-//! `.vitepress/config.mts`, `.vitepress/theme/index.js`, and `index.md`), which
-//! `jp vite sync` never modifies.
+//! `.vitepress/config.mts`, `.vitepress/theme/index.js`, `index.md`, and
+//! `.gitignore`), which `jp vite sync` never modifies.
+//! The site's dependencies are installed with Yarn 4 (`packageManager` in
+//! `package.json`), and `.gitignore` leaves out what Yarn and VitePress write.
 //! Re-running `init` overwrites existing files with different contents only
 //! when git can restore them or `--force` is passed (see [`overwrite`]).
 
@@ -23,7 +25,7 @@ pub(crate) struct Template {
     pub contents: &'static str,
 }
 
-pub(crate) const TEMPLATES: [Template; 4] = [
+pub(crate) const TEMPLATES: [Template; 5] = [
     Template {
         path: "package.json",
         contents: include_str!("../init/package.json"),
@@ -39,6 +41,10 @@ pub(crate) const TEMPLATES: [Template; 4] = [
     Template {
         path: "index.md",
         contents: include_str!("../init/index.md"),
+    },
+    Template {
+        path: ".gitignore",
+        contents: include_str!("../init/gitignore"),
     },
 ];
 
