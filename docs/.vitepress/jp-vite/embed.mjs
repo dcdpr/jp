@@ -35,11 +35,11 @@ const IMAGES = new Set([
 // embeds are expanded once the section is cut out of it, and only those.
 const WHOLE_DOCUMENT = 'jpViteSectionSource'
 
-// Set in the `meta` of every block token an embed puts into a page.
+// Token metadata key marking block tokens inserted by an embed.
 const EMBEDDED = 'jpViteEmbedded'
 
-// Whether an embed put `token` into the page. Its `map` then holds lines of the
-// file it was embedded from, not of the page.
+// Return whether `token` was inserted by an embed. Embedded tokens have `map`
+// line numbers from their source file rather than the embedding page.
 export function isEmbedded(token) {
     return token.meta?.[EMBEDDED] === true
 }

@@ -193,14 +193,14 @@ export function withSearch(themeConfig) {
     return { ...themeConfig, search: { provider: 'local' } }
 }
 
-// On a ticket's page, a function from the inline token of a task-list item to
-// the text `jp ticket edit --check` finds the item by; `undefined` on any other
-// page.
+// On a ticket page, return a function that maps a task-list item's inline token
+// to the lookup text for `jp ticket edit --check`. Return `undefined` on other
+// pages.
 //
-// Only the items of the ticket's description have one: the tooling never
-// changes a comment, and an embedded item lives in another file. The text is
-// read from the item's line in the source, as the `ticket` crate reads it,
-// rather than from the rendered text.
+// Only items in the ticket's description are checkable: `jp ticket` never
+// modifies comments, and embedded items belong to another file. Extract the
+// lookup text from the raw source line rather than the rendered tokens so it
+// matches the `ticket` crate's parser.
 function ticketChecklistItems(state) {
     const page = state.env?.relativePath
     if (!page || !isDocumentPage(page, readSettings(), ['ticket'])) return undefined

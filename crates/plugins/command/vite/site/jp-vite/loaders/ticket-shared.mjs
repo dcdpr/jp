@@ -363,9 +363,9 @@ export function readChecklist(content) {
     return { checked: items.filter(item => item.checked).length, count: items.length }
 }
 
-// The index of the line a ticket's first comment opens at, or the count of
-// `lines` when it has no comment. The title, metadata, and description are the
-// lines before it.
+// Return the line index where the ticket's first comment starts, or
+// `lines.length` if there are no comments. Everything before this index
+// belongs to the title, metadata, and description.
 export function descriptionEnd(lines) {
     return unfenced(lines).find(i => opensComment(lines, i)) ?? lines.length
 }
@@ -374,11 +374,12 @@ export function descriptionEnd(lines) {
 // digits and `.` or `)`, whitespace, `[ ]` or `[x]`, whitespace, and text.
 const CHECKLIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[([ xX])\][ \t]+(\S.*)$/
 
-// `line` read as a checklist item, `{ checked, text }`, or `null` when it is
-// none. `text` is what follows the checkbox on the line, trimmed, which is what
-// `jp ticket edit --check` finds the item by.
+// Parse `line` as a checklist item (`{ checked, text }`), or return `null` if
+// it is not one. `text` is the trimmed content after the checkbox, which
+// `jp ticket edit --check` uses to match the item.
 export function checklistItem(line) {
-    // Trimmed first, so a `\r` left by CRLF line endings isn't the text.
+    // Strip trailing whitespace first so a `\r` from CRLF line endings is not
+    // matched as item text.
     const match = line.trimEnd().match(CHECKLIST_ITEM)
     if (!match) return null
 

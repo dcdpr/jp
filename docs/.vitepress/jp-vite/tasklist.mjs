@@ -9,10 +9,10 @@
 // The list item gets `task-list-item` and its list `contains-task-list`, the
 // classes GitHub uses, which `theme/style.css` styles.
 //
-// A checkbox `jp ticket edit --check` can change carries the text it finds the
-// item by in `data-checklist-item`, and `theme/TicketChecklist.vue` enables it
-// on a dev server that accepts edits. Every checkbox renders disabled, so a
-// built site stays read-only.
+// Items that `jp ticket edit --check` can toggle carry their lookup text in
+// `data-checklist-item`, and `theme/TicketChecklist.vue` enables them when the
+// dev server accepts edits. Checkboxes render disabled in HTML so static builds
+// stay read-only.
 
 // A checkbox at the start of an item's text, with text after it.
 const CHECKBOX = /^\[([ xX])\][ \t]+(?=\S)/
@@ -24,9 +24,9 @@ const LEADING = /^\[[ xX]\][ \t]*/
 // Turn the task-list items among markdown-it's block `tokens` into checkboxes.
 // `Token` is markdown-it's token constructor.
 //
-// `itemText` is called with the inline token of each item's first paragraph,
-// and returns the text the item can be checked by, or `null` for an item that
-// can't be.
+// `itemText` receives the inline token of each item's first paragraph and
+// returns the lookup text for `data-checklist-item`, or `null` if the item is
+// not checkable.
 export function renderTaskLists(tokens, Token, itemText = () => null) {
     for (let index = 2; index < tokens.length; index++) {
         const inline = tokens[index]

@@ -393,8 +393,8 @@ export function ticketCommands(parsed) {
             return { commands: [['ticket', 'delete', text(parsed.id)]] }
         case 'check':
         case 'uncheck': {
-            // The item is named by its text, joined to the flag with `=` so
-            // text opening with `-` isn't read as another flag.
+            // Pass the item text with `=` so a leading `-` is not parsed as a
+            // flag.
             const item = text(parsed.item).trim()
             if (!text(parsed.id) || !item) {
                 return { refusal: `${parsed.action} needs a ticket id and an item` }

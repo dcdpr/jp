@@ -53,13 +53,14 @@ test('a ticket counts the checklist in its description only', () => {
     assert.equal(ticket.comments, 1)
 })
 
-// Line 11 is the `-----` the comment opens with.
+// Line 11 is the `-----` separator that opens the first comment.
 test('the description ends where the first comment opens', () => {
     assert.equal(descriptionEnd(TICKET.split('\n')), 11)
     assert.equal(descriptionEnd(['# Plain', '', 'Just prose.']), 3)
 })
 
-// Only the item's first line: what `jp ticket edit --check` finds it by.
+// Match only the item's first line, which `jp ticket edit --check` uses to
+// locate the item.
 test('one line reads as a checklist item, or as none', () => {
     assert.deepEqual(checklistItem('  - [X] **Phase**: summary  \r'), {
         checked: true,

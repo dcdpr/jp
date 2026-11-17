@@ -57,15 +57,13 @@ export function enhanceApp({ app }) {
     app.component('WikiChildren', defineAsyncComponent(() => import('./WikiChildren.vue')))
 }
 
-// What the RFD, ticket, and wiki pages add above a document, for the default
-// layout's `doc-before` slot: the problem `jp vite serve` found, if any, the
-// trail back to the index, on a ticket filed under a parent, that parent, link
-// colours, and on a wiki page, where it sits in the wiki, with an editor on a
-// dev server that accepts edits. On such a server, a ticket's checklist items
-// can be checked from its page.
+// Render the components for the default layout's `doc-before` slot: any startup
+// problem reported by `jp vite serve`, the breadcrumb back to the index, parent
+// links for child tickets, document link colors, checklist toggling on ticket
+// pages, and hierarchy breadcrumbs and inline editing on wiki pages.
 //
-// Each one renders only on the pages it concerns, so the slot can hold them on
-// every page.
+// Each component renders only on the pages it applies to, so all of them can be
+// mounted in the slot unconditionally.
 export function docBefore() {
     return [
         h(SiteProblem),

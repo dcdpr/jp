@@ -5,17 +5,18 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { isDev, postBoard } from './board.mjs'
 import { documentAt } from './documents.mjs'
 
-// Checking and unchecking a ticket's checklist items from its page, on a dev
-// server that accepts edits.
+// Enable interactive checklist items on ticket pages when the dev server
+// accepts edits.
 //
-// The items of a ticket's description render with the text they are found by
-// in `data-checklist-item` (see `../tasklist.mjs`), disabled. On a ticket's
-// page this enables them, and a change runs `jp ticket edit --check` or
-// `--uncheck` through the dev server. The ticket file changing re-renders the
-// page from it. A refused change puts the checkbox back and says why.
+// Checklist items in a ticket's description render as disabled checkboxes with
+// their lookup text in `data-checklist-item` (see `../tasklist.mjs`). On a
+// ticket page, this component enables those checkboxes and sends `jp ticket
+// edit --check` or `--uncheck` requests to the dev server when toggled. Writing
+// the ticket file triggers VitePress to re-render the page; if the command
+// fails, the checkbox is reverted and an error notice is shown.
 //
-// Changes are sent one at a time, in the order they were made: each one
-// rewrites the ticket file, and two at once could each write over the other.
+// Requests are serialized in click order because each command rewrites the
+// ticket file on disk, and concurrent writes could overwrite each other.
 
 const ENDPOINT = '/__ticket'
 const SELECTOR = '.vp-doc input[data-checklist-item]'

@@ -47,7 +47,8 @@ test('add needs a title, and an unknown action is refused', () => {
     })
 })
 
-// The text is joined to its flag, so an item opening with `-` is no flag.
+// Join the item text to the flag with `=` so leading dashes are not parsed as
+// flags.
 test('a checklist item is checked and unchecked by its text', () => {
     assert.deepEqual(ticketCommands({ action: 'check', id: 'T-02wt0kx', item: 'Cover a call' }), {
         commands: [['ticket', 'edit', 'T-02wt0kx', '--check=Cover a call']],
@@ -57,7 +58,6 @@ test('a checklist item is checked and unchecked by its text', () => {
     })
 })
 
-// `jp ticket edit` with no change to make opens an editor.
 test('checking needs a ticket and an item', () => {
     assert.deepEqual(ticketCommands({ action: 'check', id: 'T-02wt0kx', item: '  ' }), {
         refusal: 'check needs a ticket id and an item',

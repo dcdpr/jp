@@ -6,39 +6,40 @@
 - **Label**: domain=tooling
 - **Label**: type=follow-up
 
-On a dev server `jp vite serve` started, a ticket's checklist items can be
-checked and unchecked from the ticket's page.
-Task-list items on RFD pages (an Implementation Plan's phases, such as RFD
+When serving the site with `jp vite serve`, checklist items in a ticket's
+description can be checked and unchecked from the ticket page.
+Task-list items on RFD pages (such as phases in an Implementation Plan, like RFD
 072's) and on wiki pages still render as disabled checkboxes.
 
-The site writes every document through `jp`, and neither `jp rfd` nor `jp wiki`
-has a command that checks an item, so this needs one in each before the site can
-offer it.
+Because the site writes every document through `jp`, both `jp rfd` and `jp wiki`
+need a flag to check and uncheck task-list items before the site can support
+toggling them.
 
-How the ticket version works, for reference:
+How the ticket implementation works:
 
-- `tasklist.mjs` puts the item's text in `data-checklist-item` on its checkbox.
-  `config.mjs` (`ticketChecklistItems`) decides which items get it: on ticket
-  pages only, items in the description, not in comments or embeds, with the text
-  read from the item's source line as the `ticket` crate's `checklist` module
-  reads it.
-
+- `tasklist.mjs` writes the item's lookup text to `data-checklist-item` on its
+  checkbox.
+  `config.mjs` (`ticketChecklistItems`) populates this attribute only for items
+  in a ticket's description (excluding comments and embeds), reading the lookup
+  text from the raw source line the same way the `ticket` crate's `checklist`
+  module does.
 - `theme/TicketChecklist.vue` enables those checkboxes and posts `check` or
-  `uncheck` to `/__ticket`.
-  `middleware.mjs` (`ticketCommands`) turns the request into `jp ticket edit
-  <id> --check=<text>`.
+  `uncheck` requests to `/__ticket`.
+  `middleware.mjs` (`ticketCommands`) translates the request into `jp ticket
+  edit <id> --check=<text>` (or `--uncheck=<text>`).
 
-- [ ] Add a way to check and uncheck an item by its text to `jp wiki edit` and
-      to `jp rfd`, reusing the `ticket` crate's `checklist::mark` rather than a
-      second implementation
+Items are matched by their text, so duplicate item text on the same page is
+rejected as ambiguous.
+When a request is rejected, the page displays the error and reverts the
+checkbox.
 
-- [ ] Give RFD and wiki pages their item text in the renderer, with the same
-      exclusions (embedded items stay disabled, since they are checked on the
-      page they come from)
+## Checklist
 
-- [ ] Generalize `TicketChecklist.vue` and the endpoints to the three document
-      kinds
-
-Items are found by their text, so two items with the same text are refused as
-ambiguous on every kind of page.
-The page shows the refusal and leaves the box as it was.
+- [ ] Add flags to check and uncheck an item by its text in `jp wiki edit` and
+      `jp rfd`, reusing `ticket::checklist::mark` rather than duplicating the
+      parser
+- [ ] Populate `data-checklist-item` on RFD and wiki pages in the renderer, with
+      the same exclusions (embedded items stay disabled because they belong to
+      their source document)
+- [ ] Generalize `TicketChecklist.vue` and the dev-server endpoints to support
+      all three document kinds

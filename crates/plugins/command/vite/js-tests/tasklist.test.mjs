@@ -106,9 +106,9 @@ test('brackets that are no checkbox, or sit outside a list item, stay text', () 
     assert.ok(tokens.every(each => each.type !== 'inline' || each.children[0].type === 'text'))
 })
 
-// The text an item is checked by goes on its checkbox, escaped; an item
-// without one gets no attribute. Both stay disabled until the page enables
-// them.
+// Checkable items store their HTML-escaped lookup text in
+// `data-checklist-item`; non-checkable items omit the attribute. Both render
+// disabled until enabled on the client.
 test('a checkbox carries the text its item is checked by', () => {
     const tokens = list(
         item('[ ] Quote "a" & <b>', [text('[ ] Quote "a" & <b>')]),
