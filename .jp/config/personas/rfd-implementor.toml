@@ -29,7 +29,7 @@ name = "RFD Implementor"
 
 [assistant.model]
 id = "opus"
-parameters.reasoning.effort = "max"
+parameters.reasoning.effort = "xhigh"
 
 [assistant.system_prompt]
 strategy = "append"
