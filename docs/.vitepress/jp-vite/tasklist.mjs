@@ -8,6 +8,11 @@
 //
 // The list item gets `task-list-item` and its list `contains-task-list`, the
 // classes GitHub uses, which `theme/style.css` styles.
+//
+// A checkbox `jp ticket edit --check` can change carries the text it finds the
+// item by in `data-checklist-item`, and `theme/TicketChecklist.vue` enables it
+// on a dev server that accepts edits. Every checkbox renders disabled, so a
+// built site stays read-only.
 
 // A checkbox at the start of an item's text, with text after it.
 const CHECKBOX = /^\[([ xX])\][ \t]+(?=\S)/
@@ -18,7 +23,11 @@ const LEADING = /^\[[ xX]\][ \t]*/
 
 // Turn the task-list items among markdown-it's block `tokens` into checkboxes.
 // `Token` is markdown-it's token constructor.
-export function renderTaskLists(tokens, Token) {
+//
+// `itemText` is called with the inline token of each item's first paragraph,
+// and returns the text the item can be checked by, or `null` for an item that
+// can't be.
+export function renderTaskLists(tokens, Token, itemText = () => null) {
     for (let index = 2; index < tokens.length; index++) {
         const inline = tokens[index]
         if (inline.type !== 'inline') continue
@@ -31,7 +40,10 @@ export function renderTaskLists(tokens, Token) {
 
         const box = new Token('html_inline', '', 0)
         const checked = match[1] === ' ' ? '' : ' checked'
-        box.content = `<input type="checkbox" class="task-list-item-checkbox" disabled${checked}> `
+        const text = itemText(inline)
+        const item = text ? ` data-checklist-item="${escapeAttribute(text)}"` : ''
+        box.content =
+            `<input type="checkbox" class="task-list-item-checkbox" disabled${checked}${item}> `
 
         first.content = first.content.replace(LEADING, '')
         const rest = first.content === '' ? inline.children.slice(1) : inline.children
@@ -55,6 +67,12 @@ function enclosingList(tokens, at) {
     }
 
     return null
+}
+
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }
+
+function escapeAttribute(text) {
+    return text.replace(/[&<>"]/g, char => ESCAPES[char])
 }
 
 // Add `name` to the classes `token` carries, once.

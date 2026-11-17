@@ -43,7 +43,27 @@ test('an edit that changes nothing runs nothing', () => {
 test('add needs a title, and an unknown action is refused', () => {
     assert.deepEqual(ticketCommands({ action: 'add', title: '' }), { refusal: 'add needs a title' })
     assert.deepEqual(ticketCommands({ action: 'frobnicate' }), {
-        refusal: 'expected action: add, edit, or delete',
+        refusal: 'expected action: add, edit, delete, check, or uncheck',
+    })
+})
+
+// The text is joined to its flag, so an item opening with `-` is no flag.
+test('a checklist item is checked and unchecked by its text', () => {
+    assert.deepEqual(ticketCommands({ action: 'check', id: 'T-02wt0kx', item: 'Cover a call' }), {
+        commands: [['ticket', 'edit', 'T-02wt0kx', '--check=Cover a call']],
+    })
+    assert.deepEqual(ticketCommands({ action: 'uncheck', id: 'T-02wt0kx', item: '--body x' }), {
+        commands: [['ticket', 'edit', 'T-02wt0kx', '--uncheck=--body x']],
+    })
+})
+
+// `jp ticket edit` with no change to make opens an editor.
+test('checking needs a ticket and an item', () => {
+    assert.deepEqual(ticketCommands({ action: 'check', id: 'T-02wt0kx', item: '  ' }), {
+        refusal: 'check needs a ticket id and an item',
+    })
+    assert.deepEqual(ticketCommands({ action: 'uncheck', item: 'Cover a call' }), {
+        refusal: 'uncheck needs a ticket id and an item',
     })
 })
 

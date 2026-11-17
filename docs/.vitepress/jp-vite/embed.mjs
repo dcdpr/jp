@@ -35,6 +35,15 @@ const IMAGES = new Set([
 // embeds are expanded once the section is cut out of it, and only those.
 const WHOLE_DOCUMENT = 'jpViteSectionSource'
 
+// Set in the `meta` of every block token an embed puts into a page.
+const EMBEDDED = 'jpViteEmbedded'
+
+// Whether an embed put `token` into the page. Its `map` then holds lines of the
+// file it was embedded from, not of the page.
+export function isEmbedded(token) {
+    return token.meta?.[EMBEDDED] === true
+}
+
 // Add the rule that expands embeds to `md`.
 //
 // It runs after VitePress has given the page's headings their anchors and
@@ -203,7 +212,10 @@ function expand(tokens, context) {
                 const replacement = embed.kind === 'section'
                     ? embedSection(embed, image, enclosing, context)
                     : embedLines(embed, image, context)
-                for (const added of replacement) inserted.add(added)
+                for (const added of replacement) {
+                    inserted.add(added)
+                    added.meta = { ...added.meta, [EMBEDDED]: true }
+                }
                 tokens.splice(index - 1, 3, ...replacement)
                 index += replacement.length - 2
                 continue

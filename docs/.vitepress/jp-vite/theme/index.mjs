@@ -6,6 +6,7 @@ import DocCrumbs from './DocCrumbs.vue'
 import DocLinkColors from './DocLinkColors.vue'
 import DocReferences from './DocReferences.vue'
 import SiteProblem from './SiteProblem.vue'
+import TicketChecklist from './TicketChecklist.vue'
 import WikiEditor from './WikiEditor.vue'
 import './style.css'
 
@@ -60,7 +61,8 @@ export function enhanceApp({ app }) {
 // layout's `doc-before` slot: the problem `jp vite serve` found, if any, the
 // trail back to the index, on a ticket filed under a parent, that parent, link
 // colours, and on a wiki page, where it sits in the wiki, with an editor on a
-// dev server that accepts edits.
+// dev server that accepts edits. On such a server, a ticket's checklist items
+// can be checked from its page.
 //
 // Each one renders only on the pages it concerns, so the slot can hold them on
 // every page.
@@ -70,6 +72,7 @@ export function docBefore() {
         h(DocBreadcrumb),
         h(DocCrumbs, { kind: 'ticket' }),
         h(DocLinkColors),
+        h(TicketChecklist),
         h(WikiEditor),
     ]
 }

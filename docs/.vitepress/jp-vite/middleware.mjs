@@ -299,7 +299,8 @@ const ticketBoardWriter = {
     },
 }
 
-// Ticket management on the ticket index: add, edit, delete.
+// Ticket management on the ticket index and the ticket pages: add, edit,
+// delete, and check or uncheck a checklist item.
 //
 // Every write shells out to `jp ticket`, which is the one implementation of the
 // ticket format. Reimplementing id allocation, slugs, and the file template
@@ -390,8 +391,20 @@ export function ticketCommands(parsed) {
         }
         case 'delete':
             return { commands: [['ticket', 'delete', text(parsed.id)]] }
+        case 'check':
+        case 'uncheck': {
+            // The item is named by its text, joined to the flag with `=` so
+            // text opening with `-` isn't read as another flag.
+            const item = text(parsed.item).trim()
+            if (!text(parsed.id) || !item) {
+                return { refusal: `${parsed.action} needs a ticket id and an item` }
+            }
+            return {
+                commands: [['ticket', 'edit', text(parsed.id), `--${parsed.action}=${item}`]],
+            }
+        }
         default:
-            return { refusal: 'expected action: add, edit, or delete' }
+            return { refusal: 'expected action: add, edit, delete, check, or uncheck' }
     }
 }
 

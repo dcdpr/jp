@@ -106,6 +106,29 @@ test('brackets that are no checkbox, or sit outside a list item, stay text', () 
     assert.ok(tokens.every(each => each.type !== 'inline' || each.children[0].type === 'text'))
 })
 
+// The text an item is checked by goes on its checkbox, escaped; an item
+// without one gets no attribute. Both stay disabled until the page enables
+// them.
+test('a checkbox carries the text its item is checked by', () => {
+    const tokens = list(
+        item('[ ] Quote "a" & <b>', [text('[ ] Quote "a" & <b>')]),
+        item('[x] In a comment', [text('[x] In a comment')]),
+    )
+    const asked = []
+
+    renderTaskLists(tokens, Token, (inline) => {
+        asked.push(inline.content)
+        return inline.content.startsWith('[ ]') ? 'Quote "a" & <b>' : null
+    })
+
+    assert.deepEqual(asked, ['[ ] Quote "a" & <b>', '[x] In a comment'])
+    assert.equal(tokens[3].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled ' +
+        'data-checklist-item="Quote &quot;a&quot; &amp; &lt;b&gt;"> ')
+    assert.equal(tokens[8].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled checked> ')
+})
+
 // A class the list or item already carries, from `{.class}` attributes, is
 // kept alongside the task-list one.
 test('existing classes are kept', () => {

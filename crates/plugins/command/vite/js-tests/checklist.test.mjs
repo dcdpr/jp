@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { checklistItems, parseTicket } from '../site/jp-vite/loaders/ticket-shared.mjs'
+import {
+    checklistItem,
+    checklistItems,
+    descriptionEnd,
+    parseTicket,
+} from '../site/jp-vite/loaders/ticket-shared.mjs'
 
 // The cases the `ticket` crate's reader is tested against, so the site counts
 // a checklist the way `jp ticket` does.
@@ -46,6 +51,22 @@ test('a ticket counts the checklist in its description only', () => {
 
     assert.deepEqual(ticket.checklist, { checked: 1, count: 2 })
     assert.equal(ticket.comments, 1)
+})
+
+// Line 11 is the `-----` the comment opens with.
+test('the description ends where the first comment opens', () => {
+    assert.equal(descriptionEnd(TICKET.split('\n')), 11)
+    assert.equal(descriptionEnd(['# Plain', '', 'Just prose.']), 3)
+})
+
+// Only the item's first line: what `jp ticket edit --check` finds it by.
+test('one line reads as a checklist item, or as none', () => {
+    assert.deepEqual(checklistItem('  - [X] **Phase**: summary  \r'), {
+        checked: true,
+        text: '**Phase**: summary',
+    })
+    assert.equal(checklistItem('      continuation of an item'), null)
+    assert.equal(checklistItem('> - [ ] quoted'), null)
 })
 
 test('a ticket without a checklist carries none', () => {

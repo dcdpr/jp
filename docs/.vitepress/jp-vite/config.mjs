@@ -1,7 +1,8 @@
 import { posix } from 'node:path'
 
-import { embedSections, lineRange } from './embed.mjs'
+import { embedSections, isEmbedded, lineRange } from './embed.mjs'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { checklistItem, descriptionEnd } from './loaders/ticket-shared.mjs'
 import { metadataHeader } from './meta-header.mjs'
 import { devServer } from './middleware.mjs'
 import { redirectServer, writeRedirects } from './redirects.mjs'
@@ -63,7 +64,7 @@ export function withJpVite(config = {}) {
                 // After the embeds, so an embedded checklist renders too. See
                 // `./tasklist.mjs`.
                 md.core.ruler.push('jp_vite_task_lists', (state) => {
-                    renderTaskLists(state.tokens, state.Token)
+                    renderTaskLists(state.tokens, state.Token, ticketChecklistItems(state))
                 })
                 // Last, so the header keeps the links the rules above made.
                 compactMetadata(md)
@@ -190,6 +191,29 @@ export function withSearch(themeConfig) {
     if (themeConfig.search !== undefined) return themeConfig
 
     return { ...themeConfig, search: { provider: 'local' } }
+}
+
+// On a ticket's page, a function from the inline token of a task-list item to
+// the text `jp ticket edit --check` finds the item by; `undefined` on any other
+// page.
+//
+// Only the items of the ticket's description have one: the tooling never
+// changes a comment, and an embedded item lives in another file. The text is
+// read from the item's line in the source, as the `ticket` crate reads it,
+// rather than from the rendered text.
+function ticketChecklistItems(state) {
+    const page = state.env?.relativePath
+    if (!page || !isDocumentPage(page, readSettings(), ['ticket'])) return undefined
+
+    const lines = state.src.split('\n')
+    const end = descriptionEnd(lines)
+
+    return (inline) => {
+        const line = inline.map?.[0]
+        if (isEmbedded(inline) || line === undefined || line >= end) return null
+
+        return checklistItem(lines[line])?.text ?? null
+    }
 }
 
 // Render the metadata block an RFD, ticket, or wiki page opens with as a
