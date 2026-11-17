@@ -128,11 +128,36 @@ fn serve_passes_its_arguments_to_vitepress() {
         ["serve", "--", "--host", "--open", "/rfd/priority"].as_slice(),
     ] {
         match parse(args).unwrap().command {
-            Command::Serve { vitepress } => {
+            Command::Serve { offline, vitepress } => {
+                assert!(!offline, "{args:?}");
                 assert_eq!(vitepress, ["--host", "--open", "/rfd/priority"], "{args:?}");
             }
             other => panic!("expected serve, got {other:?}"),
         }
+    }
+}
+
+/// `--offline` before `--` is parsed by `jp vite serve`; after `--`, it is
+/// forwarded to `vitepress dev`.
+#[test]
+fn serve_takes_offline_before_the_vitepress_arguments() {
+    match parse(&["serve", "--offline", "--", "--open"])
+        .unwrap()
+        .command
+    {
+        Command::Serve { offline, vitepress } => {
+            assert!(offline);
+            assert_eq!(vitepress, ["--open"]);
+        }
+        other => panic!("expected serve, got {other:?}"),
+    }
+
+    match parse(&["serve", "--", "--offline"]).unwrap().command {
+        Command::Serve { offline, vitepress } => {
+            assert!(!offline);
+            assert_eq!(vitepress, ["--offline"]);
+        }
+        other => panic!("expected serve, got {other:?}"),
     }
 }
 
@@ -205,9 +230,9 @@ fn init_writes_the_project_files_with_the_answers() {
     assert_eq!(
         text,
         "Created docs/package.json\nCreated docs/.vitepress/config.mts\nCreated \
-         docs/.vitepress/theme/index.js\nCreated docs/index.md\nThe configuration imports files \
-         `jp vite sync` writes, with the RFD and ticket pages: run it next, then `jp vite serve` \
-         to see the site.\n"
+         docs/.vitepress/theme/index.js\nCreated docs/index.md\nCreated docs/.gitignore\nThe \
+         configuration imports files `jp vite sync` writes, with the RFD and ticket pages: run it \
+         next, then `jp vite serve` to see the site.\n"
     );
 
     let config = fs::read_to_string(root.path().join("docs/.vitepress/config.mts")).unwrap();
@@ -253,8 +278,8 @@ fn init_with_the_same_answers_changes_nothing() {
     assert_eq!(code, 0);
     assert_eq!(
         text,
-        "docs/ already has the package.json, configuration, theme, and homepage `jp vite init` \
-         writes.\n"
+        "docs/ already has the package.json, configuration, theme, homepage, and .gitignore `jp \
+         vite init` writes.\n"
     );
 }
 
@@ -268,9 +293,9 @@ fn init_overwrites_what_git_can_restore() {
     assert_eq!(
         text,
         "Overwrote docs/package.json\nCreated docs/.vitepress/config.mts\nCreated \
-         docs/.vitepress/theme/index.js\nCreated docs/index.md\nThe configuration imports files \
-         `jp vite sync` writes, with the RFD and ticket pages: run it next, then `jp vite serve` \
-         to see the site.\n"
+         docs/.vitepress/theme/index.js\nCreated docs/index.md\nCreated docs/.gitignore\nThe \
+         configuration imports files `jp vite sync` writes, with the RFD and ticket pages: run it \
+         next, then `jp vite serve` to see the site.\n"
     );
     assert_ne!(
         fs::read_to_string(root.path().join("docs/package.json")).unwrap(),

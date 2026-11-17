@@ -1,32 +1,36 @@
 //! `jp vite serve`: run the dev server, and decide whether it may write.
 //!
-//! Before starting `vitepress dev`, serve brings the settings snapshot up to
-//! date and checks the site against what it reads ([`problems`]):
+//! Before starting `vitepress dev`, `serve` installs the site's dependencies
+//! with the project's package manager ([`install`]), without modifying an
+//! existing lockfile and without network access when `--offline` is set.
+//! It then updates the settings snapshot and checks the site for version skew
+//! ([`problems`]):
 //!
-//! - `jp ticket`, `jp rfd`, and `jp wiki`, for each workflow the project has,
-//!   report the revision of the site files this binary carries, so the loaders
-//!   read the formats those plugins write.
-//! - Every owned file but the snapshot is the one this binary writes, so no
-//!   loader is left over from another release.
+//! - For each enabled workflow, `jp ticket`, `jp rfd`, and `jp wiki` report the
+//!   site revision embedded in this binary, so the site loaders match the
+//!   formats those plugins write.
+//! - Every `jp-vite`-owned file other than the settings snapshot matches the
+//!   embedded copy, so no loader is left over from another release.
 //!
 //! A failed check still starts the site.
-//! The problem reaches it in `JP_VITE_PROBLEM`: the RFD and ticket pages show
-//! it in place of their content, and the dev server refuses writes.
+//! The error is passed via `JP_VITE_PROBLEM`: the RFD, ticket, and wiki pages
+//! display it in place of their content, and the dev server refuses write
+//! requests.
 //! Writes are accepted only under `JP_VITE_SERVE`, which names the workspace
 //! root the middleware runs `jp` in.
 //!
-//! While the site runs, serve asks the host for the configuration again every
-//! [`POLL`] and rewrites the snapshot when the settings in it change, so a
+//! While the site runs, `serve` polls the host for configuration changes every
+//! [`POLL`] and rewrites the snapshot when the relevant settings change, so a
 //! changed directory or vocabulary reaches the site without a restart.
-//! The snapshot holds nothing written by hand, so it is rewritten without the
-//! checks `sync` makes before overwriting a file.
+//! The snapshot is never edited by hand, so it is rewritten without the
+//! dirty-file checks `sync` performs before overwriting a file.
 
 use std::{
-    fs,
-    io::{BufRead, BufReader, Read, Write},
+    fmt, fs,
+    io::{self, BufRead, BufReader, Read, Write},
     process::{Child, Command, ExitStatus, Stdio},
-    sync::mpsc::{self, RecvTimeoutError, Sender},
-    thread,
+    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -53,19 +57,28 @@ const TICK: Duration = Duration::from_millis(200);
 /// Where `cargo install` finds the plugins.
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 
-/// Run the dev server for the project at `root` until the host asks it to stop,
-/// or it stops on its own.
+/// CLI flags for `jp vite serve`.
+pub(crate) struct Flags {
+    /// Install the site's dependencies without network access.
+    pub offline: bool,
+
+    /// Trailing arguments forwarded to `vitepress dev`.
+    pub vitepress: Vec<String>,
+}
+
+/// Run the dev server for the project at `root` until the host sends a shutdown
+/// message or the server exits.
 ///
-/// `stdin` goes to a thread of its own, so the host is heard while the server
-/// runs; everything sent to the host goes through `stdout` from here.
-/// `vitepress` are the arguments `vitepress dev` gets.
+/// Spawns a background reader on `stdin` so host messages are received while
+/// dependencies install and the server runs.
+/// All messages to the host are written to `stdout` on the current thread.
 pub(crate) fn serve<R, W>(
     stdin: R,
     stdout: &mut W,
     root: &Utf8Path,
     options: &Options,
     config: &Value,
-    vitepress: &[String],
+    flags: &Flags,
 ) -> Result<(), String>
 where
     R: BufRead + Send + 'static,
@@ -76,19 +89,24 @@ where
         return Err(reason);
     }
 
+    let (events, received) = mpsc::channel();
+    listen(stdin, events.clone());
+
+    let installer = install(&site_dir, flags.offline);
+    if !run_install(stdout, root, &site_dir, &installer, &events, &received)? {
+        return Ok(());
+    }
+
     let remote = git::remote(root);
     let (mut settings, problem) = prepare(stdout, root, options, config, &remote)?;
 
-    let mut child = start(root, &site_dir, vitepress, problem.as_deref())?;
-
-    let (events, received) = mpsc::channel();
-    if let Some(output) = child.stdout.take() {
-        forward(output, "content", events.clone());
-    }
-    if let Some(output) = child.stderr.take() {
-        forward(output, "chrome", events.clone());
-    }
-    listen(stdin, events);
+    let mut child = start(
+        root,
+        &site_dir,
+        &flags.vitepress,
+        problem.as_deref(),
+        &events,
+    )?;
 
     let mut last_read = Instant::now();
     let mut reading = false;
@@ -99,7 +117,7 @@ where
             .try_wait()
             .map_err(|error| format!("`vitepress dev`: {error}"))?
         {
-            // What it printed on the way out is still in the channel.
+            // Drain any remaining output lines buffered before the process exited.
             while let Ok(Event::Output { text, channel }) = received.try_recv() {
                 print_to(stdout, &text, channel)?;
             }
@@ -255,8 +273,13 @@ enum Event {
     Host(Result<HostToPlugin, String>),
 }
 
-/// Forward each line of `output` to the host's `channel`.
-fn forward(output: impl Read + Send + 'static, channel: &'static str, events: Sender<Event>) {
+/// Spawn a thread that forwards each line from `output` to the host's `channel`
+/// until EOF.
+fn forward(
+    output: impl Read + Send + 'static,
+    channel: &'static str,
+    events: Sender<Event>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break };
@@ -265,10 +288,11 @@ fn forward(output: impl Read + Send + 'static, channel: &'static str, events: Se
                 break;
             }
         }
-    });
+    })
 }
 
-/// Pass on what the host says, until it stops saying anything.
+/// Spawn a thread that reads host messages from `stdin` and forwards them to
+/// `events` until EOF or a read error.
 fn listen(mut stdin: impl BufRead + Send + 'static, events: Sender<Event>) {
     thread::spawn(move || {
         loop {
@@ -281,15 +305,16 @@ fn listen(mut stdin: impl BufRead + Send + 'static, events: Sender<Event>) {
     });
 }
 
-/// Start `vitepress dev` in the source directory.
+/// Start `vitepress dev` in `site_dir`.
 ///
-/// Its stdin is closed, since the plugin's own carries the protocol, and its
-/// output is forwarded to the host, which owns the terminal.
+/// Closes the child's stdin (since the plugin's stdin carries the host
+/// protocol) and forwards its stdout and stderr to `events`.
 fn start(
     root: &Utf8Path,
     site_dir: &Utf8Path,
     vitepress: &[String],
     problem: Option<&str>,
+    events: &Sender<Event>,
 ) -> Result<Child, String> {
     let runner = runner(site_dir);
     let mut command = Command::new(runner[0]);
@@ -307,15 +332,23 @@ fn start(
         command.env("JP_VITE_PROBLEM", problem);
     }
 
-    command
+    let mut child = command
         .spawn()
-        .map_err(|error| format!("`{} dev` couldn't be started: {error}", runner.join(" ")))
+        .map_err(|error| format!("`{} dev` couldn't be started: {error}", runner.join(" ")))?;
+    if let Some(output) = child.stdout.take() {
+        forward(output, "content", events.clone());
+    }
+    if let Some(output) = child.stderr.take() {
+        forward(output, "chrome", events.clone());
+    }
+
+    Ok(child)
 }
 
-/// Stop the dev server.
+/// Kill `child` and reap its process.
 ///
-/// What it started goes with the plugin: the host ends the plugin's whole
-/// process tree once it exits.
+/// Any descendants spawned by `child` are terminated by the host when the
+/// plugin exits and the host tears down the plugin's process tree.
 fn stop(child: &mut Child) {
     drop(child.kill());
     drop(child.wait());
@@ -330,11 +363,11 @@ fn finished(status: ExitStatus) -> Result<(), String> {
     }
 }
 
-/// Why the site in `site_dir` can't be served, or `None` when it can.
+/// Check whether `site_dir` has a `package.json` ready to serve, returning an
+/// error message when it does not.
 ///
-/// The site needs its `package.json`.
-/// When every file `jp vite init` writes is missing, there is no site;
-/// otherwise each missing one is named.
+/// If none of the [`init::TEMPLATES`] files exist, reports that no site is
+/// initialized; otherwise lists the missing template files.
 pub(crate) fn unready(root: &Utf8Path, site_dir: &Utf8Path) -> Option<String> {
     if site_dir.join("package.json").is_file() {
         return None;
@@ -363,36 +396,332 @@ pub(crate) fn unready(root: &Utf8Path, site_dir: &Utf8Path) -> Option<String> {
     ))
 }
 
-/// The command that runs the project's `vitepress`, through the package manager
-/// the project uses: the one `packageManager` in `package.json` names, or the
-/// one whose lockfile is there, or `npx`.
-pub(crate) fn runner(site_dir: &Utf8Path) -> Vec<&'static str> {
+/// JavaScript package manager used to install dependencies and run VitePress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Manager {
+    Npm,
+    Pnpm,
+    Bun,
+
+    /// Yarn 2 and later.
+    Yarn,
+
+    /// Yarn 1.
+    YarnClassic,
+}
+
+impl Manager {
+    fn program(self) -> &'static str {
+        match self {
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Bun => "bun",
+            Self::Yarn | Self::YarnClassic => "yarn",
+        }
+    }
+
+    /// Lockfile filenames recognized by this package manager, in priority
+    /// order.
+    fn lockfiles(self) -> &'static [&'static str] {
+        match self {
+            Self::Npm => &["npm-shrinkwrap.json", "package-lock.json"],
+            Self::Pnpm => &["pnpm-lock.yaml"],
+            Self::Bun => &["bun.lock", "bun.lockb"],
+            Self::Yarn | Self::YarnClassic => &["yarn.lock"],
+        }
+    }
+}
+
+/// Detect the package manager for `site_dir` from `packageManager` in
+/// `package.json`, falling back to lockfile detection and then npm.
+pub(crate) fn manager(site_dir: &Utf8Path) -> Manager {
     let named = fs::read_to_string(site_dir.join("package.json"))
         .ok()
         .and_then(|source| serde_json::from_str::<Value>(&source).ok())
-        .and_then(|package| {
-            let manager = package.get("packageManager")?.as_str()?;
-            Some(manager.split('@').next().unwrap_or_default().to_owned())
-        });
+        .and_then(|package| Some(package.get("packageManager")?.as_str()?.to_owned()));
 
-    let manager = named.or_else(|| {
-        [
-            ("yarn.lock", "yarn"),
-            ("pnpm-lock.yaml", "pnpm"),
-            ("bun.lock", "bun"),
-            ("bun.lockb", "bun"),
-        ]
-        .into_iter()
-        .find(|(lockfile, _)| site_dir.join(lockfile).is_file())
-        .map(|(_, manager)| manager.to_owned())
-    });
-
-    match manager.as_deref() {
-        Some("yarn") => vec!["yarn", "vitepress"],
-        Some("pnpm") => vec!["pnpm", "exec", "vitepress"],
-        Some("bun") => vec!["bunx", "vitepress"],
-        _ => vec!["npx", "vitepress"],
+    if let Some(named) = named {
+        let (name, version) = named.split_once('@').unwrap_or((&named, ""));
+        return match name {
+            "yarn" if version.starts_with("1.") => Manager::YarnClassic,
+            "yarn" if version.is_empty() => yarn(site_dir),
+            "yarn" => Manager::Yarn,
+            "pnpm" => Manager::Pnpm,
+            "bun" => Manager::Bun,
+            _ => Manager::Npm,
+        };
     }
+
+    if site_dir.join("yarn.lock").is_file() {
+        yarn(site_dir)
+    } else if site_dir.join("pnpm-lock.yaml").is_file() {
+        Manager::Pnpm
+    } else if Manager::Bun
+        .lockfiles()
+        .iter()
+        .any(|lockfile| site_dir.join(lockfile).is_file())
+    {
+        Manager::Bun
+    } else {
+        Manager::Npm
+    }
+}
+
+/// Distinguish Yarn 2+ from Yarn 1 by inspecting `yarn.lock` in `site_dir`.
+///
+/// Lockfiles generated by Yarn 2+ contain a `__metadata:` key; Yarn 1 lockfiles
+/// do not.
+/// Defaults to [`Manager::Yarn`] (Yarn 2+) when `yarn.lock` is absent.
+fn yarn(site_dir: &Utf8Path) -> Manager {
+    match fs::read_to_string(site_dir.join("yarn.lock")) {
+        Ok(lockfile) if !lockfile.contains("__metadata:") => Manager::YarnClassic,
+        _ => Manager::Yarn,
+    }
+}
+
+/// Return the command and arguments used to invoke `vitepress` via the site's
+/// [`manager`].
+pub(crate) fn runner(site_dir: &Utf8Path) -> Vec<&'static str> {
+    match manager(site_dir) {
+        Manager::Yarn | Manager::YarnClassic => vec!["yarn", "vitepress"],
+        Manager::Pnpm => vec!["pnpm", "exec", "vitepress"],
+        Manager::Bun => vec!["bunx", "vitepress"],
+        Manager::Npm => vec!["npx", "vitepress"],
+    }
+}
+
+/// Command and environment for installing the site's dependencies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Install {
+    pub manager: Manager,
+    pub args: Vec<&'static str>,
+    pub env: Vec<(&'static str, &'static str)>,
+
+    /// Existing lockfile enforced during installation, if any.
+    pub lockfile: Option<&'static str>,
+    pub offline: bool,
+}
+
+impl fmt::Display for Install {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (name, value) in &self.env {
+            write!(f, "{name}={value} ")?;
+        }
+        write!(f, "{} {}", self.manager.program(), self.args.join(" "))
+    }
+}
+
+/// Build the dependency installation command for `site_dir` using its
+/// [`manager`].
+///
+/// When a lockfile exists, passes the manager's immutable or frozen flag so the
+/// install fails instead of modifying the lockfile.
+/// When no lockfile exists, the install generates one.
+/// When `offline` is `true`, disables network access so the install fails if
+/// any dependency is missing from the local cache.
+pub(crate) fn install(site_dir: &Utf8Path, offline: bool) -> Install {
+    let manager = manager(site_dir);
+    let lockfile = manager
+        .lockfiles()
+        .iter()
+        .copied()
+        .find(|lockfile| site_dir.join(lockfile).is_file());
+
+    // pnpm and Yarn 2+ default to frozen/immutable installs in CI environments,
+    // which fails when no lockfile exists yet. Pass the unlocked flag explicitly.
+    let mut args = match (manager, lockfile.is_some()) {
+        (Manager::Npm, true) => vec!["ci"],
+        (Manager::Yarn, true) => vec!["install", "--immutable"],
+        (Manager::Yarn, false) => vec!["install", "--no-immutable"],
+        (Manager::Pnpm, false) => vec!["install", "--no-frozen-lockfile"],
+        (Manager::Pnpm | Manager::Bun | Manager::YarnClassic, true) => {
+            vec!["install", "--frozen-lockfile"]
+        }
+        (Manager::Npm | Manager::Bun | Manager::YarnClassic, false) => vec!["install"],
+    };
+
+    let mut env = vec![];
+    if offline {
+        // Corepack shims Yarn and pnpm and downloads the pinned `packageManager`
+        // version when it is not cached locally.
+        if matches!(
+            manager,
+            Manager::Yarn | Manager::YarnClassic | Manager::Pnpm
+        ) {
+            env.push(("COREPACK_ENABLE_NETWORK", "0"));
+        }
+        // Yarn 2+ has no `--offline` flag; disable networking via its
+        // environment variable instead.
+        if manager == Manager::Yarn {
+            env.push(("YARN_ENABLE_NETWORK", "0"));
+        } else {
+            args.push("--offline");
+        }
+    }
+
+    Install {
+        manager,
+        args,
+        env,
+        lockfile,
+        offline,
+    }
+}
+
+/// Run `install` in `site_dir`, forwarding its output to the host.
+///
+/// Returns `Ok(false)` if the host shuts down before the install completes.
+fn run_install(
+    stdout: &mut impl Write,
+    root: &Utf8Path,
+    site_dir: &Utf8Path,
+    install: &Install,
+    events: &Sender<Event>,
+    received: &Receiver<Event>,
+) -> Result<bool, String> {
+    print_to(
+        stdout,
+        &format!("Installing the site's dependencies: `{install}`\n"),
+        "chrome",
+    )?;
+
+    let child = Command::new(install.manager.program())
+        .args(&install.args)
+        .envs(install.env.iter().copied())
+        .current_dir(site_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| unstarted(install, &error))?;
+
+    let Some(status) = follow(stdout, child, events, received)? else {
+        return Ok(false);
+    };
+    if !status.success() {
+        return Err(failed(install, &shown(root, site_dir), status));
+    }
+
+    Ok(true)
+}
+
+/// Forward `child`'s stdout and stderr to the host's `chrome` channel until the
+/// process exits, and return its [`ExitStatus`].
+///
+/// If the host shuts down first, kills `child` and returns `Ok(None)`.
+fn follow(
+    stdout: &mut impl Write,
+    mut child: Child,
+    events: &Sender<Event>,
+    received: &Receiver<Event>,
+) -> Result<Option<ExitStatus>, String> {
+    let readers: Vec<_> = [
+        child
+            .stdout
+            .take()
+            .map(|output| forward(output, "chrome", events.clone())),
+        child
+            .stderr
+            .take()
+            .map(|output| forward(output, "chrome", events.clone())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let Some(status) = wait(stdout, &mut child, received)? else {
+        return Ok(None);
+    };
+
+    // Join the reader threads before draining `received` so any final error
+    // output buffered in the pipes is forwarded before reporting the exit status.
+    for reader in readers {
+        drop(reader.join());
+    }
+    while let Ok(event) = received.try_recv() {
+        match event {
+            Event::Output { text, channel } => print_to(stdout, &text, channel)?,
+            Event::Host(Ok(HostToPlugin::Shutdown) | Err(_)) => return Ok(None),
+            Event::Host(Ok(_)) => {}
+        }
+    }
+
+    Ok(Some(status))
+}
+
+/// Poll `child` until it exits while forwarding buffered output to the host.
+///
+/// If the host shuts down first, kills `child` and returns `Ok(None)`.
+fn wait(
+    stdout: &mut impl Write,
+    child: &mut Child,
+    received: &Receiver<Event>,
+) -> Result<Option<ExitStatus>, String> {
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("waiting for the install: {error}"))?
+        {
+            return Ok(Some(status));
+        }
+
+        match received.recv_timeout(TICK) {
+            Ok(Event::Output { text, channel }) => print_to(stdout, &text, channel)?,
+            Ok(Event::Host(Ok(HostToPlugin::Shutdown) | Err(_)))
+            | Err(RecvTimeoutError::Disconnected) => {
+                stop(child);
+                return Ok(None);
+            }
+            Ok(Event::Host(Ok(_))) | Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+/// Format an error message when spawning `install` fails with `error`.
+///
+/// When the package manager executable is not found on `PATH`, includes
+/// instructions for installing or enabling it.
+pub(crate) fn unstarted(install: &Install, error: &io::Error) -> String {
+    if error.kind() != io::ErrorKind::NotFound {
+        return format!("`{install}` couldn't be started: {error}");
+    }
+
+    let how = match install.manager {
+        Manager::Npm => "Install Node.js, which comes with it",
+        Manager::Bun => "Install Bun",
+        Manager::Pnpm | Manager::Yarn | Manager::YarnClassic => {
+            "Install it, or run `corepack enable` if your Node.js comes with Corepack"
+        }
+    };
+
+    format!(
+        "`{}` isn't on your PATH, and the site's dependencies are installed with it. {how}, then \
+         run `jp vite serve` again.",
+        install.manager.program()
+    )
+}
+
+/// Format an error message when `install` exits with a non-zero `status` in
+/// `site_dir`, appending remediation hints for lockfile mismatches and
+/// `--offline` cache misses.
+pub(crate) fn failed(install: &Install, site_dir: &Utf8Path, status: impl fmt::Display) -> String {
+    let mut text = format!("`{install}` failed in {site_dir} ({status}).");
+
+    if let Some(lockfile) = install.lockfile {
+        text.push_str(&format!(
+            " If {lockfile} doesn't match package.json, run `{} install` in {site_dir} to update \
+             it.",
+            install.manager.program()
+        ));
+    }
+    if install.offline {
+        text.push_str(
+            " With `--offline`, a dependency missing from the package manager's cache fails the \
+             install: run without it to download what's missing.",
+        );
+    }
+
+    text
 }
 
 /// Write the snapshot when it differs from `previous`, or from the file when
