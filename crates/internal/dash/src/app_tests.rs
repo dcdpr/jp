@@ -1043,13 +1043,13 @@ fn test_a_queue_edit_lasts_until_github_shows_it() {
 
     // A list read before the edit landed still shows the old label.
     prs(&mut app, vec![pr(7, "a")]);
-    assert_eq!(app.queue_edits, HashMap::from([(7, true)]));
+    assert_eq!(app.queue.edits, HashMap::from([(7, true)]));
 
     prs(&mut app, vec![PullRequest {
         labeled: true,
         ..pr(7, "a")
     }]);
-    assert!(app.queue_edits.is_empty());
+    assert!(app.queue.edits.is_empty());
 }
 
 #[test]
@@ -1064,7 +1064,7 @@ fn test_a_failed_queue_edit_is_forgotten() {
         outcome: Err("Adding the queue label on #7 failed: offline".to_owned()),
     });
 
-    assert!(app.queue_edits.is_empty());
+    assert!(app.queue.edits.is_empty());
     assert_eq!(
         app.notice.as_deref(),
         Some("Adding the queue label on #7 failed: offline")
@@ -1079,12 +1079,12 @@ fn test_p_pauses_and_resumes_the_queue() {
         app.handle(key(KeyCode::Char('p'))),
         Action::PauseQueue(true)
     );
-    assert!(app.queue_paused);
+    assert!(app.queue.paused);
     assert_eq!(
         app.handle(key(KeyCode::Char('p'))),
         Action::PauseQueue(false)
     );
-    assert!(!app.queue_paused);
+    assert!(!app.queue.paused);
     assert_eq!(app.notice.as_deref(), Some("Merge queue resumed."));
 }
 

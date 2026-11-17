@@ -319,7 +319,7 @@ fn test_screen_shows_a_stacked_pull_requests_place_in_its_stack() {
 #[test]
 fn test_screen_shows_a_queue_edit_before_github_confirms_it() {
     let mut app = queue_and_review();
-    app.queue_edits.insert(1132, true);
+    app.queue.edits.insert(1132, true);
 
     let lines = render(&app, 116, 6);
     assert_eq!(

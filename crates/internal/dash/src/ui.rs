@@ -487,7 +487,7 @@ fn header_line(app: &App) -> Line {
 /// Append the merge-queue summary to the header line: paused state, waiting
 /// entry count, and the active step for the front entry.
 fn queue_summary(app: &App, line: &mut Line) {
-    if app.queue_paused {
+    if app.queue.paused {
         line.push(" · queue paused", fg(Color::Yellow));
         return;
     }
@@ -566,7 +566,7 @@ fn cells(app: &App, row: &Row) -> [(String, Style); COLUMNS] {
     if let Some(add) = row
         .pr
         .as_ref()
-        .and_then(|pr| app.queue_edits.get(&pr.number))
+        .and_then(|pr| app.queue.edits.get(&pr.number))
     {
         let text = if *add { "adding…" } else { "removing…" };
         queue = (text.to_owned(), fg(Color::Yellow));

@@ -270,23 +270,30 @@ fn carry_out(
                 Ok(())
             });
         }
-        Action::PauseQueue(paused) => {
-            control.set_paused(paused);
-            // A pause takes effect at the next poll; a resume should act now.
-            if !paused {
-                refresher.refresh();
-            }
-        }
-        Action::Queue { number, add } => {
-            // Re-enqueuing a pull request clears any hold placed on its entry.
-            if add {
-                control.clear(number);
-            }
-            // The editor applies label changes sequentially and outlives the
-            // event loop.
-            let _gone = labels.send((number, add));
-        }
+        Action::PauseQueue(paused) => pause_queue(paused, control, refresher),
+        Action::Queue { number, add } => edit_queue_label(number, add, control, labels),
     }
+}
+
+/// Pause the merge queue in this process, or resume it.
+fn pause_queue(paused: bool, control: &QueueControl, refresher: &Refresher) {
+    control.set_paused(paused);
+    // A pause takes effect at the next poll; a resume should act now.
+    if !paused {
+        refresher.refresh();
+    }
+}
+
+/// Hand adding or removing the queue label on pull request `number` to the
+/// label editor.
+fn edit_queue_label(number: u64, add: bool, control: &QueueControl, labels: &Sender<(u64, bool)>) {
+    // Re-enqueuing a pull request clears any hold placed on its entry.
+    if add {
+        control.clear(number);
+    }
+    // The editor applies label changes sequentially and outlives the event
+    // loop.
+    let _gone = labels.send((number, add));
 }
 
 fn open_url(url: &str) -> Result<(), String> {

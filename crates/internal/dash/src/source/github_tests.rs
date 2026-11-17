@@ -1,8 +1,6 @@
-use std::sync::{Arc, Mutex};
-
 use camino_tempfile::Utf8TempDir;
 
-use super::*;
+use super::{label::DEFAULT_QUEUE_LABEL, *};
 use crate::{
     model::StackPlace,
     queue::{QueueState, Reason},
@@ -27,65 +25,6 @@ fn state() -> State {
             reason: Reason::Blocked("merging it failed: HTTP 405: no".to_owned()),
         })]),
     }
-}
-
-fn open(number: u64) -> PullRequest {
-    PullRequest {
-        number,
-        title: String::new(),
-        url: String::new(),
-        head: String::new(),
-        sha: String::new(),
-        draft: false,
-        checks: Checks::default(),
-        threads: 0,
-        answered: 0,
-        labeled: false,
-        base: None,
-        stack: None,
-        remote_branch: None,
-        mergeable: None,
-        queue: None,
-    }
-}
-
-fn read_at(read_at: u64) -> Review {
-    Review {
-        threads: 1,
-        answered: 0,
-        read_at,
-    }
-}
-
-#[test]
-fn test_due_reviews_by_age_and_worktree() {
-    let now = 10_000;
-    let prs = [open(1), open(2), open(3), open(4), open(5)];
-    // 1 and 2 have a local worktree; 3 and 4 do not; 5 was never read.
-    let local = HashSet::from([1, 2]);
-    let reviews = HashMap::from([
-        (1, read_at(now - 60)),
-        (2, read_at(now - 180)),
-        (3, read_at(now - 600)),
-        (4, read_at(now - 900)),
-    ]);
-
-    assert_eq!(due_reviews(&prs, &local, &reviews, now, false), [2, 4, 5]);
-}
-
-#[test]
-fn test_due_reviews_all_when_asked() {
-    let now = 10_000;
-    let prs = [open(1), open(2)];
-    let reviews = HashMap::from([(1, read_at(now)), (2, read_at(now))]);
-
-    assert_eq!(
-        due_reviews(&prs, &HashSet::new(), &reviews, now, false),
-        Vec::<u64>::new()
-    );
-    assert_eq!(due_reviews(&prs, &HashSet::new(), &reviews, now, true), [
-        1, 2
-    ]);
 }
 
 fn github(state: State) -> GitHub {
@@ -291,36 +230,6 @@ fn test_cached_read_places_stacked_pull_requests_on_the_stacks_base() {
 }
 
 #[test]
-fn test_label_edits_reach_github_in_the_order_pressed() {
-    let applied = Arc::new(Mutex::new(vec![]));
-    let (done, finished) = mpsc::channel();
-
-    let edits = {
-        let applied = Arc::clone(&applied);
-        editor(
-            move |number, add| {
-                // The add is slow: run side by side, the remove would land first.
-                if add {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                applied.lock().unwrap().push((number, add));
-                Ok(())
-            },
-            move |_, _, _| {
-                let _gone = done.send(());
-            },
-        )
-    };
-    edits.send((7, true)).unwrap();
-    edits.send((7, false)).unwrap();
-    for _ in 0..2 {
-        finished.recv_timeout(Duration::from_secs(5)).unwrap();
-    }
-
-    assert_eq!(*applied.lock().unwrap(), [(7, true), (7, false)]);
-}
-
-#[test]
 fn test_the_queues_holds_are_saved_with_the_state() {
     let mut github = github(State::default());
     github.driver = merge::Driver::new(state().holds);
@@ -387,88 +296,6 @@ fn test_api_message_prefers_the_error_message() {
 }
 
 #[test]
-fn test_contexts_tally_check_runs_and_commit_statuses() {
-    let runs = r#"{"total_count": 4, "check_runs": [
-        {"name": "lint", "status": "completed", "conclusion": "success", "started_at": "2026-09-22T10:00:00Z"},
-        {"name": "shear", "status": "completed", "conclusion": "skipped", "started_at": "2026-09-22T10:00:00Z"},
-        {"name": "test", "status": "in_progress", "conclusion": null, "started_at": "2026-09-22T10:00:00Z"},
-        {"name": "docs", "status": "completed", "conclusion": "failure", "started_at": "2026-09-22T10:00:00Z"}
-    ]}"#;
-    let status = r#"{"state": "pending", "statuses": [
-        {"context": "coverage/coveralls", "state": "pending"}
-    ]}"#;
-
-    assert_eq!(checks(contexts(runs, status).unwrap(), &[]), Checks {
-        passed: 2,
-        pending: 2,
-        failed: 1,
-    });
-}
-
-#[test]
-fn test_contexts_of_a_commit_without_checks() {
-    let runs = r#"{"total_count": 0, "check_runs": []}"#;
-    let status = r#"{"state": "pending", "statuses": []}"#;
-
-    assert_eq!(
-        checks(contexts(runs, status).unwrap(), &[]),
-        Checks::default()
-    );
-}
-
-#[test]
-fn test_reviews_query_has_one_alias_per_pull_request() {
-    assert_eq!(
-        reviews_query(&[1132, 1193]),
-        "query($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) {
-    pr1132: pullRequest(number: 1132) { reviewThreads(first: 30) { totalCount nodes { \
-         comments(first: 2) { nodes { id } } } } }
-    pr1193: pullRequest(number: 1193) { reviewThreads(first: 30) { totalCount nodes { \
-         comments(first: 2) { nodes { id } } } } }
-  }
-}"
-    );
-}
-
-#[test]
-fn test_parse_reviews_counts_threads_with_a_reply() {
-    let json = r#"{"data": {
-        "repository": {
-            "pr1193": {"reviewThreads": {"totalCount": 0, "nodes": []}},
-            "pr1132": {"reviewThreads": {"totalCount": 3, "nodes": [
-                {"comments": {"nodes": [{"id": "a"}, {"id": "b"}]}},
-                {"comments": {"nodes": [{"id": "c"}]}},
-                {"comments": {"nodes": [{"id": "d"}, {"id": "e"}]}}
-            ]}},
-            "pr1200": null
-        }
-    }}"#;
-
-    assert_eq!(
-        parse_reviews(json).unwrap(),
-        HashMap::from([(1132, (3, 2)), (1193, (0, 0))])
-    );
-}
-
-#[test]
-fn test_parse_reviews_counts_threads_past_the_ones_read() {
-    // Two of the three threads were fetched (both answered); totalCount (3)
-    // must still be preserved.
-    let json = r#"{"data": {"repository": {
-        "pr1132": {"reviewThreads": {"totalCount": 3, "nodes": [
-            {"comments": {"nodes": [{"id": "a"}, {"id": "b"}]}},
-            {"comments": {"nodes": [{"id": "c"}, {"id": "d"}]}}
-        ]}}
-    }}}"#;
-
-    assert_eq!(
-        parse_reviews(json).unwrap(),
-        HashMap::from([(1132, (3, 2))])
-    );
-}
-
-#[test]
 fn test_local_branch_names_a_forks_default_branch_after_its_owner() {
     let pull = |head_ref: &str, head_repo: &str| -> RestPull {
         parse_json(&format!(
@@ -486,94 +313,4 @@ fn test_local_branch_names_a_forks_default_branch_after_its_owner() {
     // A deleted fork still came from another repository.
     assert_eq!(local_branch(&pull("main", "null")), "octo/main");
     assert_eq!(local_branch(&pull("main", same)), "main");
-}
-
-#[test]
-fn test_parse_reviews_rejects_a_graphql_error_response() {
-    let json = r#"{"errors": [{"message": "API rate limit exceeded"}]}"#;
-
-    assert!(matches!(parse_reviews(json).unwrap_err(), Error::Parse {
-        program: "gh",
-        ..
-    }));
-}
-
-#[test]
-fn test_parse_required_reads_only_required_status_check_rules() {
-    let rules = r#"[
-        {"type": "deletion"},
-        {"type": "pull_request", "parameters": {"required_approving_review_count": 0}},
-        {"type": "required_status_checks", "parameters": {
-            "strict_required_status_checks_policy": false,
-            "required_status_checks": [{"context": "lint"}, {"context": "test", "integration_id": 15368}]
-        }}
-    ]"#;
-
-    assert_eq!(parse_required(rules).unwrap(), ["lint", "test"]);
-    assert_eq!(parse_required("[]").unwrap(), Vec::<String>::new());
-}
-
-#[test]
-fn test_required_checks_that_have_not_reported_count_as_pending() {
-    let runs = r#"{"check_runs": [
-        {"name": "lint", "status": "completed", "conclusion": "success", "started_at": "2026-01-01T00:00:00Z"}
-    ]}"#;
-    let status = r#"{"statuses": []}"#;
-    let required = ["lint".to_owned(), "test".to_owned(), "build".to_owned()];
-
-    assert_eq!(checks(contexts(runs, status).unwrap(), &required), Checks {
-        passed: 1,
-        pending: 2,
-        failed: 0,
-    });
-}
-
-#[test]
-fn test_checks_count_only_the_latest_attempt_of_a_rerun() {
-    let contexts = vec![
-        Context::CheckRun {
-            name: "test".to_owned(),
-            status: "COMPLETED".to_owned(),
-            conclusion: Some("FAILURE".to_owned()),
-            started_at: Some("2026-09-22T10:00:00Z".to_owned()),
-        },
-        Context::CheckRun {
-            name: "test".to_owned(),
-            status: "COMPLETED".to_owned(),
-            conclusion: Some("SUCCESS".to_owned()),
-            started_at: Some("2026-09-22T11:00:00Z".to_owned()),
-        },
-    ];
-
-    assert_eq!(checks(contexts, &[]), Checks {
-        passed: 1,
-        pending: 0,
-        failed: 0,
-    });
-}
-
-#[test]
-fn test_checks_treat_an_unstarted_rerun_as_the_latest() {
-    // The queued re-run has no start time yet, and must win over the failed
-    // attempt whichever order GitHub lists them in.
-    let failed = || Context::CheckRun {
-        name: "test".to_owned(),
-        status: "COMPLETED".to_owned(),
-        conclusion: Some("FAILURE".to_owned()),
-        started_at: Some("2026-09-22T10:00:00Z".to_owned()),
-    };
-    let queued = || Context::CheckRun {
-        name: "test".to_owned(),
-        status: "QUEUED".to_owned(),
-        conclusion: None,
-        started_at: None,
-    };
-    let pending = Checks {
-        passed: 0,
-        pending: 1,
-        failed: 0,
-    };
-
-    assert_eq!(checks(vec![failed(), queued()], &[]), pending);
-    assert_eq!(checks(vec![queued(), failed()], &[]), pending);
 }

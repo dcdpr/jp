@@ -247,26 +247,12 @@ pub fn rebase_stack(
     branches: &[(String, String)],
     below: Option<&str>,
 ) -> Result<Rebased, Error> {
-    let tracking = |branch: &str| format!("refs/remotes/{remote}/{branch}");
+    fetch_stack(dir, remote, base, branches)?;
 
-    let mut fetch = vec![
-        "fetch".to_owned(),
-        "--quiet".to_owned(),
-        "--no-tags".to_owned(),
-        remote.to_owned(),
-        format!("+refs/heads/{base}:{}", tracking(base)),
-    ];
-    fetch.extend(
-        branches
-            .iter()
-            .map(|(branch, _)| format!("+refs/heads/{branch}:{}", tracking(branch))),
-    );
-    git(dir, &fetch.iter().map(String::as_str).collect::<Vec<_>>())?;
-
-    let tip = rev_parse(dir, &tracking(base))?;
+    let tip = rev_parse(dir, &tracking(remote, base))?;
     let moved = branches
         .iter()
-        .any(|(branch, sha)| rev_parse(dir, &tracking(branch)).ok().as_ref() != Some(sha));
+        .any(|(branch, sha)| rev_parse(dir, &tracking(remote, branch)).ok().as_ref() != Some(sha));
     if moved {
         return Ok(Rebased::Moved);
     }
@@ -306,6 +292,32 @@ pub fn rebase_stack(
         Ok(_) => Rebased::Pushed,
         Err(error) => Rebased::Refused(format!("pushing the rebased stack failed: {error}")),
     })
+}
+
+/// Fetch `base` and every branch of `branches` from `remote` into their
+/// remote-tracking refs.
+fn fetch_stack(
+    dir: &Utf8Path,
+    remote: &str,
+    base: &str,
+    branches: &[(String, String)],
+) -> Result<(), Error> {
+    let refspec = |branch: &str| format!("+refs/heads/{branch}:{}", tracking(remote, branch));
+
+    let mut fetch = vec![
+        "fetch".to_owned(),
+        "--quiet".to_owned(),
+        "--no-tags".to_owned(),
+        remote.to_owned(),
+        refspec(base),
+    ];
+    fetch.extend(branches.iter().map(|(branch, _)| refspec(branch)));
+    git(dir, &fetch.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
+}
+
+/// The remote-tracking ref of `branch` on `remote`.
+fn tracking(remote: &str, branch: &str) -> String {
+    format!("refs/remotes/{remote}/{branch}")
 }
 
 /// Replay each branch in `branches` onto the rebased tip of the branch below it

@@ -6,7 +6,7 @@ use camino_tempfile::Utf8TempDir;
 use super::*;
 use crate::{
     model::{Checks, StackPlace},
-    source::github::DEFAULT_QUEUE_LABEL,
+    source::github::label::DEFAULT_QUEUE_LABEL,
 };
 
 fn github() -> GitHub {

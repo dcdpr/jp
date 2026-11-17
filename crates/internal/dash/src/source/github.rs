@@ -5,13 +5,8 @@
 //! Unchanged resources return `304 Not Modified`, which does not count against
 //! the GitHub rate limit.
 //!
-//! Review threads are fetched via GraphQL because the REST API omits pending
-//! review comments created by `just pr-review` and `just pr-triage`.
-//! Because GraphQL does not support conditional requests, review threads are
-//! refreshed per pull request only after [`LOCAL_REVIEWS_INTERVAL`] (when
-//! checked out in a local worktree) or [`REMOTE_REVIEWS_INTERVAL`] (when not
-//! checked out), batching all due pull requests into a single query.
-//! Explicit user refreshes (`r`) query all open pull requests.
+//! Review threads are fetched via GraphQL on their own schedule (see
+//! [`reviews`]), and CI check responses are reduced to counts in [`checks`].
 //!
 //! When `JP_GITHUB_TOKEN` is set in the environment, it is passed to `gh` as
 //! `GH_TOKEN` so pending review comments authored by that account are visible.
@@ -35,42 +30,33 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     process::Command,
-    sync::mpsc::{self, Sender},
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+mod checks;
+mod label;
 mod merge;
+mod reviews;
 
-pub use self::merge::{Poll, QueueControl};
+use self::{
+    checks::{checks, contexts, parse_required},
+    reviews::{Review, Reviews, due_reviews, parse_reviews, reviews_query},
+};
+pub use self::{
+    label::{label_editor, queue_label},
+    merge::{Poll, QueueControl},
+};
 use super::{Error, cache, failure, git, output, parallel, stdout};
 use crate::{
-    model::{Checks, PullRequest, StackPlace},
+    model::{PullRequest, StackPlace},
     queue::{self, Entry, Hold},
 };
 
-/// Default merge-queue label when `dash.queueLabel` is unset in git config.
-pub const DEFAULT_QUEUE_LABEL: &str = "merge-when-green";
-
-const QUEUE_LABEL_KEY: &str = "dash.queueLabel";
-
 /// Maximum concurrent REST API requests per poll.
 const PARALLEL: usize = 8;
-
-/// Review-thread refresh interval for pull requests with a local worktree.
-const LOCAL_REVIEWS_INTERVAL: Duration = Duration::from_mins(3);
-
-/// Review-thread refresh interval for pull requests without a local worktree.
-const REMOTE_REVIEWS_INTERVAL: Duration = Duration::from_mins(15);
-
-/// Maximum review threads fetched per pull request in [`reviews_query`] to
-/// bound GraphQL query cost.
-/// Threads beyond this limit are counted in `totalCount` but not inspected for
-/// replies.
-const THREADS: u32 = 30;
 
 const NOT_MODIFIED: u16 = 304;
 const SUCCESS_FIRST: u16 = 200;
@@ -79,21 +65,6 @@ const SUCCESS_LAST: u16 = 299;
 /// Maximum characters of a raw REST error body included when it has no JSON
 /// `message` field.
 const ERROR_BODY_CHARS: usize = 80;
-
-/// Map from PR number to `(total_threads, answered_threads)`.
-type Counts = HashMap<u64, (u32, u32)>;
-
-/// Map from PR number to cached review-thread counts.
-type Reviews = HashMap<u64, Review>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct Review {
-    threads: u32,
-    answered: u32,
-
-    /// Unix timestamp (in seconds) when the review threads were last fetched.
-    read_at: u64,
-}
 
 /// Client for polling open pull requests, checks, and review threads for the
 /// repository containing `dir`.
@@ -772,106 +743,6 @@ pub fn checkout(worktree: &Utf8Path, number: u64) -> Result<(), Error> {
     stdout("gh", git::noninteractive(&mut command, worktree)).map(drop)
 }
 
-/// Return the merge-queue label for the repository containing `dir`
-/// (`dash.queueLabel` in git config, or [`DEFAULT_QUEUE_LABEL`]).
-#[must_use]
-pub fn queue_label(dir: &Utf8Path) -> String {
-    git::config(dir, QUEUE_LABEL_KEY).unwrap_or_else(|| DEFAULT_QUEUE_LABEL.to_owned())
-}
-
-/// Add (`add: true`) or remove (`add: false`) the merge-queue label on pull
-/// request `number`, creating the label in the repository first if needed.
-pub fn set_queued(dir: &Utf8Path, number: u64, add: bool) -> Result<(), Error> {
-    let label = queue_label(dir);
-    let edit = || {
-        let mut command = gh(dir);
-        command
-            .args(["pr", "edit", &number.to_string()])
-            .arg(if add { "--add-label" } else { "--remove-label" })
-            .arg(&label)
-            .env("GH_PROMPT_DISABLED", "1");
-        stdout("gh", git::noninteractive(&mut command, dir)).map(drop)
-    };
-
-    match edit() {
-        Err(_) if add => {
-            // `gh pr edit --add-label` fails if the label does not exist in the
-            // repository yet; create it (ignoring errors if it already exists)
-            // and retry so the retry surfaces any underlying error.
-            let mut create = gh(dir);
-            create
-                .args([
-                    "label",
-                    "create",
-                    &label,
-                    "--color",
-                    "0e8a16",
-                    "--description",
-                ])
-                .arg("Merged by dash once its checks pass")
-                .env("GH_PROMPT_DISABLED", "1");
-            let _exists = stdout("gh", git::noninteractive(&mut create, dir));
-            edit()
-        }
-        result => result,
-    }
-}
-
-/// Spawn a background worker that applies `(pr_number, add)` queue-label edits
-/// sequentially and invokes `done` with each outcome.
-pub fn label_editor<D>(dir: Utf8PathBuf, done: D) -> Sender<(u64, bool)>
-where
-    D: Fn(u64, bool, Result<(), String>) + Send + 'static,
-{
-    editor(
-        move |number, add| set_queued(&dir, number, add).map_err(|error| error.to_string()),
-        done,
-    )
-}
-
-fn editor<E, D>(edit: E, done: D) -> Sender<(u64, bool)>
-where
-    E: Fn(u64, bool) -> Result<(), String> + Send + 'static,
-    D: Fn(u64, bool, Result<(), String>) + Send + 'static,
-{
-    let (send, edits) = mpsc::channel();
-
-    // Process label edits on a single thread so rapid toggles (`m` twice)
-    // execute in order instead of racing on GitHub.
-    thread::spawn(move || {
-        for (number, add) in edits {
-            done(number, add, edit(number, add));
-        }
-    });
-
-    send
-}
-
-/// Return PR numbers whose review threads need refreshing: all PRs when `asked`
-/// is true, or those with missing or expired review cache entries.
-fn due_reviews(
-    prs: &[PullRequest],
-    local: &HashSet<u64>,
-    reviews: &Reviews,
-    now: u64,
-    asked: bool,
-) -> Vec<u64> {
-    prs.iter()
-        .map(|pr| pr.number)
-        .filter(|number| {
-            asked
-                || reviews.get(number).is_none_or(|review| {
-                    let interval = if local.contains(number) {
-                        LOCAL_REVIEWS_INTERVAL
-                    } else {
-                        REMOTE_REVIEWS_INTERVAL
-                    };
-                    now.saturating_sub(review.read_at) >= interval.as_secs()
-                })
-        })
-        .collect()
-}
-
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -998,266 +869,6 @@ fn local_branch(pull: &RestPull) -> String {
         }
         _ => head.r#ref.clone(),
     }
-}
-
-#[derive(Deserialize)]
-struct CheckRuns {
-    check_runs: Vec<CheckRun>,
-}
-
-#[derive(Deserialize)]
-struct CheckRun {
-    name: String,
-    status: String,
-    conclusion: Option<String>,
-    started_at: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct CombinedStatus {
-    statuses: Vec<Status>,
-}
-
-#[derive(Deserialize)]
-struct Status {
-    context: String,
-    state: String,
-}
-
-/// A CI check on a commit: either a GitHub Actions / App check run or an
-/// external commit status context (with uppercase status and conclusion
-/// strings).
-#[derive(Debug)]
-enum Context {
-    CheckRun {
-        name: String,
-        status: String,
-        conclusion: Option<String>,
-        started_at: Option<String>,
-    },
-    StatusContext {
-        context: String,
-        state: String,
-    },
-}
-
-impl Context {
-    /// Convert into `(name, started_at, outcome)`.
-    /// `started_at` is `None` for commit statuses and queued check runs.
-    fn into_attempt(self) -> (String, Option<String>, Outcome) {
-        match self {
-            Self::CheckRun {
-                name,
-                status,
-                conclusion,
-                started_at,
-            } => {
-                let outcome = if status != "COMPLETED" {
-                    Outcome::Pending
-                } else if matches!(
-                    conclusion.as_deref(),
-                    Some("SUCCESS" | "NEUTRAL" | "SKIPPED")
-                ) {
-                    Outcome::Passed
-                } else {
-                    Outcome::Failed
-                };
-                (name, started_at, outcome)
-            }
-            Self::StatusContext { context, state } => {
-                let outcome = match state.as_str() {
-                    "SUCCESS" => Outcome::Passed,
-                    "PENDING" | "EXPECTED" => Outcome::Pending,
-                    _ => Outcome::Failed,
-                };
-                (context, None, outcome)
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Outcome {
-    Passed,
-    Pending,
-    Failed,
-}
-
-/// Parse and combine a commit's `check-runs` and `status` JSON payloads.
-fn contexts(runs: &str, status: &str) -> Result<Vec<Context>, Error> {
-    let runs: CheckRuns = parse_json(runs)?;
-    let status: CombinedStatus = parse_json(status)?;
-
-    let runs = runs.check_runs.into_iter().map(|run| Context::CheckRun {
-        name: run.name,
-        status: run.status.to_ascii_uppercase(),
-        conclusion: run.conclusion.map(|c| c.to_ascii_uppercase()),
-        started_at: run.started_at,
-    });
-    let statuses = status
-        .statuses
-        .into_iter()
-        .map(|status| Context::StatusContext {
-            context: status.context,
-            state: status.state.to_ascii_uppercase(),
-        });
-
-    Ok(runs.chain(statuses).collect())
-}
-
-/// Build a GraphQL query fetching the review threads for each PR in `numbers`.
-///
-/// Requests up to 2 comments per thread, which is sufficient to determine
-/// whether the thread has at least one reply.
-fn reviews_query(numbers: &[u64]) -> String {
-    let mut query = String::from(
-        "query($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n",
-    );
-    for number in numbers {
-        query.push_str(&format!(
-            "    pr{number}: pullRequest(number: {number}) {{ reviewThreads(first: {THREADS}) {{ \
-             totalCount nodes {{ comments(first: 2) {{ nodes {{ id }} }} }} }} }}\n"
-        ));
-    }
-    query.push_str("  }\n}");
-    query
-}
-
-#[derive(Deserialize)]
-struct ReviewsResponse {
-    data: ReviewsData,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReviewsData {
-    /// Keyed by the `pr<number>` alias; `null` if the pull request no longer
-    /// exists.
-    repository: HashMap<String, Option<ReviewedPullRequest>>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReviewedPullRequest {
-    review_threads: Threads,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Threads {
-    /// Total threads on the pull request, including any beyond [`THREADS`].
-    total_count: u32,
-    nodes: Vec<Thread>,
-}
-
-#[derive(Deserialize)]
-struct Nodes<T> {
-    nodes: Vec<T>,
-}
-
-#[derive(Deserialize)]
-struct Thread {
-    comments: Nodes<serde_json::Value>,
-}
-
-/// Parse the GraphQL response from [`reviews_query`] into total and answered
-/// thread counts per PR.
-fn parse_reviews(json: &str) -> Result<Counts, Error> {
-    let response: ReviewsResponse = parse_json(json)?;
-
-    let reviews = response
-        .data
-        .repository
-        .into_iter()
-        .filter_map(|(alias, pr)| {
-            let number = alias.strip_prefix("pr")?.parse().ok()?;
-            let threads = pr?.review_threads;
-            let answered = threads
-                .nodes
-                .iter()
-                .filter(|thread| thread.comments.nodes.len() > 1)
-                .count();
-            Some((number, (threads.total_count, count(answered))))
-        })
-        .collect();
-
-    Ok(reviews)
-}
-
-#[derive(Deserialize)]
-struct Rule {
-    r#type: String,
-    parameters: Option<RuleParameters>,
-}
-
-#[derive(Deserialize)]
-struct RuleParameters {
-    #[serde(default)]
-    required_status_checks: Vec<RequiredCheck>,
-}
-
-#[derive(Deserialize)]
-struct RequiredCheck {
-    context: String,
-}
-
-/// Parse the `rules/branches/{branch}` response into the names of the checks it
-/// requires.
-fn parse_required(json: &str) -> Result<Vec<String>, Error> {
-    let rules: Vec<Rule> = parse_json(json)?;
-
-    Ok(rules
-        .into_iter()
-        .filter(|rule| rule.r#type == "required_status_checks")
-        .filter_map(|rule| rule.parameters)
-        .flat_map(|parameters| parameters.required_status_checks)
-        .map(|check| check.context)
-        .collect())
-}
-
-/// Aggregate check outcomes by check name, keeping only the latest attempt when
-/// a check has been re-run, and counting each `required` check that hasn't
-/// reported as pending.
-///
-/// A queued check run with `started_at: None` is treated as newer than any
-/// previously started attempt.
-fn checks(contexts: Vec<Context>, required: &[String]) -> Checks {
-    let mut latest: HashMap<String, (Option<String>, Outcome)> = HashMap::new();
-
-    for context in contexts {
-        let (name, started_at, outcome) = context.into_attempt();
-        let newer = latest
-            .get(&name)
-            .is_none_or(|(seen, _)| match (seen, &started_at) {
-                (None, _) => false,
-                (Some(_), None) => true,
-                (Some(seen), Some(started)) => started > seen,
-            });
-        if newer {
-            latest.insert(name, (started_at, outcome));
-        }
-    }
-
-    let missing = required
-        .iter()
-        .filter(|name| !latest.contains_key(*name))
-        .collect::<HashSet<_>>()
-        .len();
-
-    let unreported = Checks {
-        pending: count(missing),
-        ..Checks::default()
-    };
-    latest
-        .into_values()
-        .fold(unreported, |mut checks, (_, outcome)| {
-            match outcome {
-                Outcome::Passed => checks.passed += 1,
-                Outcome::Pending => checks.pending += 1,
-                Outcome::Failed => checks.failed += 1,
-            }
-            checks
-        })
 }
 
 fn count(n: usize) -> u32 {

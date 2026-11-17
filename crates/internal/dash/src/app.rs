@@ -9,12 +9,10 @@
 //! tracks the selected item and scroll offset.
 
 mod cursor;
+mod queue_view;
 mod table;
 
-use std::{
-    collections::{HashMap, HashSet},
-    mem,
-};
+use std::{collections::HashSet, mem};
 
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
@@ -23,6 +21,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use self::table::Key;
 pub use self::{
     cursor::Cursor,
+    queue_view::QueueView,
     table::{Display, Filter, Indent, Item, Operation, Sort, Table},
 };
 use crate::{
@@ -221,12 +220,8 @@ pub struct App {
     /// Reference timestamp used to format relative ages on the current frame.
     pub now: DateTime<Utc>,
 
-    /// Whether the merge queue is paused in this process.
-    pub queue_paused: bool,
-
-    /// Pending queue-label edits not yet reflected in the polled pull request
-    /// list, keyed by PR number (`true` for add, `false` for remove).
-    pub queue_edits: HashMap<u64, bool>,
+    /// Whether the merge queue is paused here, and label edits in flight.
+    pub queue: QueueView,
 
     /// Row and next tab index for cycling through tabs on repeated `Enter`
     /// presses.
@@ -254,7 +249,9 @@ impl App {
             Update::Jp(read) => self.feeds.jp.apply(read),
             Update::PullRequests(read) => {
                 self.feeds.prs.apply(read);
-                self.settle_queue_edits();
+                if let Some(prs) = &self.feeds.prs.data {
+                    self.queue.settle(prs);
+                }
             }
             Update::Base(read) => {
                 self.feeds.base.apply(read);
@@ -269,17 +266,7 @@ impl App {
                 add,
                 outcome,
             } => {
-                self.notice = Some(match outcome {
-                    Ok(()) if add => format!("Added #{number} to the merge queue."),
-                    Ok(()) => format!("Took #{number} out of the merge queue."),
-                    Err(error) => {
-                        // Only forget the edit if no later `m` replaced it.
-                        if self.queue_edits.get(&number) == Some(&add) {
-                            self.queue_edits.remove(&number);
-                        }
-                        error
-                    }
-                });
+                self.notice = Some(self.queue.edited(number, add, outcome));
                 return;
             }
             Update::Created { pr, outcome } => {
@@ -349,14 +336,8 @@ impl App {
             KeyCode::Char('o') => self.open(),
             KeyCode::Char('m') => self.toggle_queue(),
             KeyCode::Char('p') => {
-                self.queue_paused = !self.queue_paused;
-                self.notice = Some(if self.queue_paused {
-                    "Merge queue paused: nothing is updated or merged until you press p again."
-                        .to_owned()
-                } else {
-                    "Merge queue resumed.".to_owned()
-                });
-                Action::PauseQueue(self.queue_paused)
+                self.notice = Some(self.queue.toggle_pause());
+                Action::PauseQueue(self.queue.paused)
             }
             _ => {
                 self.browse(key, pending_g);
@@ -738,9 +719,7 @@ impl App {
         };
 
         let number = pr.number;
-        let labeled = self.queue_edits.get(&number).copied().unwrap_or(pr.labeled);
-        let add = !labeled;
-        self.queue_edits.insert(number, add);
+        let add = self.queue.toggle(number, pr.labeled);
 
         self.notice = Some(if add {
             format!("Adding #{number} to the merge queue…")
@@ -748,18 +727,6 @@ impl App {
             format!("Taking #{number} out of the merge queue…")
         });
         Action::Queue { number, add }
-    }
-
-    /// Clear pending label edits that have taken effect in the latest pull
-    /// request list or whose pull request has closed.
-    fn settle_queue_edits(&mut self) {
-        let Some(prs) = &self.feeds.prs.data else {
-            return;
-        };
-        self.queue_edits.retain(|number, add| {
-            prs.iter()
-                .any(|pr| pr.number == *number && pr.labeled != *add)
-        });
     }
 
     /// Adjust the scroll offset so the selected item fits within `rows` screen

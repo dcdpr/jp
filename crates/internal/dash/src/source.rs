@@ -36,6 +36,9 @@ use crate::{app::Update, model::BaseUpdate};
 /// Delay before re-polling GitHub after the merge queue mutates remote state.
 const SOON: Duration = Duration::from_secs(5);
 
+/// How often the GitHub source polls pull requests and moves the merge queue.
+const PULL_REQUESTS_INTERVAL: Duration = Duration::from_secs(30);
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("cannot run `{program}`: {source}")]
@@ -109,7 +112,7 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>, control: Arc<QueueControl
 
     let github = github_poke
         .get_or_init(|| {
-            every(Duration::from_secs(30), updates.clone(), move |asked| {
+            every(PULL_REQUESTS_INTERVAL, updates.clone(), move |asked| {
                 let poll = github.pull_requests(asked, &control);
                 for event in &poll.events {
                     if event.notify {

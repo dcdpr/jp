@@ -206,24 +206,7 @@ pub fn assign(prs: &mut [PullRequest], front: Option<u64>, holds: &HashMap<u64, 
     let mut line = vec![];
     for entry in entries(prs) {
         let members = entry.numbers();
-        let hold = holds
-            .get(&entry.key())
-            .filter(|hold| hold.sha == entry.signature());
-
-        let state = if entry.members.iter().any(|pr| pr.draft) {
-            QueueState::Draft
-        } else if let Some(base) = &entry.top().base {
-            QueueState::OtherBase(base.clone())
-        } else if let Some(hold) = hold {
-            match &hold.reason {
-                Reason::Conflicts => QueueState::Conflicts,
-                Reason::Blocked(reason) => QueueState::Blocked(reason.clone()),
-            }
-        } else if entry.members.iter().any(|pr| pr.mergeable == Some(false)) {
-            QueueState::Conflicts
-        } else if entry.members.iter().any(|pr| pr.checks.failed > 0) {
-            QueueState::Failing
-        } else {
+        let Some(state) = held_back(&entry, holds) else {
             line.push((Some(entry.key()) != front, entry.key(), members));
             continue;
         };
@@ -243,6 +226,30 @@ pub fn assign(prs: &mut [PullRequest], front: Option<u64>, holds: &HashMap<u64, 
 
     for pr in prs {
         pr.queue = states.remove(&pr.number);
+    }
+}
+
+/// Why `entry` is held back from the line, or `None` if it is in line.
+fn held_back(entry: &Entry<'_>, holds: &HashMap<u64, Hold>) -> Option<QueueState> {
+    let hold = holds
+        .get(&entry.key())
+        .filter(|hold| hold.sha == entry.signature());
+
+    if entry.members.iter().any(|pr| pr.draft) {
+        Some(QueueState::Draft)
+    } else if let Some(base) = &entry.top().base {
+        Some(QueueState::OtherBase(base.clone()))
+    } else if let Some(hold) = hold {
+        Some(match &hold.reason {
+            Reason::Conflicts => QueueState::Conflicts,
+            Reason::Blocked(reason) => QueueState::Blocked(reason.clone()),
+        })
+    } else if entry.members.iter().any(|pr| pr.mergeable == Some(false)) {
+        Some(QueueState::Conflicts)
+    } else if entry.members.iter().any(|pr| pr.checks.failed > 0) {
+        Some(QueueState::Failing)
+    } else {
+        None
     }
 }
 
