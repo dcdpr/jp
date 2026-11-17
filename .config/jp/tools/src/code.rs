@@ -247,6 +247,9 @@ fn code_symbol(ctx: &Context, t: &Tool) -> ToolResult {
 }
 
 /// Start the language server and wait until the workspace is loaded.
+///
+/// The `server_log` tool option names a file the server writes its own log to,
+/// for finding out why it answered as it did.
 fn open<'a>(ctx: &'a Context, t: &Tool) -> Result<Session<'a>, String> {
     let configured = configured_root(&t.options)?;
     let root = resolve_root(
@@ -267,9 +270,17 @@ fn open<'a>(ctx: &'a Context, t: &Tool) -> Result<Session<'a>, String> {
         merge(&mut settings, extra);
     }
 
+    let env = t
+        .options
+        .get("server_log")
+        .and_then(Value::as_str)
+        .map(rust_analyzer::log_env)
+        .unwrap_or_default();
+
     let mut server = Server::start(
         &command,
         &[],
+        &env,
         &root,
         &settings,
         &rust_analyzer::experimental_capabilities(),

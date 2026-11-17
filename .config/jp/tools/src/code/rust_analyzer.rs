@@ -63,6 +63,19 @@ pub fn settings() -> Value {
     })
 }
 
+/// What rust-analyzer writes to a requested log: how it loads the workspace,
+/// and the order it handles events and requests in.
+const LOG_FILTER: &str = "rust_analyzer=debug,project_model=info,load_cargo=info";
+
+/// The environment that makes rust-analyzer write its log to `path`.
+#[must_use]
+pub fn log_env(path: &str) -> Vec<(String, String)> {
+    vec![
+        ("RA_LOG_FILE".to_owned(), path.to_owned()),
+        ("RA_LOG".to_owned(), LOG_FILTER.to_owned()),
+    ]
+}
+
 /// Non-standard client capabilities advertised in `initialize`.
 #[must_use]
 pub fn experimental_capabilities() -> Value {

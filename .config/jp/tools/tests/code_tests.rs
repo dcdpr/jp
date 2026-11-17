@@ -5,9 +5,15 @@
 //! Because `rust-analyzer` is included in the pinned Rust toolchain, a missing
 //! binary fails the test rather than skipping it.
 
-use std::fs;
+use std::{
+    fs, panic, process,
+    sync::{
+        Once,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
@@ -195,12 +201,80 @@ fn ctx(root: &Utf8Path) -> Context {
     }
 }
 
+/// The most lines of each server log a failing test prints, from the end.
+const LOG_TAIL: usize = 400;
+
+/// Where this test process keeps its rust-analyzer logs.
+fn log_dir() -> Utf8PathBuf {
+    Utf8Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("code-tests")
+        .join(process::id().to_string())
+}
+
+/// Tool options that have rust-analyzer write its log to a file of its own.
+///
+/// A test that fails prints the end of every log its process wrote, so a wrong
+/// answer on CI comes with what the server was doing when it gave it.
+fn logged_options() -> Map<String, Value> {
+    static HOOK: Once = Once::new();
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    HOOK.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            print_logs(&log_dir());
+            previous(info);
+        }));
+    });
+
+    let path = log_dir().join(format!(
+        "rust-analyzer-{}.log",
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    let mut options = Map::new();
+    options.insert("server_log".to_owned(), json!(path.as_str()));
+    options
+}
+
+#[expect(
+    clippy::print_stderr,
+    reason = "the log is for whoever reads the failure"
+)]
+fn print_logs(dir: &Utf8Path) {
+    let Ok(entries) = dir.read_dir_utf8() else {
+        return;
+    };
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().to_owned())
+        .collect::<Vec<_>>();
+    paths.sort();
+
+    for path in paths {
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        // Each entry starts with a timestamp. The lines that do not are the
+        // server's configuration, which it dumps at start over several
+        // hundred lines.
+        let lines = text
+            .lines()
+            .filter(|line| line.starts_with(|c: char| c.is_ascii_digit()))
+            .collect::<Vec<_>>();
+        let tail = &lines[lines.len().saturating_sub(LOG_TAIL)..];
+        eprintln!(
+            "\n==== {path}: last {} of {} entries ====\n{}",
+            tail.len(),
+            lines.len(),
+            tail.join("\n")
+        );
+    }
+}
+
 fn tool(arguments: &Value) -> Tool {
     Tool {
         name: "code_symbol".to_owned(),
         arguments: arguments.as_object().unwrap().clone(),
         answers: Map::new(),
-        options: Map::new(),
+        options: logged_options(),
     }
 }
 
@@ -371,7 +445,7 @@ fn rename_tool(arguments: &Value, answers: &Value) -> Tool {
         name: "code_rename".to_owned(),
         arguments: arguments.as_object().unwrap().clone(),
         answers: answers.as_object().unwrap().clone(),
-        options: Map::new(),
+        options: logged_options(),
     }
 }
 

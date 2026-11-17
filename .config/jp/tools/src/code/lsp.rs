@@ -467,12 +467,14 @@ pub struct Server {
 impl Server {
     /// Start `command` in `root` and complete the `initialize` handshake.
     ///
+    /// `env` is added to the process's environment.
     /// `options` is sent as `initializationOptions`, and `experimental` as the
     /// client's experimental capabilities.
     /// `timeout` bounds each request, the handshake included.
     pub fn start(
         command: &str,
         args: &[String],
+        env: &[(String, String)],
         root: &Utf8Path,
         options: &Value,
         experimental: &Value,
@@ -480,6 +482,7 @@ impl Server {
     ) -> Result<Self, LspError> {
         let mut child = Command::new(command)
             .args(args)
+            .envs(env.iter().map(|(key, value)| (key, value)))
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
