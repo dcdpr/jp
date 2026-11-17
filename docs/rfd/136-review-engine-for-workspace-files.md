@@ -16,7 +16,8 @@ A reviewer anchors comments and suggested edits to exact source ranges and
 submits them in passes; each pass runs one conversation turn in which the
 assistant edits the files and replies to every comment with a verdict.
 The plugin persists each review as a locked directory in the store and exposes
-every operation both as a `jp review` CLI subcommand and over a local HTTP API.
+every review operation both as a `jp review` CLI subcommand and over a local
+HTTP API.
 
 ## Terminology
 
@@ -141,6 +142,16 @@ differ from the latest version (capturing manual edits made outside the review),
 and records another version when the turn completes (capturing the assistant's
 edits).
 
+**Missing files.** A version records a tracked path whose file does not exist as
+absent, which is distinct from an empty file.
+A missing file never fails a snapshot, so a pass that deletes or moves a tracked
+file still records its version and its outcome.
+Anchors on an absent file are outdated in that version and stay readable against
+the last version that had the file.
+`diff` and the file endpoint report the file as deleted.
+Renames are not followed: moving a tracked file records its old path as absent,
+and the new path is not part of the review.
+
 **Anchor.** An anchor specifies a version, an optional file path, and an
 optional range within that file.
 Omitting the file path anchors the comment to the review as a whole; omitting
@@ -185,6 +196,8 @@ A comment's status is derived from its history and pass state:
 Only the reviewer can resolve a comment.
 A reply written by the reviewer is held as a draft until the next pass is
 submitted.
+A comment carries at most one draft reply, which the reviewer can change or
+withdraw until it is submitted.
 A comment opened by the assistant starts in `open` status, awaiting the
 reviewer's response.
 
@@ -203,7 +216,8 @@ replies included in the submission, an optional overall message for the pass,
 and the conversation ID in which the turn ran.
 Its terminal state is `completed` when the turn finishes normally, `stopped`
 when the turn is stopped or aborted, `failed` when the host returns a query
-error, or `interrupted` if the host process exited before recording an outcome.
+error, or `interrupted` if the process running the pass exited before recording
+an outcome.
 
 ### Store
 
@@ -216,6 +230,7 @@ Each review lives in its own directory named after its ID (`R-` followed by a
   1h4k2m9/
     review.json
     .lock
+    .pass
     blobs/<sha256>
 ```
 
@@ -229,12 +244,27 @@ Readers never acquire the lock and always observe a complete file.
 The locking mechanism is the same OS advisory lock (`File::lock`) that
 `ticket::board` uses on `.board.lock`: the lock file is never deleted, and the
 kernel releases the lock automatically if the holding process exits or crashes.
-The CLI, HTTP server, and plugin tools each hold the lock only for the duration
+The CLI, HTTP server, and plugin tools each hold `.lock` only for the duration
 of a single read-modify-write cycle, never across a running turn.
 
-Holding the lock across the read and write lets mutations enforce state
-invariants: `submit` rejects concurrent passes on the same review, and
-`review_reply` rejects replies to withdrawn comments.
+Holding `.lock` across the read and write lets mutations enforce state
+invariants, such as `review_reply` rejecting replies to withdrawn comments.
+
+**Pass ownership.** The process that runs a pass holds a second advisory lock,
+on `.pass`, from before it records the pass until after it has recorded the
+pass's outcome.
+`submit` and `POST /api/reviews/{id}/passes` take `.pass` without waiting and
+refuse the pass if another process holds it, which is how a review runs one pass
+at a time.
+A pass in `review.json` without an outcome belongs to whoever holds `.pass`.
+A command that finds one tries to acquire `.pass`: if it succeeds, the process
+that ran the pass is gone, and the command records the pass as `interrupted`
+before releasing `.pass`.
+Conversation lock state plays no part, so a pass waiting for the host to start
+its turn, or one whose turn has finished but whose outcome is not yet recorded,
+is never mistaken for an abandoned one.
+Because only the owner records an outcome, and it releases `.pass` only after
+doing so, a turn that finishes late cannot record its outcome over a newer pass.
 
 Every comment, reply, and pass records its author and timestamp.
 The reviewer's author name comes from `user.name` (resolved the same way as in
@@ -264,10 +294,17 @@ fail with an error instructing the user to set
 
 ### Passes and the Conversation
 
-`submit` sends the review's pending draft comments and replies (or the subset
-selected with `--only`, enabling staged reviews):
+`submit` sends the review's pending input: its draft comments and replies, and
+every submitted reviewer comment the assistant has not replied to since it was
+last submitted, such as one a stopped or failed pass left unanswered.
+Comments the assistant has answered wait on the reviewer and are not sent again.
+`--only` narrows the pass to the listed comments, enabling staged reviews.
+A pass with nothing pending is allowed when it carries a message (`-m`), for
+asking the assistant to continue.
 
-1. Reject the submission if another pass on the review is still in progress.
+1. Acquire `.pass`, rejecting the submission if another process holds it, and
+   record any earlier pass left without an outcome as `interrupted` (see
+   [Store](#store)).
 2. Record a new version if any tracked file in the working tree differs from the
    latest version.
 3. Project each pending comment onto that version.
@@ -276,7 +313,7 @@ selected with `--only`, enabling staged reviews):
 4. Record the pass in `review.json`.
 5. Delegate a turn to the host via `query`.
 6. When the turn finishes, record a new version if the assistant modified any
-   tracked files, and record the pass outcome.
+   tracked files, record the pass outcome, and release `.pass`.
 
 **Conversation binding.** By default, the first pass starts a new conversation
 (`query` with `new = true`) titled after the review.
@@ -327,6 +364,8 @@ edits made to the files since the previous pass ended, followed by the newly
 submitted comments and reviewer replies.
 Because each file enters the conversation history once and later passes only
 append messages, the provider's prompt cache remains valid across passes.
+This holds as long as the conversation does not also attach a tracked file (see
+[Risks and Open Questions](#risks-and-open-questions)).
 
 Every comment in the pass message includes the quoted excerpt from its anchored
 version.
@@ -433,7 +472,9 @@ workspace tree), the tools write to it directly.
 | `ls`, `show ID [--version N]`                                        | List reviews, or display a review with comments projected to `N`. |
 | `diff ID [--from N] [--to M]`                                        | Show the line diff between two versions.                          |
 | `comment ID [--at ANCHOR] [--replace TEXT] [BODY]`                   | Add a draft comment or suggestion.                                |
-| `reply COMMENT BODY`                                                 | Add a draft reply to an open comment.                             |
+| `reply COMMENT BODY`                                                 | Add or replace the draft reply on an open comment.                |
+| `edit COMMENT [--at ANCHOR] [--replace TEXT] [BODY]`                 | Change a draft comment, or the draft reply on a comment.          |
+| `withdraw COMMENT`                                                   | Withdraw a draft comment, or the draft reply on a comment.        |
 | `resolve COMMENT... \| --accepted ID`                                | Mark specific comments, or all `accept`-verdict comments, closed. |
 | `submit ID [--only N,...] [-m BODY] [--id CONVERSATION] [--cfg ...]` | Submit pending comments/replies and run a pass.                   |
 | `close ID`                                                           | Close a completed review.                                         |
@@ -450,7 +491,8 @@ Pressing Ctrl-C stops the turn: the host routes the first interrupt to the
 running turn's interrupt handler, preserving the events and tool calls completed
 so far, and reports the outcome as `stopped` (see [Pass Outcome
 Tracking](#pass-outcome-tracking)).
-Any comments the assistant had not yet answered remain `open`.
+Any comments the assistant had not yet answered remain `open`, and the next
+`submit` sends them again.
 
 ### `jp review serve`
 
@@ -468,11 +510,12 @@ connection to the host so it can start turns with `query` and stop them with
 | `GET /api/reviews/{id}/versions/{n}/file?path=P&format=html\|text` | Return a file at version `n`, either rendered with `md-html` or as raw text.                  |
 | `GET /api/reviews/{id}/diff?from=N&to=M&path=P`                    | Return the line diff between versions `N` and `M`.                                            |
 | `POST /api/reviews/{id}/comments`                                  | Create a draft comment or suggestion.                                                         |
-| `PATCH`, `DELETE /api/reviews/{id}/comments/{n}`                   | Update or withdraw a draft comment.                                                           |
-| `POST /api/reviews/{id}/comments/{n}/replies`                      | Add a draft reply.                                                                            |
+| `PATCH`, `DELETE /api/reviews/{id}/comments/{n}`                   | Change or withdraw a draft comment, or the draft reply on a comment.                          |
+| `POST /api/reviews/{id}/comments/{n}/replies`                      | Add or replace the draft reply.                                                               |
 | `POST /api/reviews/{id}/comments/{n}/resolve`                      | Resolve a comment.                                                                            |
 | `POST /api/reviews/{id}/passes`                                    | Submit a pass; returns once the delegated turn has started.                                   |
 | `POST /api/reviews/{id}/stop`                                      | Stop the active pass on the review.                                                           |
+| `POST /api/reviews/{id}/close`                                     | Close a completed review.                                                                     |
 
 Browser clients track state changes by polling `GET /api/reviews/{id}` with
 their last seen `revision`.
@@ -513,9 +556,8 @@ any turn still running 5 seconds later.
 If the plugin is killed at its shutdown timeout or the host exits immediately
 (the last two rows), an in-flight pass may remain in `review.json` without a
 recorded outcome.
-When the next CLI command or server request reads that review and observes via
-`read_events` that the conversation is no longer locked, it reconciles the pass
-status to `interrupted`.
+The next command or server request that reads the review finds `.pass` free and
+records the pass as `interrupted` (see [Store](#store)).
 
 **Security.** Like `jp-serve-web`, `jp review serve` binds to `127.0.0.1` by
 default and has no authentication.
@@ -658,7 +700,8 @@ example, an untracked file), that file starts without a base version.
   to an existing conversation applies the review's `cfg` overlays to that
   conversation for subsequent turns.
   Because those overlays alter the system prompt, the first pass invalidates the
-  existing conversation's prompt cache once.
+  existing conversation's prompt cache once, or on every pass if the
+  conversation attaches a tracked file.
 - **Large initial pass message.** The first pass message includes the full text
   of every tracked file with line numbers, which subsequent passes pay for as
   cached input tokens.
@@ -769,11 +812,14 @@ problems.
 
 ## Risks and Open Questions
 
-- **Retry backoff delays `stop`.** Until T-1jdkmmf lands, a turn sleeping in
-  provider retry backoff only processes a stop interrupt after the current
-  backoff sleep finishes (up to 75 seconds under default settings).
-  A server shutdown during that window will exceed `shutdown_timeout_secs` and
-  leave the pass `interrupted`.
+- **Attached tracked files.** A conversation bound with `--id` often attaches
+  the files under review, as conversations started by `just review-file` do.
+  JP re-reads attachments on every turn and places them before the conversation
+  history, so each pass sends those files twice and invalidates the prompt
+  cache, the problem described in [Motivation](#motivation).
+  The reviewer should remove the attachment before the first pass.
+  `jp-review` cannot detect the case, because no plugin protocol message reports
+  the attachments a conversation's configuration resolves to.
 - **Missing review tools in custom configurations.** `submit` does not verify
   that the active configuration enables `review_reply` and `review_comment`.
   If a user overrides `cfg` without enabling the review tools, the assistant
@@ -797,7 +843,7 @@ problems.
 Implement the review domain model, anchor projection across versions,
 content-addressed blob storage, locked `review.json` persistence, and the
 non-turn CLI commands (`start`, `ls`, `show`, `diff`, `comment`, `reply`,
-`resolve`, and `close`).
+`edit`, `withdraw`, `resolve`, and `close`).
 Extract the advisory file lock helper from `ticket::board` into `doc` so both
 crates share it.
 Convert positions with `md_html::Lines`, removing the `qual:api` marker from
@@ -809,6 +855,9 @@ This phase runs no turns and is mergeable on its own.
 Implement pass prompt formatting, `submit`, the `review_reply` and
 `review_comment` plugin tools, `tools init`, and `init` (`review.toml`
 generation).
+Passes hold the `.pass` owner lock from the start, and a pass left without an
+outcome is recorded as `interrupted`, so a `submit` killed mid-pass does not
+block later ones.
 Depends on Phase 1.
 After this phase, the full review loop works end to end from the terminal.
 
@@ -820,8 +869,7 @@ Mergeable independently of Phases 1 and 2.
 
 ### Phase 4: `jp review serve`
 
-Implement the HTTP API, pass stopping, graceful shutdown, and reconciliation of
-`interrupted` passes.
+Implement the HTTP API, pass stopping, and graceful shutdown.
 Add plain-text rendering to `md-html` ([RFD 124]) for files other than Markdown.
 Depends on Phases 2 and 3.
 
