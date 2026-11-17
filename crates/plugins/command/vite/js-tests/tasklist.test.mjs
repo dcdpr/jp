@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { renderTaskLists } from '../site/jp-vite/tasklist.mjs'
+import { sectionSourceEnv } from '../site/jp-vite/embed.mjs'
+import { joinInlineCode } from '../site/jp-vite/join-inline-code.mjs'
+import { renderTaskLists, ticketItemText } from '../site/jp-vite/tasklist.mjs'
 
 // The parts of markdown-it's `Token` the rule uses.
 class Token {
@@ -127,6 +129,80 @@ test('a checkbox carries the text its item is checked by', () => {
         'data-checklist-item="Quote &quot;a&quot; &amp; &lt;b&gt;"> ')
     assert.equal(tokens[8].children[0].content,
         '<input type="checkbox" class="task-list-item-checkbox" disabled checked> ')
+})
+
+// The source as `jp ticket` reads it, with the join rule run on it the way the
+// site runs it before block parsing.
+function parsed(src, env) {
+    const state = { src, env }
+    joinInlineCode(state)
+    return state
+}
+
+// One task-list item whose paragraph starts on 0-based source line `line`.
+function itemAt(content, line) {
+    const tokens = list(item(content, [text(content)]))
+    tokens[3].map = [line, line + 1]
+    return tokens
+}
+
+const WRAPPED = `# Session read surface
+
+- **Status**: Todo
+
+- [ ] **Add the \`jp session\` read surface**: Implement \`jp
+      session ls --all\` in \`jp_cli\`.
+`
+
+// The join rule puts the code span's second line on the item's first line,
+// and `jp ticket` finds an item by its first line as written.
+test('an item wrapping a code span is checked by its first line as written', () => {
+    const state = parsed(WRAPPED, { relativePath: 'ticket/0aaaaaa-session.md' })
+    assert.notEqual(state.src, WRAPPED)
+    const tokens = itemAt('[ ] **Add the `jp session` read surface**: Implement `jp session ls --all`', 4)
+
+    renderTaskLists(tokens, Token, ticketItemText(state.env, state.src))
+
+    assert.equal(tokens[3].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled ' +
+        'data-checklist-item="**Add the `jp session` read surface**: Implement `jp"> ')
+})
+
+const EMBEDDED = `# Ticket B
+
+- **Status**: Todo
+
+## Steps
+
+- [ ] Add tests
+`
+
+const EMBEDDING = `# Ticket A
+
+- **Status**: Todo
+
+- [ ] Add tests
+
+![Steps](0bbbbbb-b.md#steps)
+`
+
+// `embedSection` parses ticket B on its own, its task lists rendered, before
+// its tokens join ticket A's. Both tickets have an `Add tests` item: a box on
+// B's item would check A's.
+test('an item embedded from another ticket is not checked from the embedding one', () => {
+    const inner = parsed(EMBEDDED, sectionSourceEnv({ relativePath: 'ticket/0bbbbbb-b.md' }))
+    const embedded = itemAt('[ ] Add tests', 6)
+    renderTaskLists(embedded, Token, ticketItemText(inner.env, inner.src))
+
+    const outer = parsed(EMBEDDING, { relativePath: 'ticket/0aaaaaa-a.md' })
+    const tokens = [...itemAt('[ ] Add tests', 4), ...embedded]
+    renderTaskLists(tokens, Token, ticketItemText(outer.env, outer.src))
+
+    assert.equal(tokens[3].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled ' +
+        'data-checklist-item="Add tests"> ')
+    assert.equal(tokens[10].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled> ')
 })
 
 // A class the list or item already carries, from `{.class}` attributes, is

@@ -20,6 +20,31 @@
 // Fenced code blocks (``` or ~~~) are passed through untouched. Spans that
 // cross block-syntax boundaries (blockquote markers, list markers, headings)
 // are left alone, since collapsing them would change interpretation.
+//
+// Each newline becomes one space, so every offset in the source as written is
+// the same offset in the joined one. The rule keeps the source as written in
+// markdown-it's `env`, for a reader that needs a line as the file holds it.
+
+// Where `joinInlineCode` keeps the source as written, in markdown-it's `env`.
+const WRITTEN = 'jpViteWrittenSource'
+
+// The core rule: join the code spans of the source `state` parses, keeping the
+// source as written in `state.env`.
+export function joinInlineCode(state) {
+    if (state.env) state.env[WRITTEN] = state.src
+    state.src = joinMultilineInlineCode(state.src)
+}
+
+// The source as written of the document parsed from `src`, the joined source,
+// in `env`.
+//
+// `src` itself when the rule didn't run, or when a later rule changed the
+// source's size, so offsets no longer line up.
+export function writtenSource(env, src) {
+    const written = env?.[WRITTEN]
+
+    return typeof written === 'string' && written.length === src.length ? written : src
+}
 
 export function joinMultilineInlineCode(src) {
     const fences = findFenceRanges(src)

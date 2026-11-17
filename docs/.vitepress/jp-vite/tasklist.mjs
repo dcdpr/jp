@@ -10,9 +10,13 @@
 // classes GitHub uses, which `theme/style.css` styles.
 //
 // Items that `jp ticket edit --check` can toggle carry their lookup text in
-// `data-checklist-item`, and `theme/TicketChecklist.vue` enables them when the
-// dev server accepts edits. Checkboxes render disabled in HTML so static builds
-// stay read-only.
+// `data-checklist-item` (see `ticketItemText`), and `theme/TicketChecklist.vue`
+// enables them when the dev server accepts edits. Checkboxes render disabled in
+// HTML so static builds stay read-only.
+
+import { isSectionSource } from './embed.mjs'
+import { writtenSource } from './join-inline-code.mjs'
+import { checklistItem, descriptionEnd } from './loaders/ticket-shared.mjs'
 
 // A checkbox at the start of an item's text, with text after it.
 const CHECKBOX = /^\[([ xX])\][ \t]+(?=\S)/
@@ -41,9 +45,9 @@ export function renderTaskLists(tokens, Token, itemText = () => null) {
         const box = new Token('html_inline', '', 0)
         const checked = match[1] === ' ' ? '' : ' checked'
         const text = itemText(inline)
-        const item = text ? ` data-checklist-item="${escapeAttribute(text)}"` : ''
+        const attribute = text ? ` data-checklist-item="${escapeAttribute(text)}"` : ''
         box.content =
-            `<input type="checkbox" class="task-list-item-checkbox" disabled${checked}${item}> `
+            `<input type="checkbox" class="task-list-item-checkbox" disabled${checked}${attribute}> `
 
         first.content = first.content.replace(LEADING, '')
         const rest = first.content === '' ? inline.children.slice(1) : inline.children
@@ -53,6 +57,43 @@ export function renderTaskLists(tokens, Token, itemText = () => null) {
         addClass(item, 'task-list-item')
         const list = enclosingList(tokens, index - 2)
         if (list) addClass(list, 'contains-task-list')
+    }
+}
+
+// The `itemText` for the block tokens of a ticket's page, parsed from `src` in
+// markdown-it's `env`: the text `jp ticket edit --check` finds each item of the
+// ticket's description by.
+//
+// Items in comments have none, since the tooling never changes a comment. A
+// document parsed for a section another page embeds gets no `itemText` at all:
+// its tokens end up on that page, where the ticket they would be checked
+// through is the embedding one.
+//
+// The text comes from the item's first line as written, as the `ticket` crate's
+// `checklist` module reads it, rather than from `src`, where the join rule may
+// have moved the next line of a wrapped code span onto it.
+export function ticketItemText(env, src) {
+    if (isSectionSource(env)) return undefined
+
+    const lines = src.split('\n')
+    const end = descriptionEnd(lines)
+    const written = writtenSource(env, src)
+    // The join rule replaces a newline with one space, so a line of `src`
+    // starts at the same offset in `written`.
+    const starts = []
+    let offset = 0
+    for (const line of lines) {
+        starts.push(offset)
+        offset += line.length + 1
+    }
+
+    return (inline) => {
+        const line = inline.map?.[0]
+        if (line === undefined || line >= end) return null
+
+        const stop = written.indexOf('\n', starts[line])
+        const first = written.slice(starts[line], stop < 0 ? undefined : stop)
+        return checklistItem(first)?.text ?? null
     }
 }
 

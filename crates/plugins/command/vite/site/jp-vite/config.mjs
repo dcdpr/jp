@@ -1,15 +1,14 @@
 import { posix } from 'node:path'
 
-import { embedSections, isEmbedded, lineRange } from './embed.mjs'
-import { joinMultilineInlineCode } from './join-inline-code.mjs'
-import { checklistItem, descriptionEnd } from './loaders/ticket-shared.mjs'
+import { embedSections, lineRange } from './embed.mjs'
+import { joinInlineCode } from './join-inline-code.mjs'
 import { metadataHeader } from './meta-header.mjs'
 import { devServer } from './middleware.mjs'
 import { redirectServer, writeRedirects } from './redirects.mjs'
 import { knownDocuments, linkMentions, relativeHref } from './references.mjs'
 import { readSettings } from './settings.mjs'
 import { slugify } from './slugify.mjs'
-import { renderTaskLists } from './tasklist.mjs'
+import { renderTaskLists, ticketItemText } from './tasklist.mjs'
 import { wikiSidebar } from './wiki.mjs'
 
 // What the RFD, ticket, and wiki pages need from the VitePress configuration.
@@ -50,9 +49,7 @@ export function withJpVite(config = {}) {
             preConfig: chain((md) => {
                 // Collapse newlines inside inline backtick spans before any
                 // block parsing runs. See `./join-inline-code.mjs` for why.
-                md.core.ruler.after('normalize', 'join_multiline_inline_code', (state) => {
-                    state.src = joinMultilineInlineCode(state.src)
-                })
+                md.core.ruler.after('normalize', 'join_multiline_inline_code', joinInlineCode)
             }, markdown.preConfig),
             config: chain((md) => {
                 escapeInlineCodeInterpolation(md)
@@ -195,25 +192,12 @@ export function withSearch(themeConfig) {
 
 // On a ticket page, return a function that maps a task-list item's inline token
 // to the lookup text for `jp ticket edit --check`. Return `undefined` on other
-// pages.
-//
-// Only items in the ticket's description are checkable: `jp ticket` never
-// modifies comments, and embedded items belong to another file. Extract the
-// lookup text from the raw source line rather than the rendered tokens so it
-// matches the `ticket` crate's parser.
+// pages. See `ticketItemText` in `./tasklist.mjs`.
 function ticketChecklistItems(state) {
     const page = state.env?.relativePath
     if (!page || !isDocumentPage(page, readSettings(), ['ticket'])) return undefined
 
-    const lines = state.src.split('\n')
-    const end = descriptionEnd(lines)
-
-    return (inline) => {
-        const line = inline.map?.[0]
-        if (isEmbedded(inline) || line === undefined || line >= end) return null
-
-        return checklistItem(lines[line])?.text ?? null
-    }
+    return ticketItemText(state.env, state.src)
 }
 
 // Render the metadata block an RFD, ticket, or wiki page opens with as a

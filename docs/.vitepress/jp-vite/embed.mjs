@@ -35,13 +35,16 @@ const IMAGES = new Set([
 // embeds are expanded once the section is cut out of it, and only those.
 const WHOLE_DOCUMENT = 'jpViteSectionSource'
 
-// Token metadata key marking block tokens inserted by an embed.
-const EMBEDDED = 'jpViteEmbedded'
+// The environment to parse a document in for a section it holds: `fields`,
+// marked as such. Every core rule runs on that parse, and its tokens end up on
+// the embedding page.
+export function sectionSourceEnv(fields) {
+    return { ...fields, [WHOLE_DOCUMENT]: true }
+}
 
-// Return whether `token` was inserted by an embed. Embedded tokens have `map`
-// line numbers from their source file rather than the embedding page.
-export function isEmbedded(token) {
-    return token.meta?.[EMBEDDED] === true
+// Whether `env` is that of a document parsed for a section it holds.
+export function isSectionSource(env) {
+    return env?.[WHOLE_DOCUMENT] === true
 }
 
 // Add the rule that expands embeds to `md`.
@@ -51,7 +54,7 @@ export function isEmbedded(token) {
 export function embedSections(md) {
     md.core.ruler.push('jp_vite_embeds', (state) => {
         const env = state.env ?? {}
-        if (!env.relativePath || env[WHOLE_DOCUMENT]) return
+        if (!env.relativePath || isSectionSource(env)) return
 
         expand(state.tokens, {
             md: state.md,
@@ -212,10 +215,7 @@ function expand(tokens, context) {
                 const replacement = embed.kind === 'section'
                     ? embedSection(embed, image, enclosing, context)
                     : embedLines(embed, image, context)
-                for (const added of replacement) {
-                    inserted.add(added)
-                    added.meta = { ...added.meta, [EMBEDDED]: true }
-                }
+                for (const added of replacement) inserted.add(added)
                 tokens.splice(index - 1, 3, ...replacement)
                 index += replacement.length - 2
                 continue
@@ -274,12 +274,11 @@ function embedSection(embed, image, enclosing, context) {
 
     // The whole document, so its definitions and its anchors are the ones it
     // has on its own page.
-    const document = md.parse(source, {
+    const document = md.parse(source, sectionSourceEnv({
         path,
         relativePath: embed.target,
         cleanUrls: context.cleanUrls,
-        [WHOLE_DOCUMENT]: true,
-    })
+    }))
     const section = cutSection(document, embed.slug, message => fail(page, src, message))
     // Read before `adapt` moves the section's headings, the title among them
     // when the section is the document's first.
