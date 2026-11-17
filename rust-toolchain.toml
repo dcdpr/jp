@@ -5,4 +5,7 @@
 #
 # When releasing a new version of the binary, we build it with the stable compiler.
 channel = "nightly-2026-03-26" # later versions break llvm-cov, need to investigate.
-components = ["cargo", "rustfmt", "clippy", "rust-analyzer", "llvm-tools"]
+# `rust-src` is what rust-analyzer reads the standard library from. Without it
+# rust-analyzer cannot expand `std` macros such as `assert_eq!`, and the
+# `code_symbol` tool misses every reference inside one.
+components = ["cargo", "rustfmt", "clippy", "rust-analyzer", "rust-src", "llvm-tools"]

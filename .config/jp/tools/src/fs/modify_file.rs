@@ -1,8 +1,3 @@
-// TODO:
-//
-// Look into using (parts of) <https://github.com/jbr/semantic-edit-mcp> for
-// semantic edits with (in-memory) staged changes.
-
 use std::{
     collections::BTreeMap,
     fmt::Write as _,
@@ -981,6 +976,25 @@ fn should_auto_approve(changes: &[(String, String, String)], config: &AutoApprov
     }
 
     total_changed <= config.max_changed_lines
+}
+
+/// Apply `changes` to the workspace, prompting for confirmation on files with
+/// uncommitted changes and on the resulting patch unless already answered in
+/// `answers` or auto-approved by `options`.
+pub(crate) fn write_changes(
+    changes: Vec<Change>,
+    ctx: &Context,
+    answers: &Map<String, Value>,
+    options: &Map<String, Value>,
+) -> ToolResult {
+    let auto_approve = parse_auto_approve_config(options);
+    apply_changes(
+        changes,
+        &ctx.root,
+        answers,
+        &auto_approve,
+        &SystemProcessRunner,
+    )
 }
 
 fn apply_changes<R: ProcessRunner>(

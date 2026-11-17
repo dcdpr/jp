@@ -1,0 +1,69 @@
+[conversation.tools.code_rename]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Rename Rust symbols at their definition and all references resolved by rust-analyzer."
+description = """
+Renames a function, method, type, field, variant, trait, constant, or local variable at its \
+definition and every resolved reference across the workspace, without touching unrelated symbols \
+that share the same name. Prefer this tool over `fs_modify_file` for any rename that spans \
+multiple files or scopes.
+
+Targets are specified the same way as in `code_symbol`. If a name matches multiple items, the \
+rename is rejected with a list of candidates; disambiguate with `path` and `line`.
+
+Batch multiple renames into a single `renames` array so they share one workspace load and one \
+approval prompt. All targets are resolved against the initial workspace state before any edits \
+are applied, and the renames then execute in sequence against the updated file contents. If any \
+rename in the batch fails, no files are modified. Batches whose outcome depends on execution \
+order (such as renaming two items to the same name, or swapping two names) are rejected.
+
+Edits go through the same uncommitted-changes and patch-approval checks as `fs_modify_file`. \
+The tool returns a summary with the edit count per rename and per file rather than the full diff.
+
+Limitations: rust-analyzer does not update occurrences inside `macro_rules!` bodies, string \
+literals, comments, or non-Rust files; it does not check whether `new_name` collides with an \
+existing identifier in scope; and it rejects renames that would move or rename a file (such as \
+renaming a module). Run `cargo_check` after renaming.
+
+Each call starts a fresh rust-analyzer process and waits several seconds for it to load the \
+workspace.
+"""
+
+examples = """
+Rename a method:
+```json
+{"renames": [{"name": "Stream::iter", "new_name": "values"}]}
+```
+
+Rename a function and a field referenced on a specific line in one call:
+```json
+{"renames": [
+  {"name": "load", "path": "src/config.rs", "new_name": "read"},
+  {"name": "config", "path": "src/editor.rs", "line": 120, "new_name": "base_config"}
+]}
+```
+"""
+
+# Auto-approve applying the patch, matching `fs_modify_file`. Prompting would
+# re-run the tool after the user answers and start a second rust-analyzer
+# process.
+questions.apply_changes.answer = true
+
+[conversation.tools.code_rename.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.code_rename.parameters.renames]
+type = "array"
+required = true
+summary = "Renames to apply in sequence."
+
+[conversation.tools.code_rename.parameters.renames.items]
+type = "object"
+properties.name = { type = "string", required = true, description = "Symbol name, qualified as needed to be unique (e.g. `iter`, `ConversationStream::iter`). Qualify struct fields with their type (`Type::field`)." }
+properties.path = { type = "string", description = "Workspace-relative file path. When `line` is omitted, selects the item with `name` defined in this file." }
+properties.line = { type = "integer", description = "1-based line number in `path` (before any renames in the batch) where `name` appears. Renames the symbol referenced at that location, wherever it is defined." }
+properties.occurrence = { type = "integer", description = "1-based occurrence index of `name` on `line`. Only needed when the identifier appears more than once on that line." }
+properties.new_name = { type = "string", required = true, description = "New unqualified identifier." }

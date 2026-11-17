@@ -15,6 +15,12 @@ current project. The following tools help you with this:
 - cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs (`comfort`).
 - cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
 - cargo_install_tools: Rebuild the binary serving these local tools, after editing `.config/jp/tools`.
+- code_symbol: Look up a Rust symbol via rust-analyzer (definition, references, implementations, \
+members, callers, and outgoing calls). Use it instead of `fs_grep_files` when checking what \
+calls, reads, or implements a specific symbol.
+- code_rename: Rename one or more Rust symbols at their definition and all resolved references \
+in a single call. Use it instead of `fs_modify_file` for any rename that spans multiple uses or \
+files.
 """
 
 [conversation.tools]
@@ -24,6 +30,8 @@ cargo_expand = { enable = true, run = "allow", result = "allow", style.inline_re
 cargo_format = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 cargo_update = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 cargo_install_tools = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+code_symbol = { enable = true, run = "allow", result = "allow" }
+code_rename = { enable = true, run = "allow", result = "allow" }
 
 [[assistant.instructions]]
 title = "Rust Project Conventions"
