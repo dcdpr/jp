@@ -2358,9 +2358,9 @@ test-ci SCOPE="workspace" *ARGS: (_install "cargo-nextest@" + nextest_version) _
 # Test the crates affected by changes since `BASE` on CI.
 #
 # Resolves affected crates via `affected-crates` and runs `test-ci packages` on
-# them. When `affected-crates` returns `all`, tests the full workspace, as
-# `main` does. If no crates are affected, exits without running nextest. `ARGS`
-# are passed on to `cargo nextest run`.
+# them. When `affected-crates` returns `all`, tests the full workspace. If no
+# crates are affected, exits without running nextest. `ARGS` are passed on to
+# `cargo nextest run`.
 [group('ci')]
 [script("bash")]
 test-affected-ci BASE *ARGS:

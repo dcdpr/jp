@@ -2079,13 +2079,13 @@ fn uri(file: &Utf8Path) -> Result<String, String> {
         .map_err(|()| format!("`{file}` is not an absolute path."))
 }
 
-/// `file` relative to `root`, joined with `/`, or `None` when `file` is not
-/// under `root`.
+/// Return `file` relative to `root` with `/` separators, or `None` if `file` is
+/// outside `root`.
 ///
-/// On Windows, `canonicalize` returns a root such as `\\?\C:\work`, while
-/// `rust-analyzer` reports files as `c:\work\...`.
-/// The verbatim prefix is removed from both before comparing; the drive
-/// letter's case is already ignored by path comparison.
+/// On Windows, `canonicalize` returns a verbatim root such as `\\?\C:\work`,
+/// while `rust-analyzer` reports file paths such as `c:\work\...`.
+/// Stripping the `\\?\` drive prefix from both paths lets `strip_prefix` match
+/// them (drive-letter case is already ignored by path comparison).
 fn relative_to(file: &Utf8Path, root: &Utf8Path) -> Option<String> {
     let rest = without_verbatim_prefix(file)
         .strip_prefix(without_verbatim_prefix(root))
@@ -2099,7 +2099,7 @@ fn relative_to(file: &Utf8Path, root: &Utf8Path) -> Option<String> {
     )
 }
 
-/// `path` without a leading `\\?\` when it names a drive, as in `\\?\C:\work`.
+/// Strip a leading Windows verbatim drive prefix (`\\?\C:...`) from `path`.
 fn without_verbatim_prefix(path: &Utf8Path) -> &Utf8Path {
     match path.as_str().strip_prefix(r"\\?\") {
         Some(rest) if rest.as_bytes().get(1) == Some(&b':') => Utf8Path::new(rest),

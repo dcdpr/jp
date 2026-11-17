@@ -422,10 +422,6 @@ fn a_file_is_relative_to_the_root_it_sits_under() {
     );
 }
 
-/// `canonicalize` gives the root as `\\?\C:\...`, and rust-analyzer reports
-/// files as `c:\...`.
-/// Both name the same directory, and the relative path uses `/` like the paths
-/// the tools take.
 #[cfg(windows)]
 #[test]
 fn a_windows_file_is_relative_to_its_verbatim_root() {
