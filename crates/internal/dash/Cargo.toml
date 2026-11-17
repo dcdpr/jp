@@ -19,15 +19,13 @@ jp_storage = { workspace = true }
 jp_workspace = { workspace = true }
 
 camino = { workspace = true }
+camino-tempfile = { workspace = true }
 chrono = { workspace = true }
 crossterm = { workspace = true, features = ["events"] }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 unicode-width = { workspace = true }
-
-[dev-dependencies]
-camino-tempfile = { workspace = true }
 
 [lints]
 workspace = true

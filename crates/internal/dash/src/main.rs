@@ -1,6 +1,8 @@
-//! `dash`: a live terminal dashboard of the repository's worktrees, showing
-//! open terminals, running `jp` processes, pull requests, CI status, and review
-//! threads.
+//! `dash`: a live terminal dashboard of the repository's worktrees.
+//!
+//! Displays open terminals, running `jp` processes, pull requests, CI status,
+//! and review threads, and runs a merge queue for pull requests carrying the
+//! queue label (see `queue` and `source::github::merge`).
 //!
 //! Run it from any worktree of the repository with `just dash`.
 //! The sources are read on background threads (see `source`); the main thread
@@ -9,6 +11,7 @@
 mod app;
 mod create;
 mod model;
+mod queue;
 mod source;
 mod ui;
 
@@ -17,7 +20,10 @@ use std::{
     io::{self, Write},
     panic,
     process::{Command, ExitCode},
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
     thread,
     time::Duration,
 };
@@ -38,7 +44,11 @@ use crossterm::{
 use crate::{
     app::{Action, App, Update},
     create::Created,
-    source::{Refresher, ghostty, jp},
+    source::{
+        Refresher, ghostty,
+        github::{self, QueueControl},
+        jp,
+    },
     ui::{Line, Span},
 };
 
@@ -59,7 +69,23 @@ fn run() -> io::Result<()> {
     let dir = Utf8PathBuf::try_from(env::current_dir()?).map_err(io::Error::other)?;
 
     let (updates, received) = mpsc::channel();
-    let refresher = source::spawn(&dir, &updates);
+    let control = Arc::new(QueueControl::default());
+    let refresher = source::spawn(&dir, &updates, Arc::clone(&control));
+    let labels = {
+        let (updates, refresher) = (updates.clone(), refresher.clone());
+        github::label_editor(dir.clone(), move |number, add, outcome| {
+            let outcome = outcome.map_err(|error| {
+                let verb = if add { "Adding" } else { "Removing" };
+                format!("{verb} the queue label on #{number} failed: {error}")
+            });
+            let _gone = updates.send(Update::QueueEdited {
+                number,
+                add,
+                outcome,
+            });
+            refresher.refresh_pull_requests();
+        })
+    };
 
     // Restore the terminal before printing panic output so the message is not
     // lost when leaving the alternate screen.
@@ -70,7 +96,7 @@ fn run() -> io::Result<()> {
     }));
 
     let _screen = Screen::enter()?;
-    event_loop(&dir, &received, &updates, &refresher)
+    event_loop(&dir, &received, &updates, &refresher, &control, &labels)
 }
 
 /// RAII guard that keeps the terminal in raw mode on the alternate screen.
@@ -121,6 +147,8 @@ fn event_loop(
     received: &Receiver<Update>,
     updates: &Sender<Update>,
     refresher: &Refresher,
+    control: &QueueControl,
+    labels: &Sender<(u64, bool)>,
 ) -> io::Result<()> {
     let mut out = io::stdout();
     let mut app = App::default();
@@ -155,7 +183,7 @@ fn event_loop(
 
         match react(&mut app, &event, width, height) {
             Action::Quit => return Ok(()),
-            action => carry_out(action, dir, updates, refresher),
+            action => carry_out(action, dir, updates, refresher, control, labels),
         }
     }
 }
@@ -187,7 +215,14 @@ fn react(app: &mut App, event: &Event, width: u16, height: u16) -> Action {
 }
 
 /// Execute `action`, spawning a background thread for subprocess calls.
-fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher: &Refresher) {
+fn carry_out(
+    action: Action,
+    dir: &Utf8Path,
+    updates: &Sender<Update>,
+    refresher: &Refresher,
+    control: &QueueControl,
+    labels: &Sender<(u64, bool)>,
+) {
     match action {
         Action::None | Action::Quit => {}
         Action::Refresh => refresher.refresh(),
@@ -235,7 +270,30 @@ fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher
                 Ok(())
             });
         }
+        Action::PauseQueue(paused) => pause_queue(paused, control, refresher),
+        Action::Queue { number, add } => edit_queue_label(number, add, control, labels),
     }
+}
+
+/// Pause the merge queue in this process, or resume it.
+fn pause_queue(paused: bool, control: &QueueControl, refresher: &Refresher) {
+    control.set_paused(paused);
+    // A pause takes effect at the next poll; a resume should act now.
+    if !paused {
+        refresher.refresh();
+    }
+}
+
+/// Hand adding or removing the queue label on pull request `number` to the
+/// label editor.
+fn edit_queue_label(number: u64, add: bool, control: &QueueControl, labels: &Sender<(u64, bool)>) {
+    // Re-enqueuing a pull request clears any hold placed on its entry.
+    if add {
+        control.clear(number);
+    }
+    // The editor applies label changes sequentially and outlives the event
+    // loop.
+    let _gone = labels.send((number, add));
 }
 
 fn open_url(url: &str) -> Result<(), String> {

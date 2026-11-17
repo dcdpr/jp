@@ -550,6 +550,14 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
 # tabs and session conversations, and `→` on a conversation lists `jp` commands
 # to run in its tab. `n` creates a worktree on a new branch from `main`, `/`
 # filters, `s` sorts, and `a` toggles idle worktrees.
+#
+# Also drives a merge queue: `m` toggles the queue label on the selected pull
+# request, and `p` pauses or resumes the queue. Labeled pull requests (or
+# stacks, from the bottom up to the highest labeled pull request) are updated
+# with the default branch and merged one entry at a time once all checks pass.
+# The queue label and merge method are read from the `dash.queueLabel` and
+# `dash.queueMergeMethod` git config keys, defaulting to `merge-when-green` and
+# the first method allowed by the repository (`squash`, `merge`, or `rebase`).
 [group('github')]
 dash:
     @cargo run {{quiet_flag}} --package dash

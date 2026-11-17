@@ -9,6 +9,7 @@
 //! tracks the selected item and scroll offset.
 
 mod cursor;
+mod queue_view;
 mod table;
 
 use std::{collections::HashSet, mem};
@@ -20,11 +21,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use self::table::Key;
 pub use self::{
     cursor::Cursor,
+    queue_view::QueueView,
     table::{Display, Filter, Indent, Item, Operation, Sort, Table},
 };
 use crate::{
     create::Created,
     model::{self, BaseUpdate, PullRequest, Row, RowId, Terminal, Worktree},
+    queue::QueueRole,
     source::jp::JpState,
 };
 
@@ -38,6 +41,17 @@ pub enum Update {
 
     /// Result of fast-forwarding the local default branch.
     Base(Result<BaseUpdate, String>),
+
+    /// Role of this process in the merge queue.
+    Queue(QueueRole),
+
+    /// Result of adding (`add: true`) or removing (`add: false`) the queue
+    /// label on pull request `number`.
+    QueueEdited {
+        number: u64,
+        add: bool,
+        outcome: Result<(), String>,
+    },
 
     /// Result of creating a worktree for pull request `pr` (or a new branch
     /// when `None`).
@@ -92,6 +106,16 @@ pub enum Action {
         dir: Utf8PathBuf,
         command: String,
     },
+
+    /// Add (`add: true`) or remove (`add: false`) the queue label on pull
+    /// request `number`.
+    Queue {
+        number: u64,
+        add: bool,
+    },
+
+    /// Pause or resume the merge queue in this process.
+    PauseQueue(bool),
 }
 
 /// Latest value and error state for a single background source.
@@ -134,6 +158,10 @@ pub struct Feeds {
     pub jp: Feed<JpState>,
     pub prs: Feed<Vec<PullRequest>>,
     pub base: Feed<BaseUpdate>,
+
+    /// Role of this process in the merge queue, populated after the first
+    /// GitHub poll.
+    pub queue: Option<QueueRole>,
 }
 
 impl Feeds {
@@ -192,6 +220,9 @@ pub struct App {
     /// Reference timestamp used to format relative ages on the current frame.
     pub now: DateTime<Utc>,
 
+    /// Whether the merge queue is paused here, and label edits in flight.
+    pub queue: QueueView,
+
     /// Row and next tab index for cycling through tabs on repeated `Enter`
     /// presses.
     cycle: Option<(RowId, usize)>,
@@ -216,9 +247,26 @@ impl App {
             Update::Worktrees(read) => self.feeds.worktrees.apply(read),
             Update::Terminals(read) => self.feeds.terminals.apply(read),
             Update::Jp(read) => self.feeds.jp.apply(read),
-            Update::PullRequests(read) => self.feeds.prs.apply(read),
+            Update::PullRequests(read) => {
+                self.feeds.prs.apply(read);
+                if let Some(prs) = &self.feeds.prs.data {
+                    self.queue.settle(prs);
+                }
+            }
             Update::Base(read) => {
                 self.feeds.base.apply(read);
+                return;
+            }
+            Update::Queue(role) => {
+                self.feeds.queue = Some(role);
+                return;
+            }
+            Update::QueueEdited {
+                number,
+                add,
+                outcome,
+            } => {
+                self.notice = Some(self.queue.edited(number, add, outcome));
                 return;
             }
             Update::Created { pr, outcome } => {
@@ -286,6 +334,11 @@ impl App {
             KeyCode::Char('r') => Action::Refresh,
             KeyCode::Enter => self.enter(cycle),
             KeyCode::Char('o') => self.open(),
+            KeyCode::Char('m') => self.toggle_queue(),
+            KeyCode::Char('p') => {
+                self.notice = Some(self.queue.toggle_pause());
+                Action::PauseQueue(self.queue.paused)
+            }
             _ => {
                 self.browse(key, pending_g);
                 Action::None
@@ -651,6 +704,29 @@ impl App {
         let notice = format!("{} has no open pull request.", row.name);
         self.notice = Some(notice);
         Action::None
+    }
+
+    /// `m`: toggle the merge-queue label on the selected row's pull request.
+    fn toggle_queue(&mut self) -> Action {
+        let Some(item) = self.selected_item() else {
+            return Action::None;
+        };
+        let row = item.row();
+
+        let Some(pr) = &row.pr else {
+            self.notice = Some(format!("{} has no open pull request.", row.name));
+            return Action::None;
+        };
+
+        let number = pr.number;
+        let add = self.queue.toggle(number, pr.labeled);
+
+        self.notice = Some(if add {
+            format!("Adding #{number} to the merge queue…")
+        } else {
+            format!("Taking #{number} out of the merge queue…")
+        });
+        Action::Queue { number, add }
     }
 
     /// Adjust the scroll offset so the selected item fits within `rows` screen

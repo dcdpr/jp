@@ -3,6 +3,9 @@
 //! Every command that may contact a remote runs with stdin closed and
 //! interactive prompts disabled so a credential prompt cannot draw over the
 //! dashboard TUI or block a background thread indefinitely.
+//!
+//! [`rebase_stack`] rebases a stack of pull request branches the way GitHub's
+//! "Rebase stack" button does, which has no public API.
 
 use std::{
     env,
@@ -151,6 +154,17 @@ pub fn update_branch(dir: &Utf8Path, branch: &str) -> Result<bool, Error> {
     Ok(rev_parse(dir, &reference)? != before)
 }
 
+/// Read the git config value `key` for the repository containing `dir`.
+///
+/// Returns `None` when the key is unset, empty, or `git config` fails.
+#[must_use]
+pub fn config(dir: &Utf8Path, key: &str) -> Option<String> {
+    git(dir, &["config", "--get", key])
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
 /// Validate `name` as a legal git branch name.
 pub fn check_branch_name(dir: &Utf8Path, name: &str) -> Result<(), Error> {
     git(dir, &["check-ref-format", "--branch", name]).map(drop)
@@ -164,6 +178,208 @@ pub fn add_detached(dir: &Utf8Path, path: &Utf8Path, commit: &str) -> Result<(),
 /// Add a worktree at `path` on a new branch `branch`, starting at `from`.
 pub fn add_branch(dir: &Utf8Path, path: &Utf8Path, branch: &str, from: &str) -> Result<(), Error> {
     git(dir, &["worktree", "add", "-b", branch, path.as_str(), from]).map(drop)
+}
+
+/// Return the name of the remote in `dir` pointing at GitHub repository `repo`
+/// (`owner/name`), if any.
+#[must_use]
+pub fn remote_for(dir: &Utf8Path, repo: &str) -> Option<String> {
+    let remotes = git(dir, &["remote"]).ok()?;
+
+    remotes
+        .lines()
+        .map(str::trim)
+        .filter(|remote| !remote.is_empty())
+        .find(|remote| {
+            git(dir, &["remote", "get-url", remote]).is_ok_and(|url| points_at(url.trim(), repo))
+        })
+        .map(str::to_owned)
+}
+
+/// Return `true` if remote `url` (HTTPS or SSH) points to GitHub repository
+/// `repo`.
+fn points_at(url: &str, repo: &str) -> bool {
+    let url = url.to_lowercase();
+    let url = url.trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+
+    url.strip_suffix(&repo.to_lowercase())
+        .is_some_and(|rest| rest.ends_with('/') || rest.ends_with(':'))
+}
+
+/// Outcome of [`rebase_stack`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rebased {
+    /// All branches in the stack were rebased and pushed.
+    Pushed,
+
+    /// A branch ref advanced from its expected SHA; nothing was pushed.
+    Moved,
+
+    /// Rebase stopped on merge conflicts; nothing was pushed.
+    Conflicts,
+
+    /// Rebase or push failed with this reason; nothing was pushed.
+    Refused(String),
+}
+
+/// Rebase a stack of branches onto `base` and atomically force-push them to
+/// `remote`.
+///
+/// `branches` lists `(branch_name, expected_head_sha)` pairs from the bottom of
+/// the stack to the top.
+/// `below` is the head commit SHA of the pull request directly below the bottom
+/// branch, if one existed and has already merged; when `below` is an ancestor
+/// of the bottom branch, only commits after `below` are replayed onto `base`.
+///
+/// The rebase runs in a temporary detached worktree with hooks and commit
+/// signing disabled.
+/// All branches are pushed in a single `git push --atomic` call with
+/// `--force-with-lease` pinned to each branch's expected SHA, so a concurrent
+/// push to any branch rejects the entire push.
+///
+/// Returns `Err` only when `git fetch` fails, so the caller can retry on the
+/// next poll.
+pub fn rebase_stack(
+    dir: &Utf8Path,
+    remote: &str,
+    base: &str,
+    branches: &[(String, String)],
+    below: Option<&str>,
+) -> Result<Rebased, Error> {
+    fetch_stack(dir, remote, base, branches)?;
+
+    let tip = rev_parse(dir, &tracking(remote, base))?;
+    let moved = branches
+        .iter()
+        .any(|(branch, sha)| rev_parse(dir, &tracking(remote, branch)).ok().as_ref() != Some(sha));
+    if moved {
+        return Ok(Rebased::Moved);
+    }
+
+    let scratch = match camino_tempfile::Builder::new()
+        .prefix("dash-rebase-")
+        .tempdir()
+    {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            return Ok(Rebased::Refused(format!(
+                "creating a worktree failed: {error}"
+            )));
+        }
+    };
+    let worktree = scratch.path().join("stack");
+    if let Err(error) = add_detached(dir, &worktree, &tip) {
+        return Ok(Rebased::Refused(format!(
+            "creating a worktree failed: {error}"
+        )));
+    }
+
+    let replayed = replay(dir, &worktree, &tip, branches, below);
+    // If removing the worktree metadata fails, `scratch` still deletes the
+    // directory and a later `git worktree prune` cleans up the administrative
+    // entry.
+    let _kept = remove_worktree(dir, &worktree);
+
+    let push = match replayed {
+        Ok(push) => push,
+        Err(outcome) => return Ok(outcome),
+    };
+    let mut args = vec!["push", "--quiet", "--atomic", "--no-verify", remote];
+    args.extend(push.iter().map(String::as_str));
+
+    Ok(match git(dir, &args) {
+        Ok(_) => Rebased::Pushed,
+        Err(error) => Rebased::Refused(format!("pushing the rebased stack failed: {error}")),
+    })
+}
+
+/// Fetch `base` and every branch of `branches` from `remote` into their
+/// remote-tracking refs.
+fn fetch_stack(
+    dir: &Utf8Path,
+    remote: &str,
+    base: &str,
+    branches: &[(String, String)],
+) -> Result<(), Error> {
+    let refspec = |branch: &str| format!("+refs/heads/{branch}:{}", tracking(remote, branch));
+
+    let mut fetch = vec![
+        "fetch".to_owned(),
+        "--quiet".to_owned(),
+        "--no-tags".to_owned(),
+        remote.to_owned(),
+        refspec(base),
+    ];
+    fetch.extend(branches.iter().map(|(branch, _)| refspec(branch)));
+    git(dir, &fetch.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
+}
+
+/// The remote-tracking ref of `branch` on `remote`.
+fn tracking(remote: &str, branch: &str) -> String {
+    format!("refs/remotes/{remote}/{branch}")
+}
+
+/// Replay each branch in `branches` onto the rebased tip of the branch below it
+/// (starting from `tip`), and return the `--force-with-lease` refspecs for `git
+/// push`.
+fn replay(
+    dir: &Utf8Path,
+    worktree: &Utf8Path,
+    tip: &str,
+    branches: &[(String, String)],
+    below: Option<&str>,
+) -> Result<Vec<String>, Rebased> {
+    let Some((_, bottom)) = branches.first() else {
+        return Ok(vec![]);
+    };
+
+    let mut old = below
+        .filter(|below| git(dir, &["merge-base", "--is-ancestor", below, bottom]).is_ok())
+        .map(str::to_owned)
+        .or_else(|| {
+            git(dir, &["merge-base", tip, bottom])
+                .ok()
+                .map(|out| out.trim().to_owned())
+        })
+        .ok_or_else(|| Rebased::Refused(format!("{bottom} shares no history with its base")))?;
+    let mut new = tip.to_owned();
+    let mut push = vec![];
+
+    for (branch, sha) in branches {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(worktree)
+            .args([
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "commit.gpgSign=false",
+                "rebase",
+                "--quiet",
+                // Do not move local branch refs checked out in user worktrees.
+                "--no-update-refs",
+                "--no-autosquash",
+                "--onto",
+                &new,
+                &old,
+                sha,
+            ])
+            .env("GIT_EDITOR", "true");
+        if stdout("git", noninteractive(&mut command, worktree)).is_err() {
+            let _aborted = git(worktree, &["rebase", "--abort"]);
+            return Err(Rebased::Conflicts);
+        }
+
+        old.clone_from(sha);
+        new = rev_parse(worktree, "HEAD")
+            .map_err(|error| Rebased::Refused(format!("rebasing the stack failed: {error}")))?;
+        push.push(format!("--force-with-lease=refs/heads/{branch}:{sha}"));
+        push.push(format!("{new}:refs/heads/{branch}"));
+    }
+
+    Ok(push)
 }
 
 /// Resolve `revision` to a commit SHA.
