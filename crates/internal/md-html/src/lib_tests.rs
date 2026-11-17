@@ -332,7 +332,7 @@ fn text_with_an_entity_is_unmapped() {
 
 #[test]
 fn text_with_a_nul_byte_is_unmapped() {
-    // The page shows the NUL as U+FFFD, three bytes where the source has one.
+    // comrak replaces NUL (1 byte) with U+FFFD (3 bytes), shifting subsequent offsets.
     let html = render("a\0b\n").html;
 
     assert_eq!(html, "<p><span class=\"unmapped\">a\u{fffd}b</span></p>\n");

@@ -1,10 +1,8 @@
-//! The formatter [`render`] runs comrak's HTML renderer with.
+//! Custom node formatter for comrak's HTML renderer.
 //!
-//! comrak writes the HTML of every node except text, code spans and blocks, raw
-//! HTML, and alerts, whose title is text.
-//! This module writes those, with each run of text in a [`span`].
-//!
-//! [`render`]: crate::render
+//! Delegates structural elements to comrak and overrides text nodes, code
+//! spans, code blocks, raw HTML, and alerts so that every rendered text run is
+//! wrapped in a [`span`].
 
 use std::fmt::{self, Write as _};
 
@@ -56,7 +54,8 @@ fn inline(
     }
 }
 
-/// Write a code span, a space standing for each line ending in its content.
+/// Write a code span, replacing each line ending in its content with an
+/// unmapped space.
 fn code_span(
     context: &mut Context<'_, '_, &Lines<'_>>,
     node: Node<'_>,
@@ -112,7 +111,7 @@ fn code_block(
     context.lf()
 }
 
-/// Write a raw HTML block, escaped, as preformatted text.
+/// Write a raw HTML block as escaped preformatted text.
 fn html_block(
     context: &mut Context<'_, '_, &Lines<'_>>,
     node: Node<'_>,
@@ -136,7 +135,7 @@ fn html_block(
     context.lf()
 }
 
-/// Write the lines of a block's `literal`, the first of which is on source line
+/// Write each line of `literal` as a span, starting at 1-based source line
 /// `first`.
 fn block_lines(
     out: &mut dyn fmt::Write,
@@ -155,7 +154,7 @@ fn block_lines(
     Ok(())
 }
 
-/// Write an alert: comrak's markup, with the title in a span.
+/// Write a GitHub alert block with its title wrapped in a span.
 fn alert_block(
     context: &mut Context<'_, '_, &Lines<'_>>,
     node: Node<'_>,
@@ -182,8 +181,8 @@ fn alert_block(
     context.lf()
 }
 
-/// Write an alert's title: its own title, or the default title for its kind,
-/// which stands for its marker.
+/// Write an alert's explicit title as a mapped span, or its default title as an
+/// atom span covering the `[!KIND]` marker.
 fn alert_title(
     out: &mut dyn fmt::Write,
     lines: &Lines<'_>,
@@ -204,7 +203,7 @@ fn alert_title(
     }
 }
 
-/// The start of the table cell `node` is in, if any.
+/// Return the start position of the enclosing table cell, if any.
 fn cell_start(node: Node<'_>) -> Option<LineColumn> {
     node.ancestors().skip(1).find_map(|ancestor| {
         let data = ancestor.data();

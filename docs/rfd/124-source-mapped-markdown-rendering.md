@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-16
-- **Summary**: Adds an internal markdown-to-HTML renderer whose rendered text
-  carries the byte range of the source it came from.
+- **Summary**: Adds an internal Markdown-to-HTML renderer that annotates every
+  rendered text span with its source byte range.
 
 ## Summary
 

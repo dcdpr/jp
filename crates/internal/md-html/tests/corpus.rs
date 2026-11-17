@@ -1,18 +1,17 @@
-//! Renders JP's own documents, as a check on comrak's source positions that
-//! fails when a comrak upgrade or a new document leaves text unmapped.
+//! Corpus test that renders JP's Markdown documents and asserts that no text is
+//! emitted as `unmapped`.
 
 use std::{
     env, fs,
     path::{Path, PathBuf},
 };
 
-/// The directories, relative to the workspace root, whose Markdown files are
-/// rendered, subdirectories included.
+/// Workspace-relative directories walked recursively for Markdown files.
 const DIRS: [&str; 3] = ["docs/rfd", "docs/wiki", "docs/ticket"];
 
 const UNMAPPED: &str = "<span class=\"unmapped\">";
 
-/// How many unmapped spans of one document the failure message shows.
+/// Maximum unmapped spans reported per document.
 const SHOWN_PER_DOCUMENT: usize = 3;
 
 #[test]
@@ -23,7 +22,7 @@ fn jp_documents_render_without_unmapped_text() {
         markdown_files(&root.join(dir), &mut files);
     }
     files.sort();
-    // Moved documents would otherwise leave nothing to check.
+    // Guard against directory moves silently reducing the corpus to empty.
     assert!(files.len() > 100, "found only {} documents", files.len());
 
     let mut failures = vec![];
@@ -45,11 +44,11 @@ fn jp_documents_render_without_unmapped_text() {
     );
 }
 
-/// The root of JP's repository.
+/// Resolve the workspace root at runtime.
 ///
-/// Read at run time: a target directory shared between worktrees can run a
-/// binary another worktree compiled, so a path baked in with `env!` can name
-/// the wrong checkout.
+/// Reads `CARGO_MANIFEST_DIR` from the environment rather than `env!` at
+/// compile time so that worktrees sharing a `target` directory test their own
+/// checkout's documents.
 fn workspace_root() -> PathBuf {
     let manifest = env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");

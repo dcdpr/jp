@@ -1,34 +1,33 @@
-//! Conversions between byte offsets into a text and 1-based line and column
-//! positions.
+//! Conversion between UTF-8 byte offsets and 1-based line and column positions.
 
 use std::ops::Range;
 
-/// A 1-based line and column in a text.
+/// A 1-based line and column position in a string.
 ///
-/// The column counts Unicode code points from the start of the line: the first
-/// character on a line is at column 1, whatever its size in bytes.
+/// `column` counts Unicode scalar values (`char`s) from the start of the line,
+/// so the first character on a line is at column 1 regardless of its UTF-8 byte
+/// length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LineColumn {
     pub line: usize,
     pub column: usize,
 }
 
-/// The lines of a text, for converting between byte offsets into it and
-/// [`LineColumn`] positions.
+/// Line index over a source string for converting between UTF-8 byte offsets
+/// and [`LineColumn`] positions.
 ///
-/// A line ends at `\n`, `\r\n`, or a `\r` not followed by `\n`, as in
-/// CommonMark.
-/// The characters of a line ending belong to the line they end.
+/// Follows CommonMark line endings: `\n`, `\r\n`, or a standalone `\r`.
+/// Line ending characters belong to the line they terminate.
 #[derive(Debug, Clone)]
 pub struct Lines<'s> {
     text: &'s str,
 
-    /// The bytes of each line, without its line ending.
+    /// Byte range of each line, excluding its line ending.
     ranges: Vec<Range<usize>>,
 }
 
 impl<'s> Lines<'s> {
-    /// Find where each line of `text` starts and ends.
+    /// Index the line boundaries of `text`.
     #[must_use]
     pub fn new(text: &'s str) -> Self {
         let mut ranges = vec![];
@@ -41,11 +40,12 @@ impl<'s> Lines<'s> {
         Self { text, ranges }
     }
 
-    /// The position of byte `offset`.
+    /// Convert a UTF-8 byte `offset` to a 1-based [`LineColumn`].
     ///
-    /// `offset` may be the size of the text, the position past its last
-    /// character.
-    /// Returns `None` for an offset past that, or one inside a character.
+    /// `offset == text.len()` resolves to the position immediately after the
+    /// last character.
+    /// Returns `None` if `offset` is out of bounds or does not lie on a UTF-8
+    /// character boundary.
     // No code in the workspace calls this yet (T-1md6ywd).
     // qual:api
     #[must_use]
@@ -64,11 +64,12 @@ impl<'s> Lines<'s> {
         })
     }
 
-    /// The byte offset of `position`.
+    /// Convert a 1-based [`LineColumn`] to a UTF-8 byte offset.
     ///
-    /// A line's columns run through its line ending, and the last line also has
-    /// the column past its last character, at the end of the text.
-    /// Returns `None` for any other position.
+    /// Valid columns on a line include its line ending characters, and on the
+    /// last line also include the position one past the final character
+    /// (`text.len()`).
+    /// Returns `None` if `position` is out of bounds.
     // No code in the workspace calls this yet (T-1md6ywd).
     // qual:api
     #[must_use]
@@ -90,17 +91,16 @@ impl<'s> Lines<'s> {
         self.text
     }
 
-    /// The bytes of 1-based line `line`, without its line ending.
+    /// Return the byte range of 1-based `line`, excluding its line ending.
     pub(crate) fn line_range(&self, line: usize) -> Option<Range<usize>> {
         self.ranges.get(line.checked_sub(1)?).cloned()
     }
 }
 
-/// Split `text` at each line ending CommonMark reads: `\n`, `\r\n`, or a `\r`
-/// not followed by `\n`.
+/// Split `text` on CommonMark line endings (`\n`, `\r\n`, or standalone `\r`).
 ///
-/// Returns each line with the line ending after it, which is empty for the last
-/// line.
+/// Yields `(line_without_ending, ending)` pairs, ending with a final pair whose
+/// `ending` is `""`.
 pub(crate) fn split_lines(text: &str) -> Vec<(&str, &str)> {
     let mut lines = vec![];
     let mut rest = text;

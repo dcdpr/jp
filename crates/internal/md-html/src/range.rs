@@ -1,10 +1,10 @@
-//! The source ranges of rendered text.
+//! Source byte range resolution for AST nodes.
 //!
-//! comrak reports a source position for each node.
-//! These functions turn a node's position into the byte ranges its rendered
-//! text comes from, and return `None` when those bytes are not the rendered
-//! text, so the text is rendered unmapped instead of with a range that is
-//! wrong.
+//! Converts the [`Sourcepos`] reported by comrak into UTF-8 byte ranges in the
+//! original source string and verifies that the resolved slice matches the
+//! rendered text.
+//! When verification fails, these functions return `None` so the caller emits
+//! an `unmapped` span instead of an inaccurate range.
 
 use std::{borrow::Cow, ops::Range};
 
@@ -12,12 +12,11 @@ use comrak::nodes::{AlertType, LineColumn, NodeCode, Sourcepos};
 
 use crate::position::{Lines, split_lines};
 
-/// The escape that puts a `|` in a table cell.
 pub(crate) const ESCAPED_PIPE: &str = "\\|";
 
-/// The range of a text or raw HTML node's `literal`.
+/// Resolve and verify the source byte range of an inline text or raw HTML node.
 ///
-/// `cell` is the start of the table cell the node is in, if any.
+/// `cell` is the start position of the enclosing table cell, if any.
 pub(crate) fn inline(
     lines: &Lines<'_>,
     pos: Sourcepos,
@@ -30,11 +29,12 @@ pub(crate) fn inline(
     (exact && verbatim(literal)).then_some(range)
 }
 
-/// The ranges a code span's content comes from, one for each source line it
-/// spans.
+/// Resolve and verify the source byte ranges of a code span, one per source
+/// line.
 ///
-/// The code span renders each line ending, with the container markers and
-/// indentation that start the next line, as one space, which is in no range.
+/// Multi-line code spans collapse each line ending (and any leading blockquote
+/// markers or indentation on the next line) into a single space that has no
+/// source range.
 pub(crate) fn code_span(
     lines: &Lines<'_>,
     pos: Sourcepos,
@@ -51,8 +51,9 @@ pub(crate) fn code_span(
 
     let mut segments = code_lines(text, start..start + content.len());
     let joined = join(text, &segments, cell.is_some());
-    // comrak keeps the `\r` of a `\r\n` line ending in the literal, before the
-    // space that stands for the line ending. A lone `\r` becomes the space.
+    // On `\r\n` inputs, comrak retains the `\r` in `code.literal` before the
+    // space that replaces the `\n`. Strip `\r` before comparing against the
+    // joined source lines.
     let literal = code.literal.replace('\r', "");
     if joined != literal {
         unpad(&mut segments, &joined, &literal)?;
@@ -64,11 +65,11 @@ pub(crate) fn code_span(
         .then_some(segments)
 }
 
-/// The range of `content`, a line of a code or HTML block, on source line
-/// `line`.
+/// Resolve the byte range of a single `content` line from a code or HTML block
+/// on 1-based source `line`.
 ///
-/// The content ends its source line: what comes before it on the line is
-/// indentation and container markers.
+/// `content` is a suffix of the source line; any bytes preceding it on the line
+/// are indentation or blockquote markers.
 pub(crate) fn block_line(lines: &Lines<'_>, line: usize, content: &str) -> Option<Range<usize>> {
     let range = lines.line_range(line)?;
     let exact = lines.text()[range.clone()].ends_with(content);
@@ -76,8 +77,8 @@ pub(crate) fn block_line(lines: &Lines<'_>, line: usize, content: &str) -> Optio
     (exact && verbatim(content)).then(|| range.end - content.len()..range.end)
 }
 
-/// The range of an alert's marker, such as `[!NOTE]`, on the line where the
-/// alert starts at `start`.
+/// Resolve the byte range of an alert marker (such as `[!NOTE]`) on the opening
+/// line of the alert at `start`.
 pub(crate) fn alert_marker(
     lines: &Lines<'_>,
     start: LineColumn,
@@ -94,7 +95,8 @@ pub(crate) fn alert_marker(
         .then(|| open..open + "[!".len() + size + "]".len())
 }
 
-/// The range of an alert's own `title`: the rest of the line after its marker.
+/// Resolve the byte range of an alert's custom `title` following the `[!KIND]`
+/// marker on the opening line at `start`.
 pub(crate) fn alert_title(
     lines: &Lines<'_>,
     start: LineColumn,
@@ -109,8 +111,8 @@ pub(crate) fn alert_title(
     (exact && verbatim(title)).then(|| from..from + title.len())
 }
 
-/// The bytes `pos` covers, for a node in the table cell starting at `cell`, if
-/// any.
+/// Convert a comrak [`Sourcepos`] to a half-open byte range, adjusting for
+/// escaped pipes when inside a table cell starting at `cell`.
 fn node(lines: &Lines<'_>, pos: Sourcepos, cell: Option<LineColumn>) -> Option<Range<usize>> {
     let (start, last) = match cell {
         Some(cell) => (
@@ -125,21 +127,21 @@ fn node(lines: &Lines<'_>, pos: Sourcepos, cell: Option<LineColumn>) -> Option<R
     Some(range)
 }
 
-/// The byte offset of a comrak position: a 1-based line, and a 1-based column
-/// that counts bytes.
+/// Convert a comrak [`LineColumn`] (1-based line, 1-based byte column) to a
+/// byte offset.
 fn offset(lines: &Lines<'_>, position: LineColumn) -> Option<usize> {
     let line = lines.line_range(position.line)?;
 
     Some(line.start + position.column.checked_sub(1)?)
 }
 
-/// The byte offset of `target`, a position in the table cell starting at
-/// `cell`.
+/// Convert a comrak [`LineColumn`] inside a table cell to a byte offset.
 ///
-/// comrak counts an escaped pipe (`\|`) in a cell as one column, so each one
-/// before `target` in the cell puts it a byte further along.
-/// `last` marks `target` as a node's last byte, which for an escaped pipe is
-/// the `|`.
+/// comrak counts an escaped pipe (`\|`) in a table cell as one column instead
+/// of two bytes, so each `\|` between `cell` and `target` shifts the byte
+/// offset forward by one.
+/// When `last` is `true` and `target` lands on an escaped pipe, the offset
+/// advances to the `|` byte.
 fn cell_offset(
     lines: &Lines<'_>,
     cell: LineColumn,
@@ -169,8 +171,8 @@ fn cell_offset(
     Some(if last && escaped_pipe(at) { at + 1 } else { at })
 }
 
-/// The text `text[range]` renders as: in a table cell, an escaped pipe renders
-/// as `|`.
+/// Return the rendered form of `text[range]`, unescaping `\|` to `|` when
+/// inside a table cell.
 fn shown(text: &str, range: Range<usize>, in_cell: bool) -> Cow<'_, str> {
     let source = &text[range];
     if in_cell && source.contains(ESCAPED_PIPE) {
@@ -180,8 +182,8 @@ fn shown(text: &str, range: Range<usize>, in_cell: bool) -> Cow<'_, str> {
     }
 }
 
-/// The range of each line of a code span's `content`, past the container
-/// markers and indentation that start each line after the first.
+/// Split a code span's `content` byte range into per-line ranges, stripping
+/// leading blockquote markers and indentation on continuation lines.
 fn code_lines(text: &str, content: Range<usize>) -> Vec<Range<usize>> {
     let mut segments = vec![];
     let mut start = content.start;
@@ -198,8 +200,7 @@ fn code_lines(text: &str, content: Range<usize>) -> Vec<Range<usize>> {
     segments
 }
 
-/// The text code span `segments` render as, a space standing for each line
-/// ending between them.
+/// Join the rendered text of a code span's line `segments` with single spaces.
 fn join(text: &str, segments: &[Range<usize>], in_cell: bool) -> String {
     segments
         .iter()
@@ -208,11 +209,12 @@ fn join(text: &str, segments: &[Range<usize>], in_cell: bool) -> String {
         .join(" ")
 }
 
-/// Drop the space CommonMark strips from each end of a code span's content when
-/// it starts and ends with one, if that leaves `literal`.
+/// Trim one leading and one trailing space from `segments` when CommonMark
+/// strips symmetric padding from a code span, provided the trimmed text matches
+/// `literal`.
 ///
-/// An empty first or last segment is a line ending at that end of the content,
-/// which is the space, so the segment is dropped whole.
+/// If the first or last segment is empty, the stripped space came from a
+/// leading or trailing line ending, so that empty segment is removed outright.
 fn unpad(segments: &mut Vec<Range<usize>>, joined: &str, literal: &str) -> Option<()> {
     let inner = joined.strip_prefix(' ')?.strip_suffix(' ')?;
     if inner != literal {
@@ -234,8 +236,8 @@ fn unpad(segments: &mut Vec<Range<usize>>, joined: &str, literal: &str) -> Optio
     Some(())
 }
 
-/// The rest of the line after the `>` at `start`, and the offset the rest
-/// starts at.
+/// Strip the leading `>` of a blockquote line at `start`, returning the byte
+/// offset and slice of the remainder of the line.
 fn after_quote<'s>(lines: &Lines<'s>, start: LineColumn) -> Option<(usize, &'s str)> {
     let quote = offset(lines, start)?;
     let line = lines.line_range(start.line)?;
@@ -249,10 +251,10 @@ fn is_title_space(char_: char) -> bool {
     matches!(char_, ' ' | '\t' | '\u{0b}' | '\u{0c}')
 }
 
-/// Whether a page shows `text` with the bytes it has in the source.
+/// Return `true` if `text` has the same UTF-8 byte length after HTML parsing.
 ///
-/// comrak writes `\0` as U+FFFD, and an HTML parser reads `\r\n` as `\n`, so
-/// either would shift the offsets of the text after it.
+/// comrak replaces `\0` with U+FFFD (3 bytes), and HTML parsers normalize `\r`
+/// into `\n`, either of which would skew byte offsets within the span.
 fn verbatim(text: &str) -> bool {
     !text.contains(['\0', '\r'])
 }

@@ -1,4 +1,4 @@
-//! The spans rendered text is wrapped in.
+//! HTML `<span>` emitters for source-mapped, atom, and unmapped text.
 
 use std::{
     fmt::{self, Write},
@@ -9,8 +9,8 @@ use comrak::html::escape;
 
 use crate::range::ESCAPED_PIPE;
 
-/// Write `text[range]` in a mapped span, whose text is the source it covers,
-/// character for character.
+/// Write `text[range]` as a `<span data-s=".." data-e="..">` whose text matches
+/// the source slice character for character.
 pub(crate) fn mapped(out: &mut dyn Write, text: &str, range: Range<usize>) -> fmt::Result {
     if range.is_empty() {
         return Ok(());
@@ -25,8 +25,8 @@ pub(crate) fn mapped(out: &mut dyn Write, text: &str, range: Range<usize>) -> fm
     out.write_str("</span>")
 }
 
-/// Write `shown` in an atom, text that stands for the source `range` as a
-/// whole.
+/// Write `shown` as a `<span data-s=".." data-e=".." data-atom>` representing
+/// `range` as an indivisible unit.
 pub(crate) fn atom(out: &mut dyn Write, range: Range<usize>, shown: &str) -> fmt::Result {
     write!(
         out,
@@ -37,7 +37,7 @@ pub(crate) fn atom(out: &mut dyn Write, range: Range<usize>, shown: &str) -> fmt
     out.write_str("</span>")
 }
 
-/// Write `shown` in an unmapped span, which claims no source range.
+/// Write `shown` as `<span class="unmapped">` without source offsets.
 pub(crate) fn unmapped(out: &mut dyn Write, shown: &str) -> fmt::Result {
     if shown.is_empty() {
         return Ok(());
@@ -48,8 +48,8 @@ pub(crate) fn unmapped(out: &mut dyn Write, shown: &str) -> fmt::Result {
     out.write_str("</span>")
 }
 
-/// Write `text[range]` in mapped spans, except that each escaped pipe (`\|`) in
-/// a table cell is an atom showing `|`.
+/// Write `text[range]` as mapped spans, splitting out any escaped pipe (`\|`)
+/// in a table cell as a `data-atom` span displaying `|`.
 pub(crate) fn source(
     out: &mut dyn Write,
     text: &str,
