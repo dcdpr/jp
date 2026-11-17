@@ -46,7 +46,7 @@ use camino::Utf8Path;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Error, GitHub, api_message, cache, failure, git, output, parse_json, parse_response, slim,
+    Error, GitHub, SUCCESS_FIRST, SUCCESS_LAST, api, api_message, cache, git, parse_json, slim,
 };
 use crate::{
     model::{Checks, PullRequest},
@@ -674,7 +674,7 @@ impl Driver {
         for (number, branch) in deletable(&merged, prs, &default) {
             let key = format!("{number}:{branch}:deleted");
             let failed = match github.send("DELETE", &format!("git/refs/heads/{branch}"), &[]) {
-                Ok((200..=299, _)) => {
+                Ok((SUCCESS_FIRST..=SUCCESS_LAST, _)) => {
                     let message = format!("Deleted {branch}, the branch of #{number}.");
                     self.report(key, message, false, poll);
                     continue;
@@ -880,13 +880,7 @@ impl GitHub {
         for (name, value) in fields {
             command.arg("-f").arg(format!("{name}={value}"));
         }
-
-        let out = output("gh", &mut command)?;
-        let raw = String::from_utf8_lossy(&out.stdout);
-        let Some(response) = parse_response(&raw) else {
-            return Err(failure("gh", &out.stderr));
-        };
-        Ok((response.status, response.body.to_owned()))
+        api(&mut command).map(|reply| (reply.status, reply.body))
     }
 }
 
@@ -980,7 +974,7 @@ fn classify_update(status: u16, body: &str) -> Sent {
     let lower = message.to_lowercase();
 
     match status {
-        200..=299 => Sent::Done,
+        SUCCESS_FIRST..=SUCCESS_LAST => Sent::Done,
         422 if lower.contains("expected head sha") => Sent::Moved,
         422 if lower.contains("conflict") => Sent::Conflicts,
         _ => Sent::Refused(format!("updating it failed: HTTP {status}: {message}")),
@@ -992,7 +986,7 @@ fn classify_merge(status: u16, body: &str) -> Sent {
     let message = api_message(body);
 
     match status {
-        200..=299 => Sent::Done,
+        SUCCESS_FIRST..=SUCCESS_LAST => Sent::Done,
         409 => Sent::Moved,
         405 if message.contains("Base branch was modified") => Sent::Moved,
         _ => Sent::Refused(format!("merging it failed: HTTP {status}: {message}")),
@@ -1032,7 +1026,7 @@ struct AsyncDetails {
 /// Classify the response to `PUT pulls/{n}/merge-async` or `GET
 /// pulls/{n}/merge-async/{uuid}`.
 fn classify_async(status: u16, body: &str) -> Async {
-    if !(200..=299).contains(&status) {
+    if !(SUCCESS_FIRST..=SUCCESS_LAST).contains(&status) {
         return match classify_merge(status, body) {
             Sent::Refused(reason) => Async::Refused(reason),
             // Non-2xx responses never produce `Done` or `Conflicts` from

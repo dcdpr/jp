@@ -551,6 +551,12 @@ fn cells(app: &App, row: &Row) -> [(String, Style); COLUMNS] {
             }),
     };
 
+    let [pr, ci, review, queue] = pull_request_cells(app, row);
+    [name, branch, jp, conversation, pr, ci, review, queue]
+}
+
+/// The PR, CI, review, and queue cells of `row`.
+fn pull_request_cells(app: &App, row: &Row) -> [(String, Style); 4] {
     let [pr, ci, review, mut queue] = match (unknown(&app.feeds.prs), &row.pr) {
         (Some(marker), _) => [marker.clone(), marker.clone(), marker.clone(), marker],
         (None, None) => [
@@ -572,7 +578,7 @@ fn cells(app: &App, row: &Row) -> [(String, Style); COLUMNS] {
         queue = (text.to_owned(), fg(Color::Yellow));
     }
 
-    [name, branch, jp, conversation, pr, ci, review, queue]
+    [pr, ci, review, queue]
 }
 
 fn running(count: usize) -> (String, Style) {

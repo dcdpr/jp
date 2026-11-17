@@ -98,6 +98,17 @@ pub enum Reason {
     Blocked(String),
 }
 
+impl Reason {
+    /// The queue state an entry held for this reason shows.
+    #[must_use]
+    pub fn state(&self) -> QueueState {
+        match self {
+            Self::Conflicts => QueueState::Conflicts,
+            Self::Blocked(reason) => QueueState::Blocked(reason.clone()),
+        }
+    }
+}
+
 /// Role of a `dash` process in the repository's merge queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueRole {
@@ -231,26 +242,25 @@ pub fn assign(prs: &mut [PullRequest], front: Option<u64>, holds: &HashMap<u64, 
 
 /// Why `entry` is held back from the line, or `None` if it is in line.
 fn held_back(entry: &Entry<'_>, holds: &HashMap<u64, Hold>) -> Option<QueueState> {
+    if entry.members.iter().any(|pr| pr.draft) {
+        return Some(QueueState::Draft);
+    }
+    if let Some(base) = &entry.top().base {
+        return Some(QueueState::OtherBase(base.clone()));
+    }
     let hold = holds
         .get(&entry.key())
         .filter(|hold| hold.sha == entry.signature());
-
-    if entry.members.iter().any(|pr| pr.draft) {
-        Some(QueueState::Draft)
-    } else if let Some(base) = &entry.top().base {
-        Some(QueueState::OtherBase(base.clone()))
-    } else if let Some(hold) = hold {
-        Some(match &hold.reason {
-            Reason::Conflicts => QueueState::Conflicts,
-            Reason::Blocked(reason) => QueueState::Blocked(reason.clone()),
-        })
-    } else if entry.members.iter().any(|pr| pr.mergeable == Some(false)) {
-        Some(QueueState::Conflicts)
-    } else if entry.members.iter().any(|pr| pr.checks.failed > 0) {
-        Some(QueueState::Failing)
-    } else {
-        None
+    if let Some(hold) = hold {
+        return Some(hold.reason.state());
     }
+    if entry.members.iter().any(|pr| pr.mergeable == Some(false)) {
+        return Some(QueueState::Conflicts);
+    }
+    if entry.members.iter().any(|pr| pr.checks.failed > 0) {
+        return Some(QueueState::Failing);
+    }
+    None
 }
 
 /// Count the queue entries waiting in line (including the front entry).

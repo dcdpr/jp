@@ -6,7 +6,8 @@
 //! the GitHub rate limit.
 //!
 //! Review threads are fetched via GraphQL on their own schedule (see
-//! [`reviews`]), and CI check responses are reduced to counts in [`checks`].
+//! [`reviews`]), and CI check responses are reduced to counts in
+//! [`mod@checks`].
 //!
 //! When `JP_GITHUB_TOKEN` is set in the environment, it is passed to `gh` as
 //! `GH_TOKEN` so pending review comments authored by that account are visible.
@@ -17,8 +18,8 @@
 //! state immediately on startup.
 //!
 //! Pull requests carrying the queue label (`dash.queueLabel` in git config,
-//! defaulting to [`DEFAULT_QUEUE_LABEL`]) are placed in the merge queue by
-//! [`queue::assign`], and [`merge`] advances the front entry on each poll.
+//! defaulting to [`label::DEFAULT_QUEUE_LABEL`]) are placed in the merge queue
+//! by [`queue::assign`], and [`merge`] advances the front entry on each poll.
 //! Checks required by the default branch's rulesets count as pending until they
 //! report.
 //! Open GitHub stacks populate each member's [`StackPlace`]; if the stacks
@@ -226,8 +227,6 @@ impl GitHub {
             .into_iter()
             .filter_map(|worktree| worktree.branch)
             .collect();
-        let mut local = HashSet::new();
-
         let pulls: Vec<RestPull> = parse_json(&self.get(
             &format!("repos/{repo}/pulls?state=open&per_page=100"),
             online,
@@ -242,26 +241,12 @@ impl GitHub {
         }
 
         if online {
-            let mut paths: Vec<String> = pulls
-                .iter()
-                .flat_map(|pull| {
-                    [
-                        runs_path(&repo, &pull.head.sha),
-                        status_path(&repo, &pull.head.sha),
-                    ]
-                })
-                .collect();
-            if let Some(branch) = &self.default_branch {
-                paths.push(rules_path(&repo, branch));
-            }
-            if self.stacks {
-                paths.push(stacks_path(&repo));
-            }
-            self.prefetch(paths);
+            self.prefetch_pulls(&repo, &pulls);
         }
         let required = self.required(&repo, online);
         let mut places = self.places(&repo, online);
 
+        let mut local = HashSet::new();
         let mut prs = vec![];
         for pull in pulls {
             let head = local_branch(&pull);
@@ -277,18 +262,8 @@ impl GitHub {
         prs.sort_by_key(|pr| pr.number);
 
         if let Mode::Online { asked } = mode {
-            let open: HashSet<u64> = prs.iter().map(|pr| pr.number).collect();
-            let before = self.state.reviews.len();
-            self.state.reviews.retain(|number, _| open.contains(number));
-            self.dirty |= self.state.reviews.len() != before;
-
-            let now = now();
-            let due = due_reviews(&prs, &local, &self.state.reviews, now, asked);
-            if !due.is_empty() {
-                self.read_reviews(&repo, &due, now)?;
-            }
+            self.refresh_reviews(&repo, &prs, &local, asked)?;
         }
-
         for pr in &mut prs {
             if let Some(review) = self.state.reviews.get(&pr.number) {
                 pr.threads = review.threads;
@@ -299,6 +274,51 @@ impl GitHub {
         queue::assign(&mut prs, self.driver.front, &self.driver.holds);
 
         Ok(prs)
+    }
+
+    /// Send ahead the requests the pull request list leads to: each head
+    /// commit's checks, the default branch's rules, and the stacks list.
+    fn prefetch_pulls(&mut self, repo: &str, pulls: &[RestPull]) {
+        let mut paths: Vec<String> = pulls
+            .iter()
+            .flat_map(|pull| {
+                [
+                    runs_path(repo, &pull.head.sha),
+                    status_path(repo, &pull.head.sha),
+                ]
+            })
+            .collect();
+        if let Some(branch) = &self.default_branch {
+            paths.push(rules_path(repo, branch));
+        }
+        if self.stacks {
+            paths.push(stacks_path(repo));
+        }
+        self.prefetch(paths);
+    }
+
+    /// Forget the review counts of pull requests no longer in `prs`, and read
+    /// the threads of those due (all of them when `asked`).
+    ///
+    /// `local` names the pull requests checked out in a local worktree.
+    fn refresh_reviews(
+        &mut self,
+        repo: &str,
+        prs: &[PullRequest],
+        local: &HashSet<u64>,
+        asked: bool,
+    ) -> Result<(), Error> {
+        let open: HashSet<u64> = prs.iter().map(|pr| pr.number).collect();
+        let before = self.state.reviews.len();
+        self.state.reviews.retain(|number, _| open.contains(number));
+        self.dirty |= self.state.reviews.len() != before;
+
+        let now = now();
+        let due = due_reviews(prs, local, &self.state.reviews, now, asked);
+        if due.is_empty() {
+            return Ok(());
+        }
+        self.read_reviews(repo, &due, now)
     }
 
     /// Populate `mergeable` for every pull request in a queue entry so
@@ -610,10 +630,15 @@ fn call(dir: &Utf8Path, path: &str, etag: Option<&str>) -> Result<Reply, Error> 
             .arg("--header")
             .arg(format!("If-None-Match: {etag}"));
     }
+    api(&mut command)
+}
 
+/// Run a `gh api --include` `command` and parse the response it printed,
+/// whatever its HTTP status.
+fn api(command: &mut Command) -> Result<Reply, Error> {
     // `gh` exits 1 on every status outside 2xx, a `304` included, so the status
     // line decides what happened.
-    let out = output("gh", &mut command)?;
+    let out = output("gh", command)?;
     let raw = String::from_utf8_lossy(&out.stdout);
     let Some(response) = parse_response(&raw) else {
         return Err(failure("gh", &out.stderr));
