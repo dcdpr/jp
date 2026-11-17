@@ -9,32 +9,30 @@ use std::collections::HashSet;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 
-/// A git worktree of the repository the dashboard watches.
+/// A git worktree of the repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worktree {
-    /// The worktree's root directory.
     pub path: Utf8PathBuf,
 
-    /// The checked-out branch, without `refs/heads/`.
-    /// `None` for a detached `HEAD`.
+    /// Checked-out branch name without `refs/heads/`, or `None` when `HEAD` is
+    /// detached.
     pub branch: Option<String>,
 }
 
 /// A terminal surface open in the terminal emulator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Terminal {
-    /// The emulator's identifier for the surface, used to focus it.
+    /// Emulator-assigned surface identifier used to focus the tab.
     pub id: String,
 
-    /// The directory the shell in the surface reported last.
+    /// Working directory last reported by the surface's shell.
     pub cwd: Utf8PathBuf,
 
-    /// The surface's title, which shells and programs set to what is running in
-    /// it.
+    /// Title reported by the terminal surface.
     pub name: String,
 
-    /// The surface's terminal device, as `ps` names it (`ttys001`).
-    /// `None` from a Ghostty build that does not report it.
+    /// Short TTY device name matching `ps` output (e.g. `ttys001`), if reported
+    /// by Ghostty.
     pub tty: Option<String>,
 }
 
@@ -44,7 +42,7 @@ pub struct JpRun {
     pub pid: u32,
     pub cwd: Utf8PathBuf,
 
-    /// The locked conversation's title, or its ID when it has none.
+    /// Locked conversation's title, or its ID when untitled.
     pub conversation: String,
 
     /// Timestamp of the earliest unanswered inquiry in the current turn, if
@@ -62,29 +60,30 @@ pub struct JpRecent {
     pub last_event_at: Option<DateTime<Utc>>,
 }
 
-/// A shell's JP session: the conversations `jp` activated in it.
+/// A shell's JP session and its conversation history.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JpSession {
-    /// The session leader's process ID, which names the session.
+    /// Session leader PID used to identify the session.
     pub pid: u32,
 
-    /// The process ID of the session's shell: the leader itself, or its child
-    /// when the leader is `login`.
+    /// Interactive shell PID (either `pid` itself or its child when spawned by
+    /// `login`).
     pub shell: u32,
 
-    /// Whether the shell runs inside Ghostty, so one of its tabs can hold it.
+    /// Whether the shell is a descendant of the Ghostty process.
     pub ghostty: bool,
 
-    /// The shell's terminal device, as `ps` names it (`ttys001`).
+    /// Short TTY device name matching `ps` output (e.g. `ttys001`).
     pub tty: Option<String>,
 
     pub cwd: Utf8PathBuf,
 
-    /// The session's conversations: the active one first, then the rest by most
-    /// recent activity.
+    /// Session conversations, ordered with the active conversation first and
+    /// then by most recent activity.
     pub conversations: Vec<SessionConversation>,
 
-    /// How many older conversations the session has beyond `conversations`.
+    /// Number of older conversations in the session omitted after
+    /// `conversations`.
     pub more: usize,
 }
 
@@ -138,13 +137,13 @@ impl Status {
     }
 }
 
-/// The last update of the local default branch.
+/// Outcome of fast-forwarding the local default branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaseUpdate {
-    /// The default branch, such as `main`.
+    /// Name of the default branch (e.g. `main`).
     pub branch: String,
 
-    /// Whether the update moved it.
+    /// Whether the branch ref advanced.
     pub moved: bool,
 }
 
@@ -155,22 +154,21 @@ pub struct PullRequest {
     pub title: String,
     pub url: String,
 
-    /// The local branch `gh pr checkout` gives the pull request: its head
-    /// branch, or `<owner>/<branch>` for a fork's branch named like the default
-    /// branch.
+    /// Local branch name used by `gh pr checkout`: the PR's head ref, or
+    /// `<owner>/<branch>` when a fork's head ref collides with the base
+    /// repository's default branch.
     pub head: String,
     pub draft: bool,
     pub checks: Checks,
 
-    /// Review threads on the pull request, pending ones included.
+    /// Total review threads on the pull request, including pending reviews.
     pub threads: u32,
 
-    /// Review threads with at least one reply, among the first few read; more
-    /// threads than that leave `answered` short of `threads`.
+    /// Number of sampled review threads that have at least one reply.
     pub answered: u32,
 }
 
-/// The outcome of the checks on a pull request's head commit.
+/// CI check counts for a pull request's head commit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Checks {
     pub passed: u32,
@@ -228,8 +226,8 @@ pub struct Row {
 }
 
 impl Row {
-    /// The row of `worktree`, with the pull request among `prs` whose head is
-    /// its branch, and nothing else attached yet.
+    /// Build a row for `worktree`, attaching the matching pull request from
+    /// `prs` if one shares its branch.
     fn for_worktree(worktree: &Worktree, prs: &[PullRequest]) -> Self {
         Self {
             name: worktree
@@ -251,7 +249,7 @@ impl Row {
         }
     }
 
-    /// The row of a pull request no worktree has checked out.
+    /// Build a row for an open pull request that has no local worktree.
     fn for_pull_request(pr: &PullRequest) -> Self {
         Self {
             id: RowId::PullRequest(pr.number),
@@ -291,7 +289,8 @@ impl Row {
         session.ghostty && session.cwd == tab.cwd && tabs == 1 && shells == 1
     }
 
-    /// Whether the row is a worktree, not a pull request without one.
+    /// Return `true` if this row represents a local worktree rather than an
+    /// unchecked-out pull request.
     #[must_use]
     pub const fn is_worktree(&self) -> bool {
         matches!(self.id, RowId::Worktree(_))
@@ -317,14 +316,13 @@ impl Row {
     }
 }
 
-/// Join the sources into one row per worktree, sorted by worktree name,
-/// followed by one row per pull request whose branch no worktree has checked
-/// out, sorted by number.
+/// Join source snapshots into one [`Row`] per worktree (sorted by worktree
+/// name), followed by one [`Row`] per open pull request without a local
+/// worktree (sorted by PR number).
 ///
-/// A terminal, process, session, or last run belongs to the worktree whose path
-/// is the longest prefix of its working directory, so one sitting in a
-/// subdirectory still counts.
-/// Those outside every worktree are dropped.
+/// Terminals, running `jp` processes, sessions, and recent runs are assigned to
+/// the worktree whose path is the longest prefix of their working directory.
+/// Entries outside every worktree are ignored.
 #[must_use]
 pub fn rows(
     worktrees: &[Worktree],
@@ -380,10 +378,10 @@ pub fn rows(
     rows
 }
 
-/// A worktree's sessions, placed in its tabs.
+/// Sessions in a worktree grouped by their matched terminal tab.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Placed<'a> {
-    /// The sessions of each of the row's tabs, in the row's tab order.
+    /// Sessions matched to each tab in `row.terminals`, in tab order.
     pub tabs: Vec<Vec<&'a JpSession>>,
 
     /// Sessions that could not be matched to an open tab.
@@ -438,7 +436,8 @@ pub fn place(row: &Row) -> Placed<'_> {
     Placed { tabs, other }
 }
 
-/// The index of the worktree containing `path`, preferring the deepest one.
+/// Return the index of the worktree with the longest path prefix matching
+/// `path`.
 fn owner(path: &Utf8Path, worktrees: &[Worktree]) -> Option<usize> {
     worktrees
         .iter()

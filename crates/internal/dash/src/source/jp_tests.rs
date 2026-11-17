@@ -19,11 +19,11 @@ fn test_remember_keeps_the_conversation_last_run_in_each_directory() {
         ("/repo/a", conversation(1)),
         ("/repo/b", conversation(2))
     ]));
-    // The same run seen again changes nothing; another run in `/repo/a`
-    // replaces the one before it.
+    // Seeing the same run again is a no-op; a new run in `/repo/a` updates the
+    // entry.
     assert!(!remember(&mut ran, [("/repo/a", conversation(1))]));
     assert!(remember(&mut ran, [("/repo/a", conversation(3))]));
-    // With nothing running, every directory keeps what last ran there.
+    // An empty poll preserves existing entries.
     assert!(!remember(&mut ran, []));
 
     assert_eq!(
@@ -174,10 +174,10 @@ fn test_under_ghostty_walks_the_parents() {
 
 #[test]
 fn test_parse_foreground() {
-    // The shell's group is its terminal's foreground group: it sits at its
-    // prompt.
+    // Shell process group equals terminal foreground process group (idle at
+    // prompt).
     assert_eq!(parse_foreground(" 4101  4101\n"), Some(true));
-    // `jp` runs in front of it.
+    // Another process group (e.g. `jp`) owns the foreground.
     assert_eq!(parse_foreground(" 4101  4200\n"), Some(false));
     // The process is gone.
     assert_eq!(parse_foreground(""), None);
@@ -190,8 +190,8 @@ fn test_parse_lsof_no_live_processes() {
 
 #[test]
 fn test_parse_lsof_skips_a_process_without_a_cwd_line() {
-    // A process lsof may not inspect reports its PID and command only; the
-    // next process's cwd must not be attributed to it.
+    // When `lsof` cannot inspect a process's cwd, it emits only `p` and `c`;
+    // the next process's `n` line must not be attached to the first process.
     let out = "\
 p1
 cjp

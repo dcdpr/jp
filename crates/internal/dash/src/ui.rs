@@ -1,15 +1,16 @@
-//! Drawing the dashboard.
+//! Terminal rendering and mouse hit-testing for the dashboard.
 //!
-//! [`screen`] turns the app state into one [`Line`] per terminal row: a header,
-//! the column headings, the table, and a status line at the bottom.
-//! The table has a line per row and, below an expanded row, a line per tab
-//! followed by the conversations of the JP sessions in it, laid out in columns
-//! of their own the way `jp conversation ls` lists them.
-//! Every line is exactly as wide as the terminal, so painting a screen
-//! overwrites the previous one without clearing it first.
+//! [`screen`] renders [`App`] into one [`Line`] per terminal row: a summary
+//! header, column headings, the scrollable table body, and a bottom status
+//! line.
+//! Under an expanded row, tabs and session conversations are rendered as
+//! indented tree lines, with conversations formatted in aligned columns like
+//! `jp conversation ls`.
+//! Every [`Line`] is padded to the full terminal width so each frame overwrites
+//! the previous one without clearing the screen.
 //!
-//! A column whose source has never answered shows `…` while it waits and `?`
-//! once it has failed.
+//! Columns whose background source has not yet produced a snapshot render `…`
+//! while waiting and `?` if the first poll failed.
 
 use chrono::{DateTime, Utc};
 use crossterm::style::Color;
@@ -33,10 +34,10 @@ const HEADINGS: [&str; 7] = [
     "REVIEW",
 ];
 
-/// The worktree cell of a pull request without a worktree: `enter` creates one.
+/// Label shown in the worktree column for an unchecked-out pull request.
 const CREATE: &str = "create worktree";
 
-/// The columns a click on a line can mean something in.
+/// Column indices with click actions.
 const PR_COLUMN: usize = 4;
 const CI_COLUMN: usize = 5;
 const REVIEW_COLUMN: usize = 6;
@@ -44,8 +45,7 @@ const REVIEW_COLUMN: usize = 6;
 /// Blank columns between two table columns.
 const SPACING: usize = 2;
 
-/// Terminal rows that are not table lines: the header, the column headings, and
-/// the status line.
+/// Number of non-body terminal rows (header, column headings, and status line).
 const CHROME: usize = 3;
 
 /// Maximum width of the worktree and branch columns.
@@ -63,7 +63,6 @@ const CI_WIDTH: usize = 12;
 /// Width of the review column.
 const REVIEW_WIDTH: usize = 6;
 
-/// How a run of text is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Style {
     pub fg: Option<Color>,
@@ -98,17 +97,15 @@ const fn fg(color: Color) -> Style {
     }
 }
 
-/// A run of text in one style.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub text: String,
     pub style: Style,
 
-    /// A URL the text links to, drawn as an OSC 8 hyperlink.
+    /// Optional URL rendered as an OSC 8 terminal hyperlink.
     pub link: Option<String>,
 }
 
-/// One terminal row.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Line {
     pub spans: Vec<Span>,
@@ -156,13 +153,14 @@ impl Line {
     }
 }
 
-/// The number of table lines a terminal `height` rows tall has room for.
+/// Return the number of table body rows that fit in a terminal of `height`
+/// rows.
 #[must_use]
 pub fn body_rows(height: u16) -> usize {
     usize::from(height).saturating_sub(CHROME)
 }
 
-/// Lay out the whole screen for a terminal `width` by `height`.
+/// Render the full screen for a terminal of `width` columns by `height` rows.
 #[must_use]
 pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
     let (width, height) = (usize::from(width), usize::from(height));
@@ -215,7 +213,8 @@ pub fn screen(app: &App, width: u16, height: u16) -> Vec<Line> {
     lines.into_iter().map(|line| line.fit(width)).collect()
 }
 
-/// The line of a selectable table item, as wide as its content.
+/// Render a selectable table item before width fitting and selection
+/// highlighting.
 fn item_line(
     app: &App,
     item: Item<'_>,
@@ -304,7 +303,7 @@ fn text_width(text: &str) -> usize {
     text.chars().map(|c| c.width().unwrap_or(0)).sum()
 }
 
-/// Pad `text` with blanks to `width` columns, on the right, or on the left when
+/// Pad `text` with spaces to `width` display columns, left-aligned or
 /// `right_aligned`.
 fn pad(text: &str, width: usize, right_aligned: bool) -> String {
     let blanks = " ".repeat(width.saturating_sub(text_width(text)));
@@ -315,8 +314,9 @@ fn pad(text: &str, width: usize, right_aligned: bool) -> String {
     }
 }
 
-/// The width of each table column: the worktree and branch columns fit their
-/// widest value, the conversation takes whatever the others leave.
+/// Compute the width of each table column, sizing worktree and branch to their
+/// widest visible value and giving the remaining width to the conversation
+/// column.
 fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
     let fit = |widest: Option<usize>, heading: &str| {
         widest
@@ -377,7 +377,7 @@ fn table_line(
     line
 }
 
-/// The tree lines in front of a line below a row.
+/// Return the tree-drawing prefix for a given [`Indent`].
 fn guide(indent: Option<Indent>) -> &'static str {
     match indent {
         None => "",
@@ -480,8 +480,7 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
         None => ("(detached)".to_owned(), DIM),
     };
 
-    // `jp` runs belong to worktrees; a pull request without one has none,
-    // whatever state that source is in.
+    // `jp` runs only exist in local worktrees, never on unchecked-out PR rows.
     let jp = unknown(&app.feeds.jp)
         .filter(|_| row.is_worktree())
         .unwrap_or_else(|| {
@@ -493,7 +492,8 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
             }
         });
 
-    // What is running, or else what the worktree's shells last worked on.
+    // Show the running conversation's title, or fall back to the active
+    // session conversation.
     let conversation = match row.runs.first() {
         Some(run) => (run.conversation.clone(), PLAIN),
         None => row
@@ -542,10 +542,10 @@ fn status_cell(status: Status, now: DateTime<Utc>) -> (String, Style) {
     }
 }
 
-/// A tab below its worktree: its number, and its title in the conversation
-/// column.
-/// The JP column stays empty: the conversations listed below the tab say what
-/// each is doing, and the worktree's line sums it up.
+/// Build the table cells for a terminal tab row under an expanded worktree.
+///
+/// The JP status column is left blank because per-conversation status is shown
+/// on the child conversation lines and summarized on the parent worktree row.
 fn tab_cells(tab: &Terminal, index: usize, indent: Option<Indent>) -> [(String, Style); 7] {
     let empty = || (String::new(), PLAIN);
 
@@ -594,8 +594,8 @@ fn checks(checks: Checks) -> (String, Style) {
     }
 }
 
-/// The column widths of the conversation lines, shared by every conversation on
-/// screen so they line up across tabs and rows.
+/// Shared column widths for expanded conversation lines across all visible
+/// rows.
 #[derive(Debug, Default)]
 struct Listing {
     id: usize,
@@ -615,12 +615,9 @@ impl Listing {
             _ => None,
         });
 
-        // Ages tick every second, so the age columns start at the widest an
-        // age below 100 days prints (`59m ago`, `waiting 59m`). Sized to the
-        // current values alone, they would widen and narrow as `9s` turns
-        // into `10s` and `59s` into `1m`, and push the titles after them back
-        // and forth. The status column is there even when nothing runs, so a
-        // turn starting does not push them either.
+        // Reserve enough width for the widest sub-100-day age strings (`59m ago`
+        // and `waiting 59m`) so conversation titles do not shift horizontally as
+        // second and minute counters tick or when a turn starts running.
         let mut listing = Self {
             activity: text_width("59m ago"),
             status: text_width("waiting 59m"),
@@ -642,8 +639,8 @@ impl Listing {
         listing
     }
 
-    /// A conversation, as `jp conversation ls` would list it: marker, ID, event
-    /// count, last activity, status, and title.
+    /// Format a session conversation line with marker, ID, event count, age,
+    /// status, and title.
     fn line(
         &self,
         conversation: &SessionConversation,
@@ -689,8 +686,8 @@ impl Listing {
     }
 }
 
-/// When the conversation last saw an event, as `5m ago`, or nothing for an
-/// empty one.
+/// Format the relative age of `conversation`'s last event (e.g. `5m ago`), or
+/// an empty string if none.
 fn activity(conversation: &SessionConversation, now: DateTime<Utc>) -> String {
     conversation
         .last_event_at
@@ -713,8 +710,8 @@ fn age(now: DateTime<Utc>, then: DateTime<Utc>) -> String {
     }
 }
 
-/// The sort menu's lines, with entry `highlighted` reversed and the order in
-/// force marked.
+/// Render the sort menu box with `highlighted` reversed and `current` marked
+/// with `✓`.
 fn sort_menu(current: Sort, highlighted: usize) -> Vec<Line> {
     let mut body: Vec<(String, Style)> = Sort::ALL
         .iter()
@@ -737,7 +734,7 @@ fn sort_menu(current: Sort, highlighted: usize) -> Vec<Line> {
     panel(" Sort by ", &body)
 }
 
-/// A box around `body`, one line per entry, with `title` in its top border.
+/// Render a bordered box around `body` with `title` in the top border.
 fn panel(title: &str, body: &[(String, Style)]) -> Vec<Line> {
     let inner = body
         .iter()
@@ -770,8 +767,7 @@ fn panel(title: &str, body: &[(String, Style)]) -> Vec<Line> {
     lines
 }
 
-/// Draw `panel` over the middle of the table, centred, each of its rows
-/// replacing the screen row under it.
+/// Overlay `panel` centered over the table body in `lines`.
 fn overlay(lines: &mut [Line], panel: &[Line], width: usize) {
     let panel_width = panel
         .iter()
@@ -793,8 +789,8 @@ fn overlay(lines: &mut [Line], panel: &[Line], width: usize) {
     }
 }
 
-/// The marker for a column whose source has no data yet: `?` after a failed
-/// read, `…` before the first one.
+/// Return the placeholder cell for a feed with no data yet (`?` on error, `…`
+/// while loading).
 fn unknown<T>(feed: &Feed<T>) -> Option<(String, Style)> {
     if feed.data.is_some() {
         return None;

@@ -1,12 +1,12 @@
-//! The dashboard's state and what each key and click does to it.
+//! Dashboard application state and input handling.
 //!
-//! [`App`] holds the latest snapshot from every source in its [`Feeds`],
-//! applies each [`Update`] the sources send, and turns a key press or click
-//! into an [`Action`] for the shell to carry out.
-//! It does no I/O.
+//! [`App`] stores the latest snapshot from each source in [`Feeds`], applies
+//! incoming [`Update`]s, and translates key presses and mouse clicks into
+//! [`Action`]s for the event loop to execute.
+//! It performs no I/O.
 //!
-//! The rows and how they are laid out as lines are its [`Table`]; which line is
-//! selected, and how far the table is scrolled, its [`Cursor`].
+//! [`Table`] manages row filtering, sorting, and tree expansion; [`Cursor`]
+//! tracks the selected item and scroll offset.
 
 mod cursor;
 mod table;
@@ -28,7 +28,7 @@ use crate::{
     source::jp::JpState,
 };
 
-/// A fresh read from one source, or the error it hit.
+/// Event delivered to [`App::apply`] from a background source or task.
 #[derive(Debug)]
 pub enum Update {
     Worktrees(Result<Vec<Worktree>, String>),
@@ -36,21 +36,21 @@ pub enum Update {
     Jp(Result<JpState, String>),
     PullRequests(Result<Vec<PullRequest>, String>),
 
-    /// The default branch was brought up to date, or failed to be.
+    /// Result of fast-forwarding the local default branch.
     Base(Result<BaseUpdate, String>),
 
-    /// Creating a worktree finished: for pull request `pr`, or for a new branch
-    /// when `None`.
+    /// Result of creating a worktree for pull request `pr` (or a new branch
+    /// when `None`).
     Created {
         pr: Option<u64>,
         outcome: Result<Created, String>,
     },
 
-    /// A one-off message for the status line, such as a failed focus.
+    /// Transient message to display on the status line.
     Notice(String),
 }
 
-/// What the shell should do after a key press or click.
+/// Side effect for the event loop to execute after handling an input event.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     None,
@@ -66,42 +66,42 @@ pub enum Action {
     /// Open this URL in the browser.
     Open(String),
 
-    /// Create a worktree for the pull request, check its branch out there, and
-    /// open a tab in it.
+    /// Create a worktree for the pull request, check out its branch, and open a
+    /// tab in it.
     CreateWorktree {
         number: u64,
         branch: String,
     },
 
-    /// Create a worktree on a new branch from the default branch, and open a
-    /// tab in it.
+    /// Create a worktree on a new branch from the default branch and open a tab
+    /// in it.
     NewWorktree {
         branch: String,
     },
 
-    /// Focus the terminal `terminal` and run `command` at its prompt, if its
-    /// shell `shell` sits idle there.
+    /// Focus `terminal` and run `command` at its prompt if `shell` is the
+    /// foreground process.
     RunInTab {
         terminal: String,
         shell: u32,
         command: String,
     },
 
-    /// Open a tab in `dir` that runs `command`.
+    /// Open a new tab in `dir` and run `command` in it.
     RunInNewTab {
         dir: Utf8PathBuf,
         command: String,
     },
 }
 
-/// The latest state of one source.
+/// Latest value and error state for a single background source.
 #[derive(Debug)]
 pub struct Feed<T> {
-    /// The last successful read.
-    /// Kept when a later read fails, so one failure does not blank the column.
+    /// Most recent successful snapshot, retained across failed polls so a
+    /// transient error does not blank the table.
     pub data: Option<T>,
 
-    /// The error of the last read, if it failed.
+    /// Error from the most recent poll, cleared on the next success.
     pub error: Option<String>,
 }
 
@@ -126,7 +126,7 @@ impl<T> Feed<T> {
     }
 }
 
-/// The latest state of every source.
+/// Latest snapshots from all background sources.
 #[derive(Debug, Default)]
 pub struct Feeds {
     pub worktrees: Feed<Vec<Worktree>>,
@@ -137,7 +137,8 @@ pub struct Feeds {
 }
 
 impl Feeds {
-    /// The name of the default branch, as of its last update.
+    /// Name of the repository's default branch, defaulting to `"main"` before
+    /// the first update.
     #[must_use]
     pub fn base_branch(&self) -> &str {
         self.base
@@ -146,7 +147,7 @@ impl Feeds {
             .map_or("main", |base| base.branch.as_str())
     }
 
-    /// The table's rows, joined from the last successful read of each source.
+    /// Join the latest source snapshots into table rows.
     fn rows(&self) -> Vec<Row> {
         let jp = self.jp.data.as_ref();
         model::rows(
@@ -160,7 +161,7 @@ impl Feeds {
     }
 }
 
-/// What part of a line a click landed on.
+/// Table region hit by a mouse click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Worktree,
@@ -176,32 +177,31 @@ pub struct App {
     pub table: Table,
     pub cursor: Cursor,
 
-    /// The last one-off message, until the next key press.
+    /// Transient message shown on the status line until the next input event.
     pub notice: Option<String>,
 
-    /// Pull requests a worktree is being created for.
+    /// PR numbers for which worktree creation is currently in flight.
     pub creating: HashSet<u64>,
 
-    /// The sort menu, while open, with its highlighted entry in [`Sort::ALL`].
+    /// Highlighted index in [`Sort::ALL`] when the sort menu is open.
     pub sort_menu: Option<usize>,
 
-    /// The name of a new worktree's branch, while `n` is asking for it.
+    /// Branch name buffer while the new-worktree prompt (`n`) is active.
     pub new_branch: Option<String>,
 
-    /// The current time, which relative times on screen count from.
-    /// Set by the shell before every draw.
+    /// Reference timestamp used to format relative ages on the current frame.
     pub now: DateTime<Utc>,
 
-    /// The row `enter` last focused a tab of, and which of its tabs the next
-    /// `enter` focuses.
+    /// Row and next tab index for cycling through tabs on repeated `Enter`
+    /// presses.
     cycle: Option<(RowId, usize)>,
 
-    /// Whether the last key was a `g` that a second one would complete.
+    /// Whether the previous key press was `g`, awaiting a second `g` for `gg`.
     pending_g: bool,
 }
 
 impl App {
-    /// The position of the selected line in [`Table::items`].
+    /// Return the index of the selected item in [`Table::items`].
     #[must_use]
     pub fn selected_index(&self) -> Option<usize> {
         self.cursor.index(&self.table.items())
@@ -249,8 +249,7 @@ impl App {
 
         self.table.rows = self.feeds.rows();
 
-        // A new worktree shows up in the list once a tab opens in it, which may
-        // be a read or two after git reports it.
+        // Select a newly created worktree once it becomes visible in the table.
         self.cursor.follow(&self.table.visible());
         self.cursor.keep_visible(&self.table.items());
     }
@@ -282,7 +281,7 @@ impl App {
         match key.code {
             KeyCode::Char('c') if ctrl => Action::Quit,
             KeyCode::Char('q') => Action::Quit,
-            // With a filter in force, `esc` clears it instead.
+            // When a filter is active, `Esc` clears the filter instead of quitting.
             KeyCode::Esc if self.table.query().is_none() => Action::Quit,
             KeyCode::Char('r') => Action::Refresh,
             KeyCode::Enter => self.enter(cycle),
@@ -294,11 +293,7 @@ impl App {
         }
     }
 
-    /// Handle a key that moves the selection, expands or collapses rows, or
-    /// opens a prompt or the sort menu.
-    ///
-    /// `pending_g` is whether the key before was a `g` that a second one would
-    /// complete.
+    /// Handle navigation, expansion, filter, and modal-prompt keys.
     fn browse(&mut self, key: KeyEvent, pending_g: bool) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -402,7 +397,7 @@ impl App {
         self.cursor.keep_visible(&self.table.items());
     }
 
-    /// Handle a key while `n` asks for a new worktree's branch name.
+    /// Handle a key event while the new-worktree branch prompt is active.
     fn new_branch_key(&mut self, key: KeyEvent) -> Action {
         let Some(name) = &mut self.new_branch else {
             return Action::None;
@@ -427,8 +422,7 @@ impl App {
             KeyCode::Backspace => {
                 name.pop();
             }
-            // Branch names hold no spaces; typing one is almost certainly
-            // meant as a separator.
+            // Git branch names cannot contain spaces; replace spaces with dashes.
             KeyCode::Char(' ') if !ctrl => name.push('-'),
             KeyCode::Char(c) if !ctrl => name.push(c),
             _ => {}
@@ -437,8 +431,8 @@ impl App {
         Action::None
     }
 
-    /// `→`: open the selected row or conversation, or step into one that is
-    /// open already.
+    /// `→`: expand the selected row or conversation, or move selection to its
+    /// first child if already expanded.
     fn descend(&mut self) {
         let Some(item) = self.selected_item() else {
             return;
@@ -659,25 +653,25 @@ impl App {
         Action::None
     }
 
-    /// Scroll so the selected line is among the `rows` lines on screen, without
-    /// leaving lines empty past the end of the table.
+    /// Adjust the scroll offset so the selected item fits within `rows` screen
+    /// lines.
     pub fn fit_scroll(&mut self, rows: usize) {
         self.cursor.fit(&self.table.display(), rows);
     }
 
-    /// Move the selection one line down (or up) for a turn of the scroll wheel,
-    /// stopping at either end rather than wrapping.
+    /// Move the selection by one item on mouse scroll without wrapping at the
+    /// bounds.
     pub fn wheel(&mut self, down: bool) {
         self.cursor.wheel(&self.table.items(), down);
     }
 
-    /// Act on a click on drawn line `line` (a position in [`Table::display`]),
-    /// at `target`.
+    /// Handle a left-click on display line `line` at `target`.
     ///
-    /// Every click selects its line (a note selects the item it belongs to).
-    /// A click on a row's worktree acts as `enter`, on a tab focuses it, and on
-    /// the pull request, CI, or review cell opens that page of the pull
-    /// request.
+    /// Clicking any line selects its item (clicking a note selects the item it
+    /// belongs to).
+    /// Clicking a worktree cell triggers `Enter`, clicking a tab focuses it,
+    /// and clicking the PR, CI, or review cell opens the corresponding GitHub
+    /// URL.
     pub fn click(&mut self, line: usize, target: Target) -> Action {
         self.notice = None;
         self.pending_g = false;
@@ -714,27 +708,27 @@ impl App {
     }
 }
 
-/// What `enter` does on the selected item.
+/// Outcome of pressing `Enter` on the selected item.
 enum Enter {
-    /// Focus the terminal with this ID, then remember this tab cycle and show
-    /// this notice.
+    /// Focus the terminal with this ID, updating the tab-cycle state and status
+    /// notice.
     Focus(String, Option<(RowId, usize)>, Option<String>),
 
-    /// Open a tab in this directory, showing this notice.
+    /// Open a new tab in this directory and display the given notice.
     OpenTab(Utf8PathBuf, String),
 
-    /// Create a worktree for this pull request, on this branch.
+    /// Create a worktree for this PR number and branch.
     Create(u64, String),
 
     Notice(String),
 }
 
-/// What `enter` does on `row`.
+/// Resolve the `Enter` action for a top-level `row`.
 ///
-/// A pull request gets a worktree, unless one is in `creating` already.
-/// A worktree without a tab gets one, and one with a tab focuses it.
-/// One with several focuses each in turn, continuing the tab cycle `cycle` when
-/// it is the row's.
+/// For an unchecked-out pull request, starts worktree creation unless one is
+/// already in `creating`.
+/// For a worktree, opens a tab if none exist, focuses its sole tab, or cycles
+/// through its tabs using `cycle`.
 fn enter_row(row: &Row, creating: &HashSet<u64>, cycle: Option<(RowId, usize)>) -> Enter {
     match (&row.id, row.terminals.as_slice()) {
         (RowId::PullRequest(number), _) if creating.contains(number) => {

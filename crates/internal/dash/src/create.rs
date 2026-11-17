@@ -1,16 +1,15 @@
-//! Creating worktrees: one for a pull request that has none, or one on a new
-//! branch.
+//! Worktree creation for pull requests and new branches.
 //!
-//! A new worktree goes next to the one the dashboard runs in, named after its
-//! branch, and starts from the local default branch (`main`), brought up to
-//! date first.
-//! When that update fails (offline, or `main` has diverged), the worktree still
-//! starts from `main` as it is, and the result says so.
+//! New worktrees are created as siblings of the current worktree, named after
+//! the branch, starting from the local default branch (`main`) after
+//! fast-forwarding it from upstream.
+//! If fast-forwarding fails (for example, when offline or when `main` has
+//! diverged), the worktree is created from the local `main` as-is and
+//! [`Created::stale`] records the reason.
 //!
-//! A pull request's worktree starts detached, and `gh pr checkout` then puts
-//! the pull request's branch in it, fork remotes and all.
-//! A worktree whose checkout fails is removed again, so a failed attempt leaves
-//! nothing behind.
+//! For a pull request, the worktree is created detached and then populated with
+//! `gh pr checkout` so fork remotes are configured automatically.
+//! If the checkout fails, the detached worktree is removed.
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -25,10 +24,8 @@ pub struct Created {
     pub stale: Option<String>,
 }
 
-/// Create a worktree for pull request `number`, whose head is `branch`.
-/// `dir` is any directory of the repository.
-///
-/// Errors are status-line messages.
+/// Create a sibling worktree for pull request `number` (with head branch
+/// `branch`) in the repository containing `dir`.
 pub fn for_pull_request(dir: &Utf8Path, number: u64, branch: &str) -> Result<Created, String> {
     let parent = parent(dir)?;
     let name = directory_name(branch).unwrap_or_else(|| format!("pr-{number}"));
@@ -43,7 +40,7 @@ pub fn for_pull_request(dir: &Utf8Path, number: u64, branch: &str) -> Result<Cre
         .map_err(|error| format!("Adding {path} failed: {error}"))?;
 
     if let Err(error) = github::checkout(&path, number) {
-        // The worktree holds nothing but a detached checkout; nothing is lost.
+        // Clean up the newly created detached worktree on checkout failure.
         let _leftover = git::remove_worktree(dir, &path);
         return Err(format!("Checking out #{number} failed: {error}"));
     }
@@ -51,11 +48,8 @@ pub fn for_pull_request(dir: &Utf8Path, number: u64, branch: &str) -> Result<Cre
     Ok(Created { path, stale })
 }
 
-/// Create a worktree on a new branch `branch`, starting from the default
-/// branch.
-/// `dir` is any directory of the repository.
-///
-/// Errors are status-line messages.
+/// Create a sibling worktree on a new branch `branch`, starting from the
+/// default branch of the repository containing `dir`.
 pub fn for_branch(dir: &Utf8Path, branch: &str) -> Result<Created, String> {
     if branch.starts_with('-') || git::check_branch_name(dir, branch).is_err() {
         return Err(format!("`{branch}` is not a valid branch name."));

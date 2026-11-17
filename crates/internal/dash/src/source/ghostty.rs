@@ -1,9 +1,10 @@
-//! Ghostty's terminals, through its `AppleScript` dictionary.
+//! Ghostty terminal discovery and control via `osascript`.
 //!
-//! Ghostty (1.3 and later) exposes every terminal surface with its ID and
-//! working directory, can focus one by ID, and can open a tab in a directory.
-//! Scripting it needs the macOS Automation permission, which the system asks
-//! for on first use.
+//! Ghostty 1.3+ exposes open terminal surfaces (with their ID, working
+//! directory, title, and TTY) over `AppleScript` / JXA, and supports focusing
+//! terminals and opening tabs.
+//! Scripting Ghostty requires the macOS Automation permission, which the OS
+//! prompts for on first use.
 
 use std::process::Command;
 
@@ -13,15 +14,15 @@ use serde::Deserialize;
 use super::{Error, canonical, stdout};
 use crate::model::Terminal;
 
-/// The title the dashboard gives its own terminal, so a new tab can be opened
-/// in some other window than the dashboard's.
+/// Terminal title set by the dashboard so new tabs are opened in a different
+/// Ghostty window.
 pub const TITLE: &str = "jp dash";
 
-/// Opens a tab in the directory `item 1 of argv`, in the first window that
-/// holds no terminal titled `item 2 of argv`, or in a new window when every
-/// window does.
-/// The tab's shell starts with `item 3 of argv` typed at its prompt, unless
-/// that is empty.
+/// `AppleScript` that opens a tab in `item 1 of argv` inside the first Ghostty
+/// window containing no terminal whose title contains `item 2 of argv` (or in a
+/// new window if none qualifies).
+/// If `item 3 of argv` is non-empty, sends it as the initial input to the new
+/// surface.
 const OPEN_TAB: &str = r#"
 on run argv
     tell application "Ghostty"
@@ -50,11 +51,12 @@ on run argv
 end run
 "#;
 
-/// Focuses the terminal with ID `item 1 of argv`, cancels whatever is typed at
-/// its prompt, pastes `item 2 of argv` there, and presses enter.
+/// `AppleScript` that focuses terminal `item 1 of argv`, sends `Ctrl-C` to
+/// clear any partial input at the prompt, types `item 2 of argv`, and presses
+/// `Enter`.
 ///
-/// Without the cancel, the paste would be appended to a half-typed command, and
-/// enter would run both.
+/// Without `Ctrl-C`, the command would be appended to any text already typed at
+/// the prompt.
 const RUN_IN: &str = r#"
 on run argv
     tell application "Ghostty"
@@ -67,12 +69,12 @@ on run argv
 end run
 "#;
 
-/// Lists every terminal as JSON.
+/// JXA script that serializes all open Ghostty terminals to JSON.
 ///
-/// Checking `running()` first matters: sending any other event to an
-/// application that is not running launches it.
-/// A build older than the `tty` property throws on reading it, and reports no
-/// tty rather than failing the whole list.
+/// Checks `app.running()` first because sending Apple Events to a non-running
+/// application launches it.
+/// Wraps `t.tty()` in a `try` block so Ghostty builds without the `tty`
+/// property return `""` instead of failing the query.
 const LIST_TERMINALS: &str = r#"
 const app = Application("Ghostty");
 const tty = t => { try { return t.tty(); } catch (e) { return ""; } };
@@ -99,7 +101,7 @@ pub fn terminals() -> Result<Vec<Terminal>, Error> {
 
 /// Focus the terminal with ID `id`, bringing its window to the front.
 pub fn focus(id: &str) -> Result<(), Error> {
-    // The ID travels as an argument, so no value can change the script.
+    // Pass dynamic values via `argv` rather than interpolating them into the script.
     stdout(
         "osascript",
         Command::new("osascript")
@@ -114,16 +116,14 @@ pub fn focus(id: &str) -> Result<(), Error> {
     .map(drop)
 }
 
-/// Open a Ghostty tab in `dir`, away from the dashboard's own window, and bring
-/// it to the front.
-/// With `command`, the tab's shell runs it as soon as it starts.
+/// Open a Ghostty tab in `dir` (in a window other than the dashboard's) and
+/// bring it to the front, optionally running `command` on startup.
 pub fn open_tab(dir: &Utf8Path, command: Option<&str>) -> Result<(), Error> {
     let input = command
         .map(|command| format!("{command}\n"))
         .unwrap_or_default();
 
-    // The directory and command travel as arguments, so no value can change
-    // the script.
+    // Pass dynamic values via `argv` rather than interpolating them into the script.
     stdout(
         "osascript",
         Command::new("osascript")
@@ -135,12 +135,11 @@ pub fn open_tab(dir: &Utf8Path, command: Option<&str>) -> Result<(), Error> {
     .map(drop)
 }
 
-/// Focus the terminal with ID `id`, and run `command` at its shell's prompt, as
-/// if typed there.
+/// Focus terminal `id`, clear any partial prompt input with `Ctrl-C`, and run
+/// `command`.
 ///
-/// Anything already typed at the prompt is discarded first.
-/// Whatever program is in the terminal's foreground gets the input, so the
-/// caller makes sure that is the shell.
+/// Input is sent to whatever process is in the terminal's foreground group; the
+/// caller must verify that the shell is idle before calling this function.
 pub fn run_in(id: &str, command: &str) -> Result<(), Error> {
     stdout(
         "osascript",

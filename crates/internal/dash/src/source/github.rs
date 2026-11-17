@@ -1,29 +1,25 @@
-//! Open pull requests, their checks, and their review threads.
+//! GitHub pull request, CI check, and review-thread polling.
 //!
-//! Pull requests and checks come from the REST API as conditional requests:
-//! each response's `ETag` goes back as `If-None-Match`, and a resource that has
-//! not changed answers `304 Not Modified`, which GitHub does not count against
-//! the rate limit.
-//! Polling costs nothing until something changes; a running CI build costs a
-//! point per poll while its checks move.
+//! Pull requests and commit checks are fetched via the GitHub REST API using
+//! conditional requests (`If-None-Match` with the cached `ETag`).
+//! Unchanged resources return `304 Not Modified`, which does not count against
+//! the GitHub rate limit.
 //!
-//! Review threads come from GraphQL, because the REST API omits pending review
-//! comments, and those are what `just pr-review` and `just pr-triage` write.
-//! GraphQL has no conditional requests and charges for every thread's comment
-//! list, so each pull request's threads are read again only once they are older
-//! than [`LOCAL_REVIEWS_INTERVAL`] (its branch has a local worktree) or
-//! [`REMOTE_REVIEWS_INTERVAL`] (it has none), and one query covers every pull
-//! request that is due.
-//! Refreshing reads them all.
+//! Review threads are fetched via GraphQL because the REST API omits pending
+//! review comments created by `just pr-review` and `just pr-triage`.
+//! Because GraphQL does not support conditional requests, review threads are
+//! refreshed per pull request only after [`LOCAL_REVIEWS_INTERVAL`] (when
+//! checked out in a local worktree) or [`REMOTE_REVIEWS_INTERVAL`] (when not
+//! checked out), batching all due pull requests into a single query.
+//! Explicit user refreshes (`r`) query all open pull requests.
 //!
-//! Every call runs with `JP_GITHUB_TOKEN` when that is set, since pending
-//! comments are visible only to the account that wrote them.
+//! When `JP_GITHUB_TOKEN` is set in the environment, it is passed to `gh` as
+//! `GH_TOKEN` so pending review comments authored by that account are visible.
 //!
-//! The cached responses, their `ETag`s, the review counts, and the repository
-//! name are kept on disk between runs, one file per repository under
-//! `$XDG_CACHE_HOME/jp/dash/` (`~/.cache/jp/dash/` when that is unset).
-//! A restart shows the last known state straight away, and its first reads are
-//! conditional requests too, so a restart costs nothing when nothing changed.
+//! Cached REST bodies, `ETag`s, review counts, and the `owner/name` repository
+//! identifier are persisted per repository under `$XDG_CACHE_HOME/jp/dash/`
+//! (`~/.cache/jp/dash/` when unset), allowing the dashboard to render cached PR
+//! state immediately on startup.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -44,25 +40,24 @@ const LOCAL_REVIEWS_INTERVAL: Duration = Duration::from_mins(3);
 /// Review-thread refresh interval for pull requests without a local worktree.
 const REMOTE_REVIEWS_INTERVAL: Duration = Duration::from_mins(15);
 
-/// Review threads read per pull request.
-/// GraphQL charges a request per thread, so this bounds the query's cost.
-/// Threads past it are counted, but not checked for a reply.
+/// Maximum review threads fetched per pull request in [`reviews_query`] to
+/// bound GraphQL query cost.
+/// Threads beyond this limit are counted in `totalCount` but not inspected for
+/// replies.
 const THREADS: u32 = 30;
 
-/// The HTTP status of a conditional request whose resource has not changed.
 const NOT_MODIFIED: u16 = 304;
-
-/// The first and last HTTP status of a successful response.
 const SUCCESS_FIRST: u16 = 200;
 const SUCCESS_LAST: u16 = 299;
 
-/// Characters of a REST error body shown when it holds no `message`.
+/// Maximum characters of a raw REST error body included when it has no JSON
+/// `message` field.
 const ERROR_BODY_CHARS: usize = 80;
 
-/// Pull request number to its review threads and how many have a reply.
+/// Map from PR number to `(total_threads, answered_threads)`.
 type Counts = HashMap<u64, (u32, u32)>;
 
-/// Pull request number to its last read review threads.
+/// Map from PR number to cached review-thread counts.
 type Reviews = HashMap<u64, Review>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,40 +65,41 @@ struct Review {
     threads: u32,
     answered: u32,
 
-    /// When they were read, in seconds since the Unix epoch.
+    /// Unix timestamp (in seconds) when the review threads were last fetched.
     read_at: u64,
 }
 
-/// Reads the pull requests of the GitHub repository a directory belongs to.
+/// Client for polling open pull requests, checks, and review threads for the
+/// repository containing `dir`.
 pub struct GitHub {
     dir: Utf8PathBuf,
 
-    /// Where `state` is kept between runs.
-    /// `None` when there is no cache directory, or the repository's git
-    /// directory could not be found.
+    /// On-disk cache path, or `None` if the cache directory or git common
+    /// directory could not be resolved.
     file: Option<Utf8PathBuf>,
 
     state: State,
 
-    /// Whether `state` changed since it was last written to `file`.
+    /// Whether `state` has been modified since it was last written to `file`.
     dirty: bool,
 
-    /// The REST paths this read has requested.
-    /// Cached responses for any other path (the checks of a head commit that
-    /// has since moved on) are dropped at the end of the read.
+    /// REST endpoint paths requested during the current poll.
+    /// Cached entries for paths not in this set (such as checks for superseded
+    /// head commits) are pruned at the end of the poll.
     requested: HashSet<String>,
 }
 
 /// Cached GitHub state persisted across polls and dashboard runs.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct State {
-    /// `owner/name`, looked up on the first successful read.
+    /// Repository `"owner/name"`, resolved lazily on the first online poll.
     repo: Option<String>,
 
-    /// The last `200` response for each REST path, replayed on a `304`.
+    /// Cached HTTP `200` body and `ETag` per REST endpoint path, reused on
+    /// `304`.
     rest: HashMap<String, Cached>,
 
-    /// From the last review read of each pull request.
+    /// Cached review-thread counts per open pull request.
     reviews: Reviews,
 }
 
@@ -113,19 +109,19 @@ struct Cached {
     body: String,
 }
 
-/// Whether a read may use the network.
+/// Whether a poll may make network calls.
 #[derive(Clone, Copy)]
 enum Mode {
-    /// Answer from the network; `asked` is whether the user asked for the read.
+    /// Fetch from GitHub; `asked` is `true` on an explicit user refresh.
     Online { asked: bool },
 
-    /// Answer from the cache alone.
+    /// Read from the in-memory cache only.
     Offline,
 }
 
 impl GitHub {
-    /// Read the repository containing `dir`, starting from what the last run
-    /// left in the cache.
+    /// Create a [`GitHub`] reader for `dir`, loading any persisted cache from
+    /// disk.
     #[must_use]
     pub fn open(dir: Utf8PathBuf) -> Self {
         let file = cache::file(&dir, "github");
@@ -151,10 +147,9 @@ impl GitHub {
         self.read(Mode::Offline).ok()
     }
 
-    /// List the open pull requests.
+    /// Poll open pull requests and persist any updated cache state.
     ///
-    /// `asked` is whether the user asked for this read, which also refreshes
-    /// review threads.
+    /// When `asked` is `true`, forces a refresh of all review threads.
     pub fn pull_requests(&mut self, asked: bool) -> Result<Vec<PullRequest>, Error> {
         let read = self.read(Mode::Online { asked });
         self.persist();
@@ -217,10 +212,11 @@ impl GitHub {
         Ok(prs)
     }
 
-    /// Read the checks of `pull`'s head commit into a [`PullRequest`] whose
-    /// local branch is `head`, without its review threads.
+    /// Fetch check runs and commit statuses for `pull`'s head commit and build
+    /// a [`PullRequest`] (with review thread counts left at zero).
     ///
-    /// `None` when the checks are not cached and `online` is `false`.
+    /// Returns `Ok(None)` in offline mode when the commit's checks are not
+    /// cached.
     fn pull_request(
         &mut self,
         repo: &str,
@@ -278,7 +274,7 @@ impl GitHub {
         Ok(())
     }
 
-    /// Write the state to the cache file when it changed.
+    /// Write `state` to disk if modified since the last save.
     fn persist(&mut self) {
         let Some(file) = &self.file else {
             return;
@@ -317,9 +313,8 @@ impl GitHub {
         Ok(repo)
     }
 
-    /// `GET` a REST path, as a conditional request when it was read before.
-    ///
-    /// Without `online`, answer from the cache alone.
+    /// Fetch `path` from the GitHub REST API using `If-None-Match` when cached,
+    /// or read from the cache alone when `online` is `false`.
     fn get(&mut self, path: &str, online: bool) -> Result<String, Error> {
         self.requested.insert(path.to_owned());
 
@@ -397,7 +392,8 @@ impl GitHub {
     }
 }
 
-/// A `gh` command running in `dir`, with `JP_GITHUB_TOKEN` when that is set.
+/// Build a `gh` [`Command`] rooted at `dir`, forwarding `JP_GITHUB_TOKEN` as
+/// `GH_TOKEN` if set.
 fn gh(dir: &Utf8Path) -> Command {
     let mut command = Command::new("gh");
     command.current_dir(dir);
@@ -410,12 +406,8 @@ fn gh(dir: &Utf8Path) -> Command {
     command
 }
 
-/// Check pull request `number` out in the worktree at `worktree`, the way `gh
-/// pr checkout` does: a pull request from a fork gets that fork as its branch's
-/// upstream.
-///
-/// Neither `gh` nor `git` may ask anything: the dashboard owns the terminal,
-/// and a prompt would draw over it and wait forever.
+/// Check out pull request `number` in `worktree` via `gh pr checkout` with all
+/// interactive prompts disabled.
 pub fn checkout(worktree: &Utf8Path, number: u64) -> Result<(), Error> {
     let mut command = gh(worktree);
     command
@@ -455,8 +447,8 @@ fn now() -> u64 {
         .map_or(0, |since| since.as_secs())
 }
 
-/// A REST response as `gh api --include` prints it: the status line, the
-/// headers, a blank line, and the body.
+/// Parsed output of `gh api --include` (status code, optional `ETag`, and
+/// response body).
 #[derive(Debug, PartialEq, Eq)]
 struct Response<'a> {
     status: u16,
@@ -464,9 +456,8 @@ struct Response<'a> {
     body: &'a str,
 }
 
-/// Parse `gh api --include` output.
-/// `None` when it does not start with a status line, which means `gh` failed
-/// before getting a response.
+/// Parse `gh api --include` output, returning `None` if stdout does not begin
+/// with an HTTP status line.
 fn parse_response(raw: &str) -> Option<Response<'_>> {
     let (head, body) = raw
         .split_once("\r\n\r\n")
@@ -492,7 +483,8 @@ fn parse_response(raw: &str) -> Option<Response<'_>> {
     Some(Response { status, etag, body })
 }
 
-/// The `message` of a REST error body, or the start of the body itself.
+/// Extract the `"message"` field from a JSON error body, or truncate the raw
+/// body to [`ERROR_BODY_CHARS`].
 fn api_message(body: &str) -> String {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
@@ -523,10 +515,10 @@ struct Head {
     r#ref: String,
     sha: String,
 
-    /// `None` when the account that opened the pull request is gone.
+    /// `None` if the author's user account has been deleted.
     user: Option<User>,
 
-    /// `None` when the fork the pull request comes from was deleted.
+    /// `None` if the source fork repository has been deleted.
     repo: Option<Repo>,
 }
 
@@ -547,11 +539,11 @@ struct Repo {
     default_branch: String,
 }
 
-/// The local branch `gh pr checkout` gives a pull request: its head branch, or
-/// `<owner>/<branch>` when it comes from another repository and its head branch
-/// has the default branch's name.
+/// Determine the local branch name `gh pr checkout` uses for `pull`.
 ///
-/// That keeps a fork's `main` from passing for the local `main`.
+/// Returns the head ref unless `pull` comes from a fork whose head ref matches
+/// the base repository's default branch, in which case `gh` prefixes it with
+/// `<owner>/` to avoid colliding with the local default branch.
 fn local_branch(pull: &RestPull) -> String {
     let head = &pull.head;
     let base = &pull.base.repo;
@@ -592,9 +584,9 @@ struct Status {
     state: String,
 }
 
-/// One check on a commit: a check run from GitHub Actions or an app, or a
-/// commit status posted by an outside service.
-/// States are upper case.
+/// A CI check on a commit: either a GitHub Actions / App check run or an
+/// external commit status context (with uppercase status and conclusion
+/// strings).
 #[derive(Debug)]
 enum Context {
     CheckRun {
@@ -610,8 +602,8 @@ enum Context {
 }
 
 impl Context {
-    /// The check's name, when this attempt at it started (`None` for a commit
-    /// status, or a check run that has not started), and its outcome.
+    /// Convert into `(name, started_at, outcome)`.
+    /// `started_at` is `None` for commit statuses and queued check runs.
     fn into_attempt(self) -> (String, Option<String>, Outcome) {
         match self {
             Self::CheckRun {
@@ -644,7 +636,6 @@ impl Context {
     }
 }
 
-/// How one check ended, or that it has not yet.
 #[derive(Clone, Copy)]
 enum Outcome {
     Passed,
@@ -652,7 +643,7 @@ enum Outcome {
     Failed,
 }
 
-/// Combine a commit's `check-runs` and `status` responses.
+/// Parse and combine a commit's `check-runs` and `status` JSON payloads.
 fn contexts(runs: &str, status: &str) -> Result<Vec<Context>, Error> {
     let runs: CheckRuns = parse_json(runs)?;
     let status: CombinedStatus = parse_json(status)?;
@@ -674,11 +665,10 @@ fn contexts(runs: &str, status: &str) -> Result<Vec<Context>, Error> {
     Ok(runs.chain(statuses).collect())
 }
 
-/// A query for the review threads of each pull request in `numbers`, one alias
-/// per pull request.
+/// Build a GraphQL query fetching the review threads for each PR in `numbers`.
 ///
-/// A thread with a second comment has been answered, so two comments per thread
-/// are enough to tell.
+/// Requests up to 2 comments per thread, which is sufficient to determine
+/// whether the thread has at least one reply.
 fn reviews_query(numbers: &[u64]) -> String {
     let mut query = String::from(
         "query($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n",
@@ -701,8 +691,8 @@ struct ReviewsResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewsData {
-    /// Keyed by the `pr<number>` alias.
-    /// `null` for a pull request that no longer exists.
+    /// Keyed by the `pr<number>` alias; `null` if the pull request no longer
+    /// exists.
     repository: HashMap<String, Option<ReviewedPullRequest>>,
 }
 
@@ -715,7 +705,7 @@ struct ReviewedPullRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Threads {
-    /// Every thread, including those past the ones read.
+    /// Total threads on the pull request, including any beyond [`THREADS`].
     total_count: u32,
     nodes: Vec<Thread>,
 }
@@ -730,8 +720,8 @@ struct Thread {
     comments: Nodes<serde_json::Value>,
 }
 
-/// Parse the response to [`reviews_query`] into each pull request's threads and
-/// answered threads.
+/// Parse the GraphQL response from [`reviews_query`] into total and answered
+/// thread counts per PR.
 fn parse_reviews(json: &str) -> Result<Counts, Error> {
     let response: ReviewsResponse = parse_json(json)?;
 
@@ -754,12 +744,11 @@ fn parse_reviews(json: &str) -> Result<Counts, Error> {
     Ok(reviews)
 }
 
-/// Tally a commit's checks.
+/// Aggregate check outcomes by check name, keeping only the latest attempt when
+/// a check has been re-run.
 ///
-/// A re-run check is reported next to its earlier attempts; only the latest
-/// attempt counts.
-/// One that has not started yet has no `started_at` and is the latest by
-/// definition.
+/// A queued check run with `started_at: None` is treated as newer than any
+/// previously started attempt.
 fn checks(contexts: Vec<Context>) -> Checks {
     let mut latest: HashMap<String, (Option<String>, Outcome)> = HashMap::new();
 

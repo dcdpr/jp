@@ -72,8 +72,8 @@ store.
 | Worktree list                                       | `git worktree list`                                       | none                                                           | `list_workspaces` roots (JP-registered only) | Nothing; git stays the authority                     |
 | Title, pinned, event count                          | `load_conversation_metadata_batch`                        | `list_conversations`                                           | none                                         | `last_event_at` on summaries                         |
 | Whether a turn is running                           | lock file PID, checked with `ps`                          | `read_events.lock`, one conversation per request, whole stream | none                                         | Lock state on `list_conversations` entries           |
-| Worktree a conversation runs or last ran in         | `lsof` cwd of the lock holder, plus dash's own cache file | none                                                           | `last_root` (Phase 1)                        | Nothing; replaces both                               |
-| Whether a turn waits on the user                    | loads the stream, `pending_inquiries()`                   | raw events only                                                | none                                         | Derived `waiting_since` on entries and `read_events` |
+| Worktree where a conversation runs or last ran      | `lsof` cwd of the lock holder, plus dash's own cache file | none                                                           | `last_root` (Phase 1)                        | Nothing; replaces both                               |
+| Whether a turn is waiting for user input            | loads the stream, `pending_inquiries()`                   | raw events only                                                | none                                         | Derived `waiting_since` on entries and `read_events` |
 | Sessions: leader PID, active conversation, history  | `Workspace::session_overviews()`                          | none                                                           | none                                         | A `list_sessions` request; no RFD covers it          |
 | Projection-only conversations in a sibling worktree | not covered                                               | none                                                           | Phases 2 to 4                                | Nothing needed for dash                              |
 
@@ -85,12 +85,12 @@ foreground-group idle check, Ghostty, `git`, `gh`.
 JP intends for other Rust tools to build on its crates (`jp_workspace`,
 `jp_storage`, `jp_conversation`, and others), so linking them is not wrong in
 principle.
-They are not ready for it yet: their public surface is wide, shaped by what `jp`
-itself needs, and changes without notice.
-Until they have a stable, deliberately narrow API the project is comfortable
-committing to, the plugin protocol is the only stable surface.
-A plugin `jp-dash` would read the store directly as a stated, temporary
-exception and move each read to the protocol once the protocol carries it.
+They are not ready for it yet: their public surface is wide, shaped by `jp`'s
+own internal needs, and changes without notice.
+Until they expose a narrow, stable API, the plugin protocol is the only stable
+surface.
+A `jp-dash` plugin would read the store directly as an explicit temporary
+exception and move each read to the protocol once supported.
 
 The API is not the only risk.
 `jp` and a plugin are installed separately, so a plugin can read lock files,

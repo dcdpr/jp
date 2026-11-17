@@ -89,9 +89,8 @@ fn jp(app: &mut App, runs: Vec<JpRun>, sessions: Vec<JpSession>) {
     })));
 }
 
-/// Each selectable line as `worktree`, `#number`, `worktree/tab id`,
-/// `worktree/tab id/conversation id`, or `worktree/tab id/conversation
-/// id/operation`.
+/// Format each selectable item as `worktree`, `#number`, `worktree/tab`,
+/// `worktree/tab/conversation`, or `worktree/tab/conversation/operation`.
 fn lines(app: &App) -> Vec<String> {
     app.table
         .items()
@@ -142,7 +141,7 @@ fn selected(app: &App) -> String {
     lines(app)[app.selected_index().unwrap()].clone()
 }
 
-/// Three worktrees: `a` and `c` have a terminal open, `b` has nothing going on.
+/// Fixture with three worktrees: `a` and `c` have open terminals; `b` is idle.
 fn app() -> App {
     let mut app = App::default();
     app.apply(Update::Worktrees(Ok(vec![
@@ -157,8 +156,8 @@ fn app() -> App {
     app
 }
 
-/// `a` with two tabs, one of them running a session with two conversations; `c`
-/// with one tab.
+/// Fixture where `a` has two tabs (one running a session with two
+/// conversations) and `c` has one tab.
 fn two_tabs() -> App {
     let mut app = app();
     app.apply(Update::Terminals(Ok(vec![
@@ -346,7 +345,7 @@ fn test_an_expanded_row_notes_its_pull_request_and_missing_tabs() {
 
     app.handle(key(KeyCode::Right));
 
-    // Notes explain; they are not lines to select.
+    // Notes are informational only and are not selectable items.
     assert_eq!(notes(&app), [
         "#7 PR 7",
         "No tab is open here: enter opens one."
@@ -418,7 +417,8 @@ fn test_left_closes_the_operations_before_climbing_to_the_row() {
     app.handle(key(KeyCode::Down));
     assert_eq!(selected(&app), "a/TA2/jp-c2/archive conversation");
 
-    // From an operation, back to its conversation, the list closed.
+    // Left from an operation closes the operation list and selects the
+    // conversation.
     app.handle(key(KeyCode::Left));
     assert_eq!(selected(&app), "a/TA2/jp-c2");
     assert_eq!(lines(&app).len(), 6);
@@ -473,7 +473,7 @@ fn test_space_reopens_on_the_row_when_the_line_it_left_is_gone() {
     let mut app = on_conversation();
     app.handle(key(KeyCode::Char(' ')));
 
-    // `jp-c2` goes while the row is closed.
+    // Remove `jp-c2` while the row is collapsed.
     jp(&mut app, vec![], vec![session(10, "/repo/a/src", vec![
         conversation("jp-c1", true, Status::Idle),
     ])]);
@@ -487,7 +487,7 @@ fn test_left_collapsing_a_row_forgets_where_space_left_off() {
     let mut app = on_conversation();
     app.handle(key(KeyCode::Char(' ')));
 
-    // Opened and closed with the arrows, the row starts over on itself.
+    // Collapsing with `←` clears the saved inner selection from `Space`.
     app.handle(key(KeyCode::Right));
     app.handle(key(KeyCode::Left));
     app.handle(key(KeyCode::Char(' ')));
@@ -520,8 +520,8 @@ fn test_enter_on_an_operation_runs_its_command_in_the_conversations_tab() {
 
 #[test]
 fn test_an_operation_runs_in_a_new_tab_when_its_tab_is_not_certain() {
-    // Two tabs share the session's directory: which one runs its shell is a
-    // guess, and typing into the wrong one could feed another program.
+    // When two tabs share the session's directory without TTY info, the tab
+    // match is ambiguous.
     let mut app = app();
     app.apply(Update::Terminals(Ok(vec![
         terminal("TA1", "/repo/a"),
@@ -817,7 +817,7 @@ fn test_slash_filters_as_you_type_and_includes_idle_worktrees() {
     assert_eq!(lines(&app), ["w17"]);
     assert!(!app.table.filter.as_ref().unwrap().editing);
 
-    // Esc clears a filter in force, and quits only once none is.
+    // First `Esc` clears the active filter; second `Esc` quits.
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::None);
     assert!(app.table.filter.is_none());
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Quit);
@@ -839,7 +839,7 @@ fn test_filter_matches_branch_names_and_esc_restores_the_previous_filter() {
     app.handle(key(KeyCode::Enter));
     assert_eq!(lines(&app), ["one", "#9"]);
 
-    // `/` edits the filter in force, so this narrows it to `STACKs-f`.
+    // Pressing `/` again edits the existing filter query.
     type_keys(&mut app, "/s-f");
     assert_eq!(lines(&app), ["#9"]);
     app.handle(key(KeyCode::Esc));

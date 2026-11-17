@@ -226,8 +226,8 @@ fn test_rows_attach_sessions_by_shell_directory() {
 
 #[test]
 fn test_rows_keep_the_latest_run_in_a_worktree() {
-    // Two directories of `/repo/a` each had a run, and the later one counts. A
-    // run outside every worktree has no row.
+    // Multiple subdirectories in `/repo/a` take the latest timestamp; paths
+    // outside all worktrees are ignored.
     let worktrees = [worktree("/repo/a", "a"), worktree("/repo/b", "b")];
     let recent = [
         ran("/repo/a", Some(at(5))),
@@ -262,7 +262,7 @@ fn test_last_activity_is_the_latest_of_the_sessions_and_the_last_run() {
     let listed = rows(&worktrees, &[], &[], &sessions, &[], &[]);
     assert_eq!(listed[0].last_activity(), Some(at(7)));
 
-    // A run no session lists any more, later still.
+    // A recent run with a newer timestamp than any session conversation wins.
     let both = rows(
         &worktrees,
         &[],
@@ -285,8 +285,8 @@ fn test_place_puts_each_session_in_the_tab_in_its_directory() {
         terminal("T2", "/repo/a/src"),
         terminal("T3", "/repo/a"),
     ];
-    // Two sessions in `/repo/a` share its two tabs, oldest (lowest PID)
-    // first; one in a directory no tab is in goes nowhere.
+    // Two sessions in `/repo/a` are distributed across its two tabs in PID
+    // order; the session in `/repo/a/docs` has no matching tab.
     let sessions = [
         session(30, "/repo/a"),
         session(20, "/repo/a/src"),
@@ -345,7 +345,8 @@ fn test_owns_only_the_sole_tab_of_the_sole_ghostty_shell_in_a_directory() {
         outside.clone()
     ]));
 
-    // Two tabs, or two Ghostty shells, in the directory make it a guess.
+    // Multiple tabs or multiple Ghostty shells in the same directory are
+    // ambiguous.
     assert!(!owns(
         &[terminal("T1", "/repo/a"), terminal("T2", "/repo/a")],
         &[session(10, "/repo/a")]
@@ -354,7 +355,7 @@ fn test_owns_only_the_sole_tab_of_the_sole_ghostty_shell_in_a_directory() {
         session(10, "/repo/a"),
         session(20, "/repo/a")
     ]));
-    // So does a session in another directory, or outside Ghostty.
+    // Sessions in a different directory or outside Ghostty do not match.
     assert!(!owns(&[terminal("T1", "/repo/a")], &[session(
         10,
         "/repo/a/src"
@@ -364,8 +365,8 @@ fn test_owns_only_the_sole_tab_of_the_sole_ghostty_shell_in_a_directory() {
 
 #[test]
 fn test_place_matches_by_tty_whatever_the_directories() {
-    // Two tabs in one directory: the tty says which holds which session, where
-    // the directory alone would have to guess.
+    // When TTYs are reported, sessions match their exact tab even when sharing
+    // a directory.
     let worktrees = [worktree("/repo/a", "a")];
     let terminals = [
         on_tty("T1", "/repo/a", "ttys001"),
@@ -375,7 +376,8 @@ fn test_place_matches_by_tty_whatever_the_directories() {
         tty: Some(tty.to_owned()),
         ..session(pid, "/repo/a")
     };
-    // The older session is in the second tab, the opposite of the guess.
+    // Place the lower-PID session in the second tab to verify TTY matching
+    // overrides PID order.
     let sessions = [in_tty(10, "ttys002"), in_tty(20, "ttys001")];
     let rows = rows(&worktrees, &terminals, &[], &sessions, &[], &[]);
     let row = &rows[0];
@@ -395,8 +397,8 @@ fn test_place_matches_by_tty_whatever_the_directories() {
 
 #[test]
 fn test_place_puts_a_session_no_tty_matches_in_no_tab() {
-    // Ghostty reports devices, and none is this shell's: it runs somewhere
-    // else, so no tab of this directory gets it by guess.
+    // When a tab reports a TTY that does not match the session's TTY,
+    // directory fallback is not used.
     let worktrees = [worktree("/repo/a", "a")];
     let terminals = [on_tty("T1", "/repo/a", "ttys001")];
     let sessions = [JpSession {

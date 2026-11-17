@@ -221,8 +221,8 @@ fn test_parse_reviews_counts_threads_with_a_reply() {
 
 #[test]
 fn test_parse_reviews_counts_threads_past_the_ones_read() {
-    // Two threads were read, both answered; the third, past the limit, was
-    // not, so the counts must not read as everything answered.
+    // Two of the three threads were fetched (both answered); totalCount (3)
+    // must still be preserved.
     let json = r#"{"data": {"repository": {
         "pr1132": {"reviewThreads": {"totalCount": 3, "nodes": [
             {"comments": {"nodes": [{"id": "a"}, {"id": "b"}]}},

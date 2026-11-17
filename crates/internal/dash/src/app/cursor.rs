@@ -1,8 +1,7 @@
-//! The selected line of the table, and how far the table is scrolled.
+//! Selection and scroll state for the dashboard table.
 //!
-//! [`Cursor`] remembers the selection by its item's [`Key`], so it stays on its
-//! row or child as lines come and go; every method takes the lines it works on
-//! from the table.
+//! [`Cursor`] tracks the selected item by its stable [`Key`] so the selection
+//! follows the item across refreshes as rows are added, removed, or reordered.
 
 use std::collections::HashMap;
 
@@ -11,53 +10,50 @@ use crate::model::{Row, RowId};
 
 #[derive(Debug, Default)]
 pub struct Cursor {
-    /// The selected line.
     pub(super) selected: Option<Key>,
 
-    /// A row to select as soon as it shows up: a worktree being created.
+    /// Worktree row to select as soon as it appears in the table.
     pub(super) wanted: Option<RowId>,
 
-    /// Selected item inside a row when it was collapsed with `Space`, restored
-    /// on re-expand.
+    /// Inner selection saved when collapsing a row with `Space`, restored on
+    /// re-expand.
     pub(super) last_selected: HashMap<RowId, Key>,
 
-    /// The first drawn line on screen.
-    /// See [`Self::fit`].
+    /// Index of the first visible display line.
     pub scroll: usize,
 
-    /// The number of table lines on screen, as of the last [`Self::fit`].
+    /// Number of visible table body rows from the last [`Self::fit`] call.
     page: usize,
 }
 
 impl Cursor {
-    /// The position of the selected line in `items`.
+    /// Return the position of the selected item in `items`.
     #[must_use]
     pub fn index(&self, items: &[Item<'_>]) -> Option<usize> {
         let selected = self.selected.as_ref()?;
         items.iter().position(|item| item.key() == *selected)
     }
 
-    /// The selected line, when it is among `items`.
+    /// Return the selected item if present in `items`.
     #[must_use]
     pub fn item<'a>(&self, items: &[Item<'a>]) -> Option<Item<'a>> {
         let selected = self.selected.as_ref()?;
         items.iter().find(|item| item.key() == *selected).copied()
     }
 
-    /// Select the line at `index` in `items`, when there is one.
+    /// Select the item at `index` in `items`.
     pub fn select(&mut self, items: &[Item<'_>], index: usize) {
         if let Some(item) = items.get(index) {
             self.selected = Some(item.key());
         }
     }
 
-    /// Select the last of `items`.
+    /// Select the last item in `items`.
     pub fn select_last(&mut self, items: &[Item<'_>]) {
         self.select(items, items.len().saturating_sub(1));
     }
 
-    /// Move the selection one line down (or up), wrapping from the last line to
-    /// the first and back.
+    /// Move the selection down or up by one item, wrapping around at the ends.
     pub fn step(&mut self, items: &[Item<'_>], down: bool) {
         let Some(last) = items.len().checked_sub(1) else {
             return;
@@ -77,7 +73,7 @@ impl Cursor {
         self.select(items, index);
     }
 
-    /// Move the selection half a screen down (or up), stopping at either end.
+    /// Move the selection down or up by half a page, clamping at the ends.
     pub fn jump(&mut self, items: &[Item<'_>], down: bool) {
         let Some(last) = items.len().checked_sub(1) else {
             return;
@@ -94,8 +90,7 @@ impl Cursor {
         self.select(items, index);
     }
 
-    /// Move the selection one line down (or up) for a turn of the scroll wheel,
-    /// stopping at either end rather than wrapping.
+    /// Move the selection down or up by one item, clamping at the ends.
     pub fn wheel(&mut self, items: &[Item<'_>], down: bool) {
         let Some(last) = items.len().checked_sub(1) else {
             return;
@@ -111,8 +106,8 @@ impl Cursor {
         self.select(items, index);
     }
 
-    /// Scroll so the selected line of `display` is among the `rows` lines on
-    /// screen, without leaving lines empty past the end of the table.
+    /// Adjust `scroll` so the selected item is visible within `rows` screen
+    /// lines without trailing blank lines.
     pub fn fit(&mut self, display: &[Display<'_>], rows: usize) {
         self.page = rows;
         let line = self.selected.as_ref().and_then(|selected| {
@@ -133,7 +128,7 @@ impl Cursor {
         self.scroll = self.scroll.min(display.len().saturating_sub(rows));
     }
 
-    /// Select the wanted row, once it is among `rows`.
+    /// Select `wanted` once a matching row appears in `rows`.
     pub fn follow(&mut self, rows: &[&Row]) {
         let Some(wanted) = self.wanted.take() else {
             return;
@@ -149,11 +144,12 @@ impl Cursor {
         }
     }
 
-    /// Repair the selection when its line is not among `items`.
+    /// Ensure the selection points to a visible item in `items`.
     ///
-    /// A child that is gone falls back to its row, and a pull request that got
-    /// a worktree follows it to the worktree's row.
-    /// Anything else falls back to the first line.
+    /// If the selected child item disappeared, falls back to its parent row.
+    /// If a pull request row was replaced by a newly created worktree row for
+    /// that PR, follows the selection to the worktree row.
+    /// Otherwise, selects the first item.
     pub fn keep_visible(&mut self, items: &[Item<'_>]) {
         if self.index(items).is_some() {
             return;

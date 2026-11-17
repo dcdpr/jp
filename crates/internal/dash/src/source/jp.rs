@@ -1,25 +1,24 @@
-//! Running `jp` processes and JP sessions, from the workspace's store.
+//! Running `jp` processes, active shell sessions, and recent worktree activity.
 //!
-//! A `jp` command that works on a conversation holds that conversation's lock
-//! for as long as it runs, and records its PID in the lock file.
-//! The lock is read through `jp_storage`'s backend traits, never taken: a probe
-//! that took the lock, however briefly, could make a `jp` starting at that
-//! moment fail to get it.
-//! Whether the holder is still alive is asked of the OS instead.
+//! A `jp` command working on a conversation holds that conversation's lock file
+//! and writes its PID into the lock metadata.
+//! This module inspects lock files read-only via `jp_storage` without acquiring
+//! the lock (which could race with a starting `jp` process) and checks whether
+//! the holder PID is a live `jp` process via the OS process table.
 //!
-//! A session is a shell's conversation history, recorded under the shell's
-//! session-leader PID.
-//! That PID resolves via the process table to the shell and its working
-//! directory, which places the session in a worktree.
-//! Environment-derived sessions (`$JP_SESSION`, `$TMUX_PANE`) have no
-//! session-leader PID and are omitted.
+//! Shell sessions are tracked by session-leader PID (`jp_workspace`), resolved
+//! through the process table to the interactive shell and its working directory
+//! to associate each session with a worktree.
+//! Environment-keyed sessions (`$JP_SESSION`, `$TMUX_PANE`) have no leader PID
+//! and are omitted.
 //!
-//! Every worktree of the repository shares one user-local store, so the locks
-//! and sessions of all of them are found from any one.
+//! Because all worktrees of a repository share one user-local store, a single
+//! [`Workspace`] handle sees the locks and sessions for every worktree.
 //!
-//! Because conversations do not record a working directory and session mappings
-//! resolve to a directory only while their shell is alive, `Jp` caches the last
-//! conversation observed running in each directory on disk (see
+//! Conversations do not store a working directory, and session mappings only
+//! resolve to a directory while their shell process is alive.
+//! To show when `jp` last ran in an idle worktree after its shell exits, [`Jp`]
+//! caches the last conversation observed running in each directory on disk (see
 //! [`super::cache`]).
 
 use std::{
@@ -41,24 +40,24 @@ use jp_workspace::{SessionOverview, Workspace};
 use super::{Error, cache, canonical, ghostty::tty_name, output, stdout};
 use crate::model::{JpRecent, JpRun, JpSession, SessionConversation, Status};
 
-/// Conversations considered per session: the most recently activated ones.
-/// Their metadata is read to order them by activity.
+/// Maximum recent conversations per session whose metadata is loaded for
+/// sorting.
 const CONSIDERED: usize = 20;
 
-/// Conversations listed per session, after ordering by activity.
+/// Maximum conversations retained per session after sorting by activity.
 const LISTED: usize = 10;
 
-/// How long an idle conversation's title and last event are trusted before they
-/// are read again.
-/// A conversation that is running, or was at the last read, is read every time.
+/// Cache TTL for an idle conversation's metadata (title, event count, and last
+/// event timestamp).
+/// Conversations that are currently running or were running on the previous
+/// poll are reloaded on every poll.
 const METADATA_TTL: Duration = Duration::from_mins(1);
 
-/// Ancestors of a process searched for a Ghostty process.
-/// Bounds the walk in case a concurrent process-table change introduces a
-/// cycle.
+/// Maximum parent-PID hops when walking the process tree to check for a Ghostty
+/// ancestor.
 const MAX_ANCESTORS: usize = 64;
 
-/// Session overviews, by the PID of the session's leader.
+/// Session overviews paired with their session-leader PID.
 type Overviews = Vec<(u32, SessionOverview)>;
 
 /// Snapshot of running `jp` processes, active shell sessions, and recent runs.
@@ -67,35 +66,32 @@ pub struct JpState {
     pub runs: Vec<JpRun>,
     pub sessions: Vec<JpSession>,
 
-    /// The conversation last seen running in each directory.
+    /// Most recent conversation observed running in each working directory.
     pub recent: Vec<JpRecent>,
 }
 
-/// Reads the running conversations and sessions of the JP workspace containing
-/// a directory.
+/// Reader for running `jp` conversations and shell sessions in the workspace
+/// containing `dir`.
 pub struct Jp {
     dir: Utf8PathBuf,
 
-    /// Opened lazily on the first successful poll and reused across reads.
+    /// Workspace and storage backend, initialized lazily on the first poll.
     opened: Option<(Workspace, Arc<FsStorageBackend>)>,
 
-    /// Conversation metadata from earlier reads.
-    /// Loading it parses the whole event file, too much to do for every listed
-    /// conversation every read.
+    /// Cached conversation metadata across polls to avoid re-parsing every
+    /// conversation's event log on each tick.
     metadata: HashMap<ConversationId, Metadata>,
 
-    /// Cached pending-inquiry state for each currently locked conversation.
+    /// Cached pending-inquiry state for currently locked conversations.
     waiting: HashMap<ConversationId, Waiting>,
 
-    /// The conversation last seen running in each directory, by the directory's
-    /// path.
+    /// Last conversation ID observed running in each working directory path.
     ran: BTreeMap<String, ConversationId>,
 
-    /// Where `ran` is kept between runs; `None` when there is no cache
-    /// directory.
+    /// On-disk cache file for `ran`, or `None` if unavailable.
     file: Option<Utf8PathBuf>,
 
-    /// Whether `ran` changed since it was last written to `file`.
+    /// Whether `ran` has changed since it was last written to `file`.
     dirty: bool,
 }
 
@@ -119,15 +115,15 @@ struct Metadata {
 }
 
 impl Jp {
-    /// Read the workspace containing `dir`, starting from the runs the last
-    /// dashboard remembered.
+    /// Create a [`Jp`] reader for `dir`, loading cached recent runs from disk
+    /// and pruning removed directories.
     #[must_use]
     pub fn new(dir: Utf8PathBuf) -> Self {
         let file = cache::file(&dir, "jp");
         let mut ran: BTreeMap<String, ConversationId> =
             file.as_deref().map(cache::load).unwrap_or_default();
 
-        // A directory that is gone, such as a removed worktree, has no row.
+        // Prune entries for worktree directories that no longer exist on disk.
         let remembered = ran.len();
         ran.retain(|cwd, _| Utf8Path::new(cwd).exists());
 
@@ -145,8 +141,8 @@ impl Jp {
     pub fn read(&mut self) -> Result<JpState, Error> {
         let (holders, overviews) = self.locks_and_sessions()?;
 
-        // Each session is placed by its shell, the leader's child when the
-        // leader is `login` (as Ghostty starts shells), or the leader itself.
+        // Resolve each session leader to its interactive shell (the child of
+        // `login` when spawned by Ghostty, or the leader process itself).
         let table = process_table()?;
         let shells: Vec<(u32, u32)> = overviews
             .iter()
@@ -203,10 +199,10 @@ impl Jp {
         })
     }
 
-    /// Every conversation whose lock records a holder, with the holder's PID,
-    /// and every session that has a leader, by the leader's PID.
+    /// Return all locked conversations paired with their holder PID, and all
+    /// PID-keyed session overviews.
     ///
-    /// Opens the workspace on the first call.
+    /// Lazily opens the [`Workspace`] on first call.
     fn locks_and_sessions(&mut self) -> Result<(Vec<(ConversationId, u32)>, Overviews), Error> {
         if self.opened.is_none() {
             let workspace = Workspace::open_read_only(&self.dir)?;
@@ -235,7 +231,7 @@ impl Jp {
         Ok((holders, overviews))
     }
 
-    /// Write `ran` to its file when it changed.
+    /// Persist `ran` to the cache file if modified.
     fn persist(&mut self) {
         let Some(file) = &self.file else {
             return;
@@ -272,8 +268,7 @@ impl Jp {
                 continue;
             }
 
-            // A stream that fails to load says nothing about a question, so it
-            // reads as not waiting.
+            // If the event stream cannot be read, treat the turn as not waiting.
             let since = storage
                 .load_conversation_stream(id, &PartialAppConfig::empty())
                 .ok()
@@ -293,9 +288,9 @@ impl Jp {
         }
     }
 
-    /// Load the metadata of each conversation in `listed` that is not cached,
-    /// is running or was at the last read, or was read too long ago; and forget
-    /// the rest.
+    /// Reload metadata for conversations in `listed` that are uncached,
+    /// currently or recently running, or older than [`METADATA_TTL`], and evict
+    /// entries no longer in `listed`.
     fn refresh_metadata(
         &mut self,
         listed: &HashSet<ConversationId>,
@@ -335,11 +330,10 @@ impl Jp {
     }
 }
 
-/// The conversations of `holders` whose holder is a live `jp` process, by
-/// conversation.
+/// Filter `holders` to conversations locked by a live `jp` process.
 ///
-/// A lock file outlives a holder killed with SIGKILL, and its PID may since
-/// belong to something else, so only a `jp` process counts.
+/// A lock file can outlive a `SIGKILL`ed holder and its PID may be reused by an
+/// unrelated process, so we verify that the process command is `"jp"`.
 fn held(
     holders: Vec<(ConversationId, u32)>,
     processes: &HashMap<u32, Process>,
@@ -359,8 +353,9 @@ fn held(
         .collect()
 }
 
-/// The conversations whose metadata a read needs: those each session lists,
-/// those `running`, and those that `ran` last in some directory.
+/// Collect all conversation IDs that need metadata loaded: recent conversations
+/// in each session, currently running conversations, and cached per-directory
+/// runs.
 fn listed(
     overviews: &[(u32, SessionOverview)],
     running: &HashMap<ConversationId, Held>,
@@ -409,8 +404,8 @@ fn recent(
         .collect()
 }
 
-/// A conversation's title, or its ID when it has none or its metadata is not
-/// loaded.
+/// Return the conversation's title, falling back to its ID if untitled or
+/// unloaded.
 fn title(metadata: &HashMap<ConversationId, Metadata>, id: &ConversationId) -> String {
     metadata
         .get(id)
@@ -418,14 +413,14 @@ fn title(metadata: &HashMap<ConversationId, Metadata>, id: &ConversationId) -> S
         .unwrap_or_else(|| id.to_string())
 }
 
-/// A conversation a live `jp` process holds.
+/// A conversation lock held by a live `jp` process.
 struct Held {
     pid: u32,
     cwd: Utf8PathBuf,
     waiting_since: Option<DateTime<Utc>>,
 }
 
-/// A session's shell, as the process table shows it.
+/// Process-table attributes for a session's interactive shell.
 struct Shell {
     leader: u32,
     pid: u32,
@@ -490,17 +485,16 @@ fn session(
     }
 }
 
-/// A process table entry.
 #[derive(Debug, PartialEq, Eq)]
 struct Entry {
     ppid: u32,
 
-    /// The controlling terminal, as `ps` names it (`ttys001`, or `??`).
+    /// Controlling terminal name from `ps` (`ttys001`, or `??` when detached).
     tty: String,
     command: String,
 }
 
-/// Every process's parent, controlling terminal, and command.
+/// Query the OS process table for every process's parent PID, TTY, and command.
 fn process_table() -> Result<HashMap<u32, Entry>, Error> {
     let out = stdout(
         "ps",
@@ -509,8 +503,8 @@ fn process_table() -> Result<HashMap<u32, Entry>, Error> {
     Ok(parse_ps(&out))
 }
 
-/// Parse `ps -o pid=,ppid=,tty=,comm=` output.
-/// The command is last, so it may hold spaces.
+/// Parse `ps -A -o pid=,ppid=,tty=,comm=` output, preserving spaces in the
+/// trailing `comm` column.
 fn parse_ps(out: &str) -> HashMap<u32, Entry> {
     out.lines()
         .filter_map(|line| {
@@ -524,10 +518,11 @@ fn parse_ps(out: &str) -> HashMap<u32, Entry> {
         .collect()
 }
 
-/// The shell of the session led by `leader`: the leader's oldest child when the
-/// leader is `login`, which runs the shell as its child, otherwise the leader
-/// itself.
-/// `None` when the leader has exited.
+/// Resolve the interactive shell PID for session leader `leader`.
+///
+/// When `leader` is `login` (how Ghostty launches shells), returns `leader`'s
+/// lowest-PID child; otherwise returns `leader` itself.
+/// Returns `None` if `leader` is not in `table`.
 fn shell_of(table: &HashMap<u32, Entry>, leader: u32) -> Option<u32> {
     let entry = table.get(&leader)?;
     if entry.command.rsplit('/').next() != Some("login") {
@@ -542,7 +537,7 @@ fn shell_of(table: &HashMap<u32, Entry>, leader: u32) -> Option<u32> {
         .or(Some(leader))
 }
 
-/// Whether `pid` descends from a Ghostty process.
+/// Return `true` if `pid` has a `ghostty` ancestor in `table`.
 fn under_ghostty(table: &HashMap<u32, Entry>, pid: u32) -> bool {
     let mut current = pid;
     for _ in 0..MAX_ANCESTORS {
@@ -573,8 +568,8 @@ pub fn shell_is_idle(pid: u32) -> Result<bool, Error> {
     })
 }
 
-/// Parse `ps -o pgid=,tpgid=`: whether the process group is the terminal's
-/// foreground group.
+/// Parse `ps -o pgid=,tpgid=` output and return `true` if the process group
+/// matches the terminal foreground group.
 fn parse_foreground(out: &str) -> Option<bool> {
     let mut fields = out.split_whitespace();
     let group: i64 = fields.next()?.parse().ok()?;
@@ -582,7 +577,6 @@ fn parse_foreground(out: &str) -> Option<bool> {
     Some(group == foreground)
 }
 
-/// A process's command name and working directory.
 #[derive(Debug, PartialEq, Eq)]
 struct Process {
     command: String,

@@ -67,8 +67,8 @@ fn render(app: &App, width: u16, height: u16) -> Vec<String> {
         .collect()
 }
 
-/// A worktree with two tabs and a `jp` waiting on the user in one of them, and
-/// one with a pull request.
+/// Fixture with an active waiting run in one worktree and an open PR in
+/// another.
 fn queue_and_review() -> App {
     let mut app = App::default();
     app.now = at(10, 0);
@@ -211,8 +211,8 @@ fn test_conversation_titles_hold_still_as_ages_tick() {
     let mut app = queue_and_review();
     press(&mut app, KeyCode::Right);
 
-    // Where the active conversation's title starts, `seconds` after its last
-    // event, with `status`.
+    // Return the starting column of the active conversation's title for a
+    // given age and status.
     let mut title_column = |seconds: i64, status: Status| {
         let mut jp = app.feeds.jp.data.clone().unwrap();
         let conversation = &mut jp.sessions[0].conversations[0];
@@ -250,8 +250,8 @@ fn test_screen_lists_pull_requests_without_a_worktree_last() {
         pr(1132, "fix-replies", PASSED, 3),
     ])));
 
-    // Terminals and `jp` have not answered, but only the worktree shows `…`
-    // for them: a pull request without a worktree has neither.
+    // Unchecked-out PR rows leave the JP column blank even before the JP
+    // source responds.
     assert_eq!(render(&app, 110, 6)[1..4], [
         "WORKTREE         BRANCH          JP           CONVERSATION                        PR      \
          CI            REVIEW",

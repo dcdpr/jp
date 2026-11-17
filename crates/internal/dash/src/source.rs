@@ -1,12 +1,12 @@
 //! Background data sources for the dashboard.
 //!
-//! Each source runs on its own thread and interval, and sends the UI an
-//! [`Update`] after every read: the fresh snapshot, or the error the read hit.
-//! A slow source (GitHub takes about a second) never stalls the screen, and a
-//! failing one leaves the others running.
+//! Each source polls on its own thread and interval, sending an [`Update`] to
+//! the UI after every read.
+//! Slow sources (such as GitHub network calls) do not block rendering, and a
+//! failure in one source does not stop the others.
 //!
-//! [`spawn`] starts them all and returns a [`Refresher`] that makes every
-//! source read again straight away.
+//! [`spawn`] starts all source threads and returns a [`Refresher`] that wakes
+//! them for an immediate poll.
 
 pub mod cache;
 pub mod ghostty;
@@ -26,7 +26,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::{app::Update, model::BaseUpdate};
 
-/// Why a source could not be read.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("cannot run `{program}`: {source}")]
@@ -53,12 +52,12 @@ pub enum Error {
     #[error("the JP workspace has no file storage")]
     NoStorage,
 
-    /// A read from the cache alone needed something the cache does not hold.
+    /// Offline cache read missed a required entry.
     #[error("{0} is not cached")]
     NotCached(String),
 }
 
-/// Makes every source read again without waiting for its interval.
+/// Handle that wakes all background source threads for an immediate poll.
 #[derive(Clone)]
 pub struct Refresher {
     pokes: Vec<Sender<()>>,
@@ -67,13 +66,13 @@ pub struct Refresher {
 impl Refresher {
     pub fn refresh(&self) {
         for poke in &self.pokes {
-            // A source whose thread is gone has nothing to refresh.
+            // Ignore send errors if a source thread has already exited.
             let _gone = poke.send(());
         }
     }
 }
 
-/// Start every source, reading the repository that contains `dir`.
+/// Spawn all background source threads for the repository containing `dir`.
 pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
     let mut jp = jp::Jp::new(dir.to_owned());
     let mut github = github::GitHub::open(dir.to_owned());
@@ -100,8 +99,8 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
             every(Duration::from_secs(30), updates.clone(), move |asked| {
                 Update::PullRequests(github.pull_requests(asked).map_err(|e| e.to_string()))
             }),
-            // Keeps the local default branch at its upstream, so a new worktree
-            // starts from the latest `main` without waiting on a fetch.
+            // Periodically fast-forward the local default branch so new
+            // worktrees start from an up-to-date base.
             every(Duration::from_mins(5), updates.clone(), move |_| {
                 let branch = git::default_branch(&base_dir);
                 Update::Base(
@@ -114,11 +113,11 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
     }
 }
 
-/// Run `read` on a new thread every `interval`, or sooner when poked, until the
-/// UI stops listening.
+/// Run `read` on a background thread every `interval` (or immediately when
+/// woken via the returned [`Sender`]) until the UI receiver disconnects.
 ///
-/// `read` is told whether the user asked for this read, so a source can do work
-/// it otherwise spaces out.
+/// Passes `true` to `read` when woken by an explicit refresh request, and
+/// `false` on scheduled timer ticks.
 fn every<F>(interval: Duration, updates: Sender<Update>, mut read: F) -> Sender<()>
 where
     F: FnMut(bool) -> Update + Send + 'static,
@@ -138,7 +137,7 @@ where
                 Err(RecvTimeoutError::Disconnected) => return,
             };
 
-            // Pokes that piled up during the read ask for the same thing.
+            // Drain any additional refresh pokes queued while `read` was running.
             while pokes.try_recv().is_ok() {}
         }
     });
@@ -146,8 +145,8 @@ where
     poke
 }
 
-/// Run a command and return its standard output, failing when it exits
-/// unsuccessfully.
+/// Run `command` and return its stdout as UTF-8, or [`Error::Failed`] if it
+/// exits non-zero.
 fn stdout(program: &'static str, command: &mut Command) -> Result<String, Error> {
     let output = output(program, command)?;
     if !output.status.success() {

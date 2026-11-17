@@ -1,11 +1,9 @@
-//! The rows of the table, which of them are shown and in what order, and the
-//! lines they are drawn as.
+//! Table filtering, sorting, and tree layout.
 //!
-//! [`Table::display`] lays the shown rows out as a tree: a line per row and,
-//! below an expanded row, its tabs, each followed by the conversations of the
-//! JP sessions running in it.
-//! Every row, tab, and conversation is a selectable [`Item`]; the lines between
-//! them that only explain something are notes.
+//! [`Table::display`] flattens visible rows and their expanded children into a
+//! sequence of [`Display`] lines: top-level worktree and pull request rows,
+//! expanded terminal tabs, session conversations, conversation operations, and
+//! non-selectable [`Display::Note`] lines.
 
 use std::{cmp::Reverse, collections::HashSet};
 
@@ -44,18 +42,18 @@ impl Operation {
     }
 }
 
-/// One selectable line of the table.
+/// Selectable item in the table tree.
 #[derive(Debug, Clone, Copy)]
 pub enum Item<'a> {
-    /// A worktree, or a pull request without one.
+    /// A worktree row or an unchecked-out pull request row.
     Row(&'a Row),
 
-    /// One of an expanded worktree's tabs.
+    /// A terminal tab under an expanded worktree row.
     Tab {
         row: &'a Row,
         tab: &'a Terminal,
 
-        /// The tab's position among the worktree's tabs, from zero.
+        /// Zero-based index of the tab within the worktree.
         index: usize,
     },
 
@@ -114,7 +112,8 @@ impl<'a> Item<'a> {
         }
     }
 
-    /// The key of the conversation an operation belongs to.
+    /// Return the [`Key`] of the conversation this item represents or belongs
+    /// to.
     pub(super) fn conversation_key(&self) -> Option<Key> {
         match self {
             Self::Conversation {
@@ -142,21 +141,21 @@ fn conversation_key(
     }
 }
 
-/// Where a line below a row sits in the tree, which decides the guide lines
-/// drawn in front of it.
+/// Tree indentation level for lines rendered under an expanded row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Indent {
-    /// A tab, the last of its row's or not.
+    /// Terminal tab line (`last` is `true` for the final tab of the row).
     Tab { last: bool },
 
-    /// A line below a tab, the last of its row's or not.
+    /// Line nested under a terminal tab (`last_tab` is `true` when the parent
+    /// tab is the final tab of the row).
     InTab { last_tab: bool },
 
-    /// A line below the row, outside any tab.
+    /// Line nested directly under the row without a parent tab.
     InRow,
 
-    /// An operation below a conversation: in a tab (the last of its row's or
-    /// not), or outside any tab.
+    /// Operation line nested under a conversation (`last_tab` is `Some` when
+    /// the conversation is inside a tab, `None` when directly under the row).
     Operation { last_tab: Option<bool> },
 }
 
@@ -173,30 +172,30 @@ impl Indent {
     }
 }
 
-/// One line of the table as drawn.
+/// A rendered line in the table body.
 #[derive(Debug, Clone)]
 pub enum Display<'a> {
     Item {
-        /// The item's position in [`Table::items`].
+        /// Index of this item in [`Table::items`].
         index: usize,
         item: Item<'a>,
         indent: Option<Indent>,
     },
 
-    /// A line that explains something about the item before it, and cannot be
-    /// selected.
+    /// Non-selectable informational line attached to a preceding item.
     Note {
-        /// The position in [`Table::items`] of the item the note belongs to.
+        /// Index in [`Table::items`] of the item this note belongs to.
         owner: usize,
         text: String,
         indent: Indent,
     },
 }
 
-/// The order rows are listed in.
+/// Sort order for top-level table rows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Sort {
-    /// Worktrees by name, then pull requests without one by number.
+    /// Worktrees alphabetically by name, followed by unchecked-out pull
+    /// requests by number.
     #[default]
     Name,
 
@@ -206,8 +205,8 @@ pub enum Sort {
     /// Newest pull request first.
     PullRequest,
 
-    /// Waiting on the user first, then running, then by the most recent
-    /// conversation event.
+    /// Conversations waiting on user input first, then running turns, then most
+    /// recent event.
     Activity,
 
     /// Failing checks first, then running, then passing.
@@ -215,7 +214,7 @@ pub enum Sort {
 }
 
 impl Sort {
-    /// Every order, as the sort menu lists them.
+    /// All sort orders in menu display order.
     pub const ALL: [Self; 5] = [
         Self::Name,
         Self::Branch,
@@ -235,18 +234,17 @@ impl Sort {
         }
     }
 
-    /// The order's position in [`Self::ALL`].
     pub(super) fn position(self) -> usize {
         Self::ALL.iter().position(|sort| *sort == self).unwrap_or(0)
     }
 }
 
-/// A filter on the rows, from `/`.
+/// Substring filter applied to worktree and branch names.
 #[derive(Debug)]
 pub struct Filter {
     pub query: String,
 
-    /// Whether the query is still being typed.
+    /// Whether the user is actively typing into the filter prompt.
     pub editing: bool,
 
     /// Previous filter query, restored if editing is cancelled.
@@ -274,28 +272,28 @@ pub(super) enum Child {
     },
 }
 
-/// The rows, which of them are shown and in what order, and which are expanded.
+/// Table state: rows, active filter and sort order, and expanded tree nodes.
 #[derive(Debug, Default)]
 pub struct Table {
-    /// Every worktree's row, then every pull request without a worktree.
+    /// All rows (worktrees followed by unchecked-out pull requests).
     pub(super) rows: Vec<Row>,
 
     pub sort: Sort,
 
-    /// Show every worktree, not only the active ones.
+    /// Whether to include idle worktrees when no filter is active.
     pub show_all: bool,
 
     pub filter: Option<Filter>,
 
-    /// Rows whose tabs and conversations are listed below them.
+    /// Row IDs whose tabs and conversations are expanded.
     pub(super) expanded: HashSet<RowId>,
 
-    /// Conversations whose operations are listed below them.
+    /// Conversation keys whose operations are expanded.
     pub(super) opened: HashSet<Key>,
 }
 
 impl Table {
-    /// The filter's query, when one is in force.
+    /// Return the active non-empty filter query, if any.
     #[must_use]
     pub fn query(&self) -> Option<&str> {
         self.filter
@@ -304,12 +302,11 @@ impl Table {
             .filter(|query| !query.is_empty())
     }
 
-    /// The rows on screen, in the chosen order.
+    /// Return the visible rows in the active sort order.
     ///
-    /// With a filter, every row whose worktree or branch name contains the
-    /// query, idle worktrees included.
-    /// Without one, the active worktrees (or every worktree with `show_all`)
-    /// and every pull request without a worktree.
+    /// When a filter query is active, returns every row (including idle
+    /// worktrees) whose worktree or branch name matches the query.
+    /// Otherwise, returns active rows (or all rows when `show_all` is set).
     #[must_use]
     pub fn visible(&self) -> Vec<&Row> {
         let mut rows: Vec<&Row> = match self.query() {
@@ -350,7 +347,7 @@ impl Table {
         lines.lines
     }
 
-    /// The selectable lines, in the order they are drawn.
+    /// Return the selectable items in display order.
     #[must_use]
     pub fn items(&self) -> Vec<Item<'_>> {
         self.display()
@@ -362,19 +359,20 @@ impl Table {
             .collect()
     }
 
-    /// The number of worktrees, shown or not.
+    /// Return the total number of worktrees, whether visible or hidden.
     #[must_use]
     pub fn total(&self) -> usize {
         self.rows.iter().filter(|row| row.is_worktree()).count()
     }
 
-    /// The number of rows, worktrees and pull requests, shown or not.
+    /// Return the total number of rows (worktrees and unchecked-out pull
+    /// requests).
     #[must_use]
     pub fn total_rows(&self) -> usize {
         self.rows.len()
     }
 
-    /// Start editing the filter, from the query in force.
+    /// Open the filter input prompt, pre-filled with any existing query.
     pub(super) fn edit_filter(&mut self) {
         let previous = self.filter.take().map(|filter| filter.query);
         self.filter = Some(Filter {
@@ -391,9 +389,10 @@ impl Table {
     }
 }
 
-/// The drawn lines being built, numbering items as they are added.
+/// Builder that accumulates [`Display`] lines and assigns sequential item
+/// indices.
 struct Lines<'a> {
-    /// Conversations whose operations are listed below them.
+    /// Conversation keys whose operations are expanded.
     opened: &'a HashSet<Key>,
 
     lines: Vec<Display<'a>>,
@@ -410,7 +409,7 @@ impl<'a> Lines<'a> {
         self.items += 1;
     }
 
-    /// A note, belonging to the item added last.
+    /// Append a note attached to the most recently added item.
     fn note(&mut self, text: String, indent: Indent) {
         self.lines.push(Display::Note {
             owner: self.items.saturating_sub(1),
@@ -419,9 +418,8 @@ impl<'a> Lines<'a> {
         });
     }
 
-    /// The lines below an expanded row: its pull request, its tabs, each
-    /// followed by the conversations in it, and the conversations of shells no
-    /// tab could be found for.
+    /// Append the expanded lines for `row`: its PR title, its tabs and their
+    /// session conversations, and any sessions not matched to an open tab.
     fn children(&mut self, row: &'a Row) {
         if let Some(pr) = &row.pr {
             self.note(format!("#{} {}", pr.number, pr.title), Indent::InRow);
@@ -458,7 +456,8 @@ impl<'a> Lines<'a> {
         }
     }
 
-    /// A session's conversations, in `tab` or in no tab.
+    /// Append `session`'s conversations (and any expanded operations) under
+    /// `tab` or the row.
     fn session(
         &mut self,
         row: &'a Row,
@@ -497,8 +496,8 @@ impl<'a> Lines<'a> {
     }
 }
 
-/// Whether the row's worktree or branch name contains `query`, which is lower
-/// case.
+/// Return `true` if `row`'s worktree or branch name contains the lowercase
+/// `query`.
 fn matches(row: &Row, query: &str) -> bool {
     row.name.to_lowercase().contains(query)
         || row
@@ -534,8 +533,8 @@ fn sort(rows: &mut [&Row], by: Sort) {
     }
 }
 
-/// How urgent and recent the row's JP activity is: a turn waiting on the user
-/// beats a running one, which beats every recorded event.
+/// Return the activity sort key for `row`: waiting turns rank first, then
+/// running turns, then most recent event timestamp.
 fn activity(row: &Row) -> Option<(bool, bool, Option<DateTime<Utc>>)> {
     let waiting = row.runs.iter().any(|run| run.waiting_since.is_some());
     let running = !row.runs.is_empty();
@@ -544,7 +543,8 @@ fn activity(row: &Row) -> Option<(bool, bool, Option<DateTime<Utc>>)> {
     (running || last.is_some()).then_some((waiting, running, last))
 }
 
-/// Where a row goes when sorting by CI, first to last.
+/// CI status sort rank, ordered from highest priority (`Failed`) to lowest
+/// (`NoPullRequest`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ChecksRank {
     Failed,

@@ -146,8 +146,8 @@ fn event_loop(
 
         let event = event::read()?;
         if let Event::Resize(..) = event {
-            // Text the old size left outside the new one is not overwritten by
-            // the next frame.
+            // Clear cells outside the new dimensions that the next frame will
+            // not overwrite.
             execute!(out, Clear(ClearType::All))?;
             painted.clear();
             continue;
@@ -160,9 +160,8 @@ fn event_loop(
     }
 }
 
-/// Hand a key press or mouse event to `app`, on a screen `width` by `height`,
-/// and return what it asks for.
-/// Any other event asks for nothing.
+/// Dispatch a key press or mouse event to `app` and return the resulting
+/// [`Action`].
 fn react(app: &mut App, event: Event, width: u16, height: u16) -> Action {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => app.handle(key),
@@ -200,8 +199,6 @@ fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher
             in_background(updates, move || {
                 let opened = ghostty::open_tab(&path, None)
                     .map_err(|error| format!("Opening a tab in {path} failed: {error}"));
-                // The new tab shows up at once rather than at the next
-                // poll.
                 refresher.refresh();
                 opened
             });
@@ -241,7 +238,6 @@ fn carry_out(action: Action, dir: &Utf8Path, updates: &Sender<Update>, refresher
     }
 }
 
-/// Open `url` in the browser.
 fn open_url(url: &str) -> Result<(), String> {
     let status = Command::new("open")
         .arg(url)
@@ -278,7 +274,6 @@ fn create_worktree(
         });
 
         refresher.refresh();
-        // The UI has quit when nobody is listening; nothing to report to.
         let _gone = updates.send(Update::Created { pr, outcome });
     });
 }
@@ -305,7 +300,8 @@ fn run_in_tab(terminal: &str, shell: u32, command: &str) -> Result<(), String> {
 
 /// Draw `lines` from the top of the screen, one per terminal row.
 ///
-/// Every line spans the full width, so nothing needs clearing first.
+/// Every line is padded to the full terminal width, so rows overwrite previous
+/// content without clearing first.
 fn paint(out: &mut impl Write, lines: &[Line]) -> io::Result<()> {
     for (row, line) in (0..).zip(lines) {
         queue!(out, MoveTo(0, row))?;
@@ -319,8 +315,8 @@ fn paint(out: &mut impl Write, lines: &[Line]) -> io::Result<()> {
     out.flush()
 }
 
-/// Queue `span`'s text in its style, resetting the style the previous span left
-/// first.
+/// Queue `span` with its terminal attributes, resetting any attributes from the
+/// previous span first.
 fn queue_span(out: &mut impl Write, span: &Span) -> io::Result<()> {
     queue!(out, SetAttribute(Attribute::Reset))?;
     if span.style.bold {
@@ -336,7 +332,8 @@ fn queue_span(out: &mut impl Write, span: &Span) -> io::Result<()> {
         queue!(out, SetForegroundColor(color))?;
     }
 
-    // OSC 8 escapes take no columns, so the layout's widths still hold.
+    // OSC 8 hyperlink escapes occupy zero terminal columns, preserving column
+    // widths.
     let Some(url) = &span.link else {
         return queue!(out, Print(&span.text));
     };
@@ -357,7 +354,6 @@ where
     let updates = updates.clone();
     thread::spawn(move || {
         if let Err(error) = task() {
-            // The UI has quit when nobody is listening; nothing to report to.
             let _gone = updates.send(Update::Notice(error));
         }
     });

@@ -1,10 +1,8 @@
-//! The repository's worktrees, from `git worktree list`, and the git work the
-//! dashboard does on them: keeping the default branch up to date, and adding
-//! worktrees.
+//! Git worktree discovery and branch operations.
 //!
-//! Every command that may reach a remote runs with prompts disabled and without
-//! a stdin: the dashboard owns the terminal, and a credential prompt would draw
-//! over it and wait forever.
+//! Every command that may contact a remote runs with stdin closed and
+//! interactive prompts disabled so a credential prompt cannot draw over the
+//! dashboard TUI or block a background thread indefinitely.
 
 use std::{
     env,
@@ -17,15 +15,15 @@ use camino::{Utf8Path, Utf8PathBuf};
 use super::{Error, canonical, stdout};
 use crate::model::Worktree;
 
-/// Held while the default branch is being updated, so a periodic update and one
-/// started for a new worktree do not fetch into the same refs at once.
+/// Serializes default-branch updates so periodic background fetches and
+/// worktree-creation fetches do not update the same refs concurrently.
 static UPDATING: Mutex<()> = Mutex::new(());
 
-/// Make `command`, a `git` or `gh` command run in `dir`, fail rather than ask
-/// for anything.
+/// Configure a `git` or `gh` `command` running in `dir` to fail instead of
+/// prompting for credentials.
 ///
-/// Git's own prompts are turned off, and SSH runs in batch mode on top of
-/// whatever SSH command the user configured.
+/// Disables Git and Git Credential Manager prompts and appends `-o
+/// BatchMode=yes` to the configured SSH command.
 pub fn noninteractive<'a>(command: &'a mut Command, dir: &Utf8Path) -> &'a mut Command {
     let ssh = env::var("GIT_SSH_COMMAND")
         .ok()
@@ -70,7 +68,8 @@ pub fn worktrees(dir: &Utf8Path) -> Result<Vec<Worktree>, Error> {
         .collect())
 }
 
-/// The git directory every worktree of the repository containing `dir` shares.
+/// Return the shared git directory (`--git-common-dir`) for the repository
+/// containing `dir`.
 pub fn common_dir(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     let out = stdout(
         "git",
@@ -84,7 +83,8 @@ pub fn common_dir(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     Ok(canonical(out.trim()))
 }
 
-/// The root directory of the worktree containing `dir`.
+/// Return the root directory (`--show-toplevel`) of the worktree containing
+/// `dir`.
 pub fn toplevel(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     let out = stdout(
         "git",
@@ -97,8 +97,8 @@ pub fn toplevel(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     Ok(canonical(out.trim()))
 }
 
-/// The branch new worktrees start from: the one `origin`'s `HEAD` names, or
-/// `main` when it names none.
+/// Return the default branch name from `refs/remotes/origin/HEAD`, falling back
+/// to `"main"`.
 #[must_use]
 pub fn default_branch(dir: &Utf8Path) -> String {
     stdout(
@@ -116,12 +116,14 @@ pub fn default_branch(dir: &Utf8Path) -> String {
     .unwrap_or_else(|| "main".to_owned())
 }
 
-/// Fast-forward the local `branch` to its upstream, and say whether it moved.
+/// Fast-forward the local `branch` to its upstream and return `true` if its
+/// commit changed.
 ///
-/// When a worktree has `branch` checked out, the update runs there, so the
-/// files follow the branch; a merge that is not a fast-forward, or that would
-/// overwrite uncommitted changes, fails without touching anything.
-/// Otherwise the branch is fetched into directly.
+/// If `branch` is checked out in a worktree, runs `git fetch` and `git merge
+/// --ff-only` in that worktree so its working tree stays in sync (failing
+/// without modifying files if the merge is not a fast-forward or conflicts with
+/// local changes).
+/// Otherwise, fetches `branch:branch` directly.
 pub fn update_branch(dir: &Utf8Path, branch: &str) -> Result<bool, Error> {
     let _updating = UPDATING.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -149,7 +151,7 @@ pub fn update_branch(dir: &Utf8Path, branch: &str) -> Result<bool, Error> {
     Ok(rev_parse(dir, &reference)? != before)
 }
 
-/// Whether `name` is a valid name for a new branch.
+/// Validate `name` as a legal git branch name.
 pub fn check_branch_name(dir: &Utf8Path, name: &str) -> Result<(), Error> {
     git(dir, &["check-ref-format", "--branch", name]).map(drop)
 }
@@ -164,7 +166,7 @@ pub fn add_branch(dir: &Utf8Path, path: &Utf8Path, branch: &str, from: &str) -> 
     git(dir, &["worktree", "add", "-b", branch, path.as_str(), from]).map(drop)
 }
 
-/// The commit `revision` names.
+/// Resolve `revision` to a commit SHA.
 fn rev_parse(dir: &Utf8Path, revision: &str) -> Result<String, Error> {
     git(dir, &["rev-parse", "--verify", "--quiet", revision]).map(|out| out.trim().to_owned())
 }
@@ -176,7 +178,7 @@ fn git(dir: &Utf8Path, args: &[&str]) -> Result<String, Error> {
     stdout("git", noninteractive(&mut command, dir))
 }
 
-/// Remove the worktree at `path`, uncommitted changes and all.
+/// Force-remove the worktree at `path`, discarding any uncommitted changes.
 pub fn remove_worktree(dir: &Utf8Path, path: &Utf8Path) -> Result<(), Error> {
     stdout(
         "git",
