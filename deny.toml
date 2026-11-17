@@ -3,6 +3,8 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, but stable" },
     { id = "RUSTSEC-2025-0141", reason = "The team considers version 1.3.3 a complete version of bincode that is not in need of any updates." },
     { id = "RUSTSEC-2026-0462", reason = "Affects rmcp's built-in reqwest and unix-socket Streamable HTTP clients, which JP does not enable." },
+    { id = "RUSTSEC-2026-0542", reason = "humantime is unmaintained; migration to jiff is tracked in T-1mf9dpb." },
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; migration to jiff is tracked in T-1mf9dpb." },
 ]
 
 [licenses]
