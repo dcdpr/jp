@@ -1,43 +1,44 @@
-//! A file's items, flattened from the server's document symbols: which item
-//! encloses a line, and which items a qualified name can mean.
+//! Flattened document symbol outline for mapping source lines to enclosing
+//! items and resolving qualified symbol names.
 
 use super::{
     protocol::{DocumentSymbol, Position, Range, kind},
     rust_analyzer::{PATH_SEPARATOR, base_ident, doc_text, impl_parts, impl_segment, is_preamble},
 };
 
-/// One item in a file, with the items that enclose it already resolved.
+/// A document symbol with its enclosing scope resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
-    /// The symbol's own name: `iter`, `Stream`, `impl Render for Stream`.
+    /// Unqualified symbol name (`iter`, `Stream`, `impl Render for Stream`).
     pub ident: String,
 
-    /// The name qualified by the enclosing items in the same file:
-    /// `Stream::iter`, `<Stream as Render>::render`, `tests::counts`.
+    /// Name qualified by enclosing items in the same file (`Stream::iter`,
+    /// `<Stream as Render>::render`, `tests::counts`).
     pub name: String,
 
     pub kind: u32,
 
-    /// The whole item, doc comments and attributes included.
+    /// Full span of the item, including doc comments and attributes.
     pub range: Range,
 
-    /// The item's name.
+    /// Span of the item's identifier.
     pub selection: Range,
 
     pub parent: Option<usize>,
 
-    /// How many items enclose this one.
+    /// Nesting depth (number of enclosing items).
     pub depth: usize,
 
-    /// The names a qualifier can use for the enclosing items, outermost first.
-    /// An `impl` block contributes its self type.
+    /// Enclosing item names from outermost to innermost; `impl` blocks
+    /// contribute their `Self` type name.
     pub scope: Vec<String>,
 
-    /// Whether a module named `tests` or `test` encloses the item.
+    /// Whether the item is inside a `test` or `tests` module.
     pub in_tests: bool,
 }
 
-/// The items of a document symbol tree, parents before their children.
+/// Flatten a hierarchical `DocumentSymbol` tree in pre-order (parents before
+/// children).
 #[must_use]
 pub fn flatten(symbols: &[DocumentSymbol]) -> Vec<Item> {
     let mut items = vec![];
@@ -48,7 +49,6 @@ pub fn flatten(symbols: &[DocumentSymbol]) -> Vec<Item> {
     items
 }
 
-/// What an item passes down to its children.
 #[derive(Debug, Default)]
 struct Prefix {
     name: Option<String>,
@@ -63,8 +63,8 @@ fn push(items: &mut Vec<Item>, symbol: &DocumentSymbol, parent: Option<usize>, p
         (Some(outer), _) => format!("{outer}{PATH_SEPARATOR}{}", symbol.name),
     };
 
-    // Children of an `impl` are named through its self type, the way they are
-    // written at a call site.
+    // Qualify children of an `impl` block by its `Self` type rather than the
+    // `impl ...` header string.
     let (segment, scope_name) = match impl_parts(&symbol.name) {
         Some((Some(trait_), self_ty)) if symbol.kind == kind::OBJECT => (
             impl_segment(trait_, self_ty),
@@ -107,9 +107,9 @@ fn push(items: &mut Vec<Item>, symbol: &DocumentSymbol, parent: Option<usize>, p
     }
 }
 
-/// The innermost item that encloses `line`, other than a field or a variant.
-///
-/// A reference in a field's type is reported against the struct.
+/// Return the innermost item spanning `line`, excluding struct fields and enum
+/// variants so references in field or variant types are attributed to the
+/// enclosing type definition.
 #[must_use]
 pub fn enclosing(items: &[Item], line: u32) -> Option<usize> {
     innermost(items, |item| {
@@ -117,8 +117,8 @@ pub fn enclosing(items: &[Item], line: u32) -> Option<usize> {
     })
 }
 
-/// The innermost item whose name is at `position`, or failing that, whose range
-/// holds it.
+/// Return the innermost item whose identifier selection contains `position`,
+/// falling back to the innermost item whose full range contains `position`.
 #[must_use]
 pub fn at(items: &[Item], position: Position) -> Option<usize> {
     innermost(items, |item| item.selection.contains(position))
@@ -134,14 +134,17 @@ fn innermost(items: &[Item], matches: impl Fn(&Item) -> bool) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
-/// Whether an item's name starts at `position`, which tells a definition from a
-/// `use` that re-exports it: imports are not document symbols.
+/// Return whether any item's identifier selection contains `position`.
+///
+/// Distinguishes item definitions from `pub use` re-exports, which are omitted
+/// from document symbols.
 #[must_use]
 pub fn defines(items: &[Item], position: Position) -> bool {
     items.iter().any(|item| item.selection.contains(position))
 }
 
-/// The items named `ident` whose enclosing names end with `qualifier`.
+/// Return the indices of items named `ident` whose enclosing `scope` ends with
+/// `qualifier`.
 #[must_use]
 pub fn matching(items: &[Item], qualifier: &[String], ident: &str) -> Vec<usize> {
     items
@@ -152,7 +155,7 @@ pub fn matching(items: &[Item], qualifier: &[String], ident: &str) -> Vec<usize>
         .collect()
 }
 
-/// The direct children of item `parent` named `ident`.
+/// Return the indices of direct children of `parent` named `ident`.
 #[must_use]
 pub fn children_named(items: &[Item], parent: usize, ident: &str) -> Vec<usize> {
     items
@@ -163,7 +166,8 @@ pub fn children_named(items: &[Item], parent: usize, ident: &str) -> Vec<usize> 
         .collect()
 }
 
-/// The first line of an item's code, after its doc comments and attributes.
+/// Return the first line of `item` after any leading doc comments and
+/// attributes.
 #[must_use]
 pub fn code_start(item: &Item, lines: &[String]) -> u32 {
     (item.range.start.line..=item.range.end.line)
@@ -178,10 +182,11 @@ pub fn code_start(item: &Item, lines: &[String]) -> u32 {
         .unwrap_or(item.range.start.line)
 }
 
-/// The first paragraph of an item's doc comment, at most `max` lines.
+/// Extract the first paragraph of `item`'s outer doc comment, truncated to at
+/// most `max` lines.
 ///
-/// rust-analyzer's item range starts at the doc comment, so the comment is the
-/// doc lines before [`code_start`].
+/// `rust-analyzer` includes leading doc comments in `item.range`, so doc lines
+/// appear between `item.range.start.line` and [`code_start`].
 #[must_use]
 pub fn doc_paragraph(item: &Item, lines: &[String], max: usize) -> Vec<String> {
     let start = usize::try_from(item.range.start.line).unwrap_or(usize::MAX);

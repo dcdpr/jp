@@ -214,7 +214,6 @@ fn references_only(file: FileHits) -> Report {
     }
 }
 
-/// A rendered report without its header.
 fn after_header(rendered: &str) -> &str {
     rendered.split_once("\n\n").unwrap().1
 }

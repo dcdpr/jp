@@ -1,17 +1,18 @@
-//! `code_symbol`: what a symbol is, where it is defined, what refers to it,
-//! what implements it, and what it calls and is called by, as rust-analyzer
-//! resolves them.
-//! `code_rename`: rename a symbol everywhere it is used.
+//! `code_symbol` and `code_rename` tools backed by `rust-analyzer`.
 //!
-//! Each call starts rust-analyzer in the workspace, waits for it to load,
-//! answers with that one server, and shuts it down.
-//! Nothing is kept between calls.
+//! `code_symbol` looks up symbol definitions, references, implementations,
+//! members, callers, and outgoing calls.
+//! `code_rename` renames symbols across the workspace.
 //!
-//! [`lsp`] speaks the protocol, [`target`] turns a target into a position,
-//! [`outline`] tells which item encloses a line, and [`render`] writes the
-//! answer.
-//! What holds only for rust-analyzer and Rust lives in [`rust_analyzer`]; the
-//! rest asks the server standard LSP questions.
+//! Each call starts a `rust-analyzer` process in the workspace, waits for it to
+//! index the crate graph, runs the query, and shuts the server down.
+//! No state is kept between calls.
+//!
+//! [`lsp`] handles JSON-RPC framing and server lifecycle, [`target`] resolves
+//! target specifications to file positions, [`outline`] maps line numbers to
+//! enclosing items, and [`render`] formats the output.
+//! Rust- and `rust-analyzer`-specific details live in [`rust_analyzer`]; the
+//! rest of the module uses standard LSP requests.
 
 #[cfg(test)]
 mod fixture;
@@ -64,40 +65,44 @@ use crate::{
     },
 };
 
-/// Lines the implementations and references sections take when one symbol is
-/// asked about.
-/// Several symbols share it evenly, down to [`MIN_REFERENCE_BUDGET`] each.
+/// Maximum lines for the implementations and references sections of a single
+/// symbol.
+///
+/// Split evenly across multiple targets, with a floor of
+/// [`MIN_REFERENCE_BUDGET`] lines per target.
 const REFERENCE_BUDGET: usize = 500;
 const MIN_REFERENCE_BUDGET: usize = 60;
 
-/// What each item one name matches gets of its symbol's budget before the rest
-/// is shared by how many references each has.
+/// Minimum line budget reserved for each matching item before the remaining
+/// symbol budget is split proportionally by reference count.
 const MIN_ITEM_BUDGET: usize = 20;
 
-/// A name that matches up to this many items is answered for each of them; past
-/// it, the candidates are listed.
+/// Maximum number of matching items answered in full for a single target name;
+/// beyond this limit, only the candidate list is returned.
 const ANSWERED: usize = 3;
 
-/// The most members listed, high enough that only a generated type reaches it.
+/// Maximum number of members listed for a type or trait.
 const MEMBERS: usize = 1_000;
 
-/// The most doc comment lines in a symbol's header.
+/// Maximum doc-comment lines shown in a symbol's header.
 const DOC_LINES: usize = 6;
 
-/// The most lines below a reference that its statement is followed to.
+/// Maximum lines below a reference to include when extending to the end of its
+/// statement.
 const STATEMENT_LINES: u32 = 10;
 
-/// The most candidates listed for an ambiguous name.
+/// Maximum candidates listed for an ambiguous symbol name.
 const CANDIDATES: usize = 15;
 
-/// How many levels of callers `callers` lists, unless `depth` says otherwise.
+/// Default caller hierarchy depth when `depth` is omitted.
 const DEFAULT_CALLER_DEPTH: usize = 2;
 const MAX_CALLER_DEPTH: usize = 5;
 
-/// The most files a rename's summary lists by name.
+/// Maximum modified files listed individually in a rename summary.
 const RENAMED_FILES: usize = 50;
 
-/// What a rename leaves to check, ending its summary.
+/// Trailing note in a rename summary reminding the caller of constructs
+/// `rust-analyzer` does not update.
 const RENAME_COVERAGE: &str = "rust-analyzer does not rename the name inside `macro_rules!` \
                                bodies, strings, comments, or non-Rust files. Run `cargo_check`, \
                                and search for the old name with `fs_grep_files` where those could \
@@ -143,15 +148,11 @@ enum Show {
     Calls,
 }
 
-/// What `code_symbol` was asked to show for every target.
+/// Parameters shared across all targets in a `code_symbol` call.
 struct Query<'a> {
     show: &'a [Show],
     filters: &'a [Utf8PathBuf],
-
-    /// How many levels of callers to list.
     depth: usize,
-
-    /// Whether test code is shown in full.
     tests: bool,
 }
 
@@ -245,7 +246,7 @@ fn code_symbol(ctx: &Context, t: &Tool) -> ToolResult {
     Ok(text.into())
 }
 
-/// Start the language server in the workspace and wait for it to load it.
+/// Start the language server and wait until the workspace is loaded.
 fn open<'a>(ctx: &'a Context, t: &Tool) -> Result<Session<'a>, String> {
     let configured = configured_root(&t.options)?;
     let root = resolve_root(
@@ -282,8 +283,7 @@ fn open<'a>(ctx: &'a Context, t: &Tool) -> Result<Session<'a>, String> {
     Ok(Session::new(server, &ctx.root, ctx.access.as_ref()))
 }
 
-/// One rename `code_rename` was asked for: the item, named the way a
-/// `code_symbol` target is, and its new name.
+/// A single rename operation within a `code_rename` call.
 #[derive(Debug, Deserialize)]
 struct RenameRequest {
     name: String,
@@ -342,19 +342,19 @@ fn code_rename(ctx: &Context, t: &Tool) -> ToolResult {
 
     let summary = rename_summary(&renamed);
 
-    // The patch the approval shows is for the user; the assistant gets the
-    // summary, which does not grow with the number of edits.
+    // The approval prompt shows the full diff to the user; the assistant
+    // receives a compact summary whose size does not grow with edit count.
     match write_changes(renamed.changes, ctx, &t.answers, &t.options)? {
         Outcome::Success { .. } => Ok(summary.into()),
         other => Ok(other),
     }
 }
 
-/// Refuse a batch of renames before any server starts: an empty one, an empty
-/// new name, and a batch whose result would depend on its order.
+/// Validate a batch of renames before starting the language server.
 ///
-/// The order matters when two renames give the same name, or when one gives a
-/// name that another takes away, as a swap does.
+/// Rejects empty batches, empty target names, duplicate `new_name` values, and
+/// batches whose outcome depends on execution order (such as swapping two names
+/// or renaming an item to a name that another rename in the batch vacates).
 fn check_renames(requests: &[RenameRequest]) -> Result<(), String> {
     if requests.is_empty() {
         return Err("`renames` is empty. Give at least one rename.".to_owned());
@@ -394,7 +394,8 @@ fn check_renames(requests: &[RenameRequest]) -> Result<(), String> {
     Ok(())
 }
 
-/// `message` about rename `index`, naming the rename when there are several.
+/// Prefix `message` with the rename index and target name when the batch has
+/// multiple renames.
 fn in_rename(requests: &[RenameRequest], index: usize, message: String) -> String {
     if requests.len() > 1 {
         format!(
@@ -407,21 +408,20 @@ fn in_rename(requests: &[RenameRequest], index: usize, message: String) -> Strin
     }
 }
 
-/// Renames worked out but not yet written.
+/// Computed rename results awaiting persistence.
 struct Renamed {
     renames: Vec<RenameOutcome>,
 
-    /// Each edited file with its number of edits across every rename.
+    /// Edit count per workspace-relative file path across all renames.
     files: BTreeMap<String, usize>,
 
     changes: Vec<Change>,
 }
 
 struct RenameOutcome {
-    /// The name as the request gave it: `Stream::iter`.
     name: String,
 
-    /// Where the renamed item is defined: `src/stream.rs:15`.
+    /// Definition location (`path:line`).
     location: String,
 
     new_name: String,
@@ -460,8 +460,8 @@ fn rename_summary(renamed: &Renamed) -> String {
     out.join("\n")
 }
 
-/// Merge `extra` into `base`, object keys recursively and anything else by
-/// replacement.
+/// Recursively merge JSON object keys from `extra` into `base`, replacing
+/// non-object values.
 fn merge(base: &mut Value, extra: &Value) {
     match (base, extra) {
         (Value::Object(base), Value::Object(extra)) => {
@@ -473,51 +473,54 @@ fn merge(base: &mut Value, extra: &Value) {
     }
 }
 
-/// A rename with its target found, before any rename is made.
+/// A rename target resolved to its initial definition position before any edits
+/// are applied.
 struct Planned {
     name: Name,
     new_name: String,
 
-    /// Where the item is defined: `src/stream.rs:15`, from before any rename.
+    /// Initial definition location (`path:line`) for reporting.
     location: String,
 
-    /// The file the item is defined in, relative to the workspace root.
+    /// Workspace-relative file path containing the definition.
     path: String,
     file: Utf8PathBuf,
 
-    /// Where the item is defined, in the file as the earlier renames left it.
+    /// Definition position in `file`, updated as earlier renames in the batch
+    /// shift lines and columns.
     position: Position,
 }
 
-/// A file as it was and as the renames so far left it.
+/// In-memory file state across a batch of renames.
 struct Edited {
     relative: Utf8PathBuf,
     before: String,
     current: String,
 }
 
-/// A file's text and items, read once per call.
+/// Cached file lines and flattened document symbols.
 struct Source {
     lines: Rc<[String]>,
     items: Vec<Item>,
 }
 
-/// The server and what has been read from the workspace during one call.
+/// Active language server session and per-call file cache.
 struct Session<'a> {
     server: Server,
     root: &'a Utf8Path,
 
-    /// `root` with symlinks resolved, since the server reports canonical paths.
+    /// Canonicalized `root` for stripping prefixes from server-returned paths.
     canonical_root: Utf8PathBuf,
 
     access: Option<&'a AccessPolicy>,
     sources: HashMap<Utf8PathBuf, Rc<Source>>,
 
-    /// The version last sent for each file the server was given the text of.
+    /// Last `textDocument` version number sent to the server for each modified
+    /// file.
     versions: HashMap<Utf8PathBuf, i32>,
 
-    /// Narrows the references and implementations shown to the items with a
-    /// line it matches.
+    /// Optional regex filter restricting shown references and implementations
+    /// to enclosing items with a matching line.
     pattern: Option<Regex>,
 }
 
@@ -534,7 +537,7 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// One report per item the target names, up to [`ANSWERED`] of them.
+    /// Build a report for each item matching `target` (up to [`ANSWERED`]).
     fn reports(&mut self, target: &Target, query: &Query<'_>) -> Result<Vec<Report>, String> {
         let name = Name::parse(&target.name)?;
 
@@ -544,7 +547,7 @@ impl<'a> Session<'a> {
             .collect()
     }
 
-    /// Where each item the target names is defined, without repeats.
+    /// Resolve `target` to deduplicated definition positions.
     fn definitions(
         &mut self,
         target: &Target,
@@ -614,8 +617,8 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// The call hierarchy item for the function defined at `position`, or
-    /// `None` when it is not a function.
+    /// Prepare the call hierarchy item at `position`, returning `None` if the
+    /// symbol is not a function or method.
     fn call_item(
         &mut self,
         file: &Utf8Path,
@@ -631,10 +634,11 @@ impl<'a> Session<'a> {
             .and_then(|items| items.into_iter().next()))
     }
 
-    /// The functions that call the function at `position`, to `depth` levels.
+    /// Find incoming callers of the function at `position` up to `depth`
+    /// levels.
     ///
-    /// Test functions are counted rather than listed unless `tests` asks for
-    /// them, and their own callers are never followed.
+    /// Test functions are counted rather than listed unless `tests` is true,
+    /// and their own callers are not traversed.
     fn callers(
         &mut self,
         file: &Utf8Path,
@@ -659,11 +663,10 @@ impl<'a> Session<'a> {
         Ok(callers)
     }
 
-    /// List the callers of `item` at `level`, each followed by its own callers
-    /// while `level` is above `depth`.
+    /// Recursively collect incoming callers of `item` at `level` up to `depth`.
     ///
-    /// A function already listed is listed again without its callers, so a
-    /// recursive call ends the walk.
+    /// Functions already visited in `seen` are recorded as repeated and not
+    /// traversed again, terminating cycles.
     fn walk_callers(
         &mut self,
         item: &CallHierarchyItem,
@@ -703,7 +706,7 @@ impl<'a> Session<'a> {
                 });
             found.push((test, file, line, label, call));
         }
-        // Callers outside tests first, then in file and line order.
+        // Sort non-test callers first, then by file path and line number.
         found.sort_by(|a, b| (a.0, &a.1, a.2).cmp(&(b.0, &b.1, b.2)));
 
         for (test, file, line, label, call) in found {
@@ -733,8 +736,8 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// The functions the function at `position` calls, in the order of their
-    /// first call.
+    /// Find outgoing calls from the function at `position`, ordered by first
+    /// call site.
     fn calls(&mut self, file: &Utf8Path, position: Position) -> Result<Calls, String> {
         let Some(item) = self.call_item(file, position)? else {
             return Ok(Calls {
@@ -758,9 +761,9 @@ impl<'a> Session<'a> {
             let Ok(callee) = file_path(&call.to.uri) else {
                 continue;
             };
-            // The server lists the structs and variants a function constructs
-            // beside its calls. Outside the workspace those are `Some`, `Ok`
-            // and the like, which say nothing.
+            // `outgoingCalls` includes struct and enum-variant constructors
+            // alongside function calls. Outside the workspace these are mostly
+            // standard library variants like `Some` and `Ok`, which add noise.
             let function = is_function_kind(call.to.kind);
             if self.relative(&callee).is_none() {
                 if function && !calls.outside.contains(&call.to.name) {
@@ -770,8 +773,8 @@ impl<'a> Session<'a> {
             }
 
             let label = match self.item_at(&callee, call.to.selection_range.start) {
-                // The server places a method a derive generates on the type the
-                // derive sits on.
+                // `rust-analyzer` reports methods generated by `#[derive]` at
+                // the deriving type's definition position.
                 Some(item) if function && !is_function_kind(item.kind) => format!(
                     "derived fn {}{}{}",
                     item.name,
@@ -806,8 +809,8 @@ impl<'a> Session<'a> {
         Ok(calls)
     }
 
-    /// The label of the item defined at `position`, and whether it is test
-    /// code, when the tool may read its file.
+    /// Return the display label and whether the item at `position` is in test
+    /// code, if `file` is readable under the access policy.
     fn label_at(&mut self, file: &Utf8Path, position: Position) -> Option<(String, bool)> {
         let item = self.item_at(file, position)?;
         let test_path = self
@@ -820,7 +823,8 @@ impl<'a> Session<'a> {
         ))
     }
 
-    /// The item defined at `position`, when the tool may read its file.
+    /// Return the outline item at `position` if `file` is within the workspace
+    /// and readable.
     fn item_at(&mut self, file: &Utf8Path, position: Position) -> Option<Item> {
         let path = self.relative(file)?;
         self.readable(&path).ok()?;
@@ -829,8 +833,8 @@ impl<'a> Session<'a> {
         outline::at(&source.items, position).map(|index| source.items[index].clone())
     }
 
-    /// Where each rename's item is defined, found in the files as they are
-    /// before any rename.
+    /// Resolve all rename targets against the initial workspace state before
+    /// applying any edits.
     fn plan_renames(&mut self, requests: &[RenameRequest]) -> Result<Vec<Planned>, String> {
         let context = |index: usize, message: String| in_rename(requests, index, message);
 
@@ -866,14 +870,13 @@ impl<'a> Session<'a> {
         Ok(planned)
     }
 
-    /// The edits that make every rename in `requests`, in order, as the changed
-    /// contents of each file.
+    /// Compute the workspace edits for every rename in `requests` in sequence.
     ///
-    /// Every target is found in the files as they are before any rename.
-    /// Each rename after the first is worked out against the text the earlier
-    /// ones left, which the server is sent, and a target an earlier rename
-    /// moved is followed to its new place.
-    /// Any failure leaves every file as it was.
+    /// All targets are first resolved against the unmodified workspace.
+    /// Each subsequent rename runs against the updated file contents (synced to
+    /// the server via `didOpen`/`didChange`), with remaining target positions
+    /// shifted to account for earlier edits.
+    /// If any rename fails, no files are modified on disk.
     fn rename(&mut self, requests: &[RenameRequest]) -> Result<Renamed, String> {
         let context = |index: usize, message: String| in_rename(requests, index, message);
         let mut planned = self.plan_renames(requests)?;
@@ -974,7 +977,8 @@ impl<'a> Session<'a> {
         Ok(renamed)
     }
 
-    /// The one item `target` names, for renaming.
+    /// Resolve `target` to a single definition for renaming, returning an error
+    /// if it is ambiguous.
     fn rename_target(&mut self, target: &Target) -> Result<(Name, Utf8PathBuf, Position), String> {
         let name = Name::parse(&target.name)?;
         let definitions = self.definitions(target, &name)?;
@@ -994,8 +998,8 @@ impl<'a> Session<'a> {
         Ok((name, file, position))
     }
 
-    /// The server's edits for renaming the item at `position` to `new_name`,
-    /// per file.
+    /// Request a `textDocument/rename` from the server for the item at
+    /// `position`.
     fn rename_edits(
         &mut self,
         file: &Utf8Path,
@@ -1015,8 +1019,8 @@ impl<'a> Session<'a> {
             .map_err(|message| format!("Renaming `{}` was refused: {message}.", name.query()))
     }
 
-    /// Give the server `text` as the contents of `file`, which it then answers
-    /// from instead of the file on disk.
+    /// Send the updated `text` of `file` to the server via `didOpen` or
+    /// `didChange` so subsequent requests analyze the in-memory contents.
     fn sync(&mut self, file: &Utf8Path, text: &str) -> Result<(), String> {
         let uri = uri(file)?;
         let version = {
@@ -1052,8 +1056,7 @@ impl<'a> Session<'a> {
             .map_err(|failure| failure.to_string())
     }
 
-    /// The files and positions a target names: one, or up to [`ANSWERED`] when
-    /// a name matches several items.
+    /// Locate the file positions matching `target` (up to [`ANSWERED`]).
     fn locate(
         &mut self,
         target: &Target,
@@ -1118,16 +1121,17 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Find a name with the server's workspace symbol search.
+    /// Resolve `name` via `workspace/symbol`.
     ///
-    /// The search is asked for the last segment only, since it matches a
-    /// qualifier against module paths and not against the type a method is
-    /// implemented on.
-    /// The qualifier then picks among the exact matches, and a `use` that
-    /// re-exports a match is dropped in favor of the definition.
+    /// Queries the server with only the final identifier segment because
+    /// `rust-analyzer` matches qualifiers against module paths rather than
+    /// implementing types.
+    /// Results are then filtered to exact identifier matches, checked against
+    /// `name.qualifier`, and deduplicated against `pub use` re-exports.
     ///
-    /// The search does not index fields, so a qualified name that matches
-    /// nothing is looked up as a member of its qualifier.
+    /// Because `workspace/symbol` does not index struct fields, a qualified
+    /// name with no matches falls back to looking up a member on its qualifier
+    /// type.
     fn search(&mut self, name: &Name) -> Result<Vec<(Utf8PathBuf, Position)>, String> {
         let symbols = self
             .server
@@ -1170,8 +1174,8 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Why a name matched nothing, or the member it names when its qualifier is
-    /// a type with that field.
+    /// Fall back to member lookup when `workspace/symbol` finds no match, or
+    /// format a diagnostic error.
     fn not_found(
         &mut self,
         name: &Name,
@@ -1212,8 +1216,7 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Whether a symbol sits where `qualifier` says, judged by its file and the
-    /// type or trait it is defined on.
+    /// Return whether `symbol`'s file path and container match `qualifier`.
     fn fits(&self, symbol: &SymbolInformation, qualifier: &[String]) -> bool {
         if qualifier.is_empty() {
             return true;
@@ -1227,12 +1230,12 @@ impl<'a> Session<'a> {
         target::qualifier_fits(qualifier, &path, symbol.container_name.as_deref())
     }
 
-    /// `symbols` without the ones that only re-export an item: a `pub use` is
-    /// reported under the name it brings in, alongside the definition.
+    /// Filter out `pub use` re-exports from `symbols`, keeping only actual
+    /// definitions.
     ///
-    /// A symbol in a file the tool may not read is kept, since it cannot be
-    /// told apart.
-    /// If every symbol is a re-export, all are kept.
+    /// Symbols in unreadable files are retained because their outline cannot be
+    /// inspected.
+    /// If every match is a re-export, all matches are retained.
     fn without_re_exports(
         &mut self,
         symbols: Vec<SymbolInformation>,
@@ -1266,7 +1269,7 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// A list of symbols for an error, up to [`CANDIDATES`] of them.
+    /// Format up to [`CANDIDATES`] symbols as a bulleted candidate list.
     fn candidates(&self, symbols: &[SymbolInformation]) -> String {
         let mut listed = symbols
             .iter()
@@ -1280,7 +1283,7 @@ impl<'a> Session<'a> {
         listed.join("\n")
     }
 
-    /// Find `name` among the members of the item `parent` names.
+    /// Look up `name.ident` as a field, variant, or method of `parent`.
     fn member(&mut self, parent: &Name, name: &Name) -> Result<(Utf8PathBuf, Position), String> {
         let parents = self.search(parent).map_err(|message| {
             format!(
@@ -1328,7 +1331,7 @@ impl<'a> Session<'a> {
         format!("- {} {name} ({location})", kind_label(symbol.kind))
     }
 
-    /// Where the symbol at `position` is defined, if the server knows.
+    /// Query `textDocument/definition` for the symbol at `position`.
     fn definition(
         &mut self,
         file: &Utf8Path,
@@ -1378,8 +1381,8 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// The first doc paragraph of the item defined at `position`, when the tool
-    /// may read its file.
+    /// Extract the first doc-comment paragraph of the item at `position` if its
+    /// file is readable.
     fn doc(&mut self, file: &Utf8Path, position: Position) -> Result<Vec<String>, String> {
         let readable = self
             .relative(file)
@@ -1394,8 +1397,8 @@ impl<'a> Session<'a> {
             .unwrap_or_default())
     }
 
-    /// The source of the item defined at `position`, when it is in the
-    /// workspace.
+    /// Return the source snippet of the item at `position` if its file is in
+    /// the workspace and readable.
     fn snippet(&mut self, file: &Utf8Path, position: Position) -> Result<Option<Snippet>, String> {
         let Some(path) = self.relative(file) else {
             return Ok(None);
@@ -1420,8 +1423,7 @@ impl<'a> Session<'a> {
         }))
     }
 
-    /// What implements the symbol at `position`: the `impl` blocks of a trait
-    /// or type, or each implementation of a trait method.
+    /// Find implementations of the trait, type, or trait method at `position`.
     fn implementations(
         &mut self,
         file: &Utf8Path,
@@ -1448,12 +1450,13 @@ impl<'a> Session<'a> {
             .unwrap_or_default())
     }
 
-    /// Every use of the symbol at `position`.
+    /// Find references to the symbol at `position`.
     ///
-    /// The server counts each implementation of a trait method as a reference
-    /// to it; those are left out, so a trait method's references are its calls.
-    /// With `statements`, each reference is followed to the end of its
-    /// statement for showing.
+    /// `rust-analyzer` includes trait method implementations in
+    /// `textDocument/references` results; those are excluded here so a trait
+    /// method's references list only call sites.
+    /// When `statements` is true, each reference is extended to the end of its
+    /// enclosing statement.
     fn references(
         &mut self,
         file: &Utf8Path,
@@ -1483,8 +1486,7 @@ impl<'a> Session<'a> {
         self.hits(locations, filters, statements)
     }
 
-    /// Whether the item defined at `position` is a function or method, when the
-    /// tool may read its file.
+    /// Return whether the item at `position` is a function or method.
     fn is_function(&mut self, file: &Utf8Path, position: Position) -> Result<bool, String> {
         let readable = self
             .relative(file)
@@ -1498,11 +1500,11 @@ impl<'a> Session<'a> {
             .is_some_and(|index| matches!(source.items[index].kind, kind::METHOD | kind::FUNCTION)))
     }
 
-    /// Locations grouped by file and enclosing item, counted across the
-    /// workspace and kept for showing under `filters`.
+    /// Group `locations` by file and enclosing item, tallying workspace-wide
+    /// counts and filtering displayed hits by `filters` and `self.pattern`.
     ///
-    /// With `statements`, each shown location is followed to the end of the
-    /// statement it starts.
+    /// When `statements` is true, each displayed hit is extended to the end of
+    /// its starting statement.
     fn hits(
         &mut self,
         locations: Vec<Location>,
@@ -1534,8 +1536,8 @@ impl<'a> Session<'a> {
                 continue;
             }
 
-            // Grouped before the `paths` filter applies, so the split between
-            // test code and the rest covers the whole workspace.
+            // Group before applying the `paths` filter so test vs. non-test
+            // counts reflect the entire workspace.
             let source = self.source(&file)?;
             let mut groups = group_lines(
                 &source.items,
@@ -1571,11 +1573,11 @@ impl<'a> Session<'a> {
         Ok(hits)
     }
 
-    /// Follow each reference in `groups` to the end of the statement it starts,
-    /// from the selection ranges the server gives for `positions`.
+    /// Extend each reference in `groups` to the end of the statement starting
+    /// on its line, using `textDocument/selectionRange`.
     ///
-    /// A server that does not answer leaves the groups as they are, with the
-    /// fixed context around each reference.
+    /// Leaves `groups` unchanged if the server does not return selection
+    /// ranges.
     fn extend_to_statements(
         &mut self,
         file: &Utf8Path,
@@ -1611,11 +1613,11 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// The fields, variants and methods of the type or trait at `position`,
-    /// each with its references.
+    /// List the fields, variants, and inherent or trait methods of the symbol
+    /// at `position`, along with reference counts for each.
     ///
-    /// A struct's or enum's methods are those of its inherent `impl` blocks;
-    /// methods of a trait impl are the trait's.
+    /// For structs and enums, only inherent `impl` methods are included; trait
+    /// implementation methods belong to the trait.
     fn members(
         &mut self,
         file: &Utf8Path,
@@ -1651,7 +1653,6 @@ impl<'a> Session<'a> {
             });
         }
 
-        // Each member as the file it is in and its index there.
         let mut found = children(&source.items, index)
             .map(|child| (file.to_owned(), Rc::clone(&source), child))
             .collect::<Vec<_>>();
@@ -1711,7 +1712,7 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// A file's text and items, read and asked for once per call.
+    /// Load and cache a file's lines and flattened document symbols.
     fn source(&mut self, file: &Utf8Path) -> Result<Rc<Source>, String> {
         if let Some(source) = self.sources.get(file) {
             return Ok(Rc::clone(source));
@@ -1737,8 +1738,8 @@ impl<'a> Session<'a> {
         Ok(source)
     }
 
-    /// Resolve a workspace-relative path the tool will read, under the access
-    /// policy.
+    /// Resolve a workspace-relative path and check read permission under the
+    /// access policy.
     fn readable(&self, path: &str) -> Result<Utf8PathBuf, String> {
         let resolved = resolve_workspace_path(self.root, path, self.access)?;
         authorize(self.access, Capability::Read, &resolved)?;
@@ -1746,7 +1747,8 @@ impl<'a> Session<'a> {
         Ok(resolved.absolute)
     }
 
-    /// `file` relative to the workspace root, or `None` outside it.
+    /// Strip the workspace root from `file`, returning `None` if it is outside
+    /// the workspace.
     fn relative(&self, file: &Utf8Path) -> Option<String> {
         file.strip_prefix(self.root)
             .or_else(|_| file.strip_prefix(&self.canonical_root))
@@ -1754,7 +1756,8 @@ impl<'a> Session<'a> {
             .map(|path| path.as_str().to_owned())
     }
 
-    /// `path:line` with a one-based line, the way the other tools write it.
+    /// Format `file` and zero-based `line` as `path:line` with a 1-based line
+    /// number.
     fn display(&self, file: &Utf8Path, line: u32) -> String {
         match self.relative(file) {
             Some(path) => format!("{path}:{}", line + 1),
@@ -1763,10 +1766,10 @@ impl<'a> Session<'a> {
     }
 }
 
-/// The references in one file, grouped by the item that encloses them.
+/// Group reference line numbers in a single file by their enclosing item,
+/// ordered by first reference line.
 ///
-/// Groups are ordered by their first line.
-/// A reference outside any item gets a group of its own per file.
+/// References outside any item share a single group with `item: None`.
 fn group_lines(items: &[Item], source: &[String], lines: &[u32], test_file: bool) -> Vec<Group> {
     let mut groups: BTreeMap<Option<usize>, Group> = BTreeMap::new();
 
@@ -1801,8 +1804,8 @@ fn group_lines(items: &[Item], source: &[String], lines: &[u32], test_file: bool
     groups
 }
 
-/// Record in each group the lines `pattern` matches: in its item's code, or for
-/// a group outside any item, on its referencing lines.
+/// Record lines matching `pattern` within each group's enclosing item (or among
+/// the group's reference lines when outside any item).
 fn mark_matches(groups: &mut [Group], source: &[String], pattern: &Regex) {
     for group in groups {
         let lines = match &group.item {
@@ -1821,8 +1824,8 @@ fn mark_matches(groups: &mut [Group], source: &[String], pattern: &Regex) {
     }
 }
 
-/// `fn total`, `struct Stream`, or an `impl` block's own name: `impl Render for
-/// Stream`.
+/// Format an item's display label (e.g. `fn total`, `struct Stream`, or `impl
+/// Render for Stream`).
 fn item_label(item: &Item) -> String {
     if item.kind == kind::OBJECT {
         item.name.clone()
@@ -1831,8 +1834,8 @@ fn item_label(item: &Item) -> String {
     }
 }
 
-/// The direct children of item `parent` that are members: everything but
-/// generic parameters.
+/// Return the indices of direct child items of `parent`, excluding generic type
+/// parameters.
 fn children(items: &[Item], parent: usize) -> impl Iterator<Item = usize> + '_ {
     items
         .iter()
@@ -1841,8 +1844,7 @@ fn children(items: &[Item], parent: usize) -> impl Iterator<Item = usize> + '_ {
         .map(|(index, _)| index)
 }
 
-/// The items outside tests holding a hit, with where the first hit is: `fn
-/// total (src/stream.rs:28)`.
+/// Format the non-test items containing hits as `label (path:line)`.
 fn places(hits: &Hits) -> Vec<String> {
     hits.shown
         .iter()
@@ -1861,7 +1863,7 @@ fn places(hits: &Hits) -> Vec<String> {
         .collect()
 }
 
-/// Count one file's groups toward the hits outside tests and in them.
+/// Add one file's group counts to `hits.outside_tests` and `hits.in_tests`.
 fn tally(hits: &mut Hits, groups: &[Group]) {
     for (test, tally) in [(false, &mut hits.outside_tests), (true, &mut hits.in_tests)] {
         let count = groups
@@ -1880,16 +1882,15 @@ fn is_function_kind(value: u32) -> bool {
     matches!(value, kind::FUNCTION | kind::METHOD | kind::CONSTRUCTOR)
 }
 
-/// A reference that sits directly in a `tests` module, outside any function.
 fn is_test_module(item: &Item) -> bool {
     item.kind == kind::MODULE && rust_analyzer::is_test_module(&item.ident)
 }
 
-/// The last line of the statement a reference on `line` starts, from the
-/// selection ranges the server nests around it, innermost first.
+/// Return the last line of the statement starting on `line`, chosen from the
+/// server's innermost-first selection range `chain`.
 ///
-/// That is the largest range starting on `line` that ends at most
-/// [`STATEMENT_LINES`] lines further down; `line` itself when none does.
+/// Picks the largest range starting on `line` whose span is at most
+/// [`STATEMENT_LINES`] lines, or `line` itself if none qualifies.
 fn statement_end(chain: &[Range], line: u32) -> u32 {
     chain
         .iter()
@@ -1900,7 +1901,6 @@ fn statement_end(chain: &[Range], line: u32) -> u32 {
         .unwrap_or(line)
 }
 
-/// `text` with `edits` applied, as [`edit_spans`] reads them.
 #[cfg(test)]
 fn apply_edits(
     text: &str,
@@ -1911,13 +1911,12 @@ fn apply_edits(
     Ok(splice(text, &edit_spans(text, edits, encoding, old)?))
 }
 
-/// The byte range each of `edits` replaces in `text`, with its replacement,
-/// sorted, their positions counted in `encoding`.
+/// Convert `edits` into sorted byte-offset spans `(start, end, new_text)` in
+/// `text` using `encoding`.
 ///
-/// An edit that replaces text must replace text containing `old`, the name
-/// being renamed.
-/// One that does not means the file changed after the server read it, and
-/// nothing is applied.
+/// Non-empty replaced ranges must contain `old` (the identifier being renamed);
+/// otherwise the file changed since the server indexed it and the rename is
+/// aborted.
 fn edit_spans<'e>(
     text: &str,
     edits: &'e [TextEdit],
@@ -1958,7 +1957,8 @@ fn edit_spans<'e>(
     Ok(spans)
 }
 
-/// `text` with each sorted, non-overlapping span replaced.
+/// Replace each non-overlapping byte span in `text` with its replacement
+/// string.
 fn splice(text: &str, spans: &[(usize, usize, &str)]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
@@ -1972,10 +1972,10 @@ fn splice(text: &str, spans: &[(usize, usize, &str)]) -> String {
     out
 }
 
-/// Where `position` in `before` is in `after`, the text `spans` made of it.
+/// Map `position` in `before` to its updated position in `after` following
+/// `spans`.
 ///
-/// `None` when a span replaces text at or around the position: the name there
-/// was itself rewritten.
+/// Returns `None` if a span overlaps `position` itself.
 fn shift_position(
     before: &str,
     after: &str,
@@ -2009,14 +2009,14 @@ fn shift_position(
     })
 }
 
-/// The byte offset each line of `text` starts at.
+/// Return the starting byte offset of each line in `text`.
 fn line_starts(text: &str) -> Vec<usize> {
     iter::once(0)
         .chain(text.match_indices('\n').map(|(at, _)| at + 1))
         .collect()
 }
 
-/// The byte offset in `text` of `position`.
+/// Convert `position` to a byte offset in `text`.
 fn byte_at(
     text: &str,
     starts: &[usize],
@@ -2040,8 +2040,7 @@ fn byte_at(
         })
 }
 
-/// Where each location starts, grouped by file in path order and in order
-/// within a file.
+/// Group `locations` by file path, with positions sorted within each file.
 fn by_file(locations: Vec<Location>) -> BTreeMap<Utf8PathBuf, Vec<Position>> {
     let mut files: BTreeMap<Utf8PathBuf, Vec<Position>> = BTreeMap::new();
     for location in locations {

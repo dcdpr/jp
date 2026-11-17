@@ -4,7 +4,7 @@ use serde_json::json;
 
 use super::{super::rust_analyzer::READY, *};
 
-/// A writer the test can read back after the connection wrote to it.
+/// In-memory writer that records framed JSON-RPC messages for assertions.
 #[derive(Clone, Default)]
 struct Written(Arc<Mutex<Vec<u8>>>);
 
@@ -153,8 +153,7 @@ fn waits_until_the_server_is_quiescent() {
         .wait_until_ready(READY, Duration::from_secs(5))
         .unwrap();
 
-    // The wait went past the first status, which said the server was still
-    // loading, to the second.
+    // Wait past the initial non-quiescent status until `quiescent` is true.
     assert_eq!(
         connection.latest.get("experimental/serverStatus"),
         Some(&json!({

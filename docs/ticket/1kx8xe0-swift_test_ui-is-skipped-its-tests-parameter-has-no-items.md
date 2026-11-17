@@ -10,7 +10,7 @@
 Its `tests` parameter in `.jp/mcp/tools/swift/test_ui.toml` is declared `type =
 "array"` with no item schema, and schema resolution rejects that
 (`crates/jp_tool/src/schema.rs`).
-JP then leaves the tool out of the turn:
+JP then omits the tool from the turn:
 
 ```text
 WARN jp_mcp::server: Skipping tool: its parameter schema could not be resolved.

@@ -15,11 +15,12 @@ current project. The following tools help you with this:
 - cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs (`comfort`).
 - cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
 - cargo_install_tools: Rebuild the binary serving these local tools, after editing `.config/jp/tools`.
-- code_symbol: Look up a Rust symbol through rust-analyzer: its definition, every use, its \
-implementations, and its callers and calls. Use it instead of grepping for a name when the \
-question is who calls, reads, or implements one specific symbol.
-- code_rename: Rename Rust items at their definition and every use, several in one call. Use it \
-instead of `fs_modify_file` for a rename that reaches past one file.
+- code_symbol: Look up a Rust symbol via rust-analyzer (definition, references, implementations, \
+members, callers, and outgoing calls). Use it instead of `fs_grep_files` when checking what \
+calls, reads, or implements a specific symbol.
+- code_rename: Rename one or more Rust symbols at their definition and all resolved references \
+in a single call. Use it instead of `fs_modify_file` for any rename that spans multiple uses or \
+files.
 """
 
 [conversation.tools]

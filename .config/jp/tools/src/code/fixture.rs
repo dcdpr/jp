@@ -1,11 +1,10 @@
-//! A source file and the document symbols rust-analyzer returned for it,
-//! recorded from a real server, shared by the unit tests.
+//! Shared source fixture and recorded `rust-analyzer` document symbols for unit
+//! tests.
 
 use serde_json::json;
 
 use super::protocol::DocumentSymbol;
 
-/// `src/stream.rs` of the fixture crate.
 pub const STREAM: &str = "\
 use crate::Render;
 
@@ -57,7 +56,7 @@ pub fn stream_lines() -> Vec<String> {
     STREAM.lines().map(str::to_owned).collect()
 }
 
-/// `textDocument/documentSymbol` for [`STREAM`], as rust-analyzer answered.
+/// Recorded `textDocument/documentSymbol` response for [`STREAM`].
 pub fn stream_symbols() -> Vec<DocumentSymbol> {
     serde_json::from_value(json!([
         {"name":"Stream","kind":23,"range":{"start":{"line":2,"character":0},"end":{"line":10,"character":1}},"selectionRange":{"start":{"line":6,"character":11},"end":{"line":6,"character":17}},"children":[

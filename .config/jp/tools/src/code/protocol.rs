@@ -1,4 +1,4 @@
-//! The few Language Server Protocol types the code tools read.
+//! Subset of Language Server Protocol types used by the code tools.
 
 use std::collections::HashMap;
 
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use url::Url;
 
-/// A zero-based line and a `character` offset in the server's encoding.
+/// Zero-based line and character offset in the server's negotiated encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Position {
     pub line: u32,
@@ -25,7 +25,6 @@ impl Range {
         self.start <= position && position <= self.end
     }
 
-    /// Whether `line` falls within the range.
     #[must_use]
     pub fn spans_line(&self, line: u32) -> bool {
         self.start.line <= line && line <= self.end.line
@@ -45,8 +44,8 @@ pub struct LocationLink {
     pub target_selection_range: Range,
 }
 
-/// The answer to `textDocument/definition` and `textDocument/implementation`,
-/// in any of the shapes the protocol allows.
+/// Untyped union of responses returned by `textDocument/definition` and
+/// `textDocument/implementation`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum GotoResponse {
@@ -83,8 +82,8 @@ pub struct DocumentSymbol {
     pub children: Vec<DocumentSymbol>,
 }
 
-/// One answer to `textDocument/selectionRange`: the range of the smallest
-/// syntax node at a position, and the ranges of the nodes around it.
+/// Nested syntax node ranges around a position, returned by
+/// `textDocument/selectionRange`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SelectionRange {
     pub range: Range,
@@ -93,7 +92,7 @@ pub struct SelectionRange {
 }
 
 impl SelectionRange {
-    /// This range and every range around it, innermost first.
+    /// Collect this range and its ancestors, from innermost to outermost.
     #[must_use]
     pub fn chain(&self) -> Vec<Range> {
         let mut ranges = vec![self.range];
@@ -107,10 +106,10 @@ impl SelectionRange {
     }
 }
 
-/// A function or method as `textDocument/prepareCallHierarchy` describes it.
+/// Function or method node returned by `textDocument/prepareCallHierarchy`.
 ///
-/// The server can keep data of its own in the item, so the fields not read here
-/// are kept and the item is sent back whole.
+/// Unrecognized fields are preserved in `rest` so the item can be echoed back
+/// to the server in `callHierarchy/incomingCalls` and `outgoingCalls`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallHierarchyItem {
@@ -122,7 +121,7 @@ pub struct CallHierarchyItem {
     pub rest: Map<String, Value>,
 }
 
-/// A function that calls the item asked about, and where the calls are in it.
+/// Incoming call hierarchy edge returned by `callHierarchy/incomingCalls`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IncomingCall {
@@ -130,7 +129,7 @@ pub struct IncomingCall {
     pub from_ranges: Vec<Range>,
 }
 
-/// A function the item asked about calls, and where in the item the calls are.
+/// Outgoing call hierarchy edge returned by `callHierarchy/outgoingCalls`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutgoingCall {
@@ -145,8 +144,7 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
-/// The answer to `textDocument/rename`, in either of the shapes the protocol
-/// allows.
+/// Workspace edit returned by `textDocument/rename`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceEdit {
@@ -169,10 +167,8 @@ struct DocumentId {
 }
 
 impl WorkspaceEdit {
-    /// The text edits for each file, in path order.
-    ///
-    /// An edit that would also create, rename, or delete a file is refused,
-    /// with the operation it names.
+    /// Extract per-file text edits sorted by file URI, rejecting resource
+    /// operations (file creation, rename, or deletion).
     pub fn into_text_edits(self) -> Result<Vec<(Url, Vec<TextEdit>)>, String> {
         let mut files = vec![];
         for (uri, edits) in self.changes.unwrap_or_default() {
@@ -205,7 +201,7 @@ pub struct SymbolInformation {
     pub container_name: Option<String>,
 }
 
-/// `SymbolKind` values the code tools tell apart.
+/// LSP `SymbolKind` constants.
 pub mod kind {
     pub const MODULE: u32 = 2;
     pub const METHOD: u32 = 6;
@@ -222,9 +218,9 @@ pub mod kind {
     pub const TYPE_PARAMETER: u32 = 26;
 }
 
-/// The Rust keyword for a `SymbolKind`, as rust-analyzer assigns them.
+/// Map an LSP `SymbolKind` to its Rust keyword label.
 ///
-/// rust-analyzer reports an `impl` block as `Object` and a type alias as
+/// `rust-analyzer` maps `impl` blocks to `Object` and type aliases to
 /// `TypeParameter`.
 #[must_use]
 pub fn kind_label(value: u32) -> &'static str {
@@ -244,8 +240,8 @@ pub fn kind_label(value: u32) -> &'static str {
     }
 }
 
-/// The text of a `textDocument/hover` result's `contents`, whichever shape it
-/// arrives in.
+/// Extract the markdown or plain-text body from a `textDocument/hover`
+/// response.
 #[must_use]
 pub fn hover_text(hover: &Value) -> Option<String> {
     let contents = hover.get("contents")?;

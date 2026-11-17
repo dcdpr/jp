@@ -1,34 +1,34 @@
 [conversation.tools.code_symbol]
 enable = false
-# Starts rust-analyzer, which builds and runs build scripts and proc macros
-# while it loads the workspace, as `cargo_check` does.
+# Starts rust-analyzer, which compiles and runs build scripts and proc macros
+# while loading the workspace, just as `cargo_check` does.
 run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Look up Rust symbols by meaning, not text: what a symbol is, where it is defined, every place that uses it, what implements it, and what it calls and is called by."
+summary = "Look up Rust symbols via rust-analyzer: definition, references, implementations, members, callers, and outgoing calls."
 description = """
-rust-analyzer resolves names, so this finds the uses of one specific symbol where a text search \
-matches every symbol that shares its name. Prefer it to `fs_grep_files` for any question about \
-who calls, reads, constructs, or implements something in Rust code, and for following a call \
-chain up or down.
+Resolves Rust symbols semantically through rust-analyzer, finding references to a specific \
+symbol rather than every identifier with the same name. Prefer this tool over `fs_grep_files` \
+when checking what calls, reads, constructs, or implements a Rust symbol, or when tracing a \
+call chain up or down.
 
-Each call starts rust-analyzer and waits for it to load the workspace, which takes several \
-seconds. Put every symbol you have a question about into one call's `targets`, rather than \
-calling once per symbol.
+Each call starts a fresh rust-analyzer process and waits several seconds for it to load the \
+workspace. Batch all symbols you want to inspect into a single call's `targets` array rather \
+than calling the tool once per symbol.
 
-Every answer starts with a header: the symbol's full path, where it is defined, its doc comment's \
-first paragraph, and its signature.
+Every target report starts with a header showing the symbol's full path, definition location, \
+first doc-comment paragraph, and signature.
 
-References are grouped by file, then by the function or item that contains them. Every reference \
-outside tests is shown at least as its own line. As far as the output allows, each then gets the \
-lines around it, through the end of the statement it starts (a struct literal or call spanning \
-several lines, up to 10), and items are shown whole, those outside tests first and the shortest \
-first; an item not shown whole gives its line range, which `fs_read_file` can read in full. A \
-file listed under "Not shown, over the output budget" had too many references to fit even as \
-single lines. \
-Lines use the `fs_grep_files` convention: a line number followed by `:` is a reference, followed \
-by `-` is context, and `--` separates non-adjacent lines. A line number followed by `=` matches \
-`pattern`. Code is dedented, and a line is shown once even when two items hold it.
+References are grouped by file and then by enclosing item. Non-test references are prioritized: \
+each is shown at least as its own line, then expanded with surrounding context through the end \
+of the statement it starts (such as a multi-line struct literal or call, up to 10 lines), and \
+finally expanded to the full enclosing item (non-test items first, shortest items first) as the \
+line budget permits. Partially shown items include their `start-end` line range so you can read \
+them with `fs_read_file`. Files listed under `Not shown, over the output budget:` had too many \
+references to fit even as single lines. \
+Snippet lines follow the `fs_grep_files` format: `line:` marks a reference, `line-` marks \
+context, `line=` marks a line matching `pattern`, and `--` separates non-adjacent blocks. \
+Snippets are dedented, and shared lines across nested items are emitted only once.
 
 ```
 src/stream.rs (1)
@@ -40,67 +40,68 @@ In tests, 2 in 2 files. Pass `tests: true` to show them:
 src/stream_tests.rs (2)
 ```
 
-The `References:` line is complete: the total, then how many are outside tests and how many are in \
-tests. When the output would be too long, files are shown with fewer lines, then by count alone; \
-narrow them with `paths`.
+The `References:` summary line always reports workspace-wide totals (overall, outside tests, and \
+in tests). When output exceeds the line budget, files are compacted to fewer context lines or \
+to per-file counts; use `paths` or `pattern` to narrow the results.
 
-Implementations are shown the same way, with their bodies, and the ones in test code are always \
-shown, after the others. When references are shown too, implementations take at most half the \
-output.
+Implementations use the same layout and include test implementations by default (listed after \
+non-test implementations). When both `implementations` and `references` are requested, \
+implementations use at most half of the line budget.
 
-What references cover, as rust-analyzer finds them:
+Reference coverage in rust-analyzer:
 
-- Found: calls, including through generics and `dyn`; field reads and writes, including inside \
-`format!` and other macro arguments, destructuring, struct literals and shorthand field init \
-(`Self { x }`); `Self` in a type's own impl.
-- A call through a trait counts for the trait's method (`Trait::method`), not for an impl's \
-method: ask about the trait's method to find callers, and use `implementations` to find the \
-impls. A trait method's references leave its implementations out, so they are its calls.
-- Not found: uses inside a `macro_rules!` body (the call site does not count either); code a \
-derive generates, so a field only `Debug` or serde reads shows no references; imports, which \
-are left out on purpose; mentions in strings, comments, TOML, and Markdown. Check those with \
-`fs_grep_files` before calling a field unused or a list complete.
+- Included: function and method calls (including generic and `dyn` dispatch); field reads and \
+writes (including inside `format!` and other macro arguments, destructuring patterns, struct \
+literals, and field init shorthand like `Self { x }`); and `Self` references inside an `impl` \
+block.
+- Trait methods: calls through a trait resolve to the trait method (`Trait::method`), not to \
+individual `impl` methods. Query `Trait::method` for callers, and request `implementations` to \
+see each `impl` body. Trait method `references` exclude the `impl` declarations themselves so \
+only call sites are counted.
+- Excluded: occurrences inside `macro_rules!` definitions; references generated by `#[derive]` \
+expansions (so a field read only by `Debug` or `Serialize` reports no references); `use` \
+imports (excluded intentionally); and mentions in strings, comments, TOML, or Markdown. Check \
+those with `fs_grep_files` before concluding that a symbol is unused.
 """
 
 examples = """
-Who uses a method, and who reads a field, in one call:
+Find callers of a method and readers of a field in one call:
 ```json
 {"targets": [{"name": "ConversationStream::iter"}, {"name": "ConversationEventWithConfigRef::config"}]}
 ```
 
-The symbol called on a line you are reading, with its definition:
+Inspect the symbol referenced on a specific line and show its definition:
 ```json
 {"targets": [{"name": "iter", "path": "crates/jp_cli/src/cmd/query.rs", "line": 1577}], "show": ["definition"]}
 ```
 
-Everything that implements a trait:
+Find all implementations of a trait:
 ```json
 {"targets": [{"name": "Provider"}], "show": ["implementations"]}
 ```
 
-How each type implements one trait method, with the bodies:
+Show how each type implements a trait method:
 ```json
 {"targets": [{"name": "PersistBackend::write"}], "show": ["implementations"]}
 ```
 
-Which fields of a type are never used:
+Check which fields or methods of a type have no references:
 ```json
 {"targets": [{"name": "CodeConfig"}], "show": ["members"]}
 ```
 
-Which callers of a method also read `.config`, leaving out the ones that don't:
+Filter callers of a method to enclosing items that also access `.config`:
 ```json
 {"targets": [{"name": "ConversationStream::iter"}], "pattern": "[.]config"}
 ```
 
-What reaches a function, three callers deep, and what it calls itself:
+Trace incoming callers three levels up and outgoing calls from a function:
 ```json
 {"targets": [{"name": "persist_conversation"}], "show": ["callers", "calls"], "depth": 3}
 ```
 
-Who constructs a type and who only reads it: `references` shows struct literals on the lines it \
-lists, and `members` gives the reference counts of its constructors, such as `fn new`, in the \
-same call:
+Check how a type is constructed and used (`references` shows struct literals in context, and \
+`members` reports reference counts for constructors like `fn new`):
 ```json
 {"targets": [{"name": "ToolCallRequest"}], "show": ["references", "members"]}
 ```
@@ -115,66 +116,63 @@ parameters = "function_call"
 type = "array"
 required = true
 items.type = "object"
-items.properties.name = { type = "string", required = true, summary = "The symbol's name, qualified as far as needed to be unique: `iter`, `ConversationStream::iter`. Name a field through its type, as `Type::field`." }
-items.properties.path = { type = "string", summary = "File to look in, relative to the workspace root. Without `line`, the item this file defines with that name." }
-items.properties.line = { type = "integer", summary = "Line in `path` where the name appears, as `fs_read_file` numbers it: the symbol used there is looked up, wherever it is defined." }
-items.properties.occurrence = { type = "integer", summary = "Which appearance of the name on `line`, counting from 1. Needed only when it appears more than once." }
-summary = "Symbols to look up. Each is found by name across the workspace, by name in one file (`path`), or by where it appears (`path` and `line`)."
+items.properties.name = { type = "string", required = true, summary = "Symbol name, qualified as needed to be unique (e.g. `iter`, `ConversationStream::iter`). Qualify struct fields with their type (`Type::field`)." }
+items.properties.path = { type = "string", summary = "Workspace-relative file path. When `line` is omitted, selects the item with `name` defined in this file." }
+items.properties.line = { type = "integer", summary = "1-based line number in `path` where `name` appears. Selects the symbol referenced at that location, wherever it is defined." }
+items.properties.occurrence = { type = "integer", summary = "1-based occurrence index of `name` on `line`. Only needed when the identifier appears more than once on that line." }
+summary = "Symbols to look up by workspace name, by definition in `path`, or by usage at `path` and `line`."
 description = """
-A qualifier is matched against the type a method or field belongs to and against the module \
-path, so `ConversationStream::iter` and `jp_conversation::ConversationStream` both work. A \
-re-export (`pub use`) is not a second item.
+Qualifiers are matched against both the enclosing type/trait and the module path, so \
+`ConversationStream::iter` and `jp_conversation::ConversationStream` both work. `pub use` \
+re-exports are deduplicated in favor of the original definition.
 
-A name that matches two or three items is answered for each of them, under its own header. \
-Past three, the answer lists the candidates with their locations, so the next call can qualify \
-the name or give `path` and `line`.
+If a name matches up to three items, all of them are reported under separate headers. If it \
+matches more than three, the tool returns the candidate list with file locations so you can \
+add a qualifier or specify `path` and `line`.
 """
 
 [conversation.tools.code_symbol.parameters.show]
 type = "array"
 items.type = "string"
 items.enum = ["definition", "references", "implementations", "members", "callers", "calls"]
-summary = "What to show for each target, after its header. Defaults to `[\"references\"]`."
+summary = "Sections to include after each target's header. Defaults to `[\"references\"]`."
 description = """
-- `definition`: the source of the item, doc comment included.
-- `references`: every use of the symbol.
-- `implementations`: for a trait, its impl blocks; for a type, its impl blocks; for a trait \
-method, each implementation of it. Shown with their bodies.
-- `members`: for a struct or enum, its fields or variants and the methods of its inherent impl \
-blocks; for a trait, its methods. Each with its reference counts outside tests and in tests, \
-and the items outside tests that use it, so an unused member reads `no references`. Takes one \
-references lookup per member.
-- `callers`: for a function or method, the functions that call it, each followed by the \
-functions that call those, to `depth` levels, as an indented list of names with where each first \
-calls. No code is shown: use `references` for the calls themselves. A function listed twice is \
-followed once. Test functions are counted unless `tests` is set. A call through a trait object or \
-generic counts for the trait's method, not an impl's: an impl method with no callers is usually \
-reached that way, so ask about `Trait::method` instead.
-- `calls`: for a function or method, the functions it calls in the order it first calls them, \
-each with where it is defined and the lines it is called on. Functions outside the workspace, in \
-`std` and dependencies, are named only. A method a derive generates is listed as `derived fn \
-Type::clone`, at the type. The workspace structs and variants it constructs are named on a line \
-of their own, since they are not calls.
+- `definition`: full source of the item, including doc comments.
+- `references`: every resolved use of the symbol.
+- `implementations`: `impl` blocks for a trait or type, or each `impl` method body for a trait \
+method.
+- `members`: fields, variants, and inherent methods of a struct or enum, or methods of a trait. \
+Reports non-test and test reference counts and up to five non-test usage locations per member \
+(or `no references` when unused). Performs one reference lookup per member.
+- `callers`: incoming call tree up to `depth` levels for a function or method, formatted as an \
+indented list with each caller's first call location. Does not include source snippets (use \
+`references` for call-site code). Repeated callers are expanded only once, and test callers are \
+summarized by count unless `tests: true` is set. Calls through a trait object or generic bound \
+resolve to `Trait::method` rather than the concrete `impl` method.
+- `calls`: outgoing calls from a function or method, ordered by first call site, with callee \
+definition locations and call line numbers. External callees (`std` and dependencies) are listed \
+by name only, `#[derive]`-generated methods appear as `derived fn Type::clone`, and workspace \
+struct or variant constructors are listed separately under `Types and variants it names:`.
 """
 
 [conversation.tools.code_symbol.parameters.tests]
 type = "boolean"
-summary = "Show references and callers in test code in full. By default they are counted, not shown. Implementations in tests are always shown."
+summary = "Show references and callers in test code in full instead of summarizing them by count. Implementations in tests are always shown."
 
 [conversation.tools.code_symbol.parameters.pattern]
 type = "string"
-summary = "A regex. Show only the references and implementations whose enclosing item has a line it matches, and mark those lines. The counts still cover every reference."
+summary = "Single-line regex filter. Shows only references and implementations whose enclosing item has a line matching the regex (marked with `=`). Summary counts still reflect the full workspace."
 description = """
-Use it when a symbol has more references than the output shows, and the question is about the \
-ones that also do something else: callers that also read `.config`, impls that also call \
-`flush`. The regex is matched line by line against the item's code, so it cannot span lines.
+Useful when a symbol has many references and you only want call sites whose enclosing function \
+also performs another operation (e.g. callers that also access `.config` or call `flush`). \
+Matched line by line against the enclosing item's source.
 """
 
 [conversation.tools.code_symbol.parameters.depth]
 type = "integer"
-summary = "How many levels of callers `callers` lists, from 1 to 5. Defaults to 2."
+summary = "Number of caller levels to traverse for `callers` (1 to 5, default 2)."
 
 [conversation.tools.code_symbol.parameters.paths]
 type = "array"
 items.type = "string"
-summary = "Show only references in these files or directories. The counts still cover the whole workspace."
+summary = "Restrict displayed references and implementations to these workspace-relative files or directories. Summary counts still reflect the full workspace."

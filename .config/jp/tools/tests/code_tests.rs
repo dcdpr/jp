@@ -1,9 +1,9 @@
 //! End-to-end tests for `code_symbol` and `code_rename` against a real
-//! rust-analyzer.
+//! `rust-analyzer` process.
 //!
-//! Each test starts rust-analyzer on a small fixture crate, so each takes a few
-//! seconds. rust-analyzer is a component of the pinned toolchain, so a missing
-//! binary fails the tests rather than skipping them.
+//! Each test spawns `rust-analyzer` on a temporary fixture crate.
+//! Because `rust-analyzer` is included in the pinned Rust toolchain, a missing
+//! binary fails the test rather than skipping it.
 
 use std::fs;
 
@@ -104,8 +104,7 @@ fn fixture() -> Utf8TempDir {
     dir
 }
 
-/// What rust-analyzer counts as a reference, pinned so the tool description's
-/// claims about coverage stay true.
+/// Fixture exercising the reference categories documented in `symbol.toml`.
 const COVERAGE: &str = r#"pub struct Point {
     pub x: u32,
     pub y: u32,
@@ -205,9 +204,8 @@ fn tool(arguments: &Value) -> Tool {
     }
 }
 
-/// `Stream::iter`'s references, narrowed to the items that also read `config`:
-/// `total` and the test in `stream.rs` are left out, and the matching line is
-/// marked.
+/// Narrowing `Stream::iter` references with `pattern: "config"` excludes items
+/// that do not match and marks the matching line with `=`.
 #[tokio::test]
 async fn a_pattern_keeps_the_items_it_matches_in() {
     let dir = fixture();
@@ -297,10 +295,9 @@ fn calls_fixture() -> Utf8TempDir {
     dir
 }
 
-/// Callers two levels up, with the test that calls `leaf` counted, what `top`
-/// calls, split at the workspace boundary, and the struct and variant `build`
-/// constructs, which are not calls, and the `clone` a derive generates, which
-/// is.
+/// Verify `callers` (up to two levels, counting test callers) and `calls`
+/// (distinguishing workspace functions, external functions, derived methods,
+/// and struct/variant constructors).
 #[tokio::test]
 async fn shows_callers_up_the_tree_and_calls_down() {
     let dir = calls_fixture();
@@ -378,8 +375,8 @@ fn rename_tool(arguments: &Value, answers: &Value) -> Tool {
     }
 }
 
-/// The method is renamed at its definition and every call, while
-/// `self.items.iter()`, a call to `Vec`'s method of the same name, is not.
+/// Renaming `Stream::iter` updates its definition and all resolved calls while
+/// leaving `Vec::iter` (`self.items.iter()`) untouched.
 #[tokio::test]
 async fn renames_a_method_everywhere_it_is_called() {
     let dir = fixture();
@@ -433,9 +430,8 @@ rust-analyzer does not rename the name inside `macro_rules!` bodies, strings, co
     );
 }
 
-/// Two renames in one call, the second of a parameter on the line the first
-/// changed: the second is worked out against the text the first left, and found
-/// one character to the right of where it was.
+/// When two renames in a single call edit the same line, the second rename
+/// resolves against the updated text with its target column shifted.
 #[tokio::test]
 async fn renames_in_a_batch_build_on_each_other() {
     let dir = coverage_fixture();
@@ -474,8 +470,6 @@ rust-analyzer does not rename the name inside `macro_rules!` bodies, strings, co
     );
 }
 
-/// A name that matches two items is not renamed: the tool cannot know which one
-/// is meant.
 #[tokio::test]
 async fn an_ambiguous_rename_lists_the_candidates() {
     let dir = fixture();
@@ -659,11 +653,9 @@ in impl Render for Stream (20-25):
     );
 }
 
-/// rust-analyzer's symbol search matches a qualifier against module paths, so
-/// `Other::iter` finds nothing when asked as written: the method is found by
-/// its own name and kept by the type it is implemented on.
-/// `Stream` is re-exported from the crate root, which the search reports as a
-/// second `Stream`.
+/// `workspace/symbol` matches qualifiers against module paths rather than
+/// `Self` types and includes `pub use` re-exports; verify that `Other::iter`
+/// resolves through its `Self` type and `Stream` deduplicates its re-export.
 #[tokio::test]
 async fn resolves_names_through_their_type_and_past_re_exports() {
     let dir = fixture();
@@ -711,9 +703,9 @@ Definition (src/stream.rs:3-11):
     );
 }
 
-/// A field reference is found in shorthand init, a struct literal, an
-/// assignment, destructuring, a `format!` argument and `self.x`, but not
-/// through a `macro_rules!` body; a field only a derive reads has none.
+/// Field references include shorthand initialization, struct literals,
+/// assignments, destructuring, macro arguments (`format!`), and method bodies,
+/// but exclude `macro_rules!` bodies and `#[derive]` expansions.
 #[tokio::test]
 async fn references_cover_what_the_description_says() {
     let dir = coverage_fixture();
@@ -770,8 +762,9 @@ References: none in the workspace."
     );
 }
 
-/// A call through a trait is a reference to the trait's method, and asking for
-/// the method's implementations shows each impl's body.
+/// Trait method calls resolve as references to the trait method, while
+/// `implementations` lists each `impl` method body without duplicating it in
+/// `references`.
 #[tokio::test]
 async fn a_trait_method_has_the_calls_and_its_implementations() {
     let dir = coverage_fixture();
@@ -817,8 +810,6 @@ in fn dynamic (61-63):
     );
 }
 
-/// A struct's members are its fields and its inherent methods, each counted; an
-/// unused one reads `no references`.
 #[tokio::test]
 async fn members_count_each_field_and_method() {
     let dir = coverage_fixture();

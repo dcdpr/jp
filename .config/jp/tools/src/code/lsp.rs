@@ -1,15 +1,14 @@
-//! A blocking Language Server Protocol client, large enough to start a server,
-//! ask it questions about a workspace, and shut it down again.
+//! Blocking Language Server Protocol client for single-call workspace queries.
 //!
-//! [`Server::start`] spawns the server and completes the `initialize`
-//! handshake, [`Server::wait_until_ready`] blocks until the server reports that
-//! it has loaded the workspace, and [`Server::request`] sends one request and
-//! waits for its answer.
-//! Dropping a [`Server`] kills the process if [`Server::shutdown`] did not end
-//! it.
+//! [`Server::start`] spawns the language server and completes the `initialize`
+//! handshake, [`Server::wait_until_ready`] blocks until the workspace is
+//! indexed, and [`Server::request`] sends a request and waits for its response.
+//! Dropping a [`Server`] terminates the child process if [`Server::shutdown`]
+//! did not complete.
 //!
-//! Framing and message routing live in [`Connection`], which works over any
-//! reader and writer, so it is tested without a server process.
+//! JSON-RPC framing and message routing live in [`Connection`], which operates
+//! over arbitrary readers and writers so it can be unit-tested without a child
+//! process.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -27,21 +26,21 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use url::Url;
 
-/// JSON-RPC error code for a request the server abandoned because its inputs
-/// changed while it was answering.
-/// Sending the request again is the remedy.
+/// JSON-RPC error code returned when a request is canceled because workspace
+/// contents changed during evaluation.
+/// Retrying the request resolves the error.
 const CONTENT_MODIFIED: i64 = -32801;
 
-/// How often a request that fails with [`CONTENT_MODIFIED`] is sent again.
+/// Maximum retry attempts for requests that fail with [`CONTENT_MODIFIED`].
 const CONTENT_MODIFIED_RETRIES: usize = 3;
 
-/// How many lines of the server's stderr are kept for error messages.
+/// Maximum lines of server stderr retained for error diagnostics.
 const STDERR_TAIL_LINES: usize = 20;
 
-/// How long [`Server::shutdown`] waits for the process to exit on its own.
+/// Maximum time [`Server::shutdown`] waits for the child process to exit.
 const EXIT_GRACE: Duration = Duration::from_secs(5);
 
-/// Why a conversation with the language server failed.
+/// Errors returned by language server operations.
 #[derive(Debug)]
 pub enum LspError {
     /// The server process could not be started.
@@ -63,8 +62,7 @@ pub enum LspError {
     /// The server reported that it could not load the workspace.
     Unhealthy { message: String },
 
-    /// A message could not be written, or a result did not have the expected
-    /// shape.
+    /// Writing a message failed, or a response could not be deserialized.
     Protocol { method: String, message: String },
 }
 
@@ -94,7 +92,7 @@ impl fmt::Display for LspError {
 
 impl std::error::Error for LspError {}
 
-/// The unit a server counts `character` offsets in.
+/// Character offset encoding negotiated with the language server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PositionEncoding {
     Utf8,
@@ -102,9 +100,10 @@ pub enum PositionEncoding {
 }
 
 impl PositionEncoding {
-    /// The `character` offset of byte offset `byte` in `line`.
+    /// Convert byte offset `byte` in `line` to a character offset in this
+    /// encoding.
     ///
-    /// `byte` must lie on a character boundary.
+    /// `byte` must lie on a UTF-8 character boundary.
     #[must_use]
     pub fn character(self, line: &str, byte: usize) -> u32 {
         let prefix = &line[..byte.min(line.len())];
@@ -116,8 +115,9 @@ impl PositionEncoding {
         u32::try_from(units).unwrap_or(u32::MAX)
     }
 
-    /// The byte offset in `line` of the `character` offset, or `None` when it
-    /// falls past the line's end or inside a character.
+    /// Convert a `character` offset in `line` to a byte offset, returning
+    /// `None` if `character` is past the end of `line` or inside a multi-unit
+    /// character.
     #[must_use]
     pub fn byte(self, line: &str, character: u32) -> Option<usize> {
         let character = usize::try_from(character).ok()?;
@@ -139,22 +139,21 @@ impl PositionEncoding {
     }
 }
 
-/// How a server reports that it has loaded the workspace.
-///
-/// The protocol has no standard for this, so each server says it its own way.
+/// Server-specific notification used to detect when workspace indexing
+/// finishes.
 #[derive(Debug, Clone, Copy)]
 pub struct ReadySignal {
-    /// The notification that carries the server's progress.
+    /// Notification method name carrying progress updates.
     pub method: &'static str,
 
-    /// Read a notification's params: `None` while the server is still loading,
-    /// `Some(Ok(()))` once it is ready, and `Some(Err(message))` once it has
-    /// loaded but cannot answer reliably.
+    /// Inspects notification parameters and returns `None` while still loading,
+    /// `Some(Ok(()))` when ready, or `Some(Err(message))` if workspace loading
+    /// failed.
     pub ready: fn(&Value) -> Option<Result<(), String>>,
 }
 
-/// A message read from the server, after server-to-client requests have been
-/// answered.
+/// Inbound message from the server after server-to-client requests have been
+/// handled.
 #[derive(Debug)]
 enum Incoming {
     Response {
@@ -179,7 +178,7 @@ pub struct Connection {
     incoming: Receiver<Result<Incoming, String>>,
     next_id: i64,
 
-    /// The params of the latest notification of each method.
+    /// Most recent parameters received for each notification method.
     latest: HashMap<String, Value>,
 
     closed: Option<String>,
@@ -240,11 +239,11 @@ impl Connection {
         )
     }
 
-    /// Block until the server reports, the way `signal` describes, that it has
-    /// loaded the workspace.
+    /// Block until `signal` reports that the server has finished loading the
+    /// workspace.
     ///
-    /// A server that reports it is done but cannot answer reliably is an error:
-    /// its answers would be incomplete.
+    /// Returns [`LspError::Unhealthy`] if the server finishes in an error
+    /// state.
     pub fn wait_until_ready(
         &mut self,
         signal: ReadySignal,
@@ -260,8 +259,8 @@ impl Connection {
         }
     }
 
-    /// The next message from the server, keeping each notification's params on
-    /// the way.
+    /// Receive the next message from the server, recording any notification in
+    /// `self.latest`.
     fn receive(
         &mut self,
         method: &str,
@@ -313,10 +312,10 @@ impl Connection {
     }
 }
 
-/// Read messages until the server closes its output, answering its requests and
-/// forwarding everything else.
+/// Read messages from `reader` until EOF, replying to server-to-client requests
+/// with `null` and forwarding responses and notifications to `sender`.
 ///
-/// The last item sent is the reason reading stopped.
+/// Sends a final `Err` describing why the stream ended before returning.
 fn read_loop(
     mut reader: impl BufRead,
     writer: &SharedWriter,
@@ -332,9 +331,9 @@ fn read_loop(
         let incoming = match route(message) {
             Route::Forward(incoming) => incoming,
             Route::Answer(id) => {
-                // Every server-to-client request gets an empty answer. The
-                // client advertises no capability that makes one matter, and an
-                // unanswered request can stall the server.
+                // Reply `null` to every server-to-client request. We advertise
+                // no client capabilities that require a non-null response, and
+                // leaving a request unanswered can stall the server.
                 let reply = json!({ "jsonrpc": "2.0", "id": id, "result": null });
                 if let Ok(mut writer) = writer.lock() {
                     let _written = write_message(&mut **writer, &reply);
@@ -405,9 +404,8 @@ fn route(mut message: Value) -> Route {
     }
 }
 
-/// Read one `Content-Length`-framed message.
-///
-/// Returns `None` when the stream ends between messages.
+/// Read one `Content-Length`-framed JSON-RPC message, returning `Ok(None)` on
+/// clean EOF between messages.
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     let mut length = None;
     let mut started = false;
@@ -528,13 +526,11 @@ impl Server {
         Ok(server)
     }
 
-    /// The unit the server counts `character` offsets in.
     #[must_use]
     pub fn encoding(&self) -> PositionEncoding {
         self.encoding
     }
 
-    /// Send a notification.
     pub fn notify(&mut self, method: &str, params: &Value) -> Result<(), LspError> {
         self.connection
             .notify(method, params)
@@ -552,10 +548,8 @@ impl Server {
             .map_err(|error| self.explain(error))
     }
 
-    /// Send a request and decode its result.
-    ///
-    /// A request the server abandons because its inputs changed is sent again,
-    /// a few times.
+    /// Send a request and deserialize its response, retrying on
+    /// [`CONTENT_MODIFIED`].
     pub fn request<R: DeserializeOwned>(
         &mut self,
         method: &str,
@@ -581,10 +575,11 @@ impl Server {
         }
     }
 
-    /// Ask the server to exit, and wait briefly for it to do so.
+    /// Send `shutdown` and `exit` and wait up to [`EXIT_GRACE`] for the child
+    /// process to exit.
     ///
-    /// Failures are not reported: the answers are already in hand, and [`Drop`]
-    /// kills a server that does not exit.
+    /// Ignores errors because [`Drop`] kills the process if it is still
+    /// running.
     pub fn shutdown(&mut self) {
         if self
             .connection
@@ -603,8 +598,7 @@ impl Server {
         }
     }
 
-    /// Add the tail of the server's stderr to an error that ended the
-    /// connection, since the server usually says why it stopped there.
+    /// Append captured stderr lines to [`LspError::Closed`] errors.
     fn explain(&self, error: LspError) -> LspError {
         let LspError::Closed { detail } = error else {
             return error;
@@ -635,9 +629,8 @@ impl Drop for Server {
     }
 }
 
-/// Keep the last lines the server writes to stderr.
-///
-/// The stream is drained continuously so a chatty server never blocks on a full
+/// Continuously drain `stderr` on a background thread, retaining the last
+/// [`STDERR_TAIL_LINES`] lines so the child process never blocks on a full
 /// pipe.
 fn collect_stderr(stderr: ChildStderr) -> Arc<Mutex<VecDeque<String>>> {
     let lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));

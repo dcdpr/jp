@@ -1,12 +1,10 @@
-//! Plain-text rendering of what the language server said about a symbol.
+//! Plain-text formatting for `code_symbol` reports.
 //!
-//! Source lines use the `fs_grep_files` convention: a line number followed by
-//! `:` is a hit, followed by `-` is context, and `--` separates non-adjacent
-//! stretches of one file.
-//! A line number followed by `=` matches the `pattern` the hits were narrowed
-//! by.
-//! Each stretch is dedented by its common indentation, and no line of a file is
-//! shown twice.
+//! Source snippets use `fs_grep_files` line markers: `:` for a reference or
+//! implementation line, `-` for surrounding context, `=` for a line matching
+//! `pattern`, and `--` between non-adjacent line ranges.
+//! Each contiguous block is dedented by its common leading whitespace, and each
+//! source line is emitted at most once per file.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -14,28 +12,28 @@ use std::{
     rc::Rc,
 };
 
-/// Context lines around a hit inside an item not shown whole.
+/// Context lines shown before and after a hit inside a partially rendered item.
 const ITEM_CONTEXT: usize = 2;
 
-/// Context lines around a hit outside any item.
+/// Context lines shown before and after a hit outside any item.
 const LOOSE_CONTEXT: usize = 1;
 
-/// The most lines of a definition shown.
+/// Maximum lines shown for a symbol's definition snippet.
 const DEFINITION_LINES: usize = 60;
 
-/// The most files listed by count alone before the rest are summed up.
+/// Maximum files listed in a count-only summary before collapsing the
+/// remainder.
 const COUNT_LINES: usize = 50;
 
-/// The most places outside tests listed under one member.
+/// Maximum non-test usage locations listed per member.
 const MEMBER_PLACES: usize = 5;
 
-/// The most signature lines taken from a hover.
+/// Maximum signature lines retained from a hover response.
 pub const SIGNATURE_LINES: usize = 20;
 
-/// The most callers listed, across every level.
+/// Maximum caller lines rendered across all depth levels.
 pub const CALLER_LINES: usize = 100;
 
-/// Everything shown about one symbol.
 #[derive(Debug)]
 pub struct Report {
     pub header: Header,
@@ -47,158 +45,148 @@ pub struct Report {
     pub members: Option<Members>,
 }
 
-/// The functions that call a function, and the functions that call those, to
-/// `depth` levels.
+/// Incoming call hierarchy for a function or method.
 #[derive(Debug, Default)]
 pub struct Callers {
-    /// Why there are none to list, when the symbol is not a function.
+    /// Diagnostic note when the target symbol is not a function or method.
     pub note: Option<String>,
 
     pub depth: usize,
 
-    /// Each caller after the caller it calls, deeper levels indented.
+    /// Flattened pre-order list of callers.
     pub shown: Vec<Caller>,
 
-    /// Test functions among the callers, counted but not listed.
+    /// Number of callers in test code omitted when `tests` is false.
     pub hidden_tests: usize,
 
-    /// Whether listing stopped at [`CALLER_LINES`].
+    /// Whether traversal stopped at [`CALLER_LINES`].
     pub stopped: bool,
 }
 
 #[derive(Debug)]
 pub struct Caller {
-    /// `fn total`.
+    /// Display label (e.g. `fn total`).
     pub label: String,
 
-    /// Where its first call is: `src/stream.rs:28`.
+    /// Location of the first call site (`src/stream.rs:28`).
     pub location: String,
 
     pub calls: usize,
 
-    /// How far up it is: 0 calls the symbol itself.
+    /// Zero-based indentation depth (`0` for direct callers).
     pub level: usize,
 
-    /// Whether it is listed with its own callers higher up.
+    /// Whether this function already appeared earlier in `shown` with its own
+    /// callers expanded.
     pub repeated: bool,
 }
 
-/// The functions a function calls, in the order it first calls them.
+/// Outgoing calls from a function or method, ordered by first call site.
 #[derive(Debug, Default)]
 pub struct Calls {
-    /// Why there are none to list, when the symbol is not a function.
+    /// Diagnostic note when the target symbol is not a function or method.
     pub note: Option<String>,
 
     pub inside: Vec<Callee>,
 
-    /// The names of functions outside the workspace that it calls.
+    /// Names of callees defined outside the workspace.
     pub outside: Vec<String>,
 
-    /// The workspace structs and variants it names, which the server lists with
-    /// its calls: `struct Pair`, `variant Shape::Circle`.
+    /// Workspace structs and enum variants constructed in the function body
+    /// (`struct Pair`, `variant Shape::Circle`).
     pub named: Vec<String>,
 }
 
 #[derive(Debug)]
 pub struct Callee {
-    /// `fn middle`.
     pub label: String,
-
-    /// Where it is defined: `src/lib.rs:5`.
     pub location: String,
-
-    /// The one-based lines of the calls.
+    /// One-based line numbers of call sites within the caller.
     pub lines: Vec<usize>,
 }
 
 #[derive(Debug, Default)]
 pub struct Header {
-    /// The symbol's path: `fixture::stream::Stream::iter`.
+    /// Fully qualified symbol path (`fixture::stream::Stream::iter`).
     pub qualified: String,
 
-    /// Where it is defined: `src/stream.rs:15`.
+    /// Definition location (`src/stream.rs:15`).
     pub location: String,
 
     pub signature: Vec<String>,
 
-    /// The first paragraph of its doc comment.
+    /// First paragraph of the item's doc comment.
     pub doc: Vec<String>,
 }
 
-/// The source of the symbol's item, doc comments included.
+/// Source snippet for an item's definition, including doc comments.
 #[derive(Debug)]
 pub struct Snippet {
     pub path: String,
 
-    /// The zero-based line `lines` starts at.
+    /// Zero-based starting line number of `lines`.
     pub start: usize,
 
     pub lines: Vec<String>,
 }
 
-/// Locations and the files they are in.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Tally {
     pub count: usize,
     pub files: usize,
 }
 
-/// Locations the server returned for a symbol, references or implementations,
-/// grouped by file and enclosing item.
+/// Reference or implementation hits grouped by file and enclosing item.
 #[derive(Debug, Default)]
 pub struct Hits {
-    /// Locations in the workspace, wherever they are.
+    /// Total hits across the workspace.
     pub total: usize,
     pub files: usize,
 
-    /// Locations in files the tool may read, outside test code and in it.
-    /// A file with both counts toward both.
+    /// Hits in readable files outside and inside test code.
+    /// A file containing both increments `files` on both tallies.
     pub outside_tests: Tally,
     pub in_tests: Tally,
 
-    /// Locations in files the tool may not read, counted but not shown.
+    /// Hits in files blocked by the access policy.
     pub withheld: usize,
 
     pub outside_workspace: usize,
 
-    /// Whether `paths` narrowed what is shown.
+    /// Whether `paths` restricted the displayed files.
     pub filtered: bool,
 
-    /// The `pattern` that narrowed what is shown to the items it matches in.
+    /// Regex pattern restricting displayed hits to enclosing items with a
+    /// matching line.
     pub pattern: Option<String>,
 
-    /// The files to show, in order.
     pub shown: Vec<FileHits>,
 }
 
-/// The fields, variants and methods of a type or trait, each with its
-/// references.
+/// Fields, variants, and methods of a type or trait, with reference counts for
+/// each.
 #[derive(Debug, Default)]
 pub struct Members {
-    /// Why there are none to list, when the symbol is not a type or trait.
+    /// Diagnostic note when the target cannot have members.
     pub note: Option<String>,
 
     pub members: Vec<Member>,
 
-    /// Members past the most listed.
+    /// Number of additional members truncated past the member limit.
     pub omitted: usize,
 }
 
 #[derive(Debug)]
 pub struct Member {
-    /// `field color`, `fn iter`.
     pub label: String,
-
-    /// Where it is defined: `src/stream.rs:9`.
     pub location: String,
-
     pub outside_tests: usize,
     pub in_tests: usize,
 
-    /// References in files the tool may not read.
+    /// References in files blocked by the access policy.
     pub withheld: usize,
 
-    /// The items outside tests that refer to it: `fn total (src/stream.rs:28)`.
+    /// Non-test items referencing this member (`fn total (src/stream.rs:28)`).
     pub places: Vec<String>,
 }
 
@@ -209,22 +197,24 @@ pub struct FileHits {
     pub groups: Vec<Group>,
 }
 
-/// The references inside one enclosing item, or outside any item.
+/// Hits within a single enclosing item (or at file scope when `item` is
+/// `None`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Group {
     pub item: Option<GroupItem>,
 
-    /// Zero-based lines with a reference, sorted and without repeats.
+    /// Sorted, deduplicated zero-based line numbers containing hits.
     pub lines: Vec<usize>,
 
-    /// The last line of the statement each reference starts on, aligned with
-    /// `lines` and never before its own line.
+    /// Zero-based end line of the statement starting at each entry in `lines`.
     pub ends: Vec<usize>,
 
-    /// Zero-based lines in the item that match `pattern`, sorted.
+    /// Sorted zero-based line numbers in the enclosing item that match
+    /// `pattern`.
     pub matches: Vec<usize>,
 
-    /// References, which can exceed the lines when one line holds several.
+    /// Total hit count in this group (may exceed `lines.len()` when multiple
+    /// hits appear on one line).
     pub count: usize,
 
     pub test: bool,
@@ -232,23 +222,22 @@ pub struct Group {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupItem {
-    /// `fn Stream::iter`.
     pub label: String,
 
-    /// The first line of the item's code, after doc comments and attributes.
-    /// Zero-based.
+    /// Zero-based first line of the item's declaration (after doc comments and
+    /// attributes).
     pub start: usize,
 
-    /// Zero-based and inclusive.
+    /// Zero-based inclusive end line of the item.
     pub end: usize,
 }
 
-/// Split `budget` across items by `weights`: `minimum` each first, the rest in
-/// proportion to each weight.
+/// Divide `budget` across items proportionally by `weights` after reserving up
+/// to `minimum` lines per item.
 ///
-/// The rounding remainder goes to the heaviest item.
-/// Without weights, or with a budget too small for `minimum` each, the split is
-/// even.
+/// Any rounding remainder goes to the first item with the largest weight.
+/// If all weights are zero or `budget` cannot cover `minimum` per item, splits
+/// `budget` evenly.
 #[must_use]
 pub fn shares(budget: usize, weights: &[usize], minimum: usize) -> Vec<usize> {
     let count = weights.len();
@@ -284,8 +273,9 @@ pub fn shares(budget: usize, weights: &[usize], minimum: usize) -> Vec<usize> {
 }
 
 impl Report {
-    /// How many locations the report shows: implementations, and references
-    /// outside tests plus those in tests when `tests` asks for them.
+    /// Return the total number of hits this report will display (all
+    /// implementations plus non-test references, and test references when
+    /// `tests` is true).
     #[must_use]
     pub fn weight(&self, tests: bool) -> usize {
         let references = self.references.as_ref().map_or(0, |hits| {
@@ -302,20 +292,21 @@ impl Report {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Options {
-    /// The most lines the references section takes, counts aside.
+    /// Line budget shared by the implementations and references sections.
     pub budget: usize,
 
-    /// Show test references in full rather than as counts.
+    /// Whether to render test references and callers in full rather than as
+    /// summary counts.
     pub tests: bool,
 }
 
-/// Render a report.
+/// Render a symbol report as plain text.
 ///
 /// The implementations and references sections share `options.budget`: when
-/// both are shown, implementations are planned against half of it and
-/// references get what they leave.
-/// Implementations in test code are always shown, after the others, since the
-/// implementing type is the answer whichever code it sits in.
+/// both are present, implementations receive up to half the budget and
+/// references receive the remainder.
+/// Implementations in test code are always rendered in full after non-test
+/// implementations.
 #[must_use]
 pub fn render(report: &Report, options: Options) -> String {
     let mut out = vec![];
@@ -507,10 +498,8 @@ fn render_definition(out: &mut Vec<String>, snippet: &Snippet) {
     }
 }
 
-/// One section of locations, titled `title`: a summary line, then each file as
-/// [`plan`] decides.
-///
-/// Returns the lines of `options.budget` the files took.
+/// Render a `Hits` section under `title` and return the number of budget lines
+/// consumed.
 fn render_hits(out: &mut Vec<String>, title: &str, hits: &Hits, options: Options) -> usize {
     let mut summary = if hits.total == 0 {
         format!("{title}: none in the workspace.")
@@ -651,33 +640,32 @@ fn render_members(out: &mut Vec<String>, members: &Members) {
     }
 }
 
-/// What [`plan`] decided for one section.
+/// Budget allocation result for a `Hits` section.
 struct Plan<'a> {
-    /// The files to show, in output order.
     planned: Vec<PlannedFile<'a>>,
 
-    /// Files over the budget, with their counts.
+    /// Files excluded because even their single-line hits exceeded the budget.
     over: Vec<(&'a str, usize)>,
 
-    /// Test files collapsed to counts.
+    /// Test files summarized by count only when `options.tests` is false.
     collapsed: Vec<(&'a str, usize)>,
 
-    /// The lines of the budget the planned files take.
+    /// Budget lines consumed by `planned`.
     used: usize,
 }
 
-/// Decide what of each file fits `options.budget`, in three passes:
+/// Allocate `options.budget` across `hits` in three passes:
 ///
-/// 1. Every reference gets its own line: those outside tests first, then those
-///    in tests when they are shown.
-///    When the lines alone do not fit, the files with the fewest are kept and
-///    the rest are counted as over the budget.
-/// 2. Each reference's line grows to the shorter of its whole enclosing item
-///    and the context around it.
-/// 3. What is left shows items whole.
+/// 1. Include each file at `Form::Lines` (hit lines only), prioritizing
+///    non-test files and choosing files with the fewest lines first so the
+///    maximum number of files fit.
+///    Files that still exceed the budget are moved to `over`.
+/// 2. Upgrade groups from `Form::Lines` to the shorter of `Form::Whole` or
+///    `Form::Context`.
+/// 3. Upgrade remaining `Form::Context` groups to `Form::Whole`.
 ///
-/// Passes 2 and 3 take the cheapest change first, those outside tests before
-/// those in tests.
+/// Passes 2 and 3 apply the smallest line-count increases first, prioritizing
+/// non-test groups before test groups.
 fn plan(hits: &Hits, options: Options) -> Plan<'_> {
     let mut remaining = options.budget;
     let mut planned = vec![];
@@ -779,10 +767,8 @@ fn plan(hits: &Hits, options: Options) -> Plan<'_> {
     }
 }
 
-/// Apply each upgrade that fits `remaining`, cheapest first, those outside
-/// tests before those in tests.
-///
-/// Returns what is left of `remaining`.
+/// Apply upgrades that fit within `remaining` budget, ordered by non-test first
+/// and then by smallest line increase, returning the unused budget.
 fn upgrade(
     planned: &mut [PlannedFile<'_>],
     mut upgrades: Vec<(bool, usize, usize, usize, Form)>,
@@ -799,27 +785,27 @@ fn upgrade(
     remaining
 }
 
-/// How one group of references is shown.
+/// Detail level for rendering a [`Group`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Form {
-    /// The referencing lines alone, without the enclosing item or context.
+    /// Hit lines only, without enclosing item headers or surrounding context.
     Lines,
 
-    /// The enclosing item's label and the lines around each reference.
+    /// Enclosing item header and context lines around each hit.
     Context,
 
-    /// The enclosing item's label and the whole item.
+    /// Enclosing item header and the full item body.
     Whole,
 }
 
 impl Form {
-    /// The group on its own, as the planner prices it.
+    /// Render `group` in isolation to measure its line cost during planning.
     fn render(self, source: &[String], group: &Group) -> Vec<String> {
         self.render_into(source, group, &marks(group), &mut BTreeSet::new())
     }
 
-    /// The group's lines not in `seen`, which takes them, each marked as
-    /// `marks` says or as context.
+    /// Render `group`'s lines that are not yet in `seen`, inserting rendered
+    /// line numbers into `seen`.
     fn render_into(
         self,
         source: &[String],
@@ -844,9 +830,8 @@ impl Form {
     }
 }
 
-/// The lines a group marks: `:` for a reference, `=` for a line matching the
-/// pattern.
-/// A reference that also matches is a reference.
+/// Build a map from zero-based line number to its marker character (`:` for
+/// hits, `=` for `pattern` matches, with `:` taking precedence).
 fn marks(group: &Group) -> BTreeMap<usize, char> {
     let mut marks = group
         .matches
@@ -857,8 +842,8 @@ fn marks(group: &Group) -> BTreeMap<usize, char> {
     marks
 }
 
-/// Every line a group marks, sorted, with the last line of the statement each
-/// starts: its own line for a pattern match.
+/// Return all marked line numbers in `group` (`lines` and `matches`) paired
+/// with their statement end lines.
 fn anchors(group: &Group) -> (Vec<usize>, Vec<usize>) {
     let mut anchors = group
         .matches
@@ -873,26 +858,21 @@ fn anchors(group: &Group) -> (Vec<usize>, Vec<usize>) {
     anchors.into_iter().unzip()
 }
 
-/// One shown file: which of its groups are in it and how each is shown.
+/// Planned rendering state for a single file (either non-test or test subset).
 struct PlannedFile<'a> {
     file: &'a FileHits,
     groups: Vec<&'a Group>,
-
-    /// Per group, how it is shown.
     forms: Vec<Form>,
-
     count: usize,
     test: bool,
 
-    /// The file's place in the hits, which the output keeps.
+    /// Original index in `hits.shown` used to restore file ordering.
     order: usize,
 }
 
 impl PlannedFile<'_> {
-    /// A `path (count)` line, then each group.
-    ///
-    /// A line an earlier group showed is not shown again, and a line any group
-    /// marks keeps its mark under whichever group shows it.
+    /// Render the `path (count)` header followed by each group, deduplicating
+    /// lines shared across nested items.
     fn render(&self) -> Vec<String> {
         let mut marked = BTreeMap::new();
         for group in &self.groups {
@@ -914,22 +894,20 @@ impl PlannedFile<'_> {
     }
 }
 
-/// Whether showing the group's whole item takes no more lines than the context
-/// around each reference.
+/// Return whether rendering the full enclosing item takes no more lines than
+/// rendering context windows around its hits.
 fn whole_is_shortest(source: &[String], group: &Group) -> bool {
     group.item.is_some()
         && render_group(source, group, true).len() <= render_group(source, group, false).len()
 }
 
-/// One group: its whole enclosing item when `whole` is set and it has one,
-/// otherwise the lines around each marked line.
+/// Render a single group in isolation.
 fn render_group(source: &[String], group: &Group, whole: bool) -> Vec<String> {
     render_group_into(source, group, whole, &marks(group), &mut BTreeSet::new())
 }
 
-/// [`render_group`], leaving out the lines in `seen` and adding the rest to it.
-///
-/// A group with nothing left to show renders as nothing, its label included.
+/// Render `group`, skipping lines already present in `seen` and omitting the
+/// group header if all of its lines were already rendered.
 fn render_group_into(
     source: &[String],
     group: &Group,
@@ -1000,9 +978,9 @@ fn render_group_into(
     lines
 }
 
-/// The stretches of lines within `low..=high` that show each of `hits`, which
-/// is sorted, with `context` lines around it, and on to the end of its
-/// statement in `ends`, merged where they touch.
+/// Compute merged, inclusive line ranges within `low..=high` covering each line
+/// in `hits` with `context` lines before and after and extending through the
+/// corresponding statement end in `ends`.
 fn spans(
     hits: &[usize],
     ends: &[usize],
@@ -1049,7 +1027,7 @@ fn files(count: usize) -> String {
     }
 }
 
-/// The smallest leading whitespace across the non-blank lines.
+/// Return the minimum leading whitespace byte count across non-blank lines.
 fn common_indent<'a>(lines: impl Iterator<Item = &'a str>) -> usize {
     lines
         .filter(|line| !line.trim().is_empty())

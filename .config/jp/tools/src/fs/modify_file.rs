@@ -978,9 +978,9 @@ fn should_auto_approve(changes: &[(String, String, String)], config: &AutoApprov
     total_changed <= config.max_changed_lines
 }
 
-/// Write `changes` the way `fs_modify_file` does: a file with uncommitted
-/// changes is asked about first, then the patch is shown for approval, unless
-/// `answers` or the auto-approve settings in `options` settle both.
+/// Apply `changes` to the workspace, prompting for confirmation on files with
+/// uncommitted changes and on the resulting patch unless already answered in
+/// `answers` or auto-approved by `options`.
 pub(crate) fn write_changes(
     changes: Vec<Change>,
     ctx: &Context,

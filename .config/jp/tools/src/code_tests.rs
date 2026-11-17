@@ -165,8 +165,7 @@ fn an_impl_block_is_labelled_by_its_own_name() {
     );
 }
 
-/// The `show` values the tool definition advertises are the ones the code
-/// accepts, all of them.
+/// Verify that the `show` enum in `symbol.toml` matches `Show` variants.
 #[test]
 fn tool_definition_show_enum_matches_the_code() {
     let path = Path::new("../../../.jp/mcp/tools/code/symbol.toml");

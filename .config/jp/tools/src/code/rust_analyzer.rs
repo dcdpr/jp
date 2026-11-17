@@ -1,11 +1,9 @@
-//! What the code tools know about rust-analyzer and the Rust it reads.
+//! `rust-analyzer`- and Rust-specific configuration and parsing.
 //!
-//! Everything else in the code tools speaks plain LSP.
-//! This module holds what is true only of rust-analyzer: the command and
-//! settings it starts with, the notification it reports a loaded workspace
-//! through, and how it names items in its document symbols and hovers.
-//! It also holds the Rust syntax the tools read from source text: `::` paths,
-//! doc comments and attributes, and how test code is laid out.
+//! Isolates server-specific details from the generic LSP client: startup
+//! command and initialization options, the `experimental/serverStatus`
+//! readiness notification, hover and `impl` symbol formatting, and Rust syntax
+//! helpers for paths, doc comments, attributes, and test layout.
 
 use jp_tool::Capability;
 use serde::Deserialize;
@@ -14,18 +12,18 @@ use serde_json::{Value, json};
 use super::lsp::ReadySignal;
 use crate::util::root::{CARGO_MANIFEST, Marker};
 
-/// The server command, unless the `command` tool option names another.
+/// Default language server executable when `options.command` is unset.
 pub const COMMAND: &str = "rust-analyzer";
 
-/// The language a document is opened as, when the tools send it its text.
+/// LSP `languageId` sent when syncing Rust documents.
 pub const LANGUAGE_ID: &str = "rust";
 
-/// The entry that marks a directory the server can load as a workspace.
+/// Workspace root marker file (`Cargo.toml`).
 pub const ROOT: Marker = CARGO_MANIFEST;
 
-/// rust-analyzer runs build scripts and proc macros while it loads the
-/// workspace, and builds them into the target directory: everything cargo's
-/// compiling commands need.
+/// Access capabilities required to run `rust-analyzer`, which compiles and
+/// executes build scripts and proc macros in the target directory during
+/// workspace loading.
 pub const CAPABILITIES: &[Capability] = &[
     Capability::Read,
     Capability::Create,
@@ -34,28 +32,26 @@ pub const CAPABILITIES: &[Capability] = &[
     Capability::Execute,
 ];
 
-/// The most results the server's symbol search returns.
+/// Maximum results requested from `workspace/symbol`.
 ///
-/// The search matches fuzzily and is searched for a name's last segment alone,
-/// so a common name like `iter` returns thousands of results, few of them named
-/// exactly `iter`.
-/// On this workspace `iter` returns about 5,000 in under a second.
+/// Because `workspace/symbol` performs a fuzzy search on the final identifier
+/// segment, a short name like `iter` can return thousands of fuzzy hits before
+/// exact matches are filtered.
 pub const SYMBOL_LIMIT: usize = 100_000;
 
-/// What separates the segments of a path: `Stream::iter`.
 pub const PATH_SEPARATOR: &str = "::";
 
-/// The settings rust-analyzer starts with, sent as `initializationOptions`.
-///
-/// The `settings` tool option is merged over these.
+/// Default `initializationOptions` sent to `rust-analyzer`, before merging the
+/// tool's `settings` option.
 #[must_use]
 pub fn settings() -> Value {
     json!({
-        // A check would run `cargo check` behind the call and contend with
-        // `cargo_check` for the build lock.
+        // Disable flycheck so `rust-analyzer` does not run `cargo check` in the
+        // background and contend with the `cargo_check` tool for the Cargo
+        // build lock.
         "checkOnSave": false,
-        // An import is not a use: it says where a name comes from, and a
-        // widely used type is imported in nearly every file.
+        // Exclude `use` imports from reference counts so widely imported types
+        // only report actual usage sites.
         "references": { "excludeImports": true },
         "workspace": { "symbol": { "search": { "kind": "all_symbols", "limit": SYMBOL_LIMIT } } },
         "hover": {
@@ -67,35 +63,37 @@ pub fn settings() -> Value {
     })
 }
 
-/// The client capabilities outside the standard that the tools rely on.
+/// Non-standard client capabilities advertised in `initialize`.
 #[must_use]
 pub fn experimental_capabilities() -> Value {
     json!({ "serverStatusNotification": true })
 }
 
-/// How rust-analyzer reports that it has loaded and indexed the workspace.
+/// Readiness signal based on `rust-analyzer`'s `experimental/serverStatus`
+/// notification.
 pub const READY: ReadySignal = ReadySignal {
     method: "experimental/serverStatus",
     ready: server_status,
 };
 
-/// The progress rust-analyzer reports through `experimental/serverStatus`.
+/// Payload of the `experimental/serverStatus` notification.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct ServerStatus {
-    /// `ok`, `warning`, or `error`.
+    /// Server health: `"ok"`, `"warning"`, or `"error"`.
     health: String,
 
-    /// Whether the server has finished loading and indexing the workspace.
+    /// Whether workspace loading and initial indexing have completed.
     quiescent: bool,
 
     #[serde(default)]
     message: Option<String>,
 }
 
-/// Whether a status notification says the workspace is loaded.
+/// Evaluate a `ServerStatus` notification for [`READY`].
 ///
-/// A server that is done but in `error` health, such as rust-analyzer after
-/// `cargo metadata` failed, is not ready: its answers would be incomplete.
+/// Returns `Some(Err(...))` when `quiescent` is true but `health` is `"error"`
+/// (for example, when `cargo metadata` fails), since queries against a broken
+/// workspace return incomplete results.
 fn server_status(params: &Value) -> Option<Result<(), String>> {
     let status = serde_json::from_value::<ServerStatus>(params.clone()).ok()?;
     if !status.quiescent {
@@ -109,10 +107,10 @@ fn server_status(params: &Value) -> Option<Result<(), String>> {
     })
 }
 
-/// The trait and self type an `impl` symbol names.
+/// Parse an `impl` symbol name into `(trait_name, self_type)`.
 ///
-/// `impl Render for Stream` gives `(Some("Render"), "Stream")` and `impl<T>
-/// Stream<T>` gives `(None, "Stream<T>")`.
+/// Returns `Some((Some("Render"), "Stream"))` for `"impl Render for Stream"`
+/// and `Some((None, "Stream<T>"))` for `"impl<T> Stream<T>"`.
 #[must_use]
 pub fn impl_parts(name: &str) -> Option<(Option<&str>, &str)> {
     let rest = skip_generics(name.strip_prefix("impl")?.trim_start()).trim();
@@ -123,14 +121,13 @@ pub fn impl_parts(name: &str) -> Option<(Option<&str>, &str)> {
     })
 }
 
-/// The path segment that names a trait impl's items at a call site: `<Stream as
-/// Render>`.
+/// Format a qualified trait-impl path segment (`<SelfType as Trait>`).
 #[must_use]
 pub fn impl_segment(trait_: &str, self_ty: &str) -> String {
     format!("<{self_ty} as {trait_}>")
 }
 
-/// `s` without a leading `<...>` parameter list.
+/// Strip a leading `<...>` generic parameter list from `s`.
 fn skip_generics(s: &str) -> &str {
     if !s.starts_with('<') {
         return s;
@@ -153,7 +150,7 @@ fn skip_generics(s: &str) -> &str {
     s
 }
 
-/// Split `s` at the first `separator` outside angle brackets.
+/// Split `s` at the first occurrence of `separator` outside angle brackets.
 fn split_top_level<'a>(s: &'a str, separator: &str) -> Option<(&'a str, &'a str)> {
     let mut depth = 0usize;
     for (at, c) in s.char_indices() {
@@ -170,7 +167,8 @@ fn split_top_level<'a>(s: &'a str, separator: &str) -> Option<(&'a str, &'a str)
     None
 }
 
-/// The name a type is written with: `Stream` for `&mut crate::Stream<T>`.
+/// Extract the base type identifier from a type expression (e.g. `"Stream"`
+/// from `"&mut crate::Stream<T>"`).
 #[must_use]
 pub fn base_ident(ty: &str) -> &str {
     let ty = ty.trim_start_matches('&').trim_start();
@@ -181,15 +179,14 @@ pub fn base_ident(ty: &str) -> &str {
     ty.rsplit(PATH_SEPARATOR).next().unwrap_or(ty).trim()
 }
 
-/// Whether a module of this name holds test code: `tests` or `test`.
 #[must_use]
 pub fn is_test_module(name: &str) -> bool {
     matches!(name, "tests" | "test")
 }
 
-/// Whether a workspace-relative path holds test code by its name alone: a
-/// `tests` or `benches` directory, or a file named `tests.rs`, `test.rs`, or
-/// `*_tests.rs`.
+/// Return whether a workspace-relative path is a test or benchmark file by
+/// naming convention (`tests/`, `benches/`, `test.rs`, `tests.rs`, `*_test.rs`,
+/// or `*_tests.rs`).
 #[must_use]
 pub fn is_test_path(path: &str) -> bool {
     let mut components = path.split('/').collect::<Vec<_>>();
@@ -204,10 +201,8 @@ pub fn is_test_path(path: &str) -> bool {
         || stem.ends_with("_test")
 }
 
-/// Whether a line, already trimmed at the start, comes before an item's code: a
-/// doc comment or an attribute.
-///
-/// rust-analyzer's item range starts at the item's doc comment.
+/// Return whether a leading-trimmed source line is an outer/inner doc comment
+/// or attribute preceding an item's declaration.
 #[must_use]
 pub fn is_preamble(line: &str) -> bool {
     line.starts_with("///")
@@ -216,30 +211,29 @@ pub fn is_preamble(line: &str) -> bool {
         || line.starts_with("#![")
 }
 
-/// The text of an outer doc comment line, already trimmed at the start: `A
-/// stream.` for `/// A stream.`.
+/// Strip the `///` prefix from a leading-trimmed outer doc comment line.
 #[must_use]
 pub fn doc_text(line: &str) -> Option<&str> {
     let text = line.strip_prefix("///")?;
     Some(text.strip_prefix(' ').unwrap_or(text).trim_end())
 }
 
-/// The parts of a hover that the header shows.
+/// Extracted header fields from a `rust-analyzer` hover response.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HoverParts {
-    /// The path of the enclosing module or type: `fixture::stream::Stream`.
+    /// Enclosing module or type path (e.g. `fixture::stream::Stream`).
     pub container: Option<String>,
     pub signature: Vec<String>,
 }
 
-/// Read the container path and signature from a hover, at most `max` signature
-/// lines.
+/// Parse the container path and item signature (truncated to `max` lines) from
+/// a `rust-analyzer` hover markdown string.
 ///
-/// rust-analyzer writes the container and the signature as two fenced code
-/// blocks before the first `---` rule.
-/// The sections after the rule (doc comment, dyn-compatibility, memory layout)
-/// vary by item kind and are not read; the header takes the doc comment from
-/// the source instead.
+/// `rust-analyzer` formats the container path and item signature as up to two
+/// fenced code blocks before the first `---` horizontal rule.
+/// Everything after the rule (doc comments, dyn-compatibility notes, memory
+/// layout) is ignored; doc comments are read directly from the source file
+/// instead.
 #[must_use]
 pub fn parse_hover(markdown: &str, max: usize) -> HoverParts {
     let mut blocks: Vec<Vec<String>> = vec![];

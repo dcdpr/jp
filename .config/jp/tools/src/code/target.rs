@@ -1,23 +1,20 @@
-//! Reading a target's `name`, and finding it on a line or among the symbols the
-//! server returned.
+//! Parsing target symbol names and matching them against source lines and
+//! workspace symbols.
 
 use super::{protocol::SymbolInformation, rust_analyzer::PATH_SEPARATOR};
 
-/// A symbol name as the assistant writes it: `iter`, `Stream::iter`, or
-/// `stream::Stream`.
+/// A parsed symbol name such as `iter`, `Stream::iter`, or `stream::Stream`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Name {
-    /// The leading segments, outermost first.
+    /// Leading path segments, outermost first.
     pub qualifier: Vec<String>,
 
-    /// The last segment.
+    /// Final identifier segment.
     pub ident: String,
 }
 
 impl Name {
-    /// Parse a possibly qualified name.
-    ///
-    /// A trailing `()` is dropped, so `Stream::iter()` names the method.
+    /// Parse a potentially qualified symbol name, stripping any trailing `()`.
     pub fn parse(raw: &str) -> Result<Self, String> {
         let trimmed = raw.trim().trim_end_matches("()");
         let mut segments = trimmed
@@ -45,14 +42,14 @@ impl Name {
         })
     }
 
-    /// The last segment without a raw identifier's `r#`, as the server's symbol
-    /// search reports names.
+    /// Return `ident` without a leading `r#` raw-identifier prefix, matching
+    /// how `workspace/symbol` indexes identifiers.
     #[must_use]
     pub fn bare_ident(&self) -> &str {
         self.ident.strip_prefix("r#").unwrap_or(&self.ident)
     }
 
-    /// The name as written, qualifier included.
+    /// Reconstruct the `::`-joined name from `qualifier` and `ident`.
     #[must_use]
     pub fn query(&self) -> String {
         self.qualifier
@@ -63,7 +60,7 @@ impl Name {
             .join(PATH_SEPARATOR)
     }
 
-    /// The name without its last segment, if it has a qualifier.
+    /// Return the qualifier as its own [`Name`], or `None` if unqualified.
     #[must_use]
     pub fn parent(&self) -> Option<Self> {
         let (ident, qualifier) = self.qualifier.split_last()?;
@@ -79,7 +76,8 @@ fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// The byte offsets where `ident` appears in `line` as a whole word.
+/// Return the starting byte offsets of whole-word occurrences of `ident` in
+/// `line`.
 #[must_use]
 pub fn occurrences(line: &str, ident: &str) -> Vec<usize> {
     line.match_indices(ident)
@@ -93,11 +91,10 @@ pub fn occurrences(line: &str, ident: &str) -> Vec<usize> {
         .collect()
 }
 
-/// The byte offset of the occurrence of `ident` on `line` that the target
-/// names.
+/// Return the byte offset of the requested 1-based `occurrence` of `ident` in
+/// `line`.
 ///
-/// `occurrence` counts from 1, and is only needed when `ident` appears more
-/// than once.
+/// `occurrence` may be `None` only when `ident` appears exactly once on `line`.
 pub fn pick(line: &str, ident: &str, occurrence: Option<usize>) -> Result<usize, String> {
     let found = occurrences(line, ident);
 
@@ -119,13 +116,13 @@ pub fn pick(line: &str, ident: &str, occurrence: Option<usize>) -> Result<usize,
     }
 }
 
-/// Whether `qualifier` fits where a symbol sits.
+/// Return whether `qualifier` matches a symbol's workspace-relative `path` and
+/// `container` name.
 ///
-/// The qualifier's segments must appear, in order, among the components of the
-/// symbol's workspace-relative `path` (without the `.rs`) followed by the names
-/// in its `container`, the type or trait it is defined on.
-/// `Stream::iter` fits a method on `Stream<T>`, and
-/// `jp_conversation::ConversationStream` fits a struct in
+/// Each segment of `qualifier` must appear in order among the `/` components of
+/// `path` (without `.rs`) followed by the identifier tokens of `container`.
+/// For example, `Stream::iter` matches a method on `Stream<T>`, and
+/// `jp_conversation::ConversationStream` matches a struct in
 /// `crates/jp_conversation/src/stream.rs`.
 #[must_use]
 pub fn qualifier_fits(qualifier: &[String], path: &str, container: Option<&str>) -> bool {
@@ -144,10 +141,10 @@ pub fn qualifier_fits(qualifier: &[String], path: &str, container: Option<&str>)
         .all(|wanted| scope.any(|segment| segment == wanted))
 }
 
-/// The symbols named exactly `ident`, once per location.
+/// Filter `symbols` to exact matches for `ident` and deduplicate by location.
 ///
-/// The server's search is fuzzy and case-insensitive, so `iter` also returns
-/// `iter_turns` and `Iter`.
+/// `workspace/symbol` is fuzzy and case-insensitive, so querying `iter` also
+/// returns symbols like `iter_turns` and `Iter`.
 #[must_use]
 pub fn exact(symbols: Vec<SymbolInformation>, ident: &str) -> Vec<SymbolInformation> {
     let mut found: Vec<SymbolInformation> = vec![];

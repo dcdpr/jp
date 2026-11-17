@@ -23,19 +23,19 @@ TypeScript in this repository as well as the Rust.
 ## Scope
 
 - [ ] A search tool: pattern, language, `paths`, and `context`, with matches
-      printed in the shape `fs_grep_files` uses.
-- [ ] A rewrite tool: pattern and replacement, applied through the path
-      `fs_modify_file` uses (`access` check, dirty-file question,
+      formatted like `fs_grep_files`.
+- [ ] A rewrite tool: pattern and replacement, applied through the same write
+      pipeline as `fs_modify_file` (`access` check, dirty-file prompt,
       `apply_changes`).
 - [ ] Config under `.jp/mcp/tools/` and a skill file that enables both for the
       dev persona.
 
 ## Not in scope
 
-These tools match syntax, not symbols: `$X.iter()` matches every `iter` on every
-type.
-"What refers to this symbol" and "rename this symbol" need a language server,
-and are being designed separately.
+These tools match syntax, not symbols: `$X.iter()` matches every `.iter()` call
+regardless of receiver type.
+Semantic symbol lookup and renaming require a language server (`code_symbol` and
+`code_rename`).
 
 ## To decide while implementing
 
