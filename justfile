@@ -16,22 +16,6 @@ vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
-# Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
-# docs infrastructure, command plugins, and the macOS app's C interface
-# `jp_ffi`. Skipping them drops their dependencies from the build entirely,
-# rather than merely skipping their tests.
-#
-# A crate belongs here only if it is not the sole crate enabling some feature of
-# a shared dependency. Cargo builds each dependency once with the union of the
-# features asked for, so excluding such a crate changes that dependency's build,
-# and every crate above it, and the build stops matching the sccache entries a
-# full-workspace build writes on `main`. That is why `xct2cli` is absent: it is
-# the only crate that turns on serde's `rc` feature.
-#
-# `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
-# it is compiled either way.
-non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude jp_ffi --exclude json_edit --exclude tools"
-
 alias r := run
 alias i := install
 alias c := check
@@ -2363,22 +2347,20 @@ typecheck-js-ci: typecheck-js
 
 # Test the code on CI.
 #
-# `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
-# skips the crates listed in `non_jp_excludes`, and `packages` tests only the
-# crates named with `-p` in `ARGS`. An unrecognised scope tests the full
-# workspace. `ARGS` are passed on to `cargo nextest run`.
+# `SCOPE` selects the crates to test: `workspace` covers every member, and
+# `packages` tests only the crates named with `-p` in `ARGS`. An unrecognised
+# scope tests the full workspace. `ARGS` are passed on to `cargo nextest run`.
 [group('ci')]
 test-ci SCOPE="workspace" *ARGS: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
     # No target selection, matching `just test`; see the reasoning there.
-    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final {{ if SCOPE == "packages" { "--no-tests=warn" } else { "--workspace" } }} --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }} {{ARGS}}
+    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final {{ if SCOPE == "packages" { "--no-tests=warn" } else { "--workspace" } }} --no-fail-fast {{ARGS}}
 
 # Test the crates affected by changes since `BASE` on CI.
 #
-# Resolves affected crates via `affected-crates`, filters out `non_jp_excludes`,
-# and runs `test-ci packages` on the remaining crates. When `affected-crates`
-# returns `all`, falls back to `test-ci jp-only`. If no non-excluded crates are
-# affected, exits without running nextest. `ARGS` are passed on to
-# `cargo nextest run`.
+# Resolves affected crates via `affected-crates` and runs `test-ci packages` on
+# them. When `affected-crates` returns `all`, tests the full workspace, as
+# `main` does. If no crates are affected, exits without running nextest. `ARGS`
+# are passed on to `cargo nextest run`.
 [group('ci')]
 [script("bash")]
 test-affected-ci BASE *ARGS:
@@ -2386,21 +2368,19 @@ test-affected-ci BASE *ARGS:
 
     crates=$(just affected-crates "{{BASE}}")
     if [ "$crates" = all ]; then
-        echo "Global build inputs changed; testing all jp-only crates."
-        exec just test-ci jp-only {{ARGS}}
+        echo "Global build inputs changed; testing the full workspace."
+        exec just test-ci workspace {{ARGS}}
     fi
 
-    excluded=" {{non_jp_excludes}} "
     selection=()
     names=()
     for crate in $crates; do
-        case "$excluded" in *" $crate "*) continue ;; esac
         selection+=(-p "$crate")
         names+=("$crate")
     done
 
     if [ ${#selection[@]} -eq 0 ]; then
-        echo "No non-excluded crates affected; skipping tests."
+        echo "No crates affected; skipping tests."
         exit 0
     fi
 
