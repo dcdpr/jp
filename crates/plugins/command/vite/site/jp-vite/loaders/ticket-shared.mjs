@@ -357,16 +357,34 @@ function unfenced(lines) {
 // through it.
 export function readChecklist(content) {
     const lines = content.split('\n')
-    const end = unfenced(lines).find(i => opensComment(lines, i)) ?? lines.length
-    const items = checklistItems(lines.slice(0, end).join('\n'))
+    const items = checklistItems(lines.slice(0, descriptionEnd(lines)).join('\n'))
     if (items.length === 0) return null
 
     return { checked: items.filter(item => item.checked).length, count: items.length }
 }
 
+// Return the line index where the ticket's first comment starts, or
+// `lines.length` if there are no comments. Everything before this index
+// belongs to the title, metadata, and description.
+export function descriptionEnd(lines) {
+    return unfenced(lines).find(i => opensComment(lines, i)) ?? lines.length
+}
+
 // A list item opening with a checkbox: indentation, a bullet or up to nine
 // digits and `.` or `)`, whitespace, `[ ]` or `[x]`, whitespace, and text.
 const CHECKLIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[([ xX])\][ \t]+(\S.*)$/
+
+// Parse `line` as a checklist item (`{ checked, text }`), or return `null` if
+// it is not one. `text` is the trimmed content after the checkbox, which
+// `jp ticket edit --check` uses to match the item.
+export function checklistItem(line) {
+    // Strip trailing whitespace first so a `\r` from CRLF line endings is not
+    // matched as item text.
+    const match = line.trimEnd().match(CHECKLIST_ITEM)
+    if (!match) return null
+
+    return { checked: match[1] !== ' ', text: match[2].trim() }
+}
 
 // The checklist items in `text`, as `{ checked, text }`, outside fenced code
 // blocks.
@@ -377,11 +395,8 @@ export function checklistItems(text) {
     const lines = text.split('\n')
 
     return unfenced(lines).flatMap((i) => {
-        // Trimmed first, so a `\r` left by CRLF line endings isn't the text.
-        const match = lines[i].trimEnd().match(CHECKLIST_ITEM)
-        if (!match) return []
-
-        return [{ checked: match[1] !== ' ', text: match[2].trim() }]
+        const item = checklistItem(lines[i])
+        return item ? [item] : []
     })
 }
 
