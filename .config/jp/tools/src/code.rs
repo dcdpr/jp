@@ -1558,7 +1558,12 @@ impl<'a> Session<'a> {
             );
             tally(&mut hits, &groups);
 
-            if !filters.is_empty() && !filters.iter().any(|filter| file.starts_with(filter)) {
+            if !filters.is_empty()
+                && !filters.iter().any(|filter| {
+                    self.relative(filter)
+                        .is_some_and(|filter| Utf8Path::new(&path).starts_with(filter))
+                })
+            {
                 continue;
             }
 
@@ -1761,10 +1766,7 @@ impl<'a> Session<'a> {
     /// Strip the workspace root from `file`, returning `None` if it is outside
     /// the workspace.
     fn relative(&self, file: &Utf8Path) -> Option<String> {
-        file.strip_prefix(self.root)
-            .or_else(|_| file.strip_prefix(&self.canonical_root))
-            .ok()
-            .map(|path| path.as_str().to_owned())
+        relative_to(file, self.root).or_else(|| relative_to(file, &self.canonical_root))
     }
 
     /// Format `file` and zero-based `line` as `path:line` with a 1-based line
@@ -2075,6 +2077,34 @@ fn uri(file: &Utf8Path) -> Result<String, String> {
     Url::from_file_path(file)
         .map(String::from)
         .map_err(|()| format!("`{file}` is not an absolute path."))
+}
+
+/// Return `file` relative to `root` with `/` separators, or `None` if `file` is
+/// outside `root`.
+///
+/// On Windows, `canonicalize` returns a verbatim root such as `\\?\C:\work`,
+/// while `rust-analyzer` reports file paths such as `c:\work\...`.
+/// Stripping the `\\?\` drive prefix from both paths lets `strip_prefix` match
+/// them (drive-letter case is already ignored by path comparison).
+fn relative_to(file: &Utf8Path, root: &Utf8Path) -> Option<String> {
+    let rest = without_verbatim_prefix(file)
+        .strip_prefix(without_verbatim_prefix(root))
+        .ok()?;
+
+    Some(
+        rest.components()
+            .map(|component| component.as_str())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+/// Strip a leading Windows verbatim drive prefix (`\\?\C:...`) from `path`.
+fn without_verbatim_prefix(path: &Utf8Path) -> &Utf8Path {
+    match path.as_str().strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => Utf8Path::new(rest),
+        _ => path,
+    }
 }
 
 fn file_path(uri: &Url) -> Result<Utf8PathBuf, String> {

@@ -67,8 +67,12 @@ jobs:
           # without it still gets built, but must not reach the checksums
           # file: `build-registry` rejects a checksum whose id has no
           # registry entry.
+          #
+          # `jq.exe` on Windows ends lines with CRLF, and word splitting
+          # keeps the `\r` on each id.
           ids=$(cargo metadata --no-deps --format-version=1 \
-            | jq -r '.packages[] | select(.metadata["jp-registry"]) | .metadata["jp-registry"].id')
+            | jq -r '.packages[] | select(.metadata["jp-registry"]) | .metadata["jp-registry"].id' \
+            | tr -d '\r')
 
           for id in $ids; do
             bin="target/${{ matrix.target }}/release/jp-${id}"
