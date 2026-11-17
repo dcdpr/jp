@@ -28,14 +28,14 @@ fn test_parallel_runs_its_items_at_the_same_time() {
         let now = running.fetch_add(1, Ordering::SeqCst) + 1;
         peak.fetch_max(now, Ordering::SeqCst);
 
-        // Wait for the other three to start; one after another, they never do.
+        // Wait for all four workers to enter the closure concurrently.
         let deadline = Instant::now() + Duration::from_secs(5);
         while running.load(Ordering::SeqCst) < 4 && Instant::now() < deadline {
             thread::yield_now();
         }
         peak.fetch_max(running.load(Ordering::SeqCst), Ordering::SeqCst);
 
-        // Stay counted until all four have looked, then leave.
+        // Hold until all four workers have observed the peak concurrency.
         while peak.load(Ordering::SeqCst) < 4 && Instant::now() < deadline {
             thread::yield_now();
         }

@@ -33,8 +33,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use self::github::QueueControl;
 use crate::{app::Update, model::BaseUpdate};
 
-/// How long after the merge queue changes something the GitHub source polls
-/// again.
+/// Delay before re-polling GitHub after the merge queue mutates remote state.
 const SOON: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
@@ -85,8 +84,7 @@ impl Refresher {
         }
     }
 
-    /// Poll GitHub now, without reloading every review thread the way an
-    /// explicit refresh does.
+    /// Wake the GitHub source without forcing a full review-thread refresh.
     pub fn refresh_pull_requests(&self) {
         let _gone = self.github.send(false);
     }
@@ -155,8 +153,7 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>, control: Arc<QueueControl
     }
 }
 
-/// Poke the source behind `poke` after [`SOON`], without it counting as an
-/// explicit refresh.
+/// Schedule a non-forced poll on `poke` after [`SOON`].
 fn poll_soon(poke: &Arc<OnceLock<Sender<bool>>>) {
     let Some(poke) = poke.get().cloned() else {
         return;
@@ -167,10 +164,9 @@ fn poll_soon(poke: &Arc<OnceLock<Sender<bool>>>) {
     });
 }
 
-/// Show `message` as a macOS notification, ignoring any failure.
+/// Display `message` as a macOS desktop notification, ignoring any failure.
 fn notify(message: &str) {
-    // The message goes in as an argument rather than into the script, so no
-    // character in it can change what the script does.
+    // Pass `message` via `argv` rather than interpolating it into the script.
     let _unshown = Command::new("osascript")
         .args([
             "-e",
@@ -218,8 +214,8 @@ where
     poke
 }
 
-/// Run `work` on every item of `items`, on up to `workers` threads at once, and
-/// return the results in the order of `items`.
+/// Apply `work` to every item in `items` across at most `workers` concurrent
+/// threads, returning results in input order.
 fn parallel<T, R, F>(items: &[T], workers: usize, work: F) -> Vec<R>
 where
     T: Sync,

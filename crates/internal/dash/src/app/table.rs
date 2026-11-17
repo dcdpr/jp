@@ -215,8 +215,8 @@ pub enum Sort {
     /// Failing checks first, then running, then passing.
     Checks,
 
-    /// Pull requests in the merge queue in the order they merge, then the
-    /// labeled ones held back, then the rest.
+    /// Queued pull requests in merge order, then held-back labeled pull
+    /// requests, then the rest.
     Queue,
 }
 
@@ -543,9 +543,9 @@ fn sort(rows: &mut [&Row], by: Sort) {
     }
 }
 
-/// Rank a row for [`Sort::Queue`]: the front, then entries in line by position,
-/// then entries held back, then everything else; within an entry, bottom of the
-/// stack first.
+/// Rank a row for [`Sort::Queue`]: the front entry first, then waiting entries
+/// by position, then held-back entries, then unqueued rows (ordered from bottom
+/// to top within a stack).
 fn queue_rank(row: &Row) -> (u8, usize, usize) {
     let Some(pr) = &row.pr else {
         return (2, 0, 0);

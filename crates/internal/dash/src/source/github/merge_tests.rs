@@ -141,7 +141,7 @@ fn test_only_one_driver_holds_the_queue_lock() {
     assert!(first.acquire_at(&path));
     assert!(!second.acquire_at(&path));
 
-    // Another process takes over once the first lets go.
+    // Releasing the lock lets the second driver acquire it.
     drop(first);
     assert!(second.acquire_at(&path));
 }

@@ -1,7 +1,8 @@
-//! `dash`: a live terminal dashboard of the repository's worktrees, showing
-//! open terminals, running `jp` processes, pull requests, CI status, and review
-//! threads, and a merge queue for the pull requests carrying the queue label
-//! (see `queue` and `source::github::merge`).
+//! `dash`: a live terminal dashboard of the repository's worktrees.
+//!
+//! Displays open terminals, running `jp` processes, pull requests, CI status,
+//! and review threads, and runs a merge queue for pull requests carrying the
+//! queue label (see `queue` and `source::github::merge`).
 //!
 //! Run it from any worktree of the repository with `just dash`.
 //! The sources are read on background threads (see `source`); the main thread
@@ -277,13 +278,12 @@ fn carry_out(
             }
         }
         Action::Queue { number, add } => {
-            // Putting a pull request back in the queue by hand lifts the hold
-            // the queue placed on it.
+            // Re-enqueuing a pull request clears any hold placed on its entry.
             if add {
                 control.clear(number);
             }
-            // The editor applies edits in the order pressed; it outlives the
-            // event loop, so a failed send can't happen while `dash` runs.
+            // The editor applies label changes sequentially and outlives the
+            // event loop.
             let _gone = labels.send((number, add));
         }
     }

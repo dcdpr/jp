@@ -1,7 +1,6 @@
 use super::*;
 use crate::model::{Checks, StackPlace};
 
-/// Pull request `number` at `position` in stack 1, of `size` pull requests.
 fn stacked(number: u64, position: usize, size: usize, labeled: bool) -> PullRequest {
     PullRequest {
         labeled,

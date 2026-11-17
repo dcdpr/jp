@@ -156,7 +156,7 @@ pub fn update_branch(dir: &Utf8Path, branch: &str) -> Result<bool, Error> {
 
 /// Read the git config value `key` for the repository containing `dir`.
 ///
-/// `None` when the key is unset or empty, or `git` fails.
+/// Returns `None` when the key is unset, empty, or `git config` fails.
 #[must_use]
 pub fn config(dir: &Utf8Path, key: &str) -> Option<String> {
     git(dir, &["config", "--get", key])
@@ -180,8 +180,8 @@ pub fn add_branch(dir: &Utf8Path, path: &Utf8Path, branch: &str, from: &str) -> 
     git(dir, &["worktree", "add", "-b", branch, path.as_str(), from]).map(drop)
 }
 
-/// The remote of the repository containing `dir` that points at GitHub
-/// repository `repo` (`owner/name`), if any.
+/// Return the name of the remote in `dir` pointing at GitHub repository `repo`
+/// (`owner/name`), if any.
 #[must_use]
 pub fn remote_for(dir: &Utf8Path, repo: &str) -> Option<String> {
     let remotes = git(dir, &["remote"]).ok()?;
@@ -196,7 +196,8 @@ pub fn remote_for(dir: &Utf8Path, repo: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Whether remote `url` (HTTPS or SSH) names GitHub repository `repo`.
+/// Return `true` if remote `url` (HTTPS or SSH) points to GitHub repository
+/// `repo`.
 fn points_at(url: &str, repo: &str) -> bool {
     let url = url.to_lowercase();
     let url = url.trim_end_matches('/');
@@ -206,37 +207,39 @@ fn points_at(url: &str, repo: &str) -> bool {
         .is_some_and(|rest| rest.ends_with('/') || rest.ends_with(':'))
 }
 
-/// How [`rebase_stack`] ended.
+/// Outcome of [`rebase_stack`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum Rebased {
-    /// The stack was rebased and pushed.
+    /// All branches in the stack were rebased and pushed.
     Pushed,
 
-    /// A branch moved since GitHub reported it; nothing was pushed.
+    /// A branch ref advanced from its expected SHA; nothing was pushed.
     Moved,
 
-    /// A commit didn't apply; nothing was pushed.
+    /// Rebase stopped on merge conflicts; nothing was pushed.
     Conflicts,
 
-    /// Nothing was pushed, for this reason.
+    /// Rebase or push failed with this reason; nothing was pushed.
     Refused(String),
 }
 
-/// Rebase a stack of branches onto `base` and force-push them to `remote`.
+/// Rebase a stack of branches onto `base` and atomically force-push them to
+/// `remote`.
 ///
-/// `branches` are the stack's branches with the head commit each is expected
-/// at, bottom first.
-/// `below` is the head commit of the pull request below the bottom one, which
-/// may have merged already: when the bottom branch builds on it, only the
-/// commits above it move.
+/// `branches` lists `(branch_name, expected_head_sha)` pairs from the bottom of
+/// the stack to the top.
+/// `below` is the head commit SHA of the pull request directly below the bottom
+/// branch, if one existed and has already merged; when `below` is an ancestor
+/// of the bottom branch, only commits after `below` are replayed onto `base`.
 ///
-/// The rebase runs in a temporary worktree with git hooks and commit signing
-/// off.
-/// Every branch is pushed in one atomic push, each with a lease on its expected
-/// head commit, so a branch someone pushed to in the meantime fails the whole
-/// push.
+/// The rebase runs in a temporary detached worktree with hooks and commit
+/// signing disabled.
+/// All branches are pushed in a single `git push --atomic` call with
+/// `--force-with-lease` pinned to each branch's expected SHA, so a concurrent
+/// push to any branch rejects the entire push.
 ///
-/// Fails only when fetching fails, which is worth retrying.
+/// Returns `Err` only when `git fetch` fails, so the caller can retry on the
+/// next poll.
 pub fn rebase_stack(
     dir: &Utf8Path,
     remote: &str,
@@ -287,8 +290,9 @@ pub fn rebase_stack(
     }
 
     let replayed = replay(dir, &worktree, &tip, branches, below);
-    // A worktree that won't go away only leaves a record `git worktree prune`
-    // clears; its directory goes with `scratch`.
+    // If removing the worktree metadata fails, `scratch` still deletes the
+    // directory and a later `git worktree prune` cleans up the administrative
+    // entry.
     let _kept = remove_worktree(dir, &worktree);
 
     let push = match replayed {
@@ -304,8 +308,9 @@ pub fn rebase_stack(
     })
 }
 
-/// Rebase each of `branches` in `worktree` onto the one below it, the bottom
-/// one onto `tip`, and return the arguments that push the results.
+/// Replay each branch in `branches` onto the rebased tip of the branch below it
+/// (starting from `tip`), and return the `--force-with-lease` refspecs for `git
+/// push`.
 fn replay(
     dir: &Utf8Path,
     worktree: &Utf8Path,
@@ -341,7 +346,7 @@ fn replay(
                 "commit.gpgSign=false",
                 "rebase",
                 "--quiet",
-                // Moving other local branches would touch the user's worktrees.
+                // Do not move local branch refs checked out in user worktrees.
                 "--no-update-refs",
                 "--no-autosquash",
                 "--onto",

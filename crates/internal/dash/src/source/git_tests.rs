@@ -5,8 +5,6 @@ use camino_tempfile::Utf8TempDir;
 
 use super::*;
 
-/// Run `git` in `dir` with hooks and signing off, and return its trimmed
-/// stdout.
 fn run(dir: &Utf8Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
@@ -28,7 +26,6 @@ fn run(dir: &Utf8Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
-/// Write `text` to `file` in `work` and commit it, returning the commit.
 fn commit(work: &Utf8Path, file: &str, text: &str) -> String {
     fs::write(work.join(file), text).unwrap();
     run(work, &["add", file]);
@@ -36,9 +33,9 @@ fn commit(work: &Utf8Path, file: &str, text: &str) -> String {
     run(work, &["rev-parse", "HEAD"])
 }
 
-/// A bare `origin` and a clone with `main`, plus a stack `b1` (on `main`) and
-/// `b2` (on `b1`), all pushed; returns the clone's and the remote's paths and
-/// the stack's head commits.
+/// Initialize a bare `origin` remote and a `work` clone with `main` and a
+/// two-branch stack (`b1` on `main`, `b2` on `b1`), returning `(work, remote,
+/// b1_sha, b2_sha)`.
 fn stack(tmp: &Utf8TempDir, b1_text: &str) -> (Utf8PathBuf, Utf8PathBuf, String, String) {
     let remote = tmp.path().join("origin.git");
     let work = tmp.path().join("work");

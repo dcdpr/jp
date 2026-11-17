@@ -161,7 +161,7 @@ pub struct PullRequest {
     /// repository's default branch.
     pub head: String,
 
-    /// The head commit.
+    /// Head commit SHA.
     pub sha: String,
     pub draft: bool,
     pub checks: Checks,
@@ -175,47 +175,45 @@ pub struct PullRequest {
     /// Whether the pull request carries the merge-queue label.
     pub labeled: bool,
 
-    /// The branch it merges into, when that isn't the repository's default
-    /// branch: for a stacked pull request, the branch the whole stack merges
-    /// into.
+    /// Target base branch when it differs from the repository's default branch
+    /// (for a stacked pull request, the base branch of the stack as a whole).
     pub base: Option<String>,
 
-    /// Where it sits in a GitHub stack of pull requests, if it is in one.
+    /// Position in an open GitHub pull request stack, if part of one.
     pub stack: Option<StackPlace>,
 
-    /// The head branch on GitHub, when it lives in the repository itself;
-    /// `None` for a fork's branch, which the queue can't delete.
+    /// Head branch name on GitHub when the branch lives in the base repository,
+    /// or `None` for a fork branch (which the queue cannot delete).
     pub remote_branch: Option<String>,
 
-    /// GitHub's answer to whether it merges into its base without conflicts;
-    /// `None` while GitHub works it out, and for pull requests in no queue
-    /// entry, which aren't asked.
+    /// Whether GitHub reports that the pull request can merge cleanly, or
+    /// `None` while GitHub is computing mergeability (or for pull requests
+    /// outside the queue, which are not queried).
     pub mergeable: Option<bool>,
 
-    /// Where it stands in the merge queue, set by [`queue::assign`] and updated
-    /// by the queue's driver; `None` without the queue label.
+    /// State in the merge queue, set by [`queue::assign`] and updated by the
+    /// queue driver (`None` when not in a queue entry).
     ///
     /// [`queue::assign`]: crate::queue::assign
     pub queue: Option<QueueState>,
 }
 
-/// A pull request's place in a GitHub stack.
+/// Position of a pull request within an open GitHub stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StackPlace {
-    /// The stack's number.
     pub stack: u64,
 
-    /// Position in the stack, counting from 1 at the bottom.
+    /// 1-based position in the stack, from the bottom up.
     pub position: usize,
 
-    /// Number of pull requests in the stack.
+    /// Total number of pull requests in the stack.
     pub size: usize,
 
-    /// The pull request's branch on GitHub.
+    /// Head branch name on GitHub.
     pub branch: String,
 
-    /// Head commit of the pull request below it in the stack; `None` at the
-    /// bottom.
+    /// Head commit SHA of the pull request directly below this one in the
+    /// stack, or `None` for the bottom pull request.
     pub below: Option<String>,
 }
 

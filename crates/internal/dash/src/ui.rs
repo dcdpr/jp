@@ -484,8 +484,8 @@ fn header_line(app: &App) -> Line {
     line
 }
 
-/// Append the merge queue's state to the header: paused, how many pull requests
-/// are in line, and what is happening to the front one.
+/// Append the merge-queue summary to the header line: paused state, waiting
+/// entry count, and the active step for the front entry.
 fn queue_summary(app: &App, line: &mut Line) {
     if app.queue_paused {
         line.push(" · queue paused", fg(Color::Yellow));
@@ -562,7 +562,7 @@ fn cells(app: &App, row: &Row) -> [(String, Style); COLUMNS] {
         (None, Some(pr)) => pr_cells(pr),
     };
 
-    // A label edit shows before GitHub's next answer confirms it.
+    // Render optimistic label edits before the next GitHub poll confirms them.
     if let Some(add) = row
         .pr
         .as_ref()
@@ -633,10 +633,8 @@ fn pr_cells(pr: &PullRequest) -> [(String, Style); 4] {
     [number, checks(pr.checks), review, queue_cell(pr)]
 }
 
-/// Format a pull request's merge-queue state: its place in line, why it is held
-/// back, or nothing when it is in no queue entry.
-///
-/// A stacked pull request also shows its place in the stack.
+/// Format the `QUEUE` cell for `pr`, appending `<position>/<size>` when `pr`
+/// belongs to a stack.
 fn queue_cell(pr: &PullRequest) -> (String, Style) {
     let (state, style) = queue_state(pr.queue.as_ref());
     match &pr.stack {

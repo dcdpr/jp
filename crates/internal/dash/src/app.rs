@@ -43,11 +43,11 @@ pub enum Update {
     /// Result of fast-forwarding the local default branch.
     Base(Result<BaseUpdate, String>),
 
-    /// Which part this process plays in the merge queue.
+    /// Role of this process in the merge queue.
     Queue(QueueRole),
 
-    /// Result of adding the queue label to pull request `number` (or removing
-    /// it, when `add` is `false`).
+    /// Result of adding (`add: true`) or removing (`add: false`) the queue
+    /// label on pull request `number`.
     QueueEdited {
         number: u64,
         add: bool,
@@ -108,14 +108,14 @@ pub enum Action {
         command: String,
     },
 
-    /// Add pull request `number` to the merge queue, or take it out when `add`
-    /// is `false`.
+    /// Add (`add: true`) or remove (`add: false`) the queue label on pull
+    /// request `number`.
     Queue {
         number: u64,
         add: bool,
     },
 
-    /// Pause the merge queue in this process, or resume it.
+    /// Pause or resume the merge queue in this process.
     PauseQueue(bool),
 }
 
@@ -160,8 +160,8 @@ pub struct Feeds {
     pub prs: Feed<Vec<PullRequest>>,
     pub base: Feed<BaseUpdate>,
 
-    /// Which part this process plays in the merge queue, once the GitHub source
-    /// has polled.
+    /// Role of this process in the merge queue, populated after the first
+    /// GitHub poll.
     pub queue: Option<QueueRole>,
 }
 
@@ -224,8 +224,8 @@ pub struct App {
     /// Whether the merge queue is paused in this process.
     pub queue_paused: bool,
 
-    /// Queue label edits not yet seen in a pull request list: `true` to add the
-    /// label to that pull request, `false` to remove it.
+    /// Pending queue-label edits not yet reflected in the polled pull request
+    /// list, keyed by PR number (`true` for add, `false` for remove).
     pub queue_edits: HashMap<u64, bool>,
 
     /// Row and next tab index for cycling through tabs on repeated `Enter`
@@ -725,8 +725,7 @@ impl App {
         Action::None
     }
 
-    /// `m`: add the selected row's pull request to the merge queue, or take it
-    /// out if it is already in.
+    /// `m`: toggle the merge-queue label on the selected row's pull request.
     fn toggle_queue(&mut self) -> Action {
         let Some(item) = self.selected_item() else {
             return Action::None;
@@ -751,8 +750,8 @@ impl App {
         Action::Queue { number, add }
     }
 
-    /// Forget label edits the latest pull request list shows done, or whose
-    /// pull request closed.
+    /// Clear pending label edits that have taken effect in the latest pull
+    /// request list or whose pull request has closed.
     fn settle_queue_edits(&mut self) {
         let Some(prs) = &self.feeds.prs.data else {
             return;

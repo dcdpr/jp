@@ -1,32 +1,34 @@
-//! The merge-queue driver: moves the entry at the front of the queue toward a
-//! merge, one step per poll.
+//! Merge-queue driver that advances the front queue entry by one step per poll.
 //!
-//! Each poll it brings the front up to date with the default branch, waits for
-//! every member's checks and for GitHub's answer on whether they can merge,
-//! then merges, pinned to the head commits it checked:
+//! On each poll, the driver updates the front entry with the default branch,
+//! waits for all member checks to pass and for GitHub to report each member as
+//! mergeable, and then merges the entry pinned to its verified head commit
+//! SHAs:
 //!
-//! - A single pull request gets the default branch merged into it
-//!   (`update-branch`) and merges through `pulls/{n}/merge`.
+//! - A single pull request is updated via `PUT pulls/{n}/update-branch` and
+//!   merged via `PUT pulls/{n}/merge`.
 //! - A stack is rebased onto the default branch in a temporary worktree and
-//!   force-pushed with a lease ([`git::rebase_stack`]), on a thread of its own
-//!   so the poll that starts it, and the ones while it runs, still report the
-//!   pull requests; a later poll acts on how it ended.
-//!   It then merges through `pulls/{n}/merge-async` on its top pull request,
-//!   which GitHub requires for stacks.
-//!   GitHub finishes such a merge in the background, so the following polls
-//!   follow the request until it ends.
+//!   atomically force-pushed with a lease ([`git::rebase_stack`]) on a
+//!   background thread so polling continues while the rebase runs; the next
+//!   poll after completion handles the result.
+//!   Once up to date and green, the stack is merged via `PUT
+//!   pulls/{n}/merge-async` on its top pull request, which executes
+//!   asynchronously on GitHub and is polled on subsequent ticks until it
+//!   completes.
 //!
-//! Once merged, each member's branch is deleted on GitHub, unless the
-//! repository deletes merged branches itself, the branch lives in a fork, or
-//! another open pull request still builds on it.
+//! After a merge, each member's remote branch is deleted on GitHub unless the
+//! repository has `delete_branch_on_merge` enabled, the branch belongs to a
+//! fork, or another open pull request still builds on it.
 //!
-//! A conflict, or an update, rebase, or merge GitHub refuses, puts a [`Hold`]
-//! on the entry's head commits; a new push to any member, or putting a member
-//! back in the queue by hand ([`QueueControl::clear`]), lifts it.
+//! Merge conflicts or refused update/rebase/merge requests record a [`Hold`]
+//! against the entry's head commit signature; pushing a new commit to any
+//! member or re-queueing a member manually ([`QueueControl::clear`]) lifts the
+//! hold.
 //!
-//! Only one `dash` process per repository drives the queue: the first to take
-//! an exclusive lock on a file next to the repository's cache files.
-//! The others report [`QueueRole::Watching`] and retry the lock every poll.
+//! At most one `dash` process per repository drives the queue, coordinated via
+//! a non-blocking exclusive file lock in the cache directory.
+//! Other instances report [`QueueRole::Watching`] and retry the lock on every
+//! poll.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -52,23 +54,22 @@ use crate::{
     source::git::Rebased,
 };
 
-/// How long the front's head commits must go without any check before the queue
-/// assumes none are coming.
+/// Grace period with zero reported checks on the front entry's head commits
+/// before assuming no checks will run.
 const QUIET: Duration = Duration::from_mins(2);
 
-/// How long a stack merge GitHub accepted may stay unfinished before the queue
-/// asks again.
+/// Timeout for an in-flight `merge-async` request before re-submitting it.
 const MERGE_PATIENCE: Duration = Duration::from_mins(10);
 
-/// The git config key naming the merge method.
 const MERGE_METHOD_KEY: &str = "dash.queueMergeMethod";
 
-/// Queue settings shared between the UI and the GitHub source.
+/// Shared merge-queue control state between the UI thread and the GitHub
+/// source.
 #[derive(Debug, Default)]
 pub struct QueueControl {
     paused: AtomicBool,
 
-    /// Pull requests put back in the queue by hand since the last poll.
+    /// Pull request numbers manually re-queued since the last poll.
     cleared: Mutex<Vec<u64>>,
 }
 
@@ -96,16 +97,19 @@ impl QueueControl {
     }
 }
 
-/// Result of one GitHub poll.
+/// Result of a single GitHub poll and merge-queue step.
 #[derive(Debug)]
 pub struct Poll {
     pub prs: Result<Vec<PullRequest>, Error>,
     pub role: QueueRole,
 
-    /// What the queue did or ran into, each reported once.
+    /// Deduplicated queue events emitted during this poll.
     pub events: Vec<Event>,
 
-    /// Whether the queue changed something, so the next poll should come soon.
+    /// Whether the queue mutated remote state or has an operation in flight,
+    /// signaling that the source should re-poll after [`SOON`].
+    ///
+    /// [`SOON`]: crate::source::SOON
     pub changed: bool,
 }
 
@@ -120,46 +124,40 @@ impl Default for Poll {
     }
 }
 
-/// Something the queue did or ran into.
+/// Status event emitted by the merge queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     pub message: String,
 
-    /// Whether it deserves a desktop notification: a merge, or an entry
-    /// dropping out of the queue.
+    /// Whether to send a desktop notification (used for completed merges and
+    /// entries held back for failures or conflicts).
     pub notify: bool,
 }
 
-/// A stack merge GitHub accepted but hasn't finished.
+/// In-flight `merge-async` request accepted by GitHub.
 #[derive(Debug)]
 struct Merging {
-    /// The [`signature`] of the entry being merged.
-    ///
-    /// [`signature`]: Entry::signature
+    /// [`Entry::signature`] of the stack being merged.
     signature: String,
 
-    /// The top pull request, the one the merge was requested on.
+    /// Number of the top pull request on which `merge-async` was called.
     top: u64,
 
-    /// GitHub's identifier for the merge request.
+    /// UUID returned by GitHub for polling `merge-async/{uuid}`.
     request: String,
 
-    /// When the merge was first requested.
     since: Instant,
 }
 
-/// A stack rebase running on its own thread.
+/// Background stack rebase started by the driver.
 #[derive(Debug)]
 struct Rebasing {
-    /// The key of the entry being rebased.
     key: u64,
 
-    /// The entry's [`signature`] when the rebase started.
-    ///
-    /// [`signature`]: Entry::signature
+    /// [`Entry::signature`] when the rebase started.
     signature: String,
 
-    /// The branch the stack is rebased onto.
+    /// Target base branch for the rebase.
     base: String,
 
     handle: JoinHandle<Result<Rebased, String>>,
@@ -167,54 +165,55 @@ struct Rebasing {
 
 #[derive(Debug, Default)]
 pub(super) struct Driver {
-    /// The lock that makes this process the one driving the repository's queue,
-    /// once taken.
+    /// Exclusive lock file held while this process drives the repository's
+    /// merge queue.
     lock: Option<File>,
 
-    /// The key of the entry at the front of the queue.
+    /// [`Entry::key`] of the entry currently at the front of the queue.
     pub(super) front: Option<u64>,
 
-    /// Entries the queue stopped trying to merge, by key.
+    /// Active holds keyed by [`Entry::key`].
     pub(super) holds: HashMap<u64, Hold>,
 
-    /// Pull requests whose entry's hold the next poll lifts.
+    /// Pull request numbers whose entry holds should be cleared on the next
+    /// [`drive`] call.
+    ///
+    /// [`drive`]: Self::drive
     cleared: Vec<u64>,
 
-    /// The signature the queue last updated or rebased, so a poll that still
-    /// sees those head commits doesn't do it again.
+    /// [`Entry::signature`] of the last entry updated or rebased, preventing
+    /// duplicate updates when GitHub briefly serves stale head SHAs.
     updated: Option<String>,
 
-    /// The front's signature, and when a poll first saw it.
+    /// Front entry's [`Entry::signature`] and the instant it was first
+    /// observed.
     seen: Option<(String, Instant)>,
 
-    /// A stack merge in progress.
     merging: Option<Merging>,
 
-    /// A stack rebase in progress.
     rebasing: Option<Rebasing>,
 
-    /// Branches of pull requests merged this poll, for [`delete_merged`].
+    /// Branches of pull requests merged during the current poll, queued for
+    /// [`delete_merged`].
     ///
     /// [`delete_merged`]: Self::delete_merged
     merged: Vec<Merged>,
 
-    /// Keys of events already reported.
+    /// Deduplication keys of events already emitted.
     reported: HashSet<String>,
 }
 
-/// The branch of a pull request the queue merged.
+/// Remote branch of a merged pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Merged {
     number: u64,
     branch: String,
 
-    /// The pull request's stack and position in it, if it was stacked.
+    /// `(stack_number, position)` if the pull request belonged to a stack.
     stack: Option<(u64, usize)>,
 }
 
 impl Driver {
-    /// A driver that starts out holding `holds`, such as the ones a previous
-    /// run saved.
     pub(super) fn new(holds: HashMap<u64, Hold>) -> Self {
         Self {
             holds,
@@ -222,16 +221,16 @@ impl Driver {
         }
     }
 
-    /// Lift, at the next [`drive`], the hold on any entry containing one of
-    /// `numbers`.
+    /// Clear any hold on an entry containing one of `numbers` on the next
+    /// [`drive`] call.
     ///
     /// [`drive`]: Self::drive
     pub(super) fn forget(&mut self, numbers: &[u64]) {
         self.cleared.extend_from_slice(numbers);
     }
 
-    /// Move the front of the queue in `prs` one step toward a merge, and set
-    /// every pull request's queue state to match.
+    /// Advance the front of the merge queue by one step and update each pull
+    /// request's [`PullRequest::queue`] state.
     pub(super) fn drive(
         &mut self,
         github: &mut GitHub,
@@ -403,11 +402,11 @@ impl Driver {
         }
     }
 
-    /// Check on a rebase started by an earlier poll.
+    /// Poll an in-flight stack rebase started by an earlier tick.
     ///
-    /// Returns the key of its entry while it still runs, which keeps the queue
-    /// from acting on anything else in the meantime.
-    /// Once it ended, acts on how it ended and returns `None`.
+    /// While the thread is still running, returns `Some(key)` so the driver
+    /// keeps the entry at the front without starting another action.
+    /// Once the thread finishes, records the outcome and returns `None`.
     fn collect(&mut self, prs: &[PullRequest], poll: &mut Poll) -> Option<u64> {
         let running = self.rebasing.take()?;
         if !running.handle.is_finished() {
@@ -453,8 +452,8 @@ impl Driver {
         None
     }
 
-    /// Start rebasing a stack onto the default branch and force-pushing it, on
-    /// a thread of its own; [`collect`] picks up the outcome.
+    /// Spawn a background thread to rebase `entry` onto the default branch and
+    /// force-push it; [`collect`] harvests the result on a later poll.
     ///
     /// [`collect`]: Self::collect
     fn rebase(
@@ -566,7 +565,7 @@ impl Driver {
         }
     }
 
-    /// Ask GitHub how the stack merge `merging` is going.
+    /// Poll the status of an in-flight `merge-async` request.
     fn follow(
         &mut self,
         github: &mut GitHub,
@@ -661,10 +660,10 @@ impl Driver {
         (key, Step::Merging)
     }
 
-    /// Delete the branches of the pull requests merged this poll on GitHub.
+    /// Delete the remote branches of pull requests merged during this poll.
     ///
-    /// Skipped when the repository deletes merged branches itself; see
-    /// [`deletable`] for which branches stay.
+    /// Skipped when the repository has `delete_branch_on_merge` enabled; see
+    /// [`deletable`] for branches that are retained.
     fn delete_merged(&mut self, github: &mut GitHub, prs: &[PullRequest], poll: &mut Poll) {
         let merged = mem::take(&mut self.merged);
         if merged.is_empty() || github.settings().is_some_and(|s| s.delete_branch_on_merge) {
@@ -705,8 +704,8 @@ impl Driver {
             Reason::Blocked(why) => format!("{} left the merge queue, {why}", entry.name()),
         };
 
-        // The same key `report_failing` uses for a conflict, so the hold and the
-        // conflicted state it leaves behind notify once between them.
+        // Reuse the `"conflicts"` key from `report_failing` so holding an entry
+        // and observing its conflicted state emit only a single notification.
         let kind = match &reason {
             Reason::Conflicts => "conflicts",
             Reason::Blocked(_) => "hold",
@@ -781,11 +780,11 @@ fn mark_front(prs: &mut [PullRequest], key: u64, step: Step) {
 }
 
 impl GitHub {
-    /// What the queue needs to know about `entry` to decide its next step.
+    /// Fetch the readiness [`Status`] for the front queue `entry`.
     ///
-    /// Each member counts as behind by the commits it lacks from what it builds
-    /// on: the default branch for the bottom one, the member below for the
-    /// rest.
+    /// Each member's `behind` count is measured against its immediate base (the
+    /// default branch for the bottom member, and the preceding member's head
+    /// commit for stacked members above it).
     fn status(&mut self, entry: &Entry<'_>, quiet: bool) -> Result<Status, Error> {
         let repo = self.repo(true)?;
         let base = self.base()?;
@@ -834,21 +833,20 @@ impl GitHub {
         })
     }
 
-    /// The repository's default branch.
     fn base(&self) -> Result<String, Error> {
         self.default_branch
             .clone()
             .ok_or_else(|| Error::NotCached("the default branch".to_owned()))
     }
 
-    /// The git remote here that points at the repository.
     fn remote(&mut self) -> Option<String> {
         let repo = self.repo(true).ok()?;
         git::remote_for(&self.dir, &repo)
     }
 
-    /// The merge method: the repository's `dash.queueMergeMethod` git config,
-    /// or the first of squash, merge, and rebase the repository allows.
+    /// Return the configured merge method (`dash.queueMergeMethod`), or the
+    /// first method allowed by the repository in `[squash, merge, rebase]`
+    /// order.
     fn merge_method(&mut self) -> String {
         if let Some(method) = git::config(&self.dir, MERGE_METHOD_KEY) {
             return method;
@@ -857,7 +855,6 @@ impl GitHub {
         choose_method(self.settings().as_ref()).to_owned()
     }
 
-    /// The repository's merge settings, or `None` when they can't be read.
     fn settings(&mut self) -> Option<Settings> {
         let repo = self.repo(true).ok()?;
         let body = self
@@ -893,14 +890,13 @@ impl GitHub {
     }
 }
 
-/// The part of a compare response the queue reads.
 #[derive(Debug, Serialize, Deserialize)]
 struct Compare {
     behind_by: u64,
 }
 
-/// The merge settings of a repository the queue reads; absent for viewers who
-/// may not see them.
+/// Subset of repository settings used to select the merge method and branch
+/// cleanup behavior.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Settings {
     #[serde(default)]
@@ -910,15 +906,16 @@ struct Settings {
     #[serde(default)]
     allow_rebase_merge: bool,
 
-    /// Whether GitHub deletes a pull request's branch once it merges.
     #[serde(default)]
     delete_branch_on_merge: bool,
 }
 
-/// The branches of `merged` to delete, with their pull request numbers.
+/// Return `(pr_number, branch_name)` for each branch in `merged` that is safe
+/// to delete.
 ///
-/// Keeps the default branch, and any branch another open pull request in `prs`
-/// still builds on: one based on it, or the next one up its stack.
+/// Retains the repository's `default` branch and any branch that another open
+/// pull request in `prs` still targets (either as its base branch or as the
+/// preceding member in the same stack).
 fn deletable(merged: &[Merged], prs: &[PullRequest], default: &str) -> Vec<(u64, String)> {
     let numbers: HashSet<u64> = merged.iter().map(|merged| merged.number).collect();
     let others: Vec<&PullRequest> = prs
@@ -944,8 +941,9 @@ fn deletable(merged: &[Merged], prs: &[PullRequest], default: &str) -> Vec<(u64,
         .collect()
 }
 
-/// Pick the merge method: squash, merge, or rebase, the first `methods` allows,
-/// and squash when none is known to be allowed.
+/// Select the first allowed merge method in `[squash, merge, rebase]` order,
+/// defaulting to `"squash"` when `methods` is `None` or reports no allowed
+/// methods.
 fn choose_method(methods: Option<&Settings>) -> &'static str {
     match methods {
         Some(methods) if !methods.allow_squash_merge && methods.allow_merge_commit => "merge",
@@ -960,18 +958,19 @@ fn choose_method(methods: Option<&Settings>) -> &'static str {
     }
 }
 
-/// How GitHub answered an update or merge request.
+/// Parsed outcome of a `PUT pulls/{n}/update-branch` or `PUT pulls/{n}/merge`
+/// request.
 #[derive(Debug, PartialEq, Eq)]
 enum Sent {
     Done,
 
-    /// The pull request or its base moved since the queue looked; try again on
-    /// the next poll.
+    /// Head or base branch changed since the poll; retry on the next poll.
     Moved,
 
     Conflicts,
 
-    /// Refused for this reason, which reads after "left the merge queue, ".
+    /// Permanently refused with this reason (formatted to follow `"left the
+    /// merge queue, "`).
     Refused(String),
 }
 
@@ -1000,20 +999,20 @@ fn classify_merge(status: u16, body: &str) -> Sent {
     }
 }
 
-/// How GitHub answered a stack merge request, or a question about one.
+/// Parsed outcome of a `PUT` or `GET` on `pulls/{n}/merge-async`.
 #[derive(Debug, PartialEq, Eq)]
 enum Async {
-    /// Merged, or handed to GitHub's own merge queue.
+    /// Merged, or handed off to GitHub's native merge queue.
     Done,
 
-    /// Accepted; GitHub is still merging, under this request identifier.
+    /// Still merging in the background under this request UUID.
     Pending(String),
 
-    /// The pull requests or their base moved since the queue looked; try again
-    /// on the next poll.
+    /// Head or base branch changed since the poll; retry on the next poll.
     Moved,
 
-    /// Refused for this reason, which reads after "left the merge queue, ".
+    /// Permanently refused with this reason (formatted to follow `"left the
+    /// merge queue, "`).
     Refused(String),
 }
 
@@ -1030,14 +1029,14 @@ struct AsyncDetails {
     message: Option<String>,
 }
 
-/// Classify the response to `pulls/{n}/merge-async`, or to a request for how
-/// one is going.
+/// Classify the response to `PUT pulls/{n}/merge-async` or `GET
+/// pulls/{n}/merge-async/{uuid}`.
 fn classify_async(status: u16, body: &str) -> Async {
     if !(200..=299).contains(&status) {
         return match classify_merge(status, body) {
             Sent::Refused(reason) => Async::Refused(reason),
-            // `classify_merge` only answers `Done` for a 2xx, and never
-            // `Conflicts`; anything else is worth another look.
+            // Non-2xx responses never produce `Done` or `Conflicts` from
+            // `classify_merge`; treat `Moved` as retryable on the next poll.
             Sent::Moved | Sent::Done | Sent::Conflicts => Async::Moved,
         };
     }

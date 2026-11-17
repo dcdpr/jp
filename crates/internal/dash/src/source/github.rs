@@ -21,15 +21,13 @@
 //! (`~/.cache/jp/dash/` when unset), allowing the dashboard to render cached PR
 //! state immediately on startup.
 //!
-//! A pull request joins the merge queue by carrying the queue label, named by
-//! the repository's `dash.queueLabel` git config and [`DEFAULT_QUEUE_LABEL`]
-//! without it; [`queue::assign`] then orders the labeled ones, and the driver
-//! in [`merge`] moves the front one toward a merge.
-//! Checks the default branch's rulesets require count as pending until they
+//! Pull requests carrying the queue label (`dash.queueLabel` in git config,
+//! defaulting to [`DEFAULT_QUEUE_LABEL`]) are placed in the merge queue by
+//! [`queue::assign`], and [`merge`] advances the front entry on each poll.
+//! Checks required by the default branch's rulesets count as pending until they
 //! report.
-//! Open GitHub stacks place each stacked pull request in its stack; a
-//! repository without stacked pull requests answers that list with a 404, after
-//! which it isn't asked again.
+//! Open GitHub stacks populate each member's [`StackPlace`]; if the stacks
+//! endpoint returns `404`, subsequent polls skip it.
 //!
 //! [`queue::assign`]: crate::queue::assign
 
@@ -54,13 +52,12 @@ use crate::{
     queue::{self, Entry, Hold},
 };
 
-/// The queue label when the repository's `dash.queueLabel` git config is unset.
+/// Default merge-queue label when `dash.queueLabel` is unset in git config.
 pub const DEFAULT_QUEUE_LABEL: &str = "merge-when-green";
 
-/// The git config key naming the queue label.
 const QUEUE_LABEL_KEY: &str = "dash.queueLabel";
 
-/// How many REST requests a poll sends at once.
+/// Maximum concurrent REST API requests per poll.
 const PARALLEL: usize = 8;
 
 /// Review-thread refresh interval for pull requests with a local worktree.
@@ -120,21 +117,20 @@ pub struct GitHub {
     /// head commits) are pruned at the end of the poll.
     requested: HashSet<String>,
 
-    /// The repository's default branch, from the last pull request list that
-    /// had any pull request.
+    /// Default branch of the repository, taken from the most recent non-empty
+    /// pull request list.
     default_branch: Option<String>,
 
-    /// Answers to requests sent ahead during the current poll, by REST endpoint
-    /// path, taken by [`fetch`].
+    /// Prefetched REST responses for the current poll, keyed by endpoint path
+    /// and consumed by [`fetch`].
     ///
     /// [`fetch`]: Self::fetch
     prefetched: HashMap<String, Result<Reply, Error>>,
 
-    /// Whether the repository may have stacked pull requests; `false` once the
-    /// stacks list answered 404.
+    /// Whether to query the repository's stacks endpoint (`false` after a `404`
+    /// response).
     stacks: bool,
 
-    /// Moves the front of the merge queue toward a merge.
     driver: merge::Driver,
 }
 
@@ -151,8 +147,8 @@ struct State {
     /// Cached review-thread counts per open pull request.
     reviews: Reviews,
 
-    /// Merge-queue entries the queue stopped trying to merge, by key, so a
-    /// restart doesn't retry them.
+    /// Persisted holds on merge-queue entries, keyed by [`Entry::key`], so
+    /// restarting `dash` does not retry held entries.
     #[serde(default)]
     holds: HashMap<u64, Hold>,
 }
@@ -226,7 +222,7 @@ impl GitHub {
             Err(error) => poll.prs = Err(error),
         }
 
-        // A read that failed partway leaves answers no one took.
+        // Discard any prefetched responses left unconsumed by an early error.
         self.prefetched.clear();
         self.keep_holds();
         self.prune();
@@ -234,8 +230,8 @@ impl GitHub {
         poll
     }
 
-    /// Copy the queue's holds into the state written to disk, when they
-    /// changed.
+    /// Sync the driver's holds into `self.state` and mark the cache dirty if
+    /// they changed.
     fn keep_holds(&mut self) {
         if self.state.holds != self.driver.holds {
             self.state.holds.clone_from(&self.driver.holds);
@@ -334,11 +330,10 @@ impl GitHub {
         Ok(prs)
     }
 
-    /// Ask GitHub whether each pull request in a queue entry can merge, so an
-    /// entry with conflicts shows them wherever it sits in line.
+    /// Populate `mergeable` for every pull request in a queue entry so
+    /// conflicts are visible at any queue position.
     ///
-    /// A pull request whose answer can't be read keeps `None`, as if GitHub
-    /// were still working it out.
+    /// If the detail request fails, `mergeable` remains `None`.
     fn read_mergeable(&mut self, repo: &str, prs: &mut [PullRequest], online: bool) {
         let queued: Vec<u64> = queue::entries(prs)
             .iter()
@@ -364,11 +359,12 @@ impl GitHub {
         }
     }
 
-    /// Each stacked pull request's place in its open stack, and the branch the
-    /// stack merges into, by pull request number.
+    /// Return each stacked pull request's `(StackPlace, stack_base_branch)`
+    /// keyed by PR number.
     ///
-    /// Empty when the stacks can't be read; their pull requests then show as
-    /// merging into the branch below them, which the queue leaves alone.
+    /// Returns an empty map when stacks are disabled or the request fails;
+    /// stacked pull requests then retain their individual base branches and are
+    /// skipped by the queue as `OtherBase`.
     fn places(&mut self, repo: &str, online: bool) -> HashMap<u64, (StackPlace, String)> {
         if !self.stacks {
             return HashMap::new();
@@ -383,8 +379,8 @@ impl GitHub {
         }
     }
 
-    /// The checks the default branch's rulesets require, or none when they
-    /// can't be read (no rulesets, no access, or not cached while offline).
+    /// Return the status-check contexts required by the default branch's
+    /// rulesets, or an empty list if rulesets are unavailable or not cached.
     fn required(&mut self, repo: &str, online: bool) -> Vec<String> {
         let Some(branch) = self.default_branch.clone() else {
             return vec![];
@@ -523,10 +519,9 @@ impl GitHub {
         self.fetch(path, online, |body| Ok(body.to_owned()))
     }
 
-    /// Like [`get`], but keep only what `keep` makes of a `200` body, in the
-    /// cache and in the return value.
-    ///
-    /// [`get`]: Self::get
+    /// Fetch `path` from the GitHub REST API (or read from the cache when
+    /// `online` is `false`), transforming `200` bodies with `keep` before
+    /// caching and returning them.
     fn fetch(
         &mut self,
         path: &str,
@@ -582,8 +577,8 @@ impl GitHub {
         self.state.rest.get(path).map(|cached| cached.etag.as_str())
     }
 
-    /// Send the requests for `paths` up to [`PARALLEL`] at a time, so the
-    /// [`fetch`]es that follow find their answers waiting.
+    /// Fetch `paths` concurrently (up to [`PARALLEL`] at a time) and store the
+    /// replies in `self.prefetched` for subsequent [`fetch`] calls.
     ///
     /// [`fetch`]: Self::fetch
     fn prefetch(&mut self, paths: Vec<String>) {
@@ -680,15 +675,15 @@ fn detail_path(repo: &str, number: u64) -> String {
     format!("repos/{repo}/pulls/{number}")
 }
 
-/// The part of a pull request response the queue reads.
+/// Subset of a single pull request REST response used by the merge queue.
 #[derive(Debug, Serialize, Deserialize)]
 struct Detail {
-    /// `None` while GitHub works out whether the pull request can merge.
+    /// `None` while GitHub is still computing mergeability.
     mergeable: Option<bool>,
 }
 
-/// Reduce a JSON response to the fields `T` reads, so the cache doesn't keep
-/// the rest (a compare response lists every changed file).
+/// Strip a JSON response body down to the fields of `T` before caching (for
+/// example, discarding the file diffs in a compare response).
 fn slim<T: Serialize + DeserializeOwned>(body: &str) -> Result<String, Error> {
     serde_json::to_string(&parse_json::<T>(body)?).map_err(|source| Error::Parse {
         program: "gh",
@@ -777,18 +772,15 @@ pub fn checkout(worktree: &Utf8Path, number: u64) -> Result<(), Error> {
     stdout("gh", git::noninteractive(&mut command, worktree)).map(drop)
 }
 
-/// The label that puts a pull request of the repository containing `dir` in the
-/// merge queue: its `dash.queueLabel` git config, or [`DEFAULT_QUEUE_LABEL`].
+/// Return the merge-queue label for the repository containing `dir`
+/// (`dash.queueLabel` in git config, or [`DEFAULT_QUEUE_LABEL`]).
 #[must_use]
 pub fn queue_label(dir: &Utf8Path) -> String {
     git::config(dir, QUEUE_LABEL_KEY).unwrap_or_else(|| DEFAULT_QUEUE_LABEL.to_owned())
 }
 
-/// Add pull request `number` to the merge queue (or take it out, when `add` is
-/// `false`) by adding or removing the queue label.
-///
-/// A repository that doesn't have the label yet gets it created on the first
-/// add.
+/// Add (`add: true`) or remove (`add: false`) the merge-queue label on pull
+/// request `number`, creating the label in the repository first if needed.
 pub fn set_queued(dir: &Utf8Path, number: u64, add: bool) -> Result<(), Error> {
     let label = queue_label(dir);
     let edit = || {
@@ -803,9 +795,9 @@ pub fn set_queued(dir: &Utf8Path, number: u64, add: bool) -> Result<(), Error> {
 
     match edit() {
         Err(_) if add => {
-            // `gh pr edit` refuses a label the repository doesn't have. Creating
-            // it fails harmlessly when it exists, and the retry reports
-            // whatever stopped the first attempt.
+            // `gh pr edit --add-label` fails if the label does not exist in the
+            // repository yet; create it (ignoring errors if it already exists)
+            // and retry so the retry surfaces any underlying error.
             let mut create = gh(dir);
             create
                 .args([
@@ -825,12 +817,8 @@ pub fn set_queued(dir: &Utf8Path, number: u64, add: bool) -> Result<(), Error> {
     }
 }
 
-/// Start a thread that adds or removes the queue label on the pull requests
-/// sent to it, one at a time and in the order sent, and calls `done` with each
-/// edit's outcome.
-///
-/// Send `(number, true)` to add the label to pull request `number`, `false` to
-/// remove it.
+/// Spawn a background worker that applies `(pr_number, add)` queue-label edits
+/// sequentially and invokes `done` with each outcome.
 pub fn label_editor<D>(dir: Utf8PathBuf, done: D) -> Sender<(u64, bool)>
 where
     D: Fn(u64, bool, Result<(), String>) + Send + 'static,
@@ -841,8 +829,6 @@ where
     )
 }
 
-/// Apply each `(number, add)` sent to the returned [`Sender`] with `edit`, in
-/// the order sent, and report it to `done`.
 fn editor<E, D>(edit: E, done: D) -> Sender<(u64, bool)>
 where
     E: Fn(u64, bool) -> Result<(), String> + Send + 'static,
@@ -850,9 +836,8 @@ where
 {
     let (send, edits) = mpsc::channel();
 
-    // A single thread for all edits keeps them in order: with a thread per
-    // edit, a quick `m m` could reach GitHub as remove-then-add and leave the
-    // label on.
+    // Process label edits on a single thread so rapid toggles (`m` twice)
+    // execute in order instead of racing on GitHub.
     thread::spawn(move || {
         for (number, add) in edits {
             done(number, add, edit(number, add));

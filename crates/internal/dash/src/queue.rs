@@ -1,20 +1,22 @@
-//! Merge-queue order, and the next step for the entry at its front.
+//! Merge-queue ordering and front-entry state machine.
 //!
-//! The queue is made of [`Entry`]s: a labeled pull request outside a stack, or
-//! a stack's pull requests from the bottom up to its highest labeled one, since
-//! GitHub merges a stacked pull request together with everything below it.
+//! Queue [`Entry`]s are built from open pull requests: either a standalone
+//! labeled pull request, or a stack slice from the bottom of the stack up to
+//! its highest labeled pull request (because GitHub merges a stacked pull
+//! request together with all pull requests below it).
 //!
-//! [`assign`] decides each entry's place: in line, at the front, or held back
-//! as a draft, for failing checks, for targeting a branch other than the
-//! repository's default branch, or for a [`Hold`] the queue placed on its head
-//! commits.
-//! Every pull request in an entry gets the entry's state.
-//! Entries in line are ordered by their bottom pull request's number, lowest
-//! first, except that the current front stays first until it merges or drops
-//! out.
+//! [`assign`] computes each entry's [`QueueState`] and applies it to every
+//! member pull request.
+//! Eligible entries are ordered by their bottom pull request number (lowest
+//! first), except that the current `front` entry retains the lead until it
+//! merges or is held back.
+//! Entries that are drafts, have failing checks, target a non-default base
+//! branch, have merge conflicts, or match a [`Hold`] on their current head
+//! commits are held back out of line.
 //!
-//! [`next`] decides what the queue does with the front: bring it up to date,
-//! wait, merge it, or hold it for conflicts.
+//! [`next`] decides the next action for the front entry: update it with the
+//! default branch, wait on checks or mergeability, merge it, or place a
+//! conflict hold.
 //! This module does no I/O.
 
 use std::collections::{BTreeMap, HashMap};
@@ -23,46 +25,47 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{Checks, PullRequest};
 
-/// Where a labeled pull request stands in the merge queue.
+/// State of a pull request in the merge queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueState {
-    /// In line to be merged, `position` counting from 1 for the next one.
+    /// Waiting in line (`position` is 1-based, with `1` at the front).
     Waiting { position: usize },
 
-    /// At the front of the queue, being moved toward a merge.
+    /// At the front of the queue, executing `Step`.
     Front(Step),
 
-    /// A draft, which the queue doesn't merge.
+    /// Held back because the pull request (or a stack member) is a draft.
     Draft,
 
-    /// Has a failing check, so it waits for a push that fixes it.
+    /// Held back because a check failed; resumes when a new commit is pushed.
     Failing,
 
-    /// Merges into this branch rather than the repository's default branch.
+    /// Held back because the entry targets a branch other than the default
+    /// branch.
     OtherBase(String),
 
-    /// Conflicts with its base: GitHub reports a member it can't merge, or the
-    /// queue's update or rebase hit a conflict, until a head commit changes.
+    /// Held back due to merge conflicts (reported by GitHub or encountered
+    /// during an update or rebase) until a head commit changes.
     Conflicts,
 
-    /// The queue's update or merge failed with this reason, until its head
-    /// commit changes.
+    /// Held back because an update, rebase, or merge failed with this reason,
+    /// until a head commit changes.
     Blocked(String),
 }
 
-/// What the queue is doing with the pull request at its front.
+/// Active step for the entry at the front of the merge queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    /// The default branch is being merged into it.
+    /// Updating or rebasing onto the default branch.
     Updating,
 
-    /// Its checks are still running, or haven't reported yet.
+    /// Waiting for required or running CI checks to complete.
     WaitingForChecks,
 
-    /// GitHub hasn't finished working out whether it can merge.
+    /// Waiting for GitHub to compute whether the entry is mergeable.
     Checking,
 
-    /// The merge was requested.
+    /// Merge request submitted to GitHub.
     Merging,
 }
 
@@ -78,13 +81,13 @@ impl Step {
     }
 }
 
-/// An entry the queue stopped trying to merge, until one of its head commits
-/// changes or it is put back in the queue by hand.
+/// Hold recorded on a queue entry after a conflict or refused operation.
+///
+/// The hold remains active until one of the entry's head commits changes or the
+/// user re-queues a member manually.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hold {
-    /// The entry's [`signature`] the hold applies to.
-    ///
-    /// [`signature`]: Entry::signature
+    /// [`Entry::signature`] that this hold applies to.
     pub sha: String,
     pub reason: Reason,
 }
@@ -95,35 +98,35 @@ pub enum Reason {
     Blocked(String),
 }
 
-/// Which `dash` process acts on the repository's merge queue.
+/// Role of a `dash` process in the repository's merge queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueRole {
-    /// This process updates and merges pull requests.
+    /// Holds the queue lock and drives updates and merges.
     Driving,
 
-    /// Another `dash` process in the same repository drives the queue.
+    /// Another `dash` process holds the queue lock for this repository.
     Watching,
 
-    /// The queue is paused in this process.
+    /// Paused by the user in this process.
     Paused,
 }
 
-/// Pull requests the queue merges together.
+/// Unit of work in the merge queue: a single pull request, or a contiguous
+/// slice of a stack from its bottom up to its highest labeled pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry<'a> {
-    /// Bottom of the stack first; a single pull request outside a stack.
-    /// Never empty.
+    /// Pull requests in the entry, ordered from bottom to top (never empty).
     pub members: Vec<&'a PullRequest>,
 }
 
 impl Entry<'_> {
-    /// The bottom pull request's number, which identifies the entry.
+    /// Number of the bottom pull request, used as the entry's stable key.
     #[must_use]
     pub fn key(&self) -> u64 {
         self.members[0].number
     }
 
-    /// The highest pull request, the one merging takes everything up to.
+    /// Top pull request in the entry (merging it merges the entire entry).
     #[must_use]
     pub fn top(&self) -> &PullRequest {
         self.members[self.members.len() - 1]
@@ -134,15 +137,14 @@ impl Entry<'_> {
         self.members[0].stack.is_some()
     }
 
-    /// Every member's head commit, bottom first: a change to any of them is a
-    /// new attempt at the entry.
+    /// Space-separated head commit SHAs of all members from bottom to top.
     #[must_use]
     pub fn signature(&self) -> String {
         let shas: Vec<&str> = self.members.iter().map(|pr| pr.sha.as_str()).collect();
         shas.join(" ")
     }
 
-    /// `#7`, or `#7..#9` for several pull requests.
+    /// Display label: `#7` for a single pull request, or `#7..#9` for a stack.
     #[must_use]
     pub fn name(&self) -> String {
         match self.members.as_slice() {
@@ -156,17 +158,18 @@ impl Entry<'_> {
         self.members.iter().any(|pr| pr.number == number)
     }
 
-    /// The members' numbers, bottom first.
+    /// Member pull request numbers from bottom to top.
     #[must_use]
     pub fn numbers(&self) -> Vec<u64> {
         self.members.iter().map(|pr| pr.number).collect()
     }
 }
 
-/// The merge-queue entries in `prs`, by key.
+/// Build the merge-queue entries from `prs`, sorted by [`Entry::key`].
 ///
-/// A stack only forms an entry when one of its pull requests carries the queue
-/// label, and the entry stops at the highest labeled one.
+/// A stack forms an entry only if at least one of its pull requests carries the
+/// queue label; the entry includes all members from the bottom up to the
+/// highest labeled pull request.
 #[must_use]
 pub fn entries(prs: &[PullRequest]) -> Vec<Entry<'_>> {
     let mut entries = vec![];
@@ -191,11 +194,11 @@ pub fn entries(prs: &[PullRequest]) -> Vec<Entry<'_>> {
     entries
 }
 
-/// Set [`PullRequest::queue`] on every pull request in `prs`, and sort them by
-/// number.
+/// Assign [`PullRequest::queue`] for every pull request in `prs` and sort `prs`
+/// by number.
 ///
-/// A pull request in no entry gets `None`.
-/// The entry keyed `front` stays first in line while it is still eligible.
+/// Pull requests not belonging to any queue entry get `None`.
+/// If the entry keyed `front` is still eligible, it stays at position `1`.
 pub fn assign(prs: &mut [PullRequest], front: Option<u64>, holds: &HashMap<u64, Hold>) {
     prs.sort_by_key(|pr| pr.number);
 
@@ -243,7 +246,7 @@ pub fn assign(prs: &mut [PullRequest], front: Option<u64>, holds: &HashMap<u64, 
     }
 }
 
-/// The number of entries in line in `prs`, the front included.
+/// Count the queue entries waiting in line (including the front entry).
 #[must_use]
 pub fn waiting(prs: &[PullRequest]) -> usize {
     entries(prs)
@@ -257,7 +260,7 @@ pub fn waiting(prs: &[PullRequest]) -> usize {
         .count()
 }
 
-/// The entry at the front of the queue, if any.
+/// Return the entry at the front of the queue, if any.
 #[must_use]
 pub fn front(prs: &[PullRequest]) -> Option<Entry<'_>> {
     entries(prs).into_iter().find(|entry| {
@@ -268,42 +271,42 @@ pub fn front(prs: &[PullRequest]) -> Option<Entry<'_>> {
     })
 }
 
-/// What the queue knows about the entry at its front.
+/// Readiness snapshot for the entry at the front of the queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Status {
-    /// Its checks, with required checks that haven't reported counted as
-    /// pending.
+    /// Combined check counts across all members, with unreported required
+    /// checks counted as pending.
     pub checks: Checks,
 
-    /// Commits on the default branch it doesn't have yet.
+    /// Total commits that members are behind their respective base branches.
     pub behind: u64,
 
-    /// GitHub's answer to whether it can merge; `None` while GitHub works it
-    /// out.
+    /// Combined mergeability across all members (`None` while GitHub is still
+    /// computing it for any member).
     pub mergeable: Option<bool>,
 
-    /// Whether its head commit has had no checks at all for long enough to
-    /// assume none are coming.
+    /// Whether the entry's head commits have had zero checks for long enough to
+    /// conclude that no checks will run.
     pub quiet: bool,
 }
 
-/// What the queue does next with the pull request at its front.
+/// Next action for the entry at the front of the queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Next {
-    /// Merge the default branch into it.
+    /// Update or rebase the entry onto the default branch.
     Update,
 
-    /// Nothing to do yet.
+    /// Wait in `Step` without mutating the entry.
     Wait(Step),
 
-    /// Merge it.
+    /// Merge the entry.
     Merge,
 
-    /// Hold it: it conflicts with the default branch.
+    /// Place a conflict hold on the entry.
     Conflicts,
 }
 
-/// Decide the next step for the pull request at the front of the queue.
+/// Decide the next action for the front queue entry from its [`Status`].
 #[must_use]
 pub fn next(status: &Status) -> Next {
     let checks = status.checks;
