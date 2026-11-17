@@ -256,6 +256,7 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     // trailing whitespace such as `> ` or `   `. Strip it before handing the
     // text downstream.
     let canonical = trim_blank_prefix_lines(&canonical);
+    let canonical = join_leading_html_blocks(&canonical);
     let canonical = rewrite_code_spans(body, &canonical);
 
     // Comrak's formatter appends a trailing newline unconditionally;
@@ -502,6 +503,94 @@ fn trim_blank_prefix_lines(text: &str) -> String {
         }
     }
     out
+}
+
+/// Put the HTML block that opens a list item back on the item's marker line.
+///
+/// Comrak writes an item whose first block is HTML, such as an HTML comment, as
+/// its marker alone, with a trailing space, and the HTML indented on the line
+/// below.
+/// That form is a different document when the item is the first of a list that
+/// follows a paragraph line, as a nested list under its parent's text does: an
+/// item that starts blank can't interrupt a paragraph, so its marker reads as
+/// text.
+/// Written on the marker line, the HTML is the item's first block wherever the
+/// item is:
+///
+/// ```text
+/// - <!-- C-1a2b3c4 -->
+///   The rest of the item.
+/// ```
+///
+/// Comrak's output is matched as text, since parsing it can lose the item; a
+/// marker line in a code or HTML block is literal content and left alone.
+fn join_leading_html_blocks(text: &str) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let opened: Vec<Option<&str>> = (0..lines.len())
+        .map(|index| {
+            lines
+                .get(index + 1)
+                .and_then(|below| opening_html(lines[index], below))
+        })
+        .collect();
+    if opened.iter().all(Option::is_none) {
+        return text.to_owned();
+    }
+
+    let arena = Arena::new();
+    let options = comrak_options();
+    let root = comrak::parse_document(&arena, text, &options);
+    let line_starts = line_start_offsets(text);
+    let mut verbatim: Vec<Range<usize>> = Vec::new();
+    collect_verbatim_block_ranges(root, text, &line_starts, &mut verbatim);
+
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < lines.len() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let line = lines[index];
+        let start = line_starts[index];
+        let literal = verbatim
+            .iter()
+            .any(|range| start >= range.start && start + line.len() <= range.end);
+        out.push_str(line);
+        match opened[index].filter(|_| !literal) {
+            Some(html) => {
+                out.push_str(html);
+                index += 2;
+            }
+            None => index += 1,
+        }
+    }
+
+    out
+}
+
+/// The HTML that opens a list item comrak wrote as `line`, its marker alone
+/// with trailing spaces, and `below`, the HTML indented to the item's content.
+fn opening_html<'a>(line: &str, below: &'a str) -> Option<&'a str> {
+    let marker = line.trim_end_matches(' ');
+    if marker.len() == line.len() {
+        return None;
+    }
+
+    // What comes before the marker: block quotes' `>` and enclosing items'
+    // indentation, which the line below repeats.
+    let bullet = marker.trim_start_matches([' ', '>']);
+    let lead = &marker[..marker.len() - bullet.len()];
+    let is_marker = matches!(bullet, "-" | "*" | "+")
+        || bullet.strip_suffix(['.', ')']).is_some_and(|digits| {
+            (1..=9).contains(&digits.len()) && digits.bytes().all(|byte| byte.is_ascii_digit())
+        });
+    if !is_marker {
+        return None;
+    }
+
+    let indent = " ".repeat(line.len() - lead.len());
+    let html = below.strip_prefix(lead)?.strip_prefix(indent.as_str())?;
+    html.starts_with('<').then_some(html)
 }
 
 /// A line that has trailing whitespace and contains nothing but block-quote

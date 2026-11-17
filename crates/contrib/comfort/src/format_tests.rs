@@ -504,6 +504,65 @@ fn canonical_preserves_table_inside_list_item() {
     assert_eq!(crate::format::format_markdown_canonical(&out, 80), out);
 }
 
+/// Comrak writes an item that opens with HTML as its marker alone, with a
+/// trailing space, and the HTML on the line below.
+#[test]
+fn canonical_keeps_html_that_opens_a_list_item_on_its_marker_line() {
+    let body = indoc! {"
+        - <!-- C-1a2b3c4 #1216 -->
+          JP finds a command plugin by the manifest its binary embeds.
+        - <!-- C-5d6e7f8 -->
+          A second entry.
+          It has two sentences.
+    "};
+
+    let out = crate::format::format_markdown_canonical(body, 80);
+
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+#[test]
+fn canonical_moves_html_below_a_bare_marker_onto_it() {
+    let body = "- \n  <!-- C-1a2b3c4 -->\n  An entry.\n";
+
+    let out = crate::format::format_markdown_canonical(body, 80);
+
+    assert_eq!(out, "- <!-- C-1a2b3c4 -->\n  An entry.\n");
+    assert_eq!(render_html(&out), render_html(body));
+}
+
+/// The HTML starts after the item's marker whatever comes before it: a block
+/// quote's `>`, a nested item's indentation, or an ordered marker.
+/// A nested item written as its marker alone, right after its parent's text,
+/// would read as that text.
+#[test]
+fn canonical_keeps_opening_html_on_nested_and_quoted_markers() {
+    let body = indoc! {"
+        > 1. <!-- C-1a2b3c4 -->
+        >    An entry in a quote.
+
+        - An entry.
+          - <!-- C-5d6e7f8 -->
+            A nested entry.
+    "};
+
+    let out = crate::format::format_markdown_canonical(body, 80);
+
+    assert_eq!(out, body);
+    assert_eq!(render_html(&out), render_html(body));
+    assert_eq!(crate::format::format_markdown_canonical(&out, 80), out);
+}
+
+#[test]
+fn canonical_leaves_a_bare_marker_in_a_code_block_alone() {
+    let body = "```markdown\n- \n  <!-- C-1a2b3c4 -->\n```\n";
+
+    let out = crate::format::format_markdown_canonical(body, 80);
+
+    assert_eq!(out, body);
+}
+
 #[test]
 fn canonical_preserves_table_inside_block_quote() {
     // Same regression class as the list-item case: continuation lines inside
