@@ -54,6 +54,13 @@ Tracking ticket for [RFD 122].
       `jp-vite changelog`, so only a `vitepress build` started by hand needs the
       `changelog` binary.
       Depends on Phase 4.
+- [ ] **One document per release**: Writes each release's notes as one document
+      at the cut, with `C-` IDs and identity comments holding credits, and has
+      `abandon` split it back.
+      `finalize`, `render`, `status`, and `check` (with `--fix`) read documents,
+      the site serves them as pages and generates the Unreleased page, and
+      release directories, `.order.json`, and `--no-credits` go.
+      Depends on Phases 1 to 8.
 
 The repository settings the plan names, protecting `release/*` branches and `v*`
 tags, are [T-1f2jmb7].

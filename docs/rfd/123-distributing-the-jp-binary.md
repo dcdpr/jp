@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-14
+- **Requires**: [RFD 122]
 - **Summary**: Builds release binaries for five targets on macOS and publishes
   them to GitHub Releases via `jp release github`.
 
@@ -14,9 +15,9 @@ JP's releases ship prebuilt `jp` binaries for Linux, macOS, and Windows.
 all five target triples on macOS using a pinned toolchain and a size-optimized
 release profile, producing archives, `checksums.txt`, and `manifest.json`.
 A new command plugin, `jp release github`, publishes a verified build to GitHub
-Releases: it sets the release description to the rendered release notes, uploads
-the archives, checksums, manifest, and install scripts as release assets, and
-updates release descriptions when notes change on `main`.
+Releases: it sets the release description to the release's notes document,
+uploads the archives, checksums, manifest, and install scripts as release
+assets, and updates release descriptions when notes change on `main`.
 Because building does not depend on GitHub, future publishers (such as hosting
 releases directly on `jp.computer`) can consume the same build directory.
 Finally, `just backfill` uses these commands to cut, build, and publish
@@ -167,10 +168,9 @@ by longest command prefix ([RFD 072]):
   in `manifest.json` so creating the release never implicitly creates a tag at
   the tip of `main`.
 - `jp release github sync` compares existing GitHub Release descriptions against
-  the release notes rendered from the current checkout and updates any that
-  differ.
+  the release documents in the current checkout and updates any that differ.
   JP's `.github/workflows/release-notes.yml` runs `sync` on pushes to `main`
-  that touch `changelog.d/*/**`.
+  that touch a release document (`docs/releases/*.md`).
 
 Because the install scripts and release footer are specific to JP, they are
 configured in `.jp/config.toml` rather than hardcoded in the plugin:
@@ -178,21 +178,23 @@ configured in `.jp/config.toml` rather than hardcoded in the plugin:
 ```toml
 [plugins.command.release-github.options]
 assets = [".config/release/install.sh", ".config/release/install.ps1"]
-upgrade_guide = "https://jp.computer/releases/{version}/upgrade"
+notes_page = "https://jp.computer/releases/{version}"
 footer = ".config/release/github.md"
 ```
 
-Each GitHub Release description consists of the release notes rendered from the
-current checkout, followed by the contents of `footer` (with `{version}` and
-`{download}` substituted).
-The notes leave each entry's credits out, as the built site does, since a
-Release is read by people deciding whether to upgrade; highlights keep their
-bylines ([RFD 122]).
-When `upgrade_guide` is configured (as a URL template containing `{version}`),
-breaking entries link to that external URL because GitHub Release descriptions
-do not generate heading anchors ([GitHub discussion 48311]).
-When `upgrade_guide` is unset, the upgrade guide is appended inline after the
-release notes.
+Each GitHub Release description is the release's document from the current
+checkout, without its title, followed by the contents of `footer` (with
+`{version}` and `{download}` substituted).
+Entries show no credits, as on the site, since a Release is read by people
+deciding whether to upgrade and GitHub renders their identity comments as
+nothing; highlights keep their bylines ([RFD 122]).
+GitHub Release descriptions do not generate heading anchors ([GitHub discussion
+48311]), so when `notes_page` is configured (as a URL template containing
+`{version}`), links to a section of the document, such as a breaking entry's
+link to its upgrade section, point to that section on the release's page
+instead.
+When `notes_page` is unset, they stay links within the description, which GitHub
+does not follow.
 
 Because publishing an older release after a newer one, such as when correcting
 its files, would otherwise cause GitHub to mark it as the repository's `latest`
@@ -252,26 +254,26 @@ repository, so nothing reaches GitHub until the entire backfill is reviewed:
   `deprecated`, and `removed` entries, followed by any uncredited changes.
   Each `just backfill docs` invocation starts or resumes an interactive `jp
   query` session with the `release-docs` persona (which has write access to the
-  release worktree's wiki via `jp query --mount` and links the fragment to its
-  guide page).
+  release worktree's wiki via `jp query --mount` and links the entry, in the
+  release's document, to its guide page).
   `just backfill docs proceed` commits the entry's guide changes to the release
   branch (dated at the release's end date) and advances to the next entry; `docs
   skip` marks an entry as needing no guide changes, `docs finish` marks all
   remaining entries as done, and `docs <entry>` reopens a specific entry.
-- `just backfill highlight <entry>` drafts a release highlight for `<entry>` in
-  a conversation that reads the change's diffs, the release's code, and its user
-  guide page.
-- The maintainer reviews and edits the notes on the notes branch, adds an
-  `overview.md`, and previews them with `jp release render` or `just
-  develop-docs`.
+- `just backfill highlight <entry>` writes a highlight for `<entry>` into the
+  release's document, in a conversation that reads the change's diffs, the
+  release's code, and its user guide page.
+- The maintainer reviews and edits the release's document on the notes branch,
+  overview included, and previews it with `just develop-docs`, where it is a
+  draft page.
 - `just backfill proceed` verifies that all user guide entries are complete,
   merges the notes branch into `main`, runs `jp release finalize` and `jp
   release build` (full five-target release profile), pushes to the local bare
   `origin`, and starts the next period.
 - `just backfill revert 0.5.0` deletes tags `v0.5.0` and later from the bare
   `origin`, runs `jp release abandon` from newest to oldest ([RFD 122]), and
-  removes their build directories so `next` can re-cut `0.5.0` while preserving
-  any edited fragments.
+  removes their build directories so `next` can re-cut `0.5.0`, keeping the
+  notes' wording, which `abandon` splits back into fragments.
   Each release's user guide is saved under `refs/backfill/guide/<version>/` and
   restored by `docs` after re-cutting.
 - `just backfill archive [name]` keeps the period's notes, and its guide once
@@ -377,7 +379,8 @@ guide written for that release, which T-1k4twkf builds and deploys under
 - **Historical cut points that fail to compile.** `just backfill cut` runs a
   host `--quick` build immediately after cutting so broken cut points are caught
   before the notes are refined, and `just backfill revert` followed by `next`
-  moves the cut point to another day; the drafted fragments keep their credits.
+  moves the cut point to another day; the notes keep their wording and credits,
+  which `abandon` writes back into fragments.
 - **Xcode SDK / linker incompatibilities on older toolchains.** Newer macOS SDKs
   can fail to link with older Command Line Tools linkers; `build.sh` probes
   installed developer directories and selects one whose linker and SDK match.
@@ -417,6 +420,8 @@ Create `crates/plugins/command/release-github` with `publish` (supporting
 endpoints to `jp_github`, configure `release-github` in `.jp/config.toml`, and
 add `.github/workflows/release-notes.yml` to run `sync` when `changelog.d/*/**`
 changes on `main`.
+[RFD 122]'s Phase 9 replaces `upgrade_guide` with `notes_page`, and has `sync`
+follow release documents.
 Depends on Phases 1 and 2.
 
 ### Phase 4: JP's history

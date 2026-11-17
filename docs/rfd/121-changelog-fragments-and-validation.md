@@ -68,8 +68,8 @@ Anything besides their text is held in the filename or in a metadata block of `-
   Highlights are selective, written in prose, and can span multiple pull
   requests.
 
-When cutting a release ([RFD 122]), JP compiles these files into release notes
-(an introduction, highlight notes, and fragments grouped by type) and, if the
+When cutting a release ([RFD 122]), JP writes these files into one document: an
+introduction, the highlight notes, the fragments grouped by type, and, if the
 release contains breaking changes, an upgrade guide.
 This RFD defines the two input formats, the crate and plugin that write and
 validate them, and JP's CI checks, leaving release rendering to [RFD 122].
@@ -124,9 +124,10 @@ The type is the last `.`-separated part of the filename before `.md`.
 Keeping it in the filename rather than the file makes it visible in a directory
 listing, and means a hand-written fragment needs nothing but its entry.
 Because every fragment's filename ends in its type, no slug can collide with the
-directory's `README.md` or a release's `overview.md`, in any letter case.
+directory's `README.md` or `overview.md`, in any letter case.
 A metadata block at the top of the file may hold only `Credits` fields
-([Credits](#credits)); it cannot name a type, since the filename holds it.
+([Credits](#credits)) and an `ID` field ([Released notes](#released-notes)); it
+cannot name a type, since the filename holds it.
 
 #### Breaking changes
 
@@ -195,11 +196,10 @@ locally, and backfilling it in CI would require a bot identity to push commits
 to contributor branches.
 
 Instead, the release pipeline ([RFD 122]) derives credits from git history on
-`main`: it credits every change request whose commits added or modified the
-fragment while it lived at the top level of the fragments directory.
-Edits made after a fragment moves into a release directory
-(`changelog.d/<version>/`) are treated as wording corrections and do not add
-credits.
+`main` when it cuts a release: it credits every change request whose commits
+added or modified the fragment while it lived at the top level of the fragments
+directory, and writes those credits into the release's document, where later
+edits add none.
 If git history names no change request, the entry credits the commit instead.
 For the rare case where derived credits are inaccurate, `Credits` fields at the
 top of the file override them, one per line.
@@ -225,10 +225,9 @@ whether or not the earlier one has been released.
 An existing fragment is edited only to correct its wording.
 This keeps each fragment tied to the commit that added it.
 If a release is cut while a pull request editing an existing fragment is open
-([Released fragments](#released-fragments)), git's rename tracking carries that
-edit into `changelog.d/<version>/` when the pull request merges, which is
-desirable for a wording fix but would misattribute new work to the earlier
-release.
+([Released notes](#released-notes)), the edit conflicts with the cut's deletion
+of that fragment, so a wording fix is carried into the release's document by
+hand, and new work is not attributed to the earlier release.
 A feature built across several pull requests adds a fragment for each
 user-visible change they make, and each of them edits the shared highlight,
 which credits all of them.
@@ -280,36 +279,41 @@ makes it visible to users.
 A feature that is visible but incomplete gets a highlight describing what
 currently exists, which later pull requests expand as more pieces land.
 
-### Released fragments
+### Released notes
 
-Cutting a release ([RFD 122]) moves the unreleased fragments and highlights from
-the top level into a directory named after its version, on a notes branch merged
-into `main`, and picking a later change into a release moves that change's
-fragment the same way:
+Cutting a release ([RFD 122]) writes the fragments and highlights it ships into
+the release's document, `<version>.md` in the notes directory, on a notes branch
+merged into `main`, and deletes them:
 
 ```
 changelog.d/
   README.md
+  .epoch
+  overview.md                   # the next release's introduction
   enable-explicit.removed.md    # unreleased
   highlights/fan-out.md         # unreleased
-  0.3.0/
-    overview.md
-    .order.json
-    retry-idle-turns.fixed.md
-    highlights/plugin-tools.md
+docs/releases/
+  0.3.0.md                      # retry-idle-turns, plugin-tools, ...
 ```
 
-Files in a version directory belong to that release, while top-level files are
-unreleased ([RFD 122] determines which release ships them).
-Released fragments remain on `main` permanently.
-All fragment additions, moves, and corrections happen exclusively on `main`;
-release branches contain only code and have no `changelog.d/` ([RFD 122]).
-Released and unreleased files share the same format, and validation checks
-released directories as well, so a wording fix to an older release's notes is
-validated like any new change.
-A version directory may also contain `overview.md`, the release's introduction,
-and `.order.json`, the order its notes list its highlights and entries in ([RFD
+Fragments at the top level are unreleased ([RFD 122] determines which release
+ships them), and a release's notes are its document from the cut on.
+All fragment additions and corrections, and every edit to a document, happen on
+`main`; release branches contain only code and have no `changelog.d/` ([RFD
 122]).
+Validation checks documents as well, so a wording fix to an older release's
+notes is validated like any new change.
+
+The fragments directory also holds what the cut needs besides fragments:
+
+- `.epoch`, which `jp release init` writes: the epoch the `C-` IDs of entries
+  and highlights are allocated from, as tickets' IDs are ([RFD 116]).
+- `overview.md`, an introduction for the next release, which the next cut uses
+  as its document's overview and deletes.
+  `abandon` writes it from an abandoned release's overview ([RFD 122]).
+- An `ID` field in a fragment's or highlight's metadata, which `abandon` writes
+  when it splits a document back into fragments, so the next cut keeps each
+  entry's ID.
 
 ### Crates and the `jp release` plugin
 
@@ -412,16 +416,16 @@ JP's CI enforces three rules:
 
    A fragment's filename must end in one of the seven type identifiers,
    `<slug>.<type>.md`.
-   An optional metadata block at the top may hold only `Credits` fields, each a
-   change request (`#1207`, `!1207`) or a commit hash of at least seven
-   characters.
+   An optional metadata block at the top may hold only an `ID` field and
+   `Credits` fields, each a change request (`#1207`, `!1207`) or a commit hash
+   of at least seven characters.
    The entry after it must be non-empty after trimming surrounding whitespace,
    and any upgrade section must follow the structure in [Breaking
    changes](#breaking-changes).
 
    A highlight opens with a `# Title` heading with a title, then a metadata
-   block holding at least one `Authors` field, each naming someone, and any
-   number of `Credits` fields, and then non-empty prose.
+   block holding an optional `ID` field, at least one `Authors` field, each
+   naming someone, and any number of `Credits` fields, and then non-empty prose.
 
    Unknown metadata fields are rejected rather than ignored so that typos like
    `- **Credit**:` fail in CI instead of being silently dropped.
@@ -432,13 +436,13 @@ JP's CI enforces three rules:
    fragment at the top level of the fragments directory or carries the
    `no-changelog` GitHub label.
    Modifying an existing fragment, adding only a highlight note, or editing a
-   released fragment does not satisfy this rule:
+   release's document does not satisfy this rule:
 
    - Editing an existing fragment only corrects wording ([Credits](#credits)).
    - Adding a highlight note without a fragment would omit the change from the
      categorized changelog list.
-   - Editing a released fragment updates historical release notes without
-     changing the software.
+   - Editing a release's document updates its notes without changing the
+     software.
 
    Pull requests limited to those edits must carry `no-changelog`.
    The rule checks only for a newly added top-level fragment or the label;
@@ -456,21 +460,18 @@ The set of paths allowed in the fragments directory is closed:
 
 - `README.md` at the top level, which documents both formats and is ignored by
   the parser (`highlights/` has no `README.md`).
+- `.epoch` and `overview.md` at the top level ([Released
+  notes](#released-notes)).
 - `<slug>.<type>.md` and `highlights/<slug>.md` at the top level.
-- `<version>/<slug>.<type>.md`, `<version>/highlights/<slug>.md`,
-  `<version>/overview.md`, and `<version>/.order.json`, where `<version>` is a
-  semantic version directory.
+- `<version>.md`, a release's document, when the notes directory is the
+  fragments directory, its default ([RFD 122]).
 
 Any other path is a CI error rather than a silently ignored file, failing early
 instead of vanishing during release assembly.
 This rejects a fragment without a type in its filename, other file extensions
-(`.txt`, `.markdown`), a misspelled `overview.md`, non-version subdirectories,
-deeper directory nesting, or stray files under `highlights/`.
-A top-level `overview.md` has no type in its filename, so it is an error rather
-than a release's introduction, and a top-level `.order.json` is an error, since
-only a release has an order.
-A release's `.order.json` must be a JSON object of `highlights` and `entries`,
-each a list of file names.
+(`.txt`, `.markdown`), a misspelled `overview.md`, subdirectories other than
+`highlights/`, deeper directory nesting, or stray files under `highlights/`.
+[RFD 122] defines what a release's document must hold.
 
 CI runs these rules as two separate checks because they have opposite triggering
 requirements.
@@ -522,8 +523,9 @@ label.").
 
 The gate applies only to pull requests targeting `main`; pushes to `main` and
 local `jp release check` runs perform format validation only.
-The pull request that files a release's notes ([RFD 122]) moves existing
-fragments rather than adding new ones, so it carries the `no-changelog` label.
+The pull request that files a release's notes ([RFD 122]) replaces existing
+fragments with a document rather than adding new ones, so it carries the
+`no-changelog` label.
 Release branches receive commits directly from `jp release`, never via pull
 requests, and have no `changelog.d/` directory, so neither check runs on them.
 Fork pull requests work the same way, since reading labels needs no write
@@ -606,9 +608,10 @@ Workspaces without CI or on other forges can use `jp release` without them.
 - **Edit existing fragments in follow-up pull requests** so a change and its
   follow-ups share one entry.
   Release notes would read slightly cleaner without manual consolidation, but if
-  a release is cut while a follow-up pull request is open, git's rename tracking
-  carries the follow-up's edit into the moved file in `changelog.d/<version>/`,
-  attributing unshipped work to the release.
+  a release is cut while a follow-up pull request is open, the cut has already
+  written the fragment into the release's document and deleted it, so the
+  follow-up's edit conflicts, and resolving it by hand risks attributing
+  unshipped work to the release.
   Separate fragments for related changes can instead be combined while preparing
   the release notes ([RFD 122]).
 
@@ -675,6 +678,12 @@ type, and `highlight`, and allow it in `.jp/config.toml`.
 Expose writing a fragment as the `changelog_add` tool via `jp release tools
 init`, and enable it in JP's conversations.
 Depends on Phase 1.
+
+### Release documents
+
+The `ID` field, the top-level `.epoch` and `overview.md`, and the documents in
+the closed path set ([Released notes](#released-notes)) land with [RFD 122]'s
+Phase 9, which writes release documents.
 
 ## References
 
