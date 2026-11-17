@@ -8,6 +8,15 @@
 //
 // The list item gets `task-list-item` and its list `contains-task-list`, the
 // classes GitHub uses, which `theme/style.css` styles.
+//
+// Items that `jp ticket edit --check` can toggle carry their lookup text in
+// `data-checklist-item` (see `ticketItemText`), and `theme/TicketChecklist.vue`
+// enables them when the dev server accepts edits. Checkboxes render disabled in
+// HTML so static builds stay read-only.
+
+import { isSectionSource } from './embed.mjs'
+import { writtenSource } from './join-inline-code.mjs'
+import { checklistItem, descriptionEnd } from './loaders/ticket-shared.mjs'
 
 // A checkbox at the start of an item's text, with text after it.
 const CHECKBOX = /^\[([ xX])\][ \t]+(?=\S)/
@@ -18,7 +27,11 @@ const LEADING = /^\[[ xX]\][ \t]*/
 
 // Turn the task-list items among markdown-it's block `tokens` into checkboxes.
 // `Token` is markdown-it's token constructor.
-export function renderTaskLists(tokens, Token) {
+//
+// `itemText` receives the inline token of each item's first paragraph and
+// returns the lookup text for `data-checklist-item`, or `null` if the item is
+// not checkable.
+export function renderTaskLists(tokens, Token, itemText = () => null) {
     for (let index = 2; index < tokens.length; index++) {
         const inline = tokens[index]
         if (inline.type !== 'inline') continue
@@ -31,7 +44,10 @@ export function renderTaskLists(tokens, Token) {
 
         const box = new Token('html_inline', '', 0)
         const checked = match[1] === ' ' ? '' : ' checked'
-        box.content = `<input type="checkbox" class="task-list-item-checkbox" disabled${checked}> `
+        const text = itemText(inline)
+        const attribute = text ? ` data-checklist-item="${escapeAttribute(text)}"` : ''
+        box.content =
+            `<input type="checkbox" class="task-list-item-checkbox" disabled${checked}${attribute}> `
 
         first.content = first.content.replace(LEADING, '')
         const rest = first.content === '' ? inline.children.slice(1) : inline.children
@@ -41,6 +57,42 @@ export function renderTaskLists(tokens, Token) {
         addClass(item, 'task-list-item')
         const list = enclosingList(tokens, index - 2)
         if (list) addClass(list, 'contains-task-list')
+    }
+}
+
+// Build the `itemText` callback for a ticket page parsed from `src` with
+// markdown-it environment `env`, returning the lookup text that
+// `jp ticket edit --check` uses to match each description item.
+//
+// Comment items return `null` because `jp ticket` never modifies comments.
+// Section-embed parses return `undefined` so embedded items are not wired up to
+// toggle the embedding ticket.
+//
+// Reads each item's first line from the unjoined source (`writtenSource`) so it
+// matches the `ticket` crate's `checklist` parser even when `joinInlineCode`
+// collapsed a wrapped code span onto that line in `src`.
+export function ticketItemText(env, src) {
+    if (isSectionSource(env)) return undefined
+
+    const lines = src.split('\n')
+    const end = descriptionEnd(lines)
+    const written = writtenSource(env, src)
+    // `joinInlineCode` replaces each newline with a single space, so every line
+    // in `src` starts at the same character offset in `written`.
+    const starts = []
+    let offset = 0
+    for (const line of lines) {
+        starts.push(offset)
+        offset += line.length + 1
+    }
+
+    return (inline) => {
+        const line = inline.map?.[0]
+        if (line === undefined || line >= end) return null
+
+        const stop = written.indexOf('\n', starts[line])
+        const first = written.slice(starts[line], stop < 0 ? undefined : stop)
+        return checklistItem(first)?.text ?? null
     }
 }
 
@@ -55,6 +107,12 @@ function enclosingList(tokens, at) {
     }
 
     return null
+}
+
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }
+
+function escapeAttribute(text) {
+    return text.replace(/[&<>"]/g, char => ESCAPES[char])
 }
 
 // Add `name` to the classes `token` carries, once.
