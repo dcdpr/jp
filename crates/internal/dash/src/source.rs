@@ -7,6 +7,8 @@
 //!
 //! [`spawn`] starts all source threads and returns a [`Refresher`] that wakes
 //! them for an immediate poll.
+//! The GitHub source also drives the merge queue, so it polls again shortly
+//! after the queue changes something on GitHub.
 
 pub mod cache;
 pub mod ghostty;
@@ -17,14 +19,23 @@ pub mod jp;
 use std::{
     io,
     process::{Command, Output},
-    sync::mpsc::{self, RecvTimeoutError, Sender},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError,
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{self, RecvTimeoutError, Sender},
+    },
     thread,
     time::Duration,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
 
+use self::github::QueueControl;
 use crate::{app::Update, model::BaseUpdate};
+
+/// How long after the merge queue changes something the GitHub source polls
+/// again.
+const SOON: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -60,24 +71,37 @@ pub enum Error {
 /// Handle that wakes all background source threads for an immediate poll.
 #[derive(Clone)]
 pub struct Refresher {
-    pokes: Vec<Sender<()>>,
+    pokes: Vec<Sender<bool>>,
+
+    /// The GitHub source's poke, also in `pokes`.
+    github: Sender<bool>,
 }
 
 impl Refresher {
     pub fn refresh(&self) {
         for poke in &self.pokes {
             // Ignore send errors if a source thread has already exited.
-            let _gone = poke.send(());
+            let _gone = poke.send(true);
         }
+    }
+
+    /// Poll GitHub now, without reloading every review thread the way an
+    /// explicit refresh does.
+    pub fn refresh_pull_requests(&self) {
+        let _gone = self.github.send(false);
     }
 }
 
-/// Spawn all background source threads for the repository containing `dir`.
-pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
+/// Spawn all background source threads for the repository containing `dir`,
+/// with `control` pausing the merge queue or lifting its holds.
+pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>, control: Arc<QueueControl>) -> Refresher {
     let mut jp = jp::Jp::new(dir.to_owned());
     let mut github = github::GitHub::open(dir.to_owned());
     let git_dir = dir.to_owned();
     let base_dir = dir.to_owned();
+    let queue_updates = updates.clone();
+    let github_poke: Arc<OnceLock<Sender<bool>>> = Arc::default();
+    let soon = Arc::clone(&github_poke);
 
     // Emit cached pull requests immediately before the first network poll
     // completes.
@@ -85,7 +109,27 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
         let _gone = updates.send(Update::PullRequests(Ok(cached)));
     }
 
+    let github = github_poke
+        .get_or_init(|| {
+            every(Duration::from_secs(30), updates.clone(), move |asked| {
+                let poll = github.pull_requests(asked, &control);
+                for event in &poll.events {
+                    if event.notify {
+                        notify(&event.message);
+                    }
+                    let _gone = queue_updates.send(Update::Notice(event.message.clone()));
+                }
+                let _gone = queue_updates.send(Update::Queue(poll.role));
+                if poll.changed {
+                    poll_soon(&soon);
+                }
+                Update::PullRequests(poll.prs.map_err(|e| e.to_string()))
+            })
+        })
+        .clone();
+
     Refresher {
+        github: github.clone(),
         pokes: vec![
             every(Duration::from_secs(5), updates.clone(), move |_| {
                 Update::Worktrees(git::worktrees(&git_dir).map_err(|e| e.to_string()))
@@ -96,9 +140,7 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
             every(Duration::from_secs(3), updates.clone(), move |_| {
                 Update::Jp(jp.read().map_err(|e| e.to_string()))
             }),
-            every(Duration::from_secs(30), updates.clone(), move |asked| {
-                Update::PullRequests(github.pull_requests(asked).map_err(|e| e.to_string()))
-            }),
+            github,
             // Periodically fast-forward the local default branch so new
             // worktrees start from an up-to-date base.
             every(Duration::from_mins(5), updates.clone(), move |_| {
@@ -113,12 +155,41 @@ pub fn spawn(dir: &Utf8Path, updates: &Sender<Update>) -> Refresher {
     }
 }
 
+/// Poke the source behind `poke` after [`SOON`], without it counting as an
+/// explicit refresh.
+fn poll_soon(poke: &Arc<OnceLock<Sender<bool>>>) {
+    let Some(poke) = poke.get().cloned() else {
+        return;
+    };
+    thread::spawn(move || {
+        thread::sleep(SOON);
+        let _gone = poke.send(false);
+    });
+}
+
+/// Show `message` as a macOS notification, ignoring any failure.
+fn notify(message: &str) {
+    // The message goes in as an argument rather than into the script, so no
+    // character in it can change what the script does.
+    let _unshown = Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "display notification (item 1 of argv) with title \"dash\"",
+            "-e",
+            "end run",
+            message,
+        ])
+        .output();
+}
+
 /// Run `read` on a background thread every `interval` (or immediately when
 /// woken via the returned [`Sender`]) until the UI receiver disconnects.
 ///
-/// Passes `true` to `read` when woken by an explicit refresh request, and
-/// `false` on scheduled timer ticks.
-fn every<F>(interval: Duration, updates: Sender<Update>, mut read: F) -> Sender<()>
+/// Passes `true` to `read` when woken by an explicit refresh request (a poke
+/// carrying `true`), and `false` on timer ticks and other pokes.
+fn every<F>(interval: Duration, updates: Sender<Update>, mut read: F) -> Sender<bool>
 where
     F: FnMut(bool) -> Update + Send + 'static,
 {
@@ -132,17 +203,52 @@ where
             }
 
             asked = match pokes.recv_timeout(interval) {
-                Ok(()) => true,
+                Ok(asked) => asked,
                 Err(RecvTimeoutError::Timeout) => false,
                 Err(RecvTimeoutError::Disconnected) => return,
             };
 
-            // Drain any additional refresh pokes queued while `read` was running.
-            while pokes.try_recv().is_ok() {}
+            // Drain any additional pokes queued while `read` was running.
+            while let Ok(more) = pokes.try_recv() {
+                asked |= more;
+            }
         }
     });
 
     poke
+}
+
+/// Run `work` on every item of `items`, on up to `workers` threads at once, and
+/// return the results in the order of `items`.
+fn parallel<T, R, F>(items: &[T], workers: usize, work: F) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
+    let next = AtomicUsize::new(0);
+    let done = Mutex::new(Vec::with_capacity(items.len()));
+
+    thread::scope(|scope| {
+        for _ in 0..workers.clamp(1, items.len().max(1)) {
+            scope.spawn(|| {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(index) else {
+                        return;
+                    };
+                    let result = work(item);
+                    done.lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push((index, result));
+                }
+            });
+        }
+    });
+
+    let mut done = done.into_inner().unwrap_or_else(PoisonError::into_inner);
+    done.sort_by_key(|(index, _)| *index);
+    done.into_iter().map(|(_, result)| result).collect()
 }
 
 /// Run `command` and return its stdout as UTF-8, or [`Error::Failed`] if it
@@ -186,3 +292,7 @@ fn canonical(path: &str) -> Utf8PathBuf {
         .canonicalize_utf8()
         .unwrap_or_else(|_| Utf8PathBuf::from(path))
 }
+
+#[cfg(test)]
+#[path = "source_tests.rs"]
+mod tests;

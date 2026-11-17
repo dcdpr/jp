@@ -1,9 +1,14 @@
+use std::collections::HashMap;
+
 use camino::Utf8PathBuf;
 use chrono::TimeZone as _;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
-use crate::model::{Checks, JpRecent, JpRun, JpSession, SessionConversation, Status};
+use crate::{
+    model::{Checks, JpRecent, JpRun, JpSession, SessionConversation, Status},
+    queue,
+};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -41,10 +46,17 @@ fn pr(number: u64, head: &str) -> PullRequest {
         title: format!("PR {number}"),
         url: format!("https://github.com/dcdpr/jp/pull/{number}"),
         head: head.to_owned(),
+        sha: format!("sha-{number}"),
         draft: false,
         checks: Checks::default(),
         threads: 0,
         answered: 0,
+        labeled: false,
+        base: None,
+        stack: None,
+        remote_branch: None,
+        mergeable: None,
+        queue: None,
     }
 }
 
@@ -956,6 +968,132 @@ fn test_sort_by_checks_puts_failing_first() {
 
     app.table.sort = Sort::Checks;
     assert_eq!(lines(&app), ["c", "b", "a"]);
+}
+
+#[test]
+fn test_sort_by_queue_follows_the_merge_order() {
+    let mut app = app();
+    app.handle(key(KeyCode::Char('a')));
+    let mut queued = vec![
+        PullRequest {
+            labeled: true,
+            ..pr(9, "a")
+        },
+        PullRequest {
+            labeled: true,
+            ..pr(4, "c")
+        },
+    ];
+    queue::assign(&mut queued, None, &HashMap::new());
+    prs(&mut app, queued);
+
+    app.table.sort = Sort::Queue;
+    assert_eq!(lines(&app), ["c", "a", "b"]);
+}
+
+#[test]
+fn test_m_adds_and_removes_the_queue_label() {
+    let mut app = app();
+    prs(&mut app, vec![pr(7, "a")]);
+
+    assert_eq!(app.handle(key(KeyCode::Char('m'))), Action::Queue {
+        number: 7,
+        add: true
+    });
+    assert_eq!(app.notice.as_deref(), Some("Adding #7 to the merge queue…"));
+
+    prs(&mut app, vec![PullRequest {
+        labeled: true,
+        ..pr(7, "a")
+    }]);
+    assert_eq!(app.handle(key(KeyCode::Char('m'))), Action::Queue {
+        number: 7,
+        add: false
+    });
+}
+
+#[test]
+fn test_a_second_m_before_github_answers_undoes_the_first() {
+    let mut app = app();
+    prs(&mut app, vec![pr(7, "a")]);
+
+    app.handle(key(KeyCode::Char('m')));
+    assert_eq!(app.handle(key(KeyCode::Char('m'))), Action::Queue {
+        number: 7,
+        add: false
+    });
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("Taking #7 out of the merge queue…")
+    );
+}
+
+#[test]
+fn test_a_queue_edit_lasts_until_github_shows_it() {
+    let mut app = app();
+    prs(&mut app, vec![pr(7, "a")]);
+    app.handle(key(KeyCode::Char('m')));
+
+    app.apply(Update::QueueEdited {
+        number: 7,
+        add: true,
+        outcome: Ok(()),
+    });
+    assert_eq!(app.notice.as_deref(), Some("Added #7 to the merge queue."));
+
+    // A list read before the edit landed still shows the old label.
+    prs(&mut app, vec![pr(7, "a")]);
+    assert_eq!(app.queue_edits, HashMap::from([(7, true)]));
+
+    prs(&mut app, vec![PullRequest {
+        labeled: true,
+        ..pr(7, "a")
+    }]);
+    assert!(app.queue_edits.is_empty());
+}
+
+#[test]
+fn test_a_failed_queue_edit_is_forgotten() {
+    let mut app = app();
+    prs(&mut app, vec![pr(7, "a")]);
+    app.handle(key(KeyCode::Char('m')));
+
+    app.apply(Update::QueueEdited {
+        number: 7,
+        add: true,
+        outcome: Err("Adding the queue label on #7 failed: offline".to_owned()),
+    });
+
+    assert!(app.queue_edits.is_empty());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("Adding the queue label on #7 failed: offline")
+    );
+}
+
+#[test]
+fn test_p_pauses_and_resumes_the_queue() {
+    let mut app = app();
+
+    assert_eq!(
+        app.handle(key(KeyCode::Char('p'))),
+        Action::PauseQueue(true)
+    );
+    assert!(app.queue_paused);
+    assert_eq!(
+        app.handle(key(KeyCode::Char('p'))),
+        Action::PauseQueue(false)
+    );
+    assert!(!app.queue_paused);
+    assert_eq!(app.notice.as_deref(), Some("Merge queue resumed."));
+}
+
+#[test]
+fn test_m_without_a_pull_request_does_nothing() {
+    let mut app = app();
+
+    assert_eq!(app.handle(key(KeyCode::Char('m'))), Action::None);
+    assert_eq!(app.notice.as_deref(), Some("a has no open pull request."));
 }
 
 #[test]

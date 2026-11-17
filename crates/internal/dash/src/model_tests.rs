@@ -68,10 +68,17 @@ fn pr(number: u64, head: &str) -> PullRequest {
         title: format!("PR {number}"),
         url: format!("https://github.com/dcdpr/jp/pull/{number}"),
         head: head.to_owned(),
+        sha: format!("sha-{number}"),
         draft: false,
         checks: Checks::default(),
         threads: 0,
         answered: 0,
+        labeled: false,
+        base: None,
+        stack: None,
+        remote_branch: None,
+        mergeable: None,
+        queue: None,
     }
 }
 

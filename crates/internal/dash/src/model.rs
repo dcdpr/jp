@@ -9,6 +9,8 @@ use std::collections::HashSet;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 
+use crate::queue::QueueState;
+
 /// A git worktree of the repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Worktree {
@@ -158,6 +160,9 @@ pub struct PullRequest {
     /// `<owner>/<branch>` when a fork's head ref collides with the base
     /// repository's default branch.
     pub head: String,
+
+    /// The head commit.
+    pub sha: String,
     pub draft: bool,
     pub checks: Checks,
 
@@ -166,6 +171,52 @@ pub struct PullRequest {
 
     /// Number of sampled review threads that have at least one reply.
     pub answered: u32,
+
+    /// Whether the pull request carries the merge-queue label.
+    pub labeled: bool,
+
+    /// The branch it merges into, when that isn't the repository's default
+    /// branch: for a stacked pull request, the branch the whole stack merges
+    /// into.
+    pub base: Option<String>,
+
+    /// Where it sits in a GitHub stack of pull requests, if it is in one.
+    pub stack: Option<StackPlace>,
+
+    /// The head branch on GitHub, when it lives in the repository itself;
+    /// `None` for a fork's branch, which the queue can't delete.
+    pub remote_branch: Option<String>,
+
+    /// GitHub's answer to whether it merges into its base without conflicts;
+    /// `None` while GitHub works it out, and for pull requests in no queue
+    /// entry, which aren't asked.
+    pub mergeable: Option<bool>,
+
+    /// Where it stands in the merge queue, set by [`queue::assign`] and updated
+    /// by the queue's driver; `None` without the queue label.
+    ///
+    /// [`queue::assign`]: crate::queue::assign
+    pub queue: Option<QueueState>,
+}
+
+/// A pull request's place in a GitHub stack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StackPlace {
+    /// The stack's number.
+    pub stack: u64,
+
+    /// Position in the stack, counting from 1 at the bottom.
+    pub position: usize,
+
+    /// Number of pull requests in the stack.
+    pub size: usize,
+
+    /// The pull request's branch on GitHub.
+    pub branch: String,
+
+    /// Head commit of the pull request below it in the stack; `None` at the
+    /// bottom.
+    pub below: Option<String>,
 }
 
 /// CI check counts for a pull request's head commit.

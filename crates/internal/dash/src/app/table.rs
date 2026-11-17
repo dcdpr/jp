@@ -9,7 +9,10 @@ use std::{cmp::Reverse, collections::HashSet};
 
 use chrono::{DateTime, Utc};
 
-use crate::model::{self, JpSession, Row, RowId, SessionConversation, Terminal};
+use crate::{
+    model::{self, JpSession, Row, RowId, SessionConversation, Terminal},
+    queue::QueueState,
+};
 
 /// Action that can be run on a conversation in its terminal tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -211,16 +214,21 @@ pub enum Sort {
 
     /// Failing checks first, then running, then passing.
     Checks,
+
+    /// Pull requests in the merge queue in the order they merge, then the
+    /// labeled ones held back, then the rest.
+    Queue,
 }
 
 impl Sort {
     /// All sort orders in menu display order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Name,
         Self::Branch,
         Self::PullRequest,
         Self::Activity,
         Self::Checks,
+        Self::Queue,
     ];
 
     #[must_use]
@@ -231,6 +239,7 @@ impl Sort {
             Self::PullRequest => "Pull request, newest first",
             Self::Activity => "Recent JP activity",
             Self::Checks => "CI, failing first",
+            Self::Queue => "Merge queue order",
         }
     }
 
@@ -530,6 +539,24 @@ fn sort(rows: &mut [&Row], by: Sort) {
             });
         }
         Sort::Checks => rows.sort_by_key(|row| (checks_rank(row), tiebreak(row))),
+        Sort::Queue => rows.sort_by_key(|row| (queue_rank(row), tiebreak(row))),
+    }
+}
+
+/// Rank a row for [`Sort::Queue`]: the front, then entries in line by position,
+/// then entries held back, then everything else; within an entry, bottom of the
+/// stack first.
+fn queue_rank(row: &Row) -> (u8, usize, usize) {
+    let Some(pr) = &row.pr else {
+        return (2, 0, 0);
+    };
+    let in_stack = pr.stack.as_ref().map_or(0, |place| place.position);
+
+    match &pr.queue {
+        Some(QueueState::Front(_)) => (0, 0, in_stack),
+        Some(QueueState::Waiting { position }) => (0, *position, in_stack),
+        Some(_) => (1, 0, in_stack),
+        None => (2, 0, 0),
     }
 }
 

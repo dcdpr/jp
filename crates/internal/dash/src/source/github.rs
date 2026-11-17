@@ -20,19 +20,48 @@
 //! identifier are persisted per repository under `$XDG_CACHE_HOME/jp/dash/`
 //! (`~/.cache/jp/dash/` when unset), allowing the dashboard to render cached PR
 //! state immediately on startup.
+//!
+//! A pull request joins the merge queue by carrying the queue label, named by
+//! the repository's `dash.queueLabel` git config and [`DEFAULT_QUEUE_LABEL`]
+//! without it; [`queue::assign`] then orders the labeled ones, and the driver
+//! in [`merge`] moves the front one toward a merge.
+//! Checks the default branch's rulesets require count as pending until they
+//! report.
+//! Open GitHub stacks place each stacked pull request in its stack; a
+//! repository without stacked pull requests answers that list with a 404, after
+//! which it isn't asked again.
+//!
+//! [`queue::assign`]: crate::queue::assign
 
 use std::{
     collections::{HashMap, HashSet},
     env,
     process::Command,
+    sync::mpsc::{self, Sender},
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use super::{Error, cache, failure, git, output, stdout};
-use crate::model::{Checks, PullRequest};
+mod merge;
+
+pub use self::merge::{Poll, QueueControl};
+use super::{Error, cache, failure, git, output, parallel, stdout};
+use crate::{
+    model::{Checks, PullRequest, StackPlace},
+    queue::{self, Entry, Hold},
+};
+
+/// The queue label when the repository's `dash.queueLabel` git config is unset.
+pub const DEFAULT_QUEUE_LABEL: &str = "merge-when-green";
+
+/// The git config key naming the queue label.
+const QUEUE_LABEL_KEY: &str = "dash.queueLabel";
+
+/// How many REST requests a poll sends at once.
+const PARALLEL: usize = 8;
 
 /// Review-thread refresh interval for pull requests with a local worktree.
 const LOCAL_REVIEWS_INTERVAL: Duration = Duration::from_mins(3);
@@ -74,6 +103,9 @@ struct Review {
 pub struct GitHub {
     dir: Utf8PathBuf,
 
+    /// The label that puts a pull request in the merge queue.
+    label: String,
+
     /// On-disk cache path, or `None` if the cache directory or git common
     /// directory could not be resolved.
     file: Option<Utf8PathBuf>,
@@ -87,6 +119,23 @@ pub struct GitHub {
     /// Cached entries for paths not in this set (such as checks for superseded
     /// head commits) are pruned at the end of the poll.
     requested: HashSet<String>,
+
+    /// The repository's default branch, from the last pull request list that
+    /// had any pull request.
+    default_branch: Option<String>,
+
+    /// Answers to requests sent ahead during the current poll, by REST endpoint
+    /// path, taken by [`fetch`].
+    ///
+    /// [`fetch`]: Self::fetch
+    prefetched: HashMap<String, Result<Reply, Error>>,
+
+    /// Whether the repository may have stacked pull requests; `false` once the
+    /// stacks list answered 404.
+    stacks: bool,
+
+    /// Moves the front of the merge queue toward a merge.
+    driver: merge::Driver,
 }
 
 /// Cached GitHub state persisted across polls and dashboard runs.
@@ -101,6 +150,11 @@ struct State {
 
     /// Cached review-thread counts per open pull request.
     reviews: Reviews,
+
+    /// Merge-queue entries the queue stopped trying to merge, by key, so a
+    /// restart doesn't retry them.
+    #[serde(default)]
+    holds: HashMap<u64, Hold>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,14 +179,20 @@ impl GitHub {
     #[must_use]
     pub fn open(dir: Utf8PathBuf) -> Self {
         let file = cache::file(&dir, "github");
-        let state = file.as_deref().map(cache::load).unwrap_or_default();
+        let state: State = file.as_deref().map(cache::load).unwrap_or_default();
+        let driver = merge::Driver::new(state.holds.clone());
 
         Self {
+            label: queue_label(&dir),
             dir,
             file,
             state,
             dirty: false,
             requested: HashSet::new(),
+            default_branch: None,
+            prefetched: HashMap::new(),
+            stacks: true,
+            driver,
         }
     }
 
@@ -147,13 +207,49 @@ impl GitHub {
         self.read(Mode::Offline).ok()
     }
 
-    /// Poll open pull requests and persist any updated cache state.
+    /// Poll open pull requests, move the merge queue forward unless `control`
+    /// pauses it, and persist any updated cache state.
     ///
     /// When `asked` is `true`, forces a refresh of all review threads.
-    pub fn pull_requests(&mut self, asked: bool) -> Result<Vec<PullRequest>, Error> {
-        let read = self.read(Mode::Online { asked });
+    pub fn pull_requests(&mut self, asked: bool, control: &QueueControl) -> Poll {
+        self.requested.clear();
+        self.driver.forget(&control.take_cleared());
+
+        let mut poll = Poll::default();
+        match self.read(Mode::Online { asked }) {
+            Ok(mut prs) => {
+                let mut driver = std::mem::take(&mut self.driver);
+                poll.role = driver.drive(self, control.paused(), &mut prs, &mut poll);
+                self.driver = driver;
+                poll.prs = Ok(prs);
+            }
+            Err(error) => poll.prs = Err(error),
+        }
+
+        // A read that failed partway leaves answers no one took.
+        self.prefetched.clear();
+        self.keep_holds();
+        self.prune();
         self.persist();
-        read
+        poll
+    }
+
+    /// Copy the queue's holds into the state written to disk, when they
+    /// changed.
+    fn keep_holds(&mut self) {
+        if self.state.holds != self.driver.holds {
+            self.state.holds.clone_from(&self.driver.holds);
+            self.dirty = true;
+        }
+    }
+
+    /// Drop cached REST responses no request asked for during this poll.
+    fn prune(&mut self) {
+        let before = self.state.rest.len();
+        self.state
+            .rest
+            .retain(|path, _| self.requested.contains(path));
+        self.dirty |= self.state.rest.len() != before;
     }
 
     fn read(&mut self, mode: Mode) -> Result<Vec<PullRequest>, Error> {
@@ -165,11 +261,39 @@ impl GitHub {
             .collect();
         let mut local = HashSet::new();
 
-        self.requested.clear();
         let pulls: Vec<RestPull> = parse_json(&self.get(
             &format!("repos/{repo}/pulls?state=open&per_page=100"),
             online,
         )?)?;
+
+        if let Some(branch) = pulls
+            .iter()
+            .map(|pull| &pull.base.repo.default_branch)
+            .find(|branch| !branch.is_empty())
+        {
+            self.default_branch = Some(branch.clone());
+        }
+
+        if online {
+            let mut paths: Vec<String> = pulls
+                .iter()
+                .flat_map(|pull| {
+                    [
+                        runs_path(&repo, &pull.head.sha),
+                        status_path(&repo, &pull.head.sha),
+                    ]
+                })
+                .collect();
+            if let Some(branch) = &self.default_branch {
+                paths.push(rules_path(&repo, branch));
+            }
+            if self.stacks {
+                paths.push(stacks_path(&repo));
+            }
+            self.prefetch(paths);
+        }
+        let required = self.required(&repo, online);
+        let mut places = self.places(&repo, online);
 
         let mut prs = vec![];
         for pull in pulls {
@@ -178,15 +302,11 @@ impl GitHub {
                 local.insert(pull.number);
             }
 
-            if let Some(pr) = self.pull_request(&repo, pull, head, online)? {
+            let place = places.remove(&pull.number);
+            if let Some(pr) = self.pull_request(&repo, pull, head, place, &required, online)? {
                 prs.push(pr);
             }
         }
-        let before = self.state.rest.len();
-        self.state
-            .rest
-            .retain(|path, _| self.requested.contains(path));
-        self.dirty |= self.state.rest.len() != before;
         prs.sort_by_key(|pr| pr.number);
 
         if let Mode::Online { asked } = mode {
@@ -208,8 +328,70 @@ impl GitHub {
                 pr.answered = review.answered;
             }
         }
+        self.read_mergeable(&repo, &mut prs, online);
+        queue::assign(&mut prs, self.driver.front, &self.driver.holds);
 
         Ok(prs)
+    }
+
+    /// Ask GitHub whether each pull request in a queue entry can merge, so an
+    /// entry with conflicts shows them wherever it sits in line.
+    ///
+    /// A pull request whose answer can't be read keeps `None`, as if GitHub
+    /// were still working it out.
+    fn read_mergeable(&mut self, repo: &str, prs: &mut [PullRequest], online: bool) {
+        let queued: Vec<u64> = queue::entries(prs)
+            .iter()
+            .flat_map(Entry::numbers)
+            .collect();
+        let paths: Vec<String> = queued
+            .iter()
+            .map(|number| detail_path(repo, *number))
+            .collect();
+        if online {
+            self.prefetch(paths.clone());
+        }
+
+        for (number, path) in queued.iter().zip(&paths) {
+            let mergeable = self
+                .fetch(path, online, slim::<Detail>)
+                .and_then(|body| parse_json::<Detail>(&body))
+                .ok()
+                .and_then(|detail| detail.mergeable);
+            if let Some(pr) = prs.iter_mut().find(|pr| pr.number == *number) {
+                pr.mergeable = mergeable;
+            }
+        }
+    }
+
+    /// Each stacked pull request's place in its open stack, and the branch the
+    /// stack merges into, by pull request number.
+    ///
+    /// Empty when the stacks can't be read; their pull requests then show as
+    /// merging into the branch below them, which the queue leaves alone.
+    fn places(&mut self, repo: &str, online: bool) -> HashMap<u64, (StackPlace, String)> {
+        if !self.stacks {
+            return HashMap::new();
+        }
+        match self.get(&stacks_path(repo), online) {
+            Ok(body) => parse_stacks(&body).unwrap_or_default(),
+            Err(Error::Failed { message, .. }) if message.starts_with("HTTP 404") => {
+                self.stacks = false;
+                HashMap::new()
+            }
+            Err(_) => HashMap::new(),
+        }
+    }
+
+    /// The checks the default branch's rulesets require, or none when they
+    /// can't be read (no rulesets, no access, or not cached while offline).
+    fn required(&mut self, repo: &str, online: bool) -> Vec<String> {
+        let Some(branch) = self.default_branch.clone() else {
+            return vec![];
+        };
+        self.get(&rules_path(repo, &branch), online)
+            .and_then(|body| parse_required(&body))
+            .unwrap_or_default()
     }
 
     /// Fetch check runs and commit statuses for `pull`'s head commit and build
@@ -222,32 +404,54 @@ impl GitHub {
         repo: &str,
         pull: RestPull,
         head: String,
+        place: Option<(StackPlace, String)>,
+        required: &[String],
         online: bool,
     ) -> Result<Option<PullRequest>, Error> {
-        let sha = &pull.head.sha;
-        let runs = self.get(
-            &format!("repos/{repo}/commits/{sha}/check-runs?per_page=100"),
-            online,
-        );
-        let status = self.get(
-            &format!("repos/{repo}/commits/{sha}/status?per_page=100"),
-            online,
-        );
+        let runs = self.get(&runs_path(repo, &pull.head.sha), online);
+        let status = self.get(&status_path(repo, &pull.head.sha), online);
         let (runs, status) = match (runs, status) {
             (Ok(runs), Ok(status)) => (runs, status),
             (Err(Error::NotCached(_)), _) | (_, Err(Error::NotCached(_))) => return Ok(None),
             (Err(error), _) | (_, Err(error)) => return Err(error),
         };
 
+        let labeled = pull.labels.iter().any(|label| label.name == self.label);
+        let remote_branch = pull
+            .head
+            .repo
+            .as_ref()
+            .filter(|repo| repo.full_name == pull.base.repo.full_name)
+            .map(|_| pull.head.r#ref.clone());
+        let (stack, target) = match place {
+            Some((place, base)) => (
+                Some(StackPlace {
+                    branch: pull.head.r#ref.clone(),
+                    ..place
+                }),
+                base,
+            ),
+            None => (None, pull.base.r#ref),
+        };
+        let base =
+            Some(target).filter(|base| !base.is_empty() && *base != pull.base.repo.default_branch);
+
         Ok(Some(PullRequest {
             number: pull.number,
             title: pull.title,
             url: pull.html_url,
             head,
+            sha: pull.head.sha,
             draft: pull.draft,
-            checks: checks(contexts(&runs, &status)?),
+            checks: checks(contexts(&runs, &status)?, required),
             threads: 0,
             answered: 0,
+            labeled,
+            base,
+            stack,
+            remote_branch,
+            mergeable: None,
+            queue: None,
         }))
     }
 
@@ -316,6 +520,19 @@ impl GitHub {
     /// Fetch `path` from the GitHub REST API using `If-None-Match` when cached,
     /// or read from the cache alone when `online` is `false`.
     fn get(&mut self, path: &str, online: bool) -> Result<String, Error> {
+        self.fetch(path, online, |body| Ok(body.to_owned()))
+    }
+
+    /// Like [`get`], but keep only what `keep` makes of a `200` body, in the
+    /// cache and in the return value.
+    ///
+    /// [`get`]: Self::get
+    fn fetch(
+        &mut self,
+        path: &str,
+        online: bool,
+        keep: fn(&str) -> Result<String, Error>,
+    ) -> Result<String, Error> {
         self.requested.insert(path.to_owned());
 
         if !online {
@@ -327,23 +544,12 @@ impl GitHub {
                 .ok_or_else(|| Error::NotCached(path.to_owned()));
         }
 
-        let mut command = self.gh();
-        command.args(["api", "--include", path]);
-        if let Some(cached) = self.state.rest.get(path) {
-            command
-                .arg("--header")
-                .arg(format!("If-None-Match: {}", cached.etag));
-        }
+        let reply = match self.prefetched.remove(path) {
+            Some(reply) => reply,
+            None => call(&self.dir, path, self.etag(path)),
+        }?;
 
-        // `gh` exits 1 on every status outside 2xx, a `304` included, so the
-        // status line decides what happened.
-        let out = output("gh", &mut command)?;
-        let raw = String::from_utf8_lossy(&out.stdout);
-        let Some(response) = parse_response(&raw) else {
-            return Err(failure("gh", &out.stderr));
-        };
-
-        match response.status {
+        match reply.status {
             NOT_MODIFIED => self
                 .state
                 .rest
@@ -354,10 +560,10 @@ impl GitHub {
                     message: format!("{path}: 304 for a response never fetched"),
                 }),
             SUCCESS_FIRST..=SUCCESS_LAST => {
-                let body = response.body.to_owned();
-                if let Some(etag) = response.etag {
+                let body = keep(&reply.body)?;
+                if let Some(etag) = reply.etag {
                     self.state.rest.insert(path.to_owned(), Cached {
-                        etag: etag.to_owned(),
+                        etag,
                         body: body.clone(),
                     });
                     self.dirty = true;
@@ -366,9 +572,37 @@ impl GitHub {
             }
             status => Err(Error::Failed {
                 program: "gh",
-                message: format!("HTTP {status}: {}", api_message(response.body)),
+                message: format!("HTTP {status}: {}", api_message(&reply.body)),
             }),
         }
+    }
+
+    /// The `ETag` of the cached response for `path`, if any.
+    fn etag(&self, path: &str) -> Option<&str> {
+        self.state.rest.get(path).map(|cached| cached.etag.as_str())
+    }
+
+    /// Send the requests for `paths` up to [`PARALLEL`] at a time, so the
+    /// [`fetch`]es that follow find their answers waiting.
+    ///
+    /// [`fetch`]: Self::fetch
+    fn prefetch(&mut self, paths: Vec<String>) {
+        let mut seen = HashSet::new();
+        let jobs: Vec<(String, Option<String>)> = paths
+            .into_iter()
+            .filter(|path| !self.prefetched.contains_key(path) && seen.insert(path.clone()))
+            .map(|path| {
+                let etag = self.etag(&path).map(str::to_owned);
+                (path, etag)
+            })
+            .collect();
+
+        let dir = &self.dir;
+        let replies = parallel(&jobs, PARALLEL, |(path, etag)| {
+            call(dir, path, etag.as_deref())
+        });
+        self.prefetched
+            .extend(jobs.into_iter().map(|(path, _)| path).zip(replies));
     }
 
     fn graphql(&self, repo: &str, query: &str) -> Result<String, Error> {
@@ -390,6 +624,133 @@ impl GitHub {
     fn gh(&self) -> Command {
         gh(&self.dir)
     }
+}
+
+/// A REST response as `gh api --include` printed it.
+#[derive(Debug)]
+struct Reply {
+    status: u16,
+    etag: Option<String>,
+    body: String,
+}
+
+/// Request `path` from the GitHub REST API, sending `etag` as `If-None-Match`
+/// when given.
+fn call(dir: &Utf8Path, path: &str, etag: Option<&str>) -> Result<Reply, Error> {
+    let mut command = gh(dir);
+    command.args(["api", "--include", path]);
+    if let Some(etag) = etag {
+        command
+            .arg("--header")
+            .arg(format!("If-None-Match: {etag}"));
+    }
+
+    // `gh` exits 1 on every status outside 2xx, a `304` included, so the status
+    // line decides what happened.
+    let out = output("gh", &mut command)?;
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let Some(response) = parse_response(&raw) else {
+        return Err(failure("gh", &out.stderr));
+    };
+
+    Ok(Reply {
+        status: response.status,
+        etag: response.etag.map(str::to_owned),
+        body: response.body.to_owned(),
+    })
+}
+
+fn runs_path(repo: &str, sha: &str) -> String {
+    format!("repos/{repo}/commits/{sha}/check-runs?per_page=100")
+}
+
+fn status_path(repo: &str, sha: &str) -> String {
+    format!("repos/{repo}/commits/{sha}/status?per_page=100")
+}
+
+fn rules_path(repo: &str, branch: &str) -> String {
+    format!("repos/{repo}/rules/branches/{branch}")
+}
+
+fn stacks_path(repo: &str) -> String {
+    format!("repos/{repo}/stacks?per_page=100")
+}
+
+fn detail_path(repo: &str, number: u64) -> String {
+    format!("repos/{repo}/pulls/{number}")
+}
+
+/// The part of a pull request response the queue reads.
+#[derive(Debug, Serialize, Deserialize)]
+struct Detail {
+    /// `None` while GitHub works out whether the pull request can merge.
+    mergeable: Option<bool>,
+}
+
+/// Reduce a JSON response to the fields `T` reads, so the cache doesn't keep
+/// the rest (a compare response lists every changed file).
+fn slim<T: Serialize + DeserializeOwned>(body: &str) -> Result<String, Error> {
+    serde_json::to_string(&parse_json::<T>(body)?).map_err(|source| Error::Parse {
+        program: "gh",
+        source,
+    })
+}
+
+#[derive(Deserialize)]
+struct RestStack {
+    number: u64,
+    #[serde(default)]
+    open: bool,
+    base: StackBase,
+    pull_requests: Vec<StackMember>,
+}
+
+#[derive(Deserialize)]
+struct StackBase {
+    r#ref: String,
+}
+
+#[derive(Deserialize)]
+struct StackMember {
+    number: u64,
+    head: StackHead,
+}
+
+#[derive(Deserialize)]
+struct StackHead {
+    sha: String,
+}
+
+/// Parse the stacks list into each member's place in its open stack, and the
+/// branch that stack merges into, by pull request number.
+///
+/// [`StackPlace::branch`] is left empty for the caller to fill in.
+fn parse_stacks(json: &str) -> Result<HashMap<u64, (StackPlace, String)>, Error> {
+    let stacks: Vec<RestStack> = parse_json(json)?;
+
+    let mut places = HashMap::new();
+    for stack in stacks.into_iter().filter(|stack| stack.open) {
+        let size = stack.pull_requests.len();
+        for (index, member) in stack.pull_requests.iter().enumerate() {
+            let below = index
+                .checked_sub(1)
+                .map(|below| stack.pull_requests[below].head.sha.clone());
+            places.insert(
+                member.number,
+                (
+                    StackPlace {
+                        stack: stack.number,
+                        position: index + 1,
+                        size,
+                        branch: String::new(),
+                        below,
+                    },
+                    stack.base.r#ref.clone(),
+                ),
+            );
+        }
+    }
+    Ok(places)
 }
 
 /// Build a `gh` [`Command`] rooted at `dir`, forwarding `JP_GITHUB_TOKEN` as
@@ -414,6 +775,91 @@ pub fn checkout(worktree: &Utf8Path, number: u64) -> Result<(), Error> {
         .args(["pr", "checkout", &number.to_string()])
         .env("GH_PROMPT_DISABLED", "1");
     stdout("gh", git::noninteractive(&mut command, worktree)).map(drop)
+}
+
+/// The label that puts a pull request of the repository containing `dir` in the
+/// merge queue: its `dash.queueLabel` git config, or [`DEFAULT_QUEUE_LABEL`].
+#[must_use]
+pub fn queue_label(dir: &Utf8Path) -> String {
+    git::config(dir, QUEUE_LABEL_KEY).unwrap_or_else(|| DEFAULT_QUEUE_LABEL.to_owned())
+}
+
+/// Add pull request `number` to the merge queue (or take it out, when `add` is
+/// `false`) by adding or removing the queue label.
+///
+/// A repository that doesn't have the label yet gets it created on the first
+/// add.
+pub fn set_queued(dir: &Utf8Path, number: u64, add: bool) -> Result<(), Error> {
+    let label = queue_label(dir);
+    let edit = || {
+        let mut command = gh(dir);
+        command
+            .args(["pr", "edit", &number.to_string()])
+            .arg(if add { "--add-label" } else { "--remove-label" })
+            .arg(&label)
+            .env("GH_PROMPT_DISABLED", "1");
+        stdout("gh", git::noninteractive(&mut command, dir)).map(drop)
+    };
+
+    match edit() {
+        Err(_) if add => {
+            // `gh pr edit` refuses a label the repository doesn't have. Creating
+            // it fails harmlessly when it exists, and the retry reports
+            // whatever stopped the first attempt.
+            let mut create = gh(dir);
+            create
+                .args([
+                    "label",
+                    "create",
+                    &label,
+                    "--color",
+                    "0e8a16",
+                    "--description",
+                ])
+                .arg("Merged by dash once its checks pass")
+                .env("GH_PROMPT_DISABLED", "1");
+            let _exists = stdout("gh", git::noninteractive(&mut create, dir));
+            edit()
+        }
+        result => result,
+    }
+}
+
+/// Start a thread that adds or removes the queue label on the pull requests
+/// sent to it, one at a time and in the order sent, and calls `done` with each
+/// edit's outcome.
+///
+/// Send `(number, true)` to add the label to pull request `number`, `false` to
+/// remove it.
+pub fn label_editor<D>(dir: Utf8PathBuf, done: D) -> Sender<(u64, bool)>
+where
+    D: Fn(u64, bool, Result<(), String>) + Send + 'static,
+{
+    editor(
+        move |number, add| set_queued(&dir, number, add).map_err(|error| error.to_string()),
+        done,
+    )
+}
+
+/// Apply each `(number, add)` sent to the returned [`Sender`] with `edit`, in
+/// the order sent, and report it to `done`.
+fn editor<E, D>(edit: E, done: D) -> Sender<(u64, bool)>
+where
+    E: Fn(u64, bool) -> Result<(), String> + Send + 'static,
+    D: Fn(u64, bool, Result<(), String>) + Send + 'static,
+{
+    let (send, edits) = mpsc::channel();
+
+    // A single thread for all edits keeps them in order: with a thread per
+    // edit, a quick `m m` could reach GitHub as remove-then-add and leave the
+    // label on.
+    thread::spawn(move || {
+        for (number, add) in edits {
+            done(number, add, edit(number, add));
+        }
+    });
+
+    send
 }
 
 /// Return PR numbers whose review threads need refreshing: all PRs when `asked`
@@ -508,6 +954,13 @@ struct RestPull {
     draft: bool,
     head: Head,
     base: Base,
+    #[serde(default)]
+    labels: Vec<Label>,
+}
+
+#[derive(Deserialize)]
+struct Label {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -524,6 +977,8 @@ struct Head {
 
 #[derive(Deserialize)]
 struct Base {
+    #[serde(default)]
+    r#ref: String,
     repo: Repo,
 }
 
@@ -744,12 +1199,44 @@ fn parse_reviews(json: &str) -> Result<Counts, Error> {
     Ok(reviews)
 }
 
+#[derive(Deserialize)]
+struct Rule {
+    r#type: String,
+    parameters: Option<RuleParameters>,
+}
+
+#[derive(Deserialize)]
+struct RuleParameters {
+    #[serde(default)]
+    required_status_checks: Vec<RequiredCheck>,
+}
+
+#[derive(Deserialize)]
+struct RequiredCheck {
+    context: String,
+}
+
+/// Parse the `rules/branches/{branch}` response into the names of the checks it
+/// requires.
+fn parse_required(json: &str) -> Result<Vec<String>, Error> {
+    let rules: Vec<Rule> = parse_json(json)?;
+
+    Ok(rules
+        .into_iter()
+        .filter(|rule| rule.r#type == "required_status_checks")
+        .filter_map(|rule| rule.parameters)
+        .flat_map(|parameters| parameters.required_status_checks)
+        .map(|check| check.context)
+        .collect())
+}
+
 /// Aggregate check outcomes by check name, keeping only the latest attempt when
-/// a check has been re-run.
+/// a check has been re-run, and counting each `required` check that hasn't
+/// reported as pending.
 ///
 /// A queued check run with `started_at: None` is treated as newer than any
 /// previously started attempt.
-fn checks(contexts: Vec<Context>) -> Checks {
+fn checks(contexts: Vec<Context>, required: &[String]) -> Checks {
     let mut latest: HashMap<String, (Option<String>, Outcome)> = HashMap::new();
 
     for context in contexts {
@@ -766,9 +1253,19 @@ fn checks(contexts: Vec<Context>) -> Checks {
         }
     }
 
+    let missing = required
+        .iter()
+        .filter(|name| !latest.contains_key(*name))
+        .collect::<HashSet<_>>()
+        .len();
+
+    let unreported = Checks {
+        pending: count(missing),
+        ..Checks::default()
+    };
     latest
         .into_values()
-        .fold(Checks::default(), |mut checks, (_, outcome)| {
+        .fold(unreported, |mut checks, (_, outcome)| {
             match outcome {
                 Outcome::Passed => checks.passed += 1,
                 Outcome::Pending => checks.pending += 1,

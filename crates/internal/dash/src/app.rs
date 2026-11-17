@@ -11,7 +11,10 @@
 mod cursor;
 mod table;
 
-use std::{collections::HashSet, mem};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+};
 
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
@@ -25,6 +28,7 @@ pub use self::{
 use crate::{
     create::Created,
     model::{self, BaseUpdate, PullRequest, Row, RowId, Terminal, Worktree},
+    queue::QueueRole,
     source::jp::JpState,
 };
 
@@ -38,6 +42,17 @@ pub enum Update {
 
     /// Result of fast-forwarding the local default branch.
     Base(Result<BaseUpdate, String>),
+
+    /// Which part this process plays in the merge queue.
+    Queue(QueueRole),
+
+    /// Result of adding the queue label to pull request `number` (or removing
+    /// it, when `add` is `false`).
+    QueueEdited {
+        number: u64,
+        add: bool,
+        outcome: Result<(), String>,
+    },
 
     /// Result of creating a worktree for pull request `pr` (or a new branch
     /// when `None`).
@@ -92,6 +107,16 @@ pub enum Action {
         dir: Utf8PathBuf,
         command: String,
     },
+
+    /// Add pull request `number` to the merge queue, or take it out when `add`
+    /// is `false`.
+    Queue {
+        number: u64,
+        add: bool,
+    },
+
+    /// Pause the merge queue in this process, or resume it.
+    PauseQueue(bool),
 }
 
 /// Latest value and error state for a single background source.
@@ -134,6 +159,10 @@ pub struct Feeds {
     pub jp: Feed<JpState>,
     pub prs: Feed<Vec<PullRequest>>,
     pub base: Feed<BaseUpdate>,
+
+    /// Which part this process plays in the merge queue, once the GitHub source
+    /// has polled.
+    pub queue: Option<QueueRole>,
 }
 
 impl Feeds {
@@ -192,6 +221,13 @@ pub struct App {
     /// Reference timestamp used to format relative ages on the current frame.
     pub now: DateTime<Utc>,
 
+    /// Whether the merge queue is paused in this process.
+    pub queue_paused: bool,
+
+    /// Queue label edits not yet seen in a pull request list: `true` to add the
+    /// label to that pull request, `false` to remove it.
+    pub queue_edits: HashMap<u64, bool>,
+
     /// Row and next tab index for cycling through tabs on repeated `Enter`
     /// presses.
     cycle: Option<(RowId, usize)>,
@@ -216,9 +252,34 @@ impl App {
             Update::Worktrees(read) => self.feeds.worktrees.apply(read),
             Update::Terminals(read) => self.feeds.terminals.apply(read),
             Update::Jp(read) => self.feeds.jp.apply(read),
-            Update::PullRequests(read) => self.feeds.prs.apply(read),
+            Update::PullRequests(read) => {
+                self.feeds.prs.apply(read);
+                self.settle_queue_edits();
+            }
             Update::Base(read) => {
                 self.feeds.base.apply(read);
+                return;
+            }
+            Update::Queue(role) => {
+                self.feeds.queue = Some(role);
+                return;
+            }
+            Update::QueueEdited {
+                number,
+                add,
+                outcome,
+            } => {
+                self.notice = Some(match outcome {
+                    Ok(()) if add => format!("Added #{number} to the merge queue."),
+                    Ok(()) => format!("Took #{number} out of the merge queue."),
+                    Err(error) => {
+                        // Only forget the edit if no later `m` replaced it.
+                        if self.queue_edits.get(&number) == Some(&add) {
+                            self.queue_edits.remove(&number);
+                        }
+                        error
+                    }
+                });
                 return;
             }
             Update::Created { pr, outcome } => {
@@ -286,6 +347,17 @@ impl App {
             KeyCode::Char('r') => Action::Refresh,
             KeyCode::Enter => self.enter(cycle),
             KeyCode::Char('o') => self.open(),
+            KeyCode::Char('m') => self.toggle_queue(),
+            KeyCode::Char('p') => {
+                self.queue_paused = !self.queue_paused;
+                self.notice = Some(if self.queue_paused {
+                    "Merge queue paused: nothing is updated or merged until you press p again."
+                        .to_owned()
+                } else {
+                    "Merge queue resumed.".to_owned()
+                });
+                Action::PauseQueue(self.queue_paused)
+            }
             _ => {
                 self.browse(key, pending_g);
                 Action::None
@@ -651,6 +723,44 @@ impl App {
         let notice = format!("{} has no open pull request.", row.name);
         self.notice = Some(notice);
         Action::None
+    }
+
+    /// `m`: add the selected row's pull request to the merge queue, or take it
+    /// out if it is already in.
+    fn toggle_queue(&mut self) -> Action {
+        let Some(item) = self.selected_item() else {
+            return Action::None;
+        };
+        let row = item.row();
+
+        let Some(pr) = &row.pr else {
+            self.notice = Some(format!("{} has no open pull request.", row.name));
+            return Action::None;
+        };
+
+        let number = pr.number;
+        let labeled = self.queue_edits.get(&number).copied().unwrap_or(pr.labeled);
+        let add = !labeled;
+        self.queue_edits.insert(number, add);
+
+        self.notice = Some(if add {
+            format!("Adding #{number} to the merge queue…")
+        } else {
+            format!("Taking #{number} out of the merge queue…")
+        });
+        Action::Queue { number, add }
+    }
+
+    /// Forget label edits the latest pull request list shows done, or whose
+    /// pull request closed.
+    fn settle_queue_edits(&mut self) {
+        let Some(prs) = &self.feeds.prs.data else {
+            return;
+        };
+        self.queue_edits.retain(|number, add| {
+            prs.iter()
+                .any(|pr| pr.number == *number && pr.labeled != *add)
+        });
     }
 
     /// Adjust the scroll offset so the selected item fits within `rows` screen
