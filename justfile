@@ -556,6 +556,20 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
 
     printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
 
+# Open a live terminal dashboard of the repository's worktrees and pull requests.
+#
+# Lists active worktrees (those with an open Ghostty tab, a running `jp`
+# process, or an open pull request) followed by open pull requests without a
+# local worktree.
+# `Enter` focuses or opens a worktree tab (repeating cycles through multiple
+# tabs) or creates a worktree for a pull request. `→`/`Space` expands a row's
+# tabs and session conversations, and `→` on a conversation lists `jp` commands
+# to run in its tab. `n` creates a worktree on a new branch from `main`, `/`
+# filters, `s` sorts, and `a` toggles idle worktrees.
+[group('github')]
+dash:
+    @cargo run {{quiet_flag}} --package dash
+
 # Generate changelog for the project.
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
