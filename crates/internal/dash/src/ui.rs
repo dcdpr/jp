@@ -19,12 +19,13 @@ use unicode_width::UnicodeWidthChar as _;
 use crate::{
     app::{App, Display, Feed, Indent, Item, Operation, Sort, Target},
     model::{Checks, PullRequest, Row, RowId, SessionConversation, Status, Terminal},
+    queue::{self, QueueRole, QueueState},
 };
 
-const HELP: &str =
-    "enter open · →/space expand · n new · / filter · s sort · o PR · a all · r refresh · q quit";
+const HELP: &str = "enter open · →/space expand · n new · m queue · p pause · / filter · s sort · \
+                    o PR · a all · r refresh · q quit";
 
-const HEADINGS: [&str; 7] = [
+const HEADINGS: [&str; COLUMNS] = [
     "WORKTREE",
     "BRANCH",
     "JP",
@@ -32,7 +33,11 @@ const HEADINGS: [&str; 7] = [
     "PR",
     "CI",
     "REVIEW",
+    "QUEUE",
 ];
+
+/// Number of table columns.
+const COLUMNS: usize = 8;
 
 /// Label shown in the worktree column for an unchecked-out pull request.
 const CREATE: &str = "create worktree";
@@ -62,6 +67,9 @@ const CI_WIDTH: usize = 12;
 
 /// Width of the review column.
 const REVIEW_WIDTH: usize = 6;
+
+/// Width of the merge-queue column, which fits `▶ waiting for CI · 2/3`.
+const QUEUE_WIDTH: usize = 22;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Style {
@@ -219,7 +227,7 @@ fn item_line(
     app: &App,
     item: Item<'_>,
     indent: Option<Indent>,
-    widths: &[usize; 7],
+    widths: &[usize; COLUMNS],
     listing: &Listing,
 ) -> Line {
     match item {
@@ -317,7 +325,7 @@ fn pad(text: &str, width: usize, right_aligned: bool) -> String {
 /// Compute the width of each table column, sizing worktree and branch to their
 /// widest visible value and giving the remaining width to the conversation
 /// column.
-fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
+fn columns(rows: &[&Row], width: usize) -> [usize; COLUMNS] {
     let fit = |widest: Option<usize>, heading: &str| {
         widest
             .unwrap_or(0)
@@ -345,7 +353,16 @@ fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
         HEADINGS[1],
     );
 
-    let mut widths = [name, branch, JP_WIDTH, 0, PR_WIDTH, CI_WIDTH, REVIEW_WIDTH];
+    let mut widths = [
+        name,
+        branch,
+        JP_WIDTH,
+        0,
+        PR_WIDTH,
+        CI_WIDTH,
+        REVIEW_WIDTH,
+        QUEUE_WIDTH,
+    ];
     let taken = widths.iter().sum::<usize>() + SPACING * (widths.len() - 1);
     widths[3] = width.saturating_sub(taken);
     widths
@@ -356,8 +373,8 @@ fn columns(rows: &[&Row], width: usize) -> [usize; 7] {
 /// If `link` is `Some((col, url))`, wraps the text of column `col` (excluding
 /// trailing padding) in an OSC 8 hyperlink.
 fn table_line(
-    cells: [(String, Style); 7],
-    widths: &[usize; 7],
+    cells: [(String, Style); COLUMNS],
+    widths: &[usize; COLUMNS],
     link: Option<(usize, &str)>,
 ) -> Line {
     let mut line = Line::default();
@@ -453,6 +470,8 @@ fn header_line(app: &App) -> Line {
         line.push(summary, PLAIN);
     }
 
+    queue_summary(app, &mut line);
+
     if app.table.sort != Sort::default() {
         line.push(
             format!(" · by {}", app.table.sort.label().to_lowercase()),
@@ -465,7 +484,34 @@ fn header_line(app: &App) -> Line {
     line
 }
 
-fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
+/// Append the merge-queue summary to the header line: paused state, waiting
+/// entry count, and the active step for the front entry.
+fn queue_summary(app: &App, line: &mut Line) {
+    if app.queue.paused {
+        line.push(" · queue paused", fg(Color::Yellow));
+        return;
+    }
+
+    let prs = app.feeds.prs.data.as_deref().unwrap_or_default();
+    let waiting = queue::waiting(prs);
+    if waiting == 0 {
+        return;
+    }
+    line.push(format!(" · queue: {waiting}"), PLAIN);
+
+    if app.feeds.queue == Some(QueueRole::Watching) {
+        line.push(" · watching", DIM);
+    } else if let Some(front) = queue::front(prs)
+        && let Some(QueueState::Front(step)) = &front.members[0].queue
+    {
+        line.push(
+            format!(" · ▶ {} {}", front.name(), step.label()),
+            fg(Color::Yellow),
+        );
+    }
+}
+
+fn cells(app: &App, row: &Row) -> [(String, Style); COLUMNS] {
     let name = match &row.id {
         RowId::PullRequest(number) if app.creating.contains(number) => {
             ("creating…".to_owned(), fg(Color::Yellow))
@@ -505,9 +551,16 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
             }),
     };
 
-    let [pr, ci, review] = match (unknown(&app.feeds.prs), &row.pr) {
-        (Some(marker), _) => [marker.clone(), marker.clone(), marker],
+    let [pr, ci, review, queue] = pull_request_cells(app, row);
+    [name, branch, jp, conversation, pr, ci, review, queue]
+}
+
+/// The PR, CI, review, and queue cells of `row`.
+fn pull_request_cells(app: &App, row: &Row) -> [(String, Style); 4] {
+    let [pr, ci, review, mut queue] = match (unknown(&app.feeds.prs), &row.pr) {
+        (Some(marker), _) => [marker.clone(), marker.clone(), marker.clone(), marker],
         (None, None) => [
+            (String::new(), PLAIN),
             (String::new(), PLAIN),
             (String::new(), PLAIN),
             (String::new(), PLAIN),
@@ -515,7 +568,17 @@ fn cells(app: &App, row: &Row) -> [(String, Style); 7] {
         (None, Some(pr)) => pr_cells(pr),
     };
 
-    [name, branch, jp, conversation, pr, ci, review]
+    // Render optimistic label edits before the next GitHub poll confirms them.
+    if let Some(add) = row
+        .pr
+        .as_ref()
+        .and_then(|pr| app.queue.edits.get(&pr.number))
+    {
+        let text = if *add { "adding…" } else { "removing…" };
+        queue = (text.to_owned(), fg(Color::Yellow));
+    }
+
+    [pr, ci, review, queue]
 }
 
 fn running(count: usize) -> (String, Style) {
@@ -546,7 +609,7 @@ fn status_cell(status: Status, now: DateTime<Utc>) -> (String, Style) {
 ///
 /// The JP status column is left blank because per-conversation status is shown
 /// on the child conversation lines and summarized on the parent worktree row.
-fn tab_cells(tab: &Terminal, index: usize, indent: Option<Indent>) -> [(String, Style); 7] {
+fn tab_cells(tab: &Terminal, index: usize, indent: Option<Indent>) -> [(String, Style); COLUMNS] {
     let empty = || (String::new(), PLAIN);
 
     [
@@ -557,10 +620,11 @@ fn tab_cells(tab: &Terminal, index: usize, indent: Option<Indent>) -> [(String, 
         empty(),
         empty(),
         empty(),
+        empty(),
     ]
 }
 
-fn pr_cells(pr: &PullRequest) -> [(String, Style); 3] {
+fn pr_cells(pr: &PullRequest) -> [(String, Style); 4] {
     let number = (
         format!("#{}", pr.number),
         if pr.draft { DIM } else { PLAIN },
@@ -572,7 +636,33 @@ fn pr_cells(pr: &PullRequest) -> [(String, Style); 3] {
         (format!("{}/{}", pr.threads, pr.answered), PLAIN)
     };
 
-    [number, checks(pr.checks), review]
+    [number, checks(pr.checks), review, queue_cell(pr)]
+}
+
+/// Format the `QUEUE` cell for `pr`, appending `<position>/<size>` when `pr`
+/// belongs to a stack.
+fn queue_cell(pr: &PullRequest) -> (String, Style) {
+    let (state, style) = queue_state(pr.queue.as_ref());
+    match &pr.stack {
+        Some(place) if !state.is_empty() => (
+            format!("{state} · {}/{}", place.position, place.size),
+            style,
+        ),
+        _ => (state, style),
+    }
+}
+
+fn queue_state(state: Option<&QueueState>) -> (String, Style) {
+    match state {
+        None => (String::new(), PLAIN),
+        Some(QueueState::Front(step)) => (format!("▶ {}", step.label()), fg(Color::Yellow)),
+        Some(QueueState::Waiting { position }) => (format!("queued {position}"), PLAIN),
+        Some(QueueState::Draft) => ("draft".to_owned(), DIM),
+        Some(QueueState::Failing) => ("failed".to_owned(), fg(Color::Red)),
+        Some(QueueState::Conflicts) => ("conflicts".to_owned(), fg(Color::Red)),
+        Some(QueueState::Blocked(_)) => ("blocked".to_owned(), fg(Color::Red)),
+        Some(QueueState::OtherBase(base)) => (format!("base {base}"), DIM),
+    }
 }
 
 fn checks(checks: Checks) -> (String, Style) {
