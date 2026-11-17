@@ -3204,6 +3204,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-html"
+version = "0.1.0"
+dependencies = [
+ "comrak",
+ "indoc",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
