@@ -1037,7 +1037,6 @@ const SITE_PASSED: &str = indoc::indoc! {"
 
 "};
 
-/// What libtest prints when the site is out of sync.
 const SITE_FAILED: &str = indoc::indoc! {"
 
     running 1 test
@@ -1060,7 +1059,6 @@ const SITE_FAILED: &str = indoc::indoc! {"
 
 "};
 
-/// A synced site adds nothing: the run reads as it would without the check.
 #[test]
 fn a_synced_site_adds_nothing() {
     let (_dir, ctx) = ctx();
@@ -1083,8 +1081,6 @@ fn a_synced_site_adds_nothing() {
     assert_eq!(runner.calls().len(), 3);
 }
 
-/// A site file changed without the sync is reported with the files the test
-/// listed, and how to sync them from this checkout.
 #[test]
 fn an_unsynced_site_is_reported() {
     let (_dir, ctx) = ctx();
@@ -1116,8 +1112,8 @@ fn an_unsynced_site_is_reported() {
             Run `JP_VITE_BLESS=1 cargo test -p jp-vite jp_site_is_synced` to sync it, rather than editing the files under `docs/.vitepress/jp-vite/` by hand. `jp vite sync` writes the site files the installed `jp-vite` was built with, which can predate this checkout's."});
 }
 
-/// `--exact` with a name that matches no test exits 0 having run nothing, which
-/// is not a synced site.
+/// `--exact` with a filter that matches no test exits 0 after running 0 tests,
+/// which must not be treated as a synced site.
 #[test]
 fn a_site_test_that_never_ran_is_a_note() {
     let (_dir, ctx) = ctx();
@@ -1145,7 +1141,6 @@ fn a_site_test_that_never_ran_is_a_note() {
             JP's site wasn't checked: `jp-vite` has no test named `tests::jp_site_is_synced`."});
 }
 
-/// A test build that fails is a note, not a failed run: clippy's result stands.
 #[test]
 fn a_site_test_that_doesnt_build_is_a_note() {
     let (_dir, ctx) = ctx();
@@ -1171,8 +1166,6 @@ fn a_site_test_that_doesnt_build_is_a_note() {
             JP's site wasn't checked: `cargo test -p jp-vite` failed: error: package ID specification `jp-vite` did not match any packages"});
 }
 
-/// The site test is built with the profile and flags of the clippy run, so the
-/// two share a directory under `target/`.
 #[test]
 fn the_site_test_is_built_with_the_profile_and_flags_of_the_clippy_run() {
     let (_dir, ctx) = ctx();

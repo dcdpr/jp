@@ -8,8 +8,8 @@ use serde::Deserialize;
 use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope, comfort_scope};
 use crate::util::{ToolResult, error, truncate};
 
-/// Run clippy and comfort over `packages`, or the whole workspace when it is
-/// empty, and whatever else `checks` turns on.
+/// Run clippy and comfort over `packages` (or the whole workspace when
+/// `packages` is empty), plus any additional checks enabled in `checks`.
 pub(crate) async fn cargo_check(
     root: &Utf8Path,
     rustflags: &str,
@@ -27,7 +27,7 @@ pub(crate) async fn cargo_check(
     )
 }
 
-/// What a check run does besides clippy and comfort.
+/// Additional checks to run after clippy and comfort.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Checks {
     /// Use content checksums for cargo's freshness checks.
@@ -179,19 +179,17 @@ fn wiki_check<R: ProcessRunner>(root: &Utf8Path, runner: &R) -> Option<String> {
     }
 }
 
-/// The `jp-vite` test that compares JP's site with the one `jp vite sync`
-/// writes from this checkout.
+/// The `jp-vite` test that verifies `docs/.vitepress/jp-vite/` matches the site
+/// files in this checkout.
 const SITE_TEST: &str = "tests::jp_site_is_synced";
 
-/// Run [`SITE_TEST`], which the `docs` job on CI runs, returning what it found
-/// as a note; `None` when JP's site is synced.
+/// Run [`SITE_TEST`] (the same check run by the `docs` CI job), returning any
+/// failure as a note, or `None` when the site is in sync.
 ///
-/// The test is built from the working tree, so it compares the site with the
-/// site files this checkout carries.
-/// The test build gets `profile` and `env`, the same as the clippy run, so it
-/// shares that run's artifacts.
-/// A site that can't be checked is a note too, rather than a failed check: the
-/// code itself was checked.
+/// Builds the test from the working tree so it checks the site files in this
+/// checkout, using `profile` and `env` to share artifacts with the clippy pass.
+/// If the test cannot be run or built, returns a note rather than failing the
+/// check so clippy's results are preserved.
 fn site_check<R: ProcessRunner>(
     root: &Utf8Path,
     profile: Option<&str>,
@@ -238,8 +236,8 @@ fn site_check<R: ProcessRunner>(
     ))
 }
 
-/// The panic message libtest printed for the failed test `name`, or `None` when
-/// `stdout` reports no failure of that test.
+/// Extract the panic message from libtest `stdout` for the failed test `name`,
+/// or `None` if `name` did not fail.
 fn test_failure(stdout: &str, name: &str) -> Option<String> {
     let (_, rest) = stdout.split_once(&format!("---- {name} stdout ----"))?;
     let section = rest

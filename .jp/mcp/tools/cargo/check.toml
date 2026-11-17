@@ -37,11 +37,11 @@ options.wiki_check = true
 # says the gate didn't run.
 options.qual_check = true
 
-# Run `jp-vite`'s `jp_site_is_synced` test too, which the `docs` job on CI
-# runs: a change under `crates/plugins/command/vite/site/` or to the ticket
-# labels in `.jp/config.toml` has to be synced into `docs/.vitepress/jp-vite/`,
-# whose `settings.json` records a hash of the site files. Builds `jp-vite`'s
-# tests from the working tree.
+# Also run `jp-vite`'s `jp_site_is_synced` test (the same check run by the
+# `docs` CI job). Changes under `crates/plugins/command/vite/site/` or to the
+# ticket labels in `.jp/config.toml` must be synced into
+# `docs/.vitepress/jp-vite/`, where `settings.json` records a content hash of
+# the site files. Builds `jp-vite`'s tests from the working tree.
 options.site_check = true
 
 [conversation.tools.cargo_check.style]
