@@ -19,10 +19,11 @@ How the ticket implementation works:
 
 - `tasklist.mjs` writes the item's lookup text to `data-checklist-item` on its
   checkbox.
-  `config.mjs` (`ticketChecklistItems`) populates this attribute only for items
-  in a ticket's description (excluding comments and embeds), reading the lookup
-  text from the raw source line the same way the `ticket` crate's `checklist`
-  module does.
+  `config.mjs` (`ticketChecklistItems`) enables this on ticket pages via
+  `ticketItemText` in `tasklist.mjs`, which includes only items in the ticket's
+  description (excluding comments and section embeds) and reads the lookup text
+  from the unjoined source line to match the `ticket` crate's `checklist`
+  module.
 - `theme/TicketChecklist.vue` enables those checkboxes and posts `check` or
   `uncheck` requests to `/__ticket`.
   `middleware.mjs` (`ticketCommands`) translates the request into `jp ticket

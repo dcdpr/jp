@@ -21,25 +21,25 @@
 // cross block-syntax boundaries (blockquote markers, list markers, headings)
 // are left alone, since collapsing them would change interpretation.
 //
-// Each newline becomes one space, so every offset in the source as written is
-// the same offset in the joined one. The rule keeps the source as written in
-// markdown-it's `env`, for a reader that needs a line as the file holds it.
+// Because each newline is replaced with a single space, byte and character
+// offsets are identical between the original source and the joined source.
+// `joinInlineCode` stores the original source in markdown-it's `env` so
+// downstream rules can read unjoined lines from disk.
 
-// Where `joinInlineCode` keeps the source as written, in markdown-it's `env`.
+// Environment key where `joinInlineCode` stores the unjoined markdown source.
 const WRITTEN = 'jpViteWrittenSource'
 
-// The core rule: join the code spans of the source `state` parses, keeping the
-// source as written in `state.env`.
+// Collapse multiline inline code spans in `state.src`, saving the original
+// source in `state.env`.
 export function joinInlineCode(state) {
     if (state.env) state.env[WRITTEN] = state.src
     state.src = joinMultilineInlineCode(state.src)
 }
 
-// The source as written of the document parsed from `src`, the joined source,
-// in `env`.
+// Return the unjoined source saved in `env` for `src`.
 //
-// `src` itself when the rule didn't run, or when a later rule changed the
-// source's size, so offsets no longer line up.
+// Falls back to `src` if `joinInlineCode` did not run or if a later rule
+// changed the source length, invalidating character offsets.
 export function writtenSource(env, src) {
     const written = env?.[WRITTEN]
 
@@ -74,7 +74,7 @@ function collapseInlineBackticks(src) {
 
         const closer = findCloser(src, pos, openerLen)
         if (closer === -1) {
-            // Unmatched opener — emit literally.
+            // Unmatched opener: emit literally.
             out += src.slice(openerStart, pos)
             continue
         }
@@ -101,7 +101,7 @@ function findCloser(src, from, length) {
     let i = from
     while (i < src.length) {
         if (src[i] === '\n') {
-            // Paragraph break ends the search — inline code never crosses one.
+            // Paragraph break ends the search; inline code never crosses one.
             let j = i + 1
             while (j < src.length && (src[j] === ' ' || src[j] === '\t')) j++
             if (j >= src.length || src[j] === '\n') return -1

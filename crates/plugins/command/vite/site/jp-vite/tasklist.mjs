@@ -60,26 +60,25 @@ export function renderTaskLists(tokens, Token, itemText = () => null) {
     }
 }
 
-// The `itemText` for the block tokens of a ticket's page, parsed from `src` in
-// markdown-it's `env`: the text `jp ticket edit --check` finds each item of the
-// ticket's description by.
+// Build the `itemText` callback for a ticket page parsed from `src` with
+// markdown-it environment `env`, returning the lookup text that
+// `jp ticket edit --check` uses to match each description item.
 //
-// Items in comments have none, since the tooling never changes a comment. A
-// document parsed for a section another page embeds gets no `itemText` at all:
-// its tokens end up on that page, where the ticket they would be checked
-// through is the embedding one.
+// Comment items return `null` because `jp ticket` never modifies comments.
+// Section-embed parses return `undefined` so embedded items are not wired up to
+// toggle the embedding ticket.
 //
-// The text comes from the item's first line as written, as the `ticket` crate's
-// `checklist` module reads it, rather than from `src`, where the join rule may
-// have moved the next line of a wrapped code span onto it.
+// Reads each item's first line from the unjoined source (`writtenSource`) so it
+// matches the `ticket` crate's `checklist` parser even when `joinInlineCode`
+// collapsed a wrapped code span onto that line in `src`.
 export function ticketItemText(env, src) {
     if (isSectionSource(env)) return undefined
 
     const lines = src.split('\n')
     const end = descriptionEnd(lines)
     const written = writtenSource(env, src)
-    // The join rule replaces a newline with one space, so a line of `src`
-    // starts at the same offset in `written`.
+    // `joinInlineCode` replaces each newline with a single space, so every line
+    // in `src` starts at the same character offset in `written`.
     const starts = []
     let offset = 0
     for (const line of lines) {

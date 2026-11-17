@@ -31,18 +31,19 @@ const IMAGES = new Set([
     'apng', 'avif', 'bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'tif', 'tiff', 'webp',
 ])
 
-// Set on the environment of a document parsed for a section it holds: its
-// embeds are expanded once the section is cut out of it, and only those.
+// Environment key marking a full-document parse used to extract an embedded
+// section. Nested embeds are expanded only after the target section is
+// extracted.
 const WHOLE_DOCUMENT = 'jpViteSectionSource'
 
-// The environment to parse a document in for a section it holds: `fields`,
-// marked as such. Every core rule runs on that parse, and its tokens end up on
-// the embedding page.
+// Return a markdown-it environment with `fields` marked as a section-embed
+// source parse. Core rules run during that parse, and the extracted tokens are
+// spliced into the embedding page.
 export function sectionSourceEnv(fields) {
     return { ...fields, [WHOLE_DOCUMENT]: true }
 }
 
-// Whether `env` is that of a document parsed for a section it holds.
+// Return whether `env` belongs to a document being parsed for a section embed.
 export function isSectionSource(env) {
     return env?.[WHOLE_DOCUMENT] === true
 }

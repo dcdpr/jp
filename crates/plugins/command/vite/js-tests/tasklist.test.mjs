@@ -131,15 +131,14 @@ test('a checkbox carries the text its item is checked by', () => {
         '<input type="checkbox" class="task-list-item-checkbox" disabled checked> ')
 })
 
-// The source as `jp ticket` reads it, with the join rule run on it the way the
-// site runs it before block parsing.
+// Run `joinInlineCode` on `src`, preserving the original source in `env` as
+// the site does before block parsing.
 function parsed(src, env) {
     const state = { src, env }
     joinInlineCode(state)
     return state
 }
 
-// One task-list item whose paragraph starts on 0-based source line `line`.
 function itemAt(content, line) {
     const tokens = list(item(content, [text(content)]))
     tokens[3].map = [line, line + 1]
@@ -154,8 +153,9 @@ const WRAPPED = `# Session read surface
       session ls --all\` in \`jp_cli\`.
 `
 
-// The join rule puts the code span's second line on the item's first line,
-// and `jp ticket` finds an item by its first line as written.
+// `joinInlineCode` collapses the wrapped code span onto the item's first line
+// in `state.src`, but `jp ticket` matches items against the unjoined first
+// line on disk.
 test('an item wrapping a code span is checked by its first line as written', () => {
     const state = parsed(WRAPPED, { relativePath: 'ticket/0aaaaaa-session.md' })
     assert.notEqual(state.src, WRAPPED)
@@ -186,9 +186,9 @@ const EMBEDDING = `# Ticket A
 ![Steps](0bbbbbb-b.md#steps)
 `
 
-// `embedSection` parses ticket B on its own, its task lists rendered, before
-// its tokens join ticket A's. Both tickets have an `Add tests` item: a box on
-// B's item would check A's.
+// `embedSection` parses ticket B (including its task lists) before splicing its
+// tokens into ticket A. Both tickets have an `Add tests` item, so enabling B's
+// checkbox on A's page would toggle A's item instead.
 test('an item embedded from another ticket is not checked from the embedding one', () => {
     const inner = parsed(EMBEDDED, sectionSourceEnv({ relativePath: 'ticket/0bbbbbb-b.md' }))
     const embedded = itemAt('[ ] Add tests', 6)
