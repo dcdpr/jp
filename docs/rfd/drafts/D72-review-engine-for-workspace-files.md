@@ -593,9 +593,9 @@ A `query_complete` response carries an `outcome` field (`finished`, `stopped`,
 or `aborted`), which maps to `completed` (for `finished`) or `stopped` (for
 `stopped` and `aborted`).
 
-The `outcome` field on `query_complete` is tracked by T-1kyv4ex, which is a
-prerequisite for Phase 2 of this RFD.
-Without it, a delegated turn stopped via Ctrl-C at the host terminal is
+The host reports `outcome` on `query_complete` from plugin protocol version 15
+(T-1kyv4ex), so `jp-review` refuses to start under an older host.
+Without the field, a delegated turn stopped via Ctrl-C at the host terminal is
 indistinguishable from a turn that completed normally.
 
 ### Configuration
@@ -800,7 +800,7 @@ This phase runs no turns and is mergeable on its own.
 Implement pass prompt formatting, `submit`, the `review_reply` and
 `review_comment` plugin tools, `tools init`, and `init` (`review.toml`
 generation).
-Depends on Phase 1 and T-1kyv4ex.
+Depends on Phase 1.
 After this phase, the full review loop works end to end from the terminal.
 
 ### Phase 3: Shared plugin protocol client
